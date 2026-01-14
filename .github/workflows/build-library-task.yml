@@ -2,6 +2,8 @@ name: Build library task
 
 env:
   IS_MAIN_BRANCH: ${{ endsWith(github.ref, 'refs/heads/main') }}
+  PROJECT_FILE: ./Library/Library.csproj
+  PROJECT_ARTIFACT: Library.7z
 
 on:
   workflow_call:
@@ -41,7 +43,7 @@ jobs:
 
       - name: Build library project
         run: >-
-          dotnet build ./Library/Library.csproj
+          dotnet build ${{ env.PROJECT_FILE }}
           --output ${{ runner.temp }}/publish
           --configuration ${{ env.IS_MAIN_BRANCH && 'Release' || 'Debug' }}
           -property:Version=${{ needs.get-version.outputs.AssemblyVersion }}
@@ -60,11 +62,11 @@ jobs:
 
       - name: Zip output
         run: |
-          7z a -t7z ${{ runner.temp }}/publish/Library.7z ${{ runner.temp }}/publish/*
+          7z a -t7z ${{ runner.temp }}/publish/${{ env.PROJECT_ARTIFACT }} ${{ runner.temp }}/publish/*
 
       - name: Upload build artifacts
         id: artifact-upload-step
         uses: actions/upload-artifact@v6
         with:
           name: library-build
-          path: ${{ runner.temp }}/publish/Library.7z
+          path: ${{ runner.temp }}/publish/${{ env.PROJECT_ARTIFACT }}

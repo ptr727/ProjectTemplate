@@ -2,6 +2,8 @@ name: Build executable task
 
 env:
   IS_MAIN_BRANCH: ${{ endsWith(github.ref, 'refs/heads/main') }}
+  PROJECT_FILE: ./Console/Console.csproj
+  PROJECT_ARTIFACT: Console.7z
 
 on:
   workflow_call:
@@ -37,7 +39,7 @@ jobs:
 
       - name: Build executable project
         run: >-
-            dotnet publish ./Console/Console.csproj
+            dotnet publish ${{ env.PROJECT_FILE }}
             --runtime ${{ matrix.runtime }}
             --output ${{ runner.temp }}/publish/${{ matrix.runtime }}
             --configuration ${{ env.IS_MAIN_BRANCH && 'Release' || 'Debug' }}
@@ -71,11 +73,11 @@ jobs:
         path: ${{ runner.temp }}/publish
 
     - name: Zip build output
-      run: 7z a -t7z ${{ runner.temp }}/publish/Console.7z ${{ runner.temp }}/publish/*
+      run: 7z a -t7z ${{ runner.temp }}/publish/${{ env.PROJECT_ARTIFACT }} ${{ runner.temp }}/publish/*
 
     - name: Upload build artifacts
       id: artifact-upload-step
       uses: actions/upload-artifact@v6
       with:
         name: executable-build
-        path: ${{ runner.temp }}/publish/Console.7z
+        path: ${{ runner.temp }}/publish/${{ env.PROJECT_ARTIFACT }}
