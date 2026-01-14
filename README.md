@@ -67,6 +67,33 @@ winget upgrade nektos.act
 
 - Update [ACT settings](https://nektosact.com/usage/index.html#action-artifacts) to start the artifact server `act --artifact-server-path ./.artifacts`.
 
+## GitHub Project Settings
+
+- General:
+  - Set the default branch to `main`.
+  - Enable `Always suggest updating pull request branches`.
+  - Enable `Allow auto-merge`.
+  - Enable `Automatically delete head branches`.
+- Rules / Branch Ruleset:
+  - `main`:
+    - `Restrict deletions`
+    - `Require linear history`
+    - `Require signed commits`
+    - `Require a pull request before merging`
+    - `Require status checks to pass`
+    - `Block force pushes`
+    - `Require branches to be up to date before merging`
+    - Add checks: `Test project build PRs`
+    - `Block force pushes`
+    - `Automatically request Copilot code review`
+  - `develop`:
+    - `Restrict deletions`
+    - `Require linear history`
+    - `Require signed commits`
+    - `Automatically request Copilot code review`
+- Actions / General:
+  - `Allow GitHub Actions to create and approve pull requests`
+
 ## 3rd Party Tools
 
 - [AwesomeAssertions](https://awesomeassertions.org/)
