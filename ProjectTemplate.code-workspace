@@ -37,6 +37,7 @@
             "editor.defaultFormatter": "csharpier.csharpier-vscode"
         },
         "chat.agent.maxRequests": 100,
+        "githubLocalActions.actCommand": "act --artifact-server-path ./.artifacts",
 	},
 	"extensions": {
 		"recommendations": [

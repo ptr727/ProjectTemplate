@@ -23,8 +23,7 @@ jobs:
       - name: Check code style
         run: |
           dotnet tool restore
-          dotnet csharpier check --log-level=debug .
-          dotnet format style --verify-no-changes --severity=info --verbosity=detailed
+          dotnet husky run
 
       - name: Run unit tests
         run: dotnet test
@@ -34,5 +33,6 @@ jobs:
     uses: ./.github/workflows/build-project-task.yml
     secrets: inherit
     with:
+      # Do not publish to GitHub or NuGet
       github: false
       nuget: false

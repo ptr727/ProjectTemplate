@@ -1,5 +1,8 @@
 name: Build project task
 
+env:
+  IS_MAIN_BRANCH: ${{ endsWith(github.ref, 'refs/heads/main') }}
+
 on:
   workflow_call:
     inputs:
@@ -20,54 +23,47 @@ jobs:
     uses: ./.github/workflows/get-version-task.yml
     secrets: inherit
 
-  build-project:
-    name: Build project
+  build-library:
+    name: Build library project
+    uses: ./.github/workflows/build-library-task.yml
+    secrets: inherit
+    with:
+      nuget: ${{ inputs.nuget }}
+
+  build-executable:
+    name: Build executable project
+    uses: ./.github/workflows/build-executable-task.yml
+    secrets: inherit
+
+  github-release:
+    name: Publish GitHub release
+    if: ${{ inputs.github }}
     runs-on: ubuntu-latest
-    needs: get-version
+    needs: [get-version, build-library, build-executable]
     permissions:
       contents: write
 
     steps:
 
-      - name: Setup .NET SDK
-        uses: actions/setup-dotnet@v5
+      - name: Download library build artifacts
+        uses: actions/download-artifact@v7
         with:
-          dotnet-version: 10.x
+          artifact-ids: ${{ needs.build-library.outputs.artifact-id }}
+          path: ./Publish
 
-      - name: Checkout code
-        uses: actions/checkout@v6
-
-      - name: Build project
-        run: >-
-          dotnet build ./Library/Library.csproj
-          --output ./Publish/
-          --configuration ${{ endsWith(github.ref, 'refs/heads/main') && 'Release' || 'Debug' }}
-          -property:Version=${{ needs.get-version.outputs.AssemblyVersion }}
-          -property:FileVersion=${{ needs.get-version.outputs.AssemblyFileVersion }}
-          -property:AssemblyVersion=${{ needs.get-version.outputs.AssemblyVersion }}
-          -property:InformationalVersion=${{ needs.get-version.outputs.AssemblyInformationalVersion }}
-          -property:PackageVersion=${{ needs.get-version.outputs.SemVer2 }}
-
-      - name: Publish to NuGet.org
-        if: ${{ inputs.nuget }}
-        run: >-
-            dotnet nuget push ${{ github.workspace }}/Publish/*.nupkg
-            --source https://api.nuget.org/v3/index.json
-            --api-key ${{ secrets.NUGET_API_KEY }}
-            --skip-duplicate
-
-      - name: Zip output
-        run: |
-          7z a -t7z ./Publish/Library.7z ./Publish/*
+      - name: Download executable build artifacts
+        uses: actions/download-artifact@v7
+        with:
+          artifact-ids: ${{ needs.build-executable.outputs.artifact-id }}
+          path: ./Publish
 
       - name: Create GitHub release
         uses: softprops/action-gh-release@v2
-        if: ${{ inputs.github }}
         with:
           generate_release_notes: true
           tag_name: ${{ needs.get-version.outputs.SemVer2 }}
-          prerelease: ${{ !endsWith(github.ref, 'refs/heads/main') }}
+          prerelease: ${{ !env.IS_MAIN_BRANCH }}
           files: |
             LICENSE
             README.md
-            ./Publish/Library.7z
+            ./Publish/*

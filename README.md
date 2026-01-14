@@ -18,7 +18,7 @@ Packages published on [NuGet](https://www.nuget.org/packages/ptr727.ProjectTempl
 - v1.0:
   - Initial release.
 
-## Dev Setup
+## Developer Environment Setup
 
 New project:
 
@@ -46,6 +46,26 @@ dotnet tool update --all
 dotnet outdated --upgrade:prompt
 winget upgrade nektos.act
 ```
+
+## Secrets Setup
+
+- Create a [Nuget API Key](https://www.nuget.org/account/apikeys).
+  - Save the Key as `NUGET_API_KEY` in:
+    - GitHub project security Settings / Secrets / Actions.
+    - GitHub project security Settings / Secrets / Dependabot.
+    - GitHub Local Actions Settings / Secrets.
+- Create a [Docker Hub Personal Access Token](https://app.docker.com/accounts/ptr727/settings/personal-access-tokens).
+  - Save the PAT as `DOCKER_HUB_ACCESS_TOKEN` and `DOCKER_HUB_USERNAME` in:
+    - GitHub project security Settings / Secrets / Actions.
+    - GitHub project security Settings / Secrets / Dependabot.
+    - GitHub Local Actions Settings / Secrets.
+- Create a [GitHub Personal Access Token](https://github.com/settings/personal-access-tokens).
+  - Save the PAT as `GITHUB_TOKEN` in:
+    - GitHub Local Actions Settings / Secrets.
+
+## GitHub Local Actions Setup
+
+- Update [ACT settings](https://nektosact.com/usage/index.html#action-artifacts) to start the artifact server `act --artifact-server-path ./.artifacts`.
 
 ## 3rd Party Tools
 

@@ -16,12 +16,12 @@ jobs:
     uses: ./.github/workflows/build-project-task.yml
     secrets: inherit
     with:
+      # Push to GitHub and NuGet
       github: true
       nuget: true
 
   date-badge:
-    if: ${{ endsWith(github.ref, 'refs/heads/main') }}
-    needs: build-project
+    needs: [build-project]
     name: Create date badge
     uses: ./.github/workflows/date-badge-task.yml
     secrets: inherit

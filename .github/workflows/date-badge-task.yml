@@ -1,5 +1,8 @@
 name: Create date badge task
 
+env:
+  IS_MAIN_BRANCH: ${{ endsWith(github.ref, 'refs/heads/main') }}
+
 on:
   workflow_call:
   workflow_dispatch:
@@ -17,6 +20,7 @@ jobs:
           echo "date=$(date)" >> $GITHUB_OUTPUT
 
       - name: Build date badge
+        if: ${{ env.IS_MAIN_BRANCH }}
         uses: RubbaBoy/BYOB@v1
         with:
           name: lastbuild

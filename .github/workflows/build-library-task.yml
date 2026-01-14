@@ -1,0 +1,72 @@
+name: Build library task
+
+env:
+  IS_MAIN_BRANCH: ${{ endsWith(github.ref, 'refs/heads/main') }}
+
+on:
+  workflow_call:
+    inputs:
+      nuget:
+        required: false
+        type: boolean
+        default: false
+    outputs:
+      artifact-id:
+        value: ${{ jobs.build-library.outputs.artifact-id }}
+  workflow_dispatch:
+
+jobs:
+
+  get-version:
+    name: Get version information
+    uses: ./.github/workflows/get-version-task.yml
+    secrets: inherit
+
+  build-library:
+    name: Build library project
+    runs-on: ubuntu-latest
+    outputs:
+      artifact-id: ${{ steps.artifact-upload-step.outputs.artifact-id }}
+    needs: [get-version]
+    permissions:
+      contents: write
+
+    steps:
+
+      - name: Setup .NET SDK
+        uses: actions/setup-dotnet@v5
+        with:
+          dotnet-version: 10.x
+
+      - name: Checkout code
+        uses: actions/checkout@v6
+
+      - name: Build library project
+        run: >-
+          dotnet build ./Library/Library.csproj
+          --output ${{ runner.temp }}/publish
+          --configuration ${{ env.IS_MAIN_BRANCH && 'Release' || 'Debug' }}
+          -property:Version=${{ needs.get-version.outputs.AssemblyVersion }}
+          -property:FileVersion=${{ needs.get-version.outputs.AssemblyFileVersion }}
+          -property:AssemblyVersion=${{ needs.get-version.outputs.AssemblyVersion }}
+          -property:InformationalVersion=${{ needs.get-version.outputs.AssemblyInformationalVersion }}
+          -property:PackageVersion=${{ needs.get-version.outputs.SemVer2 }}
+
+      - name: Publish to NuGet.org
+        if: ${{ inputs.nuget }}
+        run: >-
+            dotnet nuget push ${{ runner.temp }}/publish/*.nupkg
+            --source https://api.nuget.org/v3/index.json
+            --api-key ${{ secrets.NUGET_API_KEY }}
+            --skip-duplicate
+
+      - name: Zip output
+        run: |
+          7z a -t7z ${{ runner.temp }}/publish/Library.7z ${{ runner.temp }}/publish/*
+      
+      - name: Upload build artifacts
+        id: artifact-upload-step
+        uses: actions/upload-artifact@v6
+        with:
+          name: library-build
+          path: ${{ runner.temp }}/publish/Library.7z

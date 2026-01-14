@@ -4,6 +4,7 @@ on:
   pull_request:
     branches: [ main, develop ]
     paths:
+      # Only run on changes to Docker-related files
       - 'Docker/**'
   workflow_dispatch:
 

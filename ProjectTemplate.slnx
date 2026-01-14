@@ -1,4 +1,17 @@
 <Solution>
+    <Folder Name="/GitHub Actions/">
+        <File Path=".github/workflows/build-docker-task.yml" />
+        <File Path=".github/workflows/build-project-task.yml" />
+        <File Path=".github/workflows/date-badge-task.yml" />
+        <File Path=".github/workflows/get-version-task.yml" />
+        <File Path=".github/workflows/merge-bot-pr.yml" />
+        <File Path=".github/workflows/publish-build-release.yml" />
+        <File Path=".github/workflows/publish-docker-release.yml" />
+        <File Path=".github/workflows/test-build-pr.yml" />
+        <File Path=".github/workflows/test-build-task.yml" />
+        <File Path=".github/workflows/test-docker-pr.yml" />
+        <File Path=".github/workflows/test-docker-task.yml" />
+    </Folder>
     <Folder Name="/Solution Items/">
         <File Path=".editorconfig" />
         <File Path=".gitattributes" />
@@ -7,13 +20,13 @@
         <File Path="README.md" />
         <File Path="version.json" />
     </Folder>
-    <Project Path="Library/Library.csproj" />
-    <Project Path="Console/Console.csproj" />
     <Project Path="Benchmarks/Benchmarks.csproj">
         <BuildDependency Project="Library/Library.csproj" />
     </Project>
+    <Project Path="Console/Console.csproj" />
+    <Project Path="Library/Library.csproj" />
     <Project Path="Tests/Tests.csproj">
-        <BuildDependency Project="Library/Library.csproj" />
         <BuildDependency Project="Console/Console.csproj" />
+        <BuildDependency Project="Library/Library.csproj" />
     </Project>
 </Solution>
