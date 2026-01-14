@@ -40,8 +40,6 @@ jobs:
     if: ${{ inputs.github }}
     runs-on: ubuntu-latest
     needs: [get-version, build-library, build-executable]
-    permissions:
-      contents: write
 
     steps:
 

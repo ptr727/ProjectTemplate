@@ -16,5 +16,5 @@ jobs:
 
   test-build:
     name: Run build tests
-    uses: ./.github/workflows/test-build-task.yml
+    uses: ./.github/workflows/test-project-task.yml
     secrets: inherit

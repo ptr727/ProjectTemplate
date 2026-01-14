@@ -28,8 +28,6 @@ jobs:
     outputs:
       artifact-id: ${{ steps.artifact-upload-step.outputs.artifact-id }}
     needs: [get-version]
-    permissions:
-      contents: write
 
     steps:
 
@@ -63,7 +61,7 @@ jobs:
       - name: Zip output
         run: |
           7z a -t7z ${{ runner.temp }}/publish/Library.7z ${{ runner.temp }}/publish/*
-      
+
       - name: Upload build artifacts
         id: artifact-upload-step
         uses: actions/upload-artifact@v6

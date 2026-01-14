@@ -13,6 +13,8 @@ jobs:
 
   build-project:
     name: Build project
+    permissions:
+      contents: write
     uses: ./.github/workflows/build-project-task.yml
     secrets: inherit
     with:
@@ -21,7 +23,9 @@ jobs:
       nuget: true
 
   date-badge:
-    needs: [build-project]
     name: Create date badge
+    permissions:
+      contents: write
+    needs: [build-project]
     uses: ./.github/workflows/date-badge-task.yml
     secrets: inherit

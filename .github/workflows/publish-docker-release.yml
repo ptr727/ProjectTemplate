@@ -23,7 +23,9 @@ jobs:
       push: true
 
   date-badge:
-    needs: [build-docker]
     name: Create date badge
+    permissions:
+      contents: write
+    needs: [build-docker]
     uses: ./.github/workflows/date-badge-task.yml
     secrets: inherit
