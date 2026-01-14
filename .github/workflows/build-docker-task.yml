@@ -4,7 +4,7 @@ env:
   IS_MAIN_BRANCH: ${{ endsWith(github.ref, 'refs/heads/main') }}
   DOCKER_REGISTRY: docker.io
   DOCKER_IMAGE: ptr727/projecttemplate
-  DOCKER_TAG_PREFIX: ${{ env.DOCKER_REGISTRY }}/${{ env.DOCKER_IMAGE }}
+  DOCKER_TAG_PREFIX: docker.io/ptr727/projecttemplate
 
 on:
   workflow_call:
