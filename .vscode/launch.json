@@ -1,0 +1,23 @@
+{
+    "version": "0.2.0",
+    "configurations": [
+        {
+            "name": "Console",
+            "type": "coreclr",
+            "request": "launch",
+            "preLaunchTask": ".Net Build",
+            "program": "${workspaceFolder}/Console/bin/Debug/net10.0/Console.dll",
+            "args": [
+                "--path=${workspaceFolder}",
+                "--loglevel=Debug",
+                "--logfile=console.log",
+                "--logfile-clear=true",
+                "--dryrun=false",
+                "--threads=4"
+            ],
+            "cwd": "${workspaceFolder}/Console/bin/Debug/net10.0",
+            "console": "internalConsole",
+            "stopAtEntry": false
+        }
+    ]
+}

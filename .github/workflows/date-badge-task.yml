@@ -1,0 +1,32 @@
+name: Create date badge task
+
+on:
+  workflow_call:
+  workflow_dispatch:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+
+  date-badge:
+    name: Create date badge
+    runs-on: ubuntu-latest
+    if: ${{ endsWith(github.ref, 'refs/heads/main') }}
+
+    steps:
+
+      - id: date
+        run: |
+          echo "date=$(date)" >> $GITHUB_OUTPUT
+
+      - name: Build date badge
+        uses: RubbaBoy/BYOB@v1
+        with:
+          name: lastbuild
+          label: "Last Build"
+          icon: "github"
+          status: ${{ steps.date.outputs.date }}
+          color: "blue"
+          github_token: ${{ secrets.GITHUB_TOKEN }}

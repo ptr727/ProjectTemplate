@@ -1,0 +1,27 @@
+name: Build and push docker images
+
+on:
+  push:
+    branches: [ main, develop ]
+  workflow_dispatch:
+  schedule:
+    - cron: '0 2 * * MON'
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+
+  build-docker:
+    name: Build docker images
+    uses: ./.github/workflows/build-docker-task.yml
+    secrets: inherit
+    with:
+      push: true
+
+  date-badge:
+    needs: build-docker
+    name: Create date badge
+    uses: ./.github/workflows/date-badge-task.yml
+    secrets: inherit

@@ -1,0 +1,23 @@
+name: Build and publish release
+
+on:
+  push:
+    branches: [ main, develop ]
+  workflow_dispatch:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+
+  build-project:
+    name: Build project
+    uses: ./.github/workflows/build-project-task.yml
+    secrets: inherit
+
+  date-badge:
+    needs: build-project
+    name: Create date badge
+    uses: ./.github/workflows/date-badge-task.yml
+    secrets: inherit

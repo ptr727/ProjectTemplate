@@ -1,0 +1,39 @@
+# .NET build artifacts
+**/bin/
+**/obj/
+**/out/
+
+# Visual Studio / VS Code
+.vs/
+.vscode/
+*.user
+*.suo
+*.userosscache
+*.sln.docstates
+
+# Test results
+TestResults/
+**/TestResults/
+
+# Benchmark results
+BenchmarkDotNet.Artifacts/
+**/BenchmarkDotNet.Artifacts/
+
+# NuGet packages
+*.nupkg
+*.snupkg
+packages/
+
+# Git
+.git/
+.gitignore
+.gitattributes
+
+# CI/CD
+.github/
+.azuredevops/
+
+# Other
+*.log
+*.tmp
+*.cache
