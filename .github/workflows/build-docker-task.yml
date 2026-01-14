@@ -1,9 +1,9 @@
 name: Build docker image task
 
+# env cannot be used in jobs or matrix evaluation, replace with inputs where needed
 env:
   IS_MAIN_BRANCH: ${{ endsWith(github.ref, 'refs/heads/main') }}
   DOCKER_REGISTRY: docker.io
-  DOCKER_IMAGE: ptr727/projecttemplate
   DOCKER_TAG_PREFIX: docker.io/ptr727/projecttemplate
 
 on:
@@ -32,8 +32,8 @@ jobs:
           - file: ./Docker/Ubuntu.Rolling.Dockerfile
             platforms: linux/amd64,linux/arm64
             tags: |
-              ${{ env.DOCKER_TAG_PREFIX }}:${{ env.IS_MAIN_BRANCH && 'latest' || 'develop' }}
-              ${{ env.DOCKER_TAG_PREFIX }}:${{ needs.get-version.outputs.SemVer2 }}
+              docker.io/ptr727/projecttemplate:${{ endsWith(github.ref, 'refs/heads/main') && 'latest' || 'develop' }}
+              docker.io/ptr727/projecttemplate:${{ needs.get-version.outputs.SemVer2 }}
 
     steps:
 
