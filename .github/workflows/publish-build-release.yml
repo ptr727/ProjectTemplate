@@ -1,4 +1,4 @@
-name: Build and publish release
+name: Build and publish project release
 
 on:
   push:
@@ -15,8 +15,12 @@ jobs:
     name: Build project
     uses: ./.github/workflows/build-project-task.yml
     secrets: inherit
+    with:
+      github: true
+      nuget: true
 
   date-badge:
+    if: ${{ endsWith(github.ref, 'refs/heads/main') }}
     needs: build-project
     name: Create date badge
     uses: ./.github/workflows/date-badge-task.yml

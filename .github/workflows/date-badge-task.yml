@@ -4,16 +4,11 @@ on:
   workflow_call:
   workflow_dispatch:
 
-concurrency:
-  group: ${{ github.workflow }}-${{ github.ref }}
-  cancel-in-progress: true
-
 jobs:
 
   date-badge:
     name: Create date badge
     runs-on: ubuntu-latest
-    if: ${{ endsWith(github.ref, 'refs/heads/main') }}
 
     steps:
 

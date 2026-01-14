@@ -3,6 +3,7 @@ name: Build docker image task
 env:
   DOCKER_REGISTRY: docker.io
   DOCKER_IMAGE: ptr727/projecttemplate
+  DOCKER_TAG_PREFIX: ${{ env.DOCKER_REGISTRY }}/${{ env.DOCKER_IMAGE }}
 
 on:
   workflow_call:
@@ -30,8 +31,8 @@ jobs:
           - file: ./Docker/Ubuntu.Rolling.Dockerfile
             platforms: linux/amd64,linux/arm64
             tags: |
-              ${{ env.DOCKER_REGISTRY }}/${{ env.DOCKER_IMAGE }}:${{ endsWith(github.ref, 'refs/heads/main') && 'latest' || 'develop' }}
-              ${{ env.DOCKER_REGISTRY }}/${{ env.DOCKER_IMAGE }}:${{ needs.get-version.outputs.SemVer2 }}
+              ${{ env.DOCKER_TAG_PREFIX }}:${{ endsWith(github.ref, 'refs/heads/main') && 'latest' || 'develop' }}
+              ${{ env.DOCKER_TAG_PREFIX }}:${{ needs.get-version.outputs.SemVer2 }}
 
     steps:
 
@@ -63,8 +64,8 @@ jobs:
           file: ${{ matrix.file }}
           tags: ${{ matrix.tags }}
           platforms: ${{ matrix.platforms }}
-          cache-from: type=registry,ref=${{ env.DOCKER_REGISTRY }}/${{ env.DOCKER_IMAGE }}:buildcache
-          cache-to: type=registry,ref=${{ env.DOCKER_REGISTRY }}/${{ env.DOCKER_IMAGE }}:buildcache,mode=max
+          cache-from: type=registry,ref=${{ env.DOCKER_TAG_PREFIX }}:buildcache
+          cache-to: type=registry,ref=${{ env.DOCKER_TAG_PREFIX }}:buildcache,mode=max
           build-args: |
             LABEL_VERSION=${{ needs.get-version.outputs.SemVer2 }}
             BUILD_CONFIGURATION=${{ endsWith(github.ref, 'refs/heads/main') && 'Release' || 'Debug' }}

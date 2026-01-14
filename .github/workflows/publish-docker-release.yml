@@ -21,6 +21,7 @@ jobs:
       push: true
 
   date-badge:
+    if: ${{ endsWith(github.ref, 'refs/heads/main') }}
     needs: build-docker
     name: Create date badge
     uses: ./.github/workflows/date-badge-task.yml
