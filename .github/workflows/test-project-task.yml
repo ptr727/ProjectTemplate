@@ -23,6 +23,7 @@ jobs:
       - name: Check code style
         run: |
           dotnet tool restore
+          dotnet husky install
           dotnet husky run
 
       - name: Run unit tests
