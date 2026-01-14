@@ -20,32 +20,37 @@ Packages published on [NuGet](https://www.nuget.org/packages/ptr727.ProjectTempl
 
 ## Developer Environment Setup
 
-New project:
+- New project:
 
-```shell
-git init
-dotnet new tool-manifest
-dotnet tool install csharpier
-dotnet tool install husky
-dotnet tool install dotnet-outdated-tool
-```
+  ```shell
+  git init
+  dotnet new tool-manifest
+  dotnet tool install csharpier
+  dotnet tool install husky
+  dotnet tool install dotnet-outdated-tool
+  ```
 
-New pull:
+- New deployment:
 
-```shell
-dotnet tool restore
-dotnet husky install
-dotnet husky add pre-commit -c "dotnet husky run"
-winget install nektos.act
-```
+  ```shell
+  dotnet tool restore
+  dotnet husky install
+  dotnet husky add pre-commit -c "dotnet husky run"
+  chmod +x ./husky/pre-commit # Make sure file is executable in Linux
+  winget install nektos.act # Windows optional
+  ```
 
-Update tools:
+- Update tools:
 
-```shell
-dotnet tool update --all
-dotnet outdated --upgrade:prompt
-winget upgrade nektos.act
-```
+  ```shell
+  dotnet tool update --all
+  dotnet outdated --upgrade:prompt
+  winget upgrade nektos.act # Windows optional
+  ```
+
+- Linux file modes:
+  - `chmod +x [filename.sh]`
+  - All shell files are `LF` mode.
 
 ## Secrets Setup
 
