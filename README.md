@@ -91,9 +91,9 @@ Packages published on [NuGet](https://www.nuget.org/packages/ptr727.ProjectTempl
   dotnet outdated --upgrade:prompt
   ```
 
-- Linux file modes:
-  - `chmod +x [filename.sh]`
-  - All shell files are `LF` mode in VSCode editor.
+- Linux / MacOS:
+  - Verify that shell files are `+x` executable and `LF` line ending mode.
+  - Verify that there are no duplicate files with different case names.
 
 ### GitHub Local Actions Setup
 
