@@ -6,6 +6,8 @@
 	],
 	"settings": {
 		"cSpell.words": [
+            "csdevkit",
+            "davidanson",
             "dotnettools",
             "dryrun",
             "gruntfuggly",
@@ -14,8 +16,10 @@
             "Nerdbank",
             "ProjectTemplate",
             "Serilog",
+            "slnx",
             "winget",
-            "xunit"
+            "xunit",
+            "yzhang"
         ],
 		"dotnet.defaultSolution": "ProjectTemplate.slnx",
         "files.trimTrailingWhitespace": true,

@@ -51,7 +51,7 @@ Packages published on [NuGet](https://www.nuget.org/packages/ptr727.ProjectTempl
   git config --global gpg.ssh.allowedSignersFile "~/.config/git/allowed_signers"
   echo "$(git config --get user.email) namespaces=\"git\" $(cat ~/.ssh/id_ed25519.pub)" >> ~/.config/git/allowed_signers
   cat ~/.config/git/allowed_signers
-  git log --show-signature # Good "git" signature for ptr727@users.noreply.github.com with ED25519 key SHA256:XI0SwS++aVpnvgVM/OQ9q3BpfmIXcNT6AdiM0UnYMNs
+  git log --show-signature # Good "git" signature for ptr727@users.noreply.github.com with ED25519 key SHA256:[secret]
 
   git config --list --show-origin
   ```
@@ -64,6 +64,8 @@ Packages published on [NuGet](https://www.nuget.org/packages/ptr727.ProjectTempl
   dotnet tool install csharpier
   dotnet tool install husky
   dotnet tool install dotnet-outdated-tool
+  dotnet husky install
+  dotnet husky add pre-commit -c "dotnet husky run"
   ```
 
 - New deployment:
@@ -71,7 +73,6 @@ Packages published on [NuGet](https://www.nuget.org/packages/ptr727.ProjectTempl
   ```shell
   dotnet tool restore
   dotnet husky install
-  dotnet husky add pre-commit -c "dotnet husky run"
   chmod +x ./husky/pre-commit # Make sure file is executable in Linux
   winget install nektos.act # Windows optional
   ```
