@@ -137,22 +137,21 @@ Packages published on [NuGet](https://www.nuget.org/packages/ptr727.ProjectTempl
   - Enable `Allow auto-merge`.
   - Enable `Automatically delete head branches`.
 - Rules / Branch Ruleset:
-  - `main`:
+  - "Main and Develop":
+    - Target branches: `main`, `develop`.
     - `Restrict deletions`
     - `Require linear history`
     - `Require signed commits`
     - `Require a pull request before merging`
       - `Dismiss stale pull request approvals when new commits are pushed`
+      - Allowed merge methods: `Squash`
     - `Require status checks to pass`
       - `Require branches to be up to date before merging`
-      - Add checks: `Check pull request workflow status`
+      - Status checks that are required: `Check pull request workflow status`
     - `Block force pushes`
     - `Automatically request Copilot code review`
-  - `develop`:
-    - `Restrict deletions`
-    - `Require linear history`
-    - `Require signed commits`
-    - `Automatically request Copilot code review`
+      - `Review new pushes`
+      - `Review draft pull requests`
 - Actions / General:
   - `Allow GitHub Actions to create and approve pull requests`
 
