@@ -7,9 +7,7 @@
         <File Path=".github/workflows/merge-bot-pr.yml" />
         <File Path=".github/workflows/publish-build-release.yml" />
         <File Path=".github/workflows/publish-docker-release.yml" />
-        <File Path=".github/workflows/test-build-pr.yml" />
-        <File Path=".github/workflows/test-build-task.yml" />
-        <File Path=".github/workflows/test-docker-pr.yml" />
+        <File Path=".github/workflows/test-project-task.yml" />
         <File Path=".github/workflows/test-docker-task.yml" />
     </Folder>
     <Folder Name="/Solution Items/">
