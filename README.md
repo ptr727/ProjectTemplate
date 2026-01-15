@@ -132,11 +132,13 @@ Packages published on [NuGet](https://www.nuget.org/packages/ptr727.ProjectTempl
 ### GitHub Project Settings
 
 - General:
-  - Set the default branch to `main`.
-  - Enable `Always suggest updating pull request branches`.
-  - Enable `Allow auto-merge`.
-  - Enable `Automatically delete head branches`.
-- Rules / Branch Ruleset:
+  - Default branch: `main`
+  - Pull requests:
+    - `Allow merge commits`
+    - `Allow squash merging`
+    - `Always suggest updating pull request branches`
+    - `Allow auto-merge`
+- Rules / Rulesets:
   - "Main and Develop":
     - Target branches: `main`, `develop`.
     - `Restrict deletions`
