@@ -46,7 +46,7 @@ Packages published on [NuGet](https://www.nuget.org/packages/ptr727.ProjectTempl
   ssh -v -T git@github.com
   ```
 
-- Configure git for [SSH signing](https://docs.github.com/en/authentication/managing-commit-signature-verification/telling-git-about-your-signing-key):
+- Configure Git for [SSH signing](https://docs.github.com/en/authentication/managing-commit-signature-verification/telling-git-about-your-signing-key):
 
   ```shell
   git config --global gpg.format ssh
@@ -91,7 +91,7 @@ Packages published on [NuGet](https://www.nuget.org/packages/ptr727.ProjectTempl
   dotnet outdated --upgrade:prompt
   ```
 
-- Linux / MacOS:
+- Linux / macOS:
   - Verify that shell files are `+x` executable and `LF` line ending mode.
   - Verify that there are no duplicate files with different case names.
 
