@@ -42,7 +42,7 @@ jobs:
             dotnet publish ${{ env.PROJECT_FILE }}
             --runtime ${{ matrix.runtime }}
             --output ${{ runner.temp }}/publish/${{ matrix.runtime }}
-            --configuration ${{ env.IS_MAIN_BRANCH && 'Release' || 'Debug' }}
+            --configuration ${{ env.IS_MAIN_BRANCH == 'true' && 'Release' || 'Debug' }}
             -property:PublishAot=false
             -property:Version=${{ needs.get-version.outputs.AssemblyVersion }}
             -property:FileVersion=${{ needs.get-version.outputs.AssemblyFileVersion }}
