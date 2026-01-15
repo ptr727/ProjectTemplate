@@ -160,10 +160,9 @@ Packages published on [NuGet](https://www.nuget.org/packages/ptr727.ProjectTempl
 
 - Create persistent `main` and `develop` branches.
 - Make sure that `main` and `develop` are always building.
-- Create a feature branch from `develop`.
-- Make changes to the feature branch.
-- Squash and Merge from the feature branch to `develop`.
-- Merge from `develop` to `main`.
+- Create feature branches from the `develop` branch.
+- Always "Squash and merge" from feature branches to `develop` to reduce the history size.
+- Alway "Merge commit" from `develop` to `main` to retain merge history.
 
 ## GitHub Actions Workflow
 
