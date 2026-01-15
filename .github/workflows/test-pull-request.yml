@@ -1,11 +1,8 @@
-name: Test docker build PRs
+name: Test pull request
 
 on:
   pull_request:
     branches: [ main, develop ]
-    paths:
-      # Only run on changes to Docker-related files
-      - 'Docker/**'
   workflow_dispatch:
 
 concurrency:
@@ -13,6 +10,11 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+
+  test-build:
+    name: Run build tests
+    uses: ./.github/workflows/test-project-task.yml
+    secrets: inherit
 
   test-docker:
     name: Test docker build

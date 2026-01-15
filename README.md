@@ -20,6 +20,29 @@ Packages published on [NuGet](https://www.nuget.org/packages/ptr727.ProjectTempl
 
 ## Developer Environment Setup
 
+- [Register](https://github.com/settings/keys) SSH Key on GitHub.
+
+  ```shell
+  ssh-keygen -t ed25519 # If not already created
+  cat ~/.ssh/id_ed25519.pub
+  ssh-keyscan github.com >> ~/.ssh/known_hosts
+  ssh -T git@github.com
+  ```
+
+- Configure Git global options, including [SSH signing](https://docs.github.com/en/authentication/managing-commit-signature-verification/telling-git-about-your-signing-key):
+
+  ```shell
+  git config --global credential.helper "cache --timeout=3600"
+  git config --global user.name "Pieter Viljoen"
+  git config --global user.email "ptr727@users.noreply.github.com"
+  git config --global core.sharedRepository group
+  git config --global --add safe.directory '*'
+  git config --global gpg.format ssh
+  git config --global user.signingkey ~/.ssh/id_ed25519.pub
+  git config --global commit.gpgsign true
+  git config --list --show-origin
+  ```
+
 - New project:
 
   ```shell
@@ -88,7 +111,7 @@ Packages published on [NuGet](https://www.nuget.org/packages/ptr727.ProjectTempl
     - `Require status checks to pass`
     - `Block force pushes`
     - `Require branches to be up to date before merging`
-    - Add checks: `Test project build PRs`
+    - Add checks: `Test pull request`
     - `Block force pushes`
     - `Automatically request Copilot code review`
   - `develop`:
