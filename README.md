@@ -134,7 +134,6 @@ Packages published on [NuGet](https://www.nuget.org/packages/ptr727.ProjectTempl
 - General:
   - Default branch: `main`
   - Pull requests:
-    - `Allow squash merging`
     - `Always suggest updating pull request branches`
     - `Allow auto-merge`
 - Rules / Rulesets:
@@ -146,6 +145,7 @@ Packages published on [NuGet](https://www.nuget.org/packages/ptr727.ProjectTempl
     - `Require a pull request before merging`
       - `Dismiss stale pull request approvals when new commits are pushed`
       - Allowed merge methods: `Squash`
+      - [Note](https://github.com/orgs/community/discussions/184410): All general merge types must be enable for rulesets merge rules to be honored.
     - `Require status checks to pass`
       - `Require branches to be up to date before merging`
       - Status checks that are required: `Check pull request workflow status`
