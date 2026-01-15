@@ -56,16 +56,17 @@ jobs:
           push: ${{ inputs.push }}
           file: ${{ env.DOCKER_FILE }}
           tags: |
-            ${{ env.DOCKER_TAG_PREFIX }}:${{ env.IS_MAIN_BRANCH && 'latest' || 'develop' }}
+            ${{ env.DOCKER_TAG_PREFIX }}:${{ env.IS_MAIN_BRANCH == 'true' && 'latest' || 'develop' }}
             ${{ env.DOCKER_TAG_PREFIX }}:${{ needs.get-version.outputs.SemVer2 }}
           platforms: linux/amd64,linux/arm64
           cache-from: type=registry,ref=${{ env.DOCKER_TAG_PREFIX }}:buildcache
           cache-to: type=registry,ref=${{ env.DOCKER_TAG_PREFIX }}:buildcache,mode=max
           build-args: |
             LABEL_VERSION=${{ needs.get-version.outputs.SemVer2 }}
-            BUILD_CONFIGURATION=${{ env.IS_MAIN_BRANCH && 'Release' || 'Debug' }}
+            BUILD_CONFIGURATION=${{ env.IS_MAIN_BRANCH == 'true' && 'Release' || 'Debug' }}
             BUILD_VERSION=${{ needs.get-version.outputs.AssemblyVersion }}
             BUILD_FILE_VERSION=${{ needs.get-version.outputs.AssemblyFileVersion }}
             BUILD_ASSEMBLY_VERSION=${{ needs.get-version.outputs.AssemblyFileVersion }}
             BUILD_INFORMATION_VERSION=${{ needs.get-version.outputs.AssemblyInformationalVersion }}
             BUILD_PACKAGE_VERSION=${{ needs.get-version.outputs.SemVer2 }}
+
