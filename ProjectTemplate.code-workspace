@@ -10,13 +10,17 @@
             "davidanson",
             "dotnettools",
             "dryrun",
+            "gpgsign",
             "gruntfuggly",
             "logfile",
             "nektos",
             "Nerdbank",
+            "Pieter",
             "ProjectTemplate",
             "Serilog",
+            "signingkey",
             "slnx",
+            "Viljoen",
             "winget",
             "xunit",
             "yzhang"
@@ -46,14 +50,14 @@
 	},
 	"extensions": {
 		"recommendations": [
-            "davidanson.vscode-markdownlint",
-            "gruntfuggly.todo-tree",
-            "streetsidesoftware.code-spell-checker",
-            "editorconfig.editorconfig",
             "csharpier.csharpier-vscode",
+            "davidanson.vscode-markdownlint",
+            "editorconfig.editorconfig",
             "github.vscode-github-actions",
+            "gruntfuggly.todo-tree",
             "ms-azuretools.vscode-docker",
             "ms-dotnettools.csdevkit",
+            "streetsidesoftware.code-spell-checker",
             "yzhang.markdown-all-in-one",
 		]
 	}
