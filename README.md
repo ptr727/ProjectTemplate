@@ -26,7 +26,7 @@ Packages published on [NuGet](https://www.nuget.org/packages/ptr727.ProjectTempl
   ssh-keygen -t ed25519 # If not already created
   cat ~/.ssh/id_ed25519.pub
   ssh-keyscan github.com >> ~/.ssh/known_hosts
-  ssh -T git@github.com
+  ssh -v -T git@github.com
   ```
 
 - Configure Git global options, including [SSH signing](https://docs.github.com/en/authentication/managing-commit-signature-verification/telling-git-about-your-signing-key):
@@ -36,10 +36,22 @@ Packages published on [NuGet](https://www.nuget.org/packages/ptr727.ProjectTempl
   git config --global user.name "Pieter Viljoen"
   git config --global user.email "ptr727@users.noreply.github.com"
   git config --global core.sharedRepository group
-  git config --global --add safe.directory '*'
+  git config --global --add safe.directory '*'git log
+
   git config --global gpg.format ssh
-  git config --global user.signingkey ~/.ssh/id_ed25519.pub
+  cat ~/.ssh/id_ed25519.pub
+  git config --global user.signingkey "~/.ssh/id_ed25519.pub"
   git config --global commit.gpgsign true
+  git config --global tag.gpgsign true
+
+  git show --show-signature # error: gpg.ssh.allowedSignersFile needs to be configured and exist for ssh signature verification
+  mkdir -p ~/.config/git
+  touch ~/.config/git/allowed_signers
+  git config --global gpg.ssh.allowedSignersFile "~/.config/git/allowed_signers"
+  echo "$(git config --get user.email) namespaces=\"git\" $(cat ~/.ssh/id_ed25519.pub)" >> ~/.config/git/allowed_signers
+  cat ~/.config/git/allowed_signers
+  git log --show-signature # Good "git" signature for ptr727@users.noreply.github.com with ED25519 key SHA256:XI0SwS++aVpnvgVM/OQ9q3BpfmIXcNT6AdiM0UnYMNs
+
   git config --list --show-origin
   ```
 
