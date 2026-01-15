@@ -24,8 +24,8 @@ jobs:
     runs-on: ubuntu-latest
     needs: [get-version]
     strategy:
-        matrix:
-          runtime: [ win-x64, linux-x64, linux-musl-x64, linux-arm, linux-arm64, osx-x64, osx-arm64 ]
+      matrix:
+        runtime: [ win-x64, linux-x64, linux-musl-x64, linux-arm, linux-arm64, osx-x64, osx-arm64 ]
 
     steps:
 
@@ -73,11 +73,11 @@ jobs:
         path: ${{ runner.temp }}/publish
 
     - name: Zip build output
-      run: 7z a -t7z ${{ runner.temp }}/publish/${{ env.PROJECT_ARTIFACT }} ${{ runner.temp }}/publish/*
+      run: 7z a -t7z ${{ runner.temp }}/${{ env.PROJECT_ARTIFACT }} ${{ runner.temp }}/publish/*
 
     - name: Upload build artifacts
       id: artifact-upload-step
       uses: actions/upload-artifact@v6
       with:
         name: executable-build
-        path: ${{ runner.temp }}/publish/${{ env.PROJECT_ARTIFACT }}
+        path: ${{ runner.temp }}/${{ env.PROJECT_ARTIFACT }}

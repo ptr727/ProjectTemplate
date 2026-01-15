@@ -24,7 +24,7 @@ jobs:
   # TODO: Workaround for GitHub Actions not supporting status checks on conditional jobs
   # https://github.com/orgs/community/discussions/12395#discussioncomment-12970019
   check-workflow-status:
-    name: Check workflow status job
+    name: Check pull request workflow status
     runs-on: ubuntu-latest
     needs:
       [
@@ -33,7 +33,7 @@ jobs:
       ]
     if: always()
     steps:
-      - name: Check workflow status step
+      - name: Check workflow results
         run: |
           exit_on_result() {
             if [[ "$2" == "failure" || "$2" == "cancelled" ]]; then

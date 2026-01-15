@@ -37,7 +37,7 @@ Packages published on [NuGet](https://www.nuget.org/packages/ptr727.ProjectTempl
   git config --global user.name "Pieter Viljoen"
   git config --global user.email "ptr727@users.noreply.github.com"
   git config --global core.sharedRepository group
-  git config --global --add safe.directory '*'git log
+  git config --global --add safe.directory '*'
 
   git config --global gpg.format ssh
   cat ~/.ssh/id_ed25519.pub
@@ -122,10 +122,9 @@ Packages published on [NuGet](https://www.nuget.org/packages/ptr727.ProjectTempl
     - `Require signed commits`
     - `Require a pull request before merging`
     - `Require status checks to pass`
+      - Add checks: `Check pull request workflow status`
     - `Block force pushes`
     - `Require branches to be up to date before merging`
-    - Add checks: `Test pull request`
-    - `Block force pushes`
     - `Automatically request Copilot code review`
   - `develop`:
     - `Restrict deletions`
