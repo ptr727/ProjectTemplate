@@ -27,6 +27,13 @@ Packages published on [NuGet](https://www.nuget.org/packages/ptr727.ProjectTempl
 ### Git Setup
 
 - Configure Git options:
+### Tools Setup
+
+- Install VSCode and / or Visual Studio
+
+### Git Setup
+
+- Configure Git options:
 
   ```shell
   git config --global credential.helper "cache --timeout=3600"
@@ -34,6 +41,21 @@ Packages published on [NuGet](https://www.nuget.org/packages/ptr727.ProjectTempl
   git config --global user.email "ptr727@users.noreply.github.com"
   git config --global core.sharedRepository group
   git config --global --add safe.directory '*'
+  git config --list --show-origin
+  ```
+
+- [Register](https://github.com/settings/keys) SSH key for Authentication and Signing on GitHub.
+
+  ```shell
+  ssh-keygen -t ed25519 # If not already created
+  cat ~/.ssh/id_ed25519.pub # Paste into GitHub
+  ssh-keyscan github.com >> ~/.ssh/known_hosts
+  ssh -v -T git@github.com
+  ```
+
+- Configure Git for [SSH signing](https://docs.github.com/en/authentication/managing-commit-signature-verification/telling-git-about-your-signing-key):
+
+  ```shell
   git config --list --show-origin
   ```
 
@@ -57,12 +79,18 @@ Packages published on [NuGet](https://www.nuget.org/packages/ptr727.ProjectTempl
   echo "$(git config --get user.email) namespaces=\"git\" $(cat ~/.ssh/id_ed25519.pub)" >> ~/.config/git/allowed_signers
   git config --global gpg.ssh.allowedSignersFile "~/.config/git/allowed_signers"
   git log --show-signature
+  git config --global gpg.ssh.allowedSignersFile "~/.config/git/allowed_signers"
+  git log --show-signature
   git config --list --show-origin
   ```
 
 ### Project Workspace Setup
 
+### Project Workspace Setup
+
 - New project:
+  - Create new project directory.
+  - Copy and rename template projects.
   - Create new project directory.
   - Copy and rename template projects.
 
@@ -77,6 +105,7 @@ Packages published on [NuGet](https://www.nuget.org/packages/ptr727.ProjectTempl
   ```
 
 - New pull of existing project:
+- New pull of existing project:
 
   ```shell
   dotnet tool restore
@@ -84,6 +113,7 @@ Packages published on [NuGet](https://www.nuget.org/packages/ptr727.ProjectTempl
   chmod +x ./.husky/pre-commit # Make sure file is executable in Linux
   ```
 
+- Update tools in existing project:
 - Update tools in existing project:
 
   ```shell
@@ -118,7 +148,37 @@ Packages published on [NuGet](https://www.nuget.org/packages/ptr727.ProjectTempl
 ## GitHub Setup
 
 ### GitHub Secrets Setup
+  ```
 
+- Linux / macOS:
+  - Verify that shell files are `+x` executable and `LF` line ending mode.
+  - Verify that there are no duplicate files with different case names.
+
+### GitHub Local Actions Setup
+
+- Install [ACT](https://nektosact.com/installation/index.html):
+
+  ```shell
+  winget install nektos.act
+  winget upgrade nektos.act
+  ```
+
+- Install [VSCode extension](https://sanjulaganepola.github.io/github-local-actions-docs/).
+- Update [settings](https://nektosact.com/usage/index.html#action-artifacts) to start the artifact server.
+
+  ```json
+  "githubLocalActions.actCommand": "act --artifact-server-path ./.artifacts",
+  ```
+
+- Update local secrets:
+  - Save the existing [Docker Hub Personal Access Token](https://app.docker.com/accounts/ptr727/settings/personal-access-tokens) as `DOCKER_HUB_ACCESS_TOKEN` and `DOCKER_HUB_USERNAME`.
+  - Create a [GitHub Personal Access Token](https://github.com/settings/personal-access-tokens) as `GITHUB_TOKEN`.
+
+## GitHub Setup
+
+### GitHub Secrets Setup
+
+- Create a [NuGet API Key](https://www.nuget.org/account/apikeys).
 - Create a [NuGet API Key](https://www.nuget.org/account/apikeys).
   - Save the Key as `NUGET_API_KEY` in:
     - GitHub project security Settings / Secrets / Actions.
@@ -128,6 +188,8 @@ Packages published on [NuGet](https://www.nuget.org/packages/ptr727.ProjectTempl
   - Save the PAT as `DOCKER_HUB_ACCESS_TOKEN` and `DOCKER_HUB_USERNAME` in:
     - GitHub project security Settings / Secrets / Actions.
     - GitHub project security Settings / Secrets / Dependabot.
+
+### GitHub Project Settings
 
 ### GitHub Project Settings
 
@@ -147,15 +209,32 @@ Packages published on [NuGet](https://www.nuget.org/packages/ptr727.ProjectTempl
     - `Require a pull request before merging`
       - `Dismiss stale pull request approvals when new commits are pushed`
       - Allowed merge methods: `Squash`
+      - Allowed merge methods: `Squash`
     - `Require status checks to pass`
       - `Require branches to be up to date before merging`
+      - Status checks that are required: `Check pull request workflow status`
       - Status checks that are required: `Check pull request workflow status`
     - `Block force pushes`
     - `Automatically request Copilot code review`
       - `Review new pushes`
       - `Review draft pull requests`
+      - `Review new pushes`
+      - `Review draft pull requests`
 - Actions / General:
   - `Allow GitHub Actions to create and approve pull requests`
+
+## Branching Workflow
+
+- Create persistent `main` and `develop` branches.
+- Make sure that `main` and `develop` are always building.
+- Create feature branches from the `develop` branch.
+- Always "Squash and merge" from feature branches to `develop` to reduce the history size.
+- Always "Merge commit" from `develop` to `main` to retain merge history.
+
+## GitHub Actions Workflow
+
+- Use reusable tasks to eliminate duplication.
+- Create one pull request test action, and register that task as a [branch rule](#github-project-settings) check.
 
 ## Branching Workflow
 
