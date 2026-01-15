@@ -5,6 +5,7 @@ on:
     branches: [ main, develop ]
   workflow_dispatch:
   schedule:
+    # Rebuild docker images weekly on Mondays at 02:00 UTC
     - cron: '0 2 * * MON'
 
 concurrency:
@@ -18,10 +19,13 @@ jobs:
     uses: ./.github/workflows/build-docker-task.yml
     secrets: inherit
     with:
+      # Push to registry
       push: true
 
   date-badge:
-    needs: build-docker
     name: Create date badge
+    permissions:
+      contents: write
+    needs: [build-docker]
     uses: ./.github/workflows/date-badge-task.yml
     secrets: inherit

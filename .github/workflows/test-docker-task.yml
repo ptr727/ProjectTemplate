@@ -7,8 +7,9 @@ on:
 jobs:
 
   build-docker:
-    name: Build docker images without pushing
+    name: Build docker images without pushing to registry
     uses: ./.github/workflows/build-docker-task.yml
     secrets: inherit
     with:
+      # Do not push to registry
       push: false

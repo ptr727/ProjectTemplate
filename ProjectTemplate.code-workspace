@@ -6,6 +6,8 @@
 	],
 	"settings": {
 		"cSpell.words": [
+            "csdevkit",
+            "davidanson",
             "dotnettools",
             "dryrun",
             "gruntfuggly",
@@ -14,8 +16,10 @@
             "Nerdbank",
             "ProjectTemplate",
             "Serilog",
+            "slnx",
             "winget",
-            "xunit"
+            "xunit",
+            "yzhang"
         ],
 		"dotnet.defaultSolution": "ProjectTemplate.slnx",
         "files.trimTrailingWhitespace": true,
@@ -37,6 +41,8 @@
             "editor.defaultFormatter": "csharpier.csharpier-vscode"
         },
         "chat.agent.maxRequests": 100,
+        "githubLocalActions.actCommand": "act --artifact-server-path ./.artifacts",
+        "git.alwaysSignOff": true,
 	},
 	"extensions": {
 		"recommendations": [
@@ -48,7 +54,6 @@
             "github.vscode-github-actions",
             "ms-azuretools.vscode-docker",
             "ms-dotnettools.csdevkit",
-            "sanjulaganepola.github-local-actions",
             "yzhang.markdown-all-in-one",
 		]
 	}

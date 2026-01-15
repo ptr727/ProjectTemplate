@@ -1,19 +1,17 @@
 name: Create date badge task
 
+env:
+  IS_MAIN_BRANCH: ${{ endsWith(github.ref, 'refs/heads/main') }}
+
 on:
   workflow_call:
   workflow_dispatch:
-
-concurrency:
-  group: ${{ github.workflow }}-${{ github.ref }}
-  cancel-in-progress: true
 
 jobs:
 
   date-badge:
     name: Create date badge
     runs-on: ubuntu-latest
-    if: ${{ endsWith(github.ref, 'refs/heads/main') }}
 
     steps:
 
@@ -22,6 +20,7 @@ jobs:
           echo "date=$(date)" >> $GITHUB_OUTPUT
 
       - name: Build date badge
+        if: ${{ env.IS_MAIN_BRANCH }}
         uses: RubbaBoy/BYOB@v1
         with:
           name: lastbuild

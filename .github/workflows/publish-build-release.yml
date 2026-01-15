@@ -1,4 +1,4 @@
-name: Build and publish release
+name: Build and publish project release
 
 on:
   push:
@@ -13,11 +13,19 @@ jobs:
 
   build-project:
     name: Build project
+    permissions:
+      contents: write
     uses: ./.github/workflows/build-project-task.yml
     secrets: inherit
+    with:
+      # Push to GitHub and NuGet
+      github: true
+      nuget: true
 
   date-badge:
-    needs: build-project
     name: Create date badge
+    permissions:
+      contents: write
+    needs: [build-project]
     uses: ./.github/workflows/date-badge-task.yml
     secrets: inherit

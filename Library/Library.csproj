@@ -51,6 +51,7 @@
   <ItemGroup>
     <InternalsVisibleTo Include="Console" />
     <InternalsVisibleTo Include="Tests" />
+    <InternalsVisibleTo Include="Benchmarks" />
   </ItemGroup>
   <ItemGroup>
     <None Include="..\README.md" Pack="true" PackagePath="" />
