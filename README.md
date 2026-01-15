@@ -73,7 +73,7 @@ Packages published on [NuGet](https://www.nuget.org/packages/ptr727.ProjectTempl
   ```shell
   dotnet tool restore
   dotnet husky install
-  chmod +x ./husky/pre-commit # Make sure file is executable in Linux
+  chmod +x ./.husky/pre-commit # Make sure file is executable in Linux
   winget install nektos.act # Windows optional
   ```
 
