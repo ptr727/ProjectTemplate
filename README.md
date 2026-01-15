@@ -29,7 +29,7 @@ Packages published on [NuGet](https://www.nuget.org/packages/ptr727.ProjectTempl
   ssh -v -T git@github.com
   ```
 
-- Add [SSH keys to GitHub](https://github.com/settings/keys), add both an authentications and a signing key.
+- Add [SSH keys to GitHub](https://github.com/settings/keys), add both an authentication and a signing key.
 - Configure git for [SSH signing](https://docs.github.com/en/authentication/managing-commit-signature-verification/telling-git-about-your-signing-key):
 
   ```shell
