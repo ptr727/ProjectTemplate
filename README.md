@@ -135,6 +135,7 @@ Packages published on [NuGet](https://www.nuget.org/packages/ptr727.ProjectTempl
   - Default branch: `main`
   - Pull requests:
     - `Allow squash merging`
+      - [TODO:](https://github.com/orgs/community/discussions/184410): Disable merge and rebase merging, ruleset merge rules do not work.
     - `Always suggest updating pull request branches`
     - `Allow auto-merge`
 - Rules / Rulesets:
