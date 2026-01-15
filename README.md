@@ -34,8 +34,8 @@ Packages published on [NuGet](https://www.nuget.org/packages/ptr727.ProjectTempl
 
   ```shell
   git config --global credential.helper "cache --timeout=3600"
-  git config --global user.name "Pieter Viljoen"
-  git config --global user.email "ptr727@users.noreply.github.com"
+  git config --global user.name "Your Name"
+  git config --global user.email "your-email@example.com"
   git config --global core.sharedRepository group
   git config --global --add safe.directory '*'
 
@@ -51,7 +51,7 @@ Packages published on [NuGet](https://www.nuget.org/packages/ptr727.ProjectTempl
   git config --global gpg.ssh.allowedSignersFile "~/.config/git/allowed_signers"
   echo "$(git config --get user.email) namespaces=\"git\" $(cat ~/.ssh/id_ed25519.pub)" >> ~/.config/git/allowed_signers
   cat ~/.config/git/allowed_signers
-  git log --show-signature # Good "git" signature for ptr727@users.noreply.github.com with ED25519 key SHA256:XI0SwS++aVpnvgVM/OQ9q3BpfmIXcNT6AdiM0UnYMNs
+  git log --show-signature # Good "git" signature for your-email@example.com with ED25519 key SHA256:YourKeyFingerprintHere
 
   git config --list --show-origin
   ```
