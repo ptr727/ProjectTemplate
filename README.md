@@ -162,7 +162,7 @@ Packages published on [NuGet](https://www.nuget.org/packages/ptr727.ProjectTempl
 - Make sure that `main` and `develop` are always building.
 - Create feature branches from the `develop` branch.
 - Always "Squash and merge" from feature branches to `develop` to reduce the history size.
-- Alway "Merge commit" from `develop` to `main` to retain merge history.
+- Always "Merge commit" from `develop` to `main` to retain merge history.
 
 ## GitHub Actions Workflow
 
