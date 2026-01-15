@@ -134,7 +134,6 @@ Packages published on [NuGet](https://www.nuget.org/packages/ptr727.ProjectTempl
 - General:
   - Default branch: `main`
   - Pull requests:
-    - `Allow merge commits`
     - `Allow squash merging`
     - `Always suggest updating pull request branches`
     - `Allow auto-merge`
