@@ -1,0 +1,60 @@
+{
+	"folders": [
+		{
+			"path": "."
+		}
+	],
+	"settings": {
+		"cSpell.words": [
+            "csdevkit",
+            "davidanson",
+            "dotnettools",
+            "dryrun",
+            "gruntfuggly",
+            "logfile",
+            "nektos",
+            "Nerdbank",
+            "ProjectTemplate",
+            "Serilog",
+            "slnx",
+            "winget",
+            "xunit",
+            "yzhang"
+        ],
+		"dotnet.defaultSolution": "ProjectTemplate.slnx",
+        "files.trimTrailingWhitespace": true,
+        "files.trimTrailingWhitespaceInRegexAndStrings": false,
+        "diffEditor.ignoreTrimWhitespace": false,
+        "editor.renderWhitespace": "boundary",
+        "dotnet.formatting.organizeImportsOnFormat": true,
+        "csharp.debug.symbolOptions.searchNuGetOrgSymbolServer": true,
+        "csharp.debug.symbolOptions.searchMicrosoftSymbolServer": true,
+        "files.encoding": "utf8",
+        "[markdown]": {
+            "files.trimTrailingWhitespace": false,
+        },
+        "[plaintext]": {
+            "files.trimTrailingWhitespace": false,
+        },
+        "[csharp]": {
+            "editor.formatOnSave": true,
+            "editor.defaultFormatter": "csharpier.csharpier-vscode"
+        },
+        "chat.agent.maxRequests": 100,
+        "githubLocalActions.actCommand": "act --artifact-server-path ./.artifacts",
+        "git.alwaysSignOff": true,
+	},
+	"extensions": {
+		"recommendations": [
+            "davidanson.vscode-markdownlint",
+            "gruntfuggly.todo-tree",
+            "streetsidesoftware.code-spell-checker",
+            "editorconfig.editorconfig",
+            "csharpier.csharpier-vscode",
+            "github.vscode-github-actions",
+            "ms-azuretools.vscode-docker",
+            "ms-dotnettools.csdevkit",
+            "yzhang.markdown-all-in-one",
+		]
+	}
+}

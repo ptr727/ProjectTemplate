@@ -1,0 +1,39 @@
+name: Test build task
+
+on:
+  workflow_call:
+  workflow_dispatch:
+
+jobs:
+
+  unit-test:
+    name: Run tests
+    runs-on: ubuntu-latest
+
+    steps:
+
+      - name: Setup .NET SDK
+        uses: actions/setup-dotnet@v5
+        with:
+          dotnet-version: 10.x
+
+      - name: Checkout code
+        uses: actions/checkout@v6
+
+      - name: Check code style
+        run: |
+          dotnet tool restore
+          dotnet husky install
+          dotnet husky run
+
+      - name: Run unit tests
+        run: dotnet test
+
+  build-project:
+    name: Build project without pushing to github or nuget
+    uses: ./.github/workflows/build-project-task.yml
+    secrets: inherit
+    with:
+      # Do not publish to GitHub or NuGet
+      github: false
+      nuget: false

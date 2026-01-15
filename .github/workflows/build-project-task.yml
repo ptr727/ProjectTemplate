@@ -1,0 +1,67 @@
+name: Build project task
+
+env:
+  IS_MAIN_BRANCH: ${{ endsWith(github.ref, 'refs/heads/main') }}
+
+on:
+  workflow_call:
+    inputs:
+      github:
+        required: false
+        type: boolean
+        default: false
+      nuget:
+        required: false
+        type: boolean
+        default: false
+  workflow_dispatch:
+
+jobs:
+
+  get-version:
+    name: Get version information
+    uses: ./.github/workflows/get-version-task.yml
+    secrets: inherit
+
+  build-library:
+    name: Build library project
+    uses: ./.github/workflows/build-library-task.yml
+    secrets: inherit
+    with:
+      nuget: ${{ inputs.nuget }}
+
+  build-executable:
+    name: Build executable project
+    uses: ./.github/workflows/build-executable-task.yml
+    secrets: inherit
+
+  github-release:
+    name: Publish GitHub release
+    if: ${{ inputs.github }}
+    runs-on: ubuntu-latest
+    needs: [get-version, build-library, build-executable]
+
+    steps:
+
+      - name: Download library build artifacts
+        uses: actions/download-artifact@v7
+        with:
+          artifact-ids: ${{ needs.build-library.outputs.artifact-id }}
+          path: ./Publish
+
+      - name: Download executable build artifacts
+        uses: actions/download-artifact@v7
+        with:
+          artifact-ids: ${{ needs.build-executable.outputs.artifact-id }}
+          path: ./Publish
+
+      - name: Create GitHub release
+        uses: softprops/action-gh-release@v2
+        with:
+          generate_release_notes: true
+          tag_name: ${{ needs.get-version.outputs.SemVer2 }}
+          prerelease: ${{ env.IS_MAIN_BRANCH != 'true' }}
+          files: |
+            LICENSE
+            README.md
+            ./Publish/*

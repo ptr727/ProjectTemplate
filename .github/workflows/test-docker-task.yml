@@ -1,0 +1,15 @@
+name: Test docker task
+
+on:
+  workflow_call:
+  workflow_dispatch:
+
+jobs:
+
+  build-docker:
+    name: Build docker images without pushing to registry
+    uses: ./.github/workflows/build-docker-task.yml
+    secrets: inherit
+    with:
+      # Do not push to registry
+      push: false
