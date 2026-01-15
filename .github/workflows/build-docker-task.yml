@@ -56,8 +56,8 @@ jobs:
           push: ${{ inputs.push }}
           file: ${{ env.DOCKER_FILE }}
           tags: |
-            ${{env.DOCKER_TAG_PREFIX}}:${{ env.IS_MAIN_BRANCH && 'latest' || 'develop' }}
-            ${{env.DOCKER_TAG_PREFIX}}:${{ needs.get-version.outputs.SemVer2 }}
+            ${{ env.DOCKER_TAG_PREFIX }}:${{ env.IS_MAIN_BRANCH && 'latest' || 'develop' }}
+            ${{ env.DOCKER_TAG_PREFIX }}:${{ needs.get-version.outputs.SemVer2 }}
           platforms: linux/amd64,linux/arm64
           cache-from: type=registry,ref=${{ env.DOCKER_TAG_PREFIX }}:buildcache
           cache-to: type=registry,ref=${{ env.DOCKER_TAG_PREFIX }}:buildcache,mode=max
