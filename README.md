@@ -208,33 +208,16 @@ Packages published on [NuGet](https://www.nuget.org/packages/ptr727.ProjectTempl
     - `Require signed commits`
     - `Require a pull request before merging`
       - `Dismiss stale pull request approvals when new commits are pushed`
-      - Allowed merge methods: `Squash`
-      - Allowed merge methods: `Squash`
+      - Allowed merge methods: `Squash`, `Merge commit`
     - `Require status checks to pass`
       - `Require branches to be up to date before merging`
-      - Status checks that are required: `Check pull request workflow status`
       - Status checks that are required: `Check pull request workflow status`
     - `Block force pushes`
     - `Automatically request Copilot code review`
       - `Review new pushes`
       - `Review draft pull requests`
-      - `Review new pushes`
-      - `Review draft pull requests`
 - Actions / General:
   - `Allow GitHub Actions to create and approve pull requests`
-
-## Branching Workflow
-
-- Create persistent `main` and `develop` branches.
-- Make sure that `main` and `develop` are always building.
-- Create feature branches from the `develop` branch.
-- Always "Squash and merge" from feature branches to `develop` to reduce the history size.
-- Always "Merge commit" from `develop` to `main` to retain merge history.
-
-## GitHub Actions Workflow
-
-- Use reusable tasks to eliminate duplication.
-- Create one pull request test action, and register that task as a [branch rule](#github-project-settings) check.
 
 ## Branching Workflow
 
