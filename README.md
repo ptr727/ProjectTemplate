@@ -22,7 +22,8 @@ Packages published on [NuGet](https://www.nuget.org/packages/ptr727.ProjectTempl
 
 ### Tools Setup
 
-- Install VSCode and / or Visual Studio
+- Install Visual Studio Code.
+- Install Visual Studio.
 
 ### Git Setup
 
@@ -97,15 +98,15 @@ Packages published on [NuGet](https://www.nuget.org/packages/ptr727.ProjectTempl
 
 ### GitHub Local Actions Setup
 
-- Install [ACT](https://nektosact.com/installation/index.html):
+- Install [Nektos ACT](https://nektosact.com/):
 
   ```shell
   winget install nektos.act
   winget upgrade nektos.act
   ```
 
-- Install [VSCode extension](https://sanjulaganepola.github.io/github-local-actions-docs/).
-- Update [settings](https://nektosact.com/usage/index.html#action-artifacts) to start the artifact server.
+- Install [GitHub Local Actions](https://marketplace.visualstudio.com/items?itemName=SanjulaGanepola.github-local-actions) Visual Studio Code extension.
+- Update [settings](https://nektosact.com/usage/index.html#action-artifacts) to always start the artifact server.
 
   ```json
   "githubLocalActions.actCommand": "act --artifact-server-path ./.artifacts",
@@ -135,6 +136,7 @@ Packages published on [NuGet](https://www.nuget.org/packages/ptr727.ProjectTempl
   - Default branch: `main`
   - Pull requests:
     - `Allow squash merging`
+      - [TODO:](https://github.com/orgs/community/discussions/184410): Disable merge and rebase merging, ruleset merge rules do not currently work.
     - `Always suggest updating pull request branches`
     - `Allow auto-merge`
 - Rules / Rulesets:
@@ -159,10 +161,11 @@ Packages published on [NuGet](https://www.nuget.org/packages/ptr727.ProjectTempl
 ## Branching Workflow
 
 - Create persistent `main` and `develop` branches.
-- Make sure that `main` and `develop` are always building.
+- Protect `main` and `develop` branches with [branch protection rules](#github-project-settings).
+- Make sure that `main` and `develop` are always building error free.
 - Create feature branches from the `develop` branch.
-- Always "Squash and merge" from feature branches to `develop` to reduce the history size.
-- Always "Merge commit" from `develop` to `main` to retain merge history.
+- Always "Squash and merge" from feature branches to the `develop` branch to minimize change history.
+- Always "Squash and merge" from `develop` to `main` to maintain a linear history.
 
 ## GitHub Actions Workflow
 
