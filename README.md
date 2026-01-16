@@ -208,7 +208,7 @@ Packages published on [NuGet](https://www.nuget.org/packages/ptr727.ProjectTempl
     - `Require signed commits`
     - `Require a pull request before merging`
       - `Dismiss stale pull request approvals when new commits are pushed`
-      - Allowed merge methods: `Squash`, `Merge commit`
+      - Allowed merge methods: `Squash`
     - `Require status checks to pass`
       - `Require branches to be up to date before merging`
       - Status checks that are required: `Check pull request workflow status`
@@ -225,7 +225,7 @@ Packages published on [NuGet](https://www.nuget.org/packages/ptr727.ProjectTempl
 - Make sure that `main` and `develop` are always building.
 - Create feature branches from the `develop` branch.
 - Always "Squash and merge" from feature branches to `develop` to reduce the history size.
-- Always "Merge commit" from `develop` to `main` to retain merge history.
+- Always "Squash and merge" from `develop` to `main` to maintain a linear history.
 
 ## GitHub Actions Workflow
 
