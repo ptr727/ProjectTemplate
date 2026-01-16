@@ -164,8 +164,8 @@ Packages published on [NuGet](https://www.nuget.org/packages/ptr727.ProjectTempl
 - Protect `main` and `develop` branches with [branch protection rules](#github-project-settings).
 - Make sure that `main` and `develop` are always building error free.
 - Create feature branches from the `develop` branch.
-- Always "Squash and merge" from feature branches to the `develop` branch to minimize changes history.
-- Always "Squash and merge" from `develop` to `main` to retain linear merge history.
+- Always "Squash and merge" from feature branches to the `develop` branch to minimize change history.
+- Always "Squash and merge" from `develop` to `main` to maintain a linear history.
 
 ## GitHub Actions Workflow
 
