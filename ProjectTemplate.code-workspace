@@ -8,18 +8,24 @@
 		"cSpell.words": [
             "csdevkit",
             "davidanson",
+            "debuglevel",
             "dotnettools",
             "dryrun",
+            "Emby",
             "gpgsign",
             "gruntfuggly",
+            "Jellyfin",
             "logfile",
             "nektos",
             "Nerdbank",
+            "othercommand",
             "Pieter",
             "ProjectTemplate",
             "Serilog",
+            "settingsfile",
             "signingkey",
             "slnx",
+            "somecommand",
             "Viljoen",
             "winget",
             "xunit",
@@ -47,6 +53,7 @@
         "chat.agent.maxRequests": 100,
         "githubLocalActions.actCommand": "act --artifact-server-path ./.artifacts",
         "git.alwaysSignOff": true,
+        "markdown.extension.toc.levels": "2..3"
 	},
 	"extensions": {
 		"recommendations": [
