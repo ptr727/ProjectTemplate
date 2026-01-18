@@ -166,18 +166,19 @@ Options:
 ### Template Setup TODO List
 
 - [ ] Start on Linux to avoid file permission issues when moving from Windows.
-- [ ] `git clone -b main https://github.com/ptr727/ProjectTemplate.git ./[NewProject]`.
-- [ ] `rm -r ./[NewProject]/.git` to start a fresh repo.
-- [ ] Configure the [developer environment](#developer-environment-setup).
-- [ ] Open the project directory in Visual Studio Code, and rename all instances of `ProjectTemplate` to `[NewProject]` in code and filenames.
-- [ ] Open the workspace in Visual Studio Code, continue editing.
+- [ ] Configure the [Developer Environment](#developer-environment-setup).
+- [ ] Configure the [Global Git Setup](#git-setup) and the [Project Git Setup](#template-git-setup).
+- [ ] Open the project directory in Visual Studio Code, and rename (Ctrl-Shift-H) all instances of `ProjectTemplate` to `[NewProject]` in code.
+- [ ] Rename `ProjectTemplate.code-workspace` to `[NewProject].code-workspace` and `ProjectTemplate.slnx` to `[NewProject].slnx`.
+- [ ] Open `[NewProject].code-workspace` workspace in Visual Studio Code.
 - [ ] Delete any sub-projects that will not be used.
 - [ ] Update all ref-links in `README.md` to point to `[NewProject]`.
-- [ ] `Publish Branch` to GitHub, default new branch is `first-branch`.
-- [ ] Configure [GitHub](#git-setup).
-- [ ] Create `develop` branch from `first-branch` when ready.
-- [ ] Create `main` branch from `develop` when ready.
-- [ ] Create feature branches and PR to `develop` and PR from `develop` to main.
+- [ ] Publish to GitHub to create a new empty GitHub repository.
+- [ ] Commit and push the `first-branch`.
+- [ ] Edit and iterate only in `first-branch` until ready to start with git history.
+- [ ] Setup `main` as the [First Permanent Branch](#template-git-permanent-branch) when ready.
+- [ ] Configure [GitHub](#github-setup) for the new repository.
+- [ ] Follow the [Branching Workflow](#branching-workflow), create `develop` from `main`, PR from `feature-branch` to `develop` to `main`.
 - [ ] Delete the `Project Template Setup` section from `README.md`.
 
 ### Developer Environment Setup
@@ -246,6 +247,37 @@ Options:
   git config --global gpg.ssh.allowedSignersFile "~/.config/git/allowed_signers"
   git log --show-signature
   git config --list --show-origin
+  ```
+
+#### Template Git Setup
+
+- Template project setup:
+
+  ```shell
+  git clone -b main https://github.com/ptr727/ProjectTemplate.git ./[NewProject]
+  rm -r ./[NewProject]/.git
+  cd ./[NewProject]
+  git init -b first-branch
+  dotnet tool restore
+  dotnet husky install
+  ```
+
+#### Template Git Permanent Branch
+
+- Create `main` branch from `first-branch` with no history:
+
+  ```shell
+  # When you're ready to create main with ONLY ONE squashed commit:
+  git checkout --orphan main                 # creates main with no history
+  git commit --allow-empty -m "temp"         # required so we can merge into it
+
+  git merge --squash first-branch            # bring in final state as staged changes
+  git commit -m "Initial import (squashed)"  # main now has exactly 1 real commit
+
+  git reset --hard HEAD~1                    # drop the temporary commit (leaves your squashed commit as the first)
+
+  # delete the feature branch
+  git branch -D feature-big-branch
   ```
 
 #### Project Workspace Setup
