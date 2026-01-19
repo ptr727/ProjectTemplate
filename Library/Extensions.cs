@@ -7,7 +7,7 @@ namespace ptr727.ProjectTemplate.Library;
     "CA1034:Nested types should not be visible",
     Justification = "https://github.com/dotnet/sdk/issues/51681"
 )]
-public static class LogExtensions
+internal static partial class LogExtensions
 {
     extension(ILogger logger)
     {
@@ -16,7 +16,7 @@ public static class LogExtensions
             [CallerMemberName] string function = "unknown"
         )
         {
-            logger.Error(exception, "{Function}", function);
+            LogCatchException(logger, function, exception);
             return false;
         }
 
@@ -25,12 +25,18 @@ public static class LogExtensions
             [CallerMemberName] string function = "unknown"
         )
         {
-            logger.Error(exception, "{Function}", function);
+            LogCatchException(logger, function, exception);
             return true;
         }
-
-        public ILogger LogOverrideContext() => logger.ForContext<LogOverride>();
     }
 
-    public class LogOverride;
+    [LoggerMessage(Message = "Exception in {Function}", Level = LogLevel.Error)]
+    internal static partial void LogCatchException(
+        this ILogger logger,
+        string function,
+        Exception exception
+    );
+
+    [LoggerMessage(Message = "{Message}", Level = LogLevel.Information)]
+    internal static partial void LogInformation(this ILogger logger, string message);
 }

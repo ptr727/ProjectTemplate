@@ -1,4 +1,4 @@
-name: Merge bot generated PRs
+name: Merge bot generated PRs action
 
 on:
   pull_request:
@@ -10,7 +10,7 @@ concurrency:
 jobs:
 
   merge-dependabot:
-    name: Merge dependabot PRs
+    name: Merge dependabot PRs job
     runs-on: ubuntu-latest
     if: github.actor == 'dependabot[bot]'
     permissions:
@@ -19,13 +19,13 @@ jobs:
 
     steps:
 
-      - name: Get dependabot metadata
+      - name: Get dependabot metadata step
         id: metadata
         uses: dependabot/fetch-metadata@v2
         with:
           github-token: "${{ secrets.GITHUB_TOKEN }}"
 
-      - name: Merge PR
+      - name: Merge PR step
         if: steps.metadata.outputs.update-type != 'version-update:semver-major'
         run: gh pr merge --auto --merge "$PR_URL"
         env:

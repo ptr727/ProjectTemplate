@@ -1,11 +1,9 @@
-name: Build and push docker images
+name: Publish weekly Docker image to Docker Hub action
 
 on:
-  push:
-    branches: [ main, develop ]
   workflow_dispatch:
   schedule:
-    # Rebuild docker images weekly on Mondays at 02:00 UTC
+    # Rebuild Docker image weekly on Mondays at 02:00 UTC
     - cron: '0 2 * * MON'
 
 concurrency:
@@ -15,7 +13,7 @@ concurrency:
 jobs:
 
   build-docker:
-    name: Build docker images
+    name: Build Docker image job
     uses: ./.github/workflows/build-docker-task.yml
     secrets: inherit
     with:
@@ -23,9 +21,9 @@ jobs:
       push: true
 
   date-badge:
-    name: Create date badge
+    name: Create BYOB date badge job
     permissions:
       contents: write
     needs: [build-docker]
-    uses: ./.github/workflows/date-badge-task.yml
+    uses: ./.github/workflows/build-datebadge-task.yml
     secrets: inherit

@@ -6,8 +6,9 @@ C# .NET project template.
 
 - **Source Code**: [GitHub][github-link] - Source code, issues, discussions, and CI/CD pipelines.
 - **Binary Releases**: [GitHub Releases][releases-link] - Pre-compiled binaries for Windows, Linux, and macOS.
+- **Versioned Releases**: [GitHub Releases][releases-link] - Version tagged source code and build artifacts.
 - **Docker Images**: [Docker Hub][docker-link] - Container images with all tools pre-installed.
-- **NuGet Packages** [NuGet Packages][nuget-link] - .NET libraries.
+- **NuGet Packages** [NuGet Packages][nuget-link] - .NET libraries published to NuGet.org.
 
 ### Build Status
 
@@ -71,10 +72,11 @@ See [Installation](#installation) for detailed setup instructions.
   - [Global Options](#global-options)
   - [Some Command](#some-command)
 - [Questions or Issues](#questions-or-issues)
-- [Project Template Setup](#project-template-setup)
-  - [Template Setup TODO List](#template-setup-todo-list)
-  - [Developer Environment Setup](#developer-environment-setup)
-  - [GitHub Setup](#github-setup)
+- [Development Environment Setup](#development-environment-setup)
+- [Template Project Setup](#template-project-setup)
+  - [Template - TODO List](#template---todo-list)
+  - [Template - Developer Environment Setup](#template---developer-environment-setup)
+  - [Template - GitHub Setup](#template---github-setup)
 - [3rd Party Tools](#3rd-party-tools)
 - [License](#license)
 
@@ -161,29 +163,69 @@ Options:
 - Check the existing [Issues][issues-link] tracker for known problems.
 - If the issue is unique and a bug, file it in [Issues][issues-link], and include all pertinent steps to reproduce the issue.
 
-## Project Template Setup
+## Development Environment Setup
 
-### Template Setup TODO List
+- **Install Developer Tools:**
+
+  - Install [.NET SDK](https://dotnet.microsoft.com/en-us/download):
+
+    ```shell
+    winget install Microsoft.DotNet.SDK.10
+    winget upgrade Microsoft.DotNet.SDK.10
+    ```
+
+  - Install [Visual Studio Code](https://code.visualstudio.com/download):
+
+    ```shell
+    winget install Microsoft.VisualStudioCode
+    winget upgrade Microsoft.VisualStudioCode
+    ```
+
+  - Install [Visual Studio](https://visualstudio.microsoft.com/downloads/):
+
+    ```shell
+    winget install Microsoft.VisualStudio.Community
+    winget upgrade Microsoft.VisualStudio.Community
+    ```
+
+- **Clone and Configure the Project:**
+
+  - Clone the repository and initialize tools:
+
+    ```shell
+    git clone -b main https://github.com/ptr727/[ProjectTemplate].git ./[NewProject]
+    dotnet tool restore
+    dotnet husky install
+    ```
+
+  - Open `[ProjectTemplate].code-workspace` in Visual Studio Code.
+  - Open `[ProjectTemplate].slnx` in Visual Studio.
+
+## Template Project Setup
+
+### Template - TODO List
 
 - [ ] Start on Linux to avoid file permission issues when moving from Windows.
-- [ ] Configure the [Developer Environment](#developer-environment-setup).
-- [ ] Configure the [Global Git Setup](#git-setup) and the [Project Git Setup](#template-git-setup).
+- [ ] Configure the [Developer Environment](#template---developer-environment-setup).
+- [ ] Configure the [Global Git Setup](#template---global-git-setup) and the [Project Git Setup](#template---project-git-setup).
 - [ ] Open the project directory in Visual Studio Code, and rename (Ctrl-Shift-H) all instances of `ProjectTemplate` to `[NewProject]` in code.
 - [ ] Rename `ProjectTemplate.code-workspace` to `[NewProject].code-workspace` and `ProjectTemplate.slnx` to `[NewProject].slnx`.
 - [ ] Open `[NewProject].code-workspace` workspace in Visual Studio Code.
-- [ ] Delete any sub-projects that will not be used.
-- [ ] Update all ref-links in `README.md` to point to `[NewProject]`.
+- [ ] Delete any projects and associated actions that will not be used, update dependencies in actions to remove deleted actions.
+- [ ] Rename projects to match the naming, update `.slnx` and `.csproj` files, and update actions to match the naming.
+- [ ] Update the `namespace` in `.cs` and `.csproj` files to match the naming.
+- [ ] Update all ref-links in `README.md` to point to the naming.
 - [ ] Publish to GitHub to create a new empty GitHub repository.
 - [ ] Commit and push the `first-branch`.
 - [ ] Edit and iterate only in `first-branch` until ready to start with git history.
-- [ ] Setup `main` as the [First Permanent Branch](#template-git-permanent-branch) when ready.
-- [ ] Configure [GitHub](#github-setup) for the new repository.
-- [ ] Follow the [Branching Workflow](#branching-workflow), create `develop` from `main`, PR from `feature-branch` to `develop` to `main`.
+- [ ] Setup `main` as the [First Permanent Branch](#template---git-permanent-branch) when ready.
+- [ ] Configure [GitHub](#template---github-setup) for the new repository.
+- [ ] Follow the [Branching Workflow](#template---branching-workflow), create `develop` from `main`, PR from `feature-branch` to `develop` to `main`.
 - [ ] Delete the `Project Template Setup` section from `README.md`.
 
-### Developer Environment Setup
+### Template - Developer Environment Setup
 
-#### Tools Setup
+#### Template - Tools Setup
 
 - Install [.NET SDK](https://dotnet.microsoft.com/en-us/download):
 
@@ -213,7 +255,7 @@ Options:
   winget upgrade nektos.act
   ```
 
-#### Git Setup
+#### Template - Global Git Setup
 
 - Configure Git options:
 
@@ -249,7 +291,7 @@ Options:
   git config --list --show-origin
   ```
 
-#### Template Git Setup
+#### Template - Project Git Setup
 
 - Template project setup:
 
@@ -262,7 +304,7 @@ Options:
   dotnet husky install
   ```
 
-#### Template Git Permanent Branch
+#### Template - Git Permanent Branch
 
 - Create `main` branch from `first-branch` with no history:
 
@@ -280,7 +322,7 @@ Options:
   git branch -D feature-big-branch
   ```
 
-#### Project Workspace Setup
+#### Template - Project Workspace Setup
 
 - Setup new project environment:
 
@@ -313,7 +355,7 @@ Options:
   - Verify that shell files are `+x` executable and `LF` line ending mode.
   - Verify that there are no duplicate files with different case names.
 
-#### GitHub Local Actions Setup
+#### Template - GitHub Local Actions Setup
 
 - Install [Nektos ACT](https://nektosact.com/):
 
@@ -333,9 +375,9 @@ Options:
   - Save the existing [Docker Hub Personal Access Token](https://app.docker.com/accounts/ptr727/settings/personal-access-tokens) as `DOCKER_HUB_ACCESS_TOKEN` and `DOCKER_HUB_USERNAME`.
   - Create a [GitHub Personal Access Token](https://github.com/settings/personal-access-tokens) as `GITHUB_TOKEN`.
 
-### GitHub Setup
+### Template - GitHub Setup
 
-#### GitHub Secrets Setup
+#### Template - GitHub Secrets Setup
 
 - Create a [NuGet API Key](https://www.nuget.org/account/apikeys).
   - Save the Key as `NUGET_API_KEY` in:
@@ -347,7 +389,7 @@ Options:
     - GitHub project security Settings / Secrets / Actions.
     - GitHub project security Settings / Secrets / Dependabot.
 
-#### GitHub Project Settings
+#### Template - GitHub Project Settings
 
 - General:
   - Default branch: `main`
@@ -375,21 +417,23 @@ Options:
 - Actions / General:
   - `Allow GitHub Actions to create and approve pull requests`
 
-#### Branching Workflow
+#### Template - Branching Workflow
 
 - Create persistent `main` and `develop` branches.
-- Protect `main` and `develop` branches with [branch protection rules](#github-project-settings).
+- Protect `main` and `develop` branches with [branch protection rules](#template---github-project-settings).
 - Make sure that `main` and `develop` are always building error free.
 - Create feature branches from the `develop` branch.
 - Always "Squash and merge" from feature branches to the `develop` branch to minimize change history.
 - Always "Squash and merge" from `develop` to `main` to maintain a linear history.
 
-#### GitHub Actions Workflow
+#### Template - GitHub Actions Workflow
 
 - Use reusable tasks to eliminate duplication.
-- Create one pull request test action, and register that task as a [branch rule](#github-project-settings) check.
+- Create one pull request test action, and register that task as a [branch rule](#template---github-project-settings) check.
 
 ## 3rd Party Tools
+
+**3rd Party tools used in this project:**
 
 - [AwesomeAssertions](https://awesomeassertions.org/)
 - [Bring Your Own Badge](https://github.com/marketplace/actions/bring-your-own-badge)

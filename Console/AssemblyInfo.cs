@@ -1,7 +1,7 @@
 using System.Reflection;
 using System.Runtime.InteropServices;
 
-namespace ptr727.ProjectTemplate.Library;
+namespace ptr727.ProjectTemplate.Console;
 
 public static class AssemblyInfo
 {

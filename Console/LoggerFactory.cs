@@ -1,5 +1,6 @@
 using Serilog.Debugging;
 using Serilog.Events;
+using Serilog.Extensions.Logging;
 using Serilog.Sinks.SystemConsole.Themes;
 
 namespace ptr727.ProjectTemplate.Console;
@@ -46,4 +47,7 @@ public static class LoggerFactory
         Log.Logger = loggerConfiguration.CreateLogger();
         return Log.Logger;
     }
+
+    public static Microsoft.Extensions.Logging.ILogger CreateLogger(string categoryName) =>
+        new SerilogLoggerFactory(Log.Logger, dispose: false).CreateLogger(categoryName);
 }

@@ -2,14 +2,14 @@ using System.Net.Http.Headers;
 using Microsoft.Extensions.Http.Resilience;
 using Polly;
 
-namespace ptr727.ProjectTemplate.Library;
+namespace ptr727.ProjectTemplate.Console;
 
 public static class HttpClientFactory
 {
     [System.Diagnostics.CodeAnalysis.SuppressMessage(
         "Design",
         "CA1024:Use properties where appropriate",
-        Justification = "Name conflcit with known class"
+        Justification = "Name conflict with known class"
     )]
     public static HttpClient GetHttpClient() => s_httpClient.Value;
 
@@ -18,7 +18,7 @@ public static class HttpClientFactory
     [System.Diagnostics.CodeAnalysis.SuppressMessage(
         "Design",
         "CA1024:Use properties where appropriate",
-        Justification = "Name conflcit with known class"
+        Justification = "Name conflict with known class"
     )]
     public static ResilienceHandler GetResilienceHandler() => s_resilienceHandler.Value;
 

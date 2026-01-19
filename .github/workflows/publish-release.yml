@@ -1,4 +1,4 @@
-name: Build and publish project release
+name: Publish project release action
 
 on:
   push:
@@ -11,21 +11,22 @@ concurrency:
 
 jobs:
 
-  build-project:
-    name: Build project
+  create-release:
+    name: Publish project release job
     permissions:
       contents: write
-    uses: ./.github/workflows/build-project-task.yml
+    uses: ./.github/workflows/build-release-task.yml
     secrets: inherit
     with:
-      # Push to GitHub and NuGet
+      # Push to GitHub and NuGet and Docker Hub
       github: true
       nuget: true
+      dockerhub: true
 
   date-badge:
-    name: Create date badge
+    name: Create BYOB date badge job
     permissions:
       contents: write
-    needs: [build-project]
-    uses: ./.github/workflows/date-badge-task.yml
+    needs: [create-release]
+    uses: ./.github/workflows/build-datebadge-task.yml
     secrets: inherit

@@ -51,6 +51,11 @@ public class Program
         _ = LoggerFactory.Create(commandLine.CreateContext(parseResult).LogOptions);
         Log.Logger.LogOverrideContext().Information("Starting: {Args}", args);
 
+        // Initialize library with logger (demonstration only)
+        _ = new TemplateLibrary(
+            new Options() { Logger = LoggerFactory.CreateLogger(typeof(TemplateLibrary).FullName!) }
+        );
+
         // Invoke command
         return await parseResult.InvokeAsync();
     }
