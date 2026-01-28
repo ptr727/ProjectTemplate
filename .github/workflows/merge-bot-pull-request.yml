@@ -1,7 +1,7 @@
-name: Merge bot generated PRs action
+name: Merge bot pull request action
 
 on:
-  pull_request_target:
+  pull_request:
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
@@ -10,7 +10,7 @@ concurrency:
 jobs:
 
   merge-dependabot:
-    name: Merge dependabot PR job
+    name: Merge dependabot pull request job
     runs-on: ubuntu-latest
     if: github.actor == 'dependabot[bot]' && github.event.pull_request.head.repo.full_name == github.repository
     permissions:
@@ -25,7 +25,7 @@ jobs:
         with:
           github-token: "${{ secrets.GITHUB_TOKEN }}"
 
-      - name: Merge PR step
+      - name: Merge pull request step
         if: steps.metadata.outputs.update-type != 'version-update:semver-major'
         run: gh pr merge --auto --merge "$PR_URL"
         env:
@@ -33,7 +33,7 @@ jobs:
           GH_TOKEN: ${{secrets.GITHUB_TOKEN}}
 
   merge-codegen:
-    name: Merge codegen PR job
+    name: Merge codegen pull request job
     runs-on: ubuntu-latest
     if: github.actor == 'github-actions[bot]' && github.event.pull_request.head.ref == 'codegen-update' && github.event.pull_request.head.repo.full_name == github.repository
     permissions:
@@ -42,7 +42,7 @@ jobs:
 
     steps:
 
-      - name: Merge PR step
+      - name: Merge pull request step
         run: gh pr merge --auto --merge "$PR_URL"
         env:
           PR_URL: ${{github.event.pull_request.html_url}}
