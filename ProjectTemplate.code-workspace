@@ -7,8 +7,12 @@
 	"settings": {
 		"cSpell.words": [
             "apikey",
+            "autoremove",
             "buildcache",
+            "buildtransitive",
             "Buildx",
+            "codegen",
+            "contentfiles",
             "csdevkit",
             "datebadge",
             "davidanson",
@@ -25,6 +29,7 @@
             "nbgv",
             "nektos",
             "Nerdbank",
+            "noninteractive",
             "othercommand",
             "Pieter",
             "ProjectTemplate",
@@ -37,6 +42,7 @@
             "snupkg",
             "softprops",
             "somecommand",
+            "tzdata",
             "Viljoen",
             "winget",
             "xunit",

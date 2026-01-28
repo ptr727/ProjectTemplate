@@ -6,35 +6,36 @@ namespace ptr727.ProjectTemplate.CodeGen;
 
 internal sealed class CommandLine
 {
-    internal sealed class Context
+    internal CommandLine(string[] args)
+    {
+        Root = CreateRootCommand();
+        Result = Root.Parse(args);
+    }
+
+    internal sealed class Options
     {
         internal required DirectoryInfo CodePath { get; init; }
         internal required string APIKey { get; init; }
     }
 
-    internal static async Task<(
-        CommandLine commandLine,
-        RootCommand rootCommand
-    )> CreateRootCommandWithCommandLine()
+    internal RootCommand Root { get; init; }
+    internal ParseResult Result { get; init; }
+
+    internal RootCommand CreateRootCommand()
     {
-        CommandLine commandLine = new();
-        RootCommand rootCommand = new("C# .NET codegen project")
-        {
-            commandLine._codePathOption,
-            commandLine._apiKeyOption,
-        };
+        RootCommand rootCommand = new("C# .NET codegen project") { _codePathOption, _apiKeyOption };
         rootCommand.SetAction(
             (parseResult, cancellationToken) =>
             {
-                Program program = new(commandLine.CreateContext(parseResult), cancellationToken);
+                Program program = new(CreateOptions(parseResult), cancellationToken);
                 return program.ExecuteAsync();
             }
         );
 
-        return (commandLine, rootCommand);
+        return rootCommand;
     }
 
-    internal Context CreateContext(ParseResult parseResult) =>
+    internal Options CreateOptions(ParseResult parseResult) =>
         new()
         {
             CodePath = parseResult.GetValue(_codePathOption)!,

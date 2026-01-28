@@ -2,10 +2,10 @@
   <PropertyGroup>
     <AnalysisLevel>latest-all</AnalysisLevel>
     <EnableNETAnalyzers>true</EnableNETAnalyzers>
+    <IsPackable>false</IsPackable>
     <Nullable>enable</Nullable>
     <OutputType>Exe</OutputType>
     <RootNamespace>ptr727.ProjectTemplate.Benchmarks</RootNamespace>
-    <IsPackable>false</IsPackable>
     <TargetFramework>net10.0</TargetFramework>
   </PropertyGroup>
   <ItemGroup>

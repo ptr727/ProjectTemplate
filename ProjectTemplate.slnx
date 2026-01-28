@@ -26,7 +26,9 @@
     <Project Path="Benchmarks/Benchmarks.csproj">
         <BuildDependency Project="Library/Library.csproj" />
     </Project>
-    <Project Path="Console/Console.csproj" />
+    <Project Path="Console/Console.csproj">
+        <BuildDependency Project="Library/Library.csproj" />
+    </Project>
     <Project Path="CodeGen/CodeGen.csproj" />
     <Project Path="Library/Library.csproj" />
     <Project Path="Tests/Tests.csproj">
