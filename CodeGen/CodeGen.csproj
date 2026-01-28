@@ -2,18 +2,18 @@
   <PropertyGroup>
     <AnalysisLevel>latest-all</AnalysisLevel>
     <EnableNETAnalyzers>true</EnableNETAnalyzers>
+    <InformationalVersion>1.0.0-pre</InformationalVersion>
     <IsPackable>false</IsPackable>
     <Nullable>enable</Nullable>
     <OutputType>Exe</OutputType>
+    <PublishAot>false</PublishAot>
     <RootNamespace>ptr727.ProjectTemplate.CodeGen</RootNamespace>
     <TargetFramework>net10.0</TargetFramework>
     <Version>1.0.0</Version>
-    <InformationalVersion Condition="'$(SourceRevisionId)' != ''"
-      >$(Version)+$(SourceRevisionId)</InformationalVersion
-    >
   </PropertyGroup>
-  <PropertyGroup Condition="'$(IsPublish)' == 'true'">
-    <PublishAot>true</PublishAot>
+  <PropertyGroup Condition="'$(PublishAot)' == 'true'">
+    <InvariantGlobalization>true</InvariantGlobalization>
+    <SelfContained>true</SelfContained>
     <VerifyReferenceAotCompatibility>true</VerifyReferenceAotCompatibility>
   </PropertyGroup>
   <ItemGroup>

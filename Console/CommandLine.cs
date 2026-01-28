@@ -6,35 +6,63 @@ namespace ptr727.ProjectTemplate.Console;
 
 internal sealed class CommandLine
 {
-    internal sealed class Context
+    internal CommandLine(string[] args)
     {
-        internal required LoggerFactory.Options LogOptions { get; init; }
+        Root = CreateRootCommand();
+        Result = Root.Parse(args);
     }
 
-    internal static async Task<(
-        CommandLine commandLine,
-        RootCommand rootCommand
-    )> CreateRootCommandWithCommandLine()
+    internal sealed class Options
     {
-        CommandLine commandLine = new();
+        internal required LoggerFactory.Options LogOptions { get; init; }
+        internal required string TestOption { get; init; }
+    }
+
+    internal RootCommand Root { get; init; }
+    internal ParseResult Result { get; init; }
+
+    internal RootCommand CreateRootCommand()
+    {
+        // Default root command
         RootCommand rootCommand = new("C# .NET console project")
         {
-            commandLine._logLevelOption,
-            commandLine._logFileOption,
-            commandLine._logFileClearOption,
+            // Global options (set Recursive to true to apply to subcommands)
+            _logLevelOption,
+            _logFileOption,
+            _logFileClearOption,
         };
         rootCommand.SetAction(
             (parseResult, cancellationToken) =>
             {
-                Program program = new(commandLine.CreateContext(parseResult), cancellationToken);
+                Program program = new(CreateOptions(parseResult), cancellationToken);
                 return program.ExecuteAsync();
             }
         );
 
-        return (commandLine, rootCommand);
+        // Sub commands
+        rootCommand.Subcommands.Add(CreateTestCommand());
+
+        return rootCommand;
     }
 
-    internal Context CreateContext(ParseResult parseResult) =>
+    internal Command CreateTestCommand()
+    {
+        Command testCommand = new("test", "Test command")
+        {
+            // Test command options
+            _testOption,
+        };
+        testCommand.SetAction(
+            (parseResult, cancellationToken) =>
+            {
+                Program program = new(CreateOptions(parseResult), cancellationToken);
+                return program.ExecuteTestAsync();
+            }
+        );
+        return testCommand;
+    }
+
+    internal Options CreateOptions(ParseResult parseResult) =>
         new()
         {
             LogOptions = new LoggerFactory.Options
@@ -43,16 +71,20 @@ internal sealed class CommandLine
                 File = parseResult.GetValue(_logFileOption) ?? string.Empty,
                 FileClear = parseResult.GetValue(_logFileClearOption),
             },
+            TestOption = parseResult.GetValue(_testOption) ?? string.Empty,
         };
 
     private readonly Option<LogEventLevel> _logLevelOption = CreateLogLevelOption();
     private readonly Option<string> _logFileOption = CreateLogFileOption();
     private readonly Option<bool> _logFileClearOption = CreateLogFileClearOption();
 
+    private readonly Option<string> _testOption = CreateTestOption();
+
     private static Option<bool> CreateLogFileClearOption() =>
         new("--logfile-clear", "-c")
         {
             Description = "Clear the log file before writing (default: false).",
+            Recursive = true,
         };
 
     private static Option<LogEventLevel> CreateLogLevelOption() =>
@@ -60,10 +92,21 @@ internal sealed class CommandLine
         {
             Description = "Set the log level (default: Information).",
             DefaultValueFactory = _ => LogEventLevel.Information,
+            Recursive = true,
         };
 
-    private static Option<string> CreateLogFileOption() =>
-        new("--logfile", "-f") { Description = "Write logs to the specified file (optional)." };
+    private static Option<string> CreateLogFileOption()
+    {
+        Option<string> option = new("--logfile", "-f")
+        {
+            Description = "Write logs to the specified file (optional).",
+            Recursive = true,
+        };
+        return option.AcceptLegalFileNamesOnly();
+    }
+
+    private static Option<string> CreateTestOption() =>
+        new("--test", "-t") { Description = "Test command option (optional)." };
 
     internal static bool BypassStartup(ParseResult parseResult) =>
         parseResult.Errors.Count > 0
