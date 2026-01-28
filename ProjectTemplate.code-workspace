@@ -6,6 +6,7 @@
 	],
 	"settings": {
 		"cSpell.words": [
+            "apikey",
             "buildcache",
             "Buildx",
             "csdevkit",
@@ -27,11 +28,13 @@
             "othercommand",
             "Pieter",
             "ProjectTemplate",
+            "quoteoftheday",
             "Rubba",
             "Serilog",
             "settingsfile",
             "signingkey",
             "slnx",
+            "snupkg",
             "softprops",
             "somecommand",
             "Viljoen",

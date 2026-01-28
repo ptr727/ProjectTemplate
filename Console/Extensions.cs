@@ -12,7 +12,7 @@ internal static partial class LogExtensions
 {
     extension(Serilog.ILogger logger)
     {
-        public bool LogAndPropagate(
+        internal bool LogAndPropagate(
             Exception exception,
             [CallerMemberName] string function = "unknown"
         )
@@ -21,7 +21,7 @@ internal static partial class LogExtensions
             return false;
         }
 
-        public bool LogAndHandle(
+        internal bool LogAndHandle(
             Exception exception,
             [CallerMemberName] string function = "unknown"
         )
@@ -30,14 +30,19 @@ internal static partial class LogExtensions
             return true;
         }
 
-        public Serilog.ILogger LogOverrideContext() => logger.ForContext<LogOverride>();
+        internal Serilog.ILogger LogOverrideContext() => logger.ForContext<LogOverride>();
     }
 
-    public class LogOverride;
+    [System.Diagnostics.CodeAnalysis.SuppressMessage(
+        "Design",
+        "CA1812:Avoid uninstantiated internal classes",
+        Justification = "TODO"
+    )]
+    internal sealed class LogOverride;
 
     extension(Microsoft.Extensions.Logging.ILogger logger)
     {
-        public bool LogAndPropagate(
+        internal bool LogAndPropagate(
             Exception exception,
             [CallerMemberName] string function = "unknown"
         )
@@ -46,7 +51,7 @@ internal static partial class LogExtensions
             return false;
         }
 
-        public bool LogAndHandle(
+        internal bool LogAndHandle(
             Exception exception,
             [CallerMemberName] string function = "unknown"
         )

@@ -7,3 +7,4 @@
 .vs
 .artifacts
 .DS_Store
+*.user

@@ -12,7 +12,6 @@ on:
         value: ${{ jobs.get-version.outputs.AssemblyFileVersion }}
       AssemblyInformationalVersion:
         value: ${{ jobs.get-version.outputs.AssemblyInformationalVersion }}
-  workflow_dispatch:
 
 jobs:
 

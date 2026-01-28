@@ -13,10 +13,10 @@ jobs:
 
   create-release:
     name: Publish project release job
-    permissions:
-      contents: write
     uses: ./.github/workflows/build-release-task.yml
     secrets: inherit
+    permissions:
+      contents: write
     with:
       # Push to GitHub and NuGet and Docker Hub
       github: true
@@ -25,8 +25,8 @@ jobs:
 
   date-badge:
     name: Create BYOB date badge job
-    permissions:
-      contents: write
     needs: [create-release]
     uses: ./.github/workflows/build-datebadge-task.yml
     secrets: inherit
+    permissions:
+      contents: write

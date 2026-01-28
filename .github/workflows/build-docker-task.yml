@@ -4,7 +4,7 @@ env:
   IS_MAIN_BRANCH: ${{ endsWith(github.ref, 'refs/heads/main') }}
   DOCKER_REGISTRY: docker.io
   DOCKER_TAG_PREFIX: docker.io/ptr727/projecttemplate
-  DOCKER_FILE: ./Docker/Ubuntu.Rolling.Dockerfile
+  DOCKER_FILE: ./Docker/Dockerfile
 
 on:
   workflow_call:
@@ -14,7 +14,6 @@ on:
         required: false
         type: boolean
         default: false
-  workflow_dispatch:
 
 jobs:
 

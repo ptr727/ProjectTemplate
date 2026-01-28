@@ -5,26 +5,25 @@ C# .NET project template.
 ## Build and Distribution
 
 - **Source Code**: [GitHub][github-link] - Source code, issues, discussions, and CI/CD pipelines.
-- **Binary Releases**: [GitHub Releases][releases-link] - Pre-compiled binaries for Windows, Linux, and macOS.
 - **Versioned Releases**: [GitHub Releases][releases-link] - Version tagged source code and build artifacts.
 - **Docker Images**: [Docker Hub][docker-link] - Container images with all tools pre-installed.
 - **NuGet Packages** [NuGet Packages][nuget-link] - .NET libraries published to NuGet.org.
 
 ### Build Status
 
-[![Release Status][release-build-status-shield]][actions-link]\
-[![Docker Status][docker-build-status-shield]][actions-link]\
-[![Last Commit][last-commit-shield]][commits-link]\
-[![Last Build][last-build-shield]][actions-link]
+[![Release Status][releasebuildstatus-shield]][actions-link]\
+[![Docker Status][dockerbuildstatus-shield]][actions-link]\
+[![Last Commit][lastcommit-shield]][commits-link]\
+[![Last Build][lastbuild-shield]][actions-link]
 
 ### Releases
 
-[![GitHub Release][release-version-shield]][releases-link]\
-[![GitHub Pre-Release][prerelease-version-shield]][releases-link]\
-[![Docker Latest][docker-latest-version-shield]][docker-link]\
-[![Docker Develop][docker-develop-version-shield]][docker-link]\
-[![NuGet Release][nuget-release-version-shield]][nuget-link]\
-[![NuGet Pre-Release][nuget-prerelease-version-shield]][nuget-link]
+[![GitHub Release][releaseversion-shield]][releases-link]\
+[![GitHub Pre-Release][prereleaseversion-shield]][releases-link]\
+[![Docker Latest][dockerlatestversion-shield]][docker-link]\
+[![Docker Develop][dockerdevelopversion-shield]][docker-link]\
+[![NuGet Release][nugetreleaseversion-shield]][nuget-link]\
+[![NuGet Pre-Release][nugetprereleaseversion-shield]][nuget-link]
 
 ### Release Notes
 
@@ -435,18 +434,19 @@ Options:
 
 **3rd Party tools used in this project:**
 
-- [AwesomeAssertions](https://awesomeassertions.org/)
-- [Bring Your Own Badge](https://github.com/marketplace/actions/bring-your-own-badge)
-- [CSharpier](https://csharpier.com/)
-- [Create Pull Request](https://github.com/marketplace/actions/create-pull-request)
-- [GH Release](https://github.com/marketplace/actions/gh-release)
-- [Git Auto Commit](https://github.com/marketplace/actions/git-auto-commit)
-- [GitHub Actions](https://github.com/actions)
-- [GitHub Dependabot](https://github.com/dependabot)
-- [Husky.Net](https://alirezanet.github.io/Husky.Net/)
-- [Nerdbank.GitVersioning](https://github.com/marketplace/actions/nerdbank-gitversioning)
-- [Serilog](https://serilog.net/)
-- [xUnit.Net](https://xunit.net/)
+- [API Ninjas](quoteoftehday-link)
+- [AwesomeAssertions][awesomeassertions-link]
+- [Bring Your Own Badge][byob-link]
+- [Create Pull Request][createpr-link]
+- [CSharpier][csharpier-link]
+- [GH Release][ghrelease-link]
+- [Git Auto Commit][ghautocommit-link]
+- [GitHub Actions][ghactions-link]
+- [GitHub Dependabot][ghdependabot-link]
+- [Husky.Net][huskynet-link]
+- [Nerdbank.GitVersioning][nerbankgitversion-link]
+- [Serilog][serilog-link]
+- [xUnit.Net][xunit-link]
 
 ## License
 
@@ -466,17 +466,33 @@ Licensed under the [MIT License][license-link]\
 [license-shield]: https://img.shields.io/github/license/ptr727/LanguageTags?label=License
 
 [docker-link]: https://hub.docker.com/r/ptr727/projecttemplate
-[docker-latest-version-shield]: https://img.shields.io/docker/v/ptr727/projecttemplate/latest?label=Docker%20Latest&logo=docker
-[docker-develop-version-shield]: https://img.shields.io/docker/v/ptr727/projecttemplate/develop?label=Docker%20Develop&logo=docker&color=orange
-[docker-build-status-shield]: https://img.shields.io/github/actions/workflow/status/ptr727/PlexCleaner/BuildDockerPush.yml?logo=github&label=Docker%20Build
+[dockerlatestversion-shield]: https://img.shields.io/docker/v/ptr727/projecttemplate/latest?label=Docker%20Latest&logo=docker
+[dockerdevelopversion-shield]: https://img.shields.io/docker/v/ptr727/projecttemplate/develop?label=Docker%20Develop&logo=docker&color=orange
+[dockerbuildstatus-shield]: https://img.shields.io/github/actions/workflow/status/ptr727/PlexCleaner/BuildDockerPush.yml?logo=github&label=Docker%20Build
 
-[last-build-shield]: https://byob.yarr.is/ptr727/PlexCleaner/lastbuild
-[last-commit-shield]: https://img.shields.io/github/last-commit/ptr727/LanguageTags?logo=github&label=Last%20Commit
+[lastbuild-shield]: https://byob.yarr.is/ptr727/PlexCleaner/lastbuild
+[lastcommit-shield]: https://img.shields.io/github/last-commit/ptr727/LanguageTags?logo=github&label=Last%20Commit
 
-[release-version-shield]: https://img.shields.io/github/v/release/ptr727/LanguageTags?logo=github&label=GitHub%20Release
-[prerelease-version-shield]: https://img.shields.io/github/v/release/ptr727/LanguageTags?include_prereleases&label=GitHub%20Pre-Release&logo=github
-[release-build-status-shield]: https://img.shields.io/github/actions/workflow/status/ptr727/PlexCleaner/BuildGitHubRelease.yml?logo=github&label=Releases%20Build
+[releaseversion-shield]: https://img.shields.io/github/v/release/ptr727/LanguageTags?logo=github&label=GitHub%20Release
+[prereleaseversion-shield]: https://img.shields.io/github/v/release/ptr727/LanguageTags?include_prereleases&label=GitHub%20Pre-Release&logo=github
+[releasebuildstatus-shield]: https://img.shields.io/github/actions/workflow/status/ptr727/PlexCleaner/BuildGitHubRelease.yml?logo=github&label=Releases%20Build
 
 [nuget-link]: https://www.nuget.org/packages/ptr727.ProjectTemplate/
-[nuget-release-version-shield]: https://img.shields.io/nuget/v/ptr727.LanguageTags?logo=nuget&label=NuGet%20Release
-[nuget-prerelease-version-shield]: https://img.shields.io/nuget/vpre/ptr727.LanguageTags?logo=nuget&&label=NuGet%20Pre-Release&color=orange
+[nugetreleaseversion-shield]: https://img.shields.io/nuget/v/ptr727.LanguageTags?logo=nuget&label=NuGet%20Release
+[nugetprereleaseversion-shield]: https://img.shields.io/nuget/vpre/ptr727.LanguageTags?logo=nuget&&label=NuGet%20Pre-Release&color=orange
+
+<!-- 3rd Party tool links: -->
+
+[awesomeassertions-link]: https://awesomeassertions.org/
+[byob-link]: https://github.com/marketplace/actions/bring-your-own-badge
+[createpr-link]: https://github.com/marketplace/actions/create-pull-request
+[csharpier-link]: https://csharpier.com/
+[ghactions-link]: https://github.com/actions
+[ghautocommit-link]: https://github.com/marketplace/actions/git-auto-commit
+[ghdependabot-link]: https://github.com/dependabot
+[ghrelease-link]: https://github.com/marketplace/actions/gh-release
+[huskynet-link]: https://alirezanet.github.io/Husky.Net/
+[nerbankgitversion-link]: https://github.com/marketplace/actions/nerdbank-gitversioning
+[serilog-link]: https://serilog.net/
+[xunit-link]: https://xunit.net/
+[quoteoftheday-link]: https://api-ninjas.com/api/quotes#v2-quoteoftheday

@@ -17,7 +17,6 @@ on:
       # Output of the uploaded artifact id
       artifact-id:
         value: ${{ jobs.build-library.outputs.artifact-id }}
-  workflow_dispatch:
 
 jobs:
 

@@ -5,16 +5,16 @@ using Serilog.Sinks.SystemConsole.Themes;
 
 namespace ptr727.ProjectTemplate.Console;
 
-public static class LoggerFactory
+internal static class LoggerFactory
 {
-    public class Options
+    internal sealed class Options
     {
-        public required LogEventLevel Level { get; init; }
-        public required string File { get; init; }
-        public required bool FileClear { get; init; }
+        internal required LogEventLevel Level { get; init; }
+        internal required string File { get; init; }
+        internal required bool FileClear { get; init; }
     }
 
-    public static ILogger Create(Options options)
+    internal static ILogger Create(Options options)
     {
         // Enable Serilog debug output to the console
         SelfLog.Enable(System.Console.Error);
@@ -48,6 +48,9 @@ public static class LoggerFactory
         return Log.Logger;
     }
 
-    public static Microsoft.Extensions.Logging.ILogger CreateLogger(string categoryName) =>
-        new SerilogLoggerFactory(Log.Logger, dispose: false).CreateLogger(categoryName);
+    internal static Microsoft.Extensions.Logging.ILogger CreateLogger(string categoryName)
+    {
+        using SerilogLoggerFactory factory = new(Log.Logger, dispose: false);
+        return factory.CreateLogger(categoryName);
+    }
 }

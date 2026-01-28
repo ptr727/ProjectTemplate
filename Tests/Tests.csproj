@@ -1,9 +1,9 @@
 <Project Sdk="Microsoft.NET.Sdk">
   <PropertyGroup>
     <AnalysisLevel>latest-all</AnalysisLevel>
-    <AssemblyName>ProjectTemplateTests</AssemblyName>
     <EnableNETAnalyzers>true</EnableNETAnalyzers>
-    <NeutralLanguage>en</NeutralLanguage>
+    <IsPackable>false</IsPackable>
+    <IsTestProject>true</IsTestProject>
     <Nullable>enable</Nullable>
     <RootNamespace>ptr727.ProjectTemplate.Tests</RootNamespace>
     <TargetFramework>net10.0</TargetFramework>
