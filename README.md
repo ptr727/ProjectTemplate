@@ -416,7 +416,7 @@ Licensed under the [MIT License][license-link]\
 - Protect `main` and `develop` branches with branch protection rules.
 - Make sure that `main` and `develop` are always building error free.
 - Create feature branches from the `develop` branch.
-- Only commit to feature branches, do not commit directly to `develop` or to `main`
+- Only commit to feature branches, do not commit directly to `develop` or to `main`.
 - Always "Squash and merge" from feature branches to the `develop` branch to minimize change history.
 - Always "Squash and merge" from `develop` to `main` to maintain a linear history.
 - Bot generated pull requests will always merge to `main`, keep feature branches updated when merging to `develop` to merge to `main`.
