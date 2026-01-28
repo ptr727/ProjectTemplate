@@ -136,7 +136,7 @@ Choose an installation method based on your platform and requirements:
 | `--help` | Show help output | Use `<command> --help` for command specific help |
 | `--version` | Show version output | |
 
-Use the `--help` to get a list of all commands and global options.\
+Use the `--help` option to get a list of all commands and global options.\
 To get help for a specific command run `Console <command> --help`.
 
 ### Global Options
