@@ -36,7 +36,7 @@ internal static partial class LogExtensions
     [System.Diagnostics.CodeAnalysis.SuppressMessage(
         "Design",
         "CA1812:Avoid uninstantiated internal classes",
-        Justification = "TODO"
+        Justification = "Used as a type marker for Serilog context filtering"
     )]
     internal sealed class LogOverride;
 

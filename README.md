@@ -116,12 +116,12 @@ See detailed command documentation below for all options and usage examples.
 ---
 
 Use the `--help` commandline option to get a list of commands and options.\
-To get help for a specific command run `PlexCleaner <command> --help`.
+To get help for a specific command run `Console <command> --help`.
 
 ```text
-> PlexCleaner --help
+> Console --help
 Description:
-  Utility to optimize media files for Direct Play in Plex, Emby, Jellyfin, etc.
+  C# .NET console project
 ```
 
 ### Global Options

@@ -3,5 +3,5 @@ root = false
 # C# files
 [*.cs]
 
-# TODO
+# TODO: Even with all types internal warnings still shows up?
 dotnet_diagnostic.CA1515.severity = none

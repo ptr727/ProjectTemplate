@@ -20,6 +20,5 @@
   </ItemGroup>
   <ItemGroup>
     <ProjectReference Include="..\Library\Library.csproj" />
-    <ProjectReference Include="..\Console\Console.csproj" />
   </ItemGroup>
 </Project>
