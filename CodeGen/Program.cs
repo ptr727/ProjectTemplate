@@ -130,7 +130,7 @@ internal sealed class Program(
 
     private static string ToCSharpStringLiteral(string value)
     {
-        StringBuilder sb = new StringBuilder(value.Length + 2);
+        StringBuilder sb = new(value.Length + 2);
         _ = sb.Append('"');
         foreach (char c in value)
         {
