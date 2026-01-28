@@ -34,36 +34,6 @@ dotnet publish ./ProjectTemplate/Console/Console.csproj \
     -property:InformationalVersion=$BUILD_INFORMATION_VERSION \
     -property:PackageVersion=$BUILD_PACKAGE_VERSION
 
-# Build AOT output
-if [ "$BUILDPLATFORM" = "$TARGETPLATFORM" ]; then
-    dotnet publish ./ProjectTemplate/Console/Console.csproj \
-        --arch $TARGETARCH \
-        --output ./Build/ReleaseAOT \
-        --configuration release \
-        -property:PublishAot=true \
-        -property:Version=$BUILD_VERSION \
-        -property:FileVersion=$BUILD_FILE_VERSION \
-        -property:AssemblyVersion=$BUILD_ASSEMBLY_VERSION \
-        -property:InformationalVersion=$BUILD_INFORMATION_VERSION \
-        -property:PackageVersion=$BUILD_PACKAGE_VERSION
-    dotnet publish ./ProjectTemplate/Console/Console.csproj \
-        --arch $TARGETARCH \
-        --output ./Build/DebugAOT \
-        --configuration debug \
-        -property:PublishAot=true \
-        -property:Version=$BUILD_VERSION \
-        -property:FileVersion=$BUILD_FILE_VERSION \
-        -property:AssemblyVersion=$BUILD_ASSEMBLY_VERSION \
-        -property:InformationalVersion=$BUILD_INFORMATION_VERSION \
-        -property:PackageVersion=$BUILD_PACKAGE_VERSION
-
-    # Copy AOT output
-    mkdir -p ./Publish/ProjectTemplate/DebugAOT
-    mkdir -p ./Publish/ProjectTemplate/ReleaseAOT
-    cp -r ./Build/DebugAOT/* ./Publish/ProjectTemplate/DebugAOT
-    cp -r ./Build/ReleaseAOT/* ./Publish/ProjectTemplate/ReleaseAOT
-fi
-
 # Copy configured build target as default output
 mkdir -p ./Publish/ProjectTemplate/Debug
 mkdir -p ./Publish/ProjectTemplate/Release

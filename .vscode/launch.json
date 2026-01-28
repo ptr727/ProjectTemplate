@@ -8,14 +8,27 @@
             "preLaunchTask": ".Net Build",
             "program": "${workspaceFolder}/Console/bin/Debug/net10.0/Console.dll",
             "args": [
-                "--path=${workspaceFolder}",
                 "--loglevel=Debug",
                 "--logfile=console.log",
-                "--logfile-clear=true",
-                "--dryrun=false",
-                "--threads=4"
+                "--logfile-clear=true"
             ],
             "cwd": "${workspaceFolder}/Console/bin/Debug/net10.0",
+            "console": "internalConsole",
+            "stopAtEntry": false
+        },
+        {
+            "name": "CodeGen",
+            "type": "coreclr",
+            "request": "launch",
+            "preLaunchTask": ".Net Build",
+            "program": "${workspaceFolder}/CodeGen/bin/Debug/net10.0/CodeGen.dll",
+            "args": [
+                "--codepath",
+                "${workspaceFolder}/CodeGen",
+                "--apikey",
+                ""
+            ],
+            "cwd": "${workspaceFolder}/CodeGen/bin/Debug/net10.0",
             "console": "internalConsole",
             "stopAtEntry": false
         }

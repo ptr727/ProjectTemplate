@@ -3,6 +3,7 @@ name: Get version information task
 on:
   workflow_call:
     outputs:
+      # Version information outputs
       SemVer2:
         value: ${{ jobs.get-version.outputs.SemVer2 }}
       AssemblyVersion:
@@ -11,12 +12,11 @@ on:
         value: ${{ jobs.get-version.outputs.AssemblyFileVersion }}
       AssemblyInformationalVersion:
         value: ${{ jobs.get-version.outputs.AssemblyInformationalVersion }}
-  workflow_dispatch:
 
 jobs:
 
   get-version:
-    name: Get version information
+    name: Get version information job
     runs-on: ubuntu-latest
     outputs:
       SemVer2: ${{ steps.nbgv.outputs.SemVer2 }}
@@ -26,16 +26,16 @@ jobs:
 
     steps:
 
-      - name: Setup .NET SDK
+      - name: Setup .NET SDK step
         uses: actions/setup-dotnet@v5
         with:
           dotnet-version: 10.x
 
-      - name: Checkout
+      - name: Checkout code step
         uses: actions/checkout@v6
         with:
           fetch-depth: 0
 
-      - name: Run Nerdbank.GitVersioning tool
+      - name: Run Nerdbank.GitVersioning tool step
         id: nbgv
         uses: dotnet/nbgv@master

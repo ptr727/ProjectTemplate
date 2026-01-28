@@ -48,14 +48,12 @@ RUN \
     # Upgrade
     apt update \
     && apt upgrade -y \
-    # Install .NET SDK and AOT dependencies
+    # Install .NET SDK  (for AOT add clang and zlib1g-dev)
     # https://documentation.ubuntu.com/ubuntu-for-developers/howto/dotnet-setup
     # https://learn.microsoft.com/en-us/dotnet/core/install/linux-ubuntu-install
     # https://learn.microsoft.com/en-us/dotnet/core/deploying/native-aot/
     && apt install -y \
         dotnet-sdk-10.0 \
-        clang \
-        zlib1g-dev \
     # Cleanup
     && apt autoremove -y \
     && apt clean \

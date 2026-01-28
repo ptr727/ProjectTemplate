@@ -1,37 +1,37 @@
 using System.Reflection;
 using System.Runtime.InteropServices;
 
-namespace ptr727.ProjectTemplate.Library;
+namespace ptr727.ProjectTemplate.CodeGen;
 
-public static class AssemblyInfo
+internal static class AssemblyInfo
 {
-    public static string AppVersion => $"{AppName} : {FileVersion} ({BuildType})";
+    internal static string AppVersion => $"{AppName} : {FileVersion} ({BuildType})";
 
-    public static string RuntimeVersion =>
+    internal static string RuntimeVersion =>
         $"{RuntimeInformation.FrameworkDescription} : {RuntimeInformation.RuntimeIdentifier}";
 
-    public static string BuildType =>
+    internal static string BuildType =>
 #if DEBUG
         "Debug";
 #else
         "Release";
 #endif
 
-    public static string AppName => GetAssembly().GetName().Name ?? string.Empty;
+    internal static string AppName => GetAssembly().GetName().Name ?? string.Empty;
 
-    public static string InformationalVersion =>
+    internal static string InformationalVersion =>
         // E.g. 1.2.3+abc123.abc123
         GetAssembly()
             .GetCustomAttribute<AssemblyInformationalVersionAttribute>()
             ?.InformationalVersion
         ?? string.Empty;
 
-    public static string FileVersion =>
+    internal static string FileVersion =>
         // E.g. 1.2.3.4
         GetAssembly().GetCustomAttribute<AssemblyFileVersionAttribute>()?.Version
         ?? string.Empty;
 
-    public static string ReleaseVersion =>
+    internal static string ReleaseVersion =>
         // E.g. 1.2.3 part of 1.2.3+abc123.abc123
         // Use major.minor.build from informational version
         InformationalVersion.Split('+', '-')[0];
