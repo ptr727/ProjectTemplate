@@ -434,7 +434,7 @@ Options:
 
 **3rd Party tools used in this project:**
 
-- [API Ninjas](quoteoftehday-link)
+- [API Ninjas][apininjas-link]
 - [AwesomeAssertions][awesomeassertions-link]
 - [Bring Your Own Badge][byob-link]
 - [Create Pull Request][createpr-link]
@@ -453,7 +453,7 @@ Options:
 Licensed under the [MIT License][license-link]\
 ![GitHub License][license-shield]
 
-<!--- TODO: Shields.io requires public GitHub repos, update links to point to the target project --->
+<!--- Shields.io requires public GitHub repos, update links to point to the target project --->
 
 [github-link]: https://github.com/ptr727/ProjectTemplate
 [actions-link]: https://github.com/ptr727/ProjectTemplate/actions
@@ -463,26 +463,27 @@ Licensed under the [MIT License][license-link]\
 [releases-link]: https://github.com/ptr727/ProjectTemplate/releases
 
 [license-link]: ./LICENSE
-[license-shield]: https://img.shields.io/github/license/ptr727/LanguageTags?label=License
+[license-shield]: https://img.shields.io/github/license/ptr727/ProjectTemplate?label=License
 
 [docker-link]: https://hub.docker.com/r/ptr727/projecttemplate
 [dockerlatestversion-shield]: https://img.shields.io/docker/v/ptr727/projecttemplate/latest?label=Docker%20Latest&logo=docker
 [dockerdevelopversion-shield]: https://img.shields.io/docker/v/ptr727/projecttemplate/develop?label=Docker%20Develop&logo=docker&color=orange
-[dockerbuildstatus-shield]: https://img.shields.io/github/actions/workflow/status/ptr727/PlexCleaner/BuildDockerPush.yml?logo=github&label=Docker%20Build
+[dockerbuildstatus-shield]: https://img.shields.io/github/actions/workflow/status/ptr727/ProjectTemplate/publish-periodic-docker-release.yml?logo=github&label=Docker%20Build
 
-[lastbuild-shield]: https://byob.yarr.is/ptr727/PlexCleaner/lastbuild
-[lastcommit-shield]: https://img.shields.io/github/last-commit/ptr727/LanguageTags?logo=github&label=Last%20Commit
+[lastbuild-shield]: https://byob.yarr.is/ptr727/ProjectTemplate/lastbuild
+[lastcommit-shield]: https://img.shields.io/github/last-commit/ptr727/ProjectTemplate?logo=github&label=Last%20Commit
 
-[releaseversion-shield]: https://img.shields.io/github/v/release/ptr727/LanguageTags?logo=github&label=GitHub%20Release
-[prereleaseversion-shield]: https://img.shields.io/github/v/release/ptr727/LanguageTags?include_prereleases&label=GitHub%20Pre-Release&logo=github
-[releasebuildstatus-shield]: https://img.shields.io/github/actions/workflow/status/ptr727/PlexCleaner/BuildGitHubRelease.yml?logo=github&label=Releases%20Build
+[releaseversion-shield]: https://img.shields.io/github/v/release/ptr727/ProjectTemplate?logo=github&label=GitHub%20Release
+[prereleaseversion-shield]: https://img.shields.io/github/v/release/ptr727/ProjectTemplate?include_prereleases&label=GitHub%20Pre-Release&logo=github
+[releasebuildstatus-shield]: https://img.shields.io/github/actions/workflow/status/ptr727/ProjectTemplate/publish-release.yml?logo=github&label=Releases%20Build
 
-[nuget-link]: https://www.nuget.org/packages/ptr727.ProjectTemplate/
-[nugetreleaseversion-shield]: https://img.shields.io/nuget/v/ptr727.LanguageTags?logo=nuget&label=NuGet%20Release
-[nugetprereleaseversion-shield]: https://img.shields.io/nuget/vpre/ptr727.LanguageTags?logo=nuget&&label=NuGet%20Pre-Release&color=orange
+[nuget-link]: https://www.nuget.org/packages/ptr727.ProjectTemplate.Library/
+[nugetreleaseversion-shield]: https://img.shields.io/nuget/v/ptr727.ProjectTemplate.Library?logo=nuget&label=NuGet%20Release
+[nugetprereleaseversion-shield]: https://img.shields.io/nuget/vpre/ptr727.ProjectTemplate.Library?logo=nuget&&label=NuGet%20Pre-Release&color=orange
 
 <!-- 3rd Party tool links: -->
 
+[apininjas-link]: https://api-ninjas.com/api/quotes
 [awesomeassertions-link]: https://awesomeassertions.org/
 [byob-link]: https://github.com/marketplace/actions/bring-your-own-badge
 [createpr-link]: https://github.com/marketplace/actions/create-pull-request
@@ -495,4 +496,3 @@ Licensed under the [MIT License][license-link]\
 [nerbankgitversion-link]: https://github.com/marketplace/actions/nerdbank-gitversioning
 [serilog-link]: https://serilog.net/
 [xunit-link]: https://xunit.net/
-[quoteoftheday-link]: https://api-ninjas.com/api/quotes#v2-quoteoftheday

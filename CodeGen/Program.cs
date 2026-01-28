@@ -70,7 +70,7 @@ internal sealed class Program(
         // https://api-ninjas.com/api/quotes#v2-quoteoftheday
         using HttpRequestMessage request = new(
             HttpMethod.Get,
-            "https://api.api-ninjas.com/v2/quoteoftheday"
+            "https://api.api-ninjas.com/v2/quotes?categories=philosophy"
         );
         request.Headers.Add("X-Api-Key", commandLineContext.APIKey);
 
@@ -145,6 +145,7 @@ internal sealed class Program(
                     '\0' => "\\0",
                     '\b' => "\\b",
                     '\f' => "\\f",
+                    '\u2019' => "'",
                     _ when char.IsControl(c) => $"\\u{(int)c:X4}",
                     _ => c.ToString(),
                 }
