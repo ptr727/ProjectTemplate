@@ -1,4 +1,6 @@
 using System.CommandLine;
+using System.Diagnostics;
+using Microsoft.Extensions.Logging.Abstractions;
 using ptr727.ProjectTemplate.Library;
 
 namespace ptr727.ProjectTemplate.Console;
@@ -31,9 +33,11 @@ internal sealed class Program(
         Log.Logger.LogOverrideContext().Information("Starting: {Args}", args);
 
         // Initialize library with logger
-        _ = new TemplateLibrary(
+        TemplateLibrary templateLibrary = new(
             new Options() { Logger = LoggerFactory.CreateLogger(typeof(TemplateLibrary).FullName!) }
         );
+        Debug.Assert(templateLibrary.Log is not NullLogger);
+        templateLibrary.Test();
 
         // Invoke command
         return await parseResult.InvokeAsync().ConfigureAwait(false);

@@ -44,12 +44,15 @@ internal sealed class CommandLine
     private readonly Option<DirectoryInfo> _codePathOption = CreateCodePathOption();
     private readonly Option<string> _apiKeyOption = CreateAPIKeyOption();
 
-    private static Option<DirectoryInfo> CreateCodePathOption() =>
-        new("--codepath", "-p")
+    private static Option<DirectoryInfo> CreateCodePathOption()
+    {
+        Option<DirectoryInfo> option = new("--codepath", "-p")
         {
             Description = "The path to the code generation output directory.",
             Required = true,
         };
+        return option.AcceptExistingOnly();
+    }
 
     private static Option<string> CreateAPIKeyOption() =>
         new("--apikey", "-a") { Description = "The API key to use (optional).", Required = false };

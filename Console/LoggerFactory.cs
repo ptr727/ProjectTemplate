@@ -48,9 +48,11 @@ internal static class LoggerFactory
         return Log.Logger;
     }
 
-    internal static Microsoft.Extensions.Logging.ILogger CreateLogger(string categoryName)
-    {
-        using SerilogLoggerFactory factory = new(Log.Logger, dispose: false);
-        return factory.CreateLogger(categoryName);
-    }
+    [System.Diagnostics.CodeAnalysis.SuppressMessage(
+        "Reliability",
+        "CA2000:Dispose objects before losing scope",
+        Justification = "Dispose handled by Serilog"
+    )]
+    internal static Microsoft.Extensions.Logging.ILogger CreateLogger(string categoryName) =>
+        new SerilogLoggerFactory(Log.Logger, dispose: false).CreateLogger(categoryName);
 }
