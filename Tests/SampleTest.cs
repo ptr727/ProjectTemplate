@@ -1,6 +1,6 @@
 namespace ptr727.ProjectTemplate.Tests;
 
-public class SampleTests
+public sealed class SampleTests
 {
     [Fact]
     public void BasicAssertion_DefaultValue_ShouldPass()
@@ -68,8 +68,8 @@ public class SampleTests
         int delay = 10;
 
         // Act
-        await Task.Delay(delay);
-        string result = await Task.FromResult("success");
+        await Task.Delay(delay, TestContext.Current.CancellationToken).ConfigureAwait(true);
+        string result = await Task.FromResult("success").ConfigureAwait(true);
 
         // Assert
         result.Should().Be("success");

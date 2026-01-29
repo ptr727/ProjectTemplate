@@ -204,7 +204,11 @@ Note: Code snippets are illustrative examples only. Replace namespaces/types to 
    logger.Error(exception, "{Function}", function);
    ```
 
-2. **CallerMemberName**: Use for automatic function name tracking
+2. **Library log configuration**: Libraries must expose logging configuration
+   - Provide options or settings to supply an `ILoggerFactory` and/or `ILogger`
+   - Offer a global fallback logger for static usage when needed
+
+3. **CallerMemberName**: Use for automatic function name tracking
 
    ```csharp
    public bool LogAndPropagate(
@@ -213,7 +217,7 @@ Note: Code snippets are illustrative examples only. Replace namespaces/types to 
    )
    ```
 
-3. **Logger extensions**: Prefer extension methods
+4. **Logger extensions**: Use `Extensions.cs` for logger and other extension methods
 
    ```csharp
    extension(ILogger logger)
@@ -222,7 +226,7 @@ Note: Code snippets are illustrative examples only. Replace namespaces/types to 
    }
    ```
 
-4. **Exceptions**: Do not swallow exceptions; log and rethrow or translate to a domain-specific exception
+5. **Exceptions**: Do not swallow exceptions; log and rethrow or translate to a domain-specific exception
 
 ### Code Patterns
 
@@ -234,7 +238,7 @@ Note: Code snippets are illustrative examples only. Replace namespaces/types to 
 6. **LINQ vs loops**: Use LINQ for clarity, loops for hot paths or allocations
 7. **HTTP**: Reuse `HttpClient` via factory; avoid per-request instantiation
 8. **Collections**: Prefer `IReadOnlyList<T>`/`IReadOnlyCollection<T>` for public APIs
-9. **Immutability**: Prefer immutable records; use init-only setters when records are not suitable; prefer frozen collections (`FrozenSet<T>`, `FrozenDictionary<TKey, TValue>`) for read-only data
+9. **Immutability**: Prefer immutable records; use init-only setters when records are not suitable; prefer immutable or frozen collections for read-only data
 10. **Exceptions as control flow**: Avoid using exceptions for expected flow
 11. **Sealing classes**: Seal classes that are not designed for inheritance
 12. **Read-only data**: Use immutable or frozen collections for read-only data sets

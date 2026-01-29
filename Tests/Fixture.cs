@@ -1,5 +1,13 @@
 namespace ptr727.ProjectTemplate.Tests;
 
+[System.Diagnostics.CodeAnalysis.SuppressMessage(
+    "Maintainability",
+    "CA1515:Consider making public types internal",
+    Justification = "https://xunit.net/xunit.analyzers/rules/xUnit1027"
+)]
+[CollectionDefinition("Sequential Test Collection", DisableParallelization = true)]
+public class SequentialCollectionDefinition { }
+
 internal static class Fixture // : IDisposable
 {
     // public void Dispose() => GC.SuppressFinalize(this);

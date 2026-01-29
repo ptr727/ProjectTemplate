@@ -1,3 +1,4 @@
+using Microsoft.Extensions.Logging;
 using Serilog.Debugging;
 using Serilog.Events;
 using Serilog.Extensions.Logging;
@@ -11,7 +12,7 @@ internal static class LoggerFactory
         new SerilogLoggerFactory(Log.Logger, dispose: false)
     );
 
-    internal static ILogger Create(Options options)
+    internal static Serilog.ILogger Create(Options options)
     {
         // Enable Serilog debug output to the console
         SelfLog.Enable(System.Console.Error);
@@ -44,6 +45,8 @@ internal static class LoggerFactory
         Log.Logger = loggerConfiguration.CreateLogger();
         return Log.Logger;
     }
+
+    internal static ILoggerFactory CreateLoggerFactory() => s_serilogLoggerFactory.Value;
 
     internal static Microsoft.Extensions.Logging.ILogger CreateLogger(string categoryName) =>
         s_serilogLoggerFactory.Value.CreateLogger(categoryName);
