@@ -2,16 +2,14 @@
 
 **ProjectTemplate** is a C# .NET template project demonstrating best practices. Developers use this as a baseline to create their own projects.
 
-For comprehensive coding standards and detailed conventions, refer to [`.github/copilot-instructions.md`](./.github/copilot-instructions.md).
+For comprehensive coding standards and detailed conventions, refer to [`.github/copilot-instructions.md`](./.github/copilot-instructions.md) and [`CODESTYLE.md`](./CODESTYLE.md).
 
 ## Key Requirements for All Projects Derived from This Template
 
 ### Build & Quality Standards
 
 - **Zero Warnings Policy**: All builds must complete without errors or warnings
-  - Run `.Net Format` task: `dotnet format style --verify-no-changes --severity=info --verbosity=detailed`
-  - Run `CSharpier Format` task: `dotnet csharpier format --log-level=debug .`
-  - Husky.Net pre-commit hooks must pass before committing
+  - Use `CSharpier Format`, `.Net Format`, and `Husky.Net Run` tasks
 
 - **Code Analysis**: Enable all .NET analyzers
   - `<EnableNETAnalyzers>true</EnableNETAnalyzers>`
@@ -23,19 +21,6 @@ For comprehensive coding standards and detailed conventions, refer to [`.github/
 - Support Visual Studio Code (`.code-workspace`) and Visual Studio Community (`.slnx`)
 - Support Linux, Windows, and macOS with correct line endings and permissions
 - Use `.editorconfig` for style enforcement
-
-### Code Standards (Summary)
-
-- **No `var`**: Always use explicit types
-- **File-scoped namespaces**: `namespace ptr727.ProjectTemplate.Library;`
-- **Allman braces**: Opening brace on new line
-- **Expression bodies**: Use for single-statement members
-- **Modern C# features**: Primary constructors, pattern matching, collection expressions
-- **Naming conventions**: `_privateField`, `s_staticField`, `PascalCaseConstants`
-- **Structured logging**: Use `ILogger` with Serilog
-- **XML documentation**: All public APIs with `<summary>` tags
-- **Nullable support**: `<Nullable>enable</Nullable>`
-- **AOT compatible code**: `<IsAotCompatible>true</IsAotCompatible>`
 
 ### Project Structure
 
@@ -57,6 +42,7 @@ For comprehensive coding standards and detailed conventions, refer to [`.github/
 For detailed specifications, see:
 
 - [`.github/copilot-instructions.md`](./.github/copilot-instructions.md) - Complete coding conventions and style guide
+- [`CODESTYLE.md`](./CODESTYLE.md) - Code style and formatting rules
 - [`.editorconfig`](./.editorconfig) - Automated style enforcement
 - Project task definitions - `CSharpier Format`, `.Net Build`, `.Net Format`, `Husky.Net Run`
 

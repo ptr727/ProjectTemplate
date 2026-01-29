@@ -7,12 +7,9 @@ namespace ptr727.ProjectTemplate.Console;
 
 internal static class LoggerFactory
 {
-    internal sealed class Options
-    {
-        internal required LogEventLevel Level { get; init; }
-        internal required string File { get; init; }
-        internal required bool FileClear { get; init; }
-    }
+    private static readonly Lazy<SerilogLoggerFactory> s_serilogLoggerFactory = new(() =>
+        new SerilogLoggerFactory(Log.Logger, dispose: false)
+    );
 
     internal static ILogger Create(Options options)
     {
@@ -48,10 +45,13 @@ internal static class LoggerFactory
         return Log.Logger;
     }
 
-    private static readonly Lazy<SerilogLoggerFactory> s_serilogLoggerFactory = new(() =>
-        new SerilogLoggerFactory(Log.Logger, dispose: false)
-    );
-
     internal static Microsoft.Extensions.Logging.ILogger CreateLogger(string categoryName) =>
         s_serilogLoggerFactory.Value.CreateLogger(categoryName);
+
+    internal sealed class Options
+    {
+        internal required LogEventLevel Level { get; init; }
+        internal required string File { get; init; }
+        internal required bool FileClear { get; init; }
+    }
 }

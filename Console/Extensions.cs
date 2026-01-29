@@ -33,13 +33,6 @@ internal static partial class LogExtensions
         internal Serilog.ILogger LogOverrideContext() => logger.ForContext<LogOverride>();
     }
 
-    [System.Diagnostics.CodeAnalysis.SuppressMessage(
-        "Design",
-        "CA1812:Avoid uninstantiated internal classes",
-        Justification = "Used as a type marker for Serilog context filtering"
-    )]
-    internal sealed class LogOverride;
-
     extension(Microsoft.Extensions.Logging.ILogger logger)
     {
         internal bool LogAndPropagate(
@@ -67,4 +60,11 @@ internal static partial class LogExtensions
         string function,
         Exception exception
     );
+
+    [System.Diagnostics.CodeAnalysis.SuppressMessage(
+        "Design",
+        "CA1812:Avoid uninstantiated internal classes",
+        Justification = "Used as a type marker for Serilog context filtering"
+    )]
+    internal sealed class LogOverride;
 }

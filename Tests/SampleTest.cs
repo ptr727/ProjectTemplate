@@ -3,7 +3,7 @@ namespace ptr727.ProjectTemplate.Tests;
 public class SampleTests
 {
     [Fact]
-    public void BasicAssertion_ShouldPass()
+    public void BasicAssertion_DefaultValue_ShouldPass()
     {
         // Arrange
         int expected = 42;
@@ -14,7 +14,7 @@ public class SampleTests
     }
 
     [Fact]
-    public void StringComparison_ShouldPass()
+    public void StringComparison_WithHelloWorld_ShouldPass()
     {
         // Arrange
         string testString = "Hello, World!";
@@ -28,7 +28,7 @@ public class SampleTests
     [InlineData(0, 0, 0)]
     [InlineData(-1, 1, 0)]
     [InlineData(100, 200, 300)]
-    public void Addition_ShouldReturnCorrectSum(int a, int b, int expected)
+    public void Addition_WithInputs_ShouldReturnCorrectSum(int a, int b, int expected)
     {
         // Act
         int result = a + b;
@@ -38,7 +38,7 @@ public class SampleTests
     }
 
     [Fact]
-    public void ExceptionHandling_ShouldThrowExpectedException()
+    public void ExceptionHandling_DivideByZero_ShouldThrowExpectedException()
     {
         // Arrange
         int zero = 0;
@@ -52,7 +52,7 @@ public class SampleTests
     }
 
     [Fact]
-    public void CollectionTest_ShouldValidateCollection()
+    public void CollectionTest_WithItems_ShouldValidateCollection()
     {
         // Arrange
         List<string> items = ["apple", "banana", "cherry"];
@@ -62,7 +62,7 @@ public class SampleTests
     }
 
     [Fact]
-    public async Task AsyncTest_ShouldCompleteSuccessfully()
+    public async Task AsyncTest_WithDelay_ShouldCompleteSuccessfully()
     {
         // Arrange
         int delay = 10;
@@ -76,7 +76,7 @@ public class SampleTests
     }
 
     [Fact]
-    public void NullChecks_ShouldValidateNullBehavior()
+    public void NullChecks_WithNullValue_ShouldValidateNullBehavior()
     {
         // Arrange
         string? nullString = null;
@@ -90,7 +90,7 @@ public class SampleTests
     [Theory]
     [InlineData(true)]
     [InlineData(false)]
-    public void BooleanTest_ShouldValidateBooleanValues(bool value)
+    public void BooleanTest_WithValue_ShouldValidateBooleanValues(bool value)
     {
         // Act & Assert
         if (value)
