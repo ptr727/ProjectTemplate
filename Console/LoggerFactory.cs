@@ -21,6 +21,7 @@ internal static class LoggerFactory
                 LogEventLevel.Verbose
             )
             .Enrich.WithThreadId()
+            .Enrich.WithThreadName()
             .WriteTo.Console(
                 theme: AnsiConsoleTheme.Code,
                 formatProvider: CultureInfo.InvariantCulture,
@@ -37,7 +38,7 @@ internal static class LoggerFactory
             _ = loggerConfiguration.WriteTo.File(
                 options.File,
                 formatProvider: CultureInfo.InvariantCulture,
-                outputTemplate: "{Timestamp:yyyy-MM-dd HH:mm:ss.fff zzz} {Level:u3}] [t:{ThreadId}{ThreadName}] {Message:lj}{NewLine}{Exception}"
+                outputTemplate: "[{Timestamp:yyyy-MM-dd HH:mm:ss.fff zzz} {Level:u3}] [t:{ThreadId}{ThreadName}] {Message:lj}{NewLine}{Exception}"
             );
         }
 
