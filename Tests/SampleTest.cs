@@ -1,6 +1,6 @@
 namespace ptr727.ProjectTemplate.Tests;
 
-public sealed class SampleTests
+public sealed class SampleTests : SingleInstanceFixture
 {
     [Fact]
     public void BasicAssertion_DefaultValue_ShouldPass()

@@ -5,12 +5,7 @@ namespace ptr727.ProjectTemplate.Library;
 /// </summary>
 public sealed class TemplateLibrary(Options? options = null)
 {
-    internal ILogger Log { get; } =
-        options?.Logger
-        ?? options?.LoggerFactory?.CreateLogger(
-            typeof(TemplateLibrary).FullName ?? nameof(TemplateLibrary)
-        )
-        ?? LogOptions.CreateLogger<TemplateLibrary>();
+    internal ILogger Log { get; } = LogOptions.CreateLogger<TemplateLibrary>(options);
 
     /// <summary>
     /// Writes a test log entry to the configured logger.

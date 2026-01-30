@@ -1,6 +1,5 @@
 using System.CommandLine;
 using System.CommandLine.Parsing;
-using Serilog.Events;
 
 namespace ptr727.ProjectTemplate.Console;
 

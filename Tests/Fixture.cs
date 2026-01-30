@@ -1,17 +1,20 @@
+// Single instance for all tests in assembly
+[assembly: AssemblyFixture(typeof(ptr727.ProjectTemplate.Tests.SingleInstanceFixture))]
+
 namespace ptr727.ProjectTemplate.Tests;
 
-[System.Diagnostics.CodeAnalysis.SuppressMessage(
-    "Maintainability",
-    "CA1515:Consider making public types internal",
-    Justification = "https://xunit.net/xunit.analyzers/rules/xUnit1027"
-)]
+// Sequential execution fixture
 [CollectionDefinition("Sequential Test Collection", DisableParallelization = true)]
 public class SequentialCollectionDefinition { }
 
-internal static class Fixture // : IDisposable
+[System.Diagnostics.CodeAnalysis.SuppressMessage(
+    "Design",
+    "CA1063:Implement IDisposable Correctly",
+    Justification = "Demonstration only"
+)]
+public class SingleInstanceFixture : IDisposable
 {
-    // public void Dispose() => GC.SuppressFinalize(this);
+    public SingleInstanceFixture() { }
 
-    public static string GetSamplesFilePath(string fileName) =>
-        Path.GetFullPath(Path.Combine(AppContext.BaseDirectory, "../../../../Samples", fileName));
+    public void Dispose() => GC.SuppressFinalize(this);
 }

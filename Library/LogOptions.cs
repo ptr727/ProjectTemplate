@@ -36,6 +36,15 @@ public static class LogOptions
     public static ILogger CreateLogger<T>() => CreateLogger(typeof(T).FullName ?? typeof(T).Name);
 
     /// <summary>
+    /// Creates a logger for the specified type using the provided options or global configuration.
+    /// </summary>
+    /// <typeparam name="T">The type used to derive the logger category.</typeparam>
+    /// <param name="options">The options used to configure logging.</param>
+    /// <returns>The configured logger for the category.</returns>
+    public static ILogger CreateLogger<T>(Options? options) =>
+        CreateLogger(typeof(T).FullName ?? typeof(T).Name, options);
+
+    /// <summary>
     /// Creates a logger for the specified category using the current factory or fallback logger.
     /// </summary>
     /// <param name="categoryName">The category name for the logger.</param>
@@ -47,6 +56,18 @@ public static class LogOptions
             ? loggerFactory.CreateLogger(categoryName)
             : Logger;
     }
+
+    /// <summary>
+    /// Creates a logger for the specified category using the provided options or global configuration.
+    /// </summary>
+    /// <param name="categoryName">The category name for the logger.</param>
+    /// <param name="options">The options used to configure logging.</param>
+    /// <returns>The configured logger for the category.</returns>
+    public static ILogger CreateLogger(string categoryName, Options? options) =>
+        options is null ? CreateLogger(categoryName)
+        : options.LoggerFactory is not null ? options.LoggerFactory.CreateLogger(categoryName)
+        : options.Logger is not null ? options.Logger
+        : CreateLogger(categoryName);
 
     /// <summary>
     /// Configures the library to use the specified logger factory.

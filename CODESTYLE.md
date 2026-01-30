@@ -40,8 +40,9 @@ Available VS Code tasks (use via `run_task` tool):
    - Verify no changes: `dotnet format style --verify-no-changes --severity=info --verbosity=detailed`
 
 3. **Husky.Net**: Git hooks for automated checks
-   - Installed via restore target in `.csproj`
-   - Pre-commit hooks run formatting checks
+   - Installed as a local dotnet tool (via `dotnet tool restore`)
+   - Install Git hooks locally with `dotnet husky install`
+   - Pre-commit hooks run formatting and style checks
 
 4. **Other tools**
    - `dotnet-outdated-tool`: Dependency update checks
@@ -234,6 +235,7 @@ Note: Code snippets are illustrative examples only. Replace namespaces/types to 
 2. **Async all the way**: Avoid blocking calls (`.Result`, `.Wait()`); use `async`/`await`
 3. **Cancellation tokens**: Accept `CancellationToken` as the last parameter and pass it through
 4. **ConfigureAwait**: In library code, use `ConfigureAwait(false)` unless context is required
+   - Do not call `ConfigureAwait(false)` in xUnit tests (see xUnit1030)
 5. **Disposables**: Use `await using` for async disposables; prefer `using` declarations
 6. **LINQ vs loops**: Use LINQ for clarity, loops for hot paths or allocations
 7. **HTTP**: Reuse `HttpClient` via factory; avoid per-request instantiation

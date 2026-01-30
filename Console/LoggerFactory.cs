@@ -1,6 +1,4 @@
-using Microsoft.Extensions.Logging;
 using Serilog.Debugging;
-using Serilog.Events;
 using Serilog.Extensions.Logging;
 using Serilog.Sinks.SystemConsole.Themes;
 

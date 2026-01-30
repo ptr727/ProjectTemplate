@@ -15,3 +15,5 @@ dotnet_diagnostic.IDE0058.severity = none
 # Ignore missing XML docs for public test APIs
 dotnet_diagnostic.CS1591.severity = none
 
+# Ignore making public types internal
+dotnet_diagnostic.CA1515.severity = none

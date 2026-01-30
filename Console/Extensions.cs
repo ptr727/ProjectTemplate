@@ -1,13 +1,7 @@
 using System.Runtime.CompilerServices;
-using Microsoft.Extensions.Logging;
 
 namespace ptr727.ProjectTemplate.Console;
 
-[System.Diagnostics.CodeAnalysis.SuppressMessage(
-    "Design",
-    "CA1034:Nested types should not be visible",
-    Justification = "https://github.com/dotnet/sdk/issues/51681"
-)]
 internal static partial class LogExtensions
 {
     extension(Serilog.ILogger logger)

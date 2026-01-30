@@ -5,7 +5,7 @@ using ptr727.ProjectTemplate.Library;
 namespace ptr727.ProjectTemplate.Tests;
 
 [Collection("Sequential Test Collection")]
-public sealed class LoggingTests
+public sealed class LoggingTests : SingleInstanceFixture
 {
     public LoggingTests()
     {
