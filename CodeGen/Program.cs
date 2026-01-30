@@ -53,10 +53,10 @@ internal sealed class Program(
             Log.Information("Executing codegen command...");
 
             string quoteoftheday = "No API key provided.";
-            if (!string.IsNullOrEmpty(commandLineOptions.APIKey))
+            if (!string.IsNullOrEmpty(commandLineOptions.ApiKey))
             {
                 Log.Information("Retrieving quote from API Ninjas...");
-                ApiNinjas apiNinjas = new(commandLineOptions.APIKey, cancellationToken);
+                ApiNinjas apiNinjas = new(commandLineOptions.ApiKey, cancellationToken);
                 quoteoftheday = await apiNinjas.GetQuoteOfTheDayAsync().ConfigureAwait(false);
             }
             Log.Information("Quote: {Quote}", quoteoftheday);

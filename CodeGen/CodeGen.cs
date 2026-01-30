@@ -1,17 +1,13 @@
 namespace ptr727.ProjectTemplate.CodeGen;
 
+[System.CodeDom.Compiler.GeneratedCode("ptr727.ProjectTemplate.CodeGen", "1.0")]
 internal static class CodeGen
 {
     private const string QuoteOfTheDay = "No API key provided.";
 
-    [System.Diagnostics.CodeAnalysis.SuppressMessage(
-        "Globalization",
-        "CA1303:Do not pass literals as localized parameters",
-        Justification = "Demonstration code."
-    )]
     internal static void Quote()
     {
-        string dateTime = $"2026-01-30T19:27:08.8382872Z";
+        const string dateTime = "2026-01-30T22:28:14.6290903Z";
         Console.WriteLine($"{dateTime} : {QuoteOfTheDay}");
         Log.Logger.Information("Quote of the Day: {DateTime} : {Quote}", dateTime, QuoteOfTheDay);
     }

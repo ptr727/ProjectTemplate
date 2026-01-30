@@ -1,4 +1,5 @@
 using System.IO;
+using System.Runtime.CompilerServices;
 using System.Text.Json;
 using System.Text.Json.Serialization;
 
@@ -21,9 +22,11 @@ internal sealed class ApiNinjas(string apiKey, CancellationToken cancellationTok
             .ConfigureAwait(false);
         _ = response.EnsureSuccessStatusCode();
 
-        using Stream responseStream = await response
+        Stream responseStream = await response
             .Content.ReadAsStreamAsync(cancellationToken)
             .ConfigureAwait(false);
+        await using ConfiguredAsyncDisposable responseScope = responseStream.ConfigureAwait(false);
+
         QuoteOfTheDayItem[]? items = await JsonSerializer
             .DeserializeAsync(
                 responseStream,

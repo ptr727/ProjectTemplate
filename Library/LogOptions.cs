@@ -16,7 +16,7 @@ public static class LogOptions
     public static ILoggerFactory LoggerFactory
     {
         get => Volatile.Read(ref s_loggerFactory);
-        set => _ = Interlocked.Exchange(ref s_loggerFactory, value ?? NullLoggerFactory.Instance);
+        set => _ = Interlocked.Exchange(ref s_loggerFactory, value);
     }
 
     /// <summary>
@@ -25,7 +25,7 @@ public static class LogOptions
     public static ILogger Logger
     {
         get => Volatile.Read(ref s_logger);
-        set => _ = Interlocked.Exchange(ref s_logger, value ?? NullLogger.Instance);
+        set => _ = Interlocked.Exchange(ref s_logger, value);
     }
 
     /// <summary>
@@ -66,8 +66,7 @@ public static class LogOptions
     public static ILogger CreateLogger(string categoryName, Options? options) =>
         options is null ? CreateLogger(categoryName)
         : options.LoggerFactory is not null ? options.LoggerFactory.CreateLogger(categoryName)
-        : options.Logger is not null ? options.Logger
-        : CreateLogger(categoryName);
+        : options.Logger ?? CreateLogger(categoryName);
 
     /// <summary>
     /// Configures the library to use the specified logger factory.
@@ -84,7 +83,7 @@ public static class LogOptions
     /// </returns>
     public static bool TrySetFactory(ILoggerFactory loggerFactory)
     {
-        ILoggerFactory candidate = loggerFactory ?? NullLoggerFactory.Instance;
+        ILoggerFactory candidate = loggerFactory;
         ILoggerFactory original = Interlocked.CompareExchange(
             ref s_loggerFactory,
             candidate,
@@ -109,7 +108,7 @@ public static class LogOptions
     /// </returns>
     public static bool TrySetLogger(ILogger logger)
     {
-        ILogger candidate = logger ?? NullLogger.Instance;
+        ILogger candidate = logger;
         ILogger original = Interlocked.CompareExchange(
             ref s_logger,
             candidate,

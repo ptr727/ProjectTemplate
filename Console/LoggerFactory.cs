@@ -6,7 +6,7 @@ namespace ptr727.ProjectTemplate.Console;
 internal static class LoggerFactory
 {
     private static readonly Lazy<SerilogLoggerFactory> s_serilogLoggerFactory = new(() =>
-        new SerilogLoggerFactory(Create(null), dispose: true)
+        new SerilogLoggerFactory(Create(), dispose: true)
     );
 
     internal static Serilog.ILogger Create(Options? options = null)
