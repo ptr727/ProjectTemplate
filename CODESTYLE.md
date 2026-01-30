@@ -168,8 +168,8 @@ Note: Code snippets are illustrative examples only. Replace namespaces/types to 
    - C#, XML, YAML, JSON, Windows scripts: CRLF
    - Linux scripts (`.sh`): LF
 
-6. **`#region`**: Do not use. Prefer logical file/folder/namespace organization.
-7. **Member ordering (StyleCop-like)**: Constants → fields → constructors → properties → indexers → methods → events → operators → finalizers → delegates → nested types
+6. **`#region`**: Do not use regions. Prefer logical file/folder/namespace organization.
+7. **Member ordering (StyleCop SA1201)**: const → static readonly → static fields → instance readonly fields → instance fields → constructors → public (events → properties → indexers → methods → operators) → non-public in same order → nested types
 
 ### Comments and Documentation
 
