@@ -6,6 +6,7 @@
 	],
 	"settings": {
 		"cSpell.words": [
+            "Allman",
             "apikey",
             "autoremove",
             "buildcache",
@@ -21,10 +22,12 @@
             "dotnettools",
             "dryrun",
             "Emby",
+            "finalizers",
             "gpgsign",
             "gruntfuggly",
             "Jellyfin",
             "lastbuild",
+            "LINQ",
             "logfile",
             "nbgv",
             "nektos",

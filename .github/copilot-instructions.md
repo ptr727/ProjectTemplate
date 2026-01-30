@@ -6,7 +6,7 @@
 
 - **Library**: Core library with AOT compatibility (`Library.csproj`)
 - **Console**: Command-line application using System.CommandLine (`Console.csproj`)
-- **Tests**: Unit tests using xUnit and FluentAssertions (`Tests.csproj`)
+- **Tests**: Unit tests using xUnit and AwesomeAssertions (`Tests.csproj`)
 - **Benchmarks**: Performance benchmarks using BenchmarkDotNet (`Benchmarks.csproj`)
 - **Docker**: Docker build configurations for Linux containers
 
@@ -183,7 +183,7 @@ Available VS Code tasks (use via `run_task` tool):
 
 ### Testing Conventions
 
-1. **Test Framework**: xUnit with FluentAssertions
+1. **Test Framework**: xUnit with AwesomeAssertions
    ```csharp
    [Fact]
    public void MethodName_Scenario_ExpectedBehavior()
@@ -252,7 +252,7 @@ Available VS Code tasks (use via `run_task` tool):
 ### Testing Dependencies
 
 - **xUnit**: Test framework
-- **FluentAssertions**: Fluent assertion library
+- **AwesomeAssertions**: Fluent assertion library
 - **BenchmarkDotNet**: Performance benchmarking
 
 ### Development Tools
@@ -280,7 +280,7 @@ Available VS Code tasks (use via `run_task` tool):
 - `Console/` - Console/CLI application using System.CommandLine
 - `Docker/` - Docker build scripts and Dockerfile
 - `Library/` - Core reusable library
-- `Tests/` - Unit tests using xUnit and FluentAssertions
+- `Tests/` - Unit tests using xUnit and AwesomeAssertions
 
 ## Best Practices
 
@@ -327,7 +327,7 @@ The project includes comprehensive `.editorconfig` settings that enforce:
 - [CSharpier Documentation](https://csharpier.com)
 - [Husky.Net Documentation](https://alirezanet.github.io/Husky.Net)
 - [xUnit Documentation](https://xunit.net)
-- [FluentAssertions Documentation](https://fluentassertions.com)
+- [AwesomeAssertions Documentation](https://awesomeassertions.org/)
 - [BenchmarkDotNet Documentation](https://benchmarkdotnet.org)
 - [System.CommandLine Documentation](https://learn.microsoft.com/en-us/dotnet/standard/commandline/)
 - [Serilog Documentation](https://serilog.net)

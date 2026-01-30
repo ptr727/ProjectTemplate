@@ -68,8 +68,8 @@ public sealed class SampleTests : SingleInstanceFixture
         int delay = 10;
 
         // Act
-        await Task.Delay(delay, TestContext.Current.CancellationToken).ConfigureAwait(true);
-        string result = await Task.FromResult("success").ConfigureAwait(true);
+        await Task.Delay(delay, TestContext.Current.CancellationToken);
+        string result = await Task.FromResult("success");
 
         // Assert
         result.Should().Be("success");

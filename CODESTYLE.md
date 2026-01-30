@@ -248,7 +248,7 @@ Note: Code snippets are illustrative examples only. Replace namespaces/types to 
 
 ### Testing Conventions
 
-1. **Framework**: xUnit with FluentAssertions
+1. **Framework**: xUnit with AwesomeAssertions
 
    ```csharp
    [Fact]
