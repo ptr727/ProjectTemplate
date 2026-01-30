@@ -114,7 +114,7 @@ public sealed class LoggingTests : SingleInstanceFixture
         TemplateLibrary library = new(options);
 
         // Assert
-        ReferenceEquals(library.Log, logger).Should().BeTrue();
+        ReferenceEquals(library._log, logger).Should().BeTrue();
     }
 
     [Fact]
@@ -128,7 +128,7 @@ public sealed class LoggingTests : SingleInstanceFixture
         TemplateLibrary library = new(options);
 
         // Assert
-        ReferenceEquals(library.Log, factory.Logger).Should().BeTrue();
+        ReferenceEquals(library._log, factory.Logger).Should().BeTrue();
         factory.LastCategoryName.Should().Be(typeof(TemplateLibrary).FullName);
     }
 

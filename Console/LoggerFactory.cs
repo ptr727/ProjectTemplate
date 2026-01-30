@@ -23,7 +23,8 @@ internal static class LoggerFactory
             .Enrich.WithThreadId()
             .WriteTo.Console(
                 theme: AnsiConsoleTheme.Code,
-                formatProvider: CultureInfo.InvariantCulture
+                formatProvider: CultureInfo.InvariantCulture,
+                outputTemplate: "[{Timestamp:HH:mm:ss} {Level:u3}] [t:{ThreadId}{ThreadName}] {Message:lj}{NewLine}{Exception}"
             );
 
         // Add file sink if logFile is specified
@@ -35,7 +36,8 @@ internal static class LoggerFactory
             }
             _ = loggerConfiguration.WriteTo.File(
                 options.File,
-                formatProvider: CultureInfo.InvariantCulture
+                formatProvider: CultureInfo.InvariantCulture,
+                outputTemplate: "{Timestamp:yyyy-MM-dd HH:mm:ss.fff zzz} {Level:u3}] [t:{ThreadId}{ThreadName}] {Message:lj}{NewLine}{Exception}"
             );
         }
 

@@ -2,7 +2,7 @@
     "version": "0.2.0",
     "configurations": [
         {
-            "name": "Console",
+            "name": "Console Root",
             "type": "coreclr",
             "request": "launch",
             "preLaunchTask": ".Net Build",
@@ -11,6 +11,23 @@
                 "--loglevel=Debug",
                 "--logfile=console.log",
                 "--logfile-clear=true"
+            ],
+            "cwd": "${workspaceFolder}/Console/bin/Debug/net10.0",
+            "console": "internalConsole",
+            "stopAtEntry": false
+        },
+        {
+            "name": "Console Test",
+            "type": "coreclr",
+            "request": "launch",
+            "preLaunchTask": ".Net Build",
+            "program": "${workspaceFolder}/Console/bin/Debug/net10.0/Console.dll",
+            "args": [
+                "--loglevel=Debug",
+                "--logfile=console.log",
+                "--logfile-clear=true",
+                "test",
+                "--test=test"
             ],
             "cwd": "${workspaceFolder}/Console/bin/Debug/net10.0",
             "console": "internalConsole",
