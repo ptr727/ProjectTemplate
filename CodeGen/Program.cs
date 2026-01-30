@@ -1,4 +1,5 @@
 using System.IO;
+using Serilog.Debugging;
 using Serilog.Sinks.SystemConsole.Themes;
 
 namespace ptr727.ProjectTemplate.CodeGen;
@@ -8,32 +9,42 @@ internal sealed class Program(
     CancellationToken cancellationToken
 )
 {
-    internal CommandLine.Options GetCommandLineOptions() => commandLineOptions;
-
-    internal CancellationToken GetCancellationToken() => cancellationToken;
-
     internal static async Task<int> Main(string[] args)
     {
-        // Parse commandline
-        CommandLine commandLine = new(args);
-
-        // Bypass startup for errors or help and version commands
-        if (CommandLine.BypassStartup(commandLine.Result))
+        try
         {
+            // Parse commandline
+            CommandLine commandLine = new(args);
+            commandLine.Result.InvocationConfiguration.EnableDefaultExceptionHandler = false;
+            commandLine.Result.InvocationConfiguration.ProcessTerminationTimeout = null;
+
+            // Bypass startup for errors or help and version commands
+            if (CommandLine.BypassStartup(commandLine.Result))
+            {
+                return await commandLine.Result.InvokeAsync().ConfigureAwait(false);
+            }
+
+            // Enable Serilog debug output to the console
+            SelfLog.Enable(Console.Error);
+            LoggerConfiguration loggerConfiguration = new LoggerConfiguration()
+                .Enrich.WithThreadId()
+                .WriteTo.Console(
+                    theme: AnsiConsoleTheme.Code,
+                    formatProvider: CultureInfo.InvariantCulture,
+                    outputTemplate: "[{Timestamp:HH:mm:ss} {Level:u3}] [t:{ThreadId}{ThreadName}] {Message:lj}{NewLine}{Exception}"
+                );
+
+            // Invoke command
             return await commandLine.Result.InvokeAsync().ConfigureAwait(false);
         }
-
-        // Configure logging
-        LoggerConfiguration loggerConfiguration = new LoggerConfiguration()
-            .Enrich.WithThreadId()
-            .WriteTo.Console(
-                theme: AnsiConsoleTheme.Code,
-                formatProvider: CultureInfo.InvariantCulture
-            );
-        Log.Logger = loggerConfiguration.CreateLogger();
-
-        // Invoke command
-        return await commandLine.Result.InvokeAsync().ConfigureAwait(false);
+        catch (Exception ex) when (Log.Logger.LogAndHandle(ex))
+        {
+            return 1;
+        }
+        finally
+        {
+            await Log.CloseAndFlushAsync().ConfigureAwait(false);
+        }
     }
 
     internal async Task<int> ExecuteAsync()

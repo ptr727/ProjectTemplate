@@ -41,9 +41,7 @@
             "program": "${workspaceFolder}/CodeGen/bin/Debug/net10.0/CodeGen.dll",
             "args": [
                 "--codepath",
-                "${workspaceFolder}/CodeGen",
-                "--apikey",
-                ""
+                "${workspaceFolder}/CodeGen"
             ],
             "cwd": "${workspaceFolder}/CodeGen/bin/Debug/net10.0",
             "console": "internalConsole",
