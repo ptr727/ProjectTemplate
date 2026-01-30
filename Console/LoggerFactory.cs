@@ -1,4 +1,3 @@
-using Serilog.Debugging;
 using Serilog.Extensions.Logging;
 using Serilog.Sinks.SystemConsole.Themes;
 
@@ -7,15 +6,14 @@ namespace ptr727.ProjectTemplate.Console;
 internal static class LoggerFactory
 {
     private static readonly Lazy<SerilogLoggerFactory> s_serilogLoggerFactory = new(() =>
-        new SerilogLoggerFactory(Log.Logger, dispose: false)
+        new SerilogLoggerFactory(Create(null), dispose: true)
     );
 
-    internal static Serilog.ILogger Create(Options options)
+    internal static Serilog.ILogger Create(Options? options = null)
     {
-        // Enable Serilog debug output to the console
-        SelfLog.Enable(System.Console.Error);
+        // Log to the console
         LoggerConfiguration loggerConfiguration = new LoggerConfiguration()
-            .MinimumLevel.Is(options.Level)
+            .MinimumLevel.Is(options?.Level ?? LogEventLevel.Information)
             .MinimumLevel.Override(
                 typeof(LogExtensions.LogOverride).FullName!,
                 LogEventLevel.Verbose
@@ -28,8 +26,8 @@ internal static class LoggerFactory
                 outputTemplate: "[{Timestamp:HH:mm:ss} {Level:u3}] [t:{ThreadId}{ThreadName}] {Message:lj}{NewLine}{Exception}"
             );
 
-        // Add file sink if logFile is specified
-        if (!string.IsNullOrEmpty(options.File))
+        // Log to file
+        if (!string.IsNullOrEmpty(options?.File))
         {
             if (options.FileClear && File.Exists(options.File))
             {
@@ -43,8 +41,7 @@ internal static class LoggerFactory
         }
 
         // Create logger
-        Log.Logger = loggerConfiguration.CreateLogger();
-        return Log.Logger;
+        return loggerConfiguration.CreateLogger();
     }
 
     internal static ILoggerFactory CreateLoggerFactory() => s_serilogLoggerFactory.Value;

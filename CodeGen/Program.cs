@@ -1,5 +1,4 @@
 using System.IO;
-using Serilog.Debugging;
 using Serilog.Sinks.SystemConsole.Themes;
 
 namespace ptr727.ProjectTemplate.CodeGen;
@@ -24,8 +23,7 @@ internal sealed class Program(
                 return await commandLine.Result.InvokeAsync().ConfigureAwait(false);
             }
 
-            // Enable Serilog debug output to the console
-            SelfLog.Enable(Console.Error);
+            // Log to the console
             LoggerConfiguration loggerConfiguration = new LoggerConfiguration()
                 .Enrich.WithThreadId()
                 .WriteTo.Console(
@@ -33,6 +31,7 @@ internal sealed class Program(
                     formatProvider: CultureInfo.InvariantCulture,
                     outputTemplate: "[{Timestamp:HH:mm:ss} {Level:u3}] [t:{ThreadId}{ThreadName}] {Message:lj}{NewLine}{Exception}"
                 );
+            Log.Logger = loggerConfiguration.CreateLogger();
 
             // Invoke command
             return await commandLine.Result.InvokeAsync().ConfigureAwait(false);

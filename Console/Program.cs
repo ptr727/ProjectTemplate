@@ -27,21 +27,13 @@ internal sealed class Program(
             }
 
             // Create logger
-            _ = LoggerFactory.Create(commandLine.CreateOptions(commandLine.Result).LogOptions);
-            Log.Logger.LogOverrideContext().Information("Starting: {Args}", args);
-
-            // Initialize library with static logger
-            ILoggerFactory libraryLoggerFactory = LoggerFactory.CreateLoggerFactory();
-            LogOptions.SetFactory(libraryLoggerFactory);
-            StaticTemplateLibrary.Test();
-
-            // Initialize library with per-instance logger
-            TemplateLibrary templateLibrary = new(
-                new Options() { LoggerFactory = libraryLoggerFactory }
+            Log.Logger = LoggerFactory.Create(
+                commandLine.CreateOptions(commandLine.Result).LogOptions
             );
-            templateLibrary.Test();
+            LogOptions.SetFactory(LoggerFactory.CreateLoggerFactory());
 
             // Invoke command
+            Log.Logger.LogOverrideContext().Information("Starting: {Args}", args);
             return await commandLine.Result.InvokeAsync().ConfigureAwait(false);
         }
         catch (Exception ex) when (Log.Logger.LogAndHandle(ex))
