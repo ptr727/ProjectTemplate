@@ -6,16 +6,18 @@ namespace ptr727.ProjectTemplate.CodeGen;
 
 internal sealed class CommandLine
 {
+    private readonly Option<DirectoryInfo> _codePathOption = CreateCodePathOption();
+    private readonly Option<string> _apiKeyOption = CreateAPIKeyOption();
+
+    private static readonly FrozenSet<string> s_cliBypassList = FrozenSet.Create(
+        StringComparer.OrdinalIgnoreCase,
+        ["--help", "--version"]
+    );
+
     internal CommandLine(string[] args)
     {
         Root = CreateRootCommand();
         Result = Root.Parse(args);
-    }
-
-    internal sealed class Options
-    {
-        internal required DirectoryInfo CodePath { get; init; }
-        internal required string APIKey { get; init; }
     }
 
     internal RootCommand Root { get; init; }
@@ -42,9 +44,6 @@ internal sealed class CommandLine
             APIKey = parseResult.GetValue(_apiKeyOption) ?? string.Empty,
         };
 
-    private readonly Option<DirectoryInfo> _codePathOption = CreateCodePathOption();
-    private readonly Option<string> _apiKeyOption = CreateAPIKeyOption();
-
     private static Option<DirectoryInfo> CreateCodePathOption()
     {
         Option<DirectoryInfo> option = new("--codepath", "-p")
@@ -65,8 +64,9 @@ internal sealed class CommandLine
             && s_cliBypassList.Contains(optionResult.Option.Name)
         );
 
-    private static readonly FrozenSet<string> s_cliBypassList = FrozenSet.Create(
-        StringComparer.OrdinalIgnoreCase,
-        ["--help", "--version"]
-    );
+    internal sealed class Options
+    {
+        internal required DirectoryInfo CodePath { get; init; }
+        internal required string APIKey { get; init; }
+    }
 }

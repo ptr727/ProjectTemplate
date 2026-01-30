@@ -1,13 +1,7 @@
 using System.Runtime.CompilerServices;
-using Microsoft.Extensions.Logging;
 
 namespace ptr727.ProjectTemplate.Console;
 
-[System.Diagnostics.CodeAnalysis.SuppressMessage(
-    "Design",
-    "CA1034:Nested types should not be visible",
-    Justification = "https://github.com/dotnet/sdk/issues/51681"
-)]
 internal static partial class LogExtensions
 {
     extension(Serilog.ILogger logger)
@@ -32,13 +26,6 @@ internal static partial class LogExtensions
 
         internal Serilog.ILogger LogOverrideContext() => logger.ForContext<LogOverride>();
     }
-
-    [System.Diagnostics.CodeAnalysis.SuppressMessage(
-        "Design",
-        "CA1812:Avoid uninstantiated internal classes",
-        Justification = "Used as a type marker for Serilog context filtering"
-    )]
-    internal sealed class LogOverride;
 
     extension(Microsoft.Extensions.Logging.ILogger logger)
     {
@@ -67,4 +54,11 @@ internal static partial class LogExtensions
         string function,
         Exception exception
     );
+
+    [System.Diagnostics.CodeAnalysis.SuppressMessage(
+        "Design",
+        "CA1812:Avoid uninstantiated internal classes",
+        Justification = "Used as a type marker for Serilog context filtering"
+    )]
+    internal sealed class LogOverride;
 }

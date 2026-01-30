@@ -48,19 +48,4 @@
   <ItemGroup>
     <None Include="..\README.md" Pack="true" PackagePath="" />
   </ItemGroup>
-  <Target Name="Husky" BeforeTargets="Restore;CollectPackageReferences" Condition="'$(HUSKY)' != 0">
-    <Exec
-      Command="dotnet tool restore"
-      StandardOutputImportance="Low"
-      StandardErrorImportance="Low"
-      ContinueOnError="true"
-    />
-    <Exec
-      Command="dotnet husky install"
-      StandardOutputImportance="Low"
-      StandardErrorImportance="Low"
-      WorkingDirectory=".."
-      ContinueOnError="true"
-    />
-  </Target>
 </Project>

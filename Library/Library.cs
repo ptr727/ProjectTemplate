@@ -1,13 +1,26 @@
 namespace ptr727.ProjectTemplate.Library;
 
-public sealed class Options
-{
-    public ILogger Logger { get; init; } = NullLogger.Instance;
-}
-
+/// <summary>
+/// Provides the primary library functionality.
+/// </summary>
 public sealed class TemplateLibrary(Options? options = null)
 {
-    public ILogger Log { get; } = (options?.Logger) ?? NullLogger.Instance;
+    internal ILogger Log { get; } = LogOptions.CreateLogger<TemplateLibrary>(options);
 
+    /// <summary>
+    /// Writes a test log entry to the configured logger.
+    /// </summary>
     public void Test() => Log.LogInformation("Test");
+}
+
+public static class StaticTemplateLibrary
+{
+    private sealed class LogCategory;
+
+    private static ILogger Log => LogOptions.CreateLogger<LogCategory>();
+
+    /// <summary>
+    /// Writes a test log entry to the configured logger.
+    /// </summary>
+    public static void Test() => Log.LogInformation("Test");
 }

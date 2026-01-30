@@ -3,5 +3,5 @@ root = false
 # C# files
 [*.cs]
 
-# TODO: Even with all types internal warnings still shows up?
+# Ignore types can be made internal
 dotnet_diagnostic.CA1515.severity = none

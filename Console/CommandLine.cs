@@ -1,21 +1,25 @@
 using System.CommandLine;
 using System.CommandLine.Parsing;
-using Serilog.Events;
 
 namespace ptr727.ProjectTemplate.Console;
 
 internal sealed class CommandLine
 {
+    private readonly Option<LogEventLevel> _logLevelOption = CreateLogLevelOption();
+    private readonly Option<string> _logFileOption = CreateLogFileOption();
+    private readonly Option<bool> _logFileClearOption = CreateLogFileClearOption();
+
+    private readonly Option<string> _testOption = CreateTestOption();
+
+    private static readonly FrozenSet<string> s_cliBypassList = FrozenSet.Create(
+        StringComparer.OrdinalIgnoreCase,
+        ["--help", "--version"]
+    );
+
     internal CommandLine(string[] args)
     {
         Root = CreateRootCommand();
         Result = Root.Parse(args);
-    }
-
-    internal sealed class Options
-    {
-        internal required LoggerFactory.Options LogOptions { get; init; }
-        internal required string TestOption { get; init; }
     }
 
     internal RootCommand Root { get; init; }
@@ -74,12 +78,6 @@ internal sealed class CommandLine
             TestOption = parseResult.GetValue(_testOption) ?? string.Empty,
         };
 
-    private readonly Option<LogEventLevel> _logLevelOption = CreateLogLevelOption();
-    private readonly Option<string> _logFileOption = CreateLogFileOption();
-    private readonly Option<bool> _logFileClearOption = CreateLogFileClearOption();
-
-    private readonly Option<string> _testOption = CreateTestOption();
-
     private static Option<bool> CreateLogFileClearOption() =>
         new("--logfile-clear", "-c")
         {
@@ -115,8 +113,9 @@ internal sealed class CommandLine
             && s_cliBypassList.Contains(optionResult.Option.Name)
         );
 
-    private static readonly FrozenSet<string> s_cliBypassList = FrozenSet.Create(
-        StringComparer.OrdinalIgnoreCase,
-        ["--help", "--version"]
-    );
+    internal sealed class Options
+    {
+        internal required LoggerFactory.Options LogOptions { get; init; }
+        internal required string TestOption { get; init; }
+    }
 }

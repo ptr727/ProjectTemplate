@@ -28,9 +28,14 @@ internal sealed class Program(
         _ = LoggerFactory.Create(commandLine.CreateOptions(commandLine.Result).LogOptions);
         Log.Logger.LogOverrideContext().Information("Starting: {Args}", args);
 
-        // Initialize library with logger
+        // Initialize library with static logger
+        ILoggerFactory libraryLoggerFactory = LoggerFactory.CreateLoggerFactory();
+        LogOptions.SetFactory(libraryLoggerFactory);
+        StaticTemplateLibrary.Test();
+
+        // Initialize library with per-instance logger
         TemplateLibrary templateLibrary = new(
-            new Options() { Logger = LoggerFactory.CreateLogger(typeof(TemplateLibrary).FullName!) }
+            new Options() { LoggerFactory = libraryLoggerFactory }
         );
         Debug.Assert(templateLibrary.Log is not NullLogger);
         templateLibrary.Test();

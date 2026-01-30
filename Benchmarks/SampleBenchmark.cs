@@ -14,16 +14,23 @@ public class SampleBenchmark
     private readonly byte[] _data;
 
     private readonly SHA256 _sha256 = SHA256.Create();
-#pragma warning disable CA5351 // Do Not Use Broken Cryptographic Algorithms - This is sample benchmark code
-    private readonly MD5 _md5 = MD5.Create();
-#pragma warning restore CA5351 // Do Not Use Broken Cryptographic Algorithms
 
+    [System.Diagnostics.CodeAnalysis.SuppressMessage(
+        "Security",
+        "CA5351:Do Not Use Broken Cryptographic Algorithms",
+        Justification = "This is sample benchmark code."
+    )]
+    private readonly MD5 _md5 = MD5.Create();
+
+    [System.Diagnostics.CodeAnalysis.SuppressMessage(
+        "Security",
+        "CA5394:Do not use insecure randomness",
+        Justification = "This is sample benchmark code."
+    )]
     public SampleBenchmark()
     {
         _data = new byte[N];
-#pragma warning disable CA5394 // Do not use insecure randomness - This is sample benchmark code
         new Random(42).NextBytes(_data);
-#pragma warning restore CA5394 // Do not use insecure randomness
     }
 
     [Benchmark]

@@ -6,15 +6,14 @@ namespace ptr727.ProjectTemplate.CodeGen;
 
 internal static class HttpClientFactory
 {
-    internal static HttpClient GetHttpClient() => s_httpClient.Value;
-
     private static readonly Lazy<HttpClient> s_httpClient = new(CreateHttpClient);
-
-    internal static ResilienceHandler GetResilienceHandler() => s_resilienceHandler.Value;
-
     private static readonly Lazy<ResilienceHandler> s_resilienceHandler = new(
         CreateResilienceHandler
     );
+
+    internal static HttpClient GetHttpClient() => s_httpClient.Value;
+
+    internal static ResilienceHandler GetResilienceHandler() => s_resilienceHandler.Value;
 
     private static ResilienceHandler CreateResilienceHandler() =>
         new(
@@ -29,8 +28,11 @@ internal static class HttpClientFactory
                         MaxDelay = TimeSpan.FromSeconds(30),
                         ShouldHandle = args =>
                             ValueTask.FromResult(
-                                args.Outcome.Result != null
-                                    && !args.Outcome.Result.IsSuccessStatusCode
+                                args.Outcome.Exception != null
+                                    || (
+                                        args.Outcome.Result != null
+                                        && !args.Outcome.Result.IsSuccessStatusCode
+                                    )
                             ),
                     }
                 )
@@ -43,8 +45,11 @@ internal static class HttpClientFactory
                         BreakDuration = TimeSpan.FromSeconds(30),
                         ShouldHandle = args =>
                             ValueTask.FromResult(
-                                args.Outcome.Result != null
-                                    && !args.Outcome.Result.IsSuccessStatusCode
+                                args.Outcome.Exception != null
+                                    || (
+                                        args.Outcome.Result != null
+                                        && !args.Outcome.Result.IsSuccessStatusCode
+                                    )
                             ),
                     }
                 )
