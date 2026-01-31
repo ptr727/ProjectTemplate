@@ -1,6 +1,5 @@
 using System.CommandLine;
 using System.CommandLine.Parsing;
-using System.IO;
 
 namespace ptr727.ProjectTemplate.CodeGen;
 

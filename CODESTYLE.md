@@ -176,12 +176,30 @@ Note: Code snippets are illustrative examples only. Replace namespaces/types to 
 1. **XML documentation**
    - `<GenerateDocumentationFile>true</GenerateDocumentationFile>`
    - Missing XML comments for public APIs are suppressed (`.editorconfig`)
-   - Single-line summaries
+   - Must document all public surfaces.
+   - Single-line summaries, additional details in remarks, document input parameters, returns values, exceptions, and add crefs
 
    ```csharp
    /// <summary>
-   /// This property always returns a value < 1.
+   /// Example of a single line summary.
    /// </summary>
+   /// <remarks>
+   /// Additional important details can consume.
+   /// Multiple lines if needed.
+   /// </remarks>
+   /// <param name="category">
+   /// The quote category to request
+   /// </param>
+   /// <param name="cancellationToken">
+   /// A <see cref="System.Threading.CancellationToken"/> that can be used to cancel the request.
+   /// </param>
+   /// <returns>
+   /// A <see cref="string"/> containing the quote text.
+   /// </returns>
+   /// <exception cref="System.ArgumentException">
+   /// Thrown when <paramref name="category"/> is not a supported value.
+   /// </exception>
+   public async Task<string> GetQuoteOfTheDayAsync(string category, CancellationToken cancellationToken) {}
    ```
 
 2. **Code analysis suppressions**

@@ -6,6 +6,7 @@
 	],
 	"settings": {
 		"cSpell.words": [
+            "accessibilities",
             "Allman",
             "apikey",
             "autoremove",
@@ -29,6 +30,7 @@
             "lastbuild",
             "LINQ",
             "logfile",
+            "nameof",
             "nbgv",
             "nektos",
             "Nerdbank",
@@ -37,6 +39,7 @@
             "Pieter",
             "ProjectTemplate",
             "quoteoftheday",
+            "resharper",
             "Rubba",
             "Serilog",
             "settingsfile",

@@ -1,4 +1,3 @@
-using System.IO;
 using Serilog.Sinks.SystemConsole.Themes;
 
 namespace ptr727.ProjectTemplate.CodeGen;

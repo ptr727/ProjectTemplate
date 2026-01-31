@@ -209,4 +209,3 @@ resharper_csharp_trailing_comma_in_multiline_lists = true
 resharper_csharp_var_for_built_in_types = false
 resharper_csharp_var_when_type_is_apparent = false
 resharper_csharp_var_when_type_is_not_apparent = false
-resharper_csharp_var_for_built_in_types = false
