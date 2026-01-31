@@ -2,7 +2,7 @@ using System.Runtime.CompilerServices;
 
 namespace ptr727.ProjectTemplate.CodeGen;
 
-internal static partial class LogExtensions
+internal static class LogExtensions
 {
     extension(ILogger logger)
     {

@@ -13,7 +13,8 @@ internal sealed class CommandLine
 
     private static readonly FrozenSet<string> s_cliBypassList = FrozenSet.Create(
         StringComparer.OrdinalIgnoreCase,
-        ["--help", "--version"]
+        "--help",
+        "--version"
     );
 
     internal CommandLine(string[] args)
@@ -22,8 +23,8 @@ internal sealed class CommandLine
         Result = Root.Parse(args);
     }
 
-    internal RootCommand Root { get; init; }
-    internal ParseResult Result { get; init; }
+    internal RootCommand Root { get; }
+    internal ParseResult Result { get; }
 
     internal RootCommand CreateRootCommand()
     {

@@ -1,4 +1,3 @@
-using System.IO;
 using System.Text;
 
 namespace ptr727.ProjectTemplate.CodeGen;
@@ -11,18 +10,14 @@ internal sealed class CodeGenBuilder(string outputPath, CancellationToken cancel
         string codeGen = $$"""
             namespace ptr727.ProjectTemplate.CodeGen;
 
+            [System.CodeDom.Compiler.GeneratedCode("ptr727.ProjectTemplate.CodeGen", "1.0")]
             internal static class CodeGen
             {
                 private const string QuoteOfTheDay = {{ToCSharpStringLiteral(quote)}};
 
-                [System.Diagnostics.CodeAnalysis.SuppressMessage(
-                    "Globalization",
-                    "CA1303:Do not pass literals as localized parameters",
-                    Justification = "Demonstration code."
-                )]
                 internal static void Quote()
                 {
-                    string dateTime = $"{{DateTime.UtcNow:o}}";
+                    const string dateTime = "{{DateTime.UtcNow:o}}";
                     Console.WriteLine($"{dateTime} : {QuoteOfTheDay}");
                     Log.Logger.Information("Quote of the Day: {DateTime} : {Quote}", dateTime, QuoteOfTheDay);
                 }

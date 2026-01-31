@@ -148,6 +148,29 @@ public sealed class LoggingTests : SingleInstanceFixture
             .Contain(entry => entry.Level == LogLevel.Information && entry.Message == "Test");
     }
 
+    [Fact]
+    public void Instance_WithOptions_ShouldNotChangeWhenGlobalFactoryChanges()
+    {
+        // Arrange
+        using TestLoggerFactory optionsFactory = new();
+        using TestLoggerFactory globalFactory = new();
+        Options options = new() { LoggerFactory = optionsFactory };
+        TemplateLibrary library = new(options);
+
+        // Act - first call uses options factory
+        library.Test();
+
+        // Change global factory (should not affect instance with options)
+        LogOptions.SetFactory(globalFactory);
+
+        // Act - second call should still use options factory
+        library.Test();
+
+        // Assert
+        optionsFactory.Logger.Entries.Should().HaveCount(2);
+        globalFactory.Logger.Entries.Should().BeEmpty();
+    }
+
     private sealed class TestLoggerFactory : ILoggerFactory
     {
         public string? LastCategoryName { get; private set; }

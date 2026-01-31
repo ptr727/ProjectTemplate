@@ -1,17 +1,17 @@
 using System.CommandLine;
 using System.CommandLine.Parsing;
-using System.IO;
 
 namespace ptr727.ProjectTemplate.CodeGen;
 
 internal sealed class CommandLine
 {
     private readonly Option<DirectoryInfo> _codePathOption = CreateCodePathOption();
-    private readonly Option<string> _apiKeyOption = CreateAPIKeyOption();
+    private readonly Option<string> _apiKeyOption = CreateApiKeyOption();
 
     private static readonly FrozenSet<string> s_cliBypassList = FrozenSet.Create(
         StringComparer.OrdinalIgnoreCase,
-        ["--help", "--version"]
+        "--help",
+        "--version"
     );
 
     internal CommandLine(string[] args)
@@ -20,8 +20,8 @@ internal sealed class CommandLine
         Result = Root.Parse(args);
     }
 
-    internal RootCommand Root { get; init; }
-    internal ParseResult Result { get; init; }
+    internal RootCommand Root { get; }
+    internal ParseResult Result { get; }
 
     internal RootCommand CreateRootCommand()
     {
@@ -41,7 +41,7 @@ internal sealed class CommandLine
         new()
         {
             CodePath = parseResult.GetValue(_codePathOption)!,
-            APIKey = parseResult.GetValue(_apiKeyOption) ?? string.Empty,
+            ApiKey = parseResult.GetValue(_apiKeyOption) ?? string.Empty,
         };
 
     private static Option<DirectoryInfo> CreateCodePathOption()
@@ -54,7 +54,7 @@ internal sealed class CommandLine
         return option.AcceptExistingOnly();
     }
 
-    private static Option<string> CreateAPIKeyOption() =>
+    private static Option<string> CreateApiKeyOption() =>
         new("--apikey", "-a") { Description = "The API key to use (optional).", Required = false };
 
     internal static bool BypassStartup(ParseResult parseResult) =>
@@ -67,6 +67,6 @@ internal sealed class CommandLine
     internal sealed class Options
     {
         internal required DirectoryInfo CodePath { get; init; }
-        internal required string APIKey { get; init; }
+        internal required string ApiKey { get; init; }
     }
 }

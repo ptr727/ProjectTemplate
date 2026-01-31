@@ -1,4 +1,4 @@
-using System.IO;
+using System.Diagnostics.CodeAnalysis;
 using System.Text.Json;
 using System.Text.Json.Serialization;
 
@@ -6,6 +6,11 @@ namespace ptr727.ProjectTemplate.CodeGen;
 
 internal sealed class ApiNinjas(string apiKey, CancellationToken cancellationToken)
 {
+    [SuppressMessage(
+        "Usage",
+        "CA2007:Consider calling ConfigureAwait on the awaited task",
+        Justification = "https://github.com/dotnet/roslyn-analyzers/issues/7185"
+    )]
     internal async Task<string> GetQuoteOfTheDayAsync()
     {
         // https://api-ninjas.com/api/quotes#v2-quoteoftheday
@@ -21,9 +26,10 @@ internal sealed class ApiNinjas(string apiKey, CancellationToken cancellationTok
             .ConfigureAwait(false);
         _ = response.EnsureSuccessStatusCode();
 
-        using Stream responseStream = await response
+        await using Stream responseStream = await response
             .Content.ReadAsStreamAsync(cancellationToken)
             .ConfigureAwait(false);
+
         QuoteOfTheDayItem[]? items = await JsonSerializer
             .DeserializeAsync(
                 responseStream,

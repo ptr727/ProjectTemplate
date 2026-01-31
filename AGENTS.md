@@ -26,13 +26,13 @@ For comprehensive coding standards and detailed conventions, refer to [`.github/
 
 - **Library**: Core reusable library
 - **Console**: CLI application using System.CommandLine
-- **Tests**: xUnit with FluentAssertions (Arrange-Act-Assert pattern)
+- **Tests**: xUnit with AwesomeAssertions (Arrange-Act-Assert pattern)
 - **Benchmarks**: BenchmarkDotNet performance measurements
 - **Docker**: Multi-platform Linux containers
 
 ### Testing
 
-- Use xUnit v3 and FluentAssertions
+- Use xUnit v3 and AwesomeAssertions
 - Organize tests logically in separate files
 - Follow Arrange-Act-Assert pattern
 - Test naming: `MethodName_Scenario_ExpectedBehavior()`

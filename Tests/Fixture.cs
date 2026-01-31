@@ -5,7 +5,7 @@ namespace ptr727.ProjectTemplate.Tests;
 
 // Sequential execution fixture
 [CollectionDefinition("Sequential Test Collection", DisableParallelization = true)]
-public class SequentialCollectionDefinition { }
+public class SequentialCollectionDefinition;
 
 [System.Diagnostics.CodeAnalysis.SuppressMessage(
     "Design",
@@ -14,7 +14,5 @@ public class SequentialCollectionDefinition { }
 )]
 public class SingleInstanceFixture : IDisposable
 {
-    public SingleInstanceFixture() { }
-
     public void Dispose() => GC.SuppressFinalize(this);
 }

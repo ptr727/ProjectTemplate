@@ -80,12 +80,13 @@ See [Installation](#installation) for detailed setup instructions.
   - [Test Command](#test-command)
 - [Questions or Issues](#questions-or-issues)
 - [Development Environment Setup](#development-environment-setup)
+- [3rd Party Tools](#3rd-party-tools)
+- [License](#license)
 - [Template Project Setup](#template-project-setup)
   - [Template - TODO List](#template---todo-list)
   - [Template - Developer Environment Setup](#template---developer-environment-setup)
   - [Template - GitHub Setup](#template---github-setup)
-- [3rd Party Tools](#3rd-party-tools)
-- [License](#license)
+  - [Template - Branching Workflow](#template---branching-workflow)
 
 ## Use Cases
 
@@ -399,6 +400,7 @@ Licensed under the [MIT License][license-link]\
     - `Require signed commits`
     - `Require a pull request before merging`
       - `Dismiss stale pull request approvals when new commits are pushed`
+      - `Require conversation resolution before merging`
       - Allowed merge methods: `Squash`
     - `Require status checks to pass`
       - `Require branches to be up to date before merging`
