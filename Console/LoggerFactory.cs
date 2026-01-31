@@ -6,8 +6,14 @@ namespace ptr727.ProjectTemplate.Console;
 internal static class LoggerFactory
 {
     private static readonly Lazy<SerilogLoggerFactory> s_serilogLoggerFactory = new(() =>
-        new SerilogLoggerFactory(Create(), dispose: true)
-    );
+    {
+        // Use already configured Log.Logger if set, else create a new logger factory
+        Serilog.ILogger logger = ReferenceEquals(Log.Logger, Serilog.Core.Logger.None)
+            ? Create()
+            : Log.Logger;
+        bool disposeLogger = !ReferenceEquals(logger, Log.Logger);
+        return new SerilogLoggerFactory(logger, dispose: disposeLogger);
+    });
 
     internal static Serilog.ILogger Create(Options? options = null)
     {
