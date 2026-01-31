@@ -23,9 +23,7 @@ public static class StaticTemplateLibrary
     private sealed class LogCategory;
 
     // Logger is created on first use and then cached
-    private static readonly Lazy<ILogger> s_logger = new(() =>
-        LogOptions.CreateLogger<LogCategory>()
-    );
+    private static readonly Lazy<ILogger> s_logger = new(LogOptions.CreateLogger<LogCategory>);
     private static ILogger Log => s_logger.Value;
 
     /// <summary>
