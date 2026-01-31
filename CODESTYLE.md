@@ -184,7 +184,7 @@ Note: Code snippets are illustrative examples only. Replace namespaces/types to 
    /// Example of a single line summary.
    /// </summary>
    /// <remarks>
-   /// Additional important details can consume.
+   /// Additional important details about usage.
    /// Multiple lines if needed.
    /// </remarks>
    /// <param name="category">
