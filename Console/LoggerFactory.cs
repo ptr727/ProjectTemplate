@@ -1,36 +1,39 @@
-using Serilog.Debugging;
-using Serilog.Events;
+using Serilog.Extensions.Logging;
 using Serilog.Sinks.SystemConsole.Themes;
 
 namespace ptr727.ProjectTemplate.Console;
 
-public static class LoggerFactory
+internal static class LoggerFactory
 {
-    public class Options
+    private static readonly Lazy<SerilogLoggerFactory> s_serilogLoggerFactory = new(() =>
     {
-        public required LogEventLevel Level { get; init; }
-        public required string File { get; init; }
-        public required bool FileClear { get; init; }
-    }
+        // Use already configured Log.Logger if set, else create a new logger factory
+        Serilog.ILogger logger = ReferenceEquals(Log.Logger, Serilog.Core.Logger.None)
+            ? Create()
+            : Log.Logger;
+        bool disposeLogger = !ReferenceEquals(logger, Log.Logger);
+        return new SerilogLoggerFactory(logger, dispose: disposeLogger);
+    });
 
-    public static ILogger Create(Options options)
+    internal static Serilog.ILogger Create(Options? options = null)
     {
-        // Enable Serilog debug output to the console
-        SelfLog.Enable(System.Console.Error);
+        // Log to the console
         LoggerConfiguration loggerConfiguration = new LoggerConfiguration()
-            .MinimumLevel.Is(options.Level)
+            .MinimumLevel.Is(options?.Level ?? LogEventLevel.Information)
             .MinimumLevel.Override(
                 typeof(LogExtensions.LogOverride).FullName!,
                 LogEventLevel.Verbose
             )
             .Enrich.WithThreadId()
+            .Enrich.WithThreadName()
             .WriteTo.Console(
                 theme: AnsiConsoleTheme.Code,
-                formatProvider: CultureInfo.InvariantCulture
+                formatProvider: CultureInfo.InvariantCulture,
+                outputTemplate: "[{Timestamp:HH:mm:ss} {Level:u3}] [t:{ThreadId}{ThreadName}] {Message:lj}{NewLine}{Exception}"
             );
 
-        // Add file sink if logFile is specified
-        if (!string.IsNullOrEmpty(options.File))
+        // Log to file
+        if (!string.IsNullOrEmpty(options?.File))
         {
             if (options.FileClear && File.Exists(options.File))
             {
@@ -38,12 +41,24 @@ public static class LoggerFactory
             }
             _ = loggerConfiguration.WriteTo.File(
                 options.File,
-                formatProvider: CultureInfo.InvariantCulture
+                formatProvider: CultureInfo.InvariantCulture,
+                outputTemplate: "[{Timestamp:yyyy-MM-dd HH:mm:ss.fff zzz} {Level:u3}] [t:{ThreadId}{ThreadName}] {Message:lj}{NewLine}{Exception}"
             );
         }
 
         // Create logger
-        Log.Logger = loggerConfiguration.CreateLogger();
-        return Log.Logger;
+        return loggerConfiguration.CreateLogger();
+    }
+
+    internal static ILoggerFactory CreateLoggerFactory() => s_serilogLoggerFactory.Value;
+
+    internal static Microsoft.Extensions.Logging.ILogger CreateLogger(string categoryName) =>
+        s_serilogLoggerFactory.Value.CreateLogger(categoryName);
+
+    internal sealed class Options
+    {
+        internal required LogEventLevel Level { get; init; }
+        internal required string File { get; init; }
+        internal required bool FileClear { get; init; }
     }
 }

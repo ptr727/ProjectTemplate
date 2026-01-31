@@ -2,35 +2,36 @@ using System.Runtime.CompilerServices;
 
 namespace ptr727.ProjectTemplate.Library;
 
-[System.Diagnostics.CodeAnalysis.SuppressMessage(
-    "Design",
-    "CA1034:Nested types should not be visible",
-    Justification = "https://github.com/dotnet/sdk/issues/51681"
-)]
-public static class LogExtensions
+internal static partial class LogExtensions
 {
     extension(ILogger logger)
     {
-        public bool LogAndPropagate(
+        internal bool LogAndPropagate(
             Exception exception,
             [CallerMemberName] string function = "unknown"
         )
         {
-            logger.Error(exception, "{Function}", function);
+            logger.LogCatchException(function, exception);
             return false;
         }
 
-        public bool LogAndHandle(
+        internal bool LogAndHandle(
             Exception exception,
             [CallerMemberName] string function = "unknown"
         )
         {
-            logger.Error(exception, "{Function}", function);
+            logger.LogCatchException(function, exception);
             return true;
         }
-
-        public ILogger LogOverrideContext() => logger.ForContext<LogOverride>();
     }
 
-    public class LogOverride;
+    [LoggerMessage(Message = "Exception in {Function}", Level = LogLevel.Error)]
+    internal static partial void LogCatchException(
+        this ILogger logger,
+        string function,
+        Exception exception
+    );
+
+    [LoggerMessage(Message = "{Message}", Level = LogLevel.Information)]
+    internal static partial void LogInformation(this ILogger logger, string message);
 }

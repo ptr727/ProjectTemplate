@@ -1,25 +1,25 @@
-name: Create date badge task
+name: Build BYOB date badge task
 
 env:
   IS_MAIN_BRANCH: ${{ endsWith(github.ref, 'refs/heads/main') }}
 
 on:
   workflow_call:
-  workflow_dispatch:
 
 jobs:
 
   date-badge:
-    name: Create date badge
+    name: Build BYOB date badge job
     runs-on: ubuntu-latest
 
     steps:
 
-      - id: date
+      - name: Get current date step
+        id: date
         run: |
           echo "date=$(date)" >> $GITHUB_OUTPUT
 
-      - name: Build date badge
+      - name: Build BYOB date badge step
         if: ${{ env.IS_MAIN_BRANCH == 'true' }}
         uses: RubbaBoy/BYOB@v1
         with:

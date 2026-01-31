@@ -1,9 +1,18 @@
+// Single instance for all tests in assembly
+[assembly: AssemblyFixture(typeof(ptr727.ProjectTemplate.Tests.SingleInstanceFixture))]
+
 namespace ptr727.ProjectTemplate.Tests;
 
-internal static class Fixture // : IDisposable
-{
-    // public void Dispose() => GC.SuppressFinalize(this);
+// Sequential execution fixture
+[CollectionDefinition("Sequential Test Collection", DisableParallelization = true)]
+public class SequentialCollectionDefinition;
 
-    public static string GetSamplesFilePath(string fileName) =>
-        Path.GetFullPath(Path.Combine(AppContext.BaseDirectory, "../../../../Samples", fileName));
+[System.Diagnostics.CodeAnalysis.SuppressMessage(
+    "Design",
+    "CA1063:Implement IDisposable Correctly",
+    Justification = "Demonstration only"
+)]
+public class SingleInstanceFixture : IDisposable
+{
+    public void Dispose() => GC.SuppressFinalize(this);
 }

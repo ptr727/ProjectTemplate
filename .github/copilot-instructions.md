@@ -6,7 +6,7 @@
 
 - **Library**: Core library with AOT compatibility (`Library.csproj`)
 - **Console**: Command-line application using System.CommandLine (`Console.csproj`)
-- **Tests**: Unit tests using xUnit and FluentAssertions (`Tests.csproj`)
+- **Tests**: Unit tests using xUnit and AwesomeAssertions (`Tests.csproj`)
 - **Benchmarks**: Performance benchmarks using BenchmarkDotNet (`Benchmarks.csproj`)
 - **Docker**: Docker build configurations for Linux containers
 
@@ -150,6 +150,14 @@ Available VS Code tasks (use via `run_task` tool):
    )]
    ```
 
+3. **Spelling**: All code must pass the Code Spell Checker extension
+   - Configure exceptions in workspace settings if needed
+   - British and American spelling both accepted
+
+4. **Markdown Quality**: Markdown files must pass Markdownlint
+   - Proper heading hierarchy, spacing, and formatting
+
+
 ### Error Handling and Logging
 
 1. **Serilog Logging**: Use structured logging with Serilog
@@ -175,7 +183,7 @@ Available VS Code tasks (use via `run_task` tool):
 
 ### Testing Conventions
 
-1. **Test Framework**: xUnit with FluentAssertions
+1. **Test Framework**: xUnit with AwesomeAssertions
    ```csharp
    [Fact]
    public void MethodName_Scenario_ExpectedBehavior()
@@ -194,6 +202,9 @@ Available VS Code tasks (use via `run_task` tool):
 2. **Test Organization**: Arrange-Act-Assert pattern
 3. **Test Naming**: Use descriptive names with underscores separating parts
 4. **Theory Tests**: Use `[Theory]` with `[InlineData]` for parameterized tests
+5. **Avoid Regions**: Don't use regions in test files
+6. **Logical Grouping**: Organize tests in separate files by feature or class
+
 
 ### Project Configuration
 
@@ -241,7 +252,7 @@ Available VS Code tasks (use via `run_task` tool):
 ### Testing Dependencies
 
 - **xUnit**: Test framework
-- **FluentAssertions**: Fluent assertion library
+- **AwesomeAssertions**: Fluent assertion library
 - **BenchmarkDotNet**: Performance benchmarking
 
 ### Development Tools
@@ -258,6 +269,19 @@ Available VS Code tasks (use via `run_task` tool):
 - Build script: `Build.sh`
 - Debug tools: `InstallDebugTools.sh`
 
+## Project Structure
+
+- `.config/` - .NET tools configuration
+- `.github/` - GitHub Actions workflows and Copilot instructions
+- `.husky/` - Husky.Net git hooks
+- `.vscode/` - Visual Studio Code settings and launch configurations
+- `Benchmarks/` - BenchmarkDotNet performance measurement project
+- `CodeGen/` - Code generation utilities (internal tooling)
+- `Console/` - Console/CLI application using System.CommandLine
+- `Docker/` - Docker build scripts and Dockerfile
+- `Library/` - Core reusable library
+- `Tests/` - Unit tests using xUnit and AwesomeAssertions
+
 ## Best Practices
 
 1. **Immutability**: Prefer `readonly` and `required` for fields and properties
@@ -269,6 +293,8 @@ Available VS Code tasks (use via `run_task` tool):
 7. **Static Analysis**: Address all analyzer warnings - zero warnings policy
 8. **Code Reviews**: All changes go through pull requests
 9. **Git Versioning**: Use Nerdbank.GitVersioning for version management
+10. **No Regions**: Avoid code regions - use logical file separation instead
+
 
 ## Editor Configuration
 
@@ -298,3 +324,11 @@ The project includes comprehensive `.editorconfig` settings that enforce:
 - [.NET Runtime Coding Style](https://github.com/dotnet/runtime/blob/main/docs/coding-guidelines/coding-style.md)
 - [dotnet format Documentation](https://learn.microsoft.com/en-us/dotnet/core/tools/dotnet-format)
 - [EditorConfig Documentation](https://editorconfig.org)
+- [CSharpier Documentation](https://csharpier.com)
+- [Husky.Net Documentation](https://alirezanet.github.io/Husky.Net)
+- [xUnit Documentation](https://xunit.net)
+- [AwesomeAssertions Documentation](https://awesomeassertions.org/)
+- [BenchmarkDotNet Documentation](https://benchmarkdotnet.org)
+- [System.CommandLine Documentation](https://learn.microsoft.com/en-us/dotnet/standard/commandline/)
+- [Serilog Documentation](https://serilog.net)
+

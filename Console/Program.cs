@@ -1,75 +1,72 @@
-using System.CommandLine;
-using System.Runtime.CompilerServices;
 using ptr727.ProjectTemplate.Library;
 
 namespace ptr727.ProjectTemplate.Console;
 
-public class Program
+internal sealed class Program(
+    CommandLine.Options commandLineOptions,
+    CancellationToken cancellationToken
+)
 {
-    public Program(CommandLine.Context commandLineContext, CancellationToken cancellationToken)
-    {
-        _commandLineContext = commandLineContext;
-        _cancellationToken = cancellationToken;
-        _parallelOptions = new ParallelOptions()
-        {
-            MaxDegreeOfParallelism = commandLineContext.Threads,
-            CancellationToken = cancellationToken,
-        };
-        _httpClient = HttpClientFactory.GetHttpClient();
-    }
+    internal CommandLine.Options GetCommandLineOptions() => commandLineOptions;
 
-    private readonly CommandLine.Context _commandLineContext;
+    internal CancellationToken GetCancellationToken() => cancellationToken;
 
-    public CommandLine.Context GetCommandLineContext() => _commandLineContext;
-
-    private readonly CancellationToken _cancellationToken;
-
-    public CancellationToken GetCancellationToken() => _cancellationToken;
-
-    private readonly ParallelOptions _parallelOptions;
-
-    public ParallelOptions GetParallelOptions() => _parallelOptions;
-
-    private readonly HttpClient _httpClient;
-
-    public HttpClient GetHttpClient() => _httpClient;
-
-    public static async Task<int> Main(string[] args)
-    {
-        // Parse commandline
-        (CommandLine commandLine, RootCommand rootCommand) =
-            await CommandLine.CreateRootCommandWithCommandLine();
-        ParseResult parseResult = rootCommand.Parse(args);
-
-        // Bypass startup for help and version commands
-        if (CommandLine.BypassStartup(parseResult))
-        {
-            return await parseResult.InvokeAsync();
-        }
-
-        // Create logger
-        _ = LoggerFactory.Create(commandLine.CreateContext(parseResult).LogOptions);
-        Log.Logger.LogOverrideContext().Information("Starting: {Args}", args);
-
-        // Invoke command
-        return await parseResult.InvokeAsync();
-    }
-
-    public bool IsDryRun([CallerMemberName] string function = "unknown")
-    {
-        if (GetCommandLineContext().DryRun)
-        {
-            Log.Verbose("Dry run enabled, skipping action in {Function}.", function);
-        }
-        return GetCommandLineContext().DryRun;
-    }
-
-    public async Task<int> ExecuteAsync()
+    internal static async Task<int> Main(string[] args)
     {
         try
         {
-            ProcessTask processTask = new(this);
-            return await processTask.ExecuteAsync();
+            // Parse commandline
+            CommandLine commandLine = new(args);
+            commandLine.Result.InvocationConfiguration.EnableDefaultExceptionHandler = false;
+            commandLine.Result.InvocationConfiguration.ProcessTerminationTimeout = null;
+
+            // Bypass startup for errors or help and version commands
+            if (CommandLine.BypassStartup(commandLine.Result))
+            {
+                return await commandLine.Result.InvokeAsync().ConfigureAwait(false);
+            }
+
+            // Create logger
+            Log.Logger = LoggerFactory.Create(
+                commandLine.CreateOptions(commandLine.Result).LogOptions
+            );
+            LogOptions.SetFactory(LoggerFactory.CreateLoggerFactory());
+
+            // Invoke command
+            Log.Logger.LogOverrideContext().Information("Starting: {Args}", args);
+            return await commandLine.Result.InvokeAsync().ConfigureAwait(false);
+        }
+        catch (Exception ex) when (Log.Logger.LogAndHandle(ex))
+        {
+            return 1;
+        }
+        finally
+        {
+            await Log.CloseAndFlushAsync().ConfigureAwait(false);
+        }
+    }
+
+    internal async Task<int> ExecuteAsync()
+    {
+        try
+        {
+            Log.Information("Executing root command...");
+            await Task.Delay(1000, cancellationToken).ConfigureAwait(false);
+            return 0;
+        }
+        catch (Exception ex) when (Log.Logger.LogAndHandle(ex))
+        {
+            return 1;
+        }
+    }
+
+    internal async Task<int> ExecuteTestAsync()
+    {
+        try
+        {
+            Log.Information("Executing test command...");
+            await Task.Delay(1000, cancellationToken).ConfigureAwait(false);
+            return 0;
         }
         catch (Exception ex) when (Log.Logger.LogAndHandle(ex))
         {
