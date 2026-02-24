@@ -1,8 +1,5 @@
 name: Run codegen and pull request task
 
-env:
-  PROJECT_FILE: ./CodeGen/CodeGen.csproj
-
 on:
   workflow_call:
 
@@ -23,8 +20,8 @@ jobs:
         uses: actions/checkout@v6
 
       - name: Run codegen step
-        run: >-
-            dotnet run --project ${{ env.PROJECT_FILE }} --
+        run: |
+          dotnet run --project ./CodeGen/CodeGen.csproj -- \
             --codepath ./CodeGen
 
       - name: Format code step
@@ -37,8 +34,9 @@ jobs:
       - name: Create pull request step
         uses: peter-evans/create-pull-request@v8
         with:
-          branch: codegen-update
+          branch: codegen
           title: 'Update codegen files'
           body: 'This PR updates the codegen files.'
           commit-message: 'Update codegen files'
           delete-branch: true
+          sign-commits: true
