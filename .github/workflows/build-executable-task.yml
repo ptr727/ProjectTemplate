@@ -60,19 +60,19 @@ jobs:
 
     steps:
 
-    - name: Download matrix build artifacts step
-      uses: actions/download-artifact@v7
-      with:
-        pattern: publish-*
-        merge-multiple: true
-        path: ${{ runner.temp }}/publish
+      - name: Download matrix build artifacts step
+        uses: actions/download-artifact@v7
+        with:
+          pattern: publish-*
+          merge-multiple: true
+          path: ${{ runner.temp }}/publish
 
-    - name: Zip build output step
-      run: 7z a -t7z ${{ runner.temp }}/Console.7z ${{ runner.temp }}/publish/*
+      - name: Zip build output step
+        run: 7z a -t7z ${{ runner.temp }}/Console.7z ${{ runner.temp }}/publish/*
 
-    - name: Upload build artifacts step
-      id: artifact-upload-step
-      uses: actions/upload-artifact@v6
-      with:
-        name: executable-build
-        path: ${{ runner.temp }}/Console.7z
+      - name: Upload build artifacts step
+        id: artifact-upload-step
+        uses: actions/upload-artifact@v6
+        with:
+          name: executable-build
+          path: ${{ runner.temp }}/Console.7z

@@ -57,8 +57,7 @@ jobs:
             --skip-duplicate
 
       - name: Zip output step
-        run: |
-          7z a -t7z ${{ runner.temp }}/Library.7z ${{ runner.temp }}/publish/*
+        run: 7z a -t7z ${{ runner.temp }}/Library.7z ${{ runner.temp }}/publish/*
 
       - name: Upload build artifacts step
         id: artifact-upload-step
