@@ -1,11 +1,5 @@
 name: Build Docker image task
 
-env:
-  IS_MAIN_BRANCH: ${{ endsWith(github.ref, 'refs/heads/main') }}
-  DOCKER_REGISTRY: docker.io
-  DOCKER_TAG_PREFIX: docker.io/ptr727/projecttemplate
-  DOCKER_FILE: ./Docker/Dockerfile
-
 on:
   workflow_call:
     inputs:
@@ -45,7 +39,6 @@ jobs:
       - name: Login to Docker Hub step
         uses: docker/login-action@v3
         with:
-          registry: ${{ env.DOCKER_REGISTRY }}
           username: ${{ secrets.DOCKER_HUB_USERNAME }}
           password: ${{ secrets.DOCKER_HUB_ACCESS_TOKEN }}
 
@@ -54,16 +47,16 @@ jobs:
         with:
           context: .
           push: ${{ inputs.push }}
-          file: ${{ env.DOCKER_FILE }}
+          file: ./Docker/Dockerfile
           tags: |
-            ${{ env.DOCKER_TAG_PREFIX }}:${{ env.IS_MAIN_BRANCH == 'true' && 'latest' || 'develop' }}
-            ${{ env.DOCKER_TAG_PREFIX }}:${{ needs.get-version.outputs.SemVer2 }}
+            docker.io/ptr727/projecttemplate:${{ github.ref_name == 'main' && 'latest' || 'develop' }}
+            docker.io/ptr727/projecttemplate:${{ needs.get-version.outputs.SemVer2 }}
           platforms: linux/amd64,linux/arm64
-          cache-from: type=registry,ref=${{ env.DOCKER_TAG_PREFIX }}:buildcache
-          cache-to: type=registry,ref=${{ env.DOCKER_TAG_PREFIX }}:buildcache,mode=max
+          cache-from: type=registry,ref=docker.io/ptr727/projecttemplate:buildcache
+          cache-to: type=registry,ref=docker.io/ptr727/projecttemplate:buildcache,mode=max
           build-args: |
             LABEL_VERSION=${{ needs.get-version.outputs.SemVer2 }}
-            BUILD_CONFIGURATION=${{ env.IS_MAIN_BRANCH == 'true' && 'Release' || 'Debug' }}
+            BUILD_CONFIGURATION=${{ github.ref_name == 'main' && 'Release' || 'Debug' }}
             BUILD_VERSION=${{ needs.get-version.outputs.AssemblyVersion }}
             BUILD_FILE_VERSION=${{ needs.get-version.outputs.AssemblyFileVersion }}
             BUILD_ASSEMBLY_VERSION=${{ needs.get-version.outputs.AssemblyFileVersion }}
