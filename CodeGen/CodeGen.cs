@@ -7,7 +7,7 @@ internal static class CodeGen
 
     internal static void Quote()
     {
-        const string dateTime = "2026-01-30T22:28:14.6290903Z";
+        const string dateTime = "2026-03-30T03:00:04.9630307Z";
         Console.WriteLine($"{dateTime} : {QuoteOfTheDay}");
         Log.Logger.Information("Quote of the Day: {DateTime} : {Quote}", dateTime, QuoteOfTheDay);
     }
