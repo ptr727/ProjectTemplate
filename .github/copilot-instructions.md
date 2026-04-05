@@ -316,7 +316,7 @@ The project includes comprehensive `.editorconfig` settings that enforce:
 3. **Before committing**:
    - Run `.Net Format` task to verify compliance
    - Husky hooks will run automatically
-4. **Dependency updates**: Run `.Net Outdated Upgrade` task (`dotnet outdated --upgrade:Prompt`) regularly
+4. **Dependency updates**: Run `.Net Outdated Upgrade` task (`dotnet outdated --upgrade:prompt`) regularly
 5. **Testing**: Run tests via VS Code test explorer or `dotnet test`
 
 ## Reference Links
