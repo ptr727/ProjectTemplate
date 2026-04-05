@@ -27,6 +27,7 @@ Available VS Code tasks (use via `run_task` tool):
 - `.Net Format`: Verify formatting and style (must pass)
 - `CSharpier Format`: Auto-format code with CSharpier
 - `.Net Tool Update`: Update dotnet tools
+- `.Net Outdated Upgrade`: Upgrade outdated NuGet dependencies (interactive prompt)
 - `Husky.Net Run`: Run pre-commit hooks manually
 
 ## Tooling and Editor

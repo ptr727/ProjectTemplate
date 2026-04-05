@@ -34,6 +34,7 @@ Available VS Code tasks (use via `run_task` tool):
 - `.Net Format`: Verify formatting and style (must pass)
 - `CSharpier Format`: Auto-format code with CSharpier
 - `.Net Tool Update`: Update dotnet tools
+- `.Net Outdated Upgrade`: Upgrade outdated NuGet dependencies (interactive prompt)
 - `Husky.Net Run`: Run pre-commit hooks manually
 
 ## Coding Standards and Conventions
@@ -315,7 +316,7 @@ The project includes comprehensive `.editorconfig` settings that enforce:
 3. **Before committing**:
    - Run `.Net Format` task to verify compliance
    - Husky hooks will run automatically
-4. **Dependency updates**: Use `dotnet outdated --upgrade:prompt` regularly
+4. **Dependency updates**: Run `.Net Outdated Upgrade` task (`dotnet outdated --upgrade:prompt`) regularly
 5. **Testing**: Run tests via VS Code test explorer or `dotnet test`
 
 ## Reference Links
