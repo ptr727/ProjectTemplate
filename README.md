@@ -382,6 +382,15 @@ Licensed under the [MIT License][license-link]\
   - Save the PAT as `DOCKER_HUB_ACCESS_TOKEN` and `DOCKER_HUB_USERNAME` in:
     - GitHub project security Settings / Secrets / Actions.
     - GitHub project security Settings / Secrets / Dependabot.
+- Create a [GitHub Personal Access Token](https://github.com/settings/personal-access-tokens).
+  - Save the PAT as `WORKFLOW_PAT`.
+  - Permissions:
+    - Contents: Read & write (to push the codegen commit)
+    - Pull requests: Read & write — to create the PR
+    - Workflows: Read & write — this is the key permission that allows the token to trigger pull_request events in other workflows
+    - Metadata: Read-only (auto-required)
+  - Save the PAT as `WORKFLOW_PAT` in:
+    - GitHub project security Settings / Secrets / Actions.
 
 **GitHub project settings**:
 
