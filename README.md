@@ -387,8 +387,9 @@ Licensed under the [MIT License][license-link]\
   - Permissions:
     - Contents: Read & write (to push the codegen commit)
     - Pull requests: Read & write — to create the PR
-    - Workflows: Read & write — this is the key permission that allows the token to trigger pull_request events in other workflows
+    - Workflows: Read & write — this is the key permission that allows the token to trigger `pull_request` events in other workflows; without it the auto-merge workflow never fires
     - Metadata: Read-only (auto-required)
+  - The auto-merge condition gates on `github.event.pull_request.user.login` matching the PAT owner's GitHub username (`ptr727`), so only PRs created by this token on the `codegen` branch are eligible for auto-merge.
   - Save the PAT as `WORKFLOW_PAT` in:
     - GitHub project security Settings / Secrets / Actions.
 
@@ -420,9 +421,6 @@ Licensed under the [MIT License][license-link]\
       - `Review draft pull requests`
 - Actions / General:
   - `Allow GitHub Actions to create and approve pull requests`
-- Labels:
-  - `https://github.com/ptr727/[project]/labels`
-  - Add `automated-codegen` label.
 
 ### Template - Branching Workflow
 
@@ -433,7 +431,8 @@ Licensed under the [MIT License][license-link]\
 - Only commit to feature branches, do not commit directly to `develop` or to `main`.
 - Always "Squash and merge" from feature branches to the `develop` branch to minimize change history.
 - Always "Squash and merge" from `develop` to `main` to maintain a linear history.
-- Bot generated pull requests will always merge to `main`, keep feature branches updated when merging to `develop` to merge to `main`.
+- Bot generated pull requests (codegen, dependabot) always checkout from and merge into `main` directly.
+- If `develop` falls behind after a bot merge, re-run codegen or rebase `develop` on `main` before merging `develop` to `main`.
 
 <!--- Shields links --->
 
