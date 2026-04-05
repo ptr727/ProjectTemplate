@@ -420,6 +420,9 @@ Licensed under the [MIT License][license-link]\
       - `Review draft pull requests`
 - Actions / General:
   - `Allow GitHub Actions to create and approve pull requests`
+- Labels:
+  - `https://github.com/ptr727/[project]/labels`
+  - Add `automated-codegen` label.
 
 ### Template - Branching Workflow
 
