@@ -44,7 +44,7 @@ For detailed specifications, see:
 - [`.github/copilot-instructions.md`](./.github/copilot-instructions.md) - Complete coding conventions and style guide
 - [`CODESTYLE.md`](./CODESTYLE.md) - Code style and formatting rules
 - [`.editorconfig`](./.editorconfig) - Automated style enforcement
-- Project task definitions - `CSharpier Format`, `.Net Build`, `.Net Format`, `Husky.Net Run`
+- Project task definitions - `CSharpier Format`, `.Net Build`, `.Net Format`, `.Net Outdated Upgrade`, `Husky.Net Run`
 
 ## Quick Start for Derived Projects
 
