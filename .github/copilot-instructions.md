@@ -309,6 +309,15 @@ The project includes comprehensive `.editorconfig` settings that enforce:
 
 **Always respect the .editorconfig settings** - these are verified by the build process.
 
+## Git and Commit Rules
+
+**These rules are absolute — no exceptions:**
+
+- **Never make git commits.** All commits must be cryptographically signed (SSH/GPG). AI coding agents cannot produce signed commits. Stage changes with `git add` and leave `git commit` to the developer, who must run it in their own environment where signing keys are available.
+- **Never force push.** Do not run `git push --force` or `git push --force-with-lease`. Force pushing rewrites shared branch history and is blocked by branch protection rules.
+- **Never run destructive git commands** (`git reset --hard`, `git checkout .`, `git restore .`, `git clean -f`) without explicit developer instruction.
+- **Staging is the limit.** Prepare changes and stage files; the developer handles all commits and pushes.
+
 ## Workflow
 
 1. **Before coding**: Run `dotnet tool restore` to ensure tools are installed

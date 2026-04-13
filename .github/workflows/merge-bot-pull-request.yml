@@ -13,7 +13,10 @@ jobs:
   merge-dependabot:
     name: Merge dependabot pull request job
     runs-on: ubuntu-latest
-    if: github.actor == 'dependabot[bot]' && github.event.pull_request.head.repo.full_name == github.repository
+    # Must come from dependabot, and the PR must be from the same repository to prevent abuse
+    if: >-
+      github.actor == 'dependabot[bot]' &&
+      github.event.pull_request.head.repo.full_name == github.repository
     permissions:
       contents: write
       pull-requests: write
@@ -36,7 +39,38 @@ jobs:
   merge-codegen:
     name: Merge codegen pull request job
     runs-on: ubuntu-latest
-    if: github.event.pull_request.user.login == 'github-actions[bot]' && github.event.pull_request.head.ref == 'codegen' && github.event.pull_request.base.ref == 'main' && github.event.pull_request.head.repo.full_name == github.repository && ((github.event.action == 'reopened' && github.actor == 'ptr727') || (github.event.action != 'reopened' && github.actor == 'github-actions[bot]'))
+    # Must come from the codegen workflow, and the PR must be from the same repository to prevent abuse
+    if: >-
+      github.event.pull_request.user.login == 'github-actions[bot]' &&
+      github.event.pull_request.head.ref == 'codegen' &&
+      github.event.pull_request.base.ref == 'main' &&
+      github.event.pull_request.head.repo.full_name == github.repository &&
+      (
+        (github.event.action == 'reopened' && github.actor == github.repository_owner) ||
+        (github.event.action != 'reopened' && github.actor == 'github-actions[bot]')
+      )
+    permissions:
+      contents: write
+      pull-requests: write
+
+    steps:
+
+      - name: Merge pull request step
+        run: gh pr merge --auto --squash "$PR_URL"
+        env:
+          PR_URL: ${{github.event.pull_request.html_url}}
+          GH_TOKEN: ${{secrets.GITHUB_TOKEN}}
+
+  merge-codegen-app:
+    name: Merge codegen app pull request job
+    runs-on: ubuntu-latest
+    # Must come from the codegen app workflow, and the PR must be from the same repository to prevent abuse
+    if: >-
+      github.actor == 'ptr727-codegen[bot]' &&
+      github.event.pull_request.user.login == 'ptr727-codegen[bot]' &&
+      github.event.pull_request.head.ref == 'codegen' &&
+      github.event.pull_request.base.ref == 'main' &&
+      github.event.pull_request.head.repo.full_name == github.repository
     permissions:
       contents: write
       pull-requests: write
