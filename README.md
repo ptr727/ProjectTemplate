@@ -388,16 +388,44 @@ Licensed under the [MIT License][license-link]\
     - Pull requests: Read & write — to close and reopen the PR, triggering `pull_request` workflow events under the PAT owner's identity
     - Workflows: Read & write — required for the PAT to trigger `pull_request` events in other workflows
     - Metadata: Read-only (auto-required)
-  - The codegen workflow uses `GITHUB_TOKEN` to create a signed commit and open the PR as `github-actions[bot]`. It then uses `WORKFLOW_PAT` to close and reopen the PR so the `pull_request` event fires under the PAT owner's identity (`ptr727`), which triggers the auto-merge workflow. PRs created or updated by `GITHUB_TOKEN` alone do not trigger other workflows, hence the close/reopen step.
+  - The codegen workflow uses `GITHUB_TOKEN` to create a signed commit and open the PR as `github-actions[bot]`. It then uses `WORKFLOW_PAT` to close and reopen the PR so the `pull_request` event fires under the repository owner's identity (`github.repository_owner`), which triggers the auto-merge workflow. PRs created or updated by `GITHUB_TOKEN` alone do not trigger other workflows, hence the close/reopen step.
   - The auto-merge condition in `merge-bot-pull-request.yml` requires all of the following to be true:
     - `github.event.pull_request.user.login == 'github-actions[bot]'` — the PR was created by the Actions bot (via `GITHUB_TOKEN`)
     - `github.event.pull_request.head.ref == 'codegen'` — the source branch is `codegen`
     - `github.event.pull_request.base.ref == 'main'` — the PR targets `main`
     - `github.event.pull_request.head.repo.full_name == github.repository` — the PR is from the same repository (not a fork)
-    - For `reopened` events: `github.actor == 'ptr727'` — the reopen was triggered by the PAT owner
+    - For `reopened` events: `github.actor == github.repository_owner` — the reopen was triggered by the repository owner account
     - For all other events: `github.actor == 'github-actions[bot]'` — triggered by normal workflow activity
   - Save the PAT as `WORKFLOW_PAT` in:
     - GitHub project security Settings / Secrets / Actions.
+- Create a [GitHub App](https://github.com/settings/apps) as an alternative to the PAT workflow.
+  - App name: `ptr727-codegen`
+  - The app bot user will be `ptr727-codegen[bot]`.
+  - Permissions required:
+    - Repository permissions:
+      - Contents: Read & write — to push commits to the `codegen` branch
+      - Pull requests: Read & write — to open and update pull requests
+      - Metadata: Read-only (auto-required)
+  - Install the app on the repository.
+  - Note the App ID from the app's settings page.
+  - Generate a private key (downloads a `.pem` file).
+  - Save the App ID as `CODEGEN_APP_ID` and the private key contents as `CODEGEN_APP_PRIVATE_KEY` in:
+    - GitHub project security Settings / Secrets / Actions.
+  - Unlike the PAT workflow, the GitHub App token triggers `pull_request` workflow events directly when opening a PR. No close/reopen step is required.
+  - The auto-merge condition in `merge-bot-pull-request.yml` for the app workflow requires all of the following to be true:
+    - `github.actor == 'ptr727-codegen[bot]'` — the event was triggered by the app
+    - `github.event.pull_request.user.login == 'ptr727-codegen[bot]'` — the PR was created by the app
+    - `github.event.pull_request.head.ref == 'codegen'` — the source branch is `codegen`
+    - `github.event.pull_request.base.ref == 'main'` — the PR targets `main`
+    - `github.event.pull_request.head.repo.full_name == github.repository` — the PR is from the same repository (not a fork)
+
+**Codegen workflow schedule**:
+
+- The PAT-based codegen workflow (`run-periodic-codegen-pull-request.yml`) runs every **Monday** at 02:00 UTC.
+  - Uses `WORKFLOW_PAT` to close and reopen the PR after creation so that the `reopened` `pull_request` event is triggered by the repository owner account, which is required by the auto-merge condition (`github.actor == github.repository_owner`). Therefore, `WORKFLOW_PAT` must belong to the repository owner account.
+- The App-based codegen workflow (`run-periodic-codegen-app-pull-request.yml`) runs every **Thursday** at 02:00 UTC.
+  - Uses `CODEGEN_APP_ID` and `CODEGEN_APP_PRIVATE_KEY` to generate a GitHub App installation token. The app token triggers `pull_request` events directly when the PR is opened — no close/reopen step needed.
+- The two workflows alternate through the week as independent verification that both authentication paths continue to work.
 
 **GitHub project settings**:
 
