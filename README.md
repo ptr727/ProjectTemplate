@@ -422,7 +422,7 @@ Licensed under the [MIT License][license-link]\
 **Codegen workflow schedule**:
 
 - The PAT-based codegen workflow (`run-periodic-codegen-pull-request.yml`) runs every **Monday** at 02:00 UTC.
-  - Uses `WORKFLOW_PAT` to close and reopen the PR after creation so that `pull_request` events fire under the PAT owner's identity (`ptr727`), triggering the auto-merge workflow.
+  - Uses `WORKFLOW_PAT` to close and reopen the PR after creation so that the `reopened` `pull_request` event is triggered by the repository owner account, which is required by the auto-merge condition (`github.actor == github.repository_owner`). Therefore, `WORKFLOW_PAT` must belong to the repository owner account.
 - The App-based codegen workflow (`run-periodic-codegen-app-pull-request.yml`) runs every **Thursday** at 02:00 UTC.
   - Uses `CODEGEN_APP_ID` and `CODEGEN_APP_PRIVATE_KEY` to generate a GitHub App installation token. The app token triggers `pull_request` events directly when the PR is opened — no close/reopen step needed.
 - The two workflows alternate through the week as independent verification that both authentication paths continue to work.
