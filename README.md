@@ -388,13 +388,13 @@ Licensed under the [MIT License][license-link]\
     - Pull requests: Read & write — to close and reopen the PR, triggering `pull_request` workflow events under the PAT owner's identity
     - Workflows: Read & write — required for the PAT to trigger `pull_request` events in other workflows
     - Metadata: Read-only (auto-required)
-  - The codegen workflow uses `GITHUB_TOKEN` to create a signed commit and open the PR as `github-actions[bot]`. It then uses `WORKFLOW_PAT` to close and reopen the PR so the `pull_request` event fires under the PAT owner's identity (`ptr727`), which triggers the auto-merge workflow. PRs created or updated by `GITHUB_TOKEN` alone do not trigger other workflows, hence the close/reopen step.
+  - The codegen workflow uses `GITHUB_TOKEN` to create a signed commit and open the PR as `github-actions[bot]`. It then uses `WORKFLOW_PAT` to close and reopen the PR so the `pull_request` event fires under the repository owner's identity (`github.repository_owner`), which triggers the auto-merge workflow. PRs created or updated by `GITHUB_TOKEN` alone do not trigger other workflows, hence the close/reopen step.
   - The auto-merge condition in `merge-bot-pull-request.yml` requires all of the following to be true:
     - `github.event.pull_request.user.login == 'github-actions[bot]'` — the PR was created by the Actions bot (via `GITHUB_TOKEN`)
     - `github.event.pull_request.head.ref == 'codegen'` — the source branch is `codegen`
     - `github.event.pull_request.base.ref == 'main'` — the PR targets `main`
     - `github.event.pull_request.head.repo.full_name == github.repository` — the PR is from the same repository (not a fork)
-    - For `reopened` events: `github.actor == 'ptr727'` — the reopen was triggered by the PAT owner
+    - For `reopened` events: `github.actor == github.repository_owner` — the reopen was triggered by the repository owner account
     - For all other events: `github.actor == 'github-actions[bot]'` — triggered by normal workflow activity
   - Save the PAT as `WORKFLOW_PAT` in:
     - GitHub project security Settings / Secrets / Actions.
