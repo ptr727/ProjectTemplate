@@ -3,6 +3,7 @@ name: Run codegen and pull request task
 on:
   workflow_call:
     secrets:
+      # Use PAT to trigger workflows
       WORKFLOW_PAT:
         required: true
 
@@ -43,6 +44,7 @@ jobs:
         uses: peter-evans/create-pull-request@v8
         id: cpr
         with:
+          # Use GITHUB_TOKEN to sign the commit, but will not trigger workflows
           token: ${{ secrets.GITHUB_TOKEN }}
           base: main
           branch: codegen
@@ -59,4 +61,5 @@ jobs:
           gh pr close "$PR"
           gh pr reopen "$PR"
         env:
+          # Use PAT to trigger workflows
           GH_TOKEN: ${{ secrets.WORKFLOW_PAT }}
