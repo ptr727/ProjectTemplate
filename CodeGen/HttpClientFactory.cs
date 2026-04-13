@@ -27,13 +27,9 @@ internal static class HttpClientFactory
     private static readonly TimeSpan s_httpClientTimeout = TimeSpan.FromSeconds(120);
 
     private static readonly Lazy<HttpClient> s_httpClient = new(CreateHttpClient);
-    private static readonly Lazy<ResilienceHandler> s_resilienceHandler = new(
-        CreateResilienceHandler
-    );
 
+    // Returns the shared singleton HttpClient; all callers share the connection pool and circuit breaker state.
     internal static HttpClient GetHttpClient() => s_httpClient.Value;
-
-    private static ResilienceHandler GetResilienceHandler() => s_resilienceHandler.Value;
 
     private static ResilienceHandler CreateResilienceHandler() =>
         new(
@@ -106,9 +102,16 @@ internal static class HttpClientFactory
             ? outcome.Exception is not (OperationCanceledException or BrokenCircuitException)
             : outcome.Result is not null && (int)outcome.Result.StatusCode is 408 or 429 or >= 500;
 
-    private static HttpClient CreateHttpClient()
+    // Creates a new HttpClient instance; each caller gets an independent resilience handler
+    // and circuit breaker state. Callers should store and reuse the returned instance.
+    [System.Diagnostics.CodeAnalysis.SuppressMessage(
+        "Reliability",
+        "CA2000:Dispose objects before losing scope",
+        Justification = "HttpClient takes ownership of the handler and disposes it when the client is disposed."
+    )]
+    internal static HttpClient CreateHttpClient()
     {
-        HttpClient httpClient = new(GetResilienceHandler()) { Timeout = s_httpClientTimeout };
+        HttpClient httpClient = new(CreateResilienceHandler()) { Timeout = s_httpClientTimeout };
         httpClient.DefaultRequestHeaders.UserAgent.Add(
             new ProductInfoHeaderValue(AssemblyInfo.AppName, AssemblyInfo.ReleaseVersion)
         );

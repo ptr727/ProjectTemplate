@@ -3,7 +3,7 @@ name: Run weekly CodeGen and Pull Request action
 on:
   workflow_dispatch:
   schedule:
-    # Run weekly on Mondays at 02:00 UTC
+    # Run weekly on Mondays at 02:00 UTC (PAT workflow; app workflow runs on Thursdays)
     - cron: '0 2 * * MON'
 
 concurrency:
