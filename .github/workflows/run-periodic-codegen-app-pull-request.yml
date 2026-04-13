@@ -7,7 +7,7 @@ on:
     - cron: '0 2 * * THU'
 
 concurrency:
-  group: ${{ github.workflow }}-${{ github.ref }}
+  group: codegen-${{ github.ref }}
   cancel-in-progress: true
 
 jobs:
@@ -15,7 +15,9 @@ jobs:
   run-codegen-app:
     name: Run codegen app and pull request job
     uses: ./.github/workflows/run-codegen-app-pull-request-task.yml
-    secrets: inherit
+    secrets:
+      CODEGEN_APP_ID: ${{ secrets.CODEGEN_APP_ID }}
+      CODEGEN_APP_PRIVATE_KEY: ${{ secrets.CODEGEN_APP_PRIVATE_KEY }}
     permissions:
       contents: write
       pull-requests: write
