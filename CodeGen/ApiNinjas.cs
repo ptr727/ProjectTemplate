@@ -1,4 +1,6 @@
 using System.Diagnostics.CodeAnalysis;
+using System.Net.Http.Headers;
+using System.Net.Mime;
 using System.Text.Json;
 using System.Text.Json.Serialization;
 
@@ -17,6 +19,9 @@ internal sealed class ApiNinjas(string apiKey, CancellationToken cancellationTok
         using HttpRequestMessage request = new(
             HttpMethod.Get,
             "https://api.api-ninjas.com/v2/quotes?categories=philosophy"
+        );
+        request.Headers.Accept.Add(
+            new MediaTypeWithQualityHeaderValue(MediaTypeNames.Application.Json)
         );
         request.Headers.Add("X-Api-Key", apiKey);
 
