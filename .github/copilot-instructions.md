@@ -228,6 +228,18 @@ Available VS Code tasks (use via `run_task` tool):
    </ItemGroup>
    ```
 
+5. **Directory.Build.props**: Common MSBuild properties shared across all projects
+   (`TargetFramework`, `Nullable`, `ImplicitUsings`, `AnalysisLevel`, `AnalysisMode`,
+   `EnableNETAnalyzers`, `ArtifactsPath`, `IsPackable`, `ManagePackageVersionsCentrally`)
+   live here at the solution root. Only add a property to a `.csproj` when it is
+   specific to that project or requires an explicit override of the shared default.
+
+6. **Directory.Packages.props**: All NuGet package versions are centralised here via
+   `PackageVersion` items. Individual `.csproj` files use `PackageReference Include="..."`
+   with no `Version` attribute. Asset metadata (`PrivateAssets`, `IncludeAssets`) stays
+   in the `.csproj` `PackageReference` element. Use `VersionOverride` only when a project
+   genuinely requires a different version from the central default.
+
 ### Code Formatting Tools
 
 1. **CSharpier**: Primary code formatter

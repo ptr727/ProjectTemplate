@@ -94,6 +94,28 @@
             }
         },
         {
+            "label": ".Net Benchmark",
+            "type": "process",
+            "command": "dotnet",
+            "args": [
+                "run",
+                "--project",
+                "${workspaceFolder}/Benchmarks/Benchmarks.csproj",
+                "-c",
+                "Release",
+                "--",
+                "--artifacts",
+                "${workspaceFolder}/.artifacts/benchmarks"
+            ],
+            "problemMatcher": [
+                "$msCompile"
+            ],
+            "presentation": {
+                "showReuseMessage": false,
+                "clear": false
+            }
+        },
+        {
             "label": ".Net Outdated Upgrade",
             "type": "process",
             "command": "dotnet",
