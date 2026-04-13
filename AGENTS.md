@@ -24,6 +24,15 @@ For comprehensive coding standards and detailed conventions, refer to [`.github/
   - `<EnableNETAnalyzers>true</EnableNETAnalyzers>`
   - `<AnalysisLevel>latest-all</AnalysisLevel>`
 
+### Project Configuration
+
+- Common MSBuild properties (`TargetFramework`, `Nullable`, `ImplicitUsings`, `AnalysisLevel`, etc.)
+  live in `Directory.Build.props` at the solution root. Do not duplicate these in individual `.csproj`
+  files — only add a property to a `.csproj` when it is project-specific or overrides the shared default.
+- All NuGet package versions are centralised in `Directory.Packages.props`. `PackageReference` elements
+  in `.csproj` files must not include a `Version` attribute. Asset metadata (`PrivateAssets`,
+  `IncludeAssets`) stays in the `.csproj` `PackageReference` element.
+
 ### Development Environment
 
 - Target latest .NET SDK (currently .NET 10 with C# 14)

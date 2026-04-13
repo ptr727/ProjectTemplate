@@ -6,13 +6,13 @@
             "type": "coreclr",
             "request": "launch",
             "preLaunchTask": ".Net Build",
-            "program": "${workspaceFolder}/Console/bin/Debug/net10.0/Console.dll",
+            "program": "${workspaceFolder}/.artifacts/bin/Console/Debug/Console.dll",
             "args": [
                 "--loglevel=Debug",
                 "--logfile=console.log",
                 "--logfile-clear=true"
             ],
-            "cwd": "${workspaceFolder}/Console/bin/Debug/net10.0",
+            "cwd": "${workspaceFolder}/.artifacts/bin/Console/Debug",
             "console": "internalConsole",
             "stopAtEntry": false
         },
@@ -21,7 +21,7 @@
             "type": "coreclr",
             "request": "launch",
             "preLaunchTask": ".Net Build",
-            "program": "${workspaceFolder}/Console/bin/Debug/net10.0/Console.dll",
+            "program": "${workspaceFolder}/.artifacts/bin/Console/Debug/Console.dll",
             "args": [
                 "--loglevel=Debug",
                 "--logfile=console.log",
@@ -29,7 +29,7 @@
                 "test",
                 "--test=test"
             ],
-            "cwd": "${workspaceFolder}/Console/bin/Debug/net10.0",
+            "cwd": "${workspaceFolder}/.artifacts/bin/Console/Debug",
             "console": "internalConsole",
             "stopAtEntry": false
         },
@@ -38,12 +38,12 @@
             "type": "coreclr",
             "request": "launch",
             "preLaunchTask": ".Net Build",
-            "program": "${workspaceFolder}/CodeGen/bin/Debug/net10.0/CodeGen.dll",
+            "program": "${workspaceFolder}/.artifacts/bin/CodeGen/Debug/CodeGen.dll",
             "args": [
                 "--codepath",
                 "${workspaceFolder}/CodeGen"
             ],
-            "cwd": "${workspaceFolder}/CodeGen/bin/Debug/net10.0",
+            "cwd": "${workspaceFolder}/.artifacts/bin/CodeGen/Debug",
             "console": "internalConsole",
             "stopAtEntry": false
         }
