@@ -40,7 +40,7 @@ jobs:
       - name: Build library project step
         run: |
           dotnet build ./Library/Library.csproj \
-            --output ${{ runner.temp }}/publish \
+            -property:PackageOutputPath=${{ runner.temp }}/publish \
             --configuration ${{ github.ref_name == 'main' && 'Release' || 'Debug' }} \
             -property:Version=${{ needs.get-version.outputs.AssemblyVersion }} \
             -property:FileVersion=${{ needs.get-version.outputs.AssemblyFileVersion }} \
