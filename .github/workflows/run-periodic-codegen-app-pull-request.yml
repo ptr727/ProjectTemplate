@@ -1,0 +1,21 @@
+name: Run weekly CodeGen App and Pull Request action
+
+on:
+  workflow_dispatch:
+  schedule:
+    # Run weekly on Thursdays at 02:00 UTC (PAT workflow runs on Mondays)
+    - cron: '0 2 * * THU'
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+
+  run-codegen-app:
+    name: Run codegen app and pull request job
+    uses: ./.github/workflows/run-codegen-app-pull-request-task.yml
+    secrets: inherit
+    permissions:
+      contents: write
+      pull-requests: write
