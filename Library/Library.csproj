@@ -1,13 +1,11 @@
 <Project Sdk="Microsoft.NET.Sdk">
   <PropertyGroup>
-    <AnalysisLevel>latest-all</AnalysisLevel>
     <AssemblyVersion>1.0.0.0</AssemblyVersion>
     <Authors>Pieter Viljoen</Authors>
     <Company>Pieter Viljoen</Company>
     <Copyright>Pieter Viljoen</Copyright>
     <Description>C# .NET template project</Description>
     <EmbedUntrackedSources>true</EmbedUntrackedSources>
-    <EnableNETAnalyzers>true</EnableNETAnalyzers>
     <FileVersion>1.0.0.0</FileVersion>
     <GenerateDocumentationFile>true</GenerateDocumentationFile>
     <GeneratePackageOnBuild>true</GeneratePackageOnBuild>
@@ -15,7 +13,6 @@
     <InformationalVersion>1.0.0-pre</InformationalVersion>
     <IsAotCompatible>true</IsAotCompatible>
     <IsPackable>true</IsPackable>
-    <Nullable>enable</Nullable>
     <PackageId>ptr727.ProjectTemplate.Library</PackageId>
     <PackageLicenseExpression>MIT</PackageLicenseExpression>
     <PackageProjectUrl>https://github.com/ptr727/ProjectTemplate</PackageProjectUrl>
@@ -26,19 +23,14 @@
     <RepositoryUrl>https://github.com/ptr727/ProjectTemplate</RepositoryUrl>
     <RootNamespace>ptr727.ProjectTemplate.Library</RootNamespace>
     <SymbolPackageFormat>snupkg</SymbolPackageFormat>
-    <TargetFramework>net10.0</TargetFramework>
     <Version>1.0.0.0</Version>
   </PropertyGroup>
   <PropertyGroup Condition="'$(IsPublish)' == 'true'">
     <VerifyReferenceAotCompatibility>true</VerifyReferenceAotCompatibility>
   </PropertyGroup>
   <ItemGroup>
-    <PackageReference Include="Microsoft.Extensions.Logging.Abstractions" Version="10.0.5" />
-    <PackageReference
-      Include="Microsoft.SourceLink.GitHub"
-      Version="10.0.201"
-      PrivateAssets="all"
-    />
+    <PackageReference Include="Microsoft.Extensions.Logging.Abstractions" />
+    <PackageReference Include="Microsoft.SourceLink.GitHub" PrivateAssets="all" />
   </ItemGroup>
   <ItemGroup>
     <InternalsVisibleTo Include="Console" />

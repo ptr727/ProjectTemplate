@@ -36,7 +36,7 @@ jobs:
         run: |
           dotnet publish ./Console/Console.csproj \
             --runtime ${{ matrix.runtime }} \
-            --output ${{ runner.temp }}/publish/${{ matrix.runtime }} \
+            -property:PublishDir=${{ runner.temp }}/publish/${{ matrix.runtime }}/ \
             --configuration ${{ github.ref_name == 'main' && 'Release' || 'Debug' }} \
             -property:PublishAot=false \
             -property:Version=${{ needs.get-version.outputs.AssemblyVersion }} \
