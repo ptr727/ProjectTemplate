@@ -13,7 +13,7 @@ jobs:
   merge-dependabot:
     name: Merge dependabot pull request job
     runs-on: ubuntu-latest
-    # To prevent abuse, the merge must come from Dependabot and the PR must originate from this repository.
+    # To prevent abuse, the PR must come from Dependabot and the PR must originate from this repository.
     if: >-
       github.actor == 'dependabot[bot]' &&
       github.event.pull_request.head.repo.full_name == github.repository
@@ -29,15 +29,12 @@ jobs:
         with:
           github-token: "${{ secrets.GITHUB_TOKEN }}"
 
-      # Merge any non-NuGet update, e.g. GitHub Actions often updates v1 to v2
-      # Merge NuGet only for minor and patch updates, e.g. major updates may build but break functionality
+      # Merge any non-NuGet update, e.g. GitHub Actions often updates v1 to v2.
+      # Merge NuGet only for non-major updates, e.g. major updates may build but break functionality.
       - name: Merge pull request step
         if: >-
           (steps.metadata.outputs.package-ecosystem != 'nuget') ||
-          (
-            (steps.metadata.outputs.update-type == 'version-update:semver-minor') ||
-            (steps.metadata.outputs.update-type == 'version-update:semver-patch')
-          )
+          (steps.metadata.outputs.update-type != 'version-update:semver-major')
         run: gh pr merge --auto --squash "$PR_URL"
         env:
           PR_URL: ${{github.event.pull_request.html_url}}
@@ -46,7 +43,7 @@ jobs:
   merge-codegen:
     name: Merge codegen pull request job
     runs-on: ubuntu-latest
-    # To prevent abuse, the merge must come from the codegen workflow, and the PR must originate from this repository.
+    # To prevent abuse, the PR must come from the codegen workflow, and the PR must originate from this repository.
     if: >-
       github.event.pull_request.user.login == 'github-actions[bot]' &&
       github.event.pull_request.head.ref == 'codegen' &&
@@ -71,7 +68,7 @@ jobs:
   merge-codegen-app:
     name: Merge codegen app pull request job
     runs-on: ubuntu-latest
-    # Must come from the codegen app workflow, and the PR must be from the same repository to prevent abuse
+    # To prevent abuse, the PR must come from the codegen app workflow, and the PR must be from the same repository.
     if: >-
       github.actor == 'ptr727-codegen[bot]' &&
       github.event.pull_request.user.login == 'ptr727-codegen[bot]' &&
