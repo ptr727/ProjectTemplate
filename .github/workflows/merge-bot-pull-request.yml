@@ -68,7 +68,7 @@ jobs:
   merge-codegen-app:
     name: Merge codegen app pull request job
     runs-on: ubuntu-latest
-    # To prevent abuse, the PR must come from the codegen app workflow, and the PR must be from the same repository.
+    # To prevent abuse, the PR must come from the codegen app workflow, and the PR must originate from this repository.
     if: >-
       github.actor == 'ptr727-codegen[bot]' &&
       github.event.pull_request.user.login == 'ptr727-codegen[bot]' &&
