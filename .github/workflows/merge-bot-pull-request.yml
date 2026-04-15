@@ -46,7 +46,7 @@ jobs:
   merge-codegen:
     name: Merge codegen pull request job
     runs-on: ubuntu-latest
-    # To prevent abuse merge must come from the codegen workflow and be from the same repository
+    # To prevent abuse, the merge must come from the codegen workflow and the PR must originate from this repository
     if: >-
       github.event.pull_request.user.login == 'github-actions[bot]' &&
       github.event.pull_request.head.ref == 'codegen' &&
