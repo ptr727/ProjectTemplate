@@ -29,8 +29,8 @@ jobs:
         with:
           github-token: "${{ secrets.GITHUB_TOKEN }}"
 
-      # Merge any non-nuget any update, e.g. github-actions often updates v1 to v2
-      # Merge nuget only if minor and patch updates, e.g. major updates may build but break functionality
+      # Merge any non-NuGet update, e.g. GitHub Actions often updates v1 to v2
+      # Merge NuGet only if minor and patch updates, e.g. major updates may build but break functionality
       - name: Merge pull request step
         if: >-
           (steps.metadata.outputs.package-ecosystem != 'nuget') ||
