@@ -13,7 +13,7 @@ jobs:
   merge-dependabot:
     name: Merge dependabot pull request job
     runs-on: ubuntu-latest
-    # Must come from dependabot, and the PR must be from the same repository to prevent abuse
+    # To prevent abuse merge must come from dependabot and be from the same repository
     if: >-
       github.actor == 'dependabot[bot]' &&
       github.event.pull_request.head.repo.full_name == github.repository
@@ -29,8 +29,12 @@ jobs:
         with:
           github-token: "${{ secrets.GITHUB_TOKEN }}"
 
+      # Merge any non-nuget any update, e.g. github-actions often updates v1 to v2
+      # Merge nuget only if minor and patch updates, e.g. major updates may build but break functionality
       - name: Merge pull request step
-        if: steps.metadata.outputs.update-type != 'version-update:semver-major'
+        if: >-
+          (steps.metadata.outputs.package-ecosystem != 'nuget') ||
+          (steps.metadata.outputs.update-type != 'version-update:semver-major')
         run: gh pr merge --auto --squash "$PR_URL"
         env:
           PR_URL: ${{github.event.pull_request.html_url}}
@@ -39,7 +43,7 @@ jobs:
   merge-codegen:
     name: Merge codegen pull request job
     runs-on: ubuntu-latest
-    # Must come from the codegen workflow, and the PR must be from the same repository to prevent abuse
+    # To prevent abuse merge must come from the codegen workflow and be from the same repository
     if: >-
       github.event.pull_request.user.login == 'github-actions[bot]' &&
       github.event.pull_request.head.ref == 'codegen' &&
