@@ -13,7 +13,7 @@ jobs:
   merge-dependabot:
     name: Merge dependabot pull request job
     runs-on: ubuntu-latest
-    # To prevent abuse merge must come from dependabot and be from the same repository
+    # To prevent abuse, the merge must come from Dependabot and the PR must originate from this repository.
     if: >-
       github.actor == 'dependabot[bot]' &&
       github.event.pull_request.head.repo.full_name == github.repository
