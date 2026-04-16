@@ -15,10 +15,13 @@
 
 # Build Dockerfile
 # docker buildx create --name "projecttemplate" --use
-# docker buildx build --platform linux/amd64,linux/arm64 --file ./Docker/Ubuntu.Rolling.Dockerfile .
+# docker buildx build --platform linux/amd64,linux/arm64 --file ./Docker/Dockerfile .
+
+# Build and log output
+# docker buildx build --no-cache --progress=plain --platform linux/amd64 --file ./Docker/Dockerfile . 2>&1 | tee build.log
 
 # Test linux/amd64 target
-# docker buildx build --load --platform linux/amd64 --tag projecttemplate:latest --file ./Docker/Ubuntu.Rolling.Dockerfile .
+# docker buildx build --load --platform linux/amd64 --tag projecttemplate:latest --file ./Docker/Dockerfile .
 # docker run -it --rm --name ProjectTemplate-Test projecttemplate:latest /bin/bash
 
 
