@@ -411,6 +411,7 @@ Licensed under the [MIT License][license-link]\
   - [Install the app](https://github.com/settings/apps) on your account and grant it access to the repository. The app must be both created **and** installed — creating the app alone is not sufficient. The `actions/create-github-app-token` action will fail with a `Not Found` error if the app is not installed on the repository.
   - Save the App ID as `CODEGEN_APP_ID` and the private key contents as `CODEGEN_APP_PRIVATE_KEY` in:
     - GitHub project security Settings / Secrets / Actions.
+  - If the codegen workflows require additional secrets (e.g. third-party API keys), register them in the same location and reference them in the reusable workflow task files.
   - Unlike the PAT workflow, the GitHub App token triggers `pull_request` workflow events directly when opening a PR. No close/reopen step is required.
   - The auto-merge condition in `merge-bot-pull-request.yml` for the app workflow requires all of the following to be true:
     - `github.actor == 'ptr727-codegen[bot]'` — the event was triggered by the app

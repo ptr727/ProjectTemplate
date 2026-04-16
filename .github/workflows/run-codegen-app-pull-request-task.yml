@@ -45,7 +45,7 @@ jobs:
         run: |
           dotnet run --project ./CodeGen/CodeGen.csproj -- \
             --codepath ./CodeGen \
-            --apikey ${{ secrets.NINJA_API_KEY }}
+            --apikey "${{ secrets.NINJA_API_KEY }}"
 
       - name: Format code step
         run: |
