@@ -406,9 +406,9 @@ Licensed under the [MIT License][license-link]\
       - Contents: Read & write — to push commits to the `codegen` branch
       - Pull requests: Read & write — to open and update pull requests
       - Metadata: Read-only (auto-required)
-  - Install the app on the repository.
   - Note the App ID from the app's settings page.
   - Generate a private key (downloads a `.pem` file).
+  - [Install the app](https://github.com/settings/apps) on your account and grant it access to the repository. The app must be both created **and** installed — creating the app alone is not sufficient. The `actions/create-github-app-token` action will fail with a `Not Found` error if the app is not installed on the repository.
   - Save the App ID as `CODEGEN_APP_ID` and the private key contents as `CODEGEN_APP_PRIVATE_KEY` in:
     - GitHub project security Settings / Secrets / Actions.
   - Unlike the PAT workflow, the GitHub App token triggers `pull_request` workflow events directly when opening a PR. No close/reopen step is required.
