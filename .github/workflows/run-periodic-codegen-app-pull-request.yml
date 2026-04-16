@@ -16,9 +16,7 @@ jobs:
   run-codegen-app:
     name: Run codegen app and pull request job
     uses: ./.github/workflows/run-codegen-app-pull-request-task.yml
-    secrets:
-      CODEGEN_APP_ID: ${{ secrets.CODEGEN_APP_ID }}
-      CODEGEN_APP_PRIVATE_KEY: ${{ secrets.CODEGEN_APP_PRIVATE_KEY }}
+    secrets: inherit
     permissions:
       contents: write
       pull-requests: write
