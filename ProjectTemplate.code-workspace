@@ -73,8 +73,6 @@
             "editor.formatOnSave": true,
             "editor.defaultFormatter": "csharpier.csharpier-vscode"
         },
-        "chat.agent.maxRequests": 100,
-        "githubLocalActions.actCommand": "act --artifact-server-path ./.artifacts",
         "git.alwaysSignOff": true,
         "markdown.extension.toc.levels": "2..3"
 	},
