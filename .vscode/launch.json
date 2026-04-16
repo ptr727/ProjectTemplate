@@ -6,13 +6,13 @@
             "type": "coreclr",
             "request": "launch",
             "preLaunchTask": ".Net Build",
-            "program": "${workspaceFolder}/.artifacts/bin/Console/Debug/Console.dll",
+            "program": "${workspaceFolder}/.artifacts/bin/Console/debug/Console.dll",
             "args": [
                 "--loglevel=Debug",
                 "--logfile=console.log",
                 "--logfile-clear=true"
             ],
-            "cwd": "${workspaceFolder}/.artifacts/bin/Console/Debug",
+            "cwd": "${workspaceFolder}/.artifacts/bin/Console/debug",
             "console": "internalConsole",
             "stopAtEntry": false
         },
@@ -21,7 +21,7 @@
             "type": "coreclr",
             "request": "launch",
             "preLaunchTask": ".Net Build",
-            "program": "${workspaceFolder}/.artifacts/bin/Console/Debug/Console.dll",
+            "program": "${workspaceFolder}/.artifacts/bin/Console/debug/Console.dll",
             "args": [
                 "--loglevel=Debug",
                 "--logfile=console.log",
@@ -29,7 +29,7 @@
                 "test",
                 "--test=test"
             ],
-            "cwd": "${workspaceFolder}/.artifacts/bin/Console/Debug",
+            "cwd": "${workspaceFolder}/.artifacts/bin/Console/debug",
             "console": "internalConsole",
             "stopAtEntry": false
         },
@@ -38,12 +38,14 @@
             "type": "coreclr",
             "request": "launch",
             "preLaunchTask": ".Net Build",
-            "program": "${workspaceFolder}/.artifacts/bin/CodeGen/Debug/CodeGen.dll",
+            "program": "${workspaceFolder}/.artifacts/bin/CodeGen/debug/CodeGen.dll",
             "args": [
                 "--codepath",
-                "${workspaceFolder}/CodeGen"
+                "${workspaceFolder}/CodeGen",
+                "--apikey",
+                "${env:NINJA_API_KEY}"
             ],
-            "cwd": "${workspaceFolder}/.artifacts/bin/CodeGen/Debug",
+            "cwd": "${workspaceFolder}/.artifacts/bin/CodeGen/debug",
             "console": "internalConsole",
             "stopAtEntry": false
         }
