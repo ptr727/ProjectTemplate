@@ -1,0 +1,88 @@
+name: Build PyPi library task
+
+on:
+  workflow_call:
+    inputs:
+      # Input to control whether to publish the PyPi library to PyPI
+      push:
+        required: false
+        type: boolean
+        default: false
+    outputs:
+      # Output of the uploaded artifact id
+      artifact-id:
+        value: ${{ jobs.build-pypilibrary.outputs.artifact-id }}
+
+jobs:
+
+  build-pypilibrary:
+    name: Build PyPi library project job
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: ./PyPiLibrary
+    outputs:
+      artifact-id: ${{ steps.artifact-upload-step.outputs.artifact-id }}
+
+    steps:
+
+      - name: Checkout code step
+        uses: actions/checkout@v6
+
+      - name: Setup uv step
+        uses: astral-sh/setup-uv@08807647e7069bb48b6ef5acd8ec9567f424441b # v8.1.0
+        with:
+          enable-cache: true
+          cache-dependency-glob: "PyPiLibrary/uv.lock"
+
+      - name: Sync dependencies step
+        run: uv sync --all-groups --frozen
+
+      - name: Lint with ruff step
+        run: uv run ruff check
+
+      - name: Verify formatting with ruff step
+        run: uv run ruff format --check
+
+      - name: Type check with pyright step
+        run: uv run pyright
+
+      - name: Run pytest step
+        run: uv run pytest
+
+      - name: Build sdist and wheel step
+        run: uv build
+
+      - name: Upload build artifacts step
+        id: artifact-upload-step
+        uses: actions/upload-artifact@v6
+        with:
+          name: pypilibrary-build
+          path: PyPiLibrary/dist/*
+
+  publish-pypilibrary:
+    name: Publish PyPi library job
+    if: ${{ inputs.push }}
+    needs: [build-pypilibrary]
+    runs-on: ubuntu-latest
+    environment:
+      name: pypi
+      url: https://pypi.org/p/ptr727-projecttemplate-library
+    # Trusted Publishing requires id-token: write at job level so the OIDC
+    # token is available to the publish action; the action exchanges it for a
+    # short-lived PyPI upload token. No PYPI_API_TOKEN secret is involved.
+    permissions:
+      id-token: write
+
+    steps:
+
+      - name: Download build artifacts step
+        uses: actions/download-artifact@v7
+        with:
+          artifact-ids: ${{ needs.build-pypilibrary.outputs.artifact-id }}
+          path: ./dist
+
+      - name: Publish to PyPI step
+        uses: pypa/gh-action-pypi-publish@6733eb7d741f0b11ec6a39b58540dab7590f9b7d # v1.14.0
+        with:
+          packages-dir: ./dist

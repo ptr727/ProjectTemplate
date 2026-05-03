@@ -27,6 +27,28 @@
             "include": [
                 "**/*.cs"
             ]
+        },
+        {
+            "name": "Ruff Format",
+            "command": "bash",
+            "args": [
+                "-lc",
+                "command -v uv >/dev/null 2>&1 && (cd PyPiLibrary && uv run ruff format ${staged}) || true"
+            ],
+            "include": [
+                "PyPiLibrary/**/*.py"
+            ]
+        },
+        {
+            "name": "Ruff Check",
+            "command": "bash",
+            "args": [
+                "-lc",
+                "command -v uv >/dev/null 2>&1 && (cd PyPiLibrary && uv run ruff check ${staged}) || true"
+            ],
+            "include": [
+                "PyPiLibrary/**/*.py"
+            ]
         }
     ]
 }

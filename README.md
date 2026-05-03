@@ -10,6 +10,7 @@ C# .NET project template.
 - **Versioned Releases**: [GitHub Releases][releases-link] - Version tagged source code and build artifacts.
 - **Docker Images**: [Docker Hub][docker-link] - Container images with all tools pre-installed.
 - **NuGet Packages** [NuGet Packages][nuget-link] - .NET libraries published to NuGet.org.
+- **PyPI Packages** [PyPI Package][pypi-link] - Python library published to PyPI.org.
 
 ### Build Status
 
@@ -25,7 +26,8 @@ C# .NET project template.
 [![Docker Latest][dockerlatestversion-shield]][docker-link]\
 [![Docker Develop][dockerdevelopversion-shield]][docker-link]\
 [![NuGet Release][nugetreleaseversion-shield]][nuget-link]\
-[![NuGet Pre-Release][nugetprereleaseversion-shield]][nuget-link]
+[![NuGet Pre-Release][nugetprereleaseversion-shield]][nuget-link]\
+[![PyPI Release][pypireleaseversion-shield]][pypi-link]
 
 ### Release Notes
 
@@ -293,7 +295,8 @@ Licensed under the [MIT License][license-link]\
 
 ### Template - TODO List
 
-- [ ] Configure git for SSH signing and SSH forwarding in dev containers.
+- [ ] Configure git for SSH signing and SSH forwarding in dev containers — see [docs/host-setup.md](./docs/host-setup.md), [docs/ssh-signing.md](./docs/ssh-signing.md), and [docs/devcontainer.md](./docs/devcontainer.md).
+- [ ] Decide whether your project needs the .NET (`NuGetLibrary/`) side, the Python (`PyPiLibrary/`) side, or both. Delete the unused folder and remove its references from `ProjectTemplate.slnx`, `dependabot.yml`, and the corresponding `.github/workflows/build-*-task.yml`.
 - [ ] Start on Linux to avoid file permission issues when moving from Windows.
 - [ ] Configure the [Developer Environment](#template---developer-environment-setup).
 - [ ] Open the project directory (*not the workspace*) in Visual Studio Code, and rename (Ctrl-Shift-H) all instances of `ProjectTemplate` to `[NewProject]` in code.
@@ -507,6 +510,9 @@ Licensed under the [MIT License][license-link]\
 [nuget-link]: https://www.nuget.org/packages/ptr727.ProjectTemplate.Library/
 [nugetreleaseversion-shield]: https://img.shields.io/nuget/v/ptr727.ProjectTemplate.Library?logo=nuget&label=NuGet%20Release
 [nugetprereleaseversion-shield]: https://img.shields.io/nuget/vpre/ptr727.ProjectTemplate.Library?logo=nuget&&label=NuGet%20Pre-Release&color=orange
+
+[pypi-link]: https://pypi.org/project/ptr727-projecttemplate-library/
+[pypireleaseversion-shield]: https://img.shields.io/pypi/v/ptr727-projecttemplate-library?logo=pypi&label=PyPI%20Release
 
 <!-- 3rd Party tool links -->
 

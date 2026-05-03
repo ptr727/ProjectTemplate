@@ -18,10 +18,11 @@ jobs:
     permissions:
       contents: write
     with:
-      # Push to GitHub and NuGet and Docker Hub
+      # Push to GitHub and NuGet and Docker Hub and PyPI
       github: true
       nuget: true
       dockerhub: true
+      pypi: true
 
   date-badge:
     name: Create BYOB date badge job

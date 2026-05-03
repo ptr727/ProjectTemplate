@@ -21,3 +21,12 @@ updates:
     actions-deps:
       patterns:
         - "*"
+- package-ecosystem: "uv"
+  target-branch: "main"
+  directory: "/PyPiLibrary"
+  schedule:
+    interval: "daily"
+  groups:
+    pypi-deps:
+      patterns:
+        - "*"

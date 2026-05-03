@@ -4,6 +4,7 @@
         <File Path=".github/workflows/build-docker-task.yml" />
         <File Path=".github/workflows/build-executable-task.yml" />
         <File Path=".github/workflows/build-nugetlibrary-task.yml" />
+        <File Path=".github/workflows/build-pypilibrary-task.yml" />
         <File Path=".github/workflows/build-release-task.yml" />
         <File Path=".github/workflows/get-version-task.yml" />
         <File Path=".github/workflows/merge-bot-pull-request.yml" />
