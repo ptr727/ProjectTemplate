@@ -6,8 +6,14 @@ set -euo pipefail
 # updates user shell init to add it to PATH for new shells; we add it to the
 # current PATH explicitly so the rest of this script can invoke `uv` without a
 # hard-coded path.
+#
+# uv is pinned to a specific version (via the version-prefixed install URL,
+# https://astral.sh/uv/<version>/install.sh) so a compromised or broken
+# upstream `latest` script cannot silently change what runs on contributors'
+# machines and CI runners. Bump UV_VERSION when you've reviewed release notes.
+UV_VERSION="0.11.8"
 if ! command -v uv >/dev/null 2>&1; then
-    curl -LsSf https://astral.sh/uv/install.sh | sh
+    curl -LsSf "https://astral.sh/uv/${UV_VERSION}/install.sh" | sh
     export PATH="$HOME/.local/bin:$PATH"
 fi
 
