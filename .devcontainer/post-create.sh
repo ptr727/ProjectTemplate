@@ -11,8 +11,17 @@ set -euo pipefail
 # https://astral.sh/uv/<version>/install.sh) so a compromised or broken
 # upstream `latest` script cannot silently change what runs on contributors'
 # machines and CI runners. Bump UV_VERSION when you've reviewed release notes.
+#
+# We re-install when uv is missing OR when the installed version doesn't
+# match the pin. The latter handles the case where a contributor (or a
+# previous run with a different pin) left a different uv version on PATH —
+# the pin is what's reproducible and what the lockfile is generated against.
 UV_VERSION="0.11.8"
-if ! command -v uv >/dev/null 2>&1; then
+installed_uv_version=""
+if command -v uv >/dev/null 2>&1; then
+    installed_uv_version="$(uv --version | awk '{print $2}')"
+fi
+if [[ "$installed_uv_version" != "$UV_VERSION" ]]; then
     curl -LsSf "https://astral.sh/uv/${UV_VERSION}/install.sh" | sh
     export PATH="$HOME/.local/bin:$PATH"
 fi
