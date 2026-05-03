@@ -211,6 +211,16 @@ Options:
 
 ## Development Environment Setup
 
+The recommended setup is the [Dev Container](./docs/devcontainer.md) — a single image with the .NET 10 SDK, the `uv` Python toolchain, and the GitHub CLI. It bind-mounts your SSH public key, allowed-signers file, and `gh` config from the host so commits sign correctly and `gh` is pre-authenticated.
+
+**Recommended (devcontainer)**:
+
+1. Complete [host setup](./docs/host-setup.md) once per machine (git identity, SSH key, allowed_signers, `gh auth login`, [SSH commit signing](./docs/ssh-signing.md)).
+2. Clone the repo, open in VS Code with the [Dev Containers extension][devcontainers-link], and run **Reopen in Container**.
+3. The `postCreateCommand` runs `dotnet tool restore`, installs Husky.Net hooks, and installs `uv`.
+
+**Alternative (host install)**:
+
 - **Install Developer Tools**:
 
   - Install [.NET SDK](https://dotnet.microsoft.com/en-us/download):
@@ -306,8 +316,9 @@ Licensed under the [MIT License][license-link]\
 #### Template - Git Setup
 
 - **⚠️ Prerequisites**:
-  - Configure git for SSH signing.
-  - Configure SSH forwarding for dev containers.
+  - Configure git for SSH signing — see [SSH commit signing](./docs/ssh-signing.md).
+  - Configure host prerequisites (SSH key, `allowed_signers`, `gh` auth) — see [host setup](./docs/host-setup.md).
+  - Configure SSH forwarding for dev containers — see [devcontainer setup](./docs/devcontainer.md).
 - Setup new project from template:
 
   ```shell
@@ -498,6 +509,8 @@ Licensed under the [MIT License][license-link]\
 [nugetprereleaseversion-shield]: https://img.shields.io/nuget/vpre/ptr727.ProjectTemplate.Library?logo=nuget&&label=NuGet%20Pre-Release&color=orange
 
 <!-- 3rd Party tool links -->
+
+[devcontainers-link]: https://marketplace.visualstudio.com/items?itemName=ms-vscode-remote.remote-containers
 
 [apininjas-link]: https://api-ninjas.com/api/quotes
 [awesomeassertions-link]: https://awesomeassertions.org/

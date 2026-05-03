@@ -1,0 +1,62 @@
+{
+    "name": "ProjectTemplate",
+    "image": "mcr.microsoft.com/devcontainers/dotnet:1-10.0",
+
+    "features": {
+        "ghcr.io/devcontainers/features/common-utils:2": {},
+        "ghcr.io/devcontainers/features/github-cli:1": {}
+    },
+
+    "mounts": [
+        {
+            "source": "${localEnv:HOME}${localEnv:USERPROFILE}/.ssh/id_ed25519.pub",
+            "target": "/home/vscode/.ssh/id_ed25519.pub",
+            "type": "bind",
+            "readonly": true
+        },
+        {
+            "source": "${localEnv:HOME}${localEnv:USERPROFILE}/.config/git/allowed_signers",
+            "target": "/home/vscode/.config/git/allowed_signers",
+            "type": "bind",
+            "readonly": true
+        },
+        {
+            "source": "${localEnv:HOME}${localEnv:USERPROFILE}/.config/gh",
+            "target": "/home/vscode/.config/gh",
+            "type": "bind",
+            "readonly": false
+        }
+    ],
+
+    "remoteUser": "vscode",
+    "workspaceFolder": "/workspaces/ProjectTemplate",
+
+    // The bind-mount on macOS hosts surfaces /home/vscode/.ssh as root-owned;
+    // chown it back so writes from inside the container (known_hosts updates
+    // by gh / git) land cleanly. Idempotent on Linux/WSL2.
+    "onCreateCommand": "sudo install -d -m 700 -o vscode -g vscode /home/vscode/.ssh",
+
+    // Install uv for the Python sibling project, restore .NET local tools,
+    // and install the husky git hooks. uv is installed under $HOME/.local/bin
+    // and added to PATH by uv's install script.
+    "postCreateCommand": ".devcontainer/post-create.sh",
+
+    "customizations": {
+        "vscode": {
+            "extensions": [
+                "csharpier.csharpier-vscode",
+                "davidanson.vscode-markdownlint",
+                "editorconfig.editorconfig",
+                "github.vscode-github-actions",
+                "gruntfuggly.todo-tree",
+                "ms-azuretools.vscode-docker",
+                "ms-dotnettools.csdevkit",
+                "streetsidesoftware.code-spell-checker",
+                "yzhang.markdown-all-in-one",
+                "ms-python.python",
+                "charliermarsh.ruff",
+                "ms-pyright.pyright"
+            ]
+        }
+    }
+}
