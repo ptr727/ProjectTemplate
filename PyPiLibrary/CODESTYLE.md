@@ -75,7 +75,7 @@ PyPiLibrary/
 
 ### Type Hints
 
-- **All public APIs are typed.** Pyright runs on `src/**` in strict mode (`[tool.pyright]` `strict = ["src/**"]`); tests run in standard mode.
+- **All public APIs are typed.** Pyright runs on `src/` in strict mode (`[tool.pyright]` `strict = ["src"]`); tests run in standard mode.
 - **Use modern syntax**: `list[int]` not `List[int]`, `dict[str, X]` not `Dict[str, X]`, `X | None` not `Optional[X]`, `from __future__ import annotations` only when needed for forward references.
 - **Don't add `# type: ignore` to silence pyright errors without a comment** explaining the constraint. If a recurring false positive needs suppression, configure it project-wide in `[tool.pyright]`.
 

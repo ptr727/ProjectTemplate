@@ -8,7 +8,7 @@ description = "Python PyPI template library — companion to the .NET NuGetLibra
 readme = "README.md"
 license = { text = "MIT" }
 authors = [{ name = "Pieter Viljoen" }]
-requires-python = ">=3.13"
+requires-python = ">=3.14"
 keywords = ["template", "pypi", "library"]
 classifiers = [
     "Development Status :: 4 - Beta",
@@ -17,7 +17,7 @@ classifiers = [
     "Operating System :: OS Independent",
     "Programming Language :: Python",
     "Programming Language :: Python :: 3",
-    "Programming Language :: Python :: 3.13",
+    "Programming Language :: Python :: 3.14",
     "Topic :: Software Development :: Libraries :: Python Modules",
 ]
 dynamic = ["version"]
@@ -46,7 +46,7 @@ include = ["src", "tests", "README.md", "pyproject.toml"]
 
 [tool.ruff]
 line-length = 120
-target-version = "py313"
+target-version = "py314"
 
 [tool.ruff.lint]
 select = [
@@ -66,9 +66,15 @@ docstring-code-format = true
 
 [tool.pyright]
 include = ["src", "tests"]
-strict = ["src/**"]
-pythonVersion = "3.13"
+pythonVersion = "3.14"
 typeCheckingMode = "standard"
+# Per-path strictness: `strict` accepts directory paths and applies
+# strict-mode type checking to everything under them — equivalent to
+# placing `# pyright: strict` at the top of every file in those dirs.
+# Public library surface (`src/`) needs tight types; tests inherit the
+# standard mode set above (fixtures, mocks, and parametrize args are
+# commonly looser).
+strict = ["src"]
 
 [tool.pytest.ini_options]
 minversion = "8.0"
