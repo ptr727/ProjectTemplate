@@ -18,11 +18,6 @@ on:
         required: false
         type: boolean
         default: false
-      # Input to control whether to publish the PyPi library to PyPI
-      pypi:
-        required: false
-        type: boolean
-        default: false
 
 jobs:
 
@@ -39,16 +34,14 @@ jobs:
       # Conditional push to NuGet.org
       push: ${{ inputs.nuget }}
 
+  # PyPi publishing happens in `publish-release.yml`, not here, so that
+  # `id-token: write` only needs to be granted at the entry-point job.
+  # This reusable workflow just builds and uploads the artifact; the
+  # publish-release workflow downloads it by name in a sibling job.
   build-pypilibrary:
     name: Build PyPi library job
     uses: ./.github/workflows/build-pypilibrary-task.yml
     secrets: inherit
-    permissions:
-      contents: read
-      id-token: write
-    with:
-      # Conditional publish to PyPI via Trusted Publishing
-      push: ${{ inputs.pypi }}
 
   build-executable:
     name: Build executable job

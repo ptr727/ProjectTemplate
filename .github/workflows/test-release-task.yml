@@ -39,4 +39,3 @@ jobs:
       github: false
       nuget: false
       dockerhub: false
-      pypi: false

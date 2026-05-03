@@ -18,11 +18,38 @@ jobs:
     permissions:
       contents: write
     with:
-      # Push to GitHub and NuGet and Docker Hub and PyPI
+      # Push to GitHub and NuGet and Docker Hub
       github: true
       nuget: true
       dockerhub: true
-      pypi: true
+
+  publish-pypi:
+    name: Publish PyPi library job
+    needs: [create-release]
+    runs-on: ubuntu-latest
+    environment:
+      name: pypi
+      url: https://pypi.org/p/ptr727-projecttemplate-library
+    # Trusted Publishing requires id-token: write at job level so the OIDC
+    # token is available to pypa/gh-action-pypi-publish; the action exchanges
+    # it for a short-lived PyPI upload token. No PYPI_API_TOKEN secret is
+    # involved. Granting this permission directly on the entry-point job
+    # avoids having to propagate it through the reusable workflow chain.
+    permissions:
+      id-token: write
+
+    steps:
+
+      - name: Download PyPi library build artifacts step
+        uses: actions/download-artifact@v7
+        with:
+          name: pypilibrary-build
+          path: ./dist
+
+      - name: Publish to PyPI step
+        uses: pypa/gh-action-pypi-publish@6733eb7d741f0b11ec6a39b58540dab7590f9b7d # v1.14.0
+        with:
+          packages-dir: ./dist
 
   date-badge:
     name: Create BYOB date badge job
