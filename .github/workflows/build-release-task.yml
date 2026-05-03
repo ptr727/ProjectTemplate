@@ -34,12 +34,12 @@ jobs:
       # Conditional push to NuGet.org
       push: ${{ inputs.nuget }}
 
-  # PyPi publishing happens in `publish-release.yml`, not here, so that
+  # PyPI publishing happens in `publish-release.yml`, not here, so that
   # `id-token: write` only needs to be granted at the entry-point job.
   # This reusable workflow just builds and uploads the artifact; the
   # publish-release workflow downloads it by name in a sibling job.
   build-pypilibrary:
-    name: Build PyPi library job
+    name: Build PyPI library job
     uses: ./.github/workflows/build-pypilibrary-task.yml
     secrets: inherit
 

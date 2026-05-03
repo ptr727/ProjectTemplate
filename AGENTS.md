@@ -133,7 +133,7 @@ The unified container hosts both `.NET 10` (base image) and Python via uv (insta
   - `CodeGen/` — internal codegen tooling
   - **Style guide: [`CODESTYLE.md`](./CODESTYLE.md)**.
 - **Python project** (env/build/test with `uv` from inside `PyPiLibrary/`):
-  - `PyPiLibrary/` — PyPi library template, published as `ptr727-projecttemplate-library`
+  - `PyPiLibrary/` — PyPI library template, published as `ptr727-projecttemplate-library`
   - **Style guide: [`PyPiLibrary/CODESTYLE.md`](./PyPiLibrary/CODESTYLE.md)**.
 - **Cross-cutting**:
   - `.github/` — workflows, Dependabot, Copilot instructions

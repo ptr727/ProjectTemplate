@@ -1,6 +1,6 @@
 # PyPiLibrary
 
-Python PyPi template — companion to the .NET `NuGetLibrary` in this repo. Published to PyPI as [`ptr727-projecttemplate-library`](https://pypi.org/project/ptr727-projecttemplate-library/).
+Python PyPI template — companion to the .NET `NuGetLibrary` in this repo. Published to PyPI as [`ptr727-projecttemplate-library`](https://pypi.org/project/ptr727-projecttemplate-library/).
 
 ## Stack
 

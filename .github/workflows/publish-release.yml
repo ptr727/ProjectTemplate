@@ -24,7 +24,7 @@ jobs:
       dockerhub: true
 
   publish-pypi:
-    name: Publish PyPi library job
+    name: Publish PyPI library job
     needs: [create-release]
     runs-on: ubuntu-latest
     environment:
@@ -47,7 +47,7 @@ jobs:
 
     steps:
 
-      - name: Download PyPi library build artifacts step
+      - name: Download PyPI library build artifacts step
         uses: actions/download-artifact@v7
         with:
           name: pypilibrary-build

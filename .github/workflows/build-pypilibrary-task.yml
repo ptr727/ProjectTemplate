@@ -1,6 +1,6 @@
-name: Build PyPi library task
+name: Build PyPI library task
 
-# This reusable workflow only builds the PyPi library and uploads the
+# This reusable workflow only builds the PyPI library and uploads the
 # wheel + sdist as a workflow-run artifact. It does NOT publish to PyPI.
 # Publishing happens directly in `publish-release.yml` so that the
 # `id-token: write` permission required by Trusted Publishing is granted
@@ -20,7 +20,7 @@ on:
 jobs:
 
   build-pypilibrary:
-    name: Build PyPi library project job
+    name: Build PyPI library project job
     runs-on: ubuntu-latest
     defaults:
       run:

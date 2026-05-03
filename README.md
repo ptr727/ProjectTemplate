@@ -10,7 +10,7 @@ C# .NET project template.
 - **Versioned Releases**: [GitHub Releases][releases-link] - Version tagged source code and build artifacts.
 - **Docker Images**: [Docker Hub][docker-link] - Container images with all tools pre-installed.
 - **NuGet Packages** [NuGet Packages][nuget-link] - .NET libraries published to NuGet.org.
-- **PyPI Packages** [PyPI Package][pypi-link] - Python library published to PyPI.org.
+- **PyPI Packages** [PyPI Packages][pypi-link] - Python library published to PyPI.org.
 
 ### Build Status
 

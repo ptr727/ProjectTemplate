@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "ptr727-projecttemplate-library"
-description = "Python PyPi template library — companion to the .NET NuGetLibrary in this template repo."
+description = "Python PyPI template library — companion to the .NET NuGetLibrary in this template repo."
 readme = "README.md"
 license = { text = "MIT" }
 authors = [{ name = "Pieter Viljoen" }]
