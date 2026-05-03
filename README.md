@@ -483,46 +483,39 @@ Licensed under the [MIT License][license-link]\
 - Bot generated pull requests (codegen, dependabot) always checkout from and merge into `main` directly.
 - If `develop` falls behind after a bot merge, re-run codegen or rebase `develop` on `main` before merging `develop` to `main`.
 
-<!--- Shields links --->
+<!--- Shields links (alphabetized per AGENTS.md) --->
 
-[github-link]: https://github.com/ptr727/ProjectTemplate
 [actions-link]: https://github.com/ptr727/ProjectTemplate/actions
-[discussions-link]: https://github.com/ptr727/ProjectTemplate/discussions
 [commits-link]: https://github.com/ptr727/ProjectTemplate/commits/main
-[issues-link]: https://github.com/ptr727/ProjectTemplate/issues
-[releases-link]: https://github.com/ptr727/ProjectTemplate/releases
-
-[license-link]: ./LICENSE
-[license-shield]: https://img.shields.io/github/license/ptr727/ProjectTemplate?label=License
-
+[discussions-link]: https://github.com/ptr727/ProjectTemplate/discussions
 [docker-link]: https://hub.docker.com/r/ptr727/projecttemplate
-[dockerlatestversion-shield]: https://img.shields.io/docker/v/ptr727/projecttemplate/latest?label=Docker%20Latest&logo=docker
-[dockerdevelopversion-shield]: https://img.shields.io/docker/v/ptr727/projecttemplate/develop?label=Docker%20Develop&logo=docker&color=orange
 [dockerbuildstatus-shield]: https://img.shields.io/github/actions/workflow/status/ptr727/ProjectTemplate/publish-periodic-docker-release.yml?logo=github&label=Docker%20Build
-
+[dockerdevelopversion-shield]: https://img.shields.io/docker/v/ptr727/projecttemplate/develop?label=Docker%20Develop&logo=docker&color=orange
+[dockerlatestversion-shield]: https://img.shields.io/docker/v/ptr727/projecttemplate/latest?label=Docker%20Latest&logo=docker
+[github-link]: https://github.com/ptr727/ProjectTemplate
+[issues-link]: https://github.com/ptr727/ProjectTemplate/issues
 [lastbuild-shield]: https://byob.yarr.is/ptr727/ProjectTemplate/lastbuild
 [lastcommit-shield]: https://img.shields.io/github/last-commit/ptr727/ProjectTemplate?logo=github&label=Last%20Commit
-
-[releaseversion-shield]: https://img.shields.io/github/v/release/ptr727/ProjectTemplate?logo=github&label=GitHub%20Release
-[prereleaseversion-shield]: https://img.shields.io/github/v/release/ptr727/ProjectTemplate?include_prereleases&label=GitHub%20Pre-Release&logo=github
-[releasebuildstatus-shield]: https://img.shields.io/github/actions/workflow/status/ptr727/ProjectTemplate/publish-release.yml?logo=github&label=Releases%20Build
-
+[license-link]: ./LICENSE
+[license-shield]: https://img.shields.io/github/license/ptr727/ProjectTemplate?label=License
 [nuget-link]: https://www.nuget.org/packages/ptr727.ProjectTemplate.Library/
-[nugetreleaseversion-shield]: https://img.shields.io/nuget/v/ptr727.ProjectTemplate.Library?logo=nuget&label=NuGet%20Release
 [nugetprereleaseversion-shield]: https://img.shields.io/nuget/vpre/ptr727.ProjectTemplate.Library?logo=nuget&&label=NuGet%20Pre-Release&color=orange
-
+[nugetreleaseversion-shield]: https://img.shields.io/nuget/v/ptr727.ProjectTemplate.Library?logo=nuget&label=NuGet%20Release
+[prereleaseversion-shield]: https://img.shields.io/github/v/release/ptr727/ProjectTemplate?include_prereleases&label=GitHub%20Pre-Release&logo=github
 [pypi-link]: https://pypi.org/project/ptr727-projecttemplate-library/
 [pypireleaseversion-shield]: https://img.shields.io/pypi/v/ptr727-projecttemplate-library?logo=pypi&label=PyPI%20Release
+[releasebuildstatus-shield]: https://img.shields.io/github/actions/workflow/status/ptr727/ProjectTemplate/publish-release.yml?logo=github&label=Releases%20Build
+[releases-link]: https://github.com/ptr727/ProjectTemplate/releases
+[releaseversion-shield]: https://img.shields.io/github/v/release/ptr727/ProjectTemplate?logo=github&label=GitHub%20Release
 
-<!-- 3rd Party tool links -->
-
-[devcontainers-link]: https://marketplace.visualstudio.com/items?itemName=ms-vscode-remote.remote-containers
+<!-- 3rd Party tool links (alphabetized per AGENTS.md) -->
 
 [apininjas-link]: https://api-ninjas.com/api/quotes
 [awesomeassertions-link]: https://awesomeassertions.org/
 [byob-link]: https://github.com/marketplace/actions/bring-your-own-badge
 [createpr-link]: https://github.com/marketplace/actions/create-pull-request
 [csharpier-link]: https://csharpier.com/
+[devcontainers-link]: https://marketplace.visualstudio.com/items?itemName=ms-vscode-remote.remote-containers
 [ghactions-link]: https://github.com/actions
 [ghautocommit-link]: https://github.com/marketplace/actions/git-auto-commit
 [ghdependabot-link]: https://github.com/dependabot

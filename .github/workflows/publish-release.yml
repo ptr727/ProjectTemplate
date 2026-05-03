@@ -29,7 +29,7 @@ jobs:
     runs-on: ubuntu-latest
     environment:
       name: pypi
-      url: https://pypi.org/p/ptr727-projecttemplate-library
+      url: https://pypi.org/project/ptr727-projecttemplate-library/
     # When a `permissions:` block is present, every scope not listed
     # collapses to `none`. The job needs three things explicitly:
     #   - `id-token: write` for Trusted Publishing's OIDC exchange
