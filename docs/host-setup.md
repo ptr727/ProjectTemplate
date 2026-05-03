@@ -2,7 +2,11 @@
 
 Prerequisites for working with this repo locally — apply once per machine before opening the devcontainer or building outside one.
 
-Supported hosts: **Linux**, **WSL2 on Windows** (native Windows is not supported for the devcontainer; use WSL2), **macOS**.
+Supported hosts:
+
+- **Linux** — both the devcontainer flow and the host-install flow.
+- **macOS** — both the devcontainer flow and the host-install flow.
+- **Windows** — the devcontainer flow requires **WSL2**; native Windows (PowerShell + winget) is supported only for the host-install flow described in `README.md`. The bind-mounts in `.devcontainer/devcontainer.json` rely on POSIX paths and only work from Linux/macOS/WSL2.
 
 ## Git Identity
 
@@ -54,10 +58,10 @@ systemctl --user enable --now ssh-agent.socket
 ssh-add ~/.ssh/id_ed25519
 ```
 
-For non-systemd shells, add to `~/.bashrc` or `~/.zshrc`:
+For non-systemd shells, add to `~/.bashrc` or `~/.zshrc`. The check probes the agent for at least one loaded key — `[ -z "$SSH_AUTH_SOCK" ]` alone would miss the case where `SSH_AUTH_SOCK` is set but points at a stale socket or a keyless agent:
 
 ```shell
-if [ -z "$SSH_AUTH_SOCK" ]; then
+if [ -z "$SSH_AUTH_SOCK" ] || ! ssh-add -l >/dev/null 2>&1; then
     eval "$(ssh-agent -s)" >/dev/null
     ssh-add ~/.ssh/id_ed25519 2>/dev/null
 fi
