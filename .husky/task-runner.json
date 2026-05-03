@@ -33,7 +33,7 @@
             "command": "bash",
             "args": [
                 "-lc",
-                "command -v uv >/dev/null 2>&1 && (cd PyPiLibrary && uv run ruff format ${staged}) || true"
+                "if command -v uv >/dev/null 2>&1; then uv run --project PyPiLibrary ruff format ${staged}; else echo 'uv not on PATH; skipping ruff format' >&2; fi"
             ],
             "include": [
                 "PyPiLibrary/**/*.py"
@@ -44,7 +44,7 @@
             "command": "bash",
             "args": [
                 "-lc",
-                "command -v uv >/dev/null 2>&1 && (cd PyPiLibrary && uv run ruff check ${staged}) || true"
+                "if command -v uv >/dev/null 2>&1; then uv run --project PyPiLibrary ruff check ${staged}; else echo 'uv not on PATH; skipping ruff check' >&2; fi"
             ],
             "include": [
                 "PyPiLibrary/**/*.py"
