@@ -211,7 +211,7 @@ Options:
 
 ## Development Environment Setup
 
-The recommended setup is the [Dev Container](./docs/devcontainer.md) — a single image with the .NET 10 SDK, the `uv` Python toolchain, and the GitHub CLI. It bind-mounts your SSH public key, allowed-signers file, and `gh` config from the host so commits sign correctly and `gh` is pre-authenticated.
+The recommended setup is the [Dev Container](./docs/devcontainer.md) — a single image with the .NET 10 SDK, the `uv` Python toolchain, and the GitHub CLI. It bind-mounts your SSH public key, allowed-signers file, and `gh` config from the host so commits sign correctly. `gh` is pre-authenticated when the host token is file-backed; macOS Keychain and Linux libsecret-backed tokens require an in-container `gh auth login` — see the [credential-store nuance](./docs/devcontainer.md#gh-credential-store) section.
 
 **Recommended (devcontainer)**:
 
