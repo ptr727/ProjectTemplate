@@ -110,7 +110,14 @@
             "yzhang.markdown-all-in-one",
             "ms-python.python",
             "charliermarsh.ruff",
+		],
+		"unwantedRecommendations": [
             "ms-pyright.pyright",
+            "ms-python.mypy-type-checker",
+            "ms-python.pylint",
+            "ms-python.flake8",
+            "ms-python.isort",
+            "ms-python.black-formatter"
 		]
 	}
 }
