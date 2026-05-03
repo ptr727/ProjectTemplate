@@ -334,7 +334,7 @@ The project includes comprehensive `.editorconfig` settings that enforce:
 
 ### Format
 
-- Imperative subject summarising the change, ≤72 characters, no trailing period. ("Add 24-hour PM2.5 average sensor", not "Added X" or "Adds X".)
+- Imperative subject summarizing the change, ≤72 characters, no trailing period. ("Add 24-hour PM2.5 average sensor", not "Added X" or "Adds X".)
 - Optional body, blank-line separated, explaining *why* the change is being made when that's non-obvious. The diff shows *what*.
 
 ### Rules

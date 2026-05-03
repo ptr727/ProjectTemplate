@@ -17,7 +17,7 @@ For comprehensive coding standards and detailed conventions, refer to [`.github/
 
 ### Format
 
-- Imperative subject summarising the change, ≤72 characters, no trailing period. ("Add 24-hour PM2.5 average sensor", not "Added X" or "Adds X".)
+- Imperative subject summarizing the change, ≤72 characters, no trailing period. ("Add 24-hour PM2.5 average sensor", not "Added X" or "Adds X".)
 - Optional body, blank-line separated, explaining *why* the change is being made when that's non-obvious. The diff shows *what*.
 
 ### Rules
@@ -52,9 +52,9 @@ Clarify devcontainer setup steps in README
 
 ## Workflow YAML Conventions
 
-The repo's `.github/workflows/` follows these conventions; new and modified workflows must respect them.
+These conventions describe the target state. New and modified workflows must respect them; existing workflows are migrated opportunistically when they're being touched for other reasons. Don't open a PR purely to apply these rules across the repo — the churn isn't worth it.
 
-- **Action pinning**: pin third-party actions to a commit SHA with a trailing `# vX.Y.Z` comment so Renovate / Dependabot can still bump it but a tag swap can't change the executed code. First-party `actions/*` use the same convention.
+- **Action pinning**: pin third-party actions to a commit SHA with a trailing `# vX.Y.Z` comment so Renovate / Dependabot can still bump it but a tag swap can't change the executed code. First-party `actions/*` are encouraged but not required to follow the same convention.
 - **Naming**: every step's `name:` ends in `step`; every job's `name:` ends in `job`. Reusable workflow filenames end in `-task.yml`.
 - **Concurrency**: top-level workflows declare `concurrency: { group: '${{ github.workflow }}-${{ github.ref }}', cancel-in-progress: true }` so a fresh push supersedes an in-flight run on the same ref.
 - **Shells**: multi-line `run:` blocks with bash start with `set -euo pipefail` — fail fast, fail on undefined vars, fail on a failed pipe segment.
