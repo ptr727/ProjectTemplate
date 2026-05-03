@@ -30,13 +30,20 @@ jobs:
     environment:
       name: pypi
       url: https://pypi.org/p/ptr727-projecttemplate-library
-    # Trusted Publishing requires id-token: write at job level so the OIDC
-    # token is available to pypa/gh-action-pypi-publish; the action exchanges
-    # it for a short-lived PyPI upload token. No PYPI_API_TOKEN secret is
-    # involved. Granting this permission directly on the entry-point job
-    # avoids having to propagate it through the reusable workflow chain.
+    # When a `permissions:` block is present, every scope not listed
+    # collapses to `none`. The job needs three things explicitly:
+    #   - `id-token: write` for Trusted Publishing's OIDC exchange
+    #     (pypa/gh-action-pypi-publish swaps the token for a short-lived
+    #     PyPI upload token; no PYPI_API_TOKEN secret involved).
+    #   - `contents: read` so `actions/checkout`-style operations and any
+    #     repo metadata reads continue to work.
+    #   - `actions: read` so `actions/download-artifact` can list and
+    #     fetch the artifact uploaded by the build workflow earlier in
+    #     the same run.
     permissions:
       id-token: write
+      contents: read
+      actions: read
 
     steps:
 
