@@ -23,6 +23,47 @@ jobs:
       nuget: true
       dockerhub: true
 
+  publish-pypi:
+    name: Publish PyPI library job
+    needs: [create-release]
+    runs-on: ubuntu-latest
+    environment:
+      name: pypi
+      url: https://pypi.org/project/ptr727-projecttemplate-library/
+    # When a `permissions:` block is present, every scope not listed
+    # collapses to `none`. The job needs three things explicitly:
+    #   - `id-token: write` for Trusted Publishing's OIDC exchange
+    #     (pypa/gh-action-pypi-publish swaps the token for a short-lived
+    #     PyPI upload token; no PYPI_API_TOKEN secret involved).
+    #   - `contents: read` so `actions/checkout`-style operations and any
+    #     repo metadata reads continue to work.
+    #   - `actions: read` so `actions/download-artifact` can list and
+    #     fetch the artifact uploaded by the build workflow earlier in
+    #     the same run.
+    permissions:
+      id-token: write
+      contents: read
+      actions: read
+
+    steps:
+
+      - name: Download PyPI library build artifacts step
+        uses: actions/download-artifact@v7
+        with:
+          name: pypilibrary-build
+          path: ./dist
+
+      - name: Publish to PyPI step
+        uses: pypa/gh-action-pypi-publish@6733eb7d741f0b11ec6a39b58540dab7590f9b7d # v1.14.0
+        with:
+          packages-dir: ./dist
+          # Skip rather than fail when the version already exists on PyPI.
+          # The template ships with `__version__ = "0.0.0"` as a placeholder
+          # — the release-on-every-push model would otherwise re-upload the
+          # same version and fail the workflow until the adopter wires a
+          # real version scheme (see PyPiLibrary/README.md).
+          skip-existing: true
+
   date-badge:
     name: Create BYOB date badge job
     needs: [create-release]

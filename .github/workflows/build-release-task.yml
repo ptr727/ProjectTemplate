@@ -34,6 +34,15 @@ jobs:
       # Conditional push to NuGet.org
       push: ${{ inputs.nuget }}
 
+  # PyPI publishing happens in `publish-release.yml`, not here, so that
+  # `id-token: write` only needs to be granted at the entry-point job.
+  # This reusable workflow just builds and uploads the artifact; the
+  # publish-release workflow downloads it by name in a sibling job.
+  build-pypilibrary:
+    name: Build PyPI library job
+    uses: ./.github/workflows/build-pypilibrary-task.yml
+    secrets: inherit
+
   build-executable:
     name: Build executable job
     uses: ./.github/workflows/build-executable-task.yml
@@ -51,7 +60,7 @@ jobs:
     name: Publish GitHub release job
     if: ${{ inputs.github }}
     runs-on: ubuntu-latest
-    needs: [get-version, build-nugetlibrary, build-executable, build-docker]
+    needs: [get-version, build-nugetlibrary, build-pypilibrary, build-executable, build-docker]
 
     steps:
 
