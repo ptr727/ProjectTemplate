@@ -25,7 +25,7 @@ jobs:
       [ test-release ]
     if: always()
     steps:
-      - name: Check workflow results
+      - name: Check workflow results step
         run: |
           exit_on_result() {
             if [[ "$2" == "failure" || "$2" == "cancelled" ]]; then
