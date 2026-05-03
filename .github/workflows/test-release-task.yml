@@ -20,11 +20,14 @@ jobs:
       - name: Checkout code step
         uses: actions/checkout@v6
 
-      - name: Check code style step
-        run: |
-          dotnet tool restore
-          dotnet husky install
-          dotnet husky run
+      - name: Restore .NET local tools step
+        run: dotnet tool restore
+
+      - name: Check formatting with CSharpier step
+        run: dotnet csharpier check .
+
+      - name: Verify .NET style with dotnet format step
+        run: dotnet format style --verify-no-changes --severity=info --verbosity=detailed
 
       - name: Run unit tests step
         run: dotnet test

@@ -1,5 +1,5 @@
 {
-    "name": "ProjectTemplate",
+    "name": "ProjectTemplate (.NET)",
     "image": "mcr.microsoft.com/devcontainers/dotnet:1-10.0",
 
     "features": {
@@ -29,27 +29,19 @@
     ],
 
     "remoteUser": "vscode",
-    // workspaceFolder defaults to /workspaces/${localWorkspaceFolderBasename},
-    // which makes the devcontainer config portable: when this template is
-    // forked into a repo with a different folder name, the mount path tracks
-    // the host folder name automatically.
 
     // The bind-mount on macOS hosts surfaces /home/vscode/.ssh as root-owned;
     // chown it back so writes from inside the container (known_hosts updates
     // by gh / git) land cleanly. Idempotent on Linux/WSL2.
     "onCreateCommand": "sudo install -d -m 700 -o vscode -g vscode /home/vscode/.ssh",
 
-    // Install uv for the Python sibling project, restore .NET local tools,
-    // and install the husky git hooks. uv is installed under $HOME/.local/bin
-    // and added to PATH by uv's install script.
-    "postCreateCommand": ".devcontainer/post-create.sh",
+    // Restore .NET local tools (csharpier, dotnet-outdated). No git hooks are
+    // installed by default — see README "Optional: enable git hooks locally".
+    "postCreateCommand": ".devcontainer/dotnet/post-create.sh",
 
     "customizations": {
         "vscode": {
-            // Mirror of `recommendations` in ProjectTemplate.code-workspace.
-            // Pyright type checking is provided by Pylance, which the
-            // ms-python.python extension auto-installs — no separate pyright
-            // extension needed (and the standalone one is in maintenance mode).
+            // Mirror of `recommendations` in DotNet.code-workspace.
             "extensions": [
                 "csharpier.csharpier-vscode",
                 "davidanson.vscode-markdownlint",
@@ -59,9 +51,7 @@
                 "ms-azuretools.vscode-docker",
                 "ms-dotnettools.csdevkit",
                 "streetsidesoftware.code-spell-checker",
-                "yzhang.markdown-all-in-one",
-                "ms-python.python",
-                "charliermarsh.ruff"
+                "yzhang.markdown-all-in-one"
             ]
         }
     }
