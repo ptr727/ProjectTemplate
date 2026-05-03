@@ -9,7 +9,7 @@ Prerequisite: complete [host setup](./host-setup.md) first — without git confi
 | Component | Source | Purpose |
 |---|---|---|
 | .NET 10 SDK | base image `mcr.microsoft.com/devcontainers/dotnet:1-10.0` | Build, test, pack the .NET projects |
-| `uv` | `astral.sh/uv/install.sh` in `post-create.sh` | Python env, dependency, build, and publish manager for the PyPi sibling |
+| `uv` | `https://astral.sh/uv/<UV_VERSION>/install.sh` (version-pinned) downloaded by `.devcontainer/post-create.sh` | Python env, dependency, build, and publish manager for the PyPi sibling |
 | `gh` CLI | `ghcr.io/devcontainers/features/github-cli:1` | Issue/PR/release management from inside the container |
 | Common utilities | `ghcr.io/devcontainers/features/common-utils:2` | bash, curl, wget, sudo, `vscode` user |
 | VS Code extensions | `customizations.vscode.extensions` in `devcontainer.json` | Mirrors `ProjectTemplate.code-workspace` recommendations so the container has the same tooling |
@@ -18,7 +18,7 @@ The extension list in `.devcontainer/devcontainer.json` and the `recommendations
 
 ## Bind Mounts
 
-The host SSH key, allowed-signers file, and `gh` config directory are mounted into the container so commits sign correctly and `gh` is pre-authenticated.
+The host SSH key, allowed-signers file, and `gh` config directory are mounted into the container so commits sign correctly and `gh` is pre-authenticated **when the host stores its `gh` token in a file** (`~/.config/gh/hosts.yml`). Hosts that store the token in macOS Keychain or Linux libsecret will need an in-container `gh auth login` instead — see [`gh` credential store](#gh-credential-store) below for the full picture.
 
 | Host path | Container path | Mode | Purpose |
 |---|---|---|---|

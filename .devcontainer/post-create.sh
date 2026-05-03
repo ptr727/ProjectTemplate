@@ -22,7 +22,21 @@ if command -v uv >/dev/null 2>&1; then
     installed_uv_version="$(uv --version | awk '{print $2}')"
 fi
 if [[ "$installed_uv_version" != "$UV_VERSION" ]]; then
-    curl -LsSf "https://astral.sh/uv/${UV_VERSION}/install.sh" | sh
+    # Download the pinned installer to a temp file first instead of piping
+    # `curl … | sh`. This produces a logged sha256 of exactly the bytes we
+    # ran, so a compromised installer leaves a forensic trail; it also lets
+    # a future change pin a known-good checksum (set EXPECTED_SHA below).
+    installer=$(mktemp -t uv-install.XXXXXX.sh)
+    trap 'rm -f "$installer"' EXIT
+    curl -LsSf "https://astral.sh/uv/${UV_VERSION}/install.sh" -o "$installer"
+    actual_sha=$(sha256sum "$installer" | awk '{print $1}')
+    echo "uv installer (v${UV_VERSION}) sha256: ${actual_sha}" >&2
+    # EXPECTED_SHA="<paste-from-trusted-source>"  # set to enforce
+    if [[ -n "${EXPECTED_SHA:-}" && "${actual_sha}" != "${EXPECTED_SHA}" ]]; then
+        echo "uv installer sha256 mismatch — refusing to run" >&2
+        exit 1
+    fi
+    sh "$installer"
     export PATH="$HOME/.local/bin:$PATH"
 fi
 
