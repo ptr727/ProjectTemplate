@@ -44,7 +44,7 @@ uv build                         # wheel + sdist into ./dist
 
 ## Publishing
 
-Releases are produced by `.github/workflows/build-pypilibrary-task.yml`, called from `build-release-task.yml` when `pypi: true` is passed by `publish-release.yml`. The publish job uses [Trusted Publishing](https://docs.pypi.org/trusted-publishers/) — no `PYPI_API_TOKEN` secret is involved; the workflow exchanges its OIDC token for a short-lived PyPI upload token.
+Releases are produced by `.github/workflows/build-pypilibrary-task.yml` (called from `build-release-task.yml` to build, lint, type-check, test, and upload the wheel + sdist as a workflow-run artifact). Publishing is a separate top-level `publish-pypi` job in `publish-release.yml` that downloads the artifact by name and runs [Trusted Publishing](https://docs.pypi.org/trusted-publishers/) — no `PYPI_API_TOKEN` secret is involved. The publish job has `id-token: write` only at that single job level, so the test-pull-request flow (which calls the same build task during PR validation) doesn't need to propagate that permission through the reusable workflow chain.
 
 First-time setup (one-time, on PyPI):
 
@@ -62,4 +62,4 @@ When deriving a new project from this template:
 - Re-register the trusted publisher on PyPI under the new project name.
 - Update `_version.py` versioning policy to match your release cadence (Nerdbank.GitVersioning is .NET-only; for Python use a tag-driven scheme like [`hatch-vcs`](https://github.com/ofek/hatch-vcs) or manual bumps in `_version.py`).
 
-If you don't want a Python project at all, delete the `PyPiLibrary/` folder, the `build-pypilibrary-task.yml` workflow, and the `pip` block in `dependabot.yml`.
+If you don't want a Python project at all, delete the `PyPiLibrary/` folder, the `build-pypilibrary-task.yml` workflow, the `build-pypilibrary` job in `build-release-task.yml`, the `publish-pypi` job in `publish-release.yml`, and the `uv` block in `dependabot.yml`.
