@@ -46,6 +46,10 @@
 
     "customizations": {
         "vscode": {
+            // Mirror of `recommendations` in ProjectTemplate.code-workspace.
+            // Pyright type checking is provided by Pylance, which the
+            // ms-python.python extension auto-installs — no separate pyright
+            // extension needed (and the standalone one is in maintenance mode).
             "extensions": [
                 "csharpier.csharpier-vscode",
                 "davidanson.vscode-markdownlint",
@@ -57,8 +61,7 @@
                 "streetsidesoftware.code-spell-checker",
                 "yzhang.markdown-all-in-one",
                 "ms-python.python",
-                "charliermarsh.ruff",
-                "ms-pyright.pyright"
+                "charliermarsh.ruff"
             ]
         }
     }
