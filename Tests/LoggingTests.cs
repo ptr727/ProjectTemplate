@@ -1,6 +1,6 @@
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Logging.Abstractions;
-using ptr727.ProjectTemplate.Library;
+using ptr727.ProjectTemplate.NuGetLibrary;
 
 namespace ptr727.ProjectTemplate.Tests;
 

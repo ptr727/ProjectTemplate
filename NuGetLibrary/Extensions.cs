@@ -1,6 +1,6 @@
 using System.Runtime.CompilerServices;
 
-namespace ptr727.ProjectTemplate.Library;
+namespace ptr727.ProjectTemplate.NuGetLibrary;
 
 internal static partial class LogExtensions
 {

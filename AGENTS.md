@@ -98,7 +98,7 @@ These conventions describe the target state. New and modified workflows must res
 
 ### Project Structure
 
-- **Library**: Core reusable library
+- **NuGetLibrary**: Core reusable .NET NuGet library (published as `ptr727.ProjectTemplate.Library`)
 - **Console**: CLI application using System.CommandLine
 - **Tests**: xUnit with AwesomeAssertions (Arrange-Act-Assert pattern)
 - **Benchmarks**: BenchmarkDotNet performance measurements
