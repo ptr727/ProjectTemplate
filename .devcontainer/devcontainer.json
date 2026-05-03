@@ -29,7 +29,10 @@
     ],
 
     "remoteUser": "vscode",
-    "workspaceFolder": "/workspaces/ProjectTemplate",
+    // workspaceFolder defaults to /workspaces/${localWorkspaceFolderBasename},
+    // which makes the devcontainer config portable: when this template is
+    // forked into a repo with a different folder name, the mount path tracks
+    // the host folder name automatically.
 
     // The bind-mount on macOS hosts surfaces /home/vscode/.ssh as root-owned;
     // chown it back so writes from inside the container (known_hosts updates
