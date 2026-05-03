@@ -4,7 +4,7 @@
 
 **ProjectTemplate** is a C# .NET template project that demonstrates best practices for C# .NET development. The project includes:
 
-- **Library**: Core library with AOT compatibility (`Library.csproj`)
+- **NuGetLibrary**: Core .NET NuGet library with AOT compatibility (`NuGetLibrary.csproj`, published as `ptr727.ProjectTemplate.Library`)
 - **Console**: Command-line application using System.CommandLine (`Console.csproj`)
 - **Tests**: Unit tests using xUnit and AwesomeAssertions (`Tests.csproj`)
 - **Benchmarks**: Performance benchmarks using BenchmarkDotNet (`Benchmarks.csproj`)
@@ -43,7 +43,7 @@ Available VS Code tasks (use via `run_task` tool):
 
 1. **File-Scoped Namespaces**: Always use file-scoped namespaces
    ```csharp
-   namespace ptr727.ProjectTemplate.Library;
+   namespace ptr727.ProjectTemplate.NuGetLibrary;
    ```
 
 2. **Nullable Reference Types**: Enabled (`<Nullable>enable</Nullable>`)
@@ -92,7 +92,7 @@ Available VS Code tasks (use via `run_task` tool):
    ```
 
 4. **Namespace**: Follow format `ptr727.ProjectTemplate.<ProjectName>`
-   - Library: `ptr727.ProjectTemplate.Library`
+   - NuGetLibrary: `ptr727.ProjectTemplate.NuGetLibrary`
    - Console: `ptr727.ProjectTemplate.Console`
    - Tests: `ptr727.ProjectTemplate.Tests`
 
@@ -110,7 +110,7 @@ Available VS Code tasks (use via `run_task` tool):
    ```csharp
    using System.CommandLine;
    using System.Runtime.CompilerServices;
-   using ptr727.ProjectTemplate.Library;
+   using ptr727.ProjectTemplate.NuGetLibrary;
 
    namespace ptr727.ProjectTemplate.Console;
    ```
@@ -211,7 +211,7 @@ Available VS Code tasks (use via `run_task` tool):
 
 1. **Target Framework**: .NET 10.0 (`<TargetFramework>net10.0</TargetFramework>`)
 
-2. **AOT Compatibility**: Library is AOT compatible
+2. **AOT Compatibility**: NuGetLibrary is AOT compatible
    - `<IsAotCompatible>true</IsAotCompatible>`
    - `<VerifyReferenceAotCompatibility>true</VerifyReferenceAotCompatibility>`
 
@@ -292,7 +292,7 @@ Available VS Code tasks (use via `run_task` tool):
 - `CodeGen/` - Code generation utilities (internal tooling)
 - `Console/` - Console/CLI application using System.CommandLine
 - `Docker/` - Docker build scripts and Dockerfile
-- `Library/` - Core reusable library
+- `NuGetLibrary/` - Core reusable .NET NuGet library (published as `ptr727.ProjectTemplate.Library`)
 - `Tests/` - Unit tests using xUnit and AwesomeAssertions
 
 ## Best Practices

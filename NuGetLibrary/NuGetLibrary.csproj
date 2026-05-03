@@ -21,7 +21,7 @@
     <PackageVersion>1.0.0-pre</PackageVersion>
     <PublishRepositoryUrl>true</PublishRepositoryUrl>
     <RepositoryUrl>https://github.com/ptr727/ProjectTemplate</RepositoryUrl>
-    <RootNamespace>ptr727.ProjectTemplate.Library</RootNamespace>
+    <RootNamespace>ptr727.ProjectTemplate.NuGetLibrary</RootNamespace>
     <SymbolPackageFormat>snupkg</SymbolPackageFormat>
     <Version>1.0.0.0</Version>
   </PropertyGroup>
