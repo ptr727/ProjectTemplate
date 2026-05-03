@@ -1,4 +1,8 @@
-# Code Style and Formatting Rules
+# Code Style and Formatting Rules — .NET
+
+This file is the style guide for the **.NET projects** in this repo: [`NuGetLibrary/`](./NuGetLibrary/), [`Console/`](./Console/), [`Tests/`](./Tests/), [`Benchmarks/`](./Benchmarks/), and [`CodeGen/`](./CodeGen/). It does NOT apply to the Python project (`PyPiLibrary/`) — see [`PyPiLibrary/CODESTYLE.md`](./PyPiLibrary/CODESTYLE.md) for that.
+
+Cross-cutting rules (PR titles, branching, US English, markdown style, workflow YAML, PR review etiquette) live in [AGENTS.md](./AGENTS.md) and apply to both languages. This file only documents what's specific to C# / .NET.
 
 ## Build Requirements
 
