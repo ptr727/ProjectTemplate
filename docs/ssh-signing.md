@@ -92,12 +92,14 @@ If you must work on Windows directly without a devcontainer, OpenSSH for Windows
 
 ## Verify Signing
 
+The `-S` flag and `-c gpg.format=ssh` override are explicit so the verification works even before `commit.gpgsign` and `gpg.format` are set globally — useful when verifying a fresh setup mid-configuration.
+
 ```shell
-git commit --allow-empty -m "verify-signing"
+git -c gpg.format=ssh commit -S --allow-empty -m "verify-signing"
 git log --show-signature -1
 ```
 
-Expected output includes `Good "git" signature for <your-email>`. If you see `error: gpg.ssh.allowedSignersFile needs to be configured` or `No signature`, walk back through the host setup — most often `allowed_signers` is missing the entry, or `commit.gpgsign` is not set.
+Expected output includes `Good "git" signature for <your-email>`. If you see `error: gpg.ssh.allowedSignersFile needs to be configured` or `No signature`, walk back through the host setup — most often `allowed_signers` is missing the entry, or the `user.signingkey` and `gpg.ssh.allowedSignersFile` configs aren't set yet.
 
 ## Inside the Devcontainer
 
