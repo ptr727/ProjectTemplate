@@ -86,6 +86,14 @@
             "editor.formatOnSave": true,
             "editor.defaultFormatter": "csharpier.csharpier-vscode"
         },
+        "[python]": {
+            "editor.formatOnSave": true,
+            "editor.defaultFormatter": "charliermarsh.ruff",
+            "editor.codeActionsOnSave": {
+                "source.organizeImports": "explicit"
+            }
+        },
+        "python.terminal.activateEnvironment": false,
         "git.alwaysSignOff": true,
         "markdown.extension.toc.levels": "2..3"
 	},

@@ -1,0 +1,71 @@
+name: Build PyPI library task
+
+# This reusable workflow only builds the PyPI library and uploads the
+# wheel + sdist as a workflow-run artifact. It does NOT publish to PyPI.
+# Publishing happens directly in `publish-release.yml` so that the
+# `id-token: write` permission required by Trusted Publishing is granted
+# at the entry-point job, not propagated through a reusable-workflow
+# chain (which would require every caller — including `test-release-task.yml`
+# during PR validation — to also grant id-token write, even when no
+# publishing happens).
+
+on:
+  workflow_call:
+    outputs:
+      artifact-name:
+        value: ${{ jobs.build-pypilibrary.outputs.artifact-name }}
+      artifact-id:
+        value: ${{ jobs.build-pypilibrary.outputs.artifact-id }}
+
+jobs:
+
+  build-pypilibrary:
+    name: Build PyPI library project job
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: ./PyPiLibrary
+    outputs:
+      artifact-name: pypilibrary-build
+      artifact-id: ${{ steps.artifact-upload-step.outputs.artifact-id }}
+
+    steps:
+
+      - name: Checkout code step
+        uses: actions/checkout@v6
+
+      - name: Setup uv step
+        uses: astral-sh/setup-uv@08807647e7069bb48b6ef5acd8ec9567f424441b # v8.1.0
+        with:
+          # Pin uv to the same version as `.devcontainer/post-create.sh`
+          # (UV_VERSION) so CI and local devcontainer behavior cannot drift
+          # — same uv resolves the same lockfile the same way. Bump in lock-
+          # step with the devcontainer pin.
+          version: "0.11.8"
+          enable-cache: true
+          cache-dependency-glob: "PyPiLibrary/uv.lock"
+
+      - name: Sync dependencies step
+        run: uv sync --all-groups --frozen
+
+      - name: Lint with ruff step
+        run: uv run ruff check
+
+      - name: Verify formatting with ruff step
+        run: uv run ruff format --check
+
+      - name: Type check with pyright step
+        run: uv run pyright
+
+      - name: Run pytest step
+        run: uv run pytest
+
+      - name: Build sdist and wheel step
+        run: uv build
+
+      - name: Upload build artifacts step
+        id: artifact-upload-step
+        uses: actions/upload-artifact@v6
+        with:
+          name: pypilibrary-build
+          path: PyPiLibrary/dist/*
