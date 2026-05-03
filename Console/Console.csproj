@@ -21,6 +21,6 @@
     <PackageReference Include="System.CommandLine" />
   </ItemGroup>
   <ItemGroup>
-    <ProjectReference Include="..\Library\Library.csproj" />
+    <ProjectReference Include="..\NuGetLibrary\NuGetLibrary.csproj" />
   </ItemGroup>
 </Project>
