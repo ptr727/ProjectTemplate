@@ -60,6 +60,9 @@ When deriving a new project from this template:
 - Replace the package name `ptr727-projecttemplate-library` (in `pyproject.toml`, this README, and CI) with your name.
 - Rename `src/ptr727_projecttemplate_library/` to your import name.
 - Re-register the trusted publisher on PyPI under the new project name.
-- Update `_version.py` versioning policy to match your release cadence (Nerdbank.GitVersioning is .NET-only; for Python use a tag-driven scheme like [`hatch-vcs`](https://github.com/ofek/hatch-vcs) or manual bumps in `_version.py`).
+- **Wire up a versioning scheme before the first publish.** `_version.py` ships with `__version__ = "0.0.0"` as a placeholder. The publish workflow uses `skip-existing: true` so the workflow won't fail on duplicate uploads — but **no new versions will land on PyPI** until you replace `0.0.0` with something that increments. Common options:
+  - [`hatch-vcs`](https://github.com/ofek/hatch-vcs) — derive the version from git tags. Add it to `[build-system].requires` and switch `[tool.hatch.version]` to `source = "vcs"`. Pairs well with tag-driven releases.
+  - **Read from `version.json`** — the .NET side uses Nerdbank.GitVersioning which reads from `version.json`. A small custom Hatchling plugin or a CI step can pull the version into `_version.py` so .NET and Python ship with matching versions.
+  - **Manual bumps** — edit `_version.py` in each release PR. Simplest, but easy to forget.
 
 If you don't want a Python project at all, delete the `PyPiLibrary/` folder, the `build-pypilibrary-task.yml` workflow, the `build-pypilibrary` job in `build-release-task.yml`, the `publish-pypi` job in `publish-release.yml`, and the `uv` block in `dependabot.yml`.

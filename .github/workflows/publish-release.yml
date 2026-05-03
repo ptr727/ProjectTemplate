@@ -57,6 +57,12 @@ jobs:
         uses: pypa/gh-action-pypi-publish@6733eb7d741f0b11ec6a39b58540dab7590f9b7d # v1.14.0
         with:
           packages-dir: ./dist
+          # Skip rather than fail when the version already exists on PyPI.
+          # The template ships with `__version__ = "0.0.0"` as a placeholder
+          # — the release-on-every-push model would otherwise re-upload the
+          # same version and fail the workflow until the adopter wires a
+          # real version scheme (see PyPiLibrary/README.md).
+          skip-existing: true
 
   date-badge:
     name: Create BYOB date badge job
