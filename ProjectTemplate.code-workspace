@@ -93,10 +93,7 @@
                 "source.organizeImports": "explicit"
             }
         },
-        "python.defaultInterpreterPath": "${workspaceFolder}/PyPiLibrary/.venv/bin/python",
         "python.terminal.activateEnvironment": false,
-        "ruff.path": ["${workspaceFolder}/PyPiLibrary/.venv/bin/ruff"],
-        "ruff.configuration": "${workspaceFolder}/PyPiLibrary/pyproject.toml",
         "git.alwaysSignOff": true,
         "markdown.extension.toc.levels": "2..3"
 	},
