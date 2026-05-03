@@ -296,7 +296,7 @@ Licensed under the [MIT License][license-link]\
 ### Template - TODO List
 
 - [ ] Configure git for SSH signing and SSH forwarding in dev containers — see [docs/host-setup.md](./docs/host-setup.md), [docs/ssh-signing.md](./docs/ssh-signing.md), and [docs/devcontainer.md](./docs/devcontainer.md).
-- [ ] Decide whether your project needs the .NET (`NuGetLibrary/`) side, the Python (`PyPiLibrary/`) side, or both. Delete the unused folder and remove its references from `ProjectTemplate.slnx`, `dependabot.yml`, and the corresponding `.github/workflows/build-*-task.yml`.
+- [ ] Decide whether your project needs the .NET (`NuGetLibrary/`) side, the Python (`PyPiLibrary/`) side, or both. Delete the unused folder and remove its references from `ProjectTemplate.slnx`, `.github/dependabot.yml`, and the corresponding `.github/workflows/build-*-task.yml`.
 - [ ] Start on Linux to avoid file permission issues when moving from Windows.
 - [ ] Configure the [Developer Environment](#template---developer-environment-setup).
 - [ ] Open the project directory (*not the workspace*) in Visual Studio Code, and rename (Ctrl-Shift-H) all instances of `ProjectTemplate` to `[NewProject]` in code.

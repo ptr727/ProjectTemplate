@@ -65,4 +65,4 @@ When deriving a new project from this template:
   - **Read from `version.json`** — the .NET side uses Nerdbank.GitVersioning which reads from `version.json`. A small custom Hatchling plugin or a CI step can pull the version into `_version.py` so .NET and Python ship with matching versions.
   - **Manual bumps** — edit `_version.py` in each release PR. Simplest, but easy to forget.
 
-If you don't want a Python project at all, delete the `PyPiLibrary/` folder, the `build-pypilibrary-task.yml` workflow, the `build-pypilibrary` job in `build-release-task.yml`, the `publish-pypi` job in `publish-release.yml`, and the `uv` block in `dependabot.yml`.
+If you don't want a Python project at all, delete the `PyPiLibrary/` folder, the `build-pypilibrary-task.yml` workflow, the `build-pypilibrary` job in `build-release-task.yml`, the `publish-pypi` job in `publish-release.yml`, and the `uv` block in `.github/dependabot.yml`.
