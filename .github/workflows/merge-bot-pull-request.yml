@@ -1,5 +1,19 @@
 name: Merge bot pull request action
 
+# Token strategy:
+#   GitHub's recursion guard blocks pushes authored by `GITHUB_TOKEN` from
+#   triggering further workflow runs. When `gh pr merge --auto --squash` runs
+#   under `secrets.GITHUB_TOKEN`, the resulting squash-merge push therefore
+#   does NOT fire `publish-release.yml`.
+#
+#   All three jobs below merge bot PRs targeting `main` (per the per-job `if:`
+#   conditions). Releases on `main` are dispatched manually via
+#   `workflow_dispatch`, so the missing trigger is acceptable for all three
+#   paths. If a future bot PR targets `develop` (where releases auto-fire on
+#   push), this merge action would need to switch to an App token so the
+#   resulting push is authored by an App identity not blocked by the
+#   recursion guard.
+
 on:
   pull_request:
     types: [opened, reopened, synchronize]
