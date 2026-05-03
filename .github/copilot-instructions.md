@@ -330,6 +330,30 @@ The project includes comprehensive `.editorconfig` settings that enforce:
 - **Never run destructive git commands** (`git reset --hard`, `git checkout .`, `git restore .`, `git clean -f`) without explicit developer instruction.
 - **Staging is the limit.** Prepare changes and stage files; the developer handles all commits and pushes.
 
+## Pull Request Title and Commit Message Conventions
+
+### Format
+
+- Imperative subject summarising the change, ≤72 characters, no trailing period. ("Add 24-hour PM2.5 average sensor", not "Added X" or "Adds X".)
+- Optional body, blank-line separated, explaining *why* the change is being made when that's non-obvious. The diff shows *what*.
+
+### Rules
+
+- Don't write `update stuff`, `wip`, or other vague titles. (Dependabot's default `Bump X from Y to Z` titles are fine — keep them.)
+- Don't add `Co-Authored-By:` lines unless the developer explicitly asks.
+- Don't put release-bump magnitude in the title — no "minor", "patch", "release v0.2.0", etc. Nerdbank.GitVersioning computes the next release version from `version.json` + git history. Dependency versions in dependency-bump titles are fine and expected.
+- Use US English spelling and match the existing heading style of the file you're editing: title case with lowercase short bind words (a, an, the, and, but, or, of, in, on, at, to, by, for, from); hyphenated compounds capitalize both parts unless the second is a short preposition (*Built-in*, *EPA-Corrected*, *24-Hour*).
+
+### Examples
+
+```text
+Add structured logging extensions to library
+Pin softprops/action-gh-release to commit SHA
+Drop net8.0 multi-targeting from console project
+Bump xunit.v3 from 3.2.2 to 3.3.0
+Clarify devcontainer setup steps in README
+```
+
 ## Workflow
 
 1. **Before coding**: Run `dotnet tool restore` to ensure tools are installed
