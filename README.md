@@ -292,7 +292,7 @@ Hooks are not shipped with the template — CI is the lint backstop. Opt in per 
     pre-commit install
     ```
 
-    Sample `.pre-commit-config.yaml`:
+    Sample `.pre-commit-config.yaml` (the hooks shell into `PyPiLibrary/` because the uv project — and therefore ruff/pyright and their configs — lives there, not at the repo root):
 
     ```yaml
     repos:
@@ -300,19 +300,21 @@ Hooks are not shipped with the template — CI is the lint backstop. Opt in per 
         hooks:
           - id: ruff-check
             name: ruff check
-            entry: uv run ruff check
+            entry: uv run --directory PyPiLibrary ruff check
             language: system
-            types: [python]
+            files: ^PyPiLibrary/.*\.py$
+            pass_filenames: false
           - id: ruff-format
             name: ruff format
-            entry: uv run ruff format --check
+            entry: uv run --directory PyPiLibrary ruff format --check
             language: system
-            types: [python]
+            files: ^PyPiLibrary/.*\.py$
+            pass_filenames: false
           - id: pyright
             name: pyright
-            entry: uv run pyright
+            entry: uv run --directory PyPiLibrary pyright
             language: system
-            types: [python]
+            files: ^PyPiLibrary/.*\.py$
             pass_filenames: false
     ```
 
@@ -352,7 +354,7 @@ Licensed under the [MIT License][license-link]\
 - [ ] Configure the [Developer Environment](#template---developer-environment-setup).
 - [ ] Open the project directory (*not the workspace*) in Visual Studio Code, and rename (Ctrl-Shift-H) all instances of `ProjectTemplate` to `[NewProject]` in code.
 - [ ] Rename `DotNet.code-workspace` to `[NewProject].code-workspace` and `Python.code-workspace` to `[NewProject]-Python.code-workspace`, or delete the workspace for the language you don't need. Rename `ProjectTemplate.slnx` to `[NewProject].slnx`.
-- [ ] Open `[NewProject].code-workspace` workspace in Visual Studio Code.
+- [ ] Open the workspace file for the language you kept (`[NewProject].code-workspace` and/or `[NewProject]-Python.code-workspace`) in Visual Studio Code.
 - [ ] Delete any projects and associated actions that will not be used, update dependencies in actions to remove deleted actions.
 - [ ] Rename projects to match the naming, update `.slnx` and `.csproj` files, and update actions to match the naming.
 - [ ] Update the `namespace` in `.cs` and `.csproj` files to match the naming.

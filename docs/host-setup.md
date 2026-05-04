@@ -134,5 +134,5 @@ If signing fails locally, the devcontainer will fail too — fix here first.
 
 ## Next Steps
 
-- [Devcontainer setup](./devcontainer.md) — open the repo in the unified .NET + Python devcontainer.
+- [Devcontainer setup](./devcontainer.md) — open the repo in the per-language .NET or Python devcontainer.
 - [SSH commit signing](./ssh-signing.md) — per-OS setup details, verification, and troubleshooting.

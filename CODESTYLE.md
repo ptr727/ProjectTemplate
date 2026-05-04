@@ -20,8 +20,9 @@ Cross-cutting rules (PR titles, branching, US English, markdown style, workflow 
    - `<EnableNETAnalyzers>true</EnableNETAnalyzers>`
    - Analyzer severity is `suggestion`, but all warnings must be addressed
 
-3. **Husky.Net pre-commit hooks**
-   - Automated checks run before commits
+3. **CI lint backstop**
+   - `dotnet csharpier check` and `dotnet format style --verify-no-changes` run on every PR
+   - No git hooks ship by default — see README "Optional: enable git hooks locally" to opt in
 
 ### Build Tasks
 
@@ -32,7 +33,6 @@ Available VS Code tasks (use via `run_task` tool):
 - `CSharpier Format`: Auto-format code with CSharpier
 - `.Net Tool Update`: Update dotnet tools
 - `.Net Outdated Upgrade`: Upgrade outdated NuGet dependencies (interactive prompt)
-- `Husky.Net Run`: Run pre-commit hooks manually
 
 ## Tooling and Editor
 
@@ -44,14 +44,11 @@ Available VS Code tasks (use via `run_task` tool):
 2. **dotnet format**: Style verification
    - Verify no changes: `dotnet format style --verify-no-changes --severity=info --verbosity=detailed`
 
-3. **Husky.Net**: Git hooks for automated checks
-   - Installed as a local dotnet tool (via `dotnet tool restore`)
-   - Install Git hooks locally with `dotnet husky install`
-   - Pre-commit hooks run formatting and style checks
-
-4. **Other tools**
+3. **Other tools**
    - `dotnet-outdated-tool`: Dependency update checks
    - Nerdbank.GitVersioning: Version management
+
+Pre-commit git hooks are not installed by default — CI is the lint backstop. See README "Optional: enable git hooks locally" if you want Husky.Net (or another runner) wired up locally.
 
 ### Editor Baseline
 
