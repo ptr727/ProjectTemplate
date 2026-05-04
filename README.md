@@ -213,13 +213,20 @@ Options:
 
 ## Development Environment Setup
 
-The recommended setup is the [Dev Container](./docs/devcontainer.md) — a single image with the .NET 10 SDK, the `uv` Python toolchain, and the GitHub CLI. It bind-mounts your SSH public key, allowed-signers file, and `gh` config from the host so commits sign correctly. `gh` is pre-authenticated when the host token is file-backed; macOS Keychain and Linux libsecret-backed tokens require an in-container `gh auth login` — see the [credential-store nuance](./docs/devcontainer.md#gh-credential-store) section.
+The recommended setup is one of the per-language [Dev Containers](./docs/devcontainer.md) under `.devcontainer/`:
+
+- **`.devcontainer/dotnet/`** — .NET 10 SDK + GitHub CLI. Pair with `DotNet.code-workspace`.
+- **`.devcontainer/python/`** — Python 3.14 + `uv` + GitHub CLI. Pair with `Python.code-workspace`.
+
+Each container bind-mounts your SSH public key, allowed-signers file, and `gh` config from the host so commits sign correctly. `gh` is pre-authenticated when the host token is file-backed; macOS Keychain and Linux libsecret-backed tokens require an in-container `gh auth login` — see the [credential-store nuance](./docs/devcontainer.md#gh-credential-store) section.
+
+> **Windows note**: Python work is intentionally not supported on the Windows host. The Python extension caches the Linux-layout `PyPiLibrary/.venv/bin/python` against a venv whose actual Windows path is `PyPiLibrary\.venv\Scripts\python.exe`, breaking Ruff. Use the python devcontainer.
 
 **Recommended (devcontainer)**:
 
 1. Complete [host setup](./docs/host-setup.md) once per machine (git identity, SSH key, allowed_signers, `gh auth login`, [SSH commit signing](./docs/ssh-signing.md)).
-2. Clone the repo, open in VS Code with the [Dev Containers extension][devcontainers-link], and run **Reopen in Container**.
-3. The `postCreateCommand` runs `dotnet tool restore`, installs Husky.Net hooks, and installs `uv`.
+2. Clone the repo, open the matching workspace (`DotNet.code-workspace` or `Python.code-workspace`) in VS Code with the [Dev Containers extension][devcontainers-link], and run **Reopen in Container** — pick the language flavor.
+3. The `postCreateCommand` runs `dotnet tool restore` (.NET container) or installs `uv` and runs `uv sync` (Python container). No git hooks are installed by default — see "Optional: enable git hooks locally" below.
 
 **Alternative (host install)**:
 
@@ -260,11 +267,58 @@ The recommended setup is the [Dev Container](./docs/devcontainer.md) — a singl
     # Initialize dotnet tools
     cd ./[Project]
     dotnet tool restore
-    dotnet husky install
     ```
 
-  - Open `[Project].code-workspace` in Visual Studio Code.
+  - Open `DotNet.code-workspace` (or `Python.code-workspace`) in Visual Studio Code.
   - Open `[Project].slnx` in Visual Studio.
+
+**Optional: enable git hooks locally**:
+
+Hooks are not shipped with the template — CI is the lint backstop. Opt in per language if you want pre-commit checks locally.
+
+- **For .NET work** — install [Husky.Net][huskynet-link]:
+
+    ```shell
+    dotnet new tool-manifest  # if no tool manifest exists yet
+    dotnet tool install Husky
+    dotnet husky install
+    dotnet husky add pre-commit -c "dotnet csharpier check . && dotnet format style --verify-no-changes --severity=info"
+    ```
+
+- **For Python work** — install [pre-commit][precommit-link]:
+
+    ```shell
+    uv tool install pre-commit
+    pre-commit install
+    ```
+
+    Sample `.pre-commit-config.yaml` (the hooks shell into `PyPiLibrary/` because the uv project — and therefore ruff/pyright and their configs — lives there, not at the repo root):
+
+    ```yaml
+    repos:
+      - repo: local
+        hooks:
+          - id: ruff-check
+            name: ruff check
+            entry: uv run --directory PyPiLibrary ruff check
+            language: system
+            files: ^PyPiLibrary/.*\.py$
+            pass_filenames: false
+          - id: ruff-format
+            name: ruff format
+            entry: uv run --directory PyPiLibrary ruff format --check
+            language: system
+            files: ^PyPiLibrary/.*\.py$
+            pass_filenames: false
+          - id: pyright
+            name: pyright
+            entry: uv run --directory PyPiLibrary pyright
+            language: system
+            files: ^PyPiLibrary/.*\.py$
+            pass_filenames: false
+    ```
+
+CI runs these same checks on every PR, so hooks are purely a local convenience.
 
 ## 3rd Party Tools
 
@@ -279,7 +333,6 @@ The recommended setup is the [Dev Container](./docs/devcontainer.md) — a singl
 - [Git Auto Commit][ghautocommit-link]
 - [GitHub Actions][ghactions-link]
 - [GitHub Dependabot][ghdependabot-link]
-- [Husky.Net][huskynet-link]
 - [Nerdbank.GitVersioning][nerbankgitversion-link]
 - [Serilog][serilog-link]
 - [xUnit.Net][xunit-link]
@@ -300,8 +353,8 @@ Licensed under the [MIT License][license-link]\
 - [ ] Start on Linux to avoid file permission issues when moving from Windows.
 - [ ] Configure the [Developer Environment](#template---developer-environment-setup).
 - [ ] Open the project directory (*not the workspace*) in Visual Studio Code, and rename (Ctrl-Shift-H) all instances of `ProjectTemplate` to `[NewProject]` in code.
-- [ ] Rename `ProjectTemplate.code-workspace` to `[NewProject].code-workspace` and `ProjectTemplate.slnx` to `[NewProject].slnx`.
-- [ ] Open `[NewProject].code-workspace` workspace in Visual Studio Code.
+- [ ] Rename `DotNet.code-workspace` to `[NewProject].code-workspace` and `Python.code-workspace` to `[NewProject]-Python.code-workspace`, or delete the workspace for the language you don't need. Rename `ProjectTemplate.slnx` to `[NewProject].slnx`.
+- [ ] Open the workspace file for the language you kept (`[NewProject].code-workspace` and/or `[NewProject]-Python.code-workspace`) in Visual Studio Code.
 - [ ] Delete any projects and associated actions that will not be used, update dependencies in actions to remove deleted actions.
 - [ ] Rename projects to match the naming, update `.slnx` and `.csproj` files, and update actions to match the naming.
 - [ ] Update the `namespace` in `.cs` and `.csproj` files to match the naming.
@@ -335,7 +388,6 @@ Licensed under the [MIT License][license-link]\
 
   # Init dotnet tools
   dotnet tool restore
-  dotnet husky install
 
   # Update dotnet tools
   dotnet tool update --all
@@ -355,13 +407,7 @@ Licensed under the [MIT License][license-link]\
   # Init dotnet tools
   dotnet new tool-manifest
   dotnet tool install csharpier
-  dotnet tool install husky
   dotnet tool install dotnet-outdated-tool
-  dotnet husky install
-  dotnet husky add pre-commit -c "dotnet husky run"
-
-  # Make sure pre-commit is executable on Linux
-  chmod +x ./.husky/pre-commit
   ```
 
 - Use `first-branch` for all the initial project setup and testing.
@@ -522,5 +568,6 @@ Licensed under the [MIT License][license-link]\
 [ghrelease-link]: https://github.com/marketplace/actions/gh-release
 [huskynet-link]: https://alirezanet.github.io/Husky.Net/
 [nerbankgitversion-link]: https://github.com/marketplace/actions/nerdbank-gitversioning
+[precommit-link]: https://pre-commit.com/
 [serilog-link]: https://serilog.net/
 [xunit-link]: https://xunit.net/

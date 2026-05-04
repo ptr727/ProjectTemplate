@@ -31,7 +31,7 @@ uv run pytest                    # run tests
 uv build                         # produce wheel + sdist in ./dist
 ```
 
-CI runs the same commands via [`.github/workflows/build-pypilibrary-task.yml`](../.github/workflows/build-pypilibrary-task.yml). Husky.Net pre-commit hooks (configured in [`.husky/task-runner.json`](../.husky/task-runner.json)) run `ruff format` and `ruff check` against staged Python files when `uv` is on PATH.
+CI runs the same commands via [`.github/workflows/build-pypilibrary-task.yml`](../.github/workflows/build-pypilibrary-task.yml). No git hooks ship by default — see the root README's "Optional: enable git hooks locally" section to wire up `pre-commit` for `ruff` and `pyright` if you want pre-commit checks locally.
 
 ## Layout
 
@@ -122,4 +122,4 @@ Before pushing or opening a PR:
 
 ## Adopting This Template Without Python
 
-If your derived project does not need a Python side, delete the entire `PyPiLibrary/` folder, the `build-pypilibrary` job in `build-release-task.yml`, the `publish-pypi` job in `publish-release.yml`, the `build-pypilibrary-task.yml` workflow, the `uv` block in `.github/dependabot.yml`, the Python entries in `.husky/task-runner.json`, and the Python settings/extension recommendations in `ProjectTemplate.code-workspace` and `.devcontainer/devcontainer.json`. The .NET side stands alone.
+If your derived project does not need a Python side, delete the entire `PyPiLibrary/` folder, the `build-pypilibrary` job in `build-release-task.yml`, the `publish-pypi` job in `publish-release.yml`, the `build-pypilibrary-task.yml` workflow, the `uv` block in `.github/dependabot.yml`, the `Python.code-workspace` file, and the `.devcontainer/python/` directory. The .NET side stands alone.

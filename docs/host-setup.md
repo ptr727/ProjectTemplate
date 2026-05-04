@@ -6,7 +6,7 @@ Supported hosts:
 
 - **Linux** — both the devcontainer flow and the host-install flow.
 - **macOS** — both the devcontainer flow and the host-install flow.
-- **Windows** — the devcontainer flow requires **WSL2**; native Windows (PowerShell + winget) is supported only for the host-install flow described in `README.md`. The bind-mounts in `.devcontainer/devcontainer.json` rely on POSIX paths and only work from Linux/macOS/WSL2.
+- **Windows** — the devcontainer flow requires **WSL2**; native Windows (PowerShell + winget) is supported only for the host-install flow described in `README.md`. The bind-mounts in `.devcontainer/dotnet/devcontainer.json` and `.devcontainer/python/devcontainer.json` rely on POSIX paths and only work from Linux/macOS/WSL2.
 
 > **Shell assumptions in this doc**: every command snippet below assumes a **POSIX shell** (bash/zsh) and POSIX path conventions (`~/.ssh/...`, `mkdir -p`, `$(...)` command substitution). On Windows, run them from **WSL2** or **Git Bash** — they will not work as-is in PowerShell or `cmd.exe`. The git config and `gh` commands are portable; only the file/path manipulation differs by shell.
 
@@ -134,5 +134,5 @@ If signing fails locally, the devcontainer will fail too — fix here first.
 
 ## Next Steps
 
-- [Devcontainer setup](./devcontainer.md) — open the repo in the unified .NET + Python devcontainer.
+- [Devcontainer setup](./devcontainer.md) — open the repo in the per-language .NET or Python devcontainer.
 - [SSH commit signing](./ssh-signing.md) — per-OS setup details, verification, and troubleshooting.

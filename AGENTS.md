@@ -121,9 +121,11 @@ These conventions describe the target state. New and modified workflows must res
 
 ## Devcontainer
 
-[.devcontainer/devcontainer.json](./.devcontainer/devcontainer.json) bind-mounts the host SSH signing key's *public half* (`~/.ssh/id_ed25519.pub`), `~/.config/git/allowed_signers`, and `~/.config/gh` so commits inside the container are SSH-signed (signing happens via the forwarded `ssh-agent` socket — the private key never enters the container) and, *when the host's `gh` token is file-backed*, `gh` is pre-authenticated. On Keychain (macOS) or libsecret (Linux) hosts, `~/.config/gh/hosts.yml` carries no `oauth_token`, so container `gh` is unauthenticated until the contributor opts into `gh auth login` inside the container. See [docs/devcontainer.md](./docs/devcontainer.md) for full setup, [docs/host-setup.md](./docs/host-setup.md) for prerequisites, and [docs/ssh-signing.md](./docs/ssh-signing.md) for the SSH commit signing details.
+The repo ships **two per-language devcontainers** so each container carries only one toolchain (and the matching VS Code extensions): [`.devcontainer/dotnet/devcontainer.json`](./.devcontainer/dotnet/devcontainer.json) (.NET 10 SDK) and [`.devcontainer/python/devcontainer.json`](./.devcontainer/python/devcontainer.json) (Python 3.14 + version-pinned `uv`). Open [`DotNet.code-workspace`](./DotNet.code-workspace) or [`Python.code-workspace`](./Python.code-workspace) and pick **Reopen in Container** to land in the matching one.
 
-The unified container hosts both `.NET 10` (base image) and Python via uv (installed in `.devcontainer/post-create.sh` from a version-pinned URL). The extension list in `.devcontainer/devcontainer.json` and `recommendations` in [`ProjectTemplate.code-workspace`](./ProjectTemplate.code-workspace) are kept identical — when you add an extension to one, add it to the other.
+Both containers bind-mount the host SSH signing key's *public half* (`~/.ssh/id_ed25519.pub`), `~/.config/git/allowed_signers`, and `~/.config/gh` so commits inside the container are SSH-signed (signing happens via the forwarded `ssh-agent` socket — the private key never enters the container) and, *when the host's `gh` token is file-backed*, `gh` is pre-authenticated. On Keychain (macOS) or libsecret (Linux) hosts, `~/.config/gh/hosts.yml` carries no `oauth_token`, so container `gh` is unauthenticated until the contributor opts into `gh auth login` inside the container. See [docs/devcontainer.md](./docs/devcontainer.md) for full setup, [docs/host-setup.md](./docs/host-setup.md) for prerequisites, and [docs/ssh-signing.md](./docs/ssh-signing.md) for the SSH commit signing details.
+
+Each devcontainer's `customizations.vscode.extensions` mirrors the `recommendations` array in its matching workspace file — when you add an extension to one, add it to the other.
 
 ## Project Structure (Languages)
 
@@ -139,7 +141,8 @@ The unified container hosts both `.NET 10` (base image) and Python via uv (insta
   - **Style guide: [`PyPiLibrary/CODESTYLE.md`](./PyPiLibrary/CODESTYLE.md)**.
 - **Cross-cutting**:
   - `.github/` — workflows, Dependabot, Copilot instructions
-  - `.devcontainer/` — devcontainer config + post-create script
+  - `.devcontainer/dotnet/` and `.devcontainer/python/` — per-language devcontainer configs + post-create scripts
+  - `DotNet.code-workspace`, `Python.code-workspace` — per-language VS Code workspace files (each pairs with its devcontainer)
   - `.vscode/` — debug configs and tasks (.NET-oriented)
   - `Docker/` — multi-platform Linux container build for the Console app
 
@@ -152,6 +155,7 @@ When you touch code in either language, also respect that language's style guide
 3. **Read** [CODESTYLE.md](./CODESTYLE.md) (.NET) and/or [PyPiLibrary/CODESTYLE.md](./PyPiLibrary/CODESTYLE.md) (Python) for the per-language style.
 4. **Update project-specific values** — `PackageId`/`RootNamespace` in `.csproj`, `name` in `pyproject.toml`, namespace conventions, `README.md`, `HISTORY.md`, `version.json`, `LICENSE`, NuGet/PyPI badge URLs.
 5. **Run tools before first commit**:
-   - .NET: `dotnet tool restore` and `dotnet husky install`.
+   - .NET: `dotnet tool restore`.
    - Python: `cd PyPiLibrary && uv sync`.
+   - Optional pre-commit hooks (off by default) — see README "Optional: enable git hooks locally".
 6. **Wire up release credentials** when ready to publish — see the README's release notes section and [PyPiLibrary/README.md](./PyPiLibrary/README.md) for PyPI Trusted Publisher setup.
