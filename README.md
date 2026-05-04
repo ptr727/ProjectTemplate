@@ -545,7 +545,7 @@ Licensed under the [MIT License][license-link]\
 [license-link]: ./LICENSE
 [license-shield]: https://img.shields.io/github/license/ptr727/ProjectTemplate?label=License
 [nuget-link]: https://www.nuget.org/packages/ptr727.ProjectTemplate.Library/
-[nugetprereleaseversion-shield]: https://img.shields.io/nuget/vpre/ptr727.ProjectTemplate.Library?logo=nuget&&label=NuGet%20Pre-Release&color=orange
+[nugetprereleaseversion-shield]: https://img.shields.io/nuget/vpre/ptr727.ProjectTemplate.Library?logo=nuget&label=NuGet%20Pre-Release&color=orange
 [nugetreleaseversion-shield]: https://img.shields.io/nuget/v/ptr727.ProjectTemplate.Library?logo=nuget&label=NuGet%20Release
 [prereleaseversion-shield]: https://img.shields.io/github/v/release/ptr727/ProjectTemplate?include_prereleases&label=GitHub%20Pre-Release&logo=github
 [pypi-link]: https://pypi.org/project/ptr727-projecttemplate-library/

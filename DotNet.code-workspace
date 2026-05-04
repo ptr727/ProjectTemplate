@@ -1,11 +1,11 @@
 {
-	"folders": [
-		{
-			"path": "."
-		}
-	],
-	"settings": {
-		"cSpell.words": [
+    "folders": [
+        {
+            "path": "."
+        }
+    ],
+    "settings": {
+        "cSpell.words": [
             "accessibilities",
             "Allman",
             "apikey",
@@ -67,7 +67,7 @@
             "xunit",
             "yzhang"
         ],
-		"dotnet.defaultSolution": "ProjectTemplate.slnx",
+        "dotnet.defaultSolution": "ProjectTemplate.slnx",
         "files.trimTrailingWhitespace": true,
         "files.trimTrailingWhitespaceInRegexAndStrings": false,
         "diffEditor.ignoreTrimWhitespace": false,
@@ -88,9 +88,9 @@
         },
         "git.alwaysSignOff": true,
         "markdown.extension.toc.levels": "2..3"
-	},
-	"extensions": {
-		"recommendations": [
+    },
+    "extensions": {
+        "recommendations": [
             "csharpier.csharpier-vscode",
             "davidanson.vscode-markdownlint",
             "editorconfig.editorconfig",
@@ -100,6 +100,6 @@
             "ms-dotnettools.csdevkit",
             "streetsidesoftware.code-spell-checker",
             "yzhang.markdown-all-in-one"
-		]
-	}
+        ]
+    }
 }

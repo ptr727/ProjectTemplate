@@ -1,11 +1,11 @@
 {
-	"folders": [
-		{
-			"path": "."
-		}
-	],
-	"settings": {
-		"cSpell.words": [
+    "folders": [
+        {
+            "path": "."
+        }
+    ],
+    "settings": {
+        "cSpell.words": [
             "accessibilities",
             "Allman",
             "apikey",
@@ -88,9 +88,9 @@
         "python.terminal.activateEnvironment": false,
         "git.alwaysSignOff": true,
         "markdown.extension.toc.levels": "2..3"
-	},
-	"extensions": {
-		"recommendations": [
+    },
+    "extensions": {
+        "recommendations": [
             "charliermarsh.ruff",
             "davidanson.vscode-markdownlint",
             "editorconfig.editorconfig",
@@ -100,14 +100,14 @@
             "ms-python.python",
             "streetsidesoftware.code-spell-checker",
             "yzhang.markdown-all-in-one"
-		],
-		"unwantedRecommendations": [
+        ],
+        "unwantedRecommendations": [
             "ms-pyright.pyright",
             "ms-python.mypy-type-checker",
             "ms-python.pylint",
             "ms-python.flake8",
             "ms-python.isort",
             "ms-python.black-formatter"
-		]
-	}
+        ]
+    }
 }
