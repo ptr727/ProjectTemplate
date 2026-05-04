@@ -220,7 +220,7 @@ The recommended setup is one of the per-language [Dev Containers](./docs/devcont
 
 Each container bind-mounts your SSH public key, allowed-signers file, and `gh` config from the host so commits sign correctly. `gh` is pre-authenticated when the host token is file-backed; macOS Keychain and Linux libsecret-backed tokens require an in-container `gh auth login` — see the [credential-store nuance](./docs/devcontainer.md#gh-credential-store) section.
 
-> **Windows note**: Python work is intentionally not supported on the Windows host. The Python extension caches the Linux-layout `.venv/bin/python` against a venv whose actual Windows path is `.venv\Scripts\python.exe`, breaking Ruff. Use the python devcontainer.
+> **Windows note**: Python work is intentionally not supported on the Windows host. The Python extension caches the Linux-layout `PyPiLibrary/.venv/bin/python` against a venv whose actual Windows path is `PyPiLibrary\.venv\Scripts\python.exe`, breaking Ruff. Use the python devcontainer.
 
 **Recommended (devcontainer)**:
 
