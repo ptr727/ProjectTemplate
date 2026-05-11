@@ -457,9 +457,11 @@ Licensed under the [MIT License][license-link]\
   - The App token is used by **both** the codegen workflow (`run-codegen-pull-request-task.yml`) **and** every job in `merge-bot-pull-request.yml`. App-authored pushes/PRs trigger downstream `pull_request` and `push` workflow events directly — unlike `GITHUB_TOKEN`-authored events, which are blocked by GitHub's recursion guard. This is why `publish-release.yml` fires on the merge commit after Dependabot or codegen auto-merge, and why the codegen workflow no longer needs the legacy close/reopen dance to trigger auto-merge.
   - The codegen auto-merge condition in `merge-bot-pull-request.yml` (`merge-codegen` job) requires:
     - `github.event.pull_request.user.login == 'ptr727-codegen[bot]'` — PR was opened by the App.
-    - `github.event.pull_request.head.ref == 'codegen'` — source branch is `codegen`.
-    - `github.event.pull_request.base.ref == 'main'` — PR targets `main`.
+    - `github.actor == 'ptr727-codegen[bot]'` — the event was triggered by the App (a maintainer pushing commits to the App PR won't auto-merge).
     - `github.event.pull_request.head.repo.full_name == github.repository` — PR is from this repo (not a fork).
+    - **Strict head/base pairing** — `(head.ref == 'codegen-main' && base.ref == 'main') || (head.ref == 'codegen-develop' && base.ref == 'develop')`. Codegen runs as a matrix opening one PR per branch; this pairing prevents a misconfigured workflow from sneaking a `codegen-develop` branch into `main` or vice versa.
+
+  Codegen targets `main` AND `develop` in parallel (matrix in `run-codegen-pull-request-task.yml`), so generated content lands on both branches independently without any back-merging. See [AGENTS.md "Branching Model"](./AGENTS.md#branching-model) for why this dual-target pattern beats develop-only-with-flow-through.
 
 **Codegen workflow schedule**:
 
@@ -474,16 +476,22 @@ Licensed under the [MIT License][license-link]\
       - [TODO:](https://github.com/orgs/community/discussions/184410): Disable merge and rebase merging, ruleset merge rules do not currently work.
     - `Always suggest updating pull request branches`
     - `Allow auto-merge`
-- Rules / Rulesets:
-  - "Main and Develop":
-    - Target branches: `main`, `develop`.
+- Rules / Rulesets — **separate rulesets per branch** so allowed merge methods differ (develop = squash-only; main = merge-commit-only, per AGENTS.md). Everything else is shared.
+  - "Develop":
+    - Target branches: `develop`.
+    - Allowed merge methods: `Squash`
+    - Plus shared settings (below).
+  - "Main":
+    - Target branches: `main`.
+    - Allowed merge methods: `Merge`
+    - Plus shared settings (below).
+  - Shared settings (apply to both rulesets):
     - `Restrict deletions`
-    - `Require linear history`
+    - `Require linear history` (only enforceable on `develop`; `main` carries merge commits by design)
     - `Require signed commits`
     - `Require a pull request before merging`
       - `Dismiss stale pull request approvals when new commits are pushed`
       - `Require conversation resolution before merging`
-      - Allowed merge methods: `Squash`
     - `Require status checks to pass`
       - `Require branches to be up to date before merging`
       - Status checks that are required: `Check pull request workflow status`
@@ -496,15 +504,40 @@ Licensed under the [MIT License][license-link]\
 
 ### Template - Branching Workflow
 
-- Create persistent `main` and `develop` branches.
-- Protect `main` and `develop` branches with branch protection rules.
-- Make sure that `main` and `develop` are always building error free.
-- Create feature branches from the `develop` branch.
-- Only commit to feature branches, do not commit directly to `develop` or to `main`.
-- Always "Squash and merge" from feature branches to the `develop` branch to minimize change history.
-- Always "Squash and merge" from `develop` to `main` to maintain a linear history.
-- Bot generated pull requests (codegen, dependabot) always checkout from and merge into `main` directly.
-- If `develop` falls behind after a bot merge, re-run codegen or rebase `develop` on `main` before merging `develop` to `main`.
+See [AGENTS.md "Branching Model"](./AGENTS.md#branching-model) for the authoritative definition. Summary:
+
+- Persistent `main` and `develop` branches, each with its own ruleset (above). Both must always be building error free.
+- Feature branches off `develop`. Only commit on feature branches, never directly to `develop` or `main`.
+- Feature → `develop`: **squash-merge** (develop ruleset enforces this; develop is kept linear).
+- `develop` → `main`: **merge-commit** (preserves develop's commit list as a real second-parent reference on main; main ruleset enforces this).
+- **`develop` is forward-only.** No `main → develop` back-merges. The develop squash-only ruleset physically blocks merge commits.
+- **Bots open parallel PRs against both branches.** [`.github/dependabot.yml`](./.github/dependabot.yml) duplicates each ecosystem entry per branch, and [`.github/workflows/run-codegen-pull-request-task.yml`](./.github/workflows/run-codegen-pull-request-task.yml) runs as a matrix (branch names `codegen-main` and `codegen-develop`). Each branch absorbs its own bot PRs independently — neither falls behind, no back-merges needed.
+
+### Template - Release Distribution Model: Push vs. Pull
+
+This template ships with a **push-on-merge release model** — every commit on `main` triggers [`.github/workflows/publish-release.yml`](./.github/workflows/publish-release.yml) which publishes a GitHub release, NuGet/PyPI uploads, Docker tags, and platform executables. With the dual-target bot model (Dependabot/codegen targeting both branches), this means every Dependabot bump that lands on `main` produces a new release. That's the right default for projects whose consumers **pull** at their own cadence (Docker pulls, NuGet/PyPI installs, manual binary downloads) — releases are cheap and frequent, consumers update on their own schedule.
+
+For projects whose consumers are **pushed** updates (HACS for Home Assistant, package managers that auto-update integrations, Linux distros that vendor from `main`), every release is a forced update to all users. Frequent bot-driven releases become noise. To switch to a **manual main-release model** while keeping the rest of the dual-target dual-channel flow:
+
+1. Edit [`.github/workflows/publish-release.yml`](./.github/workflows/publish-release.yml) and change the trigger:
+
+    ```diff
+     on:
+    -  push:
+    -    branches: [ main, develop ]
+    -  workflow_dispatch:
+    +  push:
+    +    branches: [ develop ]
+    +  workflow_dispatch:
+    ```
+
+   Result: `develop` pushes still publish dev releases automatically (PEP 440 `.dev0` to PyPI, NBGV-prerelease tags on NuGet, prerelease GitHub releases). `main` pushes no longer auto-publish; you trigger the release manually via the GitHub Actions UI (`workflow_dispatch`) when a real release is wanted.
+
+2. **(Optional)** narrow what flows into `main` automatically. If a sea of Dependabot PRs on `main` is noisy without auto-release, either:
+   - Drop the `main`-target Dependabot entries from `.github/dependabot.yml` (so deps update on `develop` only, and reach `main` through the next develop → main release the maintainer triggers — closer to a pure develop-only flow with manual cadence), or
+   - Keep dual-target Dependabot and let the merge-bot auto-merge them silently into `main`; main always has fresh code, but ships only when the maintainer dispatches a release.
+
+For an example of the manual-release model in production, see [homeassistant-purpleair](https://github.com/ptr727/homeassistant-purpleair) — that integration ships through HACS (push distribution) and uses `workflow_dispatch` for actual releases.
 
 <!--- Shields links (alphabetized per AGENTS.md) --->
 

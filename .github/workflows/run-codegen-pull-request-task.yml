@@ -1,5 +1,14 @@
 name: Run codegen and pull request task
 
+# Runs codegen against `main` and `develop` in parallel via a matrix,
+# opens a PR against each base (`codegen-main` branch → main,
+# `codegen-develop` branch → develop). The merge-bot auto-merges
+# either PR independently. This keeps both branches current on
+# generated content (date stamps, API-derived data, etc.) without
+# either branch falling behind the other and without main → develop
+# back-merges (see AGENTS.md "Branching Model" for the forward-only
+# develop invariant).
+
 on:
   workflow_call:
     secrets:
@@ -15,11 +24,21 @@ on:
 jobs:
 
   codegen:
-    name: Run codegen and pull request job
+    name: Run codegen and pull request job (${{ matrix.target.ref }})
     runs-on: ubuntu-latest
     permissions:
       contents: write
       pull-requests: write
+    strategy:
+      # Each branch gets its own parallel codegen run + PR. If one
+      # branch's PR fails (CI, conflicts, etc.) the other is unaffected.
+      fail-fast: false
+      matrix:
+        target:
+          - ref: main
+            branch: codegen-main
+          - ref: develop
+            branch: codegen-develop
 
     steps:
 
@@ -42,7 +61,7 @@ jobs:
       - name: Checkout code step
         uses: actions/checkout@v6
         with:
-          ref: main
+          ref: ${{ matrix.target.ref }}
           token: ${{ steps.app-token.outputs.token }}
 
       - name: Run codegen step
@@ -65,8 +84,8 @@ jobs:
         with:
           # App token: triggers pull_request workflow events directly, creates verified commits as the app
           token: ${{ steps.app-token.outputs.token }}
-          base: main
-          branch: codegen
+          base: ${{ matrix.target.ref }}
+          branch: ${{ matrix.target.branch }}
           title: 'Update codegen files'
           body: 'This PR updates the codegen files.'
           commit-message: 'Update codegen files'
