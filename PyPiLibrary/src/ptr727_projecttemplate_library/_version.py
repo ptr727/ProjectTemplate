@@ -27,7 +27,9 @@ output) and NuGet ``PackageVersion`` / Docker tags (NBGV ``SemVer2`` —
 PEP 440 doesn't accept its prerelease / build-metadata suffixes) all
 carry different strings across artifact families. All four still derive
 from the same NBGV computation against ``version.json`` + git history
-and correspond to the same release commit. See
+and correspond to the same commit (main pushes publish release
+versions; develop pushes publish PEP 440 dev releases / NBGV
+prereleases). See
 ``.github/workflows/build-pypilibrary-task.yml`` (the "Compute PyPI
 version step" and "Write version into _version.py step").
 
