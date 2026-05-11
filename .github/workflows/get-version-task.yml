@@ -36,8 +36,11 @@ jobs:
         with:
           fetch-depth: 0
 
-      # `dotnet/nbgv` is the documented exception to the AGENTS.md
-      # "pin third-party actions to a commit SHA" rule. Justification:
+      # `dotnet/nbgv` is intentionally floated on `master` rather than
+      # pinned to a commit SHA — a deliberate deviation from the
+      # AGENTS.md "pin third-party actions to a commit SHA" rule,
+      # documented here so the deviation isn't accidentally "fixed" by
+      # a future reviewer. Justification:
       #   - The upstream tag stream is effectively dormant — the latest
       #     tag `v0.5.1` lags well behind `master` and fixes accumulate
       #     on `master` between tag bumps.
