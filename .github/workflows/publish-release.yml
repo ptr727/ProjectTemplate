@@ -26,11 +26,13 @@ jobs:
   publish-pypi:
     name: Publish PyPI library job
     # Runs on pushes to both `main` and `develop`. `build-pypilibrary-task.yml`
-    # picks the right PEP 440 version per branch (release on main,
-    # `M.N.P.devN` on develop) so `pip install <pkg>` keeps installing the
-    # latest main release by default while `pip install --pre <pkg>` opts
-    # into the develop prerelease channel. This matches how NuGet/Docker
-    # already publish on both branches with NBGV prerelease semantics.
+    # picks the PEP 440 version per branch (`M.N.P.B` release on main,
+    # `M.N.P.B.dev0` on develop — BuildNumber stays in the release segment
+    # so develop's release segment grows past main's per commit). Default
+    # `pip install <pkg>` filters `.dev0` and picks the main release;
+    # `pip install --pre <pkg>` includes dev releases and picks develop's
+    # higher release segment. Matches how NuGet/Docker tag develop builds
+    # as prerelease via NBGV `SemVer2`.
     # The `pypi` GitHub environment's Deployment branch rule
     # (Settings → Environments → pypi) restricts uploads to `main` +
     # `develop` as defense in depth — see PyPiLibrary/README.md.

@@ -66,26 +66,45 @@ jobs:
         run: uv run pytest
 
       # Compute the PEP 440 version string for this build:
-      #   refs/heads/main    -> AssemblyFileVersion as-is. PEP 440 treats
-      #                         this 4-segment numeric form as a release.
-      #   refs/heads/develop -> Major.Minor.Patch.devN (PEP 440 dev
-      #                         release; pip filters it out of `pip
-      #                         install <pkg>` unless `--pre` is passed,
-      #                         giving us a "prerelease channel" on the
-      #                         same PyPI project. N is NBGV's
-      #                         BuildNumber, so each develop push gets a
-      #                         unique upload.)
+      #   refs/heads/main    -> AssemblyFileVersion as-is
+      #                         (`Major.Minor.Patch.BuildNumber`). PEP 440
+      #                         treats this 4-segment numeric form as a
+      #                         release.
+      #   refs/heads/develop -> `${AssemblyFileVersion}.dev0`
+      #                         (`Major.Minor.Patch.BuildNumber.dev0`).
+      #                         The BuildNumber stays in the release
+      #                         segment so develop's release segment
+      #                         (which grows past main's after every
+      #                         new commit) compares higher than main's
+      #                         under PEP 440 ordering — so `pip install
+      #                         --pre <pkg>` picks the develop dev
+      #                         build, while default `pip install <pkg>`
+      #                         filters the dev suffix and picks the
+      #                         main release. The `.dev0` literal is a
+      #                         constant because BuildNumber alone
+      #                         already differentiates each develop
+      #                         push (NBGV BuildNumber increments per
+      #                         commit), so we don't need a second
+      #                         counter in the dev segment.
+      #
+      #                         Edge case: in the window between a
+      #                         release merge to main and the next
+      #                         commit on develop, develop's
+      #                         BuildNumber equals main's (or is one
+      #                         lower) — `--pre` will still resolve to
+      #                         the main release until a new develop
+      #                         commit lands. This is accepted as a
+      #                         small, self-healing gap.
       #   other refs (PR validation via test-release-task, feature
       #                branches) -> AssemblyFileVersion as-is. These
-      #                refs never publish, so any PEP 440 valid string
-      #                that lets `uv build` succeed is fine.
+      #                refs never publish; we just need a PEP 440 valid
+      #                string for `uv build`.
       - name: Compute PyPI version step
         id: pypiver
         run: |
           set -euo pipefail
           if [[ "$GITHUB_REF" == "refs/heads/develop" ]]; then
-            IFS='.' read -r major minor patch build <<< "$AFV"
-            version="${major}.${minor}.${patch}.dev${build}"
+            version="${AFV}.dev0"
           else
             version="$AFV"
           fi

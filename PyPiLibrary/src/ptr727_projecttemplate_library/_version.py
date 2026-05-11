@@ -11,9 +11,13 @@ before ``uv build``. The format is **branch-aware**:
 - ``main`` push  → ``Major.Minor.Patch.BuildNumber`` (PEP 440 release).
   ``pip install <pkg>`` picks this up by default. Equals the .NET
   assemblies' ``FileVersion`` stamp.
-- ``develop`` push → ``Major.Minor.Patch.devBuildNumber`` (PEP 440 dev
-  release). ``pip`` filters dev releases out unless ``--pre`` is passed,
-  matching how NuGet/Docker mark develop builds as prerelease.
+- ``develop`` push → ``Major.Minor.Patch.BuildNumber.dev0`` (PEP 440 dev
+  release). The BuildNumber stays in the release segment so develop's
+  segment grows past main's per commit — that's what makes
+  ``pip install --pre <pkg>`` actually prefer the develop build over the
+  main release. Without ``--pre``, pip filters the ``.dev`` suffix and
+  picks the main release. Matches how NuGet/Docker mark develop as
+  prerelease.
 
 .NET's ``AssemblyVersion`` (the binary-compat identity, a separate NBGV
 output) and NuGet ``PackageVersion`` / Docker tags (NBGV ``SemVer2`` —
