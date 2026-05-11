@@ -1,18 +1,24 @@
 name: Merge bot pull request action
 
 # Token strategy:
-#   GitHub's recursion guard blocks pushes authored by `GITHUB_TOKEN` from
-#   triggering further workflow runs. When `gh pr merge --auto --squash` runs
-#   under `secrets.GITHUB_TOKEN`, the resulting squash-merge push therefore
-#   does NOT fire `publish-release.yml`.
+#   Every merge job in this workflow uses the GitHub App token
+#   (`actions/create-github-app-token`). The resulting merge push is
+#   committed by the App, which fires downstream workflows on develop and
+#   main. Pushes authored by `GITHUB_TOKEN` are blocked from triggering
+#   further workflow runs by GitHub's recursion guard, which would
+#   silently skip `publish-release.yml` on the merge commit. The App-token
+#   path also removes the close/reopen dance previously used by codegen
+#   PRs created under `GITHUB_TOKEN` to nudge the auto-merge workflow.
 #
-#   All three jobs below merge bot PRs targeting `main` (per the per-job `if:`
-#   conditions). Releases on `main` are dispatched manually via
-#   `workflow_dispatch`, so the missing trigger is acceptable for all three
-#   paths. If a future bot PR targets `develop` (where releases auto-fire on
-#   push), this merge action would need to switch to an App token so the
-#   resulting push is authored by an App identity not blocked by the
-#   recursion guard.
+# Merge method:
+#   Each merge step picks `--squash` or `--merge` from the PR's base ref so
+#   the form matches that branch's ruleset (`develop` allows only squash,
+#   `main` allows only merge commits — see AGENTS.md "Branching Model").
+#   A mismatch fails `enablePullRequestAutoMerge` with "Merge method ... is
+#   not allowed on this repository". Codegen PRs always target `main` so
+#   they always merge-commit; Dependabot PRs default to `develop` but
+#   security update PRs open against `main`, so the `case` statement
+#   handles both bases.
 
 on:
   pull_request:
@@ -27,9 +33,12 @@ jobs:
   merge-dependabot:
     name: Merge dependabot pull request job
     runs-on: ubuntu-latest
-    # To prevent abuse, the PR must come from Dependabot and the PR must originate from this repository.
+    # Restrict to Dependabot PRs that originate from this repository, not a
+    # fork. Check the PR author rather than the event actor so maintainer
+    # repair commits on Dependabot branches can still auto-merge after CI
+    # passes.
     if: >-
-      github.actor == 'dependabot[bot]' &&
+      github.event.pull_request.user.login == 'dependabot[bot]' &&
       github.event.pull_request.head.repo.full_name == github.repository
     permissions:
       contents: write
@@ -37,54 +46,47 @@ jobs:
 
     steps:
 
+      - name: Generate GitHub App token step
+        id: app-token
+        uses: actions/create-github-app-token@v1
+        with:
+          app-id: ${{ secrets.CODEGEN_APP_ID }}
+          private-key: ${{ secrets.CODEGEN_APP_PRIVATE_KEY }}
+
       - name: Get dependabot metadata step
         id: metadata
-        uses: dependabot/fetch-metadata@v2
+        uses: dependabot/fetch-metadata@21025c705c08248db411dc16f3619e6b5f9ea21a # v2.5.0
         with:
           github-token: "${{ secrets.GITHUB_TOKEN }}"
 
-      # Merge any non-NuGet update, e.g. GitHub Actions often updates v1 to v2.
-      # Merge NuGet only for non-major updates, e.g. major updates may build but break functionality.
+      # Skip semver-major NuGet bumps: majors can build cleanly but break
+      # runtime behaviour, so they should land via human review. Other
+      # ecosystems' majors (github-actions, uv) are usually safe and merge.
       - name: Merge pull request step
         if: >-
           (steps.metadata.outputs.package-ecosystem != 'nuget') ||
           (steps.metadata.outputs.update-type != 'version-update:semver-major')
-        run: gh pr merge --auto --squash "$PR_URL"
+        run: |
+          set -euo pipefail
+          case "${{ github.event.pull_request.base.ref }}" in
+            develop) method=--squash ;;
+            main) method=--merge ;;
+            *)
+              echo "::error::Unsupported base branch: ${{ github.event.pull_request.base.ref }}"
+              exit 1
+              ;;
+          esac
+          gh pr merge --auto "$method" "$PR_URL"
         env:
-          PR_URL: ${{github.event.pull_request.html_url}}
-          GH_TOKEN: ${{secrets.GITHUB_TOKEN}}
+          PR_URL: ${{ github.event.pull_request.html_url }}
+          GH_TOKEN: ${{ steps.app-token.outputs.token }}
 
   merge-codegen:
     name: Merge codegen pull request job
     runs-on: ubuntu-latest
-    # To prevent abuse, the PR must come from the codegen workflow, and the PR must originate from this repository.
+    # Restrict to codegen PRs that originate from the App in this repository.
+    # Codegen always opens PRs against `main` from the `codegen` branch.
     if: >-
-      github.event.pull_request.user.login == 'github-actions[bot]' &&
-      github.event.pull_request.head.ref == 'codegen' &&
-      github.event.pull_request.base.ref == 'main' &&
-      github.event.pull_request.head.repo.full_name == github.repository &&
-      (
-        (github.event.action == 'reopened' && github.actor == github.repository_owner) ||
-        (github.event.action != 'reopened' && github.actor == 'github-actions[bot]')
-      )
-    permissions:
-      contents: write
-      pull-requests: write
-
-    steps:
-
-      - name: Merge pull request step
-        run: gh pr merge --auto --squash "$PR_URL"
-        env:
-          PR_URL: ${{github.event.pull_request.html_url}}
-          GH_TOKEN: ${{secrets.GITHUB_TOKEN}}
-
-  merge-codegen-app:
-    name: Merge codegen app pull request job
-    runs-on: ubuntu-latest
-    # To prevent abuse, the PR must come from the codegen app workflow, and the PR must originate from this repository.
-    if: >-
-      github.actor == 'ptr727-codegen[bot]' &&
       github.event.pull_request.user.login == 'ptr727-codegen[bot]' &&
       github.event.pull_request.head.ref == 'codegen' &&
       github.event.pull_request.base.ref == 'main' &&
@@ -95,8 +97,15 @@ jobs:
 
     steps:
 
+      - name: Generate GitHub App token step
+        id: app-token
+        uses: actions/create-github-app-token@v1
+        with:
+          app-id: ${{ secrets.CODEGEN_APP_ID }}
+          private-key: ${{ secrets.CODEGEN_APP_PRIVATE_KEY }}
+
       - name: Merge pull request step
-        run: gh pr merge --auto --squash "$PR_URL"
+        run: gh pr merge --auto --merge "$PR_URL"
         env:
-          PR_URL: ${{github.event.pull_request.html_url}}
-          GH_TOKEN: ${{secrets.GITHUB_TOKEN}}
+          PR_URL: ${{ github.event.pull_request.html_url }}
+          GH_TOKEN: ${{ steps.app-token.outputs.token }}
