@@ -24,7 +24,7 @@ on:
 jobs:
 
   codegen:
-    name: Run codegen and pull request job (${{ matrix.target.ref }})
+    name: Run ${{ matrix.target.ref }} codegen and pull request job
     runs-on: ubuntu-latest
     permissions:
       contents: write

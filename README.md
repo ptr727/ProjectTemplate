@@ -471,15 +471,17 @@ Licensed under the [MIT License][license-link]\
 
 - General:
   - Default branch: `main`
-  - Pull requests:
-    - `Allow squash merging`
-      - [TODO:](https://github.com/orgs/community/discussions/184410): Disable merge and rebase merging, ruleset merge rules do not currently work.
+  - Pull requests — **both** merge methods enabled at the repo level so each branch ruleset can pick the right one (develop = `Squash`, main = `Merge`):
+    - `Allow merge commits` ✓ (required for develop → main releases)
+    - `Allow squash merging` ✓ (required for feature → develop merges)
+    - `Allow rebase merging` — disabled (no flow uses it; the develop ruleset forbids it anyway)
     - `Always suggest updating pull request branches`
     - `Allow auto-merge`
 - Rules / Rulesets — **separate rulesets per branch** so allowed merge methods differ (develop = squash-only; main = merge-commit-only, per AGENTS.md). Everything else is shared.
   - "Develop":
     - Target branches: `develop`.
     - Allowed merge methods: `Squash`
+    - `Require linear history` (develop is kept linear; main carries merge commits by design, so this setting belongs to develop only)
     - Plus shared settings (below).
   - "Main":
     - Target branches: `main`.
@@ -487,7 +489,6 @@ Licensed under the [MIT License][license-link]\
     - Plus shared settings (below).
   - Shared settings (apply to both rulesets):
     - `Restrict deletions`
-    - `Require linear history` (only enforceable on `develop`; `main` carries merge commits by design)
     - `Require signed commits`
     - `Require a pull request before merging`
       - `Dismiss stale pull request approvals when new commits are pushed`
