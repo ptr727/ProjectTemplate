@@ -19,9 +19,15 @@ on:
 
 jobs:
 
+  get-version:
+    name: Get version information job
+    uses: ./.github/workflows/get-version-task.yml
+    secrets: inherit
+
   build-pypilibrary:
     name: Build PyPI library project job
     runs-on: ubuntu-latest
+    needs: [get-version]
     defaults:
       run:
         working-directory: ./PyPiLibrary
@@ -59,6 +65,22 @@ jobs:
 
       - name: Run pytest step
         run: uv run pytest
+
+      # Overwrite `_version.py` (which ships hardcoded "0.0.0" so local
+      # `uv build` works without CI) with NBGV's `AssemblyFileVersion` —
+      # always Major.Minor.Patch.BuildNumber, all numeric, PEP 440 valid.
+      # `_version.py` is the single source `hatchling` reads via the
+      # `[tool.hatch.version]` path in pyproject.toml. Done AFTER tests so
+      # the test that asserts `__version__` is a non-empty string isn't
+      # affected. Wheel + sdist produced by `uv build` carry the rewritten
+      # version, so the PyPI upload version matches the matching .NET
+      # NuGet/Docker/executable artifacts for the same release commit.
+      - name: Write version into _version.py step
+        run: |
+          set -euo pipefail
+          printf '__version__ = "%s"\n' "$VERSION" > src/ptr727_projecttemplate_library/_version.py
+        env:
+          VERSION: ${{ needs.get-version.outputs.AssemblyFileVersion }}
 
       - name: Build sdist and wheel step
         run: uv build

@@ -3,8 +3,10 @@ name: Run codegen and pull request task
 on:
   workflow_call:
     secrets:
-      # Use PAT to trigger workflows
-      WORKFLOW_PAT:
+      # GitHub App credentials to generate an installation token
+      CODEGEN_APP_ID:
+        required: true
+      CODEGEN_APP_PRIVATE_KEY:
         required: true
       # API Ninjas API key
       NINJA_API_KEY:
@@ -21,6 +23,17 @@ jobs:
 
     steps:
 
+      - name: Generate GitHub App token step
+        # The App-token-driven PR open fires `pull_request` workflow events
+        # directly. `GITHUB_TOKEN`-driven PR opens do not (GitHub's recursion
+        # guard), which previously required a close/reopen dance under a PAT
+        # to nudge the auto-merge workflow — that dance is gone.
+        id: app-token
+        uses: actions/create-github-app-token@v1
+        with:
+          app-id: ${{ secrets.CODEGEN_APP_ID }}
+          private-key: ${{ secrets.CODEGEN_APP_PRIVATE_KEY }}
+
       - name: Setup .NET SDK step
         uses: actions/setup-dotnet@v5
         with:
@@ -30,6 +43,7 @@ jobs:
         uses: actions/checkout@v6
         with:
           ref: main
+          token: ${{ steps.app-token.outputs.token }}
 
       - name: Run codegen step
         run: |
@@ -49,8 +63,8 @@ jobs:
         uses: peter-evans/create-pull-request@v8
         id: cpr
         with:
-          # Use GITHUB_TOKEN to sign the commit, but will not trigger workflows
-          token: ${{ secrets.GITHUB_TOKEN }}
+          # App token: triggers pull_request workflow events directly, creates verified commits as the app
+          token: ${{ steps.app-token.outputs.token }}
           base: main
           branch: codegen
           title: 'Update codegen files'
@@ -58,14 +72,3 @@ jobs:
           commit-message: 'Update codegen files'
           delete-branch: true
           sign-commits: true
-
-      - name: Trigger PR workflows step
-        if: steps.cpr.outputs.pull-request-number != ''
-        run: |
-          set -euo pipefail
-          PR="${{ steps.cpr.outputs.pull-request-number }}"
-          gh pr close "$PR"
-          gh pr reopen "$PR"
-        env:
-          # Use PAT to trigger workflows
-          GH_TOKEN: ${{ secrets.WORKFLOW_PAT }}

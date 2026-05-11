@@ -10,6 +10,7 @@ Python PyPI template — companion to the .NET `NuGetLibrary` in this repo. Publ
 - **Type checker** — [`pyright`](https://microsoft.github.io/pyright/)
 - **Tests** — [`pytest`](https://docs.pytest.org/)
 - **Publish** — [PyPI Trusted Publishing](https://docs.pypi.org/trusted-publishers/) via `pypa/gh-action-pypi-publish` (no API token in repo secrets)
+- **Version** — [Nerdbank.GitVersioning](https://github.com/dotnet/Nerdbank.GitVersioning) (NBGV) shared with the .NET side. CI overwrites `_version.py` with NBGV's `AssemblyFileVersion` before `uv build`, so each release ships .NET and Python at the same numeric version.
 
 ## Layout
 
@@ -75,9 +76,10 @@ When deriving a new project from this template:
 - Replace the package name `ptr727-projecttemplate-library` (in `pyproject.toml`, this README, and CI) with your name.
 - Rename `src/ptr727_projecttemplate_library/` to your import name.
 - Re-register the trusted publisher on PyPI under the new project name.
-- **Wire up a versioning scheme before the first publish.** `_version.py` ships with `__version__ = "0.0.0"` as a placeholder. The publish workflow uses `skip-existing: true` so the workflow won't fail on duplicate uploads — but **no new versions will land on PyPI** until you replace `0.0.0` with something that increments. Common options:
-  - [`hatch-vcs`](https://github.com/ofek/hatch-vcs) — derive the version from git tags. Add it to `[build-system].requires` and switch `[tool.hatch.version]` to `source = "vcs"`. Pairs well with tag-driven releases.
-  - **Read from `version.json`** — the .NET side uses Nerdbank.GitVersioning which reads from `version.json`. A small custom Hatchling plugin or a CI step can pull the version into `_version.py` so .NET and Python ship with matching versions.
-  - **Manual bumps** — edit `_version.py` in each release PR. Simplest, but easy to forget.
+- **Pick a versioning scheme.** The template defaults to **NBGV-driven** versioning shared with the .NET side: `_version.py` holds `__version__ = "0.0.0"` as a local-development placeholder, and the CI step **"Write version into _version.py step"** in [`build-pypilibrary-task.yml`](../.github/workflows/build-pypilibrary-task.yml) overwrites it with NBGV's `AssemblyFileVersion` (always `Major.Minor.Patch.BuildNumber`, all numeric, PEP 440 valid) just before `uv build`. The wheel and sdist uploaded to PyPI therefore share the version of the matching NuGet/Docker/executable artifacts for that commit. If you want a different scheme, replace both `_version.py` and the workflow step. Two common alternatives:
+  - [`hatch-vcs`](https://github.com/ofek/hatch-vcs) — derive the version from git tags. Add it to `[build-system].requires` and switch `[tool.hatch.version]` to `source = "vcs"`. Drop the CI overwrite step. Pairs well with tag-driven releases and removes the NBGV dependency.
+  - **Manual bumps** — edit `_version.py` in each release PR. Simplest, but easy to forget. Drop the CI overwrite step.
+
+  The publish workflow uses `skip-existing: true` so a re-upload of the same version is a no-op instead of a failure — useful when iterating on releases without bumping NBGV.
 
 If you don't want a Python project at all, delete the `PyPiLibrary/` folder, the `build-pypilibrary-task.yml` workflow, the `build-pypilibrary` job in `build-release-task.yml`, the `publish-pypi` job in `publish-release.yml`, and the `uv` block in `.github/dependabot.yml`.
