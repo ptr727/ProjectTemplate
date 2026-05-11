@@ -72,9 +72,13 @@ jobs:
       # `_version.py` is the single source `hatchling` reads via the
       # `[tool.hatch.version]` path in pyproject.toml. Done AFTER tests so
       # the test that asserts `__version__` is a non-empty string isn't
-      # affected. Wheel + sdist produced by `uv build` carry the rewritten
-      # version, so the PyPI upload version matches the matching .NET
-      # NuGet/Docker/executable artifacts for the same release commit.
+      # affected. The PyPI version string therefore equals the .NET
+      # assemblies' `FileVersion` / `AssemblyVersion` stamp — both are
+      # `AssemblyFileVersion`. NuGet `PackageVersion` and Docker tags use
+      # NBGV's `SemVer2` instead (different format, may include `-g<sha>`
+      # or prerelease suffixes that PEP 440 rejects), so those strings
+      # are not byte-identical to PyPI's; all four still derive from the
+      # same NBGV computation per release commit.
       - name: Write version into _version.py step
         run: |
           set -euo pipefail
