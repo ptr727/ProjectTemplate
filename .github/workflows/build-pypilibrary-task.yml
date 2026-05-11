@@ -66,23 +66,26 @@ jobs:
       - name: Run pytest step
         run: uv run pytest
 
-      # Overwrite `_version.py` (which ships hardcoded "0.0.0" so local
-      # `uv build` works without CI) with NBGV's `AssemblyFileVersion` —
-      # always Major.Minor.Patch.BuildNumber, all numeric, PEP 440 valid.
-      # `_version.py` is the single source `hatchling` reads via the
-      # `[tool.hatch.version]` path in pyproject.toml. Done AFTER tests so
-      # the test that asserts `__version__` is a non-empty string isn't
-      # affected. The PyPI version string therefore equals the .NET
-      # assemblies' `FileVersion` / `AssemblyVersion` stamp — both are
-      # `AssemblyFileVersion`. NuGet `PackageVersion` and Docker tags use
-      # NBGV's `SemVer2` instead (different format, may include `-g<sha>`
-      # or prerelease suffixes that PEP 440 rejects), so those strings
-      # are not byte-identical to PyPI's; all four still derive from the
-      # same NBGV computation per release commit.
+      # Replace the `__version__` line in `_version.py` (which ships
+      # hardcoded "0.0.0" so local `uv build` works without CI) with
+      # NBGV's `AssemblyFileVersion` — always Major.Minor.Patch.BuildNumber,
+      # all numeric, PEP 440 valid. `sed -i` replaces the line in place so
+      # the module docstring and any future metadata in the file survive
+      # into the published wheel / sdist. `_version.py` is the single
+      # source `hatchling` reads via the `[tool.hatch.version]` path in
+      # pyproject.toml. Done AFTER tests so the test that asserts
+      # `__version__` is a non-empty string isn't affected. The PyPI
+      # version string therefore equals the .NET assemblies' `FileVersion`
+      # stamp (= NBGV `AssemblyFileVersion`). .NET's `AssemblyVersion`
+      # is a separate NBGV output and NuGet `PackageVersion` / Docker
+      # tags use NBGV `SemVer2` (PEP 440 rejects its prerelease /
+      # build-metadata suffixes), so those strings are not byte-identical
+      # to PyPI's; all four still derive from the same NBGV computation
+      # per release commit.
       - name: Write version into _version.py step
         run: |
           set -euo pipefail
-          printf '__version__ = "%s"\n' "$VERSION" > src/ptr727_projecttemplate_library/_version.py
+          sed -i 's/^__version__ = .*/__version__ = "'"$VERSION"'"/' src/ptr727_projecttemplate_library/_version.py
         env:
           VERSION: ${{ needs.get-version.outputs.AssemblyFileVersion }}
 
