@@ -8,8 +8,8 @@
 .artifacts
 .DS_Store
 *.user
+.claude
 
-# Python / uv
 __pycache__/
 *.py[cod]
 *.egg-info/

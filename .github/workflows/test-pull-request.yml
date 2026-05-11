@@ -27,6 +27,7 @@ jobs:
     steps:
       - name: Check workflow results step
         run: |
+          set -euo pipefail
           exit_on_result() {
             if [[ "$2" == "failure" || "$2" == "cancelled" ]]; then
               echo "Job '$1' failed or was cancelled."
