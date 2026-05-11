@@ -18,7 +18,6 @@ jobs:
   get-version:
     name: Get version information job
     uses: ./.github/workflows/get-version-task.yml
-    secrets: inherit
 
   build-nugetlibrary:
     name: Build NuGet library project job

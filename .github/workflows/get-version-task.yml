@@ -36,6 +36,20 @@ jobs:
         with:
           fetch-depth: 0
 
+      # `dotnet/nbgv` is the documented exception to the AGENTS.md
+      # "pin third-party actions to a commit SHA" rule. Justification:
+      #   - The upstream tag stream is effectively dormant — the latest
+      #     tag `v0.5.1` lags well behind `master` and fixes accumulate
+      #     on `master` between tag bumps.
+      #   - Dependabot's GitHub Actions ecosystem tracks tagged
+      #     releases. A SHA pinned to a post-`v0.5.1` `master` commit
+      #     would either receive no Dependabot updates (silently stale)
+      #     or get an attempted downgrade PR to `v0.5.1`'s SHA. Neither
+      #     beats just floating on `master`.
+      #   - Upstream owner is Microsoft (`dotnet/`), so the
+      #     "tag-/branch-retargeting risk" the AGENTS.md rule guards
+      #     against is materially lower than for a random author.
+      # Revisit if `dotnet/nbgv` resumes regular tagged releases.
       - name: Run Nerdbank.GitVersioning tool step
         id: nbgv
         uses: dotnet/nbgv@master
