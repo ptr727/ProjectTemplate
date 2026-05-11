@@ -450,9 +450,10 @@ Licensed under the [MIT License][license-link]\
     - Metadata: Read-only (auto-required).
   - Note the App ID from the app's settings page; generate a private key (downloads a `.pem` file).
   - [Install the app](https://github.com/settings/apps) on your account and grant it access to the repository. The app must be both created **and** installed — creating it alone is not sufficient (`actions/create-github-app-token` fails with `Not Found` if the app isn't installed on the repository).
-  - Save the App ID as `CODEGEN_APP_ID` and the private key contents as `CODEGEN_APP_PRIVATE_KEY` in:
-    - GitHub project security Settings / Secrets / Actions.
-  - If the codegen workflows require additional secrets (e.g. third-party API keys), register them in the same location and reference them in the reusable workflow task files.
+  - Save the App ID as `CODEGEN_APP_ID` and the private key contents as `CODEGEN_APP_PRIVATE_KEY` in **both** of:
+    - GitHub project security Settings / Secrets / Actions — for the codegen workflow and the codegen merge job.
+    - GitHub project security Settings / Secrets / Dependabot — **required** because Dependabot-triggered `pull_request` workflow runs use a separate, restricted secret context that doesn't see Actions secrets. Without the App secrets in the Dependabot store, the `merge-dependabot` job in `merge-bot-pull-request.yml` can't mint an App token and the PR will never auto-merge.
+  - If the codegen workflows require additional secrets (e.g. third-party API keys), register them in the Actions store; if a Dependabot-triggered workflow ever needs them, register them in the Dependabot store too.
   - The App token is used by **both** the codegen workflow (`run-codegen-pull-request-task.yml`) **and** every job in `merge-bot-pull-request.yml`. App-authored pushes/PRs trigger downstream `pull_request` and `push` workflow events directly — unlike `GITHUB_TOKEN`-authored events, which are blocked by GitHub's recursion guard. This is why `publish-release.yml` fires on the merge commit after Dependabot or codegen auto-merge, and why the codegen workflow no longer needs the legacy close/reopen dance to trigger auto-merge.
   - The codegen auto-merge condition in `merge-bot-pull-request.yml` (`merge-codegen` job) requires:
     - `github.event.pull_request.user.login == 'ptr727-codegen[bot]'` — PR was opened by the App.

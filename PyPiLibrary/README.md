@@ -58,7 +58,7 @@ Prerequisite: enable **2FA** on the PyPI account (TOTP or hardware key). PyPI re
    - **Workflow filename**: `publish-release.yml`
    - **Environment name**: `pypi`
 2. **GitHub repo** → **Settings** → **Environments** → **New environment** → `pypi`. The environment owns deploy-time guardrails:
-   - **Deployment branch rule** → **Selected branches and tags** → add `main`. Without this, a push to any branch could mint an OIDC token claiming to publish PyPI; with it, only pushes to `main` are eligible. **This step is mandatory — Trusted Publishing without a branch restriction is a documented security anti-pattern.**
+   - **Deployment branch rule** → **Selected branches and tags** → add `main`. **This step is mandatory — Trusted Publishing without a branch restriction is a documented security anti-pattern.** Defense in depth: the `publish-pypi` job in `.github/workflows/publish-release.yml` *also* has `if: github.ref == 'refs/heads/main'` so develop pushes don't even attempt to enter the environment gate (they'd otherwise stall as blocked deployments). The `if:` is the operational gate; the env branch rule is the security boundary that holds even if the `if:` gets misconfigured.
    - (Optional) add yourself as a **required reviewer** so each publish requires a click — useful belt-and-suspenders against an accidental release.
 3. The first successful release converts the pending publisher to a real publisher. After that the same OIDC exchange validates against the real publisher on every release.
 
