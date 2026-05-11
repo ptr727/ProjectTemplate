@@ -17,6 +17,8 @@ Do not duplicate language-specific rules here.
 
 Feature → develop PRs squash-merge — the PR title becomes the single commit on develop. Develop → main PRs merge-commit — main's history shows one merge commit per release with develop's tip as the second parent. Titles are descriptive and have no versioning effect — versioning is handled by [Nerdbank.GitVersioning](https://github.com/dotnet/Nerdbank.GitVersioning) reading [version.json](../version.json) and git history, not by parsing commit messages.
 
+Branch protection enforces the merge method on both bases (develop allows only squash, main allows only merge). When running `gh pr merge` against either base, pick the matching flag (`--squash` for develop, `--merge` for main); a mismatch fails with "Merge method ... is not allowed on this repository". The merge-bot workflow (`.github/workflows/merge-bot-pull-request.yml`) does this dispatch automatically for Dependabot and codegen PRs via a `case` on `base.ref` — keep that pattern when adding new auto-merge jobs.
+
 ### Format
 
 - Imperative subject summarizing the change, ≤ 72 characters, no trailing period. ("Add 24-hour PM2.5 average sensor", not "Added X" or "Adds X".)

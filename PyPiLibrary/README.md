@@ -48,10 +48,25 @@ Releases are produced by `.github/workflows/build-pypilibrary-task.yml` (called 
 
 First-time setup (one-time, on PyPI):
 
-1. PyPI → **Account settings** → **Publishing** → **Add a new pending publisher**.
-2. Project name: `ptr727-projecttemplate-library`. Owner: `ptr727`. Repo: `ProjectTemplate`. Workflow: `publish-release.yml`. Environment: `pypi`.
-3. GitHub repo → **Settings** → **Environments** → create `pypi` environment (optionally with required reviewers).
-4. The first successful release converts the pending publisher to a real publisher.
+Prerequisite: enable **2FA** on the PyPI account (TOTP or hardware key). PyPI requires it before any trusted publisher can be registered.
+
+1. **PyPI** → **Account settings** → **Publishing** → **Add a new pending publisher** ([direct link](https://pypi.org/manage/account/publishing/)). If the project already exists on PyPI, go to the project page → **Manage** → **Publishing** → **Add a new publisher** instead — the "pending" form is only for projects that don't exist yet. Fields:
+   - **PyPI project name**: `ptr727-projecttemplate-library`
+   - **Owner**: `ptr727`
+   - **Repository name**: `ProjectTemplate`
+   - **Workflow filename**: `publish-release.yml`
+   - **Environment name**: `pypi`
+2. **GitHub repo** → **Settings** → **Environments** → **New environment** → `pypi`. The environment owns deploy-time guardrails:
+   - **Deployment branch rule** → **Selected branches and tags** → add `main`. Without this, a push to any branch could mint an OIDC token claiming to publish PyPI; with it, only pushes to `main` are eligible. **This step is mandatory — Trusted Publishing without a branch restriction is a documented security anti-pattern.**
+   - (Optional) add yourself as a **required reviewer** so each publish requires a click — useful belt-and-suspenders against an accidental release.
+3. The first successful release converts the pending publisher to a real publisher. After that the same OIDC exchange validates against the real publisher on every release.
+
+Troubleshooting:
+
+- `invalid-publisher: ... Publisher with matching claims was not found` — the publisher hasn't been registered yet, or one of the five claim fields (owner, repo, workflow filename, environment name, project name) doesn't match. Re-check step 1.
+- `manifest unknown` from `docker:` pulling `ghcr.io/pypa/gh-action-pypi-publish` — the SHA pinned in `publish-release.yml` doesn't correspond to a release tag with a published GHCR image. Pin to the SHA that the upstream tag (`# vX.Y.Z` comment) actually points at on `pypa/gh-action-pypi-publish`.
+
+Fallback (API token instead of Trusted Publishing): drop the `id-token: write` permission from the `publish-pypi` job, add `password: ${{ secrets.PYPI_API_TOKEN }}` to the `pypa/gh-action-pypi-publish` step, and store the token as a repo secret. Also pass `attestations: false` since attestations require the OIDC token. The OIDC path is preferred — no long-lived secret in the repo — so use the token method only when Trusted Publishing isn't an option.
 
 ## Template Adoption
 
