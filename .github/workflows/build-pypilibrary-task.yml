@@ -128,7 +128,9 @@ jobs:
       # prerelease marker. .NET keeps the bare `FileVersion`, and
       # NuGet/Docker use NBGV `SemVer2`, so strings are not byte-
       # identical across artifacts on either channel. All four still
-      # derive from the same NBGV computation per release commit.
+      # derive from the same NBGV computation per commit (main pushes
+      # publish release versions; develop pushes publish PEP 440 dev
+      # releases / NBGV prereleases).
       - name: Write version into _version.py step
         run: |
           set -euo pipefail
