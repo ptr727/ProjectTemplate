@@ -43,12 +43,14 @@ jobs:
 
       - name: Run codegen step
         run: |
+          set -euo pipefail
           dotnet run --project ./CodeGen/CodeGen.csproj -- \
             --codepath ./CodeGen \
             --apikey "${{ secrets.NINJA_API_KEY }}"
 
       - name: Format code step
         run: |
+          set -euo pipefail
           dotnet tool restore
           dotnet csharpier format --log-level=debug .
           git status
