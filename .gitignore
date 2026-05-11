@@ -8,3 +8,13 @@
 .artifacts
 .DS_Store
 *.user
+.claude
+
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+dist/
+.pytest_cache/
+.ruff_cache/
+.pyright/

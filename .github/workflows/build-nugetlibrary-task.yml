@@ -1,9 +1,9 @@
-name: Build library task
+name: Build NuGet library task
 
 on:
   workflow_call:
     inputs:
-      # Input to control whether to push the library to NuGet.org
+      # Input to control whether to push the NuGet library to NuGet.org
       push:
         required: false
         type: boolean
@@ -11,7 +11,7 @@ on:
     outputs:
       # Output of the uploaded artifact id
       artifact-id:
-        value: ${{ jobs.build-library.outputs.artifact-id }}
+        value: ${{ jobs.build-nugetlibrary.outputs.artifact-id }}
 
 jobs:
 
@@ -20,8 +20,8 @@ jobs:
     uses: ./.github/workflows/get-version-task.yml
     secrets: inherit
 
-  build-library:
-    name: Build library project job
+  build-nugetlibrary:
+    name: Build NuGet library project job
     runs-on: ubuntu-latest
     outputs:
       artifact-id: ${{ steps.artifact-upload-step.outputs.artifact-id }}
@@ -37,9 +37,10 @@ jobs:
       - name: Checkout code step
         uses: actions/checkout@v6
 
-      - name: Build library project step
+      - name: Build NuGet library project step
         run: |
-          dotnet build ./Library/Library.csproj \
+          set -euo pipefail
+          dotnet build ./NuGetLibrary/NuGetLibrary.csproj \
             -property:OutputPath=${{ runner.temp }}/publish/ \
             -property:PackageOutputPath=${{ runner.temp }}/publish/ \
             --configuration ${{ github.ref_name == 'main' && 'Release' || 'Debug' }} \
@@ -52,17 +53,18 @@ jobs:
       - name: Publish to NuGet.org step
         if: ${{ inputs.push }}
         run: |
+          set -euo pipefail
           dotnet nuget push ${{ runner.temp }}/publish/*.nupkg \
             --source https://api.nuget.org/v3/index.json \
             --api-key ${{ secrets.NUGET_API_KEY }} \
             --skip-duplicate
 
       - name: Zip output step
-        run: 7z a -t7z ${{ runner.temp }}/Library.7z ${{ runner.temp }}/publish/*
+        run: 7z a -t7z ${{ runner.temp }}/NuGetLibrary.7z ${{ runner.temp }}/publish/*
 
       - name: Upload build artifacts step
         id: artifact-upload-step
         uses: actions/upload-artifact@v6
         with:
-          name: library-build
-          path: ${{ runner.temp }}/Library.7z
+          name: nugetlibrary-build
+          path: ${{ runner.temp }}/NuGetLibrary.7z

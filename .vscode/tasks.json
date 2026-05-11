@@ -78,22 +78,6 @@
             }
         },
         {
-            "label": "Husky.Net Run",
-            "type": "process",
-            "command": "dotnet",
-            "args": [
-                "husky",
-                "run"
-            ],
-            "problemMatcher": [
-                "$msCompile"
-            ],
-            "presentation": {
-                "showReuseMessage": false,
-                "clear": false
-            }
-        },
-        {
             "label": ".Net Benchmark",
             "type": "process",
             "command": "dotnet",

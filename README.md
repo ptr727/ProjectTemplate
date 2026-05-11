@@ -9,7 +9,8 @@ C# .NET project template.
 - **Source Code**: [GitHub][github-link] - Source code, issues, discussions, and CI/CD pipelines.
 - **Versioned Releases**: [GitHub Releases][releases-link] - Version tagged source code and build artifacts.
 - **Docker Images**: [Docker Hub][docker-link] - Container images with all tools pre-installed.
-- **NuGet Packages** [NuGet Packages][nuget-link] - .NET libraries published to NuGet.org.
+- **NuGet Packages**: [NuGet Packages][nuget-link] - .NET libraries published to NuGet.org.
+- **PyPI Packages**: [PyPI Packages][pypi-link] - Python library published to PyPI.org.
 
 ### Build Status
 
@@ -25,7 +26,8 @@ C# .NET project template.
 [![Docker Latest][dockerlatestversion-shield]][docker-link]\
 [![Docker Develop][dockerdevelopversion-shield]][docker-link]\
 [![NuGet Release][nugetreleaseversion-shield]][nuget-link]\
-[![NuGet Pre-Release][nugetprereleaseversion-shield]][nuget-link]
+[![NuGet Pre-Release][nugetprereleaseversion-shield]][nuget-link]\
+[![PyPI Release][pypireleaseversion-shield]][pypi-link]
 
 ### Release Notes
 
@@ -211,6 +213,23 @@ Options:
 
 ## Development Environment Setup
 
+The recommended setup is one of the per-language [Dev Containers](./docs/devcontainer.md) under `.devcontainer/`:
+
+- **`.devcontainer/dotnet/`** — .NET 10 SDK + GitHub CLI. Pair with `DotNet.code-workspace`.
+- **`.devcontainer/python/`** — Python 3.14 + `uv` + GitHub CLI. Pair with `Python.code-workspace`.
+
+Each container bind-mounts your SSH public key, allowed-signers file, and `gh` config from the host so commits sign correctly. `gh` is pre-authenticated when the host token is file-backed; macOS Keychain and Linux libsecret-backed tokens require an in-container `gh auth login` — see the [credential-store nuance](./docs/devcontainer.md#gh-credential-store) section.
+
+> **Windows note**: Python work is intentionally not supported on the Windows host. The Python extension caches the Linux-layout `PyPiLibrary/.venv/bin/python` against a venv whose actual Windows path is `PyPiLibrary\.venv\Scripts\python.exe`, breaking Ruff. Use the python devcontainer.
+
+**Recommended (devcontainer)**:
+
+1. Complete [host setup](./docs/host-setup.md) once per machine (git identity, SSH key, allowed_signers, `gh auth login`, [SSH commit signing](./docs/ssh-signing.md)).
+2. Clone the repo, open the matching workspace (`DotNet.code-workspace` or `Python.code-workspace`) in VS Code with the [Dev Containers extension][devcontainers-link], and run **Reopen in Container** — pick the language flavor.
+3. The `postCreateCommand` runs `dotnet tool restore` (.NET container) or installs `uv` and runs `uv sync` (Python container). No git hooks are installed by default — see "Optional: enable git hooks locally" below.
+
+**Alternative (host install)**:
+
 - **Install Developer Tools**:
 
   - Install [.NET SDK](https://dotnet.microsoft.com/en-us/download):
@@ -248,11 +267,58 @@ Options:
     # Initialize dotnet tools
     cd ./[Project]
     dotnet tool restore
-    dotnet husky install
     ```
 
-  - Open `[Project].code-workspace` in Visual Studio Code.
+  - Open `DotNet.code-workspace` (or `Python.code-workspace`) in Visual Studio Code.
   - Open `[Project].slnx` in Visual Studio.
+
+**Optional: enable git hooks locally**:
+
+Hooks are not shipped with the template — CI is the lint backstop. Opt in per language if you want pre-commit checks locally.
+
+- **For .NET work** — install [Husky.Net][huskynet-link]:
+
+    ```shell
+    dotnet new tool-manifest  # if no tool manifest exists yet
+    dotnet tool install Husky
+    dotnet husky install
+    dotnet husky add pre-commit -c "dotnet csharpier check . && dotnet format style --verify-no-changes --severity=info"
+    ```
+
+- **For Python work** — install [pre-commit][precommit-link]:
+
+    ```shell
+    uv tool install pre-commit
+    pre-commit install
+    ```
+
+    Sample `.pre-commit-config.yaml` (the hooks shell into `PyPiLibrary/` because the uv project — and therefore ruff/pyright and their configs — lives there, not at the repo root):
+
+    ```yaml
+    repos:
+      - repo: local
+        hooks:
+          - id: ruff-check
+            name: ruff check
+            entry: uv run --directory PyPiLibrary ruff check
+            language: system
+            files: ^PyPiLibrary/.*\.py$
+            pass_filenames: false
+          - id: ruff-format
+            name: ruff format
+            entry: uv run --directory PyPiLibrary ruff format --check
+            language: system
+            files: ^PyPiLibrary/.*\.py$
+            pass_filenames: false
+          - id: pyright
+            name: pyright
+            entry: uv run --directory PyPiLibrary pyright
+            language: system
+            files: ^PyPiLibrary/.*\.py$
+            pass_filenames: false
+    ```
+
+CI runs these same checks on every PR, so hooks are purely a local convenience.
 
 ## 3rd Party Tools
 
@@ -267,7 +333,6 @@ Options:
 - [Git Auto Commit][ghautocommit-link]
 - [GitHub Actions][ghactions-link]
 - [GitHub Dependabot][ghdependabot-link]
-- [Husky.Net][huskynet-link]
 - [Nerdbank.GitVersioning][nerbankgitversion-link]
 - [Serilog][serilog-link]
 - [xUnit.Net][xunit-link]
@@ -283,12 +348,13 @@ Licensed under the [MIT License][license-link]\
 
 ### Template - TODO List
 
-- [ ] Configure git for SSH signing and SSH forwarding in dev containers.
+- [ ] Configure git for SSH signing and SSH forwarding in dev containers — see [docs/host-setup.md](./docs/host-setup.md), [docs/ssh-signing.md](./docs/ssh-signing.md), and [docs/devcontainer.md](./docs/devcontainer.md).
+- [ ] Decide whether your project needs the .NET (`NuGetLibrary/`) side, the Python (`PyPiLibrary/`) side, or both. Delete the unused folder and remove its references from `ProjectTemplate.slnx`, `.github/dependabot.yml`, and the corresponding `.github/workflows/build-*-task.yml`.
 - [ ] Start on Linux to avoid file permission issues when moving from Windows.
 - [ ] Configure the [Developer Environment](#template---developer-environment-setup).
 - [ ] Open the project directory (*not the workspace*) in Visual Studio Code, and rename (Ctrl-Shift-H) all instances of `ProjectTemplate` to `[NewProject]` in code.
-- [ ] Rename `ProjectTemplate.code-workspace` to `[NewProject].code-workspace` and `ProjectTemplate.slnx` to `[NewProject].slnx`.
-- [ ] Open `[NewProject].code-workspace` workspace in Visual Studio Code.
+- [ ] Rename `DotNet.code-workspace` to `[NewProject].code-workspace` and `Python.code-workspace` to `[NewProject]-Python.code-workspace`, or delete the workspace for the language you don't need. Rename `ProjectTemplate.slnx` to `[NewProject].slnx`.
+- [ ] Open the workspace file for the language you kept (`[NewProject].code-workspace` and/or `[NewProject]-Python.code-workspace`) in Visual Studio Code.
 - [ ] Delete any projects and associated actions that will not be used, update dependencies in actions to remove deleted actions.
 - [ ] Rename projects to match the naming, update `.slnx` and `.csproj` files, and update actions to match the naming.
 - [ ] Update the `namespace` in `.cs` and `.csproj` files to match the naming.
@@ -306,8 +372,9 @@ Licensed under the [MIT License][license-link]\
 #### Template - Git Setup
 
 - **⚠️ Prerequisites**:
-  - Configure git for SSH signing.
-  - Configure SSH forwarding for dev containers.
+  - Configure git for SSH signing — see [SSH commit signing](./docs/ssh-signing.md).
+  - Configure host prerequisites (SSH key, `allowed_signers`, `gh` auth) — see [host setup](./docs/host-setup.md).
+  - Configure SSH forwarding for dev containers — see [devcontainer setup](./docs/devcontainer.md).
 - Setup new project from template:
 
   ```shell
@@ -321,7 +388,6 @@ Licensed under the [MIT License][license-link]\
 
   # Init dotnet tools
   dotnet tool restore
-  dotnet husky install
 
   # Update dotnet tools
   dotnet tool update --all
@@ -341,13 +407,7 @@ Licensed under the [MIT License][license-link]\
   # Init dotnet tools
   dotnet new tool-manifest
   dotnet tool install csharpier
-  dotnet tool install husky
   dotnet tool install dotnet-outdated-tool
-  dotnet husky install
-  dotnet husky add pre-commit -c "dotnet husky run"
-
-  # Make sure pre-commit is executable on Linux
-  chmod +x ./.husky/pre-commit
   ```
 
 - Use `first-branch` for all the initial project setup and testing.
@@ -469,46 +529,45 @@ Licensed under the [MIT License][license-link]\
 - Bot generated pull requests (codegen, dependabot) always checkout from and merge into `main` directly.
 - If `develop` falls behind after a bot merge, re-run codegen or rebase `develop` on `main` before merging `develop` to `main`.
 
-<!--- Shields links --->
+<!--- Shields links (alphabetized per AGENTS.md) --->
 
-[github-link]: https://github.com/ptr727/ProjectTemplate
 [actions-link]: https://github.com/ptr727/ProjectTemplate/actions
-[discussions-link]: https://github.com/ptr727/ProjectTemplate/discussions
 [commits-link]: https://github.com/ptr727/ProjectTemplate/commits/main
-[issues-link]: https://github.com/ptr727/ProjectTemplate/issues
-[releases-link]: https://github.com/ptr727/ProjectTemplate/releases
-
-[license-link]: ./LICENSE
-[license-shield]: https://img.shields.io/github/license/ptr727/ProjectTemplate?label=License
-
+[discussions-link]: https://github.com/ptr727/ProjectTemplate/discussions
 [docker-link]: https://hub.docker.com/r/ptr727/projecttemplate
-[dockerlatestversion-shield]: https://img.shields.io/docker/v/ptr727/projecttemplate/latest?label=Docker%20Latest&logo=docker
-[dockerdevelopversion-shield]: https://img.shields.io/docker/v/ptr727/projecttemplate/develop?label=Docker%20Develop&logo=docker&color=orange
 [dockerbuildstatus-shield]: https://img.shields.io/github/actions/workflow/status/ptr727/ProjectTemplate/publish-periodic-docker-release.yml?logo=github&label=Docker%20Build
-
+[dockerdevelopversion-shield]: https://img.shields.io/docker/v/ptr727/projecttemplate/develop?label=Docker%20Develop&logo=docker&color=orange
+[dockerlatestversion-shield]: https://img.shields.io/docker/v/ptr727/projecttemplate/latest?label=Docker%20Latest&logo=docker
+[github-link]: https://github.com/ptr727/ProjectTemplate
+[issues-link]: https://github.com/ptr727/ProjectTemplate/issues
 [lastbuild-shield]: https://byob.yarr.is/ptr727/ProjectTemplate/lastbuild
 [lastcommit-shield]: https://img.shields.io/github/last-commit/ptr727/ProjectTemplate?logo=github&label=Last%20Commit
-
-[releaseversion-shield]: https://img.shields.io/github/v/release/ptr727/ProjectTemplate?logo=github&label=GitHub%20Release
-[prereleaseversion-shield]: https://img.shields.io/github/v/release/ptr727/ProjectTemplate?include_prereleases&label=GitHub%20Pre-Release&logo=github
-[releasebuildstatus-shield]: https://img.shields.io/github/actions/workflow/status/ptr727/ProjectTemplate/publish-release.yml?logo=github&label=Releases%20Build
-
+[license-link]: ./LICENSE
+[license-shield]: https://img.shields.io/github/license/ptr727/ProjectTemplate?label=License
 [nuget-link]: https://www.nuget.org/packages/ptr727.ProjectTemplate.Library/
+[nugetprereleaseversion-shield]: https://img.shields.io/nuget/vpre/ptr727.ProjectTemplate.Library?logo=nuget&label=NuGet%20Pre-Release&color=orange
 [nugetreleaseversion-shield]: https://img.shields.io/nuget/v/ptr727.ProjectTemplate.Library?logo=nuget&label=NuGet%20Release
-[nugetprereleaseversion-shield]: https://img.shields.io/nuget/vpre/ptr727.ProjectTemplate.Library?logo=nuget&&label=NuGet%20Pre-Release&color=orange
+[prereleaseversion-shield]: https://img.shields.io/github/v/release/ptr727/ProjectTemplate?include_prereleases&label=GitHub%20Pre-Release&logo=github
+[pypi-link]: https://pypi.org/project/ptr727-projecttemplate-library/
+[pypireleaseversion-shield]: https://img.shields.io/pypi/v/ptr727-projecttemplate-library?logo=pypi&label=PyPI%20Release
+[releasebuildstatus-shield]: https://img.shields.io/github/actions/workflow/status/ptr727/ProjectTemplate/publish-release.yml?logo=github&label=Releases%20Build
+[releases-link]: https://github.com/ptr727/ProjectTemplate/releases
+[releaseversion-shield]: https://img.shields.io/github/v/release/ptr727/ProjectTemplate?logo=github&label=GitHub%20Release
 
-<!-- 3rd Party tool links -->
+<!-- 3rd Party tool links (alphabetized per AGENTS.md) -->
 
 [apininjas-link]: https://api-ninjas.com/api/quotes
 [awesomeassertions-link]: https://awesomeassertions.org/
 [byob-link]: https://github.com/marketplace/actions/bring-your-own-badge
 [createpr-link]: https://github.com/marketplace/actions/create-pull-request
 [csharpier-link]: https://csharpier.com/
+[devcontainers-link]: https://marketplace.visualstudio.com/items?itemName=ms-vscode-remote.remote-containers
 [ghactions-link]: https://github.com/actions
 [ghautocommit-link]: https://github.com/marketplace/actions/git-auto-commit
 [ghdependabot-link]: https://github.com/dependabot
 [ghrelease-link]: https://github.com/marketplace/actions/gh-release
 [huskynet-link]: https://alirezanet.github.io/Husky.Net/
 [nerbankgitversion-link]: https://github.com/marketplace/actions/nerdbank-gitversioning
+[precommit-link]: https://pre-commit.com/
 [serilog-link]: https://serilog.net/
 [xunit-link]: https://xunit.net/

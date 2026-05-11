@@ -33,14 +33,15 @@ jobs:
 
       - name: Run codegen step
         run: |
+          set -euo pipefail
           dotnet run --project ./CodeGen/CodeGen.csproj -- \
             --codepath ./CodeGen \
             --apikey "${{ secrets.NINJA_API_KEY }}"
 
       - name: Format code step
         run: |
+          set -euo pipefail
           dotnet tool restore
-          dotnet husky install
           dotnet csharpier format --log-level=debug .
           git status
 
@@ -61,6 +62,7 @@ jobs:
       - name: Trigger PR workflows step
         if: steps.cpr.outputs.pull-request-number != ''
         run: |
+          set -euo pipefail
           PR="${{ steps.cpr.outputs.pull-request-number }}"
           gh pr close "$PR"
           gh pr reopen "$PR"

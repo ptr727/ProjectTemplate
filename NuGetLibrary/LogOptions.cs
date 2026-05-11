@@ -1,4 +1,4 @@
-namespace ptr727.ProjectTemplate.Library;
+namespace ptr727.ProjectTemplate.NuGetLibrary;
 
 /// <summary>
 /// Provides global logging configuration for the library.
