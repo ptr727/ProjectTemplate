@@ -60,7 +60,7 @@ jobs:
           github-token: "${{ secrets.GITHUB_TOKEN }}"
 
       # Skip semver-major NuGet bumps: majors can build cleanly but break
-      # runtime behaviour, so they should land via human review. Other
+      # runtime behavior, so they should land via human review. Other
       # ecosystems' majors (github-actions, uv) are usually safe and merge.
       - name: Merge pull request step
         if: >-
