@@ -25,14 +25,15 @@ jobs:
 
   publish-pypi:
     name: Publish PyPI library job
-    # Restrict PyPI upload to `main` pushes. The `pypi` GitHub environment
-    # also has a Deployment branch rule allowing only `main` as defense in
-    # depth, but without this `if:` the job would still attempt to run on
-    # develop pushes and be blocked at the env gate — visible as a stalled
-    # / failed job on every develop release. PyPI tracks releases, not the
-    # prerelease channel; NuGet/Docker/executables already publish on
-    # develop with NBGV prerelease versions.
-    if: github.ref == 'refs/heads/main'
+    # Runs on pushes to both `main` and `develop`. `build-pypilibrary-task.yml`
+    # picks the right PEP 440 version per branch (release on main,
+    # `M.N.P.devN` on develop) so `pip install <pkg>` keeps installing the
+    # latest main release by default while `pip install --pre <pkg>` opts
+    # into the develop prerelease channel. This matches how NuGet/Docker
+    # already publish on both branches with NBGV prerelease semantics.
+    # The `pypi` GitHub environment's Deployment branch rule
+    # (Settings → Environments → pypi) restricts uploads to `main` +
+    # `develop` as defense in depth — see PyPiLibrary/README.md.
     needs: [create-release]
     runs-on: ubuntu-latest
     environment:

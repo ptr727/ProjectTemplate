@@ -65,28 +65,56 @@ jobs:
       - name: Run pytest step
         run: uv run pytest
 
+      # Compute the PEP 440 version string for this build:
+      #   refs/heads/main    -> AssemblyFileVersion as-is. PEP 440 treats
+      #                         this 4-segment numeric form as a release.
+      #   refs/heads/develop -> Major.Minor.Patch.devN (PEP 440 dev
+      #                         release; pip filters it out of `pip
+      #                         install <pkg>` unless `--pre` is passed,
+      #                         giving us a "prerelease channel" on the
+      #                         same PyPI project. N is NBGV's
+      #                         BuildNumber, so each develop push gets a
+      #                         unique upload.)
+      #   other refs (PR validation via test-release-task, feature
+      #                branches) -> AssemblyFileVersion as-is. These
+      #                refs never publish, so any PEP 440 valid string
+      #                that lets `uv build` succeed is fine.
+      - name: Compute PyPI version step
+        id: pypiver
+        run: |
+          set -euo pipefail
+          if [[ "$GITHUB_REF" == "refs/heads/develop" ]]; then
+            IFS='.' read -r major minor patch build <<< "$AFV"
+            version="${major}.${minor}.${patch}.dev${build}"
+          else
+            version="$AFV"
+          fi
+          echo "PyPI version for $GITHUB_REF: $version"
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+        env:
+          AFV: ${{ needs.get-version.outputs.AssemblyFileVersion }}
+
       # Replace the `__version__` line in `_version.py` (which ships
-      # hardcoded "0.0.0" so local `uv build` works without CI) with
-      # NBGV's `AssemblyFileVersion` — always Major.Minor.Patch.BuildNumber,
-      # all numeric, PEP 440 valid. `sed -i` replaces the line in place so
-      # the module docstring and any future metadata in the file survive
-      # into the published wheel / sdist. `_version.py` is the single
-      # source `hatchling` reads via the `[tool.hatch.version]` path in
-      # pyproject.toml. Done AFTER tests so the test that asserts
-      # `__version__` is a non-empty string isn't affected. The PyPI
-      # version string therefore equals the .NET assemblies' `FileVersion`
-      # stamp (= NBGV `AssemblyFileVersion`). .NET's `AssemblyVersion`
-      # is a separate NBGV output and NuGet `PackageVersion` / Docker
-      # tags use NBGV `SemVer2` (PEP 440 rejects its prerelease /
-      # build-metadata suffixes), so those strings are not byte-identical
-      # to PyPI's; all four still derive from the same NBGV computation
-      # per release commit.
+      # hardcoded "0.0.0" so local `uv build` works without CI) with the
+      # branch-aware PEP 440 version computed above. `sed -i` replaces
+      # the line in place so the module docstring and any future metadata
+      # in the file survive into the published wheel / sdist.
+      # `_version.py` is the single source `hatchling` reads via the
+      # `[tool.hatch.version]` path in pyproject.toml. Done AFTER tests
+      # so the test that asserts `__version__` is a non-empty string
+      # isn't affected. On main, the PyPI version string equals the .NET
+      # assemblies' `FileVersion` stamp (= NBGV `AssemblyFileVersion`);
+      # on develop, the PyPI version is `M.N.P.devB` while .NET still
+      # uses the numeric `FileVersion` and NuGet/Docker use NBGV
+      # `SemVer2` (different formats — strings are not byte-identical
+      # across artifacts on develop). All four still derive from the
+      # same NBGV computation per release commit.
       - name: Write version into _version.py step
         run: |
           set -euo pipefail
           sed -i 's/^__version__ = .*/__version__ = "'"$VERSION"'"/' src/ptr727_projecttemplate_library/_version.py
         env:
-          VERSION: ${{ needs.get-version.outputs.AssemblyFileVersion }}
+          VERSION: ${{ steps.pypiver.outputs.version }}
 
       - name: Build sdist and wheel step
         run: uv build

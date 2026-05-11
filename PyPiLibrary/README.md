@@ -10,7 +10,7 @@ Python PyPI template — companion to the .NET `NuGetLibrary` in this repo. Publ
 - **Type checker** — [`pyright`](https://microsoft.github.io/pyright/)
 - **Tests** — [`pytest`](https://docs.pytest.org/)
 - **Publish** — [PyPI Trusted Publishing](https://docs.pypi.org/trusted-publishers/) via `pypa/gh-action-pypi-publish` (no API token in repo secrets)
-- **Version** — [Nerdbank.GitVersioning](https://github.com/dotnet/Nerdbank.GitVersioning) (NBGV) shared with the .NET side. CI replaces the `__version__` line in `_version.py` (in place) with NBGV's `AssemblyFileVersion` (`Major.Minor.Patch.BuildNumber`, PEP 440 valid) before `uv build`; that matches the .NET assemblies' `FileVersion` stamp. .NET's `AssemblyVersion` (a separate NBGV output) and NuGet/Docker (NBGV `SemVer2`) carry different strings, but all four derive from the same NBGV computation per release commit.
+- **Version** — [Nerdbank.GitVersioning](https://github.com/dotnet/Nerdbank.GitVersioning) (NBGV) shared with the .NET side. CI replaces the `__version__` line in `_version.py` (in place) before `uv build`. **Branch-aware**: on `main` the value is NBGV's `AssemblyFileVersion` (`Major.Minor.Patch.BuildNumber`, PEP 440 release); on `develop` it's `Major.Minor.Patch.devBuildNumber` (PEP 440 dev release — `pip install` filters it out unless `--pre` is passed, matching how NuGet/Docker tag develop builds as prerelease). All four artifact families (.NET assemblies, NuGet, Docker, PyPI) derive from the same NBGV computation per release commit; only the formatting differs.
 
 ## Layout
 
@@ -47,6 +47,13 @@ uv build                         # wheel + sdist into ./dist
 
 Releases are produced by `.github/workflows/build-pypilibrary-task.yml` (called from `build-release-task.yml` to build, lint, type-check, test, and upload the wheel + sdist as a workflow-run artifact). Publishing is a separate top-level `publish-pypi` job in `publish-release.yml` that downloads the artifact by name and runs [Trusted Publishing](https://docs.pypi.org/trusted-publishers/) — no `PYPI_API_TOKEN` secret is involved. The publish job has `id-token: write` only at that single job level, so the test-pull-request flow (which calls the same build task during PR validation) doesn't need to propagate that permission through the reusable workflow chain.
 
+**Two-channel publishing**: pushes to both `main` and `develop` trigger `publish-release.yml`, and the **"Compute PyPI version step"** in `build-pypilibrary-task.yml` formats the version per branch:
+
+- `main` → `Major.Minor.Patch.BuildNumber` (PEP 440 release). `pip install ptr727-projecttemplate-library` picks this up by default.
+- `develop` → `Major.Minor.Patch.devBuildNumber` (PEP 440 dev release). `pip install` filters dev releases out unless `--pre` is passed; consumers opt in with `pip install --pre ptr727-projecttemplate-library`. Same package on PyPI; no separate "test" project required.
+
+This matches how NuGet (NBGV `SemVer2` prerelease tags), Docker (NBGV `SemVer2` image tags), and GitHub releases (softprops `prerelease: true` on develop) already mark develop builds.
+
 First-time setup (one-time, on PyPI):
 
 Prerequisite: enable **2FA** on the PyPI account (TOTP or hardware key). PyPI requires it before any trusted publisher can be registered.
@@ -58,7 +65,7 @@ Prerequisite: enable **2FA** on the PyPI account (TOTP or hardware key). PyPI re
    - **Workflow filename**: `publish-release.yml`
    - **Environment name**: `pypi`
 2. **GitHub repo** → **Settings** → **Environments** → **New environment** → `pypi`. The environment owns deploy-time guardrails:
-   - **Deployment branch rule** → **Selected branches and tags** → add `main`. **This step is mandatory — Trusted Publishing without a branch restriction is a documented security anti-pattern.** Defense in depth: the `publish-pypi` job in `.github/workflows/publish-release.yml` *also* has `if: github.ref == 'refs/heads/main'` so develop pushes don't even attempt to enter the environment gate (they'd otherwise stall as blocked deployments). The `if:` is the operational gate; the env branch rule is the security boundary that holds even if the `if:` gets misconfigured.
+   - **Deployment branch rule** → **Selected branches and tags** → add **both** `main` (release channel) and `develop` (prerelease channel). **This step is mandatory — Trusted Publishing without a branch restriction is a documented security anti-pattern.** Any other branch (feature branches, codegen, etc.) is blocked at the env gate even if a workflow misconfiguration ever tried to publish from it.
    - (Optional) add yourself as a **required reviewer** so each publish requires a click — useful belt-and-suspenders against an accidental release.
 3. The first successful release converts the pending publisher to a real publisher. After that the same OIDC exchange validates against the real publisher on every release.
 
@@ -76,7 +83,7 @@ When deriving a new project from this template:
 - Replace the package name `ptr727-projecttemplate-library` (in `pyproject.toml`, this README, and CI) with your name.
 - Rename `src/ptr727_projecttemplate_library/` to your import name.
 - Re-register the trusted publisher on PyPI under the new project name.
-- **Pick a versioning scheme.** The template defaults to **NBGV-driven** versioning shared with the .NET side: `_version.py` holds `__version__ = "0.0.0"` as a local-development placeholder, and the CI step **"Write version into _version.py step"** in [`build-pypilibrary-task.yml`](../.github/workflows/build-pypilibrary-task.yml) replaces the `__version__` line (in place, preserving the docstring) with NBGV's `AssemblyFileVersion` (always `Major.Minor.Patch.BuildNumber`, all numeric, PEP 440 valid) just before `uv build`. PyPI therefore ships the same version string that's stamped into the .NET assemblies as `FileVersion`. .NET's `AssemblyVersion` (the binary-compat identity — a separate NBGV output) and the **NuGet package version** / **Docker tags** (which use NBGV's `SemVer2` — PEP 440 doesn't accept its prerelease / build-metadata suffixes) all carry different strings; but all four derive from the same NBGV computation against `version.json` + git history and correspond to the same release commit. If you want a different scheme, replace both `_version.py` and the workflow step. Two common alternatives:
+- **Pick a versioning scheme.** The template defaults to **NBGV-driven** versioning shared with the .NET side: `_version.py` holds `__version__ = "0.0.0"` as a local-development placeholder, and the CI steps **"Compute PyPI version step"** + **"Write version into _version.py step"** in [`build-pypilibrary-task.yml`](../.github/workflows/build-pypilibrary-task.yml) compute and rewrite the value before `uv build`. The version is **branch-aware**: `main` pushes ship `M.N.P.B` (PEP 440 release), `develop` pushes ship `M.N.P.devB` (PEP 440 dev release — `pip` filters these unless `--pre` is passed). On `main` the PyPI version equals the .NET `FileVersion` stamp exactly; on `develop` it's the same numeric build with a `.dev` segment so pip treats it as prerelease. .NET's `AssemblyVersion` (a separate NBGV output) and NuGet/Docker (NBGV `SemVer2`) carry different strings across artifact families on both channels; all four derive from the same NBGV computation against `version.json` + git history per release commit. If you want a different scheme, replace both `_version.py` and the workflow steps. Two common alternatives:
   - [`hatch-vcs`](https://github.com/ofek/hatch-vcs) — derive the version from git tags. Add it to `[build-system].requires` and switch `[tool.hatch.version]` to `source = "vcs"`. Drop the CI overwrite step. Pairs well with tag-driven releases and removes the NBGV dependency.
   - **Manual bumps** — edit `_version.py` in each release PR. Simplest, but easy to forget. Drop the CI overwrite step.
 
