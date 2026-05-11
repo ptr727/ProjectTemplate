@@ -17,7 +17,10 @@ before ``uv build``. The format is **branch-aware**:
   ``pip install --pre <pkg>`` actually prefer the develop build over the
   main release. Without ``--pre``, pip filters the ``.dev`` suffix and
   picks the main release. Matches how NuGet/Docker mark develop as
-  prerelease.
+  prerelease. Edge case: in the window between a release merge to main
+  and the next commit on develop, develop's BuildNumber equals main's
+  (or is one lower), so ``--pre`` still resolves to the main release
+  until a new develop commit lands. Self-healing.
 
 .NET's ``AssemblyVersion`` (the binary-compat identity, a separate NBGV
 output) and NuGet ``PackageVersion`` / Docker tags (NBGV ``SemVer2`` —
