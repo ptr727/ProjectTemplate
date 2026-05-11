@@ -10,6 +10,7 @@ Python PyPI template — companion to the .NET `NuGetLibrary` in this repo. Publ
 - **Type checker** — [`pyright`](https://microsoft.github.io/pyright/)
 - **Tests** — [`pytest`](https://docs.pytest.org/)
 - **Publish** — [PyPI Trusted Publishing](https://docs.pypi.org/trusted-publishers/) via `pypa/gh-action-pypi-publish` (no API token in repo secrets)
+- **Version** — [Nerdbank.GitVersioning](https://github.com/dotnet/Nerdbank.GitVersioning) (NBGV) shared with the .NET side. CI replaces the `__version__` line in `_version.py` (in place) with NBGV's `AssemblyFileVersion` (`Major.Minor.Patch.BuildNumber`, PEP 440 valid) before `uv build`; that matches the .NET assemblies' `FileVersion` stamp. .NET's `AssemblyVersion` (a separate NBGV output) and NuGet/Docker (NBGV `SemVer2`) carry different strings, but all four derive from the same NBGV computation per release commit.
 
 ## Layout
 
@@ -48,10 +49,25 @@ Releases are produced by `.github/workflows/build-pypilibrary-task.yml` (called 
 
 First-time setup (one-time, on PyPI):
 
-1. PyPI → **Account settings** → **Publishing** → **Add a new pending publisher**.
-2. Project name: `ptr727-projecttemplate-library`. Owner: `ptr727`. Repo: `ProjectTemplate`. Workflow: `publish-release.yml`. Environment: `pypi`.
-3. GitHub repo → **Settings** → **Environments** → create `pypi` environment (optionally with required reviewers).
-4. The first successful release converts the pending publisher to a real publisher.
+Prerequisite: enable **2FA** on the PyPI account (TOTP or hardware key). PyPI requires it before any trusted publisher can be registered.
+
+1. **PyPI** → **Account settings** → **Publishing** → **Add a new pending publisher** ([direct link](https://pypi.org/manage/account/publishing/)). If the project already exists on PyPI, go to the project page → **Manage** → **Publishing** → **Add a new publisher** instead — the "pending" form is only for projects that don't exist yet. Fields:
+   - **PyPI project name**: `ptr727-projecttemplate-library`
+   - **Owner**: `ptr727`
+   - **Repository name**: `ProjectTemplate`
+   - **Workflow filename**: `publish-release.yml`
+   - **Environment name**: `pypi`
+2. **GitHub repo** → **Settings** → **Environments** → **New environment** → `pypi`. The environment owns deploy-time guardrails:
+   - **Deployment branch rule** → **Selected branches and tags** → add `main`. **This step is mandatory — Trusted Publishing without a branch restriction is a documented security anti-pattern.** Defense in depth: the `publish-pypi` job in `.github/workflows/publish-release.yml` *also* has `if: github.ref == 'refs/heads/main'` so develop pushes don't even attempt to enter the environment gate (they'd otherwise stall as blocked deployments). The `if:` is the operational gate; the env branch rule is the security boundary that holds even if the `if:` gets misconfigured.
+   - (Optional) add yourself as a **required reviewer** so each publish requires a click — useful belt-and-suspenders against an accidental release.
+3. The first successful release converts the pending publisher to a real publisher. After that the same OIDC exchange validates against the real publisher on every release.
+
+Troubleshooting:
+
+- `invalid-publisher: ... Publisher with matching claims was not found` — the publisher hasn't been registered yet, or one of the five claim fields (owner, repo, workflow filename, environment name, project name) doesn't match. Re-check step 1.
+- `manifest unknown` from `docker:` pulling `ghcr.io/pypa/gh-action-pypi-publish` — the SHA pinned in `publish-release.yml` doesn't correspond to a release tag with a published GHCR image. Pin to the SHA that the upstream tag (`# vX.Y.Z` comment) actually points at on `pypa/gh-action-pypi-publish`.
+
+Fallback (API token instead of Trusted Publishing): drop the `id-token: write` permission from the `publish-pypi` job, add `password: ${{ secrets.PYPI_API_TOKEN }}` to the `pypa/gh-action-pypi-publish` step, and store the token as a repo secret. Also pass `attestations: false` since attestations require the OIDC token. The OIDC path is preferred — no long-lived secret in the repo — so use the token method only when Trusted Publishing isn't an option.
 
 ## Template Adoption
 
@@ -60,9 +76,10 @@ When deriving a new project from this template:
 - Replace the package name `ptr727-projecttemplate-library` (in `pyproject.toml`, this README, and CI) with your name.
 - Rename `src/ptr727_projecttemplate_library/` to your import name.
 - Re-register the trusted publisher on PyPI under the new project name.
-- **Wire up a versioning scheme before the first publish.** `_version.py` ships with `__version__ = "0.0.0"` as a placeholder. The publish workflow uses `skip-existing: true` so the workflow won't fail on duplicate uploads — but **no new versions will land on PyPI** until you replace `0.0.0` with something that increments. Common options:
-  - [`hatch-vcs`](https://github.com/ofek/hatch-vcs) — derive the version from git tags. Add it to `[build-system].requires` and switch `[tool.hatch.version]` to `source = "vcs"`. Pairs well with tag-driven releases.
-  - **Read from `version.json`** — the .NET side uses Nerdbank.GitVersioning which reads from `version.json`. A small custom Hatchling plugin or a CI step can pull the version into `_version.py` so .NET and Python ship with matching versions.
-  - **Manual bumps** — edit `_version.py` in each release PR. Simplest, but easy to forget.
+- **Pick a versioning scheme.** The template defaults to **NBGV-driven** versioning shared with the .NET side: `_version.py` holds `__version__ = "0.0.0"` as a local-development placeholder, and the CI step **"Write version into _version.py step"** in [`build-pypilibrary-task.yml`](../.github/workflows/build-pypilibrary-task.yml) replaces the `__version__` line (in place, preserving the docstring) with NBGV's `AssemblyFileVersion` (always `Major.Minor.Patch.BuildNumber`, all numeric, PEP 440 valid) just before `uv build`. PyPI therefore ships the same version string that's stamped into the .NET assemblies as `FileVersion`. .NET's `AssemblyVersion` (the binary-compat identity — a separate NBGV output) and the **NuGet package version** / **Docker tags** (which use NBGV's `SemVer2` — PEP 440 doesn't accept its prerelease / build-metadata suffixes) all carry different strings; but all four derive from the same NBGV computation against `version.json` + git history and correspond to the same release commit. If you want a different scheme, replace both `_version.py` and the workflow step. Two common alternatives:
+  - [`hatch-vcs`](https://github.com/ofek/hatch-vcs) — derive the version from git tags. Add it to `[build-system].requires` and switch `[tool.hatch.version]` to `source = "vcs"`. Drop the CI overwrite step. Pairs well with tag-driven releases and removes the NBGV dependency.
+  - **Manual bumps** — edit `_version.py` in each release PR. Simplest, but easy to forget. Drop the CI overwrite step.
+
+  The publish workflow uses `skip-existing: true` so a re-upload of the same version is a no-op instead of a failure — useful when iterating on releases without bumping NBGV.
 
 If you don't want a Python project at all, delete the `PyPiLibrary/` folder, the `build-pypilibrary-task.yml` workflow, the `build-pypilibrary` job in `build-release-task.yml`, the `publish-pypi` job in `publish-release.yml`, and the `uv` block in `.github/dependabot.yml`.

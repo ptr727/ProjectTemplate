@@ -21,6 +21,7 @@ Treat this file as authoritative for everything else; don't restate its rules el
 - `develop` is the integration branch. Feature branches → `develop` is **squash-only**; develop is kept linear.
 - `develop` → `main` is **merge-commit only** (no squash, no rebase). Merge commits preserve develop's commit list as a real second-parent reference on main, which is what makes the "release on every push" model attribute releases to the develop commits that produced them. Branch protection enforces this: the develop ruleset allows only `squash`, the main ruleset allows only `merge`.
 - All commits on both branches must be cryptographically signed (SSH or GPG). Squash and merge commits created via the GitHub UI are signed by GitHub's web-flow key.
+- **Dependabot scheduled updates target `develop`** (see `target-branch` in [`.github/dependabot.yml`](./.github/dependabot.yml)) so develop stays ahead of main; bumps land on develop first and bundle into the next develop → main merge-commit. Security update PRs from Dependabot open against `main` directly (Dependabot doesn't honor `target-branch` for those). The merge-bot ([`.github/workflows/merge-bot-pull-request.yml`](./.github/workflows/merge-bot-pull-request.yml)) picks `--squash` or `--merge` from each PR's base ref so the form matches the ruleset on either base.
 
 ## Pull Request Title and Commit Message Conventions
 

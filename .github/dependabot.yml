@@ -1,9 +1,27 @@
 # https://docs.github.com/en/code-security/dependabot/dependabot-version-updates/configuration-options-for-the-dependabot.yml-file
+#
+# `target-branch: "develop"` on every ecosystem entry routes Dependabot's
+# scheduled version-update PRs to the integration branch instead of the
+# repo default (`main`). That keeps dep bumps in the
+# `feature → develop → main` flow described in AGENTS.md: each bump joins
+# the bot-triggered develop prerelease for early-warning testing, then
+# bundles into the next develop → main merge-commit alongside feature work.
+# This is also what keeps develop from falling behind main — bumps land on
+# develop first.
+#
+# Caveat: `target-branch` only redirects scheduled version updates.
+# Dependabot *security update PRs* (the CVE-driven ones Dependabot opens
+# in response to security alerts) are opened against the default branch
+# (`main`) and do not honor `target-branch`. The merge-bot's `case`
+# statement in .github/workflows/merge-bot-pull-request.yml handles
+# either base correctly (squash for develop, merge for main), and a
+# maintainer can retarget manually from the PR UI if a one-off needs
+# the other branch.
 version: 2
 updates:
 
   - package-ecosystem: "nuget"
-    target-branch: "main"
+    target-branch: "develop"
     directory: "/"
     schedule:
       interval: "daily"
@@ -13,7 +31,7 @@ updates:
           - "*"
 
   - package-ecosystem: "github-actions"
-    target-branch: "main"
+    target-branch: "develop"
     directory: "/"
     schedule:
       interval: "daily"
@@ -23,7 +41,7 @@ updates:
           - "*"
 
   - package-ecosystem: "uv"
-    target-branch: "main"
+    target-branch: "develop"
     directory: "/PyPiLibrary"
     schedule:
       interval: "daily"
