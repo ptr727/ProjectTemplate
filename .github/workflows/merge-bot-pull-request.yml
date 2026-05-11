@@ -94,10 +94,17 @@ jobs:
     # for example, sneak a `codegen-develop` branch into `main`.
     # Both the PR author AND the event actor must be the App: the
     # author check stops human-opened PRs that happen to target a
-    # `codegen-*` branch from auto-merging; the actor check stops a
-    # maintainer pushing extra commits to the App's codegen branch
-    # (a `synchronize` event the human triggered) from auto-merging
-    # unintended changes through the App PR.
+    # `codegen-*` branch from auto-merging; the actor check stops
+    # this job from re-invoking `gh pr merge --auto` on a
+    # `synchronize` event a maintainer triggered.
+    #
+    # Limitation worth knowing: the actor check does NOT disable
+    # auto-merge if it was already enabled by the initial bot-driven
+    # `opened` event. Once auto-merge is on, every commit that
+    # passes CI will land — including a maintainer's. To edit a
+    # codegen PR safely, run `gh pr merge --disable-auto <PR>` (or
+    # click "Disable auto-merge" in the GitHub UI) BEFORE pushing,
+    # then re-enable it manually when ready.
     if: >-
       github.event.pull_request.user.login == 'ptr727-codegen[bot]' &&
       github.actor == 'ptr727-codegen[bot]' &&
