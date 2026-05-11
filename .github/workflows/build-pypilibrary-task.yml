@@ -122,12 +122,13 @@ jobs:
       # `[tool.hatch.version]` path in pyproject.toml. Done AFTER tests
       # so the test that asserts `__version__` is a non-empty string
       # isn't affected. On main, the PyPI version string equals the .NET
-      # assemblies' `FileVersion` stamp (= NBGV `AssemblyFileVersion`);
-      # on develop, the PyPI version is `M.N.P.devB` while .NET still
-      # uses the numeric `FileVersion` and NuGet/Docker use NBGV
-      # `SemVer2` (different formats — strings are not byte-identical
-      # across artifacts on develop). All four still derive from the
-      # same NBGV computation per release commit.
+      # assemblies' `FileVersion` stamp (= NBGV `AssemblyFileVersion`,
+      # `M.N.P.B`); on develop, the PyPI version is `M.N.P.B.dev0` —
+      # numerically the same `FileVersion` with a trailing `.dev0`
+      # prerelease marker. .NET keeps the bare `FileVersion`, and
+      # NuGet/Docker use NBGV `SemVer2`, so strings are not byte-
+      # identical across artifacts on either channel. All four still
+      # derive from the same NBGV computation per release commit.
       - name: Write version into _version.py step
         run: |
           set -euo pipefail
