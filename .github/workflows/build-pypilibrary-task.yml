@@ -65,28 +65,78 @@ jobs:
       - name: Run pytest step
         run: uv run pytest
 
+      # Compute the PEP 440 version string for this build:
+      #   refs/heads/main    -> AssemblyFileVersion as-is
+      #                         (`Major.Minor.Patch.BuildNumber`). PEP 440
+      #                         treats this 4-segment numeric form as a
+      #                         release.
+      #   refs/heads/develop -> `${AssemblyFileVersion}.dev0`
+      #                         (`Major.Minor.Patch.BuildNumber.dev0`).
+      #                         The BuildNumber stays in the release
+      #                         segment so develop's release segment
+      #                         (which grows past main's after every
+      #                         new commit) compares higher than main's
+      #                         under PEP 440 ordering — so `pip install
+      #                         --pre <pkg>` picks the develop dev
+      #                         build, while default `pip install <pkg>`
+      #                         filters the dev suffix and picks the
+      #                         main release. The `.dev0` literal is a
+      #                         constant because BuildNumber alone
+      #                         already differentiates each develop
+      #                         push (NBGV BuildNumber increments per
+      #                         commit), so we don't need a second
+      #                         counter in the dev segment.
+      #
+      #                         Edge case: in the window between a
+      #                         release merge to main and the next
+      #                         commit on develop, develop's
+      #                         BuildNumber equals main's (or is one
+      #                         lower) — `--pre` will still resolve to
+      #                         the main release until a new develop
+      #                         commit lands. This is accepted as a
+      #                         small, self-healing gap.
+      #   other refs (PR validation via test-release-task, feature
+      #                branches) -> AssemblyFileVersion as-is. These
+      #                refs never publish; we just need a PEP 440 valid
+      #                string for `uv build`.
+      - name: Compute PyPI version step
+        id: pypiver
+        run: |
+          set -euo pipefail
+          if [[ "$GITHUB_REF" == "refs/heads/develop" ]]; then
+            version="${AFV}.dev0"
+          else
+            version="$AFV"
+          fi
+          echo "PyPI version for $GITHUB_REF: $version"
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+        env:
+          AFV: ${{ needs.get-version.outputs.AssemblyFileVersion }}
+
       # Replace the `__version__` line in `_version.py` (which ships
-      # hardcoded "0.0.0" so local `uv build` works without CI) with
-      # NBGV's `AssemblyFileVersion` — always Major.Minor.Patch.BuildNumber,
-      # all numeric, PEP 440 valid. `sed -i` replaces the line in place so
-      # the module docstring and any future metadata in the file survive
-      # into the published wheel / sdist. `_version.py` is the single
-      # source `hatchling` reads via the `[tool.hatch.version]` path in
-      # pyproject.toml. Done AFTER tests so the test that asserts
-      # `__version__` is a non-empty string isn't affected. The PyPI
-      # version string therefore equals the .NET assemblies' `FileVersion`
-      # stamp (= NBGV `AssemblyFileVersion`). .NET's `AssemblyVersion`
-      # is a separate NBGV output and NuGet `PackageVersion` / Docker
-      # tags use NBGV `SemVer2` (PEP 440 rejects its prerelease /
-      # build-metadata suffixes), so those strings are not byte-identical
-      # to PyPI's; all four still derive from the same NBGV computation
-      # per release commit.
+      # hardcoded "0.0.0" so local `uv build` works without CI) with the
+      # branch-aware PEP 440 version computed above. `sed -i` replaces
+      # the line in place so the module docstring and any future metadata
+      # in the file survive into the published wheel / sdist.
+      # `_version.py` is the single source `hatchling` reads via the
+      # `[tool.hatch.version]` path in pyproject.toml. Done AFTER tests
+      # so the test that asserts `__version__` is a non-empty string
+      # isn't affected. On main, the PyPI version string equals the .NET
+      # assemblies' `FileVersion` stamp (= NBGV `AssemblyFileVersion`,
+      # `M.N.P.B`); on develop, the PyPI version is `M.N.P.B.dev0` —
+      # numerically the same `FileVersion` with a trailing `.dev0`
+      # prerelease marker. .NET keeps the bare `FileVersion`, and
+      # NuGet/Docker use NBGV `SemVer2`, so strings are not byte-
+      # identical across artifacts on either channel. All four still
+      # derive from the same NBGV computation per commit (main pushes
+      # publish release versions; develop pushes publish PEP 440 dev
+      # releases / NBGV prereleases).
       - name: Write version into _version.py step
         run: |
           set -euo pipefail
           sed -i 's/^__version__ = .*/__version__ = "'"$VERSION"'"/' src/ptr727_projecttemplate_library/_version.py
         env:
-          VERSION: ${{ needs.get-version.outputs.AssemblyFileVersion }}
+          VERSION: ${{ steps.pypiver.outputs.version }}
 
       - name: Build sdist and wheel step
         run: uv build
