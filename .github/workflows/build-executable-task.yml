@@ -25,12 +25,12 @@ jobs:
     steps:
 
       - name: Setup .NET SDK step
-        uses: actions/setup-dotnet@v5
+        uses: actions/setup-dotnet@c2fa09f4bde5ebb9d1777cf28262a3eb3db3ced7 # v5.2.0
         with:
           dotnet-version: 10.x
 
       - name: Checkout code step
-        uses: actions/checkout@v6
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
 
       - name: Build executable project step
         run: |
@@ -46,7 +46,7 @@ jobs:
             -property:PackageVersion=${{ needs.get-version.outputs.SemVer2 }}
 
       - name: Upload matrix build artifacts step
-        uses: actions/upload-artifact@v6
+        uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6.0.0
         with:
           name: publish-${{ matrix.runtime }}
           path: ${{ runner.temp }}/publish
@@ -61,7 +61,7 @@ jobs:
     steps:
 
       - name: Download matrix build artifacts step
-        uses: actions/download-artifact@v7
+        uses: actions/download-artifact@37930b1c2abaa49bbe596cd826c3c89aef350131 # v7.0.0
         with:
           pattern: publish-*
           merge-multiple: true
@@ -72,7 +72,7 @@ jobs:
 
       - name: Upload build artifacts step
         id: artifact-upload-step
-        uses: actions/upload-artifact@v6
+        uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6.0.0
         with:
           name: executable-build
           path: ${{ runner.temp }}/Console.7z

@@ -48,18 +48,18 @@ jobs:
         # guard), which previously required a close/reopen dance under a PAT
         # to nudge the auto-merge workflow — that dance is gone.
         id: app-token
-        uses: actions/create-github-app-token@v1
+        uses: actions/create-github-app-token@d72941d797fd3113feb6b93fd0dec494b13a2547 # v1.12.0
         with:
           app-id: ${{ secrets.CODEGEN_APP_ID }}
           private-key: ${{ secrets.CODEGEN_APP_PRIVATE_KEY }}
 
       - name: Setup .NET SDK step
-        uses: actions/setup-dotnet@v5
+        uses: actions/setup-dotnet@c2fa09f4bde5ebb9d1777cf28262a3eb3db3ced7 # v5.2.0
         with:
           dotnet-version: 10.x
 
       - name: Checkout code step
-        uses: actions/checkout@v6
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
         with:
           ref: ${{ matrix.target.ref }}
           token: ${{ steps.app-token.outputs.token }}
