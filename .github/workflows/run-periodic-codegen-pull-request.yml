@@ -7,8 +7,12 @@ on:
     - cron: '0 2 * * MON'
 
 concurrency:
-  # Workflow always checks out and targets main/codegen
-  group: codegen-main
+  # Workflow checks out and opens PRs against both `main` and `develop`
+  # via a matrix in `run-codegen-pull-request-task.yml` (branch names
+  # `codegen-main` and `codegen-develop`). One concurrency group for the
+  # whole workflow — a new scheduled or manual run supersedes an
+  # in-flight one across both matrix legs.
+  group: codegen
   cancel-in-progress: true
 
 jobs:
