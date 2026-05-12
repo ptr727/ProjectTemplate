@@ -478,15 +478,17 @@ Licensed under the [MIT License][license-link]\
     - `Allow rebase merging` — disabled (no flow uses it; the develop ruleset forbids it anyway)
     - `Always suggest updating pull request branches`
     - `Allow auto-merge`
-- Rules / Rulesets — **separate rulesets per branch** so allowed merge methods differ (develop = squash-only; main = merge-commit-only, per AGENTS.md). Everything else is shared.
+- Rules / Rulesets — **separate rulesets per branch**. Develop and main intentionally diverge on three rules — allowed merge methods, `Require linear history`, and `Require branches to be up to date before merging`; everything else is shared.
   - "Develop":
     - Target branches: `develop`.
     - Allowed merge methods: `Squash`
     - `Require linear history` (develop is kept linear; main carries merge commits by design, so this setting belongs to develop only)
+    - `Require status checks to pass` → `Require branches to be up to date before merging` ✓ (feature branches must rebase or merge develop before merging back — standard hygiene)
     - Plus shared settings (below).
   - "Main":
     - Target branches: `main`.
     - Allowed merge methods: `Merge`
+    - `Require status checks to pass` → `Require branches to be up to date before merging` **intentionally OFF**. This rule is incompatible with the forward-only develop model. GitHub's "up to date" check is graph-based: it asks whether main's tip commit is reachable from develop. After any develop → main release, main's new tip is a brand-new merge commit that develop's history doesn't contain. Forward-only develop never adds it (no back-merge of main into develop, no rebase of develop onto main), so the check fails permanently on every subsequent release. Leaving the rule on would force every release through an admin bypass. See [AGENTS.md "Branching Model"](./AGENTS.md#branching-model) for the full reasoning.
     - Plus shared settings (below).
   - Shared settings (apply to both rulesets):
     - `Restrict deletions`
@@ -495,7 +497,6 @@ Licensed under the [MIT License][license-link]\
       - `Dismiss stale pull request approvals when new commits are pushed`
       - `Require conversation resolution before merging`
     - `Require status checks to pass`
-      - `Require branches to be up to date before merging`
       - Status checks that are required: `Check pull request workflow status`
     - `Block force pushes`
     - `Automatically request Copilot code review`
