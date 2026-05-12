@@ -37,9 +37,22 @@ on:
   pull_request:
     types: [opened, reopened, synchronize]
 
+# `cancel-in-progress: false` is load-bearing. The three-job model
+# (enable on opened/reopened, disable on maintainer-triggered
+# synchronize) relies on those events running to completion in arrival
+# order. With cancel-in-progress: true, a fast follow-up synchronize
+# (e.g. a Dependabot rebase right after PR open) would cancel the
+# in-flight `opened` run before it reached `gh pr merge --auto`, and
+# the new synchronize run skips the enable jobs (opened/reopened
+# filter), leaving auto-merge never enabled. Queueing instead of
+# cancelling makes the final state deterministic: opened enables,
+# then any subsequent synchronize disables (if maintainer) or no-ops
+# (if bot). Action-aware grouping has its own race (opened finishing
+# after a maintainer synchronize would re-enable auto-merge), so we
+# keep a single group and just disable cancellation.
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
-  cancel-in-progress: true
+  cancel-in-progress: false
 
 jobs:
 
