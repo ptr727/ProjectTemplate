@@ -456,10 +456,11 @@ Licensed under the [MIT License][license-link]\
   - If the codegen workflows require additional secrets (e.g. third-party API keys), register them in the Actions store; if a Dependabot-triggered workflow ever needs them, register them in the Dependabot store too.
   - The App token is used by **both** the codegen workflow (`run-codegen-pull-request-task.yml`) **and** every job in `merge-bot-pull-request.yml`. App-authored pushes/PRs trigger downstream `pull_request` and `push` workflow events directly — unlike `GITHUB_TOKEN`-authored events, which are blocked by GitHub's recursion guard. This is why `publish-release.yml` fires on the merge commit after Dependabot or codegen auto-merge, and why the codegen workflow no longer needs the legacy close/reopen dance to trigger auto-merge.
   - The codegen auto-merge condition in `merge-bot-pull-request.yml` (`merge-codegen` job) requires:
+    - **Event is `opened` or `reopened`** — auto-merge is enabled once per PR at open time; subsequent `synchronize` events do not re-enable. This is what lets the `disable-auto-merge-on-maintainer-push` safeguard (below) stick.
     - `github.event.pull_request.user.login == 'ptr727-codegen[bot]'` — PR was opened by the App.
-    - `github.actor == 'ptr727-codegen[bot]'` — the event was triggered by the App. This stops the job from **re-invoking `gh pr merge --auto`** on a maintainer-triggered `synchronize`, but **does not disable auto-merge once it was already enabled by the initial bot-driven `opened` event**. If a maintainer pushes commits to a codegen PR with auto-merge already on, the next CI pass will merge them. To edit a codegen PR safely, disable auto-merge first via `gh pr merge --disable-auto <PR>` (or the GitHub UI button) before pushing.
     - `github.event.pull_request.head.repo.full_name == github.repository` — PR is from this repo (not a fork).
     - **Strict head/base pairing** — `(head.ref == 'codegen-main' && base.ref == 'main') || (head.ref == 'codegen-develop' && base.ref == 'develop')`. Codegen runs as a matrix opening one PR per branch; this pairing prevents a misconfigured workflow from sneaking a `codegen-develop` branch into `main` or vice versa.
+  - The `disable-auto-merge-on-maintainer-push` job in `merge-bot-pull-request.yml` runs on `synchronize` events against bot-authored PRs (Dependabot or codegen) when the event actor is NOT the same bot — i.e. a maintainer pushed commits. It calls `gh pr merge --disable-auto` so the maintainer's commits don't auto-merge along with the bot's content. Re-enable auto-merge manually (`gh pr merge --auto <PR>` or the GitHub UI) when ready.
 
   Codegen targets `main` AND `develop` in parallel (matrix in `run-codegen-pull-request-task.yml`), so generated content lands on both branches independently without any back-merging. See [AGENTS.md "Branching Model"](./AGENTS.md#branching-model) for why this dual-target pattern beats develop-only-with-flow-through.
 
@@ -477,15 +478,17 @@ Licensed under the [MIT License][license-link]\
     - `Allow rebase merging` — disabled (no flow uses it; the develop ruleset forbids it anyway)
     - `Always suggest updating pull request branches`
     - `Allow auto-merge`
-- Rules / Rulesets — **separate rulesets per branch** so allowed merge methods differ (develop = squash-only; main = merge-commit-only, per AGENTS.md). Everything else is shared.
+- Rules / Rulesets — **separate rulesets per branch**. Develop and main intentionally diverge on three rules — allowed merge methods, `Require linear history`, and `Require branches to be up to date before merging`; everything else is shared.
   - "Develop":
     - Target branches: `develop`.
     - Allowed merge methods: `Squash`
     - `Require linear history` (develop is kept linear; main carries merge commits by design, so this setting belongs to develop only)
+    - `Require status checks to pass` → `Require branches to be up to date before merging` ✓ (feature branches must rebase or merge develop before merging back — standard hygiene)
     - Plus shared settings (below).
   - "Main":
     - Target branches: `main`.
     - Allowed merge methods: `Merge`
+    - `Require status checks to pass` → `Require branches to be up to date before merging` **intentionally OFF**. This rule is incompatible with the forward-only develop model. GitHub's "up to date" check is graph-based: it asks whether main's tip commit is reachable from develop. After any develop → main release, main's new tip is a brand-new merge commit that develop's history doesn't contain. Forward-only develop never adds it (no back-merge of main into develop, no rebase of develop onto main), so the check fails permanently on every subsequent release. Leaving the rule on would force every release through an admin bypass. See [AGENTS.md "Branching Model"](./AGENTS.md#branching-model) for the full reasoning.
     - Plus shared settings (below).
   - Shared settings (apply to both rulesets):
     - `Restrict deletions`
@@ -494,7 +497,6 @@ Licensed under the [MIT License][license-link]\
       - `Dismiss stale pull request approvals when new commits are pushed`
       - `Require conversation resolution before merging`
     - `Require status checks to pass`
-      - `Require branches to be up to date before merging`
       - Status checks that are required: `Check pull request workflow status`
     - `Block force pushes`
     - `Automatically request Copilot code review`
