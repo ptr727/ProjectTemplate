@@ -11,14 +11,16 @@ name: Merge bot pull request action
 #   PRs created under `GITHUB_TOKEN` to nudge the auto-merge workflow.
 #
 # Merge method:
-#   Each merge step picks `--squash` or `--merge` from the PR's base ref so
-#   the form matches that branch's ruleset (`develop` allows only squash,
-#   `main` allows only merge commits — see AGENTS.md "Branching Model").
-#   A mismatch fails `enablePullRequestAutoMerge` with "Merge method ... is
-#   not allowed on this repository". Codegen PRs always target `main` so
-#   they always merge-commit; Dependabot PRs default to `develop` but
-#   security update PRs open against `main`, so the `case` statement
-#   handles both bases.
+#   Each merge step picks `--squash` or `--merge` from the PR's base ref
+#   so the form matches that branch's ruleset (`develop` allows only
+#   squash, `main` allows only merge commits — see AGENTS.md "Branching
+#   Model"). A mismatch fails `enablePullRequestAutoMerge` with "Merge
+#   method ... is not allowed on this repository". Both Dependabot and
+#   codegen open parallel PRs against `main` and `develop` (see the
+#   AGENTS.md "Branching Model" dual-target bot section), so both jobs
+#   below use a `case` statement to dispatch the merge method by base
+#   ref. Dependabot security update PRs (always against `main`) flow
+#   through the same code path.
 
 on:
   pull_request:
@@ -84,20 +86,33 @@ jobs:
   merge-codegen:
     name: Merge codegen pull request job
     runs-on: ubuntu-latest
-    # Restrict to codegen PRs that originate from the App in this repository.
-    # Codegen always opens PRs against `main` from the `codegen` branch.
-    # Both the PR author AND the event actor must be the App: the author
-    # check stops human-opened PRs that happen to target the `codegen`
-    # branch from auto-merging; the actor check stops a maintainer
-    # pushing extra commits to the App's `codegen` branch (a
-    # `synchronize` event the human triggered) from auto-merging
-    # unintended changes through the App PR.
+    # Restrict to codegen PRs that originate from the App in this
+    # repository. Codegen runs in a matrix over `main` and `develop`,
+    # so two head refs are valid: `codegen-main` (always targets `main`)
+    # and `codegen-develop` (always targets `develop`). The head/base
+    # pairing is enforced strictly so a misconfigured workflow can't,
+    # for example, sneak a `codegen-develop` branch into `main`.
+    # Both the PR author AND the event actor must be the App: the
+    # author check stops human-opened PRs that happen to target a
+    # `codegen-*` branch from auto-merging; the actor check stops
+    # this job from re-invoking `gh pr merge --auto` on a
+    # `synchronize` event a maintainer triggered.
+    #
+    # Limitation worth knowing: the actor check does NOT disable
+    # auto-merge if it was already enabled by the initial bot-driven
+    # `opened` event. Once auto-merge is on, every commit that
+    # passes CI will land — including a maintainer's. To edit a
+    # codegen PR safely, run `gh pr merge --disable-auto <PR>` (or
+    # click "Disable auto-merge" in the GitHub UI) BEFORE pushing,
+    # then re-enable it manually when ready.
     if: >-
       github.event.pull_request.user.login == 'ptr727-codegen[bot]' &&
       github.actor == 'ptr727-codegen[bot]' &&
-      github.event.pull_request.head.ref == 'codegen' &&
-      github.event.pull_request.base.ref == 'main' &&
-      github.event.pull_request.head.repo.full_name == github.repository
+      github.event.pull_request.head.repo.full_name == github.repository &&
+      (
+        (github.event.pull_request.head.ref == 'codegen-main' && github.event.pull_request.base.ref == 'main') ||
+        (github.event.pull_request.head.ref == 'codegen-develop' && github.event.pull_request.base.ref == 'develop')
+      )
     permissions:
       contents: write
       pull-requests: write
@@ -112,7 +127,17 @@ jobs:
           private-key: ${{ secrets.CODEGEN_APP_PRIVATE_KEY }}
 
       - name: Merge pull request step
-        run: gh pr merge --auto --merge "$PR_URL"
+        run: |
+          set -euo pipefail
+          case "${{ github.event.pull_request.base.ref }}" in
+            develop) method=--squash ;;
+            main) method=--merge ;;
+            *)
+              echo "::error::Unsupported base branch: ${{ github.event.pull_request.base.ref }}"
+              exit 1
+              ;;
+          esac
+          gh pr merge --auto "$method" "$PR_URL"
         env:
           PR_URL: ${{ github.event.pull_request.html_url }}
           GH_TOKEN: ${{ steps.app-token.outputs.token }}
