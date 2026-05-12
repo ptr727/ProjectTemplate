@@ -7,12 +7,13 @@ on:
     - cron: '0 2 * * MON'
 
 concurrency:
-  # Workflow checks out and opens PRs against both `main` and `develop`
-  # via a matrix in `run-codegen-pull-request-task.yml` (branch names
-  # `codegen-main` and `codegen-develop`). One concurrency group for the
-  # whole workflow — a new scheduled or manual run supersedes an
-  # in-flight one across both matrix legs.
-  group: codegen
+  # Standard AGENTS.md "Concurrency" convention. Scheduled runs always
+  # have `github.ref == refs/heads/<default-branch>` (cron's default),
+  # and the reusable workflow `run-codegen-pull-request-task.yml` then
+  # matrixes over both `main` and `develop` internally — so a single
+  # group per workflow+ref serializes all matrix legs of all scheduled
+  # / dispatched runs in practice.
+  group: ${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: true
 
 jobs:
