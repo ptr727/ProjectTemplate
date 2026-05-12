@@ -478,7 +478,7 @@ Licensed under the [MIT License][license-link]\
     - `Allow rebase merging` — disabled (no flow uses it; the develop ruleset forbids it anyway)
     - `Always suggest updating pull request branches`
     - `Allow auto-merge`
-- Rules / Rulesets — **separate rulesets per branch** so allowed merge methods and the "up to date" requirement differ. Develop and main intentionally diverge on two rules; everything else is shared.
+- Rules / Rulesets — **separate rulesets per branch**. Develop and main intentionally diverge on three rules — allowed merge methods, `Require linear history`, and `Require branches to be up to date before merging`; everything else is shared.
   - "Develop":
     - Target branches: `develop`.
     - Allowed merge methods: `Squash`
