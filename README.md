@@ -488,7 +488,7 @@ Licensed under the [MIT License][license-link]\
   - "Main":
     - Target branches: `main`.
     - Allowed merge methods: `Merge`
-    - `Require status checks to pass` → `Require branches to be up to date before merging` **intentionally OFF**. This rule is incompatible with the forward-only develop model: GitHub's "up to date" check is graph-based, asking "is main's tip commit reachable from develop?". After any develop → main release, main has a new merge commit whose first-parent walk doesn't appear in develop's history. The only way to make the check pass is to back-merge main into develop, which the develop squash-only ruleset prohibits anyway. Leaving the rule on would force every release through an admin bypass. See [AGENTS.md "Branching Model"](./AGENTS.md#branching-model) for the full reasoning.
+    - `Require status checks to pass` → `Require branches to be up to date before merging` **intentionally OFF**. This rule is incompatible with the forward-only develop model. GitHub's "up to date" check is graph-based: it asks whether main's tip commit is reachable from develop. After any develop → main release, main's new tip is a brand-new merge commit that develop's history doesn't contain. Forward-only develop never adds it (no back-merge of main into develop, no rebase of develop onto main), so the check fails permanently on every subsequent release. Leaving the rule on would force every release through an admin bypass. See [AGENTS.md "Branching Model"](./AGENTS.md#branching-model) for the full reasoning.
     - Plus shared settings (below).
   - Shared settings (apply to both rulesets):
     - `Restrict deletions`
