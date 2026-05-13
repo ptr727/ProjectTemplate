@@ -26,7 +26,6 @@ C# .NET project template.
 [![Docker Latest][dockerlatestversion-shield]][docker-link]\
 [![Docker Develop][dockerdevelopversion-shield]][docker-link]\
 [![NuGet Release][nugetreleaseversion-shield]][nuget-link]\
-[![NuGet Pre-Release][nugetprereleaseversion-shield]][nuget-link]\
 [![PyPI Release][pypireleaseversion-shield]][pypi-link]
 
 ### Release Notes
@@ -478,12 +477,12 @@ Licensed under the [MIT License][license-link]\
     - `Allow rebase merging` — disabled (no flow uses it; the develop ruleset forbids it anyway)
     - `Always suggest updating pull request branches`
     - `Allow auto-merge`
-- Rules / Rulesets — **separate rulesets per branch**. Develop and main intentionally diverge on three rules — allowed merge methods, `Require linear history`, and `Require branches to be up to date before merging`; everything else is shared.
+- Rules / Rulesets — **separate rulesets per branch**. Develop and main intentionally diverge on two rules — allowed merge methods and `Require linear history`. `Require branches to be up to date before merging` is **off on both** for related-but-distinct reasons (below); everything else is shared.
   - "Develop":
     - Target branches: `develop`.
     - Allowed merge methods: `Squash`
     - `Require linear history` (develop is kept linear; main carries merge commits by design, so this setting belongs to develop only)
-    - `Require status checks to pass` → `Require branches to be up to date before merging` ✓ (feature branches must rebase or merge develop before merging back — standard hygiene)
+    - `Require status checks to pass` → `Require branches to be up to date before merging` **intentionally OFF**. Leaving it on stalls bot auto-merge when two bot PRs against develop land within the same window — the first merge flips the second to `mergeStateStatus: BEHIND`, and GitHub's auto-merge will not fire while strict is on. The merge-bot in [`.github/workflows/merge-bot-pull-request.yml`](./.github/workflows/merge-bot-pull-request.yml) only enables auto-merge on `opened`/`reopened` and never auto-updates bot branches; Dependabot's rebase isn't real-time. With strict off, squash mechanics still rebase the diff onto develop's tip on merge, `Require linear history` still enforces linearity, textual conflicts still block `mergeable: CONFLICTING`, and the required `Check pull request workflow status` still gates merges. See [AGENTS.md "Branching Model"](./AGENTS.md#branching-model) for the full reasoning.
     - Plus shared settings (below).
   - "Main":
     - Target branches: `main`.
@@ -558,9 +557,8 @@ For an example of the manual-release model in production, see [homeassistant-pur
 [license-link]: ./LICENSE
 [license-shield]: https://img.shields.io/github/license/ptr727/ProjectTemplate?label=License
 [nuget-link]: https://www.nuget.org/packages/ptr727.ProjectTemplate.Library/
-[nugetprereleaseversion-shield]: https://img.shields.io/nuget/vpre/ptr727.ProjectTemplate.Library?logo=nuget&label=NuGet%20Pre-Release&color=orange
 [nugetreleaseversion-shield]: https://img.shields.io/nuget/v/ptr727.ProjectTemplate.Library?logo=nuget&label=NuGet%20Release
-[prereleaseversion-shield]: https://img.shields.io/github/v/release/ptr727/ProjectTemplate?include_prereleases&label=GitHub%20Pre-Release&logo=github
+[prereleaseversion-shield]: https://img.shields.io/github/v/release/ptr727/ProjectTemplate?include_prereleases&filter=*-g*&label=GitHub%20Pre-Release&logo=github
 [pypi-link]: https://pypi.org/project/ptr727-projecttemplate-library/
 [pypireleaseversion-shield]: https://img.shields.io/pypi/v/ptr727-projecttemplate-library?logo=pypi&label=PyPI%20Release
 [releasebuildstatus-shield]: https://img.shields.io/github/actions/workflow/status/ptr727/ProjectTemplate/publish-release.yml?logo=github&label=Releases%20Build
