@@ -4,8 +4,19 @@ namespace ptr727.ProjectTemplate.CodeGen;
 
 internal sealed class CodeGenBuilder(string outputPath, CancellationToken cancellationToken)
 {
-    internal async Task CodeGenAsync(string quote)
+    // `runtime` is a template-internal hook: when the dual-target codegen
+    // matrix passes the same value to both main and develop legs, they
+    // produce byte-identical CodeGen.cs and develop->main merges don't
+    // conflict on this file. Empty -> use DateTime.UtcNow.ToString("o")
+    // (the original demo behavior, kept for local `dotnet run` use).
+    // This plumbing exists for template hygiene only — derived projects'
+    // real codegen should not copy this pattern.
+    internal async Task CodeGenAsync(string quote, string runtime)
     {
+        string dateTime = string.IsNullOrEmpty(runtime)
+            ? DateTime.UtcNow.ToString("o", CultureInfo.InvariantCulture)
+            : runtime;
+
         // Codegen example
         string codeGen = $$"""
             namespace ptr727.ProjectTemplate.CodeGen;
@@ -17,7 +28,7 @@ internal sealed class CodeGenBuilder(string outputPath, CancellationToken cancel
 
                 internal static void Quote()
                 {
-                    const string dateTime = "{{DateTime.UtcNow:o}}";
+                    const string dateTime = {{ToCSharpStringLiteral(dateTime)}};
                     Console.WriteLine($"{dateTime} : {QuoteOfTheDay}");
                     Log.Logger.Information("Quote of the Day: {DateTime} : {Quote}", dateTime, QuoteOfTheDay);
                 }
