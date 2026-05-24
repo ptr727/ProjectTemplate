@@ -447,9 +447,9 @@ Licensed under the [MIT License][license-link]\
     - Contents: Read & write — push commits to the `codegen` branch and merge bot PRs.
     - Pull requests: Read & write — open, update, and merge pull requests.
     - Metadata: Read-only (auto-required).
-  - Note the App ID from the app's settings page; generate a private key (downloads a `.pem` file).
+  - Note the **Client ID** from the app's settings page (labeled "Client ID" directly under the App name on the General tab — it looks like `Iv23li...`; **not** the numeric App ID shown above it). `actions/create-github-app-token` deprecated the numeric `app-id` input in v3.0.0 in favor of `client-id`. Also generate a private key (downloads a `.pem` file).
   - [Install the app](https://github.com/settings/apps) on your account and grant it access to the repository. The app must be both created **and** installed — creating it alone is not sufficient (`actions/create-github-app-token` fails with `Not Found` if the app isn't installed on the repository).
-  - Save the App ID as `CODEGEN_APP_ID` and the private key contents as `CODEGEN_APP_PRIVATE_KEY` in **both** of:
+  - Save the Client ID as `CODEGEN_APP_CLIENT_ID` and the private key contents as `CODEGEN_APP_PRIVATE_KEY` in **both** of:
     - GitHub project security Settings / Secrets / Actions — for the codegen workflow and the codegen merge job.
     - GitHub project security Settings / Secrets / Dependabot — **required** because Dependabot-triggered `pull_request` workflow runs use a separate, restricted secret context that doesn't see Actions secrets. Without the App secrets in the Dependabot store, the `merge-dependabot` job in `merge-bot-pull-request.yml` can't mint an App token and the PR will never auto-merge.
   - If the codegen workflows require additional secrets (e.g. third-party API keys), register them in the Actions store; if a Dependabot-triggered workflow ever needs them, register them in the Dependabot store too.
@@ -465,7 +465,7 @@ Licensed under the [MIT License][license-link]\
 
 **Codegen workflow schedule**:
 
-- `run-periodic-codegen-pull-request.yml` runs every **Monday** at 02:00 UTC, plus on-demand via `workflow_dispatch`. It uses the App token (`CODEGEN_APP_ID` + `CODEGEN_APP_PRIVATE_KEY`) to commit, open the PR as `ptr727-codegen[bot]`, and let the merge-bot auto-merge once CI passes. No PAT, no close/reopen dance.
+- `run-periodic-codegen-pull-request.yml` runs every **Monday** at 02:00 UTC, plus on-demand via `workflow_dispatch`. It uses the App token (`CODEGEN_APP_CLIENT_ID` + `CODEGEN_APP_PRIVATE_KEY`) to commit, open the PR as `ptr727-codegen[bot]`, and let the merge-bot auto-merge once CI passes. No PAT, no close/reopen dance.
 
 **GitHub project settings**:
 
