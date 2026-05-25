@@ -65,11 +65,19 @@ jobs:
           token: ${{ steps.app-token.outputs.token }}
 
       - name: Run codegen step
+        # `--runtime` is template-internal hygiene: passing the workflow's
+        # `run_started_at` to both matrix legs (main and develop) makes them
+        # produce byte-identical CodeGen.cs, so develop->main release merges
+        # don't conflict on this demo file every release. Derived projects'
+        # real codegen should not copy this pattern — if your generator's
+        # per-run state is intentional, design it not to land on multiple
+        # release branches simultaneously, or absorb the merge cost.
         run: |
           set -euo pipefail
           dotnet run --project ./CodeGen/CodeGen.csproj -- \
             --codepath ./CodeGen \
-            --apikey "${{ secrets.NINJA_API_KEY }}"
+            --apikey "${{ secrets.NINJA_API_KEY }}" \
+            --runtime "${{ github.run_started_at }}"
 
       - name: Format code step
         run: |

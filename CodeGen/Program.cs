@@ -63,7 +63,9 @@ internal sealed class Program(
             string outputPath = Path.Combine(commandLineOptions.CodePath.FullName, "CodeGen.cs");
             Log.Information("Writing quote to {OutputPath}", outputPath);
             CodeGenBuilder codegenBuilder = new(outputPath, cancellationToken);
-            await codegenBuilder.CodeGenAsync(quoteoftheday).ConfigureAwait(false);
+            await codegenBuilder
+                .CodeGenAsync(quoteoftheday, commandLineOptions.Runtime)
+                .ConfigureAwait(false);
 
             return 0;
         }
