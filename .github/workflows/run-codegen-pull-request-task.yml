@@ -13,7 +13,7 @@ on:
   workflow_call:
     secrets:
       # GitHub App credentials to generate an installation token
-      CODEGEN_APP_ID:
+      CODEGEN_APP_CLIENT_ID:
         required: true
       CODEGEN_APP_PRIVATE_KEY:
         required: true
@@ -48,9 +48,9 @@ jobs:
         # guard), which previously required a close/reopen dance under a PAT
         # to nudge the auto-merge workflow — that dance is gone.
         id: app-token
-        uses: actions/create-github-app-token@d72941d797fd3113feb6b93fd0dec494b13a2547 # v1.12.0
+        uses: actions/create-github-app-token@bcd2ba49218906704ab6c1aa796996da409d3eb1 # v3.2.0
         with:
-          app-id: ${{ secrets.CODEGEN_APP_ID }}
+          client-id: ${{ secrets.CODEGEN_APP_CLIENT_ID }}
           private-key: ${{ secrets.CODEGEN_APP_PRIVATE_KEY }}
 
       - name: Setup .NET SDK step
@@ -65,11 +65,19 @@ jobs:
           token: ${{ steps.app-token.outputs.token }}
 
       - name: Run codegen step
+        # `--runtime` is template-internal hygiene: passing the workflow's
+        # `run_started_at` to both matrix legs (main and develop) makes them
+        # produce byte-identical CodeGen.cs, so develop->main release merges
+        # don't conflict on this demo file every release. Derived projects'
+        # real codegen should not copy this pattern — if your generator's
+        # per-run state is intentional, design it not to land on multiple
+        # release branches simultaneously, or absorb the merge cost.
         run: |
           set -euo pipefail
           dotnet run --project ./CodeGen/CodeGen.csproj -- \
             --codepath ./CodeGen \
-            --apikey "${{ secrets.NINJA_API_KEY }}"
+            --apikey "${{ secrets.NINJA_API_KEY }}" \
+            --runtime "${{ github.run_started_at }}"
 
       - name: Format code step
         run: |

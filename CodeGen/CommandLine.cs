@@ -7,6 +7,7 @@ internal sealed class CommandLine
 {
     private readonly Option<DirectoryInfo> _codePathOption = CreateCodePathOption();
     private readonly Option<string> _apiKeyOption = CreateApiKeyOption();
+    private readonly Option<string> _runtimeOption = CreateRuntimeOption();
 
     private static readonly FrozenSet<string> s_cliBypassList = FrozenSet.Create(
         StringComparer.OrdinalIgnoreCase,
@@ -25,7 +26,12 @@ internal sealed class CommandLine
 
     internal RootCommand CreateRootCommand()
     {
-        RootCommand rootCommand = new("C# .NET codegen project") { _codePathOption, _apiKeyOption };
+        RootCommand rootCommand = new("C# .NET codegen project")
+        {
+            _codePathOption,
+            _apiKeyOption,
+            _runtimeOption,
+        };
         rootCommand.SetAction(
             (parseResult, cancellationToken) =>
             {
@@ -42,6 +48,7 @@ internal sealed class CommandLine
         {
             CodePath = parseResult.GetValue(_codePathOption)!,
             ApiKey = parseResult.GetValue(_apiKeyOption) ?? string.Empty,
+            Runtime = parseResult.GetValue(_runtimeOption) ?? string.Empty,
         };
 
     private static Option<DirectoryInfo> CreateCodePathOption()
@@ -57,6 +64,21 @@ internal sealed class CommandLine
     private static Option<string> CreateApiKeyOption() =>
         new("--apikey", "-a") { Description = "The API key to use (optional).", Required = false };
 
+    // Template-internal: deterministic timestamp injection so the dual-target
+    // codegen matrix produces byte-identical CodeGen.cs on main and develop
+    // (eliminates merge conflicts on every develop->main release). Derived
+    // projects: do NOT replicate this plumbing for production codegen — if
+    // your generator's per-run timestamp is intentional, accept the conflicts
+    // or redesign the generator. See README "Template - GitHub Setup".
+    private static Option<string> CreateRuntimeOption() =>
+        new("--runtime", "-r")
+        {
+            Description =
+                "Override the timestamp embedded in generated content "
+                + "(ISO 8601; defaults to DateTime.UtcNow).",
+            Required = false,
+        };
+
     internal static bool BypassStartup(ParseResult parseResult) =>
         parseResult.Errors.Count > 0
         || parseResult.CommandResult.Children.Any(symbolResult =>
@@ -68,5 +90,6 @@ internal sealed class CommandLine
     {
         internal required DirectoryInfo CodePath { get; init; }
         internal required string ApiKey { get; init; }
+        internal required string Runtime { get; init; }
     }
 }
