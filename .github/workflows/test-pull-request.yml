@@ -57,6 +57,11 @@ jobs:
               - 'NuGetLibrary/**'
             pypi:
               - 'PyPiLibrary/**'
+              # The PyPI package version comes from NBGV reading version.json,
+              # so a version bump should rebuild it. The other shared files
+              # (Directory.*.props, *.slnx) are .NET-only and don't affect the
+              # Python build, so they're intentionally excluded here.
+              - 'version.json'
 
   # Unit tests are cheap and validate the shared C# code, so they always run
   # regardless of which targets changed.
