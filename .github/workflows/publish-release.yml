@@ -11,8 +11,14 @@ on:
     # (also refreshing the Docker base image, e.g. `ubuntu:rolling`).
     - cron: '0 2 * * MON'
 
+# Single GLOBAL group (not ref-scoped): this workflow publishes shared,
+# ref-independent artifacts — it pushes both branches' Docker tags + caches
+# and creates GitHub releases for both — on schedule/dispatch regardless of
+# the triggering ref. A ref-scoped group would let a scheduled run (ref=main)
+# and a manual dispatch (ref=develop) run concurrently and double-push. The
+# global group serializes every publish run.
 concurrency:
-  group: ${{ github.workflow }}-${{ github.ref }}
+  group: ${{ github.workflow }}
   # Documented exception to the standard `cancel-in-progress: true` (see
   # AGENTS.md "Workflow YAML Conventions"): cancelling a publish mid-flight can
   # leave a partially pushed multi-arch tag set or a half-created GitHub

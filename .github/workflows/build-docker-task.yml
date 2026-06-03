@@ -84,15 +84,17 @@ jobs:
           # Branch-scoped registry cache. READ both branches' caches — the
           # layers are nearly identical (only BUILD_CONFIGURATION differs), so
           # a main build can seed from develop's cache and vice versa — but
-          # WRITE only this branch's own tag, and only on a real (non-smoke)
-          # publish. Branch-scoping is what lets the publisher's weekly matrix
-          # build main and develop concurrently in one run without the two legs
-          # overwriting a single shared cache (which would destroy hit rates);
-          # the smoke `cache-to` skip keeps PR builds from polluting it.
+          # WRITE only this branch's own tag, and only when actually pushing.
+          # Gating the export on `inputs.push` (not just `!smoke`) means a
+          # non-publishing build never writes the shared registry cache or
+          # needs Docker Hub write creds — smoke builds (always push=false) are
+          # covered too. Branch-scoping is what lets the publisher's weekly
+          # matrix build main and develop concurrently in one run without the
+          # two legs overwriting a single shared cache (destroying hit rates).
           cache-from: |
             type=registry,ref=docker.io/ptr727/projecttemplate:buildcache-main
             type=registry,ref=docker.io/ptr727/projecttemplate:buildcache-develop
-          cache-to: ${{ inputs.smoke && '' || format('type=registry,ref=docker.io/ptr727/projecttemplate:buildcache-{0},mode=max', inputs.branch) }}
+          cache-to: ${{ inputs.push && format('type=registry,ref=docker.io/ptr727/projecttemplate:buildcache-{0},mode=max', inputs.branch) || '' }}
           build-args: |
             LABEL_VERSION=${{ needs.get-version.outputs.SemVer2 }}
             BUILD_CONFIGURATION=${{ inputs.branch == 'main' && 'Release' || 'Debug' }}
