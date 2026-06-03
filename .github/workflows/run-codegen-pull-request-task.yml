@@ -23,8 +23,27 @@ on:
 
 jobs:
 
+  # Capture ONE UTC timestamp shared by both matrix legs below. `--runtime`
+  # needs the same value on the `main` and `develop` legs so CodeGen.cs comes
+  # out byte-identical and `develop -> main` release merges don't conflict on
+  # it. `github.run_started_at` was used for this but resolves to an empty
+  # string in this reusable-workflow context, so each leg fell back to its own
+  # `DateTime.UtcNow` and the outputs diverged — capture the value here instead.
+  get-runtime:
+    name: Capture shared runtime job
+    runs-on: ubuntu-latest
+    outputs:
+      runtime: ${{ steps.runtime.outputs.runtime }}
+    steps:
+      - name: Capture shared runtime step
+        id: runtime
+        run: |
+          set -euo pipefail
+          echo "runtime=$(date -u +%Y-%m-%dT%H:%M:%SZ)" >> "$GITHUB_OUTPUT"
+
   codegen:
     name: Run ${{ matrix.target.ref }} codegen and pull request job
+    needs: [get-runtime]
     runs-on: ubuntu-latest
     permissions:
       contents: write
@@ -65,19 +84,20 @@ jobs:
           token: ${{ steps.app-token.outputs.token }}
 
       - name: Run codegen step
-        # `--runtime` is template-internal hygiene: passing the workflow's
-        # `run_started_at` to both matrix legs (main and develop) makes them
-        # produce byte-identical CodeGen.cs, so develop->main release merges
-        # don't conflict on this demo file every release. Derived projects'
-        # real codegen should not copy this pattern — if your generator's
-        # per-run state is intentional, design it not to land on multiple
-        # release branches simultaneously, or absorb the merge cost.
+        # `--runtime` is template-internal hygiene: passing the SAME timestamp
+        # (captured once in the `get-runtime` job above) to both matrix legs
+        # (main and develop) makes them produce byte-identical CodeGen.cs, so
+        # develop->main release merges don't conflict on this demo file every
+        # release. Derived projects' real codegen should not copy this pattern —
+        # if your generator's per-run state is intentional, design it not to
+        # land on multiple release branches simultaneously, or absorb the merge
+        # cost.
         run: |
           set -euo pipefail
           dotnet run --project ./CodeGen/CodeGen.csproj -- \
             --codepath ./CodeGen \
             --apikey "${{ secrets.NINJA_API_KEY }}" \
-            --runtime "${{ github.run_started_at }}"
+            --runtime "${{ needs.get-runtime.outputs.runtime }}"
 
       - name: Format code step
         run: |
