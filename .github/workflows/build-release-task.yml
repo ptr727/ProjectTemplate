@@ -142,6 +142,28 @@ jobs:
           artifact-ids: ${{ needs.build-executable.outputs.artifact-id }}
           path: ./Publish
 
+      # The weekly publisher re-runs even when a branch has no new commits, so
+      # NBGV can produce a SemVer2 that was already released. GitHub release
+      # creation has no built-in skip-duplicate (unlike NuGet's
+      # `--skip-duplicate` and PyPI's `skip-existing`), and re-publishing an
+      # unchanged version is exactly the churn the two-phase model avoids — so
+      # skip the release step when a release for this tag already exists. The
+      # Docker mutable tags (`latest`/`develop`) and base-image refresh still
+      # happen regardless, so security-only rebuilds still ship.
+      - name: Check for existing release step
+        id: release-exists
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ needs.get-version.outputs.SemVer2 }}
+        run: |
+          set -euo pipefail
+          if gh release view "$TAG" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
+            echo "exists=true" >> "$GITHUB_OUTPUT"
+            echo "Release $TAG already exists; skipping release creation (no-op republish)."
+          else
+            echo "exists=false" >> "$GITHUB_OUTPUT"
+          fi
+
       # `target_commitish` MUST be set explicitly: softprops doesn't pass a
       # default through, and GitHub's REST API then defaults the new tag to
       # the repository's default branch (main). We pin it to `inputs.branch`
@@ -152,6 +174,7 @@ jobs:
       # commit. Tagging by branch name lands the tag on that branch's tip —
       # the commit that actually built the artifact — on every trigger.
       - name: Create GitHub release step
+        if: ${{ steps.release-exists.outputs.exists == 'false' }}
         uses: softprops/action-gh-release@3bb12739c298aeb8a4eeaf626c5b8d85266b0e65 # v2.6.2
         with:
           generate_release_notes: true
