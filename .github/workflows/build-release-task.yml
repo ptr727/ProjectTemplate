@@ -116,7 +116,10 @@ jobs:
 
   github-release:
     name: Publish GitHub release job
-    if: ${{ inputs.github }}
+    # `&& !inputs.smoke` enforces the "smoke never publishes" guarantee at the
+    # job level too (matching the `&& !inputs.smoke` push gates above), so a
+    # smoke caller that also set `github: true` still can't create a release.
+    if: ${{ inputs.github && !inputs.smoke }}
     runs-on: ubuntu-latest
     needs: [get-version, build-nugetlibrary, build-pypilibrary, build-executable, build-docker]
 

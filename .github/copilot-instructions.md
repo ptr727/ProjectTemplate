@@ -57,10 +57,12 @@ BOT_ID=$(gh api graphql -f query='
 {
   repository(owner: "<owner>", name: "<repo>") {
     pullRequest(number: <N>) {
-      reviews(first: 1) { nodes { author { __typename ... on Bot { id } } } }
+      reviews(first: 50) { nodes { author { __typename login ... on Bot { id } } } }
     }
   }
-}' --jq '.data.repository.pullRequest.reviews.nodes[0].author.id')
+}' --jq '[.data.repository.pullRequest.reviews.nodes[]
+          | select(.author.login == "copilot-pull-request-reviewer")
+          | .author.id] | first')
 
 # 2. Re-request a Copilot review on the current head.
 gh api graphql -f query='
