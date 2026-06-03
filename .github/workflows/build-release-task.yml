@@ -18,6 +18,46 @@ on:
         required: false
         type: boolean
         default: false
+      # Git ref to check out / version (empty = default checkout ref).
+      ref:
+        required: false
+        type: string
+        default: ''
+      # Logical branch driving config / tags / prerelease for every target.
+      # Defaults to the triggering ref so standalone callers keep working;
+      # the publisher passes it explicitly so a scheduled run can build both
+      # `main` and `develop` in one run.
+      branch:
+        required: false
+        type: string
+        default: ${{ github.ref_name }}
+      # Smoke mode: reduced, never-published build for fast PR feedback.
+      # Forwarded to every target; also hard-disables every push below so a
+      # smoke run can never publish regardless of the publish flags.
+      smoke:
+        required: false
+        type: boolean
+        default: false
+      # Per-target presence gates. Default true (build everything). A derived
+      # project that drops a target deletes its job below and removes it from
+      # `github-release`'s `needs`; a PR smoke run sets these from the
+      # paths-filter so only changed targets build.
+      enable_docker:
+        required: false
+        type: boolean
+        default: true
+      enable_nuget:
+        required: false
+        type: boolean
+        default: true
+      enable_pypi:
+        required: false
+        type: boolean
+        default: true
+      enable_executable:
+        required: false
+        type: boolean
+        default: true
 
 jobs:
 
@@ -25,14 +65,19 @@ jobs:
     name: Get version information job
     uses: ./.github/workflows/get-version-task.yml
     secrets: inherit
+    with:
+      ref: ${{ inputs.ref }}
 
   build-nugetlibrary:
     name: Build NuGet library job
+    if: ${{ inputs.enable_nuget }}
     uses: ./.github/workflows/build-nugetlibrary-task.yml
     secrets: inherit
     with:
-      # Conditional push to NuGet.org
-      push: ${{ inputs.nuget }}
+      ref: ${{ inputs.ref }}
+      branch: ${{ inputs.branch }}
+      # Conditional push to NuGet.org — never on a smoke build.
+      push: ${{ inputs.nuget && !inputs.smoke }}
 
   # PyPI publishing happens in `publish-release.yml`, not here, so that
   # `id-token: write` only needs to be granted at the entry-point job.
@@ -40,21 +85,34 @@ jobs:
   # publish-release workflow downloads it by name in a sibling job.
   build-pypilibrary:
     name: Build PyPI library job
+    if: ${{ inputs.enable_pypi }}
     uses: ./.github/workflows/build-pypilibrary-task.yml
     secrets: inherit
+    with:
+      ref: ${{ inputs.ref }}
+      branch: ${{ inputs.branch }}
 
   build-executable:
     name: Build executable job
+    if: ${{ inputs.enable_executable }}
     uses: ./.github/workflows/build-executable-task.yml
     secrets: inherit
+    with:
+      ref: ${{ inputs.ref }}
+      branch: ${{ inputs.branch }}
+      smoke: ${{ inputs.smoke }}
 
   build-docker:
     name: Build Docker job
+    if: ${{ inputs.enable_docker }}
     uses: ./.github/workflows/build-docker-task.yml
     secrets: inherit
     with:
-      # Conditional push to Docker Hub
-      push: ${{ inputs.dockerhub }}
+      ref: ${{ inputs.ref }}
+      branch: ${{ inputs.branch }}
+      smoke: ${{ inputs.smoke }}
+      # Conditional push to Docker Hub — never on a smoke build.
+      push: ${{ inputs.dockerhub && !inputs.smoke }}
 
   github-release:
     name: Publish GitHub release job
@@ -66,6 +124,8 @@ jobs:
 
       - name: Checkout code step
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          ref: ${{ inputs.ref }}
 
       - name: Download NuGet library build artifacts step
         uses: actions/download-artifact@37930b1c2abaa49bbe596cd826c3c89aef350131 # v7.0.0
@@ -81,17 +141,20 @@ jobs:
 
       # `target_commitish` MUST be set explicitly: softprops doesn't pass a
       # default through, and GitHub's REST API then defaults the new tag to
-      # the repository's default branch (main). On `push: develop` runs the
-      # tag would land on main's tip instead of the develop commit that
-      # built the artifact, leaving "Browse files" and `git checkout <tag>`
-      # pointing at unrelated code.
+      # the repository's default branch (main). We pin it to `inputs.branch`
+      # (the branch this build targets) rather than `github.sha`, because the
+      # publisher's weekly run is a branch matrix: a `develop` leg triggered
+      # by a `schedule`/`workflow_dispatch` on `main` has `github.sha` =
+      # main's tip, so tagging by SHA would land develop's release on main's
+      # commit. Tagging by branch name lands the tag on that branch's tip —
+      # the commit that actually built the artifact — on every trigger.
       - name: Create GitHub release step
         uses: softprops/action-gh-release@3bb12739c298aeb8a4eeaf626c5b8d85266b0e65 # v2.6.2
         with:
           generate_release_notes: true
           tag_name: ${{ needs.get-version.outputs.SemVer2 }}
-          target_commitish: ${{ github.sha }}
-          prerelease: ${{ github.ref_name != 'main' }}
+          target_commitish: ${{ inputs.branch }}
+          prerelease: ${{ inputs.branch != 'main' }}
           files: |
             LICENSE
             README.md

@@ -5,12 +5,25 @@ name: Build PyPI library task
 # Publishing happens directly in `publish-release.yml` so that the
 # `id-token: write` permission required by Trusted Publishing is granted
 # at the entry-point job, not propagated through a reusable-workflow
-# chain (which would require every caller — including `test-release-task.yml`
-# during PR validation — to also grant id-token write, even when no
+# chain (which would require every caller — including the PR smoke build in
+# `test-pull-request.yml` — to also grant id-token write, even when no
 # publishing happens).
 
 on:
   workflow_call:
+    inputs:
+      # Git ref to check out / version (empty = default checkout ref).
+      ref:
+        required: false
+        type: string
+        default: ''
+      # Logical branch driving the PEP 440 version (`develop` => `.dev0`
+      # prerelease suffix, anything else => plain release). Defaults to the
+      # triggering ref for standalone callers.
+      branch:
+        required: false
+        type: string
+        default: ${{ github.ref_name }}
     outputs:
       artifact-name:
         value: ${{ jobs.build-pypilibrary.outputs.artifact-name }}
@@ -22,6 +35,8 @@ jobs:
   get-version:
     name: Get version information job
     uses: ./.github/workflows/get-version-task.yml
+    with:
+      ref: ${{ inputs.ref }}
 
   build-pypilibrary:
     name: Build PyPI library project job
@@ -31,13 +46,15 @@ jobs:
       run:
         working-directory: ./PyPiLibrary
     outputs:
-      artifact-name: pypilibrary-build
+      artifact-name: pypilibrary-build-${{ inputs.branch }}
       artifact-id: ${{ steps.artifact-upload-step.outputs.artifact-id }}
 
     steps:
 
       - name: Checkout code step
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          ref: ${{ inputs.ref }}
 
       - name: Setup uv step
         uses: astral-sh/setup-uv@08807647e7069bb48b6ef5acd8ec9567f424441b # v8.1.0
@@ -95,23 +112,24 @@ jobs:
       #                         the main release until a new develop
       #                         commit lands. This is accepted as a
       #                         small, self-healing gap.
-      #   other refs (PR validation via test-release-task, feature
+      #   other branches (PR smoke build via test-pull-request, feature
       #                branches) -> AssemblyFileVersion as-is. These
-      #                refs never publish; we just need a PEP 440 valid
+      #                never publish; we just need a PEP 440 valid
       #                string for `uv build`.
       - name: Compute PyPI version step
         id: pypiver
         run: |
           set -euo pipefail
-          if [[ "$GITHUB_REF" == "refs/heads/develop" ]]; then
+          if [[ "$BRANCH" == "develop" ]]; then
             version="${AFV}.dev0"
           else
             version="$AFV"
           fi
-          echo "PyPI version for $GITHUB_REF: $version"
+          echo "PyPI version for branch $BRANCH: $version"
           echo "version=$version" >> "$GITHUB_OUTPUT"
         env:
           AFV: ${{ needs.get-version.outputs.AssemblyFileVersion }}
+          BRANCH: ${{ inputs.branch }}
 
       # Replace the `__version__` line in `_version.py` (which ships
       # hardcoded "0.0.0" so local `uv build` works without CI) with the
@@ -141,9 +159,12 @@ jobs:
       - name: Build sdist and wheel step
         run: uv build
 
+      # Branch-suffixed so the publisher's branch matrix can build both
+      # branches in one run without colliding on the artifact name. The
+      # publish-pypi job downloads `pypilibrary-build-<branch>`.
       - name: Upload build artifacts step
         id: artifact-upload-step
         uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6.0.0
         with:
-          name: pypilibrary-build
+          name: pypilibrary-build-${{ inputs.branch }}
           path: PyPiLibrary/dist/*

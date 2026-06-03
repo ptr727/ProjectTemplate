@@ -11,18 +11,115 @@ concurrency:
 
 jobs:
 
-  test-release:
-    name: Test release job
-    uses: ./.github/workflows/test-release-task.yml
+  # Detect which delivery targets a PR actually touches so we only smoke-build
+  # what changed. Build-workflow files are intentionally NOT in any filter: a
+  # path filter can't tell a logic change in a build workflow from an action-
+  # version bump, so workflow validation is left to actionlint + the scheduled
+  # full build (see AGENTS.md). On `workflow_dispatch` (no PR base to diff
+  # against) every target is forced on so a manual run is a full smoke build.
+  changes:
+    name: Detect changed targets job
+    runs-on: ubuntu-latest
+    outputs:
+      docker: ${{ github.event_name == 'pull_request' && steps.filter.outputs.docker || 'true' }}
+      nuget: ${{ github.event_name == 'pull_request' && steps.filter.outputs.nuget || 'true' }}
+      pypi: ${{ github.event_name == 'pull_request' && steps.filter.outputs.pypi || 'true' }}
+      executable: ${{ github.event_name == 'pull_request' && steps.filter.outputs.executable || 'true' }}
+    steps:
+      - name: Filter changed paths step
+        id: filter
+        if: ${{ github.event_name == 'pull_request' }}
+        uses: dorny/paths-filter@fbd0ab8f3e69293af611ebaee6363fc25e6d187d # v4.0.1
+        with:
+          filters: |
+            shared: &shared
+              - 'Directory.Build.props'
+              - 'Directory.Packages.props'
+              - 'version.json'
+              - '*.slnx'
+            docker:
+              - *shared
+              - 'Docker/**'
+              - 'Console/**'
+              - 'NuGetLibrary/**'
+            executable:
+              - *shared
+              - 'Console/**'
+              - 'NuGetLibrary/**'
+            nuget:
+              - *shared
+              - 'NuGetLibrary/**'
+            pypi:
+              - 'PyPiLibrary/**'
+
+  # Unit tests are cheap and validate the shared C# code, so they always run
+  # regardless of which targets changed.
+  unit-test:
+    name: Run unit tests job
+    runs-on: ubuntu-latest
+
+    steps:
+
+      - name: Setup .NET SDK step
+        uses: actions/setup-dotnet@c2fa09f4bde5ebb9d1777cf28262a3eb3db3ced7 # v5.2.0
+        with:
+          dotnet-version: 10.x
+
+      - name: Checkout code step
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+
+      - name: Restore .NET local tools step
+        run: dotnet tool restore
+
+      - name: Check formatting with CSharpier step
+        run: dotnet csharpier check .
+
+      - name: Verify .NET style with dotnet format step
+        run: dotnet format style --verify-no-changes --severity=info --verbosity=detailed
+
+      - name: Run unit tests step
+        run: dotnet test
+
+  # Fast PR feedback: build only the changed targets, in smoke mode (Docker
+  # amd64-only, reduced executable matrix, no publishing). Validates the PR's
+  # base-branch configuration (Release for main, Debug for develop) by passing
+  # `branch: github.base_ref`. Skipped entirely when no target changed (e.g. a
+  # docs-only PR) — unit tests still run.
+  smoke-build:
+    name: Smoke build changed targets job
+    needs: [changes]
+    if: >-
+      needs.changes.outputs.docker == 'true' ||
+      needs.changes.outputs.nuget == 'true' ||
+      needs.changes.outputs.pypi == 'true' ||
+      needs.changes.outputs.executable == 'true'
+    uses: ./.github/workflows/build-release-task.yml
     secrets: inherit
+    with:
+      smoke: true
+      # Do not publish anything from a PR.
+      github: false
+      nuget: false
+      dockerhub: false
+      # Check out the PR head; validate it in the base branch's configuration.
+      # `workflow_dispatch` has empty head_ref/base_ref, so fall back to the
+      # triggering ref.
+      ref: ${{ github.head_ref || github.ref_name }}
+      branch: ${{ github.base_ref || github.ref_name }}
+      enable_docker: ${{ needs.changes.outputs.docker == 'true' }}
+      enable_nuget: ${{ needs.changes.outputs.nuget == 'true' }}
+      enable_pypi: ${{ needs.changes.outputs.pypi == 'true' }}
+      enable_executable: ${{ needs.changes.outputs.executable == 'true' }}
 
   # TODO: Workaround for GitHub Actions not supporting status checks on conditional jobs
   # https://github.com/orgs/community/discussions/12395#discussioncomment-12970019
+  # This job's name is bound to the branch ruleset as the required status check
+  # context — do NOT rename it (see AGENTS.md "Workflow YAML Conventions").
   check-workflow-status:
     name: Check pull request workflow status
     runs-on: ubuntu-latest
     needs:
-      [ test-release ]
+      [ changes, unit-test, smoke-build ]
     if: always()
     steps:
       - name: Check workflow results step
@@ -34,4 +131,14 @@ jobs:
               exit 1
             fi
           }
-          exit_on_result "test-release" "${{ needs.test-release.result }}"
+          # The paths-filter job MUST succeed: if it failed we don't know which
+          # targets changed, so a target-changing PR could merge with its smoke
+          # build silently skipped. Treat anything other than success as a block.
+          if [[ "${{ needs.changes.result }}" != "success" ]]; then
+            echo "Job 'changes' did not succeed (${{ needs.changes.result }}); refusing to pass."
+            exit 1
+          fi
+          # unit-test always runs; smoke-build may be legitimately skipped
+          # (no target changed) — `skipped` passes, only failure/cancelled blocks.
+          exit_on_result "unit-test" "${{ needs.unit-test.result }}"
+          exit_on_result "smoke-build" "${{ needs.smoke-build.result }}"

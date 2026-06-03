@@ -2,6 +2,16 @@ name: Get version information task
 
 on:
   workflow_call:
+    inputs:
+      # Git ref to check out and version. Empty string falls back to the
+      # caller's default checkout ref (`github.ref`), preserving the
+      # original behavior. The publisher passes an explicit branch so a
+      # scheduled run — which always reports `github.ref` as the default
+      # branch — can still compute NBGV versions for `develop` too.
+      ref:
+        required: false
+        type: string
+        default: ''
     outputs:
       # Version information outputs
       SemVer2:
@@ -34,6 +44,7 @@ jobs:
       - name: Checkout code step
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
         with:
+          ref: ${{ inputs.ref }}
           fetch-depth: 0
 
       # `dotnet/nbgv` is intentionally floated on `master` rather than

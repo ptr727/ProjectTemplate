@@ -47,15 +47,38 @@ Use this section for provider-specific mechanics. The expected review loop *cont
 
 ### Triggering and Polling
 
-Auto-review on push is configured (via the branch ruleset's `copilot_code_review` rule with `review_on_push: true`) but fires inconsistently in practice — treat it as best-effort, not guaranteed. Request review explicitly through the GitHub PR UI (request `Copilot` as a reviewer) after every push.
+Auto-review on push is configured (via the branch ruleset's `copilot_code_review` rule with `review_on_push: true`) but fires inconsistently in practice — treat it as best-effort, not guaranteed. After every push, **re-request a review programmatically** via the GraphQL `requestReviews` mutation, passing the Copilot reviewer's bot node id in `botIds`. This now works reliably (it previously did not — a maintainer had to click "re-request review" in the UI; the agent can now drive the loop end-to-end without that hand-off).
+
+```sh
+# 1. PR node id + the Copilot reviewer's bot node id (read from any existing
+#    Copilot review; the reviewer login is `copilot-pull-request-reviewer`).
+PR_NODE=$(gh pr view <N> --json id --jq '.id')
+BOT_ID=$(gh api graphql -f query='
+{
+  repository(owner: "<owner>", name: "<repo>") {
+    pullRequest(number: <N>) {
+      reviews(first: 1) { nodes { author { __typename ... on Bot { id } } } }
+    }
+  }
+}' --jq '.data.repository.pullRequest.reviews.nodes[0].author.id')
+
+# 2. Re-request a Copilot review on the current head.
+gh api graphql -f query='
+mutation($pr: ID!, $bot: ID!) {
+  requestReviews(input: { pullRequestId: $pr, botIds: [$bot], union: true }) {
+    pullRequest { id }
+  }
+}' -F pr="$PR_NODE" -F bot="$BOT_ID"
+```
+
+The bot node id is read from an existing Copilot review, so step 1 needs at least one prior review on the PR — the auto-review-on-open normally supplies the first one. If no Copilot review exists yet and auto-review didn't fire, request `Copilot` once through the GitHub PR UI to seed it, then use the mutation for every subsequent re-request.
 
 **Do NOT post `@Copilot review` as a PR comment.** That comment triggers the Copilot *coding agent* (`copilot-swe-agent[bot]`), which makes code changes rather than posting a review.
 
-Known non-working request paths (don't rely on them):
+Known non-working request paths (don't rely on them — use the `requestReviews` mutation above instead):
 
 - `POST /requested_reviewers` with `reviewers=[Copilot]` can return 200 but no-op.
 - `copilot-pull-request-reviewer` as a requested reviewer slug returns 422.
-- GraphQL `requestReviews` rejects Copilot's bot node.
 
 ### Verify Review Covered Current Head
 
@@ -81,7 +104,7 @@ Coverage is confirmed when (1) exits 0. For issue comments (path 2), body conten
 If a review did not run on the current head, retry:
 
 1. Wait briefly and check head-SHA coverage (see above).
-1. Request review again via the GitHub PR UI.
+1. Re-request the review via the `requestReviews` mutation (see "Triggering and Polling"); fall back to the GitHub PR UI only if the mutation no-ops.
 1. Retry up to two more times (three total).
 1. If still missing, mark review as blocked and escalate to the user/maintainer with what was attempted.
 
