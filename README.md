@@ -453,7 +453,7 @@ Licensed under the [MIT License][license-link]\
     - GitHub project security Settings / Secrets / Actions — for the codegen workflow and the codegen merge job.
     - GitHub project security Settings / Secrets / Dependabot — **required** because Dependabot-triggered `pull_request` workflow runs use a separate, restricted secret context that doesn't see Actions secrets. Without the App secrets in the Dependabot store, the `merge-dependabot` job in `merge-bot-pull-request.yml` can't mint an App token and the PR will never auto-merge.
   - If the codegen workflows require additional secrets (e.g. third-party API keys), register them in the Actions store; if a Dependabot-triggered workflow ever needs them, register them in the Dependabot store too.
-  - The App token is used by **both** the codegen workflow (`run-codegen-pull-request-task.yml`) **and** every job in `merge-bot-pull-request.yml`. App-authored pushes/PRs trigger downstream `pull_request` and `push` workflow events directly — unlike `GITHUB_TOKEN`-authored events, which are blocked by GitHub's recursion guard. This is why `publish-release.yml` fires on the merge commit after Dependabot or codegen auto-merge, and why the codegen workflow no longer needs the legacy close/reopen dance to trigger auto-merge.
+  - The App token is used by **both** the codegen workflow (`run-codegen-pull-request-task.yml`) **and** every job in `merge-bot-pull-request.yml`. App-authored pushes/PRs trigger downstream `pull_request` and `push` workflow events directly — unlike `GITHUB_TOKEN`-authored events, which are blocked by GitHub's recursion guard. This matters for two reasons: bot-opened PRs trigger the `test-pull-request.yml` smoke build (so they can't auto-merge unvalidated), and — when `PUBLISH_ON_MERGE` is enabled — the merge commit triggers `publish-release.yml`. It also means the codegen workflow no longer needs the legacy close/reopen dance to trigger auto-merge.
   - The codegen auto-merge condition in `merge-bot-pull-request.yml` (`merge-codegen` job) requires:
     - **Event is `opened` or `reopened`** — auto-merge is enabled once per PR at open time; subsequent `synchronize` events do not re-enable. This is what lets the `disable-auto-merge-on-maintainer-push` safeguard (below) stick.
     - `github.event.pull_request.user.login == 'ptr727-codegen[bot]'` — PR was opened by the App.
@@ -465,7 +465,7 @@ Licensed under the [MIT License][license-link]\
 
 **Codegen workflow schedule**:
 
-- `run-periodic-codegen-pull-request.yml` runs every **Monday** at 02:00 UTC, plus on-demand via `workflow_dispatch`. It uses the App token (`CODEGEN_APP_CLIENT_ID` + `CODEGEN_APP_PRIVATE_KEY`) to commit, open the PR as `ptr727-codegen[bot]`, and let the merge-bot auto-merge once CI passes. No PAT, no close/reopen dance.
+- `run-periodic-codegen-pull-request.yml` runs **daily** at 04:00 UTC (staggered two hours after the weekly publish), plus on-demand via `workflow_dispatch`. It uses the App token (`CODEGEN_APP_CLIENT_ID` + `CODEGEN_APP_PRIVATE_KEY`) to commit, open the PR as `ptr727-codegen[bot]`, and let the merge-bot auto-merge once CI passes. No PAT, no close/reopen dance. Daily is cheap in the default two-phase model — codegen merges only smoke-test; the weekly publish batches the actual release.
 
 **GitHub project settings**:
 
@@ -514,32 +514,21 @@ See [AGENTS.md "Branching Model"](./AGENTS.md#branching-model) for the authorita
 - `develop` → `main`: **merge-commit** (preserves develop's commit list as a real second-parent reference on main; main ruleset enforces this).
 - **`develop` is forward-only.** No `main → develop` back-merges. The develop squash-only ruleset physically blocks merge commits.
 - **Bots open parallel PRs against both branches.** [`.github/dependabot.yml`](./.github/dependabot.yml) duplicates each ecosystem entry per branch, and [`.github/workflows/run-codegen-pull-request-task.yml`](./.github/workflows/run-codegen-pull-request-task.yml) runs as a matrix (branch names `codegen-main` and `codegen-develop`). Each branch absorbs its own bot PRs independently — neither falls behind, no back-merges needed.
+- **Review-then-merge loop.** Every PR is reviewed by GitHub Copilot. The agent pushes, re-requests a review on the new head (now reliable via the `requestReviews` GraphQL mutation), addresses and resolves each finding, repeats until green, and then **waits for the maintainer's explicit permission to merge** — it does not self-merge. See [AGENTS.md "PR Review Etiquette"](./AGENTS.md#pr-review-etiquette) and the [Copilot Review Runbook](./.github/copilot-instructions.md#github-copilot-review-runbook) for the mechanics.
 
-### Template - Release Distribution Model: Push vs. Pull
+### Template - Release Distribution Model: Two-Phase by Default
 
-This template ships with a **push-on-merge release model** — every commit on `main` triggers [`.github/workflows/publish-release.yml`](./.github/workflows/publish-release.yml) which publishes a GitHub release, NuGet/PyPI uploads, Docker tags, and platform executables. With the dual-target bot model (Dependabot/codegen targeting both branches), this means every Dependabot bump that lands on `main` produces a new release. That's the right default for projects whose consumers **pull** at their own cadence (Docker pulls, NuGet/PyPI installs, manual binary downloads) — releases are cheap and frequent, consumers update on their own schedule.
+This template ships with a **two-phase model** that decouples merging from publishing:
 
-For projects whose consumers are **pushed** updates (HACS for Home Assistant, package managers that auto-update integrations, Linux distros that vendor from `main`), every release is a forced update to all users. Frequent bot-driven releases become noise. To switch to a **manual main-release model** while keeping the rest of the dual-target dual-channel flow:
+- **Pull requests smoke-test only.** [`.github/workflows/test-pull-request.yml`](./.github/workflows/test-pull-request.yml) always runs unit tests, then path-gates a **reduced** build of only the targets a PR touches (`dorny/paths-filter`): Docker as `linux/amd64` only (no QEMU/arm64), the executable as a representative runtime subset, and nothing is pushed. A docs-only PR runs unit tests alone; a Dependabot github-actions bump is unit-tests-only. This is fast feedback, not a release.
+- **Merges to `main`/`develop` do not publish.** A push only smoke-tested the PR; merging it republishes nothing.
+- **The weekly schedule + manual dispatch are the sole publishers.** [`.github/workflows/publish-release.yml`](./.github/workflows/publish-release.yml) runs every **Monday 02:00 UTC** and on-demand via `workflow_dispatch`, and on either trigger does the **full** build/publish of **both** `main` (Release / `latest` / non-prerelease) and `develop` (Debug / `develop` / prerelease) — GitHub release, NuGet/PyPI uploads, multi-arch Docker tags, platform executables, and a refreshed Docker base image. Trigger a release on demand from the Actions UI when you want one between weekly runs.
 
-1. Edit [`.github/workflows/publish-release.yml`](./.github/workflows/publish-release.yml) and change the trigger:
+This batches cheap bot churn (Dependabot/codegen merge daily, validated by smoke builds) into one periodic publish instead of one release per merge, and keeps PR feedback fast by deferring the slow `arm64`/full-matrix builds to the publisher.
 
-    ```diff
-     on:
-    -  push:
-    -    branches: [ main, develop ]
-    -  workflow_dispatch:
-    +  push:
-    +    branches: [ develop ]
-    +  workflow_dispatch:
-    ```
+**Opt in to publish-on-merge.** Set the repository variable `PUBLISH_ON_MERGE` to `true` (Settings → Secrets and variables → Actions → Variables) to restore the legacy **continuous-release** model: every push/merge to `main` publishes `main` and every push to `develop` publishes `develop`, immediately. The weekly + manual publishers still run. Leave the variable unset (or `false`) for the two-phase default. It's a repository variable, not a workflow edit, so pulling template updates never conflicts with your choice.
 
-   Result: `develop` pushes still publish dev releases automatically (PEP 440 `.dev0` to PyPI, NBGV-prerelease tags on NuGet, prerelease GitHub releases). `main` pushes no longer auto-publish; you trigger the release manually via the GitHub Actions UI (`workflow_dispatch`) when a real release is wanted.
-
-2. **(Optional)** narrow what flows into `main` automatically. If a sea of Dependabot PRs on `main` is noisy without auto-release, either:
-   - Drop the `main`-target Dependabot entries from `.github/dependabot.yml` (so deps update on `develop` only, and reach `main` through the next develop → main release the maintainer triggers — closer to a pure develop-only flow with manual cadence), or
-   - Keep dual-target Dependabot and let the merge-bot auto-merge them silently into `main`; main always has fresh code, but ships only when the maintainer dispatches a release.
-
-For an example of the manual-release model in production, see [homeassistant-purpleair](https://github.com/ptr727/homeassistant-purpleair) — that integration ships through HACS (push distribution) and uses `workflow_dispatch` for actual releases.
+Which to pick: two-phase suits projects whose consumers are **pushed** updates (HACS for Home Assistant, package managers that auto-update, Linux distros that vendor from `main`) where every release is a forced update and frequent bot-driven releases are noise. `PUBLISH_ON_MERGE=true` suits projects whose consumers **pull** at their own cadence (Docker pulls, NuGet/PyPI installs, manual downloads) and want every merged change available immediately. For an example of a push-distribution project, see [homeassistant-purpleair](https://github.com/ptr727/homeassistant-purpleair) (ships through HACS).
 
 <!--- Shields links (alphabetized per AGENTS.md) --->
 
@@ -547,7 +536,7 @@ For an example of the manual-release model in production, see [homeassistant-pur
 [commits-link]: https://github.com/ptr727/ProjectTemplate/commits/main
 [discussions-link]: https://github.com/ptr727/ProjectTemplate/discussions
 [docker-link]: https://hub.docker.com/r/ptr727/projecttemplate
-[dockerbuildstatus-shield]: https://img.shields.io/github/actions/workflow/status/ptr727/ProjectTemplate/publish-periodic-docker-release.yml?logo=github&label=Docker%20Build
+[dockerbuildstatus-shield]: https://img.shields.io/github/actions/workflow/status/ptr727/ProjectTemplate/publish-release.yml?logo=github&label=Docker%20Build
 [dockerdevelopversion-shield]: https://img.shields.io/docker/v/ptr727/projecttemplate/develop?label=Docker%20Develop&logo=docker&color=orange
 [dockerlatestversion-shield]: https://img.shields.io/docker/v/ptr727/projecttemplate/latest?label=Docker%20Latest&logo=docker
 [github-link]: https://github.com/ptr727/ProjectTemplate

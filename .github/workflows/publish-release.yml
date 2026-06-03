@@ -4,53 +4,121 @@ on:
   push:
     branches: [ main, develop ]
   workflow_dispatch:
+  schedule:
+    # Weekly full build/publish of both branches on Mondays at 02:00 UTC.
+    # This is the guaranteed publisher in the default two-phase model: routine
+    # merges only smoke-test, and this scheduled run republishes everything
+    # (also refreshing the Docker base image, e.g. `ubuntu:rolling`).
+    - cron: '0 2 * * MON'
 
+# Single GLOBAL group (not ref-scoped): this workflow publishes shared,
+# ref-independent artifacts — it pushes both branches' Docker tags + caches
+# and creates GitHub releases for both — on schedule/dispatch regardless of
+# the triggering ref. A ref-scoped group would let a scheduled run (ref=main)
+# and a manual dispatch (ref=develop) run concurrently and double-push. The
+# global group serializes every publish run.
 concurrency:
-  group: ${{ github.workflow }}-${{ github.ref }}
-  cancel-in-progress: true
+  group: ${{ github.workflow }}
+  # Documented exception to the standard `cancel-in-progress: true` (see
+  # AGENTS.md "Workflow YAML Conventions"): cancelling a publish mid-flight can
+  # leave a partially pushed multi-arch tag set or a half-created GitHub
+  # release. Queue instead of cancel so each publish runs to completion.
+  cancel-in-progress: false
 
 jobs:
 
-  create-release:
+  # Decide WHICH branches to publish and WHETHER to publish at all:
+  #   - push        -> publish only the pushed branch, and only when the
+  #                    `PUBLISH_ON_MERGE` repository variable is `true`
+  #                    (opt-in legacy continuous-release). Unset/false => the
+  #                    default two-phase model: merges don't publish.
+  #   - schedule    -> always publish BOTH branches (the weekly full build).
+  #   - dispatch    -> always publish BOTH branches (manual on-demand publish).
+  setup:
+    name: Resolve publish plan job
+    runs-on: ubuntu-latest
+    outputs:
+      branches: ${{ steps.plan.outputs.branches }}
+      publish: ${{ steps.plan.outputs.publish }}
+    steps:
+      - name: Compute publish plan step
+        id: plan
+        env:
+          # Repository variable (Settings -> Actions -> Variables). Unset reads
+          # as empty string, so the default is the two-phase model.
+          PUBLISH_ON_MERGE: ${{ vars.PUBLISH_ON_MERGE }}
+        run: |
+          set -euo pipefail
+          case "${{ github.event_name }}" in
+            push)
+              branches='["${{ github.ref_name }}"]'
+              if [[ "${PUBLISH_ON_MERGE:-}" == "true" ]]; then
+                publish=true
+              else
+                publish=false
+              fi
+              ;;
+            *)
+              # schedule / workflow_dispatch
+              branches='["main","develop"]'
+              publish=true
+              ;;
+          esac
+          echo "Event=${{ github.event_name }} branches=$branches publish=$publish"
+          echo "branches=$branches" >> "$GITHUB_OUTPUT"
+          echo "publish=$publish" >> "$GITHUB_OUTPUT"
+
+  # Full build + publish of every target for each planned branch. The branch
+  # matrix lets a single scheduled run publish both `main` (Release/`latest`,
+  # non-prerelease) and `develop` (Debug/`develop`, prerelease) — each leg
+  # checks out and versions its own branch via the threaded `ref`/`branch`.
+  publish:
     name: Publish project release job
+    needs: [setup]
+    if: ${{ needs.setup.outputs.publish == 'true' }}
+    strategy:
+      fail-fast: false
+      matrix:
+        branch: ${{ fromJSON(needs.setup.outputs.branches) }}
     uses: ./.github/workflows/build-release-task.yml
     secrets: inherit
     permissions:
       contents: write
     with:
-      # Push to GitHub and NuGet and Docker Hub
+      ref: ${{ matrix.branch }}
+      branch: ${{ matrix.branch }}
+      smoke: false
+      # Push to GitHub and NuGet and Docker Hub.
       github: true
       nuget: true
       dockerhub: true
 
   publish-pypi:
     name: Publish PyPI library job
-    # Runs on pushes to both `main` and `develop`. `build-pypilibrary-task.yml`
-    # picks the PEP 440 version per branch (`M.N.P.B` release on main,
-    # `M.N.P.B.dev0` on develop — BuildNumber stays in the release segment
-    # so develop's release segment grows past main's per commit). Default
-    # `pip install <pkg>` filters `.dev0` and picks the main release;
-    # `pip install --pre <pkg>` includes dev releases and picks develop's
-    # higher release segment. Matches how NuGet/Docker tag develop builds
-    # as prerelease via NBGV `SemVer2`.
-    # The `pypi` GitHub environment's Deployment branch rule
-    # (Settings → Environments → pypi) restricts uploads to `main` +
-    # `develop` as defense in depth — see PyPiLibrary/README.md.
-    needs: [create-release]
+    needs: [setup, publish]
+    if: ${{ needs.setup.outputs.publish == 'true' }}
+    strategy:
+      fail-fast: false
+      matrix:
+        branch: ${{ fromJSON(needs.setup.outputs.branches) }}
     runs-on: ubuntu-latest
+    # `build-pypilibrary-task.yml` picks the PEP 440 version per branch
+    # (`M.N.P.B` release on main, `M.N.P.B.dev0` on develop). Default
+    # `pip install <pkg>` filters `.dev0` and picks the main release;
+    # `pip install --pre <pkg>` includes dev releases. The `pypi` GitHub
+    # environment's Deployment branch rule restricts uploads to `main` +
+    # `develop` as defense in depth — see PyPiLibrary/README.md.
     environment:
       name: pypi
       url: https://pypi.org/project/ptr727-projecttemplate-library/
-    # When a `permissions:` block is present, every scope not listed
-    # collapses to `none`. The job needs three things explicitly:
+    # When a `permissions:` block is present, every scope not listed collapses
+    # to `none`. The job needs three things explicitly:
     #   - `id-token: write` for Trusted Publishing's OIDC exchange
-    #     (pypa/gh-action-pypi-publish swaps the token for a short-lived
-    #     PyPI upload token; no PYPI_API_TOKEN secret involved).
-    #   - `contents: read` so `actions/checkout`-style operations and any
-    #     repo metadata reads continue to work.
-    #   - `actions: read` so `actions/download-artifact` can list and
-    #     fetch the artifact uploaded by the build workflow earlier in
-    #     the same run.
+    #     (pypa/gh-action-pypi-publish swaps the token for a short-lived PyPI
+    #     upload token; no PYPI_API_TOKEN secret involved).
+    #   - `contents: read` for repo metadata reads.
+    #   - `actions: read` so `actions/download-artifact` can fetch the artifact
+    #     uploaded by the build job earlier in the same run.
     permissions:
       id-token: write
       contents: read
@@ -61,24 +129,30 @@ jobs:
       - name: Download PyPI library build artifacts step
         uses: actions/download-artifact@37930b1c2abaa49bbe596cd826c3c89aef350131 # v7.0.0
         with:
-          name: pypilibrary-build
+          # Branch-suffixed name uploaded by build-pypilibrary-task.yml so both
+          # branch legs in this run stay distinct.
+          name: pypilibrary-build-${{ matrix.branch }}
           path: ./dist
 
       - name: Publish to PyPI step
         uses: pypa/gh-action-pypi-publish@cef221092ed1bacb1cc03d23a2d87d1d172e277b # v1.14.0
         with:
           packages-dir: ./dist
-          # Skip rather than fail when the version already exists on PyPI.
-          # The template ships with `__version__ = "0.0.0"` as a placeholder
-          # — the release-on-every-push model would otherwise re-upload the
-          # same version and fail the workflow until the adopter wires a
-          # real version scheme (see PyPiLibrary/README.md).
+          # Skip rather than fail when the version already exists on PyPI — the
+          # weekly republish re-uploads the same version when nothing changed.
           skip-existing: true
 
   date-badge:
     name: Create BYOB date badge job
-    needs: [create-release]
+    needs: [setup, publish]
+    if: ${{ needs.setup.outputs.publish == 'true' }}
+    strategy:
+      matrix:
+        branch: ${{ fromJSON(needs.setup.outputs.branches) }}
     uses: ./.github/workflows/build-datebadge-task.yml
     secrets: inherit
     permissions:
       contents: write
+    with:
+      # The badge task self-gates to `main`; the develop leg is a no-op.
+      branch: ${{ matrix.branch }}

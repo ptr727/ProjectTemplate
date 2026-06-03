@@ -8,6 +8,26 @@ on:
         required: false
         type: boolean
         default: false
+      # Git ref to check out / version (empty = default checkout ref).
+      ref:
+        required: false
+        type: string
+        default: ''
+      # Logical branch driving config and tags (`main` => Release/`latest`,
+      # anything else => Debug/`develop`). Required (no `github.ref_name`
+      # fallback): the publisher builds develop from a run whose
+      # `github.ref_name` is `main`, so a silent fallback would mistag it.
+      # The orchestrator always passes it explicitly.
+      branch:
+        required: true
+        type: string
+      # Smoke mode: build `linux/amd64` only (no QEMU/arm64), never push, and
+      # skip the shared registry `cache-to` so PR builds don't pollute the
+      # release buildcache. Used for fast PR feedback.
+      smoke:
+        required: false
+        type: boolean
+        default: false
 
 jobs:
 
@@ -15,6 +35,8 @@ jobs:
     name: Get version information job
     uses: ./.github/workflows/get-version-task.yml
     secrets: inherit
+    with:
+      ref: ${{ inputs.ref }}
 
   build-docker:
     name: Build Docker image job
@@ -25,8 +47,13 @@ jobs:
 
       - name: Checkout step
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          ref: ${{ inputs.ref }}
 
+      # QEMU only exists to emulate arm64. Smoke builds are amd64-only, so
+      # skip it entirely to save the emulation setup cost.
       - name: Setup QEMU step
+        if: ${{ !inputs.smoke }}
         uses: docker/setup-qemu-action@c7c53464625b32c7a7e944ae62b3e17d2b600130 # v3.7.0
         with:
           platforms: linux/amd64,linux/arm64
@@ -34,10 +61,16 @@ jobs:
       - name: Setup Buildx step
         uses: docker/setup-buildx-action@8d2750c68a42422c14e847fe6c8ac0403b4cbd6f # v3.12.0
         with:
-          platforms: linux/amd64,linux/arm64
+          platforms: ${{ inputs.smoke && 'linux/amd64' || 'linux/amd64,linux/arm64' }}
 
-      # Always login to Docker Hub, not just on push, to benefit from
-      # higher rate limits with a Docker subscription for pulls and cache
+      # Always login to Docker Hub, not just on push, to benefit from higher
+      # rate limits with a Docker subscription for pulls and cache reads on
+      # every build (including smoke). This is a CONSCIOUS choice over gating
+      # login on `inputs.push`: the trade-off is that fork PRs without access
+      # to the Docker Hub secrets cannot run the Docker smoke build.
+      # Acceptable here because the repo is private and PRs are same-repo; a
+      # public derived project that accepts fork PRs may prefer to gate this
+      # step on `inputs.push`.
       - name: Login to Docker Hub step
         uses: docker/login-action@c94ce9fb468520275223c153574b00df6fe4bcc9 # v3.7.0
         with:
@@ -51,14 +84,26 @@ jobs:
           push: ${{ inputs.push }}
           file: ./Docker/Dockerfile
           tags: |
-            docker.io/ptr727/projecttemplate:${{ github.ref_name == 'main' && 'latest' || 'develop' }}
+            docker.io/ptr727/projecttemplate:${{ inputs.branch == 'main' && 'latest' || 'develop' }}
             docker.io/ptr727/projecttemplate:${{ needs.get-version.outputs.SemVer2 }}
-          platforms: linux/amd64,linux/arm64
-          cache-from: type=registry,ref=docker.io/ptr727/projecttemplate:buildcache
-          cache-to: type=registry,ref=docker.io/ptr727/projecttemplate:buildcache,mode=max
+          platforms: ${{ inputs.smoke && 'linux/amd64' || 'linux/amd64,linux/arm64' }}
+          # Branch-scoped registry cache. READ both branches' caches — the
+          # layers are nearly identical (only BUILD_CONFIGURATION differs), so
+          # a main build can seed from develop's cache and vice versa — but
+          # WRITE only this branch's own tag, and only when actually pushing.
+          # Gating the export on `inputs.push` (not just `!smoke`) means a
+          # non-publishing build never writes the shared registry cache or
+          # needs Docker Hub write creds — smoke builds (always push=false) are
+          # covered too. Branch-scoping is what lets the publisher's weekly
+          # matrix build main and develop concurrently in one run without the
+          # two legs overwriting a single shared cache (destroying hit rates).
+          cache-from: |
+            type=registry,ref=docker.io/ptr727/projecttemplate:buildcache-main
+            type=registry,ref=docker.io/ptr727/projecttemplate:buildcache-develop
+          cache-to: ${{ inputs.push && format('type=registry,ref=docker.io/ptr727/projecttemplate:buildcache-{0},mode=max', inputs.branch) || '' }}
           build-args: |
             LABEL_VERSION=${{ needs.get-version.outputs.SemVer2 }}
-            BUILD_CONFIGURATION=${{ github.ref_name == 'main' && 'Release' || 'Debug' }}
+            BUILD_CONFIGURATION=${{ inputs.branch == 'main' && 'Release' || 'Debug' }}
             BUILD_VERSION=${{ needs.get-version.outputs.AssemblyVersion }}
             BUILD_FILE_VERSION=${{ needs.get-version.outputs.AssemblyFileVersion }}
             BUILD_ASSEMBLY_VERSION=${{ needs.get-version.outputs.AssemblyVersion }}
