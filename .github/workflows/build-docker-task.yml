@@ -14,13 +14,13 @@ on:
         type: string
         default: ''
       # Logical branch driving config and tags (`main` => Release/`latest`,
-      # anything else => Debug/`develop`). Defaults to the triggering ref so
-      # standalone callers keep working; the publisher passes it explicitly
-      # so a scheduled run can build `develop` as well as `main`.
+      # anything else => Debug/`develop`). Required (no `github.ref_name`
+      # fallback): the publisher builds develop from a run whose
+      # `github.ref_name` is `main`, so a silent fallback would mistag it.
+      # The orchestrator always passes it explicitly.
       branch:
-        required: false
+        required: true
         type: string
-        default: ${{ github.ref_name }}
       # Smoke mode: build `linux/amd64` only (no QEMU/arm64), never push, and
       # skip the shared registry `cache-to` so PR builds don't pollute the
       # release buildcache. Used for fast PR feedback.

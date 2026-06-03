@@ -24,13 +24,13 @@ on:
         type: string
         default: ''
       # Logical branch driving config / tags / prerelease for every target.
-      # Defaults to the triggering ref so standalone callers keep working;
-      # the publisher passes it explicitly so a scheduled run can build both
-      # `main` and `develop` in one run.
+      # Required (no `github.ref_name` fallback): the publisher builds both
+      # `main` and `develop` from one run whose `github.ref_name` is `main`,
+      # so a silent fallback would mislabel the develop leg. Every caller
+      # passes it explicitly; a missing value should fail loudly.
       branch:
-        required: false
+        required: true
         type: string
-        default: ${{ github.ref_name }}
       # Smoke mode: reduced, never-published build for fast PR feedback.
       # Forwarded to every target; also hard-disables every push below so a
       # smoke run can never publish regardless of the publish flags.

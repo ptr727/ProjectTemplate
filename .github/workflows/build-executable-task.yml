@@ -9,11 +9,11 @@ on:
         type: string
         default: ''
       # Logical branch driving build configuration (`main` => Release, else
-      # Debug). Defaults to the triggering ref for standalone callers.
+      # Debug). Required (no `github.ref_name` fallback, which would mislabel
+      # the develop leg of the publisher's matrix); the orchestrator passes it.
       branch:
-        required: false
+        required: true
         type: string
-        default: ${{ github.ref_name }}
       # Smoke mode: build a representative runtime subset (linux-x64 +
       # win-x64) instead of the full 7-runtime matrix, and skip the zip /
       # artifact aggregation. Used for fast PR feedback.

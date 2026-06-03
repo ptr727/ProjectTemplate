@@ -18,12 +18,12 @@ on:
         type: string
         default: ''
       # Logical branch driving the PEP 440 version (`develop` => `.dev0`
-      # prerelease suffix, anything else => plain release). Defaults to the
-      # triggering ref for standalone callers.
+      # prerelease suffix, anything else => plain release). Required (no
+      # `github.ref_name` fallback, which would mislabel the develop leg of
+      # the publisher's matrix); the orchestrator passes it.
       branch:
-        required: false
+        required: true
         type: string
-        default: ${{ github.ref_name }}
     outputs:
       artifact-name:
         value: ${{ jobs.build-pypilibrary.outputs.artifact-name }}

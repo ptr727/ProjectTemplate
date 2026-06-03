@@ -107,10 +107,13 @@ jobs:
       github: false
       nuget: false
       dockerhub: false
-      # Check out the PR head; validate it in the base branch's configuration.
-      # `workflow_dispatch` has empty head_ref/base_ref, so fall back to the
+      # Check out the PR head by SHA (not head_ref): the head SHA is reachable
+      # in the base repo via refs/pull/N/head even for fork PRs, whereas the
+      # head_ref branch name does not exist in the base repo for forks and
+      # would fail checkout. Validate it in the base branch's configuration.
+      # `workflow_dispatch` has no pull_request payload, so fall back to the
       # triggering ref.
-      ref: ${{ github.head_ref || github.ref_name }}
+      ref: ${{ github.event.pull_request.head.sha || github.ref_name }}
       branch: ${{ github.base_ref || github.ref_name }}
       enable_docker: ${{ needs.changes.outputs.docker == 'true' }}
       enable_nuget: ${{ needs.changes.outputs.nuget == 'true' }}
