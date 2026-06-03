@@ -14,9 +14,12 @@ jobs:
   # Detect which delivery targets a PR actually touches so we only smoke-build
   # what changed. Build-workflow files are intentionally NOT in any filter: a
   # path filter can't tell a logic change in a build workflow from an action-
-  # version bump, so workflow validation is left to actionlint + the scheduled
-  # full build (see AGENTS.md). On `workflow_dispatch` (no PR base to diff
-  # against) every target is forced on so a manual run is a full smoke build.
+  # version bump. A workflow-only change is therefore not smoke-built — the
+  # reusable workflows are exercised instead by the next run that uses them (a
+  # later code PR's smoke build, or the scheduled/publish run); lint workflow
+  # edits with `actionlint` locally before pushing (there is no CI lint job).
+  # On `workflow_dispatch` (no PR base to diff against) every target is forced
+  # on so a manual run is a full smoke build.
   changes:
     name: Detect changed targets job
     runs-on: ubuntu-latest
