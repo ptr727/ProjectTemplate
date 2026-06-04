@@ -8,12 +8,10 @@
         <File Path=".github/workflows/build-release-task.yml" />
         <File Path=".github/workflows/get-version-task.yml" />
         <File Path=".github/workflows/merge-bot-pull-request.yml" />
-        <File Path=".github/workflows/publish-periodic-docker-release.yml" />
         <File Path=".github/workflows/publish-release.yml" />
         <File Path=".github/workflows/run-codegen-pull-request-task.yml" />
         <File Path=".github/workflows/run-periodic-codegen-pull-request.yml" />
         <File Path=".github/workflows/test-pull-request.yml" />
-        <File Path=".github/workflows/test-release-task.yml" />
     </Folder>
     <Folder Name="/Solution Items/">
         <File Path=".dockerignore" />

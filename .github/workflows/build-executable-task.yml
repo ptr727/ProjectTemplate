@@ -2,6 +2,25 @@ name: Build executable task
 
 on:
   workflow_call:
+    inputs:
+      # Git ref to check out / version (empty = default checkout ref).
+      ref:
+        required: false
+        type: string
+        default: ''
+      # Logical branch driving build configuration (`main` => Release, else
+      # Debug). Required (no `github.ref_name` fallback, which would mislabel
+      # the develop leg of the publisher's matrix); the orchestrator passes it.
+      branch:
+        required: true
+        type: string
+      # Smoke mode: build a representative runtime subset (linux-x64 +
+      # win-x64) instead of the full 7-runtime matrix, and skip the zip /
+      # artifact aggregation. Used for fast PR feedback.
+      smoke:
+        required: false
+        type: boolean
+        default: false
     outputs:
       # Output of the uploaded artifact id
       artifact-id:
@@ -13,6 +32,8 @@ jobs:
     name: Get version information job
     uses: ./.github/workflows/get-version-task.yml
     secrets: inherit
+    with:
+      ref: ${{ inputs.ref }}
 
   build-executable-matrix:
     name: Build executable project matrix job
@@ -20,10 +41,18 @@ jobs:
     needs: [get-version]
     strategy:
       matrix:
-        runtime: [ win-x64, linux-x64, linux-musl-x64, linux-arm, linux-arm64, osx-x64, osx-arm64 ]
+        runtime: ${{ fromJSON(inputs.smoke && '["linux-x64","win-x64"]' || '["win-x64","linux-x64","linux-musl-x64","linux-arm","linux-arm64","osx-x64","osx-arm64"]') }}
 
     steps:
 
+      # NOTE: NuGet restore caching is intentionally NOT enabled on the .NET
+      # jobs (this matrix, build-nugetlibrary-task, and the unit-test job). The
+      # restore is low-overhead for this template's small dependency set, and
+      # `setup-dotnet`'s built-in cache requires a `packages.lock.json` that
+      # Central Package Management (Directory.Packages.props) does not produce
+      # by default. The Docker layer cache and uv's cache (which carry the
+      # expensive work) are enabled; revisit .NET restore caching only if the
+      # dependency graph grows enough to make it worthwhile.
       - name: Setup .NET SDK step
         uses: actions/setup-dotnet@c2fa09f4bde5ebb9d1777cf28262a3eb3db3ced7 # v5.2.0
         with:
@@ -31,13 +60,15 @@ jobs:
 
       - name: Checkout code step
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          ref: ${{ inputs.ref }}
 
       - name: Build executable project step
         run: |
           dotnet publish ./Console/Console.csproj \
             --runtime ${{ matrix.runtime }} \
             -property:PublishDir=${{ runner.temp }}/publish/${{ matrix.runtime }}/ \
-            --configuration ${{ github.ref_name == 'main' && 'Release' || 'Debug' }} \
+            --configuration ${{ inputs.branch == 'main' && 'Release' || 'Debug' }} \
             -property:PublishAot=false \
             -property:Version=${{ needs.get-version.outputs.AssemblyVersion }} \
             -property:FileVersion=${{ needs.get-version.outputs.AssemblyFileVersion }} \
@@ -45,14 +76,22 @@ jobs:
             -property:InformationalVersion=${{ needs.get-version.outputs.AssemblyInformationalVersion }} \
             -property:PackageVersion=${{ needs.get-version.outputs.SemVer2 }}
 
+      # Artifact names are suffixed with the branch so the publisher can build
+      # `main` and `develop` in the same workflow run (a branch matrix) without
+      # two legs colliding on an identical artifact name.
       - name: Upload matrix build artifacts step
         uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6.0.0
         with:
-          name: publish-${{ matrix.runtime }}
+          name: publish-${{ inputs.branch }}-${{ matrix.runtime }}
           path: ${{ runner.temp }}/publish
 
+  # Smoke builds only need the per-runtime compile to succeed (fast PR
+  # feedback) — the zipped, downloadable artifact is a release concern, so
+  # skip the aggregation entirely on smoke. The `artifact-id` output is then
+  # empty, which is fine because the GitHub release job never runs on smoke.
   upload-build-artifacts:
     name: Upload matrix build artifacts job
+    if: ${{ !inputs.smoke }}
     outputs:
       artifact-id: ${{ steps.artifact-upload-step.outputs.artifact-id }}
     runs-on: ubuntu-latest
@@ -63,7 +102,7 @@ jobs:
       - name: Download matrix build artifacts step
         uses: actions/download-artifact@37930b1c2abaa49bbe596cd826c3c89aef350131 # v7.0.0
         with:
-          pattern: publish-*
+          pattern: publish-${{ inputs.branch }}-*
           merge-multiple: true
           path: ${{ runner.temp }}/publish
 
@@ -74,5 +113,5 @@ jobs:
         id: artifact-upload-step
         uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6.0.0
         with:
-          name: executable-build
+          name: executable-build-${{ inputs.branch }}
           path: ${{ runner.temp }}/Console.7z
