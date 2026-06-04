@@ -71,10 +71,15 @@ jobs:
   build-nugetlibrary:
     name: Build NuGet library job
     if: ${{ inputs.enable_nuget }}
+    needs: [get-version]
     uses: ./.github/workflows/build-nugetlibrary-task.yml
     secrets: inherit
     with:
-      ref: ${{ inputs.ref }}
+      # Pin to the exact commit get-version resolved (immutable), not the
+      # possibly-moving branch ref: the publisher passes a branch name, and a
+      # commit landing mid-run could otherwise build artifacts from a different
+      # commit than the one the release tag (also GitCommitId) points at.
+      ref: ${{ needs.get-version.outputs.GitCommitId }}
       branch: ${{ inputs.branch }}
       # Conditional push to NuGet.org — never on a smoke build.
       push: ${{ inputs.nuget && !inputs.smoke }}
@@ -86,29 +91,35 @@ jobs:
   build-pypilibrary:
     name: Build PyPI library job
     if: ${{ inputs.enable_pypi }}
+    needs: [get-version]
     uses: ./.github/workflows/build-pypilibrary-task.yml
     secrets: inherit
     with:
-      ref: ${{ inputs.ref }}
+      # Pin to the resolved commit (see build-nugetlibrary).
+      ref: ${{ needs.get-version.outputs.GitCommitId }}
       branch: ${{ inputs.branch }}
 
   build-executable:
     name: Build executable job
     if: ${{ inputs.enable_executable }}
+    needs: [get-version]
     uses: ./.github/workflows/build-executable-task.yml
     secrets: inherit
     with:
-      ref: ${{ inputs.ref }}
+      # Pin to the resolved commit (see build-nugetlibrary).
+      ref: ${{ needs.get-version.outputs.GitCommitId }}
       branch: ${{ inputs.branch }}
       smoke: ${{ inputs.smoke }}
 
   build-docker:
     name: Build Docker job
     if: ${{ inputs.enable_docker }}
+    needs: [get-version]
     uses: ./.github/workflows/build-docker-task.yml
     secrets: inherit
     with:
-      ref: ${{ inputs.ref }}
+      # Pin to the resolved commit (see build-nugetlibrary).
+      ref: ${{ needs.get-version.outputs.GitCommitId }}
       branch: ${{ inputs.branch }}
       smoke: ${{ inputs.smoke }}
       # Conditional push to Docker Hub — never on a smoke build.
@@ -125,10 +136,13 @@ jobs:
 
     steps:
 
+      # Check out the exact built commit (NBGV `GitCommitId`), not the
+      # possibly-moving `inputs.ref` branch, so the uploaded release files
+      # match the tag even if the branch advances mid-run.
       - name: Checkout code step
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
         with:
-          ref: ${{ inputs.ref }}
+          ref: ${{ needs.get-version.outputs.GitCommitId }}
 
       - name: Download NuGet library build artifacts step
         uses: actions/download-artifact@37930b1c2abaa49bbe596cd826c3c89aef350131 # v7.0.0
@@ -159,7 +173,11 @@ jobs:
           set -euo pipefail
           if gh release view "$TAG" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
             echo "exists=true" >> "$GITHUB_OUTPUT"
-            echo "Release $TAG already exists; skipping release creation (no-op republish)."
+            if [[ "${{ github.event_name }}" == "workflow_dispatch" ]]; then
+              echo "Release $TAG already exists; workflow_dispatch will refresh it."
+            else
+              echo "Release $TAG already exists; skipping release creation (no-op republish)."
+            fi
           else
             echo "exists=false" >> "$GITHUB_OUTPUT"
           fi
@@ -174,8 +192,11 @@ jobs:
       # could tag the release on a newer commit than the one that was built).
       # The exact SHA is immutable, on the right branch, and consistent with
       # both the SemVer2 tag and the uploaded artifacts.
+      # Skip the no-op weekly republish when the tag already exists, but always
+      # allow a manual `workflow_dispatch` through so it can repair/refresh a
+      # partially-created release for the same tag.
       - name: Create GitHub release step
-        if: ${{ steps.release-exists.outputs.exists == 'false' }}
+        if: ${{ steps.release-exists.outputs.exists == 'false' || github.event_name == 'workflow_dispatch' }}
         uses: softprops/action-gh-release@3bb12739c298aeb8a4eeaf626c5b8d85266b0e65 # v2.6.2
         with:
           generate_release_notes: true
