@@ -536,7 +536,7 @@ Which to pick: two-phase suits projects whose consumers are **pushed** updates (
 [commits-link]: https://github.com/ptr727/ProjectTemplate/commits/main
 [discussions-link]: https://github.com/ptr727/ProjectTemplate/discussions
 [docker-link]: https://hub.docker.com/r/ptr727/projecttemplate
-[dockerbuildstatus-shield]: https://img.shields.io/github/actions/workflow/status/ptr727/ProjectTemplate/publish-release.yml?logo=github&label=Docker%20Build
+[dockerbuildstatus-shield]: https://img.shields.io/github/actions/workflow/status/ptr727/ProjectTemplate/publish-release.yml?event=schedule&logo=github&label=Docker%20Build
 [dockerdevelopversion-shield]: https://img.shields.io/docker/v/ptr727/projecttemplate/develop?label=Docker%20Develop&logo=docker&color=orange
 [dockerlatestversion-shield]: https://img.shields.io/docker/v/ptr727/projecttemplate/latest?label=Docker%20Latest&logo=docker
 [github-link]: https://github.com/ptr727/ProjectTemplate
@@ -550,7 +550,7 @@ Which to pick: two-phase suits projects whose consumers are **pushed** updates (
 [prereleaseversion-shield]: https://img.shields.io/github/v/release/ptr727/ProjectTemplate?include_prereleases&filter=*-g*&label=GitHub%20Pre-Release&logo=github
 [pypi-link]: https://pypi.org/project/ptr727-projecttemplate-library/
 [pypireleaseversion-shield]: https://img.shields.io/pypi/v/ptr727-projecttemplate-library?logo=pypi&label=PyPI%20Release
-[releasebuildstatus-shield]: https://img.shields.io/github/actions/workflow/status/ptr727/ProjectTemplate/publish-release.yml?logo=github&label=Releases%20Build
+[releasebuildstatus-shield]: https://img.shields.io/github/actions/workflow/status/ptr727/ProjectTemplate/publish-release.yml?event=schedule&logo=github&label=Releases%20Build
 [releases-link]: https://github.com/ptr727/ProjectTemplate/releases
 [releaseversion-shield]: https://img.shields.io/github/v/release/ptr727/ProjectTemplate?logo=github&label=GitHub%20Release
 
