@@ -60,9 +60,9 @@ jobs:
         uses: astral-sh/setup-uv@08807647e7069bb48b6ef5acd8ec9567f424441b # v8.1.0
         with:
           # Pin uv to the same version as `.devcontainer/python/post-create.sh`
-          # (UV_VERSION) so CI and local devcontainer behavior cannot drift
-          # - same uv resolves the same lockfile the same way. Bump in lock-
-          # step with the devcontainer pin.
+          # (UV_VERSION) so CI and local devcontainer behavior cannot drift;
+          # the same uv resolves the same lockfile the same way. Bump in
+          # lockstep with the devcontainer pin.
           version: "0.11.8"
           enable-cache: true
           cache-dependency-glob: "PyPiLibrary/uv.lock"
