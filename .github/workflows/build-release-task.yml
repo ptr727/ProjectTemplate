@@ -144,16 +144,19 @@ jobs:
         with:
           ref: ${{ needs.get-version.outputs.GitCommitId }}
 
-      - name: Download NuGet library build artifacts step
+      # Collect every release asset by the `release-asset-<branch>-*` artifact
+      # convention rather than naming individual build jobs, so this
+      # orchestration stays target-agnostic: a target that's gated off
+      # (`enable_*: false`) simply contributes no matching artifact, and a
+      # downstream attaches different files by adding/replacing a leaf
+      # `build-*-task.yml` that uploads under this pattern — without editing
+      # this file. `merge-multiple` flattens the matched artifacts into one
+      # `./Publish` dir, exactly as the previous per-target downloads did.
+      - name: Download release asset artifacts step
         uses: actions/download-artifact@37930b1c2abaa49bbe596cd826c3c89aef350131 # v7.0.0
         with:
-          artifact-ids: ${{ needs.build-nugetlibrary.outputs.artifact-id }}
-          path: ./Publish
-
-      - name: Download executable build artifacts step
-        uses: actions/download-artifact@37930b1c2abaa49bbe596cd826c3c89aef350131 # v7.0.0
-        with:
-          artifact-ids: ${{ needs.build-executable.outputs.artifact-id }}
+          pattern: release-asset-${{ inputs.branch }}-*
+          merge-multiple: true
           path: ./Publish
 
       # The weekly publisher re-runs even when a branch has no new commits, so
