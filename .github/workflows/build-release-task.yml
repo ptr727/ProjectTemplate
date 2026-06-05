@@ -144,16 +144,28 @@ jobs:
         with:
           ref: ${{ needs.get-version.outputs.GitCommitId }}
 
-      - name: Download NuGet library build artifacts step
+      # Collect every release asset by the `release-asset-<branch>-*` artifact
+      # convention rather than naming individual build jobs, so this download
+      # step never changes when a derived project subsets targets: dropping a
+      # target (delete its job + this job's `needs` entry, per AGENTS.md
+      # "Per-target subsetting") just leaves one fewer `release-asset-*` to
+      # match, and a downstream ships different files by adding/replacing a
+      # leaf `build-*-task.yml` that uploads under this pattern — without
+      # editing this step. `merge-multiple` flattens the matched artifacts into
+      # one `./Publish` dir, exactly as the previous per-target downloads did;
+      # download-artifact@v7 succeeds (downloads nothing) when the pattern
+      # matches zero artifacts, so a file-less release (tag + LICENSE/README
+      # only) still works.
+      # NOTE: subset releases by *deleting* the target, not by `enable_*:
+      # false`. `enable_*` is for smoke subsetting only — it skips a build job,
+      # and because `github-release` `needs` those jobs, a skipped one would
+      # skip this release job too (GitHub Actions: a skipped `needs` job skips
+      # its dependents).
+      - name: Download release asset artifacts step
         uses: actions/download-artifact@37930b1c2abaa49bbe596cd826c3c89aef350131 # v7.0.0
         with:
-          artifact-ids: ${{ needs.build-nugetlibrary.outputs.artifact-id }}
-          path: ./Publish
-
-      - name: Download executable build artifacts step
-        uses: actions/download-artifact@37930b1c2abaa49bbe596cd826c3c89aef350131 # v7.0.0
-        with:
-          artifact-ids: ${{ needs.build-executable.outputs.artifact-id }}
+          pattern: release-asset-${{ inputs.branch }}-*
+          merge-multiple: true
           path: ./Publish
 
       # The weekly publisher re-runs even when a branch has no new commits, so
