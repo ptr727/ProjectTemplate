@@ -100,7 +100,7 @@ jobs:
           cache-from: |
             type=registry,ref=docker.io/ptr727/projecttemplate:buildcache-main
             type=registry,ref=docker.io/ptr727/projecttemplate:buildcache-develop
-          cache-to: ${{ inputs.push && format('type=registry,ref=docker.io/ptr727/projecttemplate:buildcache-{0},mode=max', inputs.branch) || '' }}
+          cache-to: ${{ inputs.push && format('type=registry,ref=docker.io/ptr727/projecttemplate:buildcache-{0},mode=max,ignore-error=true', inputs.branch) || '' }}
           build-args: |
             LABEL_VERSION=${{ needs.get-version.outputs.SemVer2 }}
             BUILD_CONFIGURATION=${{ inputs.branch == 'main' && 'Release' || 'Debug' }}

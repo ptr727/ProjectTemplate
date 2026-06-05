@@ -49,6 +49,8 @@ Use this section for provider-specific mechanics. The expected review loop *cont
 
 Auto-review on push is configured (via the branch ruleset's `copilot_code_review` rule with `review_on_push: true`) but fires inconsistently in practice — treat it as best-effort, not guaranteed. After every push, **re-request a review programmatically** via the GraphQL `requestReviews` mutation, passing the Copilot reviewer's bot node id in `botIds`. This now works reliably (it previously did not — a maintainer had to click "re-request review" in the UI; the agent can now drive the loop end-to-end without that hand-off).
 
+> **The reviewer login differs by API — this is intentional, not a typo.** In **GraphQL** (`gh api graphql` and `gh pr view --json reviews`, which is GraphQL-backed) the `Bot.login` is `copilot-pull-request-reviewer` — **no `[bot]` suffix**. In the **REST** API (`gh api repos/.../issues|pulls/...`) the same account's `user.login` is `copilot-pull-request-reviewer[bot]` — **with** the suffix. Each query below uses the correct form for its API; match the API, not a single spelling, when adapting them.
+
 ```sh
 # 1. PR node id + the Copilot reviewer's bot node id (read from any existing
 #    Copilot review; the reviewer login is `copilot-pull-request-reviewer`).
@@ -94,9 +96,10 @@ gh pr view <N> --json reviews --jq \
   '.reviews[] | select(.author.login=="copilot-pull-request-reviewer") | .commit.oid' \
   | grep -q "$PR_HEAD" && echo "covered via formal review"
 
-# 2. Issue comment — show the most recent Copilot comment for manual confirmation.
+# 2. Issue comment — show the most recent Copilot comment for manual
+#    confirmation. This is the REST API, so the login carries the `[bot]` suffix.
 gh api repos/<owner>/<repo>/issues/<N>/comments --jq \
-  '[.[] | select(.user.login=="copilot-pull-request-reviewer")] | last | {created_at, body: .body[:200]}'
+  '[.[] | select(.user.login=="copilot-pull-request-reviewer[bot]")] | last | {created_at, body: .body[:200]}'
 ```
 
 Coverage is confirmed when (1) exits 0. For issue comments (path 2), body content is the only reliable signal — `created_at` is not: `git log -1 --format=%cI` is the **commit** timestamp, not the push timestamp, so amended or rebased commits can have an earlier timestamp and an older Copilot comment could satisfy a time check even though Copilot never saw the current head. Treat path (2) as confirmed only when the comment body explicitly refers to the current changes.

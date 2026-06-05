@@ -524,7 +524,29 @@ This template ships with a **two-phase model** that decouples merging from publi
 - **Merges to `main`/`develop` do not publish.** A push only smoke-tested the PR; merging it republishes nothing.
 - **The weekly schedule + manual dispatch are the sole publishers.** [`.github/workflows/publish-release.yml`](./.github/workflows/publish-release.yml) runs every **Monday 02:00 UTC** and on-demand via `workflow_dispatch`, and on either trigger does the **full** build/publish of **both** `main` (Release / `latest` / non-prerelease) and `develop` (Debug / `develop` / prerelease) — GitHub release, NuGet/PyPI uploads, multi-arch Docker tags, platform executables, and a refreshed Docker base image. Trigger a release on demand from the Actions UI when you want one between weekly runs.
 
-This batches cheap bot churn (Dependabot/codegen merge daily, validated by smoke builds) into one periodic publish instead of one release per merge, and keeps PR feedback fast by deferring the slow `arm64`/full-matrix builds to the publisher.
+This batches cheap bot churn (Dependabot/codegen merge daily, validated by smoke builds) into one periodic publish instead of one release per merge, and keeps PR feedback fast by deferring the slow `arm64`/full-matrix builds to the publisher. A no-op weekly run (no new commit, so an unchanged `SemVer2`) re-pushes nothing to GitHub Releases / NuGet / PyPI — only Docker re-pushes, to pick up upstream base-image refreshes.
+
+#### Reusing the Release Pipeline in a Derived Project (Any Language)
+
+The pipeline is built in two layers so you only customize one of them:
+
+- **Orchestration (sync verbatim — don't rewrite):** the publish plan and branch matrix in `publish-release.yml`, the version step (`get-version-task.yml`), the date badge (`build-datebadge-task.yml`), and — the key part — the **`github-release` job** that tags the built commit, creates the GitHub Release, and attaches assets. It collects assets by the pattern `release-asset-<branch>-*` and never names a build job, so it works unchanged no matter what you ship.
+- **Build (you own these):** the `build-<target>-task.yml` leaf tasks. Each one builds an output and either pushes it to a registry, uploads a `release-asset-<branch>-<name>` artifact for the GitHub Release, or both.
+
+**The one rule:** to put a file on the GitHub Release, upload it as an artifact named `release-asset-<branch>-<name>`. That's the seam — implement it in a leaf task and the rest of the release just works.
+
+Customize by **where your outputs go**, not by language:
+
+| What you ship | What to do | Goes to |
+| --- | --- | --- |
+| **A zip / packaged files / a binary** on the GitHub Release (e.g. a data or asset library) | One leaf task: validate → `zip` → upload `release-asset-<branch>-library` | GitHub Release asset |
+| **A NuGet package** | Keep/adapt `build-nugetlibrary-task` (it `dotnet nuget push`es *and* uploads a `release-asset-*`) | NuGet.org **+** GitHub Release asset |
+| **A PyPI package** | Keep/adapt `build-pypilibrary-task` (build + artifact) and the `publish-pypi` job in `publish-release.yml` (OIDC upload) | PyPI only |
+| **A Docker image** | Keep/adapt `build-docker-task` (pushes multi-arch tags) | Docker Hub only |
+| **A compiled app/CLI** | Keep/adapt `build-executable-task` — note it is specifically `dotnet publish`; replace it wholesale for another toolchain | GitHub Release asset |
+| **Just validate + tag a release** (no build output) | Put your checks in `test-pull-request.yml`; attach a `release-asset-*` only if you have a file | GitHub Release (tag, optionally an asset) |
+
+For each output you **don't** ship, delete its `build-<target>-task.yml`, its job + `needs` entry in `build-release-task.yml`, its `test-pull-request.yml` path filter, and (PyPI) the `publish-pypi` job. So `build-release-task.yml` is edited to reflect *your* set of leaf jobs, but its `github-release` logic stays as-is — that's the part you reuse rather than fork. `get-version-task.yml` still installs the .NET SDK to run NBGV (which produces the version/tag) even in a non-.NET repo. See [`AGENTS.md`](./AGENTS.md) "Release Model" for the full seam contract and the no-op-republish guarantee.
 
 **Opt in to publish-on-merge.** Set the repository variable `PUBLISH_ON_MERGE` to `true` (Settings → Secrets and variables → Actions → Variables) to restore the legacy **continuous-release** model: every push/merge to `main` publishes `main` and every push to `develop` publishes `develop`, immediately. The weekly + manual publishers still run. Leave the variable unset (or `false`) for the two-phase default. It's a repository variable, not a workflow edit, so pulling template updates never conflicts with your choice.
 
@@ -536,7 +558,7 @@ Which to pick: two-phase suits projects whose consumers are **pushed** updates (
 [commits-link]: https://github.com/ptr727/ProjectTemplate/commits/main
 [discussions-link]: https://github.com/ptr727/ProjectTemplate/discussions
 [docker-link]: https://hub.docker.com/r/ptr727/projecttemplate
-[dockerbuildstatus-shield]: https://img.shields.io/github/actions/workflow/status/ptr727/ProjectTemplate/publish-release.yml?logo=github&label=Docker%20Build
+[dockerbuildstatus-shield]: https://img.shields.io/github/actions/workflow/status/ptr727/ProjectTemplate/publish-release.yml?event=schedule&logo=github&label=Docker%20Build
 [dockerdevelopversion-shield]: https://img.shields.io/docker/v/ptr727/projecttemplate/develop?label=Docker%20Develop&logo=docker&color=orange
 [dockerlatestversion-shield]: https://img.shields.io/docker/v/ptr727/projecttemplate/latest?label=Docker%20Latest&logo=docker
 [github-link]: https://github.com/ptr727/ProjectTemplate
@@ -550,7 +572,7 @@ Which to pick: two-phase suits projects whose consumers are **pushed** updates (
 [prereleaseversion-shield]: https://img.shields.io/github/v/release/ptr727/ProjectTemplate?include_prereleases&filter=*-g*&label=GitHub%20Pre-Release&logo=github
 [pypi-link]: https://pypi.org/project/ptr727-projecttemplate-library/
 [pypireleaseversion-shield]: https://img.shields.io/pypi/v/ptr727-projecttemplate-library?logo=pypi&label=PyPI%20Release
-[releasebuildstatus-shield]: https://img.shields.io/github/actions/workflow/status/ptr727/ProjectTemplate/publish-release.yml?logo=github&label=Releases%20Build
+[releasebuildstatus-shield]: https://img.shields.io/github/actions/workflow/status/ptr727/ProjectTemplate/publish-release.yml?event=schedule&logo=github&label=Releases%20Build
 [releases-link]: https://github.com/ptr727/ProjectTemplate/releases
 [releaseversion-shield]: https://img.shields.io/github/v/release/ptr727/ProjectTemplate?logo=github&label=GitHub%20Release
 
