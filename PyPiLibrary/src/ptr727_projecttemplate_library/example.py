@@ -1,4 +1,4 @@
-"""Trivial example module — replace with your library code."""
+"""Trivial example module - replace with your library code."""
 
 
 def greet(name: str) -> str:

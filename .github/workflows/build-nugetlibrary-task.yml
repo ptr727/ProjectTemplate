@@ -72,7 +72,7 @@ jobs:
 
       # GitHub-release asset, uploaded under the `release-asset-<branch>-*`
       # convention that the `github-release` job in build-release-task.yml
-      # collects by pattern (it never names this job) — so a derived project
+      # collects by pattern (it never names this job) - so a derived project
       # swaps its release contents by replacing this leaf task, not the
       # orchestrator. Branch-suffixed so the publisher's branch matrix can
       # build both branches in one run without colliding on the artifact name.

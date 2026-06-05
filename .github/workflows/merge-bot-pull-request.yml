@@ -4,7 +4,7 @@ name: Merge bot pull request action
 #   1. `merge-dependabot` / `merge-codegen` run on `opened` and `reopened`
 #      events only. They enable auto-merge via `gh pr merge --auto` once
 #      per PR. Restricting to open/reopen (skipping `synchronize`) is what
-#      makes step 3 below stick — if these jobs re-ran on every
+#      makes step 3 below stick - if these jobs re-ran on every
 #      `synchronize`, they'd undo a maintainer-triggered disable.
 #   2. The merge method (`--squash` vs `--merge`) is dispatched by a
 #      `case` statement on `pull_request.base.ref` so the form matches
@@ -14,7 +14,7 @@ name: Merge bot pull request action
 #      updates always target `main` and flow through the same code path.
 #   3. `disable-auto-merge-on-maintainer-push` runs on `synchronize`
 #      events against bot-authored PRs when the event actor is NOT the
-#      same bot — i.e. a maintainer pushed commits to a bot PR. It
+#      same bot - i.e. a maintainer pushed commits to a bot PR. It
 #      calls `gh pr merge --disable-auto` so the maintainer's commits
 #      don't auto-merge along with the bot's content. The maintainer
 #      re-enables auto-merge manually (UI or `gh pr merge --auto`)
@@ -165,13 +165,13 @@ jobs:
     name: Disable auto-merge on maintainer push job
     runs-on: ubuntu-latest
     # Fires on `synchronize` events against bot-authored PRs (Dependabot
-    # or codegen) when the event actor is NOT the same bot — i.e. a
+    # or codegen) when the event actor is NOT the same bot - i.e. a
     # maintainer pushed commits to the bot's branch. Disables auto-merge
     # so the maintainer's commits don't auto-merge along with the bot's
     # content. The maintainer re-enables auto-merge manually when ready
     # (UI button, or `gh pr merge --auto <PR>`).
     #
-    # `gh pr merge --disable-auto` is idempotent — calling it on a PR
+    # `gh pr merge --disable-auto` is idempotent - calling it on a PR
     # that already has auto-merge disabled is a no-op.
     if: >-
       github.event.action == 'synchronize' &&

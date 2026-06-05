@@ -1,6 +1,6 @@
-# Code Style and Formatting Rules — .NET
+# Code Style and Formatting Rules - .NET
 
-This file is the style guide for the **.NET projects** in this repo: [`NuGetLibrary/`](./NuGetLibrary/), [`Console/`](./Console/), [`Tests/`](./Tests/), [`Benchmarks/`](./Benchmarks/), and [`CodeGen/`](./CodeGen/). It does NOT apply to the Python project (`PyPiLibrary/`) — see [`PyPiLibrary/CODESTYLE.md`](./PyPiLibrary/CODESTYLE.md) for that.
+This file is the style guide for the **.NET projects** in this repo: [`NuGetLibrary/`](./NuGetLibrary/), [`Console/`](./Console/), [`Tests/`](./Tests/), [`Benchmarks/`](./Benchmarks/), and [`CodeGen/`](./CodeGen/). It does NOT apply to the Python project (`PyPiLibrary/`) - see [`PyPiLibrary/CODESTYLE.md`](./PyPiLibrary/CODESTYLE.md) for that.
 
 Cross-cutting rules (PR titles, branching, US English, markdown style, workflow YAML, PR review etiquette) live in [AGENTS.md](./AGENTS.md) and apply to both languages. This file only documents what's specific to C# / .NET.
 
@@ -11,7 +11,7 @@ Cross-cutting rules (PR titles, branching, US English, markdown style, workflow 
 **CRITICAL**: All builds must complete without warnings. The project enforces this through:
 
 1. **VS Code tasks**
-   - `CSharpier Format` → `.Net Build` → `.Net Format`
+   - `CSharpier Format` -> `.Net Build` -> `.Net Format`
    - `.Net Format` must pass with `--verify-no-changes` before commit
    - Command: `dotnet format style --verify-no-changes --severity=info --verbosity=detailed`
 
@@ -22,7 +22,7 @@ Cross-cutting rules (PR titles, branching, US English, markdown style, workflow 
 
 3. **CI lint backstop**
    - `dotnet csharpier check` and `dotnet format style --verify-no-changes` run on every PR
-   - No git hooks ship by default — see README "Optional: enable git hooks locally" to opt in
+   - No git hooks ship by default - see README "Optional: enable git hooks locally" to opt in
 
 ### Build Tasks
 
@@ -48,7 +48,7 @@ Available VS Code tasks (use via `run_task` tool):
    - `dotnet-outdated-tool`: Dependency update checks
    - Nerdbank.GitVersioning: Version management
 
-Pre-commit git hooks are not installed by default — CI is the lint backstop. See README "Optional: enable git hooks locally" if you want Husky.Net (or another runner) wired up locally.
+Pre-commit git hooks are not installed by default - CI is the lint backstop. See README "Optional: enable git hooks locally" if you want Husky.Net (or another runner) wired up locally.
 
 ### Editor Baseline
 
@@ -171,7 +171,7 @@ Note: Code snippets are illustrative examples only. Replace namespaces/types to 
    - Linux scripts (`.sh`): LF
 
 6. **`#region`**: Do not use regions. Prefer logical file/folder/namespace organization.
-7. **Member ordering (StyleCop SA1201)**: const → static readonly → static fields → instance readonly fields → instance fields → constructors → public (events → properties → indexers → methods → operators) → non-public in same order → nested types
+7. **Member ordering (StyleCop SA1201)**: const -> static readonly -> static fields -> instance readonly fields -> instance fields -> constructors -> public (events -> properties -> indexers -> methods -> operators) -> non-public in same order -> nested types
 
 ### Comments and Documentation
 
