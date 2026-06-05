@@ -102,6 +102,8 @@ Clarify devcontainer setup steps in README
 - **Editing an existing file:** **preserve the file's current line endings** - do not reflow them as a side effect of a content change, even if the file is already non-compliant. A tool that rewrites a file in text mode (a script, a bulk find/replace) can silently flip CRLF to LF and turn a one-line change into a whole-file diff. After any programmatic edit, verify before staging: `git diff --stat` should touch only the lines you changed, and `file <path>` should report the file's expected ending. If a diff balloons to the whole file, you flipped the endings - restore them and re-stage.
 - **Fixing a non-compliant file:** bring it to its `.editorconfig` ending as a **deliberate** change, and prefer to isolate it in its own EOL-only commit so the churn is reviewable. When a broader maintenance change has to normalize endings alongside content edits (a repo-wide cleanup sometimes does), call it out explicitly in the commit/PR description and verify the content separately with `git diff --ignore-cr-at-eol`.
 
+### Quantitative Claims
+
 - Any quantitative claim in `README.md` (counts, sizes, version floors, supported platforms) must be verified against current code. If a doc number is derived from a code constant, mark the dependency in a source-code comment so the next editor knows to update both.
 
 ## PR Review Etiquette
