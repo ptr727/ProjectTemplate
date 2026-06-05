@@ -6,8 +6,8 @@ on:
       # Git ref to check out and version. Empty string falls back to the
       # caller's default checkout ref (`github.ref`), preserving the
       # original behavior. The publisher passes an explicit branch so a
-      # scheduled run — which always reports `github.ref` as the default
-      # branch — can still compute NBGV versions for `develop` too.
+      # scheduled run - which always reports `github.ref` as the default
+      # branch - can still compute NBGV versions for `develop` too.
       ref:
         required: false
         type: string
@@ -54,11 +54,11 @@ jobs:
           fetch-depth: 0
 
       # `dotnet/nbgv` is intentionally floated on `master` rather than
-      # pinned to a commit SHA — a deliberate deviation from the
+      # pinned to a commit SHA - a deliberate deviation from the
       # AGENTS.md "pin third-party actions to a commit SHA" rule,
       # documented here so the deviation isn't accidentally "fixed" by
       # a future reviewer. Justification:
-      #   - The upstream tag stream is effectively dormant — the latest
+      #   - The upstream tag stream is effectively dormant - the latest
       #     tag `v0.5.1` lags well behind `master` and fixes accumulate
       #     on `master` between tag bumps.
       #   - Dependabot's GitHub Actions ecosystem tracks tagged

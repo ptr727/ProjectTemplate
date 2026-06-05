@@ -9,7 +9,7 @@ internal sealed class CodeGenBuilder(string outputPath, CancellationToken cancel
     // produce byte-identical CodeGen.cs and develop->main merges don't
     // conflict on this file. Empty -> use DateTime.UtcNow.ToString("o")
     // (the original demo behavior, kept for local `dotnet run` use).
-    // This plumbing exists for template hygiene only — derived projects'
+    // This plumbing exists for template hygiene only - derived projects'
     // real codegen should not copy this pattern.
     internal async Task CodeGenAsync(string quote, string runtime)
     {

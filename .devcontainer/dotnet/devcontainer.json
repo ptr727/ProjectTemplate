@@ -36,7 +36,7 @@
     "onCreateCommand": "sudo install -d -m 700 -o vscode -g vscode /home/vscode/.ssh",
 
     // Restore .NET local tools (csharpier, dotnet-outdated). No git hooks are
-    // installed by default — see README "Optional: enable git hooks locally".
+    // installed by default - see README "Optional: enable git hooks locally".
     "postCreateCommand": ".devcontainer/dotnet/post-create.sh",
 
     "customizations": {

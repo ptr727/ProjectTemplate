@@ -1,11 +1,11 @@
 name: Run codegen and pull request task
 
 # Runs codegen against `main` and `develop` in parallel via a matrix,
-# opens a PR against each base (`codegen-main` branch → main,
-# `codegen-develop` branch → develop). The merge-bot auto-merges
+# opens a PR against each base (`codegen-main` branch -> main,
+# `codegen-develop` branch -> develop). The merge-bot auto-merges
 # either PR independently. This keeps both branches current on
 # generated content (date stamps, API-derived data, etc.) without
-# either branch falling behind the other and without main → develop
+# either branch falling behind the other and without main -> develop
 # back-merges (see AGENTS.md "Branching Model" for the forward-only
 # develop invariant).
 
@@ -28,7 +28,7 @@ jobs:
   # out byte-identical and `develop -> main` release merges don't conflict on
   # it. `github.run_started_at` was used for this but resolves to an empty
   # string in this reusable-workflow context, so each leg fell back to its own
-  # `DateTime.UtcNow` and the outputs diverged — capture the value here instead.
+  # `DateTime.UtcNow` and the outputs diverged - capture the value here instead.
   get-runtime:
     name: Capture shared runtime job
     runs-on: ubuntu-latest
@@ -65,7 +65,7 @@ jobs:
         # The App-token-driven PR open fires `pull_request` workflow events
         # directly. `GITHUB_TOKEN`-driven PR opens do not (GitHub's recursion
         # guard), which previously required a close/reopen dance under a PAT
-        # to nudge the auto-merge workflow — that dance is gone.
+        # to nudge the auto-merge workflow - that dance is gone.
         id: app-token
         uses: actions/create-github-app-token@bcd2ba49218906704ab6c1aa796996da409d3eb1 # v3.2.0
         with:
@@ -88,7 +88,7 @@ jobs:
         # (captured once in the `get-runtime` job above) to both matrix legs
         # (main and develop) makes them produce byte-identical CodeGen.cs, so
         # develop->main release merges don't conflict on this demo file every
-        # release. Derived projects' real codegen should not copy this pattern —
+        # release. Derived projects' real codegen should not copy this pattern -
         # if your generator's per-run state is intentional, design it not to
         # land on multiple release branches simultaneously, or absorb the merge
         # cost.

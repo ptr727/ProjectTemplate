@@ -5,8 +5,8 @@ name: Build PyPI library task
 # Publishing happens directly in `publish-release.yml` so that the
 # `id-token: write` permission required by Trusted Publishing is granted
 # at the entry-point job, not propagated through a reusable-workflow
-# chain (which would require every caller — including the PR smoke build in
-# `test-pull-request.yml` — to also grant id-token write, even when no
+# chain (which would require every caller - including the PR smoke build in
+# `test-pull-request.yml` - to also grant id-token write, even when no
 # publishing happens).
 
 on:
@@ -61,7 +61,7 @@ jobs:
         with:
           # Pin uv to the same version as `.devcontainer/python/post-create.sh`
           # (UV_VERSION) so CI and local devcontainer behavior cannot drift
-          # — same uv resolves the same lockfile the same way. Bump in lock-
+          # - same uv resolves the same lockfile the same way. Bump in lock-
           # step with the devcontainer pin.
           version: "0.11.8"
           enable-cache: true
@@ -93,7 +93,7 @@ jobs:
       #                         segment so develop's release segment
       #                         (which grows past main's after every
       #                         new commit) compares higher than main's
-      #                         under PEP 440 ordering — so `pip install
+      #                         under PEP 440 ordering - so `pip install
       #                         --pre <pkg>` picks the develop dev
       #                         build, while default `pip install <pkg>`
       #                         filters the dev suffix and picks the
@@ -108,7 +108,7 @@ jobs:
       #                         release merge to main and the next
       #                         commit on develop, develop's
       #                         BuildNumber equals main's (or is one
-      #                         lower) — `--pre` will still resolve to
+      #                         lower) - `--pre` will still resolve to
       #                         the main release until a new develop
       #                         commit lands. This is accepted as a
       #                         small, self-healing gap.
@@ -141,7 +141,7 @@ jobs:
       # so the test that asserts `__version__` is a non-empty string
       # isn't affected. On main, the PyPI version string equals the .NET
       # assemblies' `FileVersion` stamp (= NBGV `AssemblyFileVersion`,
-      # `M.N.P.B`); on develop, the PyPI version is `M.N.P.B.dev0` —
+      # `M.N.P.B`); on develop, the PyPI version is `M.N.P.B.dev0` -
       # numerically the same `FileVersion` with a trailing `.dev0`
       # prerelease marker. .NET keeps the bare `FileVersion`, and
       # NuGet/Docker use NBGV `SemVer2`, so strings are not byte-
