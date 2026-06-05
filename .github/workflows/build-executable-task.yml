@@ -82,7 +82,7 @@ jobs:
           path: ${{ runner.temp }}/publish
 
   # Smoke builds only need the per-runtime compile to succeed (fast PR
-  # feedback) — the zipped, downloadable artifact is a release concern, so
+  # feedback) - the zipped, downloadable artifact is a release concern, so
   # skip the aggregation entirely on smoke. The GitHub release job never runs
   # on smoke, so no `release-asset-*` artifact is needed then.
   upload-build-artifacts:
@@ -105,7 +105,7 @@ jobs:
 
       # GitHub-release asset, uploaded under the `release-asset-<branch>-*`
       # convention that the `github-release` job in build-release-task.yml
-      # collects by pattern (it never names this job) — so a derived project
+      # collects by pattern (it never names this job) - so a derived project
       # swaps its release contents by replacing this leaf task, not the
       # orchestrator. Branch-suffixed so the publisher's branch matrix can
       # build both branches in one run without colliding on the artifact name.

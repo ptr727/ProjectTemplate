@@ -87,13 +87,13 @@ jobs:
             docker.io/ptr727/projecttemplate:${{ inputs.branch == 'main' && 'latest' || 'develop' }}
             docker.io/ptr727/projecttemplate:${{ needs.get-version.outputs.SemVer2 }}
           platforms: ${{ inputs.smoke && 'linux/amd64' || 'linux/amd64,linux/arm64' }}
-          # Branch-scoped registry cache. READ both branches' caches — the
+          # Branch-scoped registry cache. READ both branches' caches - the
           # layers are nearly identical (only BUILD_CONFIGURATION differs), so
-          # a main build can seed from develop's cache and vice versa — but
+          # a main build can seed from develop's cache and vice versa - but
           # WRITE only this branch's own tag, and only when actually pushing.
           # Gating the export on `inputs.push` (not just `!smoke`) means a
           # non-publishing build never writes the shared registry cache or
-          # needs Docker Hub write creds — smoke builds (always push=false) are
+          # needs Docker Hub write creds - smoke builds (always push=false) are
           # covered too. Branch-scoping is what lets the publisher's weekly
           # matrix build main and develop concurrently in one run without the
           # two legs overwriting a single shared cache (destroying hit rates).

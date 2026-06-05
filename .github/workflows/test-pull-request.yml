@@ -14,7 +14,7 @@ jobs:
   # Detect which delivery targets a PR actually touches so we only smoke-build
   # what changed. Build-workflow files are intentionally NOT in any filter: a
   # path filter can't tell a logic change in a build workflow from an action-
-  # version bump. A workflow-only change is therefore not smoke-built — the
+  # version bump. A workflow-only change is therefore not smoke-built - the
   # reusable workflows are exercised instead by the next run that uses them (a
   # later code PR's smoke build, or the scheduled/publish run); lint workflow
   # edits with `actionlint` locally before pushing (there is no CI lint job).
@@ -98,7 +98,7 @@ jobs:
   # amd64-only, reduced executable matrix, no publishing). Validates the PR's
   # base-branch configuration (Release for main, Debug for develop) by passing
   # `branch: github.base_ref`. Skipped entirely when no target changed (e.g. a
-  # docs-only PR) — unit tests still run.
+  # docs-only PR) - unit tests still run.
   smoke-build:
     name: Smoke build changed targets job
     # Also gate on unit-test: the smoke build includes a Docker image build, so
@@ -135,7 +135,7 @@ jobs:
   # TODO: Workaround for GitHub Actions not supporting status checks on conditional jobs
   # https://github.com/orgs/community/discussions/12395#discussioncomment-12970019
   # This job's name is bound to the branch ruleset as the required status check
-  # context — do NOT rename it (see AGENTS.md "Workflow YAML Conventions").
+  # context - do NOT rename it (see AGENTS.md "Workflow YAML Conventions").
   check-workflow-status:
     name: Check pull request workflow status
     runs-on: ubuntu-latest
@@ -160,6 +160,6 @@ jobs:
             exit 1
           fi
           # unit-test always runs; smoke-build may be legitimately skipped
-          # (no target changed) — `skipped` passes, only failure/cancelled blocks.
+          # (no target changed) - `skipped` passes, only failure/cancelled blocks.
           exit_on_result "unit-test" "${{ needs.unit-test.result }}"
           exit_on_result "smoke-build" "${{ needs.smoke-build.result }}"

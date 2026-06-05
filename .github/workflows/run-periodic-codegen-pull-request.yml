@@ -15,7 +15,7 @@ concurrency:
   # Standard AGENTS.md "Concurrency" convention. Scheduled runs always
   # have `github.ref == refs/heads/<default-branch>` (cron's default),
   # and the reusable workflow `run-codegen-pull-request-task.yml` then
-  # matrixes over both `main` and `develop` internally — so a single
+  # matrixes over both `main` and `develop` internally - so a single
   # group per workflow+ref serializes all matrix legs of all scheduled
   # / dispatched runs in practice.
   group: ${{ github.workflow }}-${{ github.ref }}

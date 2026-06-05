@@ -67,7 +67,7 @@ internal sealed class CommandLine
     // Template-internal: deterministic timestamp injection so the dual-target
     // codegen matrix produces byte-identical CodeGen.cs on main and develop
     // (eliminates merge conflicts on every develop->main release). Derived
-    // projects: do NOT replicate this plumbing for production codegen — if
+    // projects: do NOT replicate this plumbing for production codegen - if
     // your generator's per-run timestamp is intentional, accept the conflicts
     // or redesign the generator. See README "Template - GitHub Setup".
     private static Option<string> CreateRuntimeOption() =>
