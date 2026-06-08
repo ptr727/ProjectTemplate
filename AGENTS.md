@@ -24,7 +24,7 @@ Treat this file as authoritative for everything else; don't restate its rules el
   - *Main:* the check is graph-based - it asks whether main's tip commit is reachable from develop, not whether the two branches have the same content. After any develop -> main release, main's tip is a brand-new merge commit that develop's history doesn't contain. Forward-only develop never adds it (no back-merge of main into develop), so the check would fail on every subsequent release. Other technical workarounds - rebasing develop onto main, or rewriting develop's history - exist but contradict the squash-only develop ruleset and the linearity invariant.
   - *Develop:* the check stalls bot auto-merge when two bot PRs against develop land within the same window. As soon as the first merges, the second flips to `mergeStateStatus: BEHIND` and GitHub's auto-merge will not fire while strict is on. The merge-bot only *enables* auto-merge on `opened`/`reopened` (see below) and never auto-updates bot branches, and Dependabot's rebase isn't real-time, so the second PR sits OPEN with all checks green indefinitely. Squash mechanics still rebase the diff onto develop's tip on merge, `required_linear_history` still enforces linearity, textual conflicts still block `mergeable: CONFLICTING`, and the required `Check pull request workflow status` still gates merges - the only thing lost is pre-merge detection of *semantic-but-not-textual* conflicts, which the post-merge develop CI run catches anyway.
   - See [`README.md`](./README.md#template---github-setup) "Rules / Rulesets" for the configured state.
-- **Configuring branch protection on a derived repo: don't hand-build the rules.** Reconstructing the rules by hand is error-prone and has gone wrong on past ports. First delete any **legacy classic branch-protection** rules and any stray rulesets (this template uses rulesets *only*), then create **exactly two rulesets named `develop` and `main`** by exporting the template's two rulesets and re-importing them via `gh api -X POST .../rulesets` (`gh ruleset` is read-only). The names are load-bearing - this file and the workflows reference them. Full export/import procedure: [README "Rules / Rulesets"](./README.md#template---github-setup).
+- **Configuring branch protection on a derived repo: don't hand-build the rules.** Reconstructing the rules by hand is error-prone and has gone wrong on past ports. First delete **all** legacy classic branch-protection rules and any stray rulesets (this template uses rulesets *only*), then create **exactly two rulesets named `develop` and `main`** by exporting the template's two rulesets and re-importing them via `gh api -X POST .../rulesets` (`gh ruleset` is read-only). The names are load-bearing - this file and the workflows reference them. Full export/import procedure: [README "Rules / Rulesets"](./README.md#template---github-setup). **Brownfield repos** (pre-existing history) need an extra step: `Require signed commits` rejects legacy unsigned commits and the admin bypass does not cover `git push --force`, so re-signing requires temporarily disabling the ruleset - see the [brownfield migration procedure](./README.md#template---github-setup) in that section.
 - **Bots (Dependabot and codegen) target both `main` and `develop` in parallel.** [`.github/dependabot.yml`](./.github/dependabot.yml) duplicates every ecosystem entry (one per branch) and [`.github/workflows/run-codegen-pull-request-task.yml`](./.github/workflows/run-codegen-pull-request-task.yml) runs as a matrix over both branches with branch names `codegen-main` and `codegen-develop`. Each branch absorbs its own bot PRs independently, so neither falls behind, and the forward-only rule still holds (nothing is back-merged from main to develop - both branches receive their updates directly). The merge-bot ([`.github/workflows/merge-bot-pull-request.yml`](./.github/workflows/merge-bot-pull-request.yml)) dispatches `--squash` or `--merge` from each PR's base ref via a `case` statement so the form matches the ruleset on either base. Dependabot **security** PRs (CVE-driven) always open against the repo default branch (`main`) regardless of `target-branch` - the same `case` statement covers them.
 - **Maintainer-pushed commits on a bot PR auto-disable auto-merge.** The merge-bot's `merge-dependabot` and `merge-codegen` jobs only fire on `opened` / `reopened` events (auto-merge is enabled exactly once per PR). When a maintainer pushes commits to a bot's branch (a `synchronize` event with an actor that isn't the same bot), the merge-bot's `disable-auto-merge-on-maintainer-push` job fires and calls `gh pr merge --disable-auto`. The maintainer's commits stay in the PR but won't auto-merge with the bot's content; re-enable auto-merge manually (`gh pr merge --auto <PR>` or the GitHub UI) when ready.
 - **Why parallel dual-target rather than develop-only with eventual flow-through:** push-distribution channels (HACS for Home Assistant integrations, Linux distros that vendor from `main`, etc.) consume `main` directly. A develop-only model would leave `main` running stale code during long-running develop features. Codegen content can also be production-critical (live API-derived data, language lists, build catalogs) rather than just sample/demo content, so both branches need fresh codegen on their own cadence.
@@ -101,12 +101,15 @@ Clarify devcontainer setup steps in README
 - **New files:** create them with the `.editorconfig`-mandated ending.
 - **Editing an existing file:** **preserve the file's current line endings** - do not reflow them as a side effect of a content change, even if the file is already non-compliant. A tool that rewrites a file in text mode (a script, a bulk find/replace) can silently flip CRLF to LF and turn a one-line change into a whole-file diff. After any programmatic edit, verify before staging: `git diff --stat` should touch only the lines you changed, and `file <path>` should report the file's expected ending. If a diff balloons to the whole file, you flipped the endings - restore them and re-stage.
 - **Fixing a non-compliant file:** bring it to its `.editorconfig` ending as a **deliberate** change, and prefer to isolate it in its own EOL-only commit so the churn is reviewable. When a broader maintenance change has to normalize endings alongside content edits (a repo-wide cleanup sometimes does), call it out explicitly in the commit/PR description and verify the content separately with `git diff --ignore-cr-at-eol`.
+- **Derived repos must carry both files.** [`.editorconfig`](./.editorconfig) **and** [`.gitattributes`](./.gitattributes) are mandatory verbatim carries (see [Files and Sections Derived Repos Must Carry Verbatim](#files-and-sections-derived-repos-must-carry-verbatim)). A derived repo missing either file, or one whose `.editorconfig` sets `end_of_line` only under `[*.md]` instead of carrying the full per-extension rules, will accumulate files mixed between LF and CRLF - the exact failure these two files prevent.
 
 ### Quantitative Claims
 
 - Any quantitative claim in `README.md` (counts, sizes, version floors, supported platforms) must be verified against current code. If a doc number is derived from a code constant, mark the dependency in a source-code comment so the next editor knows to update both.
 
 ## PR Review Etiquette
+
+> **Mandatory in every derived repo.** This entire "PR Review Etiquette" section is the provider-agnostic review-loop *contract* and must be carried **verbatim** into every repo derived from this template, alongside the [`.github/copilot-instructions.md`](./.github/copilot-instructions.md) "GitHub Copilot Review Runbook" that implements it. Without both in-repo, an agent working in the derived repo has no pointer to the reliable Copilot mechanics and falls back to ad-hoc (and known-broken) behavior. See [Files and Sections Derived Repos Must Carry Verbatim](#files-and-sections-derived-repos-must-carry-verbatim).
 
 The repo runs a review loop on every PR: local agent iteration plus remote automated review (GitHub Copilot is the configured reviewer). Treat this as a contract regardless of which local agent authored the changes.
 
@@ -166,6 +169,28 @@ These conventions describe the target state. New and modified workflows must res
 - **Allowlist `success` and `skipped` explicitly** when chaining jobs across optional dependencies - `!= 'failure'` lets `cancelled` through (timeout, runner failure, manual cancel). Use `(needs.X.result == 'success' || needs.X.result == 'skipped')`.
 - **Tag pinning on releases**: when using `softprops/action-gh-release` (or any tag-creating action), pass `target_commitish` explicitly - without it, GitHub's REST API defaults the new tag to the repository's default branch instead of the commit that built the artifact. Pin it to the **exact built commit's SHA** (the publisher uses NBGV's `GitCommitId` output), not `github.sha` (wrong branch in the publisher's branch matrix - a `develop` leg runs with `github.sha` = main's tip) and not a branch name (a moving ref that a mid-run commit could advance past the built tree).
 
+### Running the Linters Locally (Known-Working Invocations)
+
+There is no CI lint job for workflow YAML or Markdown - the gate is local, so an agent must know how to actually run these tools. Some linters are not obvious to invoke and their non-Docker install paths (curl-pipe installers, global npm) are frequently blocked in sandboxes or fail on WSL. **Prefer the Docker invocations below; they are the known-working path and need no local toolchain.** Both tools auto-discover their targets from the working directory.
+
+- **actionlint** (GitHub Actions workflow YAML - run after any `.github/workflows/` edit, since workflow-only changes are not smoke-built):
+
+  ```sh
+  docker run --rm -v "$PWD":/repo --workdir /repo rhysd/actionlint:latest -color
+  ```
+
+  The `rhysd/actionlint` image bundles `shellcheck`, so it also validates `run:` shell blocks. The direct-binary/curl-installer path is often sandbox-blocked - use Docker.
+
+- **markdownlint-cli2** (Markdown - mirrors the davidanson VS Code extension via the shared [`.markdownlint-cli2.jsonc`](./.markdownlint-cli2.jsonc), so the CLI and IDE agree):
+
+  ```sh
+  docker run --rm -v "$PWD":/workdir davidanson/markdownlint-cli2:latest "**/*.md"
+  ```
+
+  In a configured editor the davidanson extension is enough; use the Docker CLI when there's no IDE (agent/headless) or to confirm a clean run before pushing.
+
+When pulling a public image fails on a Docker-Desktop/WSL credential-helper error (`docker-credential-desktop.exe: exec format error`), retry with an empty Docker config: `DOCKER_CONFIG=$(mktemp -d) docker run ...` after writing `{}` to `$DOCKER_CONFIG/config.json`.
+
 ## Devcontainer
 
 The repo ships **two per-language devcontainers** so each container carries only one toolchain (and the matching VS Code extensions): [`.devcontainer/dotnet/devcontainer.json`](./.devcontainer/dotnet/devcontainer.json) (.NET 10 SDK) and [`.devcontainer/python/devcontainer.json`](./.devcontainer/python/devcontainer.json) (Python 3.14 + version-pinned `uv`). Open [`DotNet.code-workspace`](./DotNet.code-workspace) or [`Python.code-workspace`](./Python.code-workspace) and pick **Reopen in Container** to land in the matching one.
@@ -200,9 +225,27 @@ When you touch code in either language, also respect that language's style guide
 1. **Clone this template** as the baseline for your project.
 2. **Decide** which language sides you need. If you need only one, delete the other folder and its references - see the relevant CODESTYLE for the deletion checklist.
 3. **Read** [CODESTYLE.md](./CODESTYLE.md) (.NET) and/or [PyPiLibrary/CODESTYLE.md](./PyPiLibrary/CODESTYLE.md) (Python) for the per-language style.
-4. **Update project-specific values** - `PackageId`/`RootNamespace` in `.csproj`, `name` in `pyproject.toml`, namespace conventions, `README.md`, `HISTORY.md`, `version.json`, `LICENSE`, NuGet/PyPI badge URLs.
-5. **Run tools before first commit**:
+4. **Carry the mandatory shared files and sections verbatim** - do not re-invent them per repo. See [Files and Sections Derived Repos Must Carry Verbatim](#files-and-sections-derived-repos-must-carry-verbatim) for the exact list (review-loop contract + runbook, lint config, line-ending governance) and what to adapt.
+5. **Update project-specific values** - `PackageId`/`RootNamespace` in `.csproj`, `name` in `pyproject.toml`, namespace conventions, `README.md`, `HISTORY.md`, `version.json`, `LICENSE`, NuGet/PyPI badge URLs.
+6. **Run tools before first commit**:
    - .NET: `dotnet tool restore`.
    - Python: `cd PyPiLibrary && uv sync`.
    - Optional pre-commit hooks (off by default) - see README "Optional: enable git hooks locally".
-6. **Wire up release credentials** when ready to publish - see the README's release notes section and [PyPiLibrary/README.md](./PyPiLibrary/README.md) for PyPI Trusted Publisher setup.
+7. **Wire up release credentials** when ready to publish - see the README's release notes section and [PyPiLibrary/README.md](./PyPiLibrary/README.md) for PyPI Trusted Publisher setup.
+
+### Files and Sections Derived Repos Must Carry Verbatim
+
+These artifacts are the template's cross-cutting contract. A derived repo must carry **each** of them; copy the file/section as-is and change only the noted placeholders. Re-inventing or omitting any of these is the drift the template exists to prevent.
+
+- **[`AGENTS.md`](./AGENTS.md) "PR Review Etiquette" section** - the provider-agnostic review-loop contract. Copy verbatim. No placeholders to change (it names no owner/repo).
+- **[`.github/copilot-instructions.md`](./.github/copilot-instructions.md)** - the whole file is a drop-in; its "GitHub Copilot Review Runbook" carries the provider mechanics. Copy verbatim and change only the `<owner>` / `<repo>` / `<N>` placeholders in the API snippets; drop language-specific style pointers that don't apply.
+- **[`.markdownlint-cli2.jsonc`](./.markdownlint-cli2.jsonc)** - the shared lint config read by both the davidanson `markdownlint` IDE extension and CLI/CI `markdownlint-cli2`, so the IDE and command line stay in lock-step. Copy verbatim (it is repo-agnostic).
+- **[`.editorconfig`](./.editorconfig) and [`.gitattributes`](./.gitattributes)** - line-ending governance (see [Line Endings](#line-endings)). Copy **both** verbatim. `.editorconfig` sets `end_of_line` per file type and `.gitattributes` (`* -text`) stops git from normalizing; a repo missing either, or one that only sets `end_of_line` for `[*.md]` instead of carrying the full per-extension rules, drifts between LF and CRLF.
+
+When the template changes one of these, re-sync the derived repo from the new version (see below).
+
+### Staying in Sync and Reporting Drift Upstream
+
+A derived repo is expected to **re-sync against the template periodically**, not just at creation: pull the current version of each verbatim-carry artifact above and re-apply it (adapting only the noted placeholders).
+
+**Drift flows back upstream as an issue, not a private fix.** When porting or re-syncing, if you find a discrepancy that should be fixed in the **template itself** - a gap, an outdated instruction, a missing rule, something that bit this repo and would bite the next derived repo too - **open an issue in [`ptr727/ProjectTemplate`](https://github.com/ptr727/ProjectTemplate)** describing it, rather than only patching it locally. A local fix realigns *this* repo; an upstream issue (then fix) corrects it *for every future derived repo* and keeps the template the single source of truth. This is exactly how the current review-loop / lint-config / brownfield-migration gaps were surfaced.
