@@ -135,7 +135,7 @@ For each comment, classify before responding:
 - **Style/convention** - the comment cites a rule from this file or a language-specific style guide. Two cases:
   - The cited rule matches what the existing codebase already does -> fix the offending code.
   - The cited rule contradicts what's in the tree, or industry norm -> **update the rule instead of the code**. The rule is wrong, not the code. Bouncing the same code across rounds is the symptom of a wrong rule. Heuristic: three rounds on the same style category means the rule needs adjusting and the user should authorize the rule change.
-- **Architectural opinion** - the comment proposes a different design ("constrain this to disabled-by-default", "move it elsewhere", "add a runtime guardrail"). This is judgement, not a bug. Surface it to the user with a recommendation; don't apply unilaterally.
+- **Architectural opinion** - the comment proposes a different design ("constrain this to disabled-by-default", "move it elsewhere", "add a runtime guardrail"). This is judgment, not a bug. Surface it to the user with a recommendation; don't apply unilaterally.
 
 ### Responding and Resolution Expectations
 
@@ -239,7 +239,7 @@ These artifacts are the template's cross-cutting contract. A derived repo must c
 
 - **[`AGENTS.md`](./AGENTS.md) "PR Review Etiquette" section** - the provider-agnostic review-loop contract. Copy verbatim. No placeholders to change (it names no owner/repo).
 - **[`.github/copilot-instructions.md`](./.github/copilot-instructions.md)** - the whole file is a drop-in; its "GitHub Copilot Review Runbook" carries the provider mechanics. Copy verbatim and change only the `<owner>` / `<repo>` / `<N>` placeholders in the API snippets; drop language-specific style pointers that don't apply.
-- **[`.markdownlint-cli2.jsonc`](./.markdownlint-cli2.jsonc)** - the shared lint config read by both the davidanson `markdownlint` IDE extension and CLI/CI `markdownlint-cli2`, so the IDE and command line stay in lock-step. Copy verbatim (it is repo-agnostic).
+- **[`.markdownlint-cli2.jsonc`](./.markdownlint-cli2.jsonc)** - the shared lint config read by both the davidanson `markdownlint` IDE extension and CLI/CI `markdownlint-cli2`, so the IDE and command line stay in lock-step. Copy verbatim (it is repo-agnostic). **On first adoption**, a repo's existing docs often carry structural debt this config surfaces (MD022/MD031/MD032 blank lines around headings/fences/lists, MD040 unlabeled fences). Clear it in one pass with `markdownlint-cli2 --fix "**/*.md"` (the Docker image supports `--fix`), then hand-label any remaining unlabeled fences (MD040 - usually `text` for format/example blocks) and **re-verify the line endings of touched `.md` files** (`--fix` can rewrite a CRLF file as LF).
 - **[`.editorconfig`](./.editorconfig) and [`.gitattributes`](./.gitattributes)** - line-ending governance (see [Line Endings](#line-endings)). Copy **both** verbatim. `.editorconfig` sets `end_of_line` per file type and `.gitattributes` (`* -text`) stops git from normalizing; a repo missing either, or one that only sets `end_of_line` for `[*.md]` instead of carrying the full per-extension rules, drifts between LF and CRLF.
 
 When the template changes one of these, re-sync the derived repo from the new version (see below).
