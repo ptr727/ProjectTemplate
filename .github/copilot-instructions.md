@@ -43,6 +43,8 @@ Clarify devcontainer setup steps in README
 
 ## GitHub Copilot Review Runbook
 
+> **Carry this runbook verbatim into every derived repo.** This whole file is a drop-in: copy it as-is and change only the `<owner>` / `<repo>` / `<N>` placeholders in the snippets below (and drop the language-specific style pointers that don't apply). It pairs with the [AGENTS.md "PR Review Etiquette"](../AGENTS.md#pr-review-etiquette) contract, which is also a mandatory verbatim carry - see [AGENTS.md "Files and Sections Derived Repos Must Carry Verbatim"](../AGENTS.md#files-and-sections-derived-repos-must-carry-verbatim). A derived repo without this runbook in-repo has no pointer to the reliable Copilot mechanics and falls back to known-broken paths (the no-op `POST /requested_reviewers`, the wrong bot-login filter).
+
 Use this section for provider-specific mechanics. The expected review loop *contract* (request review on every push, verify head-SHA coverage, triage findings, reply + resolve, escalate when stuck) is defined in [AGENTS.md -> PR Review Etiquette](../AGENTS.md#pr-review-etiquette). This section only describes how to make GitHub Copilot reliably execute it.
 
 ### Triggering and Polling
@@ -167,3 +169,5 @@ After the final push, sweep-resolve stale older threads for removed code paths.
 ## When in Doubt
 
 Read [AGENTS.md](../AGENTS.md) for the full picture (release flow, files you must not touch, branching, workflow YAML, devcontainer). For language-specific rules, the per-language CODESTYLE files are authoritative. Don't restate any of these files' rules in commit bodies or PR descriptions - keep those focused on the change itself.
+
+**In a derived repo:** if you find a discrepancy that should be fixed in the template itself (this file or AGENTS.md is out of date, a rule is missing, something bit this repo and would bite the next), open an issue upstream in [`ptr727/ProjectTemplate`](https://github.com/ptr727/ProjectTemplate) rather than only fixing it locally - see [AGENTS.md "Staying in Sync and Reporting Drift Upstream"](../AGENTS.md#staying-in-sync-and-reporting-drift-upstream).
