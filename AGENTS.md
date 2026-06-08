@@ -169,6 +169,28 @@ These conventions describe the target state. New and modified workflows must res
 - **Allowlist `success` and `skipped` explicitly** when chaining jobs across optional dependencies - `!= 'failure'` lets `cancelled` through (timeout, runner failure, manual cancel). Use `(needs.X.result == 'success' || needs.X.result == 'skipped')`.
 - **Tag pinning on releases**: when using `softprops/action-gh-release` (or any tag-creating action), pass `target_commitish` explicitly - without it, GitHub's REST API defaults the new tag to the repository's default branch instead of the commit that built the artifact. Pin it to the **exact built commit's SHA** (the publisher uses NBGV's `GitCommitId` output), not `github.sha` (wrong branch in the publisher's branch matrix - a `develop` leg runs with `github.sha` = main's tip) and not a branch name (a moving ref that a mid-run commit could advance past the built tree).
 
+### Running the Linters Locally (Known-Working Invocations)
+
+There is no CI lint job for workflow YAML or Markdown - the gate is local, so an agent must know how to actually run these tools. Some linters are not obvious to invoke and their non-Docker install paths (curl-pipe installers, global npm) are frequently blocked in sandboxes or fail on WSL. **Prefer the Docker invocations below; they are the known-working path and need no local toolchain.** Both tools auto-discover their targets from the working directory.
+
+- **actionlint** (GitHub Actions workflow YAML - run after any `.github/workflows/` edit, since workflow-only changes are not smoke-built):
+
+  ```sh
+  docker run --rm -v "$PWD":/repo --workdir /repo rhysd/actionlint:latest -color
+  ```
+
+  The `rhysd/actionlint` image bundles `shellcheck`, so it also validates `run:` shell blocks. The direct-binary/curl-installer path is often sandbox-blocked - use Docker.
+
+- **markdownlint-cli2** (Markdown - mirrors the davidanson VS Code extension via the shared [`.markdownlint-cli2.jsonc`](./.markdownlint-cli2.jsonc), so the CLI and IDE agree):
+
+  ```sh
+  docker run --rm -v "$PWD":/workdir davidanson/markdownlint-cli2:latest "**/*.md"
+  ```
+
+  In a configured editor the davidanson extension is enough; use the Docker CLI when there's no IDE (agent/headless) or to confirm a clean run before pushing.
+
+When pulling a public image fails on a Docker-Desktop/WSL credential-helper error (`docker-credential-desktop.exe: exec format error`), retry with an empty Docker config: `DOCKER_CONFIG=$(mktemp -d) docker run ...` after writing `{}` to `$DOCKER_CONFIG/config.json`.
+
 ## Devcontainer
 
 The repo ships **two per-language devcontainers** so each container carries only one toolchain (and the matching VS Code extensions): [`.devcontainer/dotnet/devcontainer.json`](./.devcontainer/dotnet/devcontainer.json) (.NET 10 SDK) and [`.devcontainer/python/devcontainer.json`](./.devcontainer/python/devcontainer.json) (Python 3.14 + version-pinned `uv`). Open [`DotNet.code-workspace`](./DotNet.code-workspace) or [`Python.code-workspace`](./Python.code-workspace) and pick **Reopen in Container** to land in the matching one.
