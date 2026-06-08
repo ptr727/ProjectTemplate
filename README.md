@@ -515,16 +515,22 @@ Licensed under the [MIT License][license-link]\
       ```
 
     - Caveats: `bypass_actors` uses the **Admin** repository role (`actor_id: 5`), a global GitHub id that ports across repos as-is. The required status-check context (`Check pull request workflow status`) is matched by **name** and only turns green after `test-pull-request.yml` has run at least once. `gh ruleset` is read-only (list/view) - creation must go through `gh api -X POST` as above. If a field is rejected, edit the JSON and re-run the import.
-    - **Migrating a brownfield repo with unsigned history.** The shared `Require signed commits` rule (below) rejects any commit made before signing was enabled, so on a pre-existing repo the first `develop -> main` release is blocked the moment it tries to introduce that legacy history. The fix is to re-sign the legacy commits, but that rewrite is a non-fast-forward and the `Block force pushes` rule rejects it - **and the ruleset's admin bypass does not cover `git push --force` (GitHub honors ruleset bypass for UI/API operations, not git force-push).** So even the owner cannot complete the re-sign without temporarily relaxing the ruleset. Procedure:
+    - **Migrating a brownfield repo with unsigned history.** The shared `Require signed commits` rule (below) rejects any commit made before signing was enabled, so on a pre-existing repo the first `develop -> main` release is blocked the moment it tries to introduce that legacy history. The fix is to re-sign the legacy commits, but that rewrite is a non-fast-forward and the `Block force pushes` rule rejects it - **and the ruleset's admin bypass does not cover `git push --force` (GitHub honors ruleset bypass for UI/API operations, not git force-push).** So even the owner cannot complete the re-sign without temporarily relaxing the ruleset. This is a **one-time, maintainer-performed manual migration** - it deliberately uses the force-push that [AGENTS.md "Git and Commit Rules"](./AGENTS.md#git-and-commit-rules) forbids agents from running, so an AI agent must **never** execute this procedure; surface it to the maintainer instead. Procedure:
 
-      1. Re-sign the divergent history (preserves trees + merge topology):
+      1. Re-sign the divergent history, preserving merge topology. Prefer a rebase, which re-signs each commit with your current key (`commit.gpgsign` / `-S`):
+
+         ```sh
+         git rebase --rebase-merges --exec 'git commit --amend --no-edit -S' <merge-base>
+         ```
+
+         `git filter-branch` also works but is **deprecated** upstream (it prints a warning; suppress with `FILTER_BRANCH_SQUELCH_WARNING=1`, or use `git filter-repo` if installed) - keep it only as a fallback:
 
          ```sh
          git filter-branch -f --commit-filter 'git commit-tree -S "$@"' -- <merge-base>..HEAD
          ```
 
       2. Temporarily set the `develop` (and `main` if it diverged) ruleset **Enforcement** to **Disabled** (Settings -> Rules -> Rulesets), since the admin bypass won't permit the force-push.
-      3. Force-push the re-signed branch.
+      3. **(Maintainer only)** Force-push the re-signed branch. This is the single manual force-push the template sanctions; agents must never run it (see [AGENTS.md "Git and Commit Rules"](./AGENTS.md#git-and-commit-rules)).
       4. Re-enable **Enforcement**.
 
       Alternatively, enable `Require signed commits` only on a repo whose **full history is already signed** - greenfield repos created from this template (where signing is live before the first commit, per [AGENTS.md "Git and Commit Rules"](./AGENTS.md#git-and-commit-rules)) never hit this.
