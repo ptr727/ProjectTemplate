@@ -59,6 +59,7 @@ Pre-commit git hooks are not installed by default - CI is the lint backstop. See
 
 1. **Linting**: All `.md` files must be linted with the VS Code `markdownlint` extension (local only; no CI)
 2. **Zero warnings**: Markdown linting must be error and warning free
+3. **Authoritative config**: [`.markdownlint-cli2.jsonc`](./.markdownlint-cli2.jsonc) at the repo root is the single source of truth - the davidanson `markdownlint` extension and a command-line `markdownlint-cli2` run both read it, so the IDE and CLI stay in lock-step. Rules the config deliberately disables (e.g. `MD013` line-length, `MD033` inline HTML) are **intentional** - do not "fix" them. This file is one of the artifacts every derived repo must carry verbatim (see [AGENTS.md "Quick Start for Derived Projects"](./AGENTS.md#quick-start-for-derived-projects)).
 
 ### Spelling
 

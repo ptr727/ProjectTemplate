@@ -359,6 +359,7 @@ Licensed under the [MIT License][license-link]\
 - [ ] Rename projects to match the naming, update `.slnx` and `.csproj` files, and update actions to match the naming.
 - [ ] Update the `namespace` in `.cs` and `.csproj` files to match the naming.
 - [ ] Update all ref-links in `README.md` to point to the naming.
+- [ ] Keep the template's mandatory shared files and sections - do **not** re-invent them per repo. Carry **verbatim** the `AGENTS.md` "PR Review Etiquette" section, `.github/copilot-instructions.md` (the Copilot review runbook), `.markdownlint-cli2.jsonc`, `.editorconfig`, and `.gitattributes`, adapting only `<owner>`/`<repo>` placeholders. See [AGENTS.md "Files and Sections Derived Repos Must Carry Verbatim"](./AGENTS.md#files-and-sections-derived-repos-must-carry-verbatim), and re-sync them from the template periodically - filing an upstream issue when you spot a template gap.
 - [ ] Publish to GitHub from VSCode to create a new empty GitHub repository.
 - [ ] Commit and push the `first-branch`.
 - [ ] Edit and iterate only in `first-branch` until ready to start with git history.
@@ -485,7 +486,7 @@ Licensed under the [MIT License][license-link]\
     - `Allow auto-merge`
 - Rules / Rulesets - **separate rulesets per branch**. Develop and main intentionally diverge on two rules - allowed merge methods and `Require linear history`. `Require branches to be up to date before merging` is **off on both** for related-but-distinct reasons (below); everything else is shared.
   - **Configure these by exporting the template's rulesets and re-importing them - do not hand-build the rules.** The result must be **exactly two rulesets named `develop` and `main`** (the names are load-bearing: `AGENTS.md` and these docs reference them). Reconstructing each rule by hand is the step that has gone wrong on past ports.
-    - **Step 0 - remove classic protection first.** Delete any **classic branch-protection rules** (Settings -> Branches) and any pre-existing/stray **rulesets** (Settings -> Rules -> Rulesets) so enforcement isn't doubled or contradicted - this template uses rulesets *only*. Equivalent API:
+    - **Step 0 - remove ALL legacy protection first.** Delete **every** classic branch-protection rule (Settings -> Branches) and **every** pre-existing or stray **ruleset** (Settings -> Rules -> Rulesets) - not just some - so enforcement isn't doubled or contradicted. This template uses rulesets *only*, configured exclusively by the JSON export/import in Steps 1-2 below; never hand-build the rules in the UI. Partial cleanup (leaving a stray ruleset or a classic rule behind) is what has gone wrong on past ports. Equivalent API:
 
       ```sh
       # Delete classic branch protection if present (404 = none, which is fine)
@@ -514,6 +515,25 @@ Licensed under the [MIT License][license-link]\
       ```
 
     - Caveats: `bypass_actors` uses the **Admin** repository role (`actor_id: 5`), a global GitHub id that ports across repos as-is. The required status-check context (`Check pull request workflow status`) is matched by **name** and only turns green after `test-pull-request.yml` has run at least once. `gh ruleset` is read-only (list/view) - creation must go through `gh api -X POST` as above. If a field is rejected, edit the JSON and re-run the import.
+    - **Migrating a brownfield repo with unsigned history.** The shared `Require signed commits` rule (below) rejects any commit made before signing was enabled, so on a pre-existing repo the first `develop -> main` release is blocked the moment it tries to introduce that legacy history. The fix is to re-sign the legacy commits, but that rewrite is a non-fast-forward and the `Block force pushes` rule rejects it - **and the ruleset's admin bypass does not cover `git push --force` (GitHub honors ruleset bypass for UI/API operations, not git force-push).** So even the owner cannot complete the re-sign without temporarily relaxing the ruleset. This is a **one-time, maintainer-performed manual migration** - it deliberately uses the force-push that [AGENTS.md "Git and Commit Rules"](./AGENTS.md#git-and-commit-rules) forbids agents from running, so an AI agent must **never** execute this procedure; surface it to the maintainer instead. Procedure:
+
+      1. Re-sign the divergent history, preserving merge topology. Prefer a rebase, which re-signs each commit with your current key (`commit.gpgsign` / `-S`):
+
+         ```sh
+         git rebase --rebase-merges --exec 'git commit --amend --no-edit -S' <merge-base>
+         ```
+
+         `git filter-branch` also works but is **deprecated** upstream (it prints a warning; suppress with `FILTER_BRANCH_SQUELCH_WARNING=1`, or use `git filter-repo` if installed) - keep it only as a fallback:
+
+         ```sh
+         git filter-branch -f --commit-filter 'git commit-tree -S "$@"' -- <merge-base>..HEAD
+         ```
+
+      2. Temporarily set the `develop` (and `main` if it diverged) ruleset **Enforcement** to **Disabled** (Settings -> Rules -> Rulesets), since the admin bypass won't permit the force-push.
+      3. **(Maintainer only)** Force-push the re-signed branch. This is the single manual force-push the template sanctions; agents must never run it (see [AGENTS.md "Git and Commit Rules"](./AGENTS.md#git-and-commit-rules)).
+      4. Re-enable **Enforcement**.
+
+      Alternatively, enable `Require signed commits` only on a repo whose **full history is already signed** - greenfield repos created from this template (where signing is live before the first commit, per [AGENTS.md "Git and Commit Rules"](./AGENTS.md#git-and-commit-rules)) never hit this.
     - The per-branch settings below are the **reference for what each ruleset contains and why** (and the manual fallback if you configure via the UI):
   - "Develop":
     - Target branches: `develop`.
