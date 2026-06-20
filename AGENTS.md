@@ -255,7 +255,7 @@ A derived repo is expected to **re-sync against the template periodically**, not
 
 #### Known Downstream Projects
 
-Sync is **bidirectional**. The flow above is the downstream-to-upstream direction (derived repos report drift up). The reverse direction is the maintainer's: **when changing a verbatim-carry artifact or another cross-cutting contract in this template, file a heads-up issue in each affected downstream repo below** so it can re-sync, rather than letting the change be discovered only on the next ad-hoc port. Keep this table current as projects are derived from or retired off the template.
+Sync is **bidirectional**. The flow above is the downstream-to-upstream direction (derived repos report drift up). The reverse direction is the maintainer's: **when changing a verbatim-carry artifact or another cross-cutting contract in this template, file a heads-up issue in each affected downstream repo below** so it can re-sync, rather than letting the change be discovered only on the next ad-hoc port. Keep this table current as projects are derived from or retired from the template.
 
 | Repo | Ships | Consumer model |
 | --- | --- | --- |
