@@ -2,7 +2,7 @@
 
 Repository conventions for GitHub Copilot (and any other AI agent reading this file).
 
-The **canonical guide is [AGENTS.md](../AGENTS.md)** at the repo root - read it first. It covers project layout, branch flow, PR review etiquette, the release pipeline, devcontainer behavior, workflow YAML conventions, and what NOT to touch.
+The **canonical guide is [AGENTS.md](../AGENTS.md)** at the repo root - read it first for this repo's conventions, including the [PR Review Etiquette](../AGENTS.md#pr-review-etiquette) review-loop contract that this file's runbook implements.
 
 This file is intentionally narrow: commit/PR-title conventions (so VS Code's AI commit-message and PR-title generators get them without an extra fetch), plus a GitHub Copilot Review Runbook that documents the provider-specific mechanics behind the review-loop contract defined in AGENTS.md.
 
@@ -16,8 +16,6 @@ Do not duplicate language-specific rules here.
 ## Commit Messages and Pull Request Titles
 
 Feature -> develop PRs squash-merge - the PR title becomes the single commit on develop. Develop -> main PRs merge-commit - main's history shows one merge commit per release with develop's tip as the second parent. Titles are descriptive and have no versioning effect - versioning is handled by [Nerdbank.GitVersioning](https://github.com/dotnet/Nerdbank.GitVersioning) reading [version.json](../version.json) and git history, not by parsing commit messages.
-
-`develop` leads `main` by a minor. After a `develop -> main` release lands and main's publish completes, bump the minor in [version.json](../version.json) on `develop` via an isolated `bump-version-X.Y` PR, so develop's prereleases sort above main's last stable. A `develop -> main` promotion that carries only maintenance (not a release) holds main's version instead - `git checkout main -- version.json` on the promotion branch. See [AGENTS.md "Release Model"](../AGENTS.md#release-model).
 
 Branch protection enforces the merge method on both bases (develop allows only squash, main allows only merge). When running `gh pr merge` against either base, pick the matching flag (`--squash` for develop, `--merge` for main); a mismatch fails with "Merge method ... is not allowed on this repository". The merge-bot workflow (`.github/workflows/merge-bot-pull-request.yml`) does this dispatch automatically for Dependabot and codegen PRs via a `case` on `base.ref` - keep that pattern when adding new auto-merge jobs.
 
@@ -45,7 +43,7 @@ Clarify devcontainer setup steps in README
 
 ## GitHub Copilot Review Runbook
 
-> **Carry this runbook verbatim into every derived repo.** This whole file is a drop-in: copy it as-is and change only the `<owner>` / `<repo>` / `<N>` placeholders in the snippets below (and drop the language-specific style pointers that don't apply). It pairs with the [AGENTS.md "PR Review Etiquette"](../AGENTS.md#pr-review-etiquette) contract, which is also a mandatory verbatim carry - see [AGENTS.md "Files and Sections Derived Repos Must Carry Verbatim"](../AGENTS.md#files-and-sections-derived-repos-must-carry-verbatim). A derived repo without this runbook in-repo has no pointer to the reliable Copilot mechanics and falls back to known-broken paths (the no-op `POST /requested_reviewers`, the wrong bot-login filter).
+> This runbook implements the [AGENTS.md "PR Review Etiquette"](../AGENTS.md#pr-review-etiquette) review-loop contract for GitHub Copilot. Without it in-repo, an agent has no pointer to the reliable Copilot mechanics and falls back to known-broken paths (the no-op `POST /requested_reviewers`, the wrong bot-login filter). In the API snippets below, fill the `<owner>` / `<repo>` / `<N>` placeholders.
 
 Use this section for provider-specific mechanics. The expected review loop *contract* (request review on every push, verify head-SHA coverage, triage findings, reply + resolve, escalate when stuck) is defined in [AGENTS.md -> PR Review Etiquette](../AGENTS.md#pr-review-etiquette). This section only describes how to make GitHub Copilot reliably execute it.
 
@@ -170,6 +168,6 @@ After the final push, sweep-resolve stale older threads for removed code paths.
 
 ## When in Doubt
 
-Read [AGENTS.md](../AGENTS.md) for the full picture (release flow, files you must not touch, branching, workflow YAML, devcontainer). For language-specific rules, the per-language CODESTYLE files are authoritative. Don't restate any of these files' rules in commit bodies or PR descriptions - keep those focused on the change itself.
+Read [AGENTS.md](../AGENTS.md) for this repo's conventions. For language-specific rules, the per-language CODESTYLE files are authoritative. Don't restate any of these files' rules in commit bodies or PR descriptions - keep those focused on the change itself.
 
-**In a derived repo:** if you find a discrepancy that should be fixed in the template itself (this file or AGENTS.md is out of date, a rule is missing, something bit this repo and would bite the next), open an issue upstream in [`ptr727/ProjectTemplate`](https://github.com/ptr727/ProjectTemplate) rather than only fixing it locally - see [AGENTS.md "Staying in Sync and Reporting Drift Upstream"](../AGENTS.md#staying-in-sync-and-reporting-drift-upstream).
+**In a derived repo:** if you find a discrepancy that should be fixed in the template itself (this file or AGENTS.md is out of date, a rule is missing, something bit this repo and would bite the next), open an issue upstream in [`ptr727/ProjectTemplate`](https://github.com/ptr727/ProjectTemplate) rather than only fixing it locally - see the template's [AGENTS.md "Staying in Sync and Reporting Drift Upstream"](https://github.com/ptr727/ProjectTemplate/blob/main/AGENTS.md#staying-in-sync-and-reporting-drift-upstream).
