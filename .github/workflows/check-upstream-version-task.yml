@@ -89,9 +89,10 @@ jobs:
             exit 1
           fi
 
-          # Missing or non-JSON state => empty object, so the first run and a corrupt file both
-          # diff cleanly against the resolved object instead of failing.
-          if [ -f "$STATE_FILE" ] && old="$(jq -S '.' "$STATE_FILE" 2>/dev/null)"; then :; else old='{}'; fi
+          # Missing, non-JSON, or non-object state => empty object, so the first run and any
+          # unusable prior file both diff cleanly against the resolved object instead of failing
+          # (a valid-JSON-but-non-object file would otherwise break the `$old + $new` union below).
+          if [ -f "$STATE_FILE" ] && old="$(jq -S 'if type == "object" then . else empty end' "$STATE_FILE" 2>/dev/null)" && [ -n "$old" ]; then :; else old='{}'; fi
 
           # Write the canonical (sorted, pretty) state file; an identical object yields no diff,
           # so create-pull-request opens nothing.
