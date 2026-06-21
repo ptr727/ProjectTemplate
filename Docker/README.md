@@ -6,7 +6,7 @@ Container image for the ProjectTemplate Console app.
 
 - `latest` - the current stable release, built from `main`.
 - `develop` - the current prerelease, built from `develop`.
-- `X.Y.Z` - immutable per-release tags.
+- Immutable version tags (NBGV SemVer2): `X.Y.Z` for stable releases, `X.Y.Z-g<sha>` for develop prereleases.
 
 ## Usage
 
