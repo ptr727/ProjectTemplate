@@ -3,7 +3,7 @@ name: Build NuGet library task
 on:
   workflow_call:
     inputs:
-      # Input to control whether to push the NuGet library to NuGet.org
+      # Whether to push the NuGet library to NuGet.org.
       push:
         required: false
         type: boolean
@@ -13,9 +13,8 @@ on:
         required: false
         type: string
         default: ''
-      # Logical branch driving build configuration (`main` => Release, else
-      # Debug). Required (no `github.ref_name` fallback, which would mislabel
-      # the develop leg of the publisher's matrix); the orchestrator passes it.
+      # Logical branch driving build configuration (`main` => Release, else Debug). Required (no fallback) so the
+      # develop leg of the publisher's matrix isn't mislabeled.
       branch:
         required: true
         type: string
@@ -70,14 +69,12 @@ jobs:
       - name: Zip output step
         run: 7z a -t7z ${{ runner.temp }}/NuGetLibrary.7z ${{ runner.temp }}/publish/*
 
-      # GitHub-release asset, uploaded under the `release-asset-<branch>-*`
-      # convention that the `github-release` job in build-release-task.yml
-      # collects by pattern (it never names this job) - so a derived project
-      # swaps its release contents by replacing this leaf task, not the
-      # orchestrator. Branch-suffixed so the publisher's branch matrix can
-      # build both branches in one run without colliding on the artifact name.
+      # GitHub-release asset, uploaded under the `release-asset-<branch>-*` pattern that the `github-release` job
+      # collects. Branch-suffixed so the publisher can build both branches in one run without colliding on the name.
       - name: Upload build artifacts step
         uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6.0.0
         with:
           name: release-asset-${{ inputs.branch }}-nugetlibrary
           path: ${{ runner.temp }}/NuGetLibrary.7z
+          # Consumed within this run by the github-release job; minimize artifact storage.
+          retention-days: 1

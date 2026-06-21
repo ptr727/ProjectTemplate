@@ -13,17 +13,13 @@ on:
         required: false
         type: string
         default: ''
-      # Logical branch driving config and tags (`main` => Release/`latest`,
-      # anything else => Debug/`develop`). Required (no `github.ref_name`
-      # fallback): the publisher builds develop from a run whose
-      # `github.ref_name` is `main`, so a silent fallback would mistag it.
-      # The orchestrator always passes it explicitly.
+      # Logical branch driving config and tags (main => Release/latest, otherwise Debug/develop). Required (no
+      # github.ref_name fallback): the publisher builds develop from a main-ref run, so a fallback would mistag it.
       branch:
         required: true
         type: string
-      # Smoke mode: build `linux/amd64` only (no QEMU/arm64), never push, and
-      # skip the shared registry `cache-to` so PR builds don't pollute the
-      # release buildcache. Used for fast PR feedback.
+      # Smoke mode: build linux/amd64 only (no QEMU/arm64), never push, and skip the shared registry cache-to so PR
+      # builds don't pollute the release buildcache. Used for fast PR feedback.
       smoke:
         required: false
         type: boolean
@@ -50,8 +46,7 @@ jobs:
         with:
           ref: ${{ inputs.ref }}
 
-      # QEMU only exists to emulate arm64. Smoke builds are amd64-only, so
-      # skip it entirely to save the emulation setup cost.
+      # QEMU only emulates arm64; smoke builds are amd64-only, so skip it to save setup cost.
       - name: Setup QEMU step
         if: ${{ !inputs.smoke }}
         uses: docker/setup-qemu-action@c7c53464625b32c7a7e944ae62b3e17d2b600130 # v3.7.0
@@ -63,14 +58,8 @@ jobs:
         with:
           platforms: ${{ inputs.smoke && 'linux/amd64' || 'linux/amd64,linux/arm64' }}
 
-      # Always login to Docker Hub, not just on push, to benefit from higher
-      # rate limits with a Docker subscription for pulls and cache reads on
-      # every build (including smoke). This is a CONSCIOUS choice over gating
-      # login on `inputs.push`: the trade-off is that fork PRs without access
-      # to the Docker Hub secrets cannot run the Docker smoke build.
-      # Acceptable here because the repo is private and PRs are same-repo; a
-      # public derived project that accepts fork PRs may prefer to gate this
-      # step on `inputs.push`.
+      # Always login (even for smoke) to get the higher Docker subscription rate limits for pulls and cache reads. The
+      # trade-off: fork PRs without the Docker Hub secrets cannot run the Docker smoke build; acceptable for same-repo PRs.
       - name: Login to Docker Hub step
         uses: docker/login-action@c94ce9fb468520275223c153574b00df6fe4bcc9 # v3.7.0
         with:
@@ -87,16 +76,9 @@ jobs:
             docker.io/ptr727/projecttemplate:${{ inputs.branch == 'main' && 'latest' || 'develop' }}
             docker.io/ptr727/projecttemplate:${{ needs.get-version.outputs.SemVer2 }}
           platforms: ${{ inputs.smoke && 'linux/amd64' || 'linux/amd64,linux/arm64' }}
-          # Branch-scoped registry cache. READ both branches' caches - the
-          # layers are nearly identical (only BUILD_CONFIGURATION differs), so
-          # a main build can seed from develop's cache and vice versa - but
-          # WRITE only this branch's own tag, and only when actually pushing.
-          # Gating the export on `inputs.push` (not just `!smoke`) means a
-          # non-publishing build never writes the shared registry cache or
-          # needs Docker Hub write creds - smoke builds (always push=false) are
-          # covered too. Branch-scoping is what lets the publisher's weekly
-          # matrix build main and develop concurrently in one run without the
-          # two legs overwriting a single shared cache (destroying hit rates).
+          # Branch-scoped registry cache: read both branches' caches (layers are near-identical) but write only this branch's
+          # tag, and only when pushing. Branch-scoping lets the weekly matrix build main and develop concurrently without the
+          # two legs overwriting one shared cache.
           cache-from: |
             type=registry,ref=docker.io/ptr727/projecttemplate:buildcache-main
             type=registry,ref=docker.io/ptr727/projecttemplate:buildcache-develop
