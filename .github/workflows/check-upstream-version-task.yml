@@ -79,13 +79,14 @@ jobs:
         run: |
           set -euo pipefail
 
-          # Require a non-empty JSON object whose every value is a version string, so a malformed
-          # resolver (non-object, numeric/nested values, or no keys) fails fast here instead of
-          # committing state that downstream by-key build logic cannot consume.
+          # Require a non-empty JSON object of single-line name -> version strings, so a malformed
+          # resolver (non-object, numeric/nested values, no keys, or a key/value carrying a CR/LF
+          # that would corrupt the single-line `title=`/`body` GITHUB_OUTPUT) fails fast here
+          # instead of committing state that downstream by-key build logic cannot consume.
           raw="$(bash -c "$RESOLVER_COMMAND")"
           if ! new="$(printf '%s' "$raw" | jq -S '.' 2>/dev/null)" \
-             || [ "$(printf '%s' "$new" | jq -r 'type == "object" and length > 0 and all(.[]; type == "string")')" != "true" ]; then
-            echo "Resolver must print a non-empty JSON object of name -> version string (single-version wrappers print {\"version\":\"X\"}); got: $raw" >&2
+             || [ "$(printf '%s' "$new" | jq -r 'type == "object" and length > 0 and all(.[]; type == "string" and (test("[\r\n]") | not)) and (keys | all(test("[\r\n]") | not))')" != "true" ]; then
+            echo "Resolver must print a non-empty JSON object of single-line name -> version strings, no CR/LF (single-version wrappers print {\"version\":\"X\"}); got: $raw" >&2
             exit 1
           fi
 
@@ -94,8 +95,10 @@ jobs:
           # (a valid-JSON-but-non-object file would otherwise break the `$old + $new` union below).
           if [ -f "$STATE_FILE" ] && old="$(jq -S 'if type == "object" then . else empty end' "$STATE_FILE" 2>/dev/null)" && [ -n "$old" ]; then :; else old='{}'; fi
 
-          # Write the canonical (sorted, pretty) state file; an identical object yields no diff,
-          # so create-pull-request opens nothing.
+          # Write the canonical (sorted, pretty) state file. A prior file already in this exact
+          # form yields no diff, so create-pull-request opens nothing; a semantically identical
+          # file with different formatting still changes and opens a canonicalize-only PR (titled
+          # as such below).
           printf '%s\n' "$new" > "$STATE_FILE"
 
           # Diff across the union of old+new keys so an added, moved, or removed key is all caught;
