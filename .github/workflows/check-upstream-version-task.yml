@@ -79,9 +79,13 @@ jobs:
         run: |
           set -euo pipefail
 
+          # Require a non-empty JSON object whose every value is a version string, so a malformed
+          # resolver (non-object, numeric/nested values, or no keys) fails fast here instead of
+          # committing state that downstream by-key build logic cannot consume.
           raw="$(bash -c "$RESOLVER_COMMAND")"
-          if ! new="$(printf '%s' "$raw" | jq -S '.' 2>/dev/null)" || [ "$(printf '%s' "$new" | jq -r 'type')" != "object" ]; then
-            echo "Resolver must print a JSON object of name -> version (single-version wrappers print {\"version\":\"X\"}); got: $raw" >&2
+          if ! new="$(printf '%s' "$raw" | jq -S '.' 2>/dev/null)" \
+             || [ "$(printf '%s' "$new" | jq -r 'type == "object" and length > 0 and all(.[]; type == "string")')" != "true" ]; then
+            echo "Resolver must print a non-empty JSON object of name -> version string (single-version wrappers print {\"version\":\"X\"}); got: $raw" >&2
             exit 1
           fi
 
@@ -89,17 +93,23 @@ jobs:
           # diff cleanly against the resolved object instead of failing.
           if [ -f "$STATE_FILE" ] && old="$(jq -S '.' "$STATE_FILE" 2>/dev/null)"; then :; else old='{}'; fi
 
-          # Write the canonical (sorted, pretty) state file; an unchanged object yields no diff,
+          # Write the canonical (sorted, pretty) state file; an identical object yields no diff,
           # so create-pull-request opens nothing.
           printf '%s\n' "$new" > "$STATE_FILE"
 
-          # Keys whose value moved, as "name to version" fragments for the PR title/body.
-          changed="$(jq -n --argjson old "$old" --argjson new "$new" '$new | to_entries | map(select($old[.key] != .value))')"
-          summary="$(printf '%s' "$changed" | jq -r 'map("\(.key) to \(.value)") | join(", ")')"
+          # Diff across the union of old+new keys so an added, moved, or removed key is all caught;
+          # removals carry a null .new. These drive the PR title/body (only keys that moved).
+          changed="$(jq -n --argjson old "$old" --argjson new "$new" '
+            [ (($old + $new) | keys[]) | { key: ., new: $new[.] } | select($old[.key] != .new) ]')"
+          summary="$(printf '%s' "$changed" | jq -r '
+            map(if .new == null then "\(.key) removed" else "\(.key) to \(.new)" end) | join(", ")')"
 
-          # The trivial single-version case (sole key `version`) renders bare; otherwise name each
-          # changed component.
-          if [ "$(printf '%s' "$new" | jq -r 'keys == ["version"]')" = "true" ]; then
+          # Title: a canonicalization-only change (state reserialized, no key moved) when the prior
+          # file was valid-but-differently-formatted; the trivial single-version case renders bare;
+          # otherwise name each moved component.
+          if [ "$(printf '%s' "$changed" | jq 'length == 0')" = "true" ]; then
+            title="Canonicalize upstream version state file"
+          elif [ "$(printf '%s' "$new" | jq -r 'keys == ["version"]')" = "true" ]; then
             title="Update upstream version to $(printf '%s' "$new" | jq -r '.version')"
           else
             title="Update upstream versions: $summary"
@@ -107,9 +117,13 @@ jobs:
           {
             echo "title=$title"
             echo "body<<EOF"
-            echo "Rolling upstream-version bump opened by the version tracker."
-            echo
-            printf '%s' "$changed" | jq -r '.[] | "- \(.key): \(.value)"'
+            if [ "$(printf '%s' "$changed" | jq 'length == 0')" = "true" ]; then
+              echo "Re-serialize the upstream-version state file to canonical form; no version changed."
+            else
+              echo "Rolling upstream-version bump opened by the version tracker."
+              echo
+              printf '%s' "$changed" | jq -r '.[] | if .new == null then "- \(.key): removed" else "- \(.key): \(.new)" end'
+            fi
             echo "EOF"
           } >> "$GITHUB_OUTPUT"
 
