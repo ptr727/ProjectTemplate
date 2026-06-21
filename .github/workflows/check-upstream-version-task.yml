@@ -1,0 +1,93 @@
+name: Check upstream version task
+
+# Skeleton for a wrapper repo that tracks an upstream release. A resolver command
+# computes the upstream version, writes it to a committed state file at the repo
+# root (a build-input version source, beside version.json), and opens a rolling,
+# App-signed bump PR per branch that the merge-bot auto-merges. A merged bump
+# ships on the next publish, not immediately. Call this from a scheduled
+# entry-point workflow; matrix only the branches that ship the version (a
+# CI-only version uses ["develop"]).
+
+on:
+  workflow_call:
+    inputs:
+      resolver-command:
+        description: Shell command that prints the resolved upstream version to stdout.
+        required: true
+        type: string
+      state-file:
+        description: Committed version-state file, at the repo root beside version.json.
+        required: false
+        type: string
+        default: upstream-version.json
+      branches:
+        description: JSON array of base branches to open bump PRs against.
+        required: false
+        type: string
+        default: '["main", "develop"]'
+      bump-branch-prefix:
+        # merge-bot-pull-request.yml hard-codes the head refs upstream-version-main/-develop; keep this
+        # default unless you also update the merge-upstream-version job, or auto-merge will not fire.
+        description: Head-branch prefix; must match the merge-bot's upstream-version-<base> head refs.
+        required: false
+        type: string
+        default: upstream-version
+
+jobs:
+
+  check-upstream-version:
+    name: Check upstream version job
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        branch: ${{ fromJSON(inputs.branches) }}
+    permissions:
+      contents: write
+      pull-requests: write
+
+    steps:
+
+      # App token so the merge commit fires downstream workflows and the PR is signed.
+      - name: Generate GitHub App token step
+        id: app-token
+        uses: actions/create-github-app-token@bcd2ba49218906704ab6c1aa796996da409d3eb1 # v3.2.0
+        with:
+          client-id: ${{ secrets.CODEGEN_APP_CLIENT_ID }}
+          private-key: ${{ secrets.CODEGEN_APP_PRIVATE_KEY }}
+
+      - name: Checkout code step
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          ref: ${{ matrix.branch }}
+          token: ${{ steps.app-token.outputs.token }}
+
+      - name: Resolve upstream version step
+        id: resolve
+        env:
+          RESOLVER_COMMAND: ${{ inputs.resolver-command }}
+        run: |
+          set -euo pipefail
+          version="$(bash -c "$RESOLVER_COMMAND")"
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+
+      - name: Write version state file step
+        env:
+          VERSION: ${{ steps.resolve.outputs.version }}
+          STATE_FILE: ${{ inputs.state-file }}
+        run: |
+          set -euo pipefail
+          printf '%s\n' "$VERSION" > "$STATE_FILE"
+
+      # Rolling PR: signed by the API (satisfies Require signed commits), auto-merged by the merge-bot.
+      - name: Open bump pull request step
+        uses: peter-evans/create-pull-request@5f6978faf089d4d20b00c7766989d076bb2fc7f1 # v8.1.1
+        with:
+          token: ${{ steps.app-token.outputs.token }}
+          base: ${{ matrix.branch }}
+          branch: ${{ inputs.bump-branch-prefix }}-${{ matrix.branch }}
+          title: Update upstream version to ${{ steps.resolve.outputs.version }}
+          commit-message: Update upstream version to ${{ steps.resolve.outputs.version }}
+          body: Rolling upstream-version bump opened by the version tracker.
+          sign-commits: true
+          delete-branch: true

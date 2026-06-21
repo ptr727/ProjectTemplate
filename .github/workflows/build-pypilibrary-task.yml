@@ -1,13 +1,8 @@
 name: Build PyPI library task
 
-# This reusable workflow only builds the PyPI library and uploads the
-# wheel + sdist as a workflow-run artifact. It does NOT publish to PyPI.
-# Publishing happens directly in `publish-release.yml` so that the
-# `id-token: write` permission required by Trusted Publishing is granted
-# at the entry-point job, not propagated through a reusable-workflow
-# chain (which would require every caller - including the PR smoke build in
-# `test-pull-request.yml` - to also grant id-token write, even when no
-# publishing happens).
+# Reusable workflow that only builds the PyPI wheel + sdist and uploads them as a run artifact; it does not
+# publish. Publishing lives in publish-release.yml so id-token:write is granted only at that entry point and not
+# propagated to every caller (e.g. the PR smoke build).
 
 on:
   workflow_call:
@@ -17,10 +12,8 @@ on:
         required: false
         type: string
         default: ''
-      # Logical branch driving the PEP 440 version (`develop` => `.dev0`
-      # prerelease suffix, anything else => plain release). Required (no
-      # `github.ref_name` fallback, which would mislabel the develop leg of
-      # the publisher's matrix); the orchestrator passes it.
+      # Logical branch driving the PEP 440 version (develop => .dev0 prerelease, otherwise plain release). Required; the
+      # orchestrator passes it explicitly.
       branch:
         required: true
         type: string
@@ -59,10 +52,8 @@ jobs:
       - name: Setup uv step
         uses: astral-sh/setup-uv@08807647e7069bb48b6ef5acd8ec9567f424441b # v8.1.0
         with:
-          # Pin uv to the same version as `.devcontainer/python/post-create.sh`
-          # (UV_VERSION) so CI and local devcontainer behavior cannot drift;
-          # the same uv resolves the same lockfile the same way. Bump in
-          # lockstep with the devcontainer pin.
+          # Pin uv to the same version as the devcontainer (UV_VERSION) so CI and local resolves cannot drift; bump in
+          # lockstep.
           version: "0.11.8"
           enable-cache: true
           cache-dependency-glob: "PyPiLibrary/uv.lock"
@@ -82,40 +73,9 @@ jobs:
       - name: Run pytest step
         run: uv run pytest
 
-      # Compute the PEP 440 version string for this build:
-      #   refs/heads/main    -> AssemblyFileVersion as-is
-      #                         (`Major.Minor.Patch.BuildNumber`). PEP 440
-      #                         treats this 4-segment numeric form as a
-      #                         release.
-      #   refs/heads/develop -> `${AssemblyFileVersion}.dev0`
-      #                         (`Major.Minor.Patch.BuildNumber.dev0`).
-      #                         The BuildNumber stays in the release
-      #                         segment so develop's release segment
-      #                         (which grows past main's after every
-      #                         new commit) compares higher than main's
-      #                         under PEP 440 ordering - so `pip install
-      #                         --pre <pkg>` picks the develop dev
-      #                         build, while default `pip install <pkg>`
-      #                         filters the dev suffix and picks the
-      #                         main release. The `.dev0` literal is a
-      #                         constant because BuildNumber alone
-      #                         already differentiates each develop
-      #                         push (NBGV BuildNumber increments per
-      #                         commit), so we don't need a second
-      #                         counter in the dev segment.
-      #
-      #                         Edge case: in the window between a
-      #                         release merge to main and the next
-      #                         commit on develop, develop's
-      #                         BuildNumber equals main's (or is one
-      #                         lower) - `--pre` will still resolve to
-      #                         the main release until a new develop
-      #                         commit lands. This is accepted as a
-      #                         small, self-healing gap.
-      #   other branches (PR smoke build via test-pull-request, feature
-      #                branches) -> AssemblyFileVersion as-is. These
-      #                never publish; we just need a PEP 440 valid
-      #                string for `uv build`.
+      # Compute the PEP 440 version string: main -> M.N.P.B (release), develop -> M.N.P.B.dev0. BuildNumber stays in the
+      # release segment so develop sorts above main and `pip install --pre` picks the dev build while plain `pip install`
+      # picks the main release. Other branches (PR smoke, feature) use M.N.P.B as-is and never publish.
       - name: Compute PyPI version step
         id: pypiver
         run: |
@@ -131,24 +91,8 @@ jobs:
           AFV: ${{ needs.get-version.outputs.AssemblyFileVersion }}
           BRANCH: ${{ inputs.branch }}
 
-      # Replace the `__version__` line in `_version.py` (which ships
-      # hardcoded "0.0.0" so local `uv build` works without CI) with the
-      # branch-aware PEP 440 version computed above. `sed -i` replaces
-      # the line in place so the module docstring and any future metadata
-      # in the file survive into the published wheel / sdist.
-      # `_version.py` is the single source `hatchling` reads via the
-      # `[tool.hatch.version]` path in pyproject.toml. Done AFTER tests
-      # so the test that asserts `__version__` is a non-empty string
-      # isn't affected. On main, the PyPI version string equals the .NET
-      # assemblies' `FileVersion` stamp (= NBGV `AssemblyFileVersion`,
-      # `M.N.P.B`); on develop, the PyPI version is `M.N.P.B.dev0` -
-      # numerically the same `FileVersion` with a trailing `.dev0`
-      # prerelease marker. .NET keeps the bare `FileVersion`, and
-      # NuGet/Docker use NBGV `SemVer2`, so strings are not byte-
-      # identical across artifacts on either channel. All four still
-      # derive from the same NBGV computation per commit (main pushes
-      # publish release versions; develop pushes publish PEP 440 dev
-      # releases / NBGV prereleases).
+      # Rewrite the hardcoded __version__ in _version.py (the single source hatchling reads) with the computed version.
+      # Done after tests so the test asserting __version__ is non-empty isn't affected.
       - name: Write version into _version.py step
         run: |
           set -euo pipefail
@@ -159,12 +103,12 @@ jobs:
       - name: Build sdist and wheel step
         run: uv build
 
-      # Branch-suffixed so the publisher's branch matrix can build both
-      # branches in one run without colliding on the artifact name. The
-      # publish-pypi job downloads `pypilibrary-build-<branch>`.
+      # Branch-suffixed so the publisher's branch matrix can build both branches in one run without colliding.
       - name: Upload build artifacts step
         id: artifact-upload-step
         uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6.0.0
         with:
           name: pypilibrary-build-${{ inputs.branch }}
           path: PyPiLibrary/dist/*
+          # Consumed within this run by the publish-pypi job; minimize artifact storage.
+          retention-days: 1

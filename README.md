@@ -89,6 +89,7 @@ See [Installation](#installation) for detailed setup instructions.
   - [Template - GitHub Setup](#template---github-setup)
   - [Template - Branching Workflow](#template---branching-workflow)
   - [Template - Release Distribution Model: Two-Phase by Default](#template---release-distribution-model-two-phase-by-default)
+  - [Template - Deferred Patterns](#template---deferred-patterns)
 
 ## Use Cases
 
@@ -359,7 +360,7 @@ Licensed under the [MIT License][license-link]\
 - [ ] Rename projects to match the naming, update `.slnx` and `.csproj` files, and update actions to match the naming.
 - [ ] Update the `namespace` in `.cs` and `.csproj` files to match the naming.
 - [ ] Update all ref-links in `README.md` to point to the naming.
-- [ ] Keep the template's mandatory shared files and sections - do **not** re-invent them per repo. Carry **verbatim** the `AGENTS.md` "PR Review Etiquette" section, `.github/copilot-instructions.md` (the Copilot review runbook), `.markdownlint-cli2.jsonc`, `.editorconfig`, and `.gitattributes`, adapting only the `<owner>`/`<repo>`/`<N>` placeholders in its API snippets. See [AGENTS.md "Files and Sections Derived Repos Must Carry Verbatim"](./AGENTS.md#files-and-sections-derived-repos-must-carry-verbatim), and re-sync them from the template periodically - filing an upstream issue in [`ptr727/ProjectTemplate`](https://github.com/ptr727/ProjectTemplate) when you spot a template gap or hit a problem adopting the template. Sync is bidirectional: add your repo to [AGENTS.md "Known Downstream Projects"](./AGENTS.md#known-downstream-projects) (via an upstream PR) so template-side contract changes reach you as heads-up issues.
+- [ ] Keep the template's mandatory shared files and sections - do **not** re-invent them per repo. Carry **verbatim** the `AGENTS.md` "PR Review Etiquette" section, `.github/copilot-instructions.md` (the Copilot review runbook), `.markdownlint-cli2.jsonc`, `.editorconfig`, and `.gitattributes`, adapting only the `<owner>`/`<repo>`/`<N>` placeholders in its API snippets. See [AGENTS.md "Files and Sections Derived Repos Must Carry Verbatim"](./AGENTS.md#files-and-sections-derived-repos-must-carry-verbatim), and re-sync them from the template periodically - filing an upstream issue in [`ptr727/ProjectTemplate`](https://github.com/ptr727/ProjectTemplate) when you spot a template gap or hit a problem adopting the template. Sync is bidirectional: add your repo to [AGENTS.md "Known Downstream Projects"](./AGENTS.md#known-downstream-projects) (via an upstream PR) so template-side contract changes reach you as heads-up issues. A repo adopting `.gitattributes` (`* -text`) for the first time must do a one-time explicit line-ending normalization - `* -text` stops git normalizing, so convert each existing file to its `.editorconfig` ending and commit that as a deliberate one-time pass.
 - [ ] Publish to GitHub from VSCode to create a new empty GitHub repository.
 - [ ] Commit and push the `first-branch`.
 - [ ] Edit and iterate only in `first-branch` until ready to start with git history.
@@ -518,21 +519,34 @@ Licensed under the [MIT License][license-link]\
     - **Renaming or updating an existing ruleset needs a FULL-payload PUT, not a partial one.** `gh api -X PUT "repos/<owner>/<repo>/rulesets/<id>" -f name=develop` (name only) fails with `422 Unexpected parameter 'allowed_dismissal_actors'`: GitHub re-validates the stored `pull_request` rule on a partial update, and that rule carries fields the GET response does not return. To rename (e.g. legacy `Develop`/`Main` -> `develop`/`main`) or otherwise edit a ruleset, **GET it, change the field, and PUT the whole `{name, target, enforcement, bypass_actors, conditions, rules}` back** (the same writable-field subset used for export above). Back up the GET first and verify afterward that the rule types, `required_signatures`, `non_fast_forward`, and the required status-check context are all still present. Renaming is safe for *enforcement* - the required status-check binds by check name, not ruleset name, so a rename won't break CI - but the template still expects the exact `develop`/`main` names that `AGENTS.md` and these docs reference (which is precisely what a legacy `Develop`/`Main` repo is renaming *to*); the rename removes inconsistency, it isn't a license for arbitrary names.
     - **Migrating a brownfield repo with unsigned history.** The shared `Require signed commits` rule (below) rejects any commit made before signing was enabled, so on a pre-existing repo the first `develop -> main` release is blocked the moment it tries to introduce that legacy history. The fix is to re-sign the legacy commits, but that rewrite is a non-fast-forward and the `Block force pushes` rule rejects it - **and the ruleset's admin bypass does not cover `git push --force` (GitHub honors ruleset bypass for UI/API operations, not git force-push).** So even the owner cannot complete the re-sign without temporarily relaxing the ruleset. This is a **one-time, maintainer-performed manual migration** - it deliberately uses the force-push that [AGENTS.md "Git and Commit Rules"](./AGENTS.md#git-and-commit-rules) forbids agents from running, so an AI agent must **never** execute this procedure; surface it to the maintainer instead. Procedure:
 
-      1. Re-sign the divergent history, preserving merge topology. Prefer a rebase, which re-signs each commit with your current key (`commit.gpgsign` / `-S`):
+      Recommended order: **re-sign while the repo's rulesets are still permissive, then import the strict rulesets** (Steps 1-2 above). Re-signing before the strict rules exist avoids the disable/re-enable dance entirely; if the strict rulesets are already in place, disable enforcement per affected branch first (step 2).
+
+      1. **Re-sign the divergent history with a committer rewrite.** For merge-heavy history, prefer `git filter-branch` with a `--commit-filter`: it rewrites every commit object in place, preserving the exact DAG with zero conflicts, and rewriting both refs at once keeps shared ancestry consistent (same new SHA on both branches). It **must rewrite the committer** to the signing identity - `filter-branch` otherwise preserves the original committer, so the commit ends up `committer != signer`, GitHub does **not** mark it Verified, and `Require signed commits` still rejects it:
+
+         ```sh
+         FILTER_BRANCH_SQUELCH_WARNING=1 git filter-branch --commit-filter '
+           GIT_COMMITTER_NAME="You" GIT_COMMITTER_EMAIL="you@users.noreply.github.com" git commit-tree -S "$@"
+         ' -- develop main
+         ```
+
+         Pass `-- develop main` (or `--all`) to re-sign all the way to the root; add `--tag-name-filter cat` only if you want existing tags to follow the rewrite. On some hosts `filter-branch` prints a benign `envsubst: not found` warning from git's i18n setup - ignore it.
+
+         A rebase is an alternative for simple, mostly-linear history - it re-signs each commit and sets the committer to the rewriter automatically (which is *why* it verifies), but its merge-rewriting todo is fragile when there are many merge commits:
 
          ```sh
          git rebase --rebase-merges --exec 'git commit --amend --no-edit -S' <merge-base>
          ```
 
-         `git filter-branch` also works but is **deprecated** upstream (it prints a warning; suppress with `FILTER_BRANCH_SQUELCH_WARNING=1`, or use `git filter-repo` if installed) - keep it only as a fallback:
+      2. **If the strict rulesets are already imported, disable enforcement on each affected branch.** The push rejection is per-branch and depends on which rules that branch carries: `Block force pushes` **or** `Require a pull request` rejects the direct force-push, and admin bypass covers neither for git force-push. A branch with only a deletion rule may accept the push; a branch with a `pull_request` rule rejects it with `GH013 ... Changes must be made through a pull request` (which doesn't read like a force-push error). Set each affected ruleset's **Enforcement** to **Disabled** (Settings -> Rules -> Rulesets).
+      3. **(Maintainer only)** Force-push the re-signed branches. Force-push is restricted to the maintainer because it rewrites shared history and can lose commits if done wrong - a destructive operation, not a signing concern (signing comes from local git config and is unaffected by who runs the push). It is the single manual force-push the template sanctions; agents must never run it (see [AGENTS.md "Git and Commit Rules"](./AGENTS.md#git-and-commit-rules)).
+      4. Re-enable **Enforcement** (or import the strict rulesets now, if you deferred them per the recommended order).
+      5. **Verify via the API, not local `%G?`.** `git log --pretty=%G?` can show `U` (good signature, untrusted) on a fresh machine even when the signature is fine, or `G` only because `allowed_signers` happens to be configured - neither reflects what GitHub accepts. The authoritative check is:
 
          ```sh
-         git filter-branch -f --commit-filter 'git commit-tree -S "$@"' -- <merge-base>..HEAD
+         gh api repos/<owner>/<repo>/commits/<branch> --jq '.commit.verification'   # expect verified: true, reason: valid
          ```
 
-      2. Temporarily set the `develop` (and `main` if it diverged) ruleset **Enforcement** to **Disabled** (Settings -> Rules -> Rulesets), since the admin bypass won't permit the force-push.
-      3. **(Maintainer only)** Force-push the re-signed branch. This is the single manual force-push the template sanctions; agents must never run it (see [AGENTS.md "Git and Commit Rules"](./AGENTS.md#git-and-commit-rules)).
-      4. Re-enable **Enforcement**.
+      6. **Clean up.** A root rewrite orphans existing tags (they keep pointing at the pre-rewrite commits; `Require signed commits` applies to branches not tags, so leaving them is fine). Open bot PRs/branches based on the old history go stale after the force-push - let Dependabot recreate them (or rebase) so reviewers aren't confused.
 
       Alternatively, enable `Require signed commits` only on a repo whose **full history is already signed** - greenfield repos created from this template (where signing is live before the first commit, per [AGENTS.md "Git and Commit Rules"](./AGENTS.md#git-and-commit-rules)) never hit this.
     - The per-branch settings below are the **reference for what each ruleset contains and why** (and the manual fallback if you configure via the UI):
@@ -610,6 +624,13 @@ For each output you **don't** ship, delete its `build-<target>-task.yml`, its jo
 **Opt in to publish-on-merge.** Set the repository variable `PUBLISH_ON_MERGE` to `true` (Settings -> Secrets and variables -> Actions -> Variables) to switch to the **continuous-release** model: every push/merge to `main` publishes `main` and every push to `develop` publishes `develop`, immediately. The weekly and manual publishers also run. Leave the variable unset (or `false`) for the two-phase default. It's a repository variable, not a workflow edit, so pulling template updates never conflicts with your choice.
 
 Which to pick: two-phase suits projects whose consumers are **pushed** updates (HACS for Home Assistant, package managers that auto-update, Linux distros that vendor from `main`) where every release is a forced update and frequent bot-driven releases are noise. `PUBLISH_ON_MERGE=true` suits projects whose consumers **pull** at their own cadence (Docker pulls, NuGet/PyPI installs, manual downloads) and want every merged change available immediately. For an example of a push-distribution project, see [homeassistant-purpleair](https://github.com/ptr727/homeassistant-purpleair) (ships through HACS).
+
+### Template - Deferred Patterns
+
+Template improvements identified but deferred until a real project needs them, so they aren't lost and aren't force-fit prematurely. Implement an entry (and remove it here) when a new or existing derived project first hits the use case.
+
+- **Factor the unit-test job out of `test-pull-request.yml` into a `test-*-task.yml`** so the entry-point file is target-agnostic. Trigger: a non-.NET repo that wants the aggregator without hand-deleting the `unit-test` job.
+- **Per-language / per-project-type test scaffolds** (a Python test task, a Docker smoke/health-check test, etc.), added as each language or project type is actually exercised downstream. Trigger: the first repo that ships that language/type and needs CI coverage for it.
 
 <!--- Shields links (alphabetized per AGENTS.md) --->
 

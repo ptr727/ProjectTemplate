@@ -3,21 +3,11 @@ name: Run daily CodeGen and Pull Request action
 on:
   workflow_dispatch:
   schedule:
-    # Run daily at 04:00 UTC. Staggered two hours after the weekly publish
-    # (`publish-release.yml`, Mondays 02:00) so the two don't start together
-    # on Mondays. Codegen merges are cheap in the default two-phase model
-    # (they only smoke-test, the weekly publish batches the actual release),
-    # so running daily keeps both branches' generated content fresh without
-    # triggering a build per merge.
+    # Daily at 04:00 UTC, staggered after the weekly publish so the two don't start together on Mondays.
     - cron: '0 4 * * *'
 
 concurrency:
-  # Standard AGENTS.md "Concurrency" convention. Scheduled runs always
-  # have `github.ref == refs/heads/<default-branch>` (cron's default),
-  # and the reusable workflow `run-codegen-pull-request-task.yml` then
-  # matrixes over both `main` and `develop` internally - so a single
-  # group per workflow+ref serializes all matrix legs of all scheduled
-  # / dispatched runs in practice.
+  # A single group per workflow+ref serializes all scheduled/dispatched runs and their internal matrix legs.
   group: ${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: true
 
