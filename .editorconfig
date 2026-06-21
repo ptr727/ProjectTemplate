@@ -40,6 +40,12 @@ indent_size = 2
 [*.{json,jsonc}]
 end_of_line = crlf
 
+# Upstream-version state file (written LF by check-upstream-version-task.yml on the
+# runner); pin LF so an editor save does not flip it to CRLF per the JSON rule above and
+# trigger a spurious canonicalize bump. Rename to match a custom state-file input.
+[upstream-version.json]
+end_of_line = lf
+
 # Linux scripts
 [*.sh]
 end_of_line = lf

@@ -10,6 +10,12 @@ name: Check upstream version task
 # by key. A merged bump ships on the next publish, not immediately. Call this from
 # a scheduled entry-point workflow; matrix only the branches that ship the version
 # (a CI-only version uses ["develop"]).
+#
+# The state file is written with LF on the runner and is canonical LF, which is the
+# exception to .editorconfig's CRLF rule for .json. The shipped .editorconfig and
+# .gitattributes carve out the default `upstream-version.json` as LF so an editor
+# save does not flip it to CRLF and churn a spurious "Canonicalize" bump; a custom
+# state-file name must be added to those two carve-outs.
 
 on:
   workflow_call:

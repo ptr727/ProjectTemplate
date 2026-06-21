@@ -3,3 +3,8 @@
 # git add --renormalize .
 # git ls-files --eol
 * -text
+
+# Upstream-version state file is bot-written LF (check-upstream-version-task.yml);
+# enforce LF here so an editor CRLF save is normalized back and does not churn.
+# Rename to match a custom state-file input.
+upstream-version.json text eol=lf
