@@ -5,7 +5,7 @@
             "name": "Console Root",
             "type": "coreclr",
             "request": "launch",
-            "preLaunchTask": ".Net Build",
+            "preLaunchTask": ".NET Build",
             "program": "${workspaceFolder}/.artifacts/bin/Console/debug/Console.dll",
             "args": [
                 "--loglevel=Debug",
@@ -20,7 +20,7 @@
             "name": "Console Test",
             "type": "coreclr",
             "request": "launch",
-            "preLaunchTask": ".Net Build",
+            "preLaunchTask": ".NET Build",
             "program": "${workspaceFolder}/.artifacts/bin/Console/debug/Console.dll",
             "args": [
                 "--loglevel=Debug",
@@ -37,7 +37,7 @@
             "name": "CodeGen",
             "type": "coreclr",
             "request": "launch",
-            "preLaunchTask": ".Net Build",
+            "preLaunchTask": ".NET Build",
             "program": "${workspaceFolder}/.artifacts/bin/CodeGen/debug/CodeGen.dll",
             "args": [
                 "--codepath",

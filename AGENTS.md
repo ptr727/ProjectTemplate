@@ -1,9 +1,6 @@
 # Instructions for AI Coding Agents
 
-**ProjectTemplate** is a polyglot template repo. The .NET side ships under [`NuGetLibrary/`](./NuGetLibrary/) (plus `Console/`, `Tests/`, `Benchmarks/`, `CodeGen/`); the Python side ships under [`PyPiLibrary/`](./PyPiLibrary/). This file is the single source of truth for cross-cutting rules. Language-specific style guides live next to the code:
-
-- .NET - [`CODESTYLE.md`](./CODESTYLE.md)
-- Python - [`PyPiLibrary/CODESTYLE.md`](./PyPiLibrary/CODESTYLE.md)
+**ProjectTemplate** is a polyglot template repo. The .NET side ships under [`NuGetLibrary/`](./NuGetLibrary/) (plus `Console/`, `Tests/`, `Benchmarks/`, `CodeGen/`); the Python side ships under [`PyPiLibrary/`](./PyPiLibrary/). This file is the single source of truth for cross-cutting rules. Code style lives in [`CODESTYLE.md`](./CODESTYLE.md) at the repo root - one guide with a General section that applies to every language plus droppable per-language sections (.NET, Python).
 
 Treat this file as authoritative for everything else; don't restate its rules elsewhere. A derived repo's **project-specific conventions and public-API/behavioral contracts** (e.g. a "Library API Conventions" section) also live here, **not** in [`.github/copilot-instructions.md`](./.github/copilot-instructions.md) - that file targets GitHub Copilot / VS Code specifically, while this file is the agent-agnostic one every coding agent is directed to read, so any rule a reviewer must honor has to live here to be provider-independent.
 
@@ -221,24 +218,24 @@ Each devcontainer's `customizations.vscode.extensions` mirrors the `recommendati
   - `Tests/` - xUnit + AwesomeAssertions
   - `Benchmarks/` - BenchmarkDotNet
   - `CodeGen/` - internal codegen tooling
-  - **Style guide: [`CODESTYLE.md`](./CODESTYLE.md)**.
+  - **Style guide: [`CODESTYLE.md`](./CODESTYLE.md) ".NET" section**.
 - **Python project** (env/build/test with `uv` from inside `PyPiLibrary/`):
   - `PyPiLibrary/` - PyPI library template, published as `ptr727-projecttemplate-library`
-  - **Style guide: [`PyPiLibrary/CODESTYLE.md`](./PyPiLibrary/CODESTYLE.md)**.
+  - **Style guide: [`CODESTYLE.md`](./CODESTYLE.md) "Python" section**.
 - **Cross-cutting**:
   - `.github/` - workflows, Dependabot, Copilot instructions
   - `.devcontainer/dotnet/` and `.devcontainer/python/` - per-language devcontainer configs + post-create scripts
   - `DotNet.code-workspace`, `Python.code-workspace` - per-language VS Code workspace files (each pairs with its devcontainer)
-  - `.vscode/` - debug configs and tasks (.NET-oriented)
+  - `.vscode/` - debug configs and tasks, grouped by language (the template ships the .NET group); carry your language's named clean-compile tasks verbatim (see [`CODESTYLE.md`](./CODESTYLE.md))
   - `Docker/` - multi-platform Linux container build for the Console app
 
-When you touch code in either language, also respect that language's style guide. Conventions in this file (PR titles, branching, US English, devcontainer behavior, workflow YAML) apply uniformly to both languages.
+When you touch code in either language, also respect that language's style guide. After editing, that language's **clean-compile** must pass before commit, and new-port/brownfield status never licenses relaxing analyzer/linter severities or silencing newly surfaced diagnostics - both rules live in [`CODESTYLE.md`](./CODESTYLE.md) "General". Conventions in this file (PR titles, branching, US English, devcontainer behavior, workflow YAML) apply uniformly to both languages.
 
 ## Quick Start for Derived Projects
 
 1. **Clone this template** as the baseline for your project.
-2. **Decide** which language sides you need. If you need only one, delete the other folder and its references - see the relevant CODESTYLE for the deletion checklist.
-3. **Read** [CODESTYLE.md](./CODESTYLE.md) (.NET) and/or [PyPiLibrary/CODESTYLE.md](./PyPiLibrary/CODESTYLE.md) (Python) for the per-language style.
+2. **Decide** which language sides you need. If you need only one, delete the other folder and its references - drop that language's section in [CODESTYLE.md](./CODESTYLE.md) and follow its "Adopting Without ..." deletion checklist.
+3. **Read** [CODESTYLE.md](./CODESTYLE.md) - the General section plus the section(s) for the language(s) you keep (.NET, Python).
 4. **Carry the mandatory shared files and sections verbatim** - do not re-invent them per repo. See [Files and Sections Derived Repos Must Carry Verbatim](#files-and-sections-derived-repos-must-carry-verbatim) for the exact list (review-loop contract + runbook, lint config, line-ending governance) and what to adapt.
 5. **Update project-specific values** - `PackageId`/`RootNamespace` in `.csproj`, `name` in `pyproject.toml`, namespace conventions, `README.md`, `HISTORY.md`, `version.json`, `LICENSE`, NuGet/PyPI badge URLs.
 6. **Run tools before first commit**:
@@ -256,12 +253,14 @@ These artifacts are the template's cross-cutting contract. A derived repo must c
 - **[`.github/copilot-instructions.md`](./.github/copilot-instructions.md)** - the whole file is a drop-in; its "GitHub Copilot Review Runbook" carries the provider mechanics. Copy verbatim and change only the `<owner>` / `<repo>` / `<N>` placeholders in the API snippets; drop language-specific style pointers that don't apply. Keep this file **narrow** - provider-specific mechanics (the Copilot review runbook) plus the inline commit/PR-title summary. **Project-specific conventions and API/behavioral contracts do not belong here**; put them in [`AGENTS.md`](./AGENTS.md), the agent-agnostic file every coding agent reads. Non-Copilot agents (Claude Code, Codex, Cursor, ...) are not directed to this file and don't read it by default, so any rule a reviewer must honor has to live in `AGENTS.md` to be provider-independent.
 - **[`.markdownlint-cli2.jsonc`](./.markdownlint-cli2.jsonc)** - the shared lint config read by both the davidanson `markdownlint` IDE extension and CLI/CI `markdownlint-cli2`, so the IDE and command line stay in lock-step. Copy verbatim (it is repo-agnostic). **On first adoption**, a repo's existing docs often carry structural debt this config surfaces (MD022/MD031/MD032 blank lines around headings/fences/lists, MD040 unlabeled fences). Clear it in one pass by running the markdownlint-cli2 Docker command from [Running the Linters Locally](#running-the-linters-locally-known-working-invocations) with `--fix` added (`docker run --rm -v "$PWD":/workdir davidanson/markdownlint-cli2:latest --fix "**/*.md"`), then hand-label any remaining unlabeled fences (MD040 - usually `text` for format/example blocks) and **re-verify the line endings of touched `.md` files** (`--fix` can rewrite a CRLF file as LF).
 - **[`.editorconfig`](./.editorconfig) and [`.gitattributes`](./.gitattributes)** - line-ending governance (see [Line Endings](#line-endings)). `.editorconfig` sets `end_of_line` per file type and `.gitattributes` (`* -text`) stops git from normalizing; a repo missing either, or one that only sets `end_of_line` for `[*.md]` instead of carrying the full per-extension rules, drifts between LF and CRLF. The **defaults + per-extension EOL block is always-verbatim**; the `[*.cs]` + ReSharper style block at the end is **.NET-only** and may be dropped in a non-.NET repo (the file marks the boundary). A repo adopting `.gitattributes` for the **first time** must do a one-time explicit line-ending normalization: `* -text` tells git to stop normalizing, so pre-existing files keep whatever (possibly mixed) endings they have - convert each to its `.editorconfig` ending and commit that as a deliberate one-time pass, best isolated in its own commit.
+- **[`CODESTYLE.md`](./CODESTYLE.md)** - the single code-style guide. Its **General** section is always carried; each **language section** (.NET, Python) is droppable, exactly like the `.editorconfig` `[*.cs]` boundary - keep the section(s) for the language(s) you ship and drop the rest. **Repo-root placement is load-bearing**: `AGENTS.md` links it as `./CODESTYLE.md` and `.github/copilot-instructions.md` as `../CODESTYLE.md`, so moving it breaks those links. Adapt the in-section repo-specific bits - the .NET project-folder list, the `InternalsVisibleTo` project names, and the VS Code task labels - to your repo.
+- **[`.vscode/tasks.json`](./.vscode/tasks.json)** - carry your language's **named clean-compile tasks verbatim**; their names are owned by the matching `CODESTYLE.md` language section (for .NET, `.NET Build` / `CSharpier Format` / `.NET Format`) and their command sequence + arguments are the canonical clean-compile spec. Convenience tasks (`.NET Tool Update`, `.NET Outdated Upgrade`) and project-specific tasks (`.NET Benchmark`) are the adapt zone; a non-.NET repo drops the .NET group and adds its own language's tasks.
 
 When the template changes one of these, re-sync the derived repo from the new version (see below).
 
 ### Staying in Sync and Reporting Drift Upstream
 
-A derived repo is expected to **re-sync against the template periodically**, not just at creation: pull the current version of each verbatim-carry artifact above and re-apply it (adapting only the noted placeholders). For [`CODESTYLE.md`](./CODESTYLE.md), prefer to keep it as the full multi-language aggregate the template ships and re-sync the whole file, even if the repo uses only one language - replacing the entire file is simpler to keep current than maintaining hand-trimmed per-language snippets.
+A derived repo is expected to **re-sync against the template periodically**, not just at creation: pull the current version of each verbatim-carry artifact above and re-apply it (adapting only the noted placeholders). For [`CODESTYLE.md`](./CODESTYLE.md), re-sync the whole file from the template and then drop the language section(s) you don't ship (always keeping the General section) - replacing the file wholesale and trimming whole sections is simpler to keep current than hand-editing per-language snippets.
 
 **Drift flows back upstream as an issue, not a private fix.** When porting or re-syncing, if you find a discrepancy that should be fixed in the **template itself** - a gap, an outdated instruction, a missing rule, something that bit this repo and would bite the next derived repo too - **open an issue in [`ptr727/ProjectTemplate`](https://github.com/ptr727/ProjectTemplate)** describing it, rather than only patching it locally. A local fix realigns *this* repo; an upstream issue (then fix) corrects it *for every future derived repo* and keeps the template the single source of truth. This is exactly how the current review-loop / lint-config / brownfield-migration gaps were surfaced.
 
