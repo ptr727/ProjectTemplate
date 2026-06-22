@@ -8,15 +8,13 @@ on:
         required: false
         type: string
         default: ''
-      # Logical branch driving build configuration (`main` => Release, else
-      # Debug). Required (no `github.ref_name` fallback, which would mislabel
-      # the develop leg of the publisher's matrix); the orchestrator passes it.
+      # Logical branch driving build configuration (`main` => Release, else Debug). Required (no fallback) so the
+      # develop leg of the publisher's matrix isn't mislabeled.
       branch:
         required: true
         type: string
-      # Smoke mode: build a representative runtime subset (linux-x64 +
-      # win-x64) instead of the full 7-runtime matrix, and skip the zip /
-      # artifact aggregation. Used for fast PR feedback.
+      # Smoke mode: build a runtime subset (linux-x64 + win-x64) instead of the full matrix and skip the zip /
+      # artifact aggregation, for fast PR feedback.
       smoke:
         required: false
         type: boolean
@@ -41,14 +39,8 @@ jobs:
 
     steps:
 
-      # NOTE: NuGet restore caching is intentionally NOT enabled on the .NET
-      # jobs (this matrix, build-nugetlibrary-task, and the unit-test job). The
-      # restore is low-overhead for this template's small dependency set, and
-      # `setup-dotnet`'s built-in cache requires a `packages.lock.json` that
-      # Central Package Management (Directory.Packages.props) does not produce
-      # by default. The Docker layer cache and uv's cache (which carry the
-      # expensive work) are enabled; revisit .NET restore caching only if the
-      # dependency graph grows enough to make it worthwhile.
+      # NuGet restore caching is not enabled: restore is cheap for this small dependency set, and `setup-dotnet`'s
+      # cache requires a `packages.lock.json` that Central Package Management does not produce by default.
       - name: Setup .NET SDK step
         uses: actions/setup-dotnet@c2fa09f4bde5ebb9d1777cf28262a3eb3db3ced7 # v5.2.0
         with:
@@ -72,19 +64,20 @@ jobs:
             -property:InformationalVersion=${{ needs.get-version.outputs.AssemblyInformationalVersion }} \
             -property:PackageVersion=${{ needs.get-version.outputs.SemVer2 }}
 
-      # Artifact names are suffixed with the branch so the publisher can build
-      # `main` and `develop` in the same workflow run (a branch matrix) without
-      # two legs colliding on an identical artifact name.
+      # Branch-suffixed so the publisher can build `main` and `develop` in one run without colliding on the name.
+      # Skipped on smoke: the aggregation job below is `!smoke`, so the per-runtime output has no consumer and would
+      # only burn artifact storage; smoke just needs the compile to succeed.
       - name: Upload matrix build artifacts step
+        if: ${{ !inputs.smoke }}
         uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6.0.0
         with:
           name: publish-${{ inputs.branch }}-${{ matrix.runtime }}
           path: ${{ runner.temp }}/publish
+          # Consumed within this run by the aggregation job; minimize artifact storage.
+          retention-days: 1
 
-  # Smoke builds only need the per-runtime compile to succeed (fast PR
-  # feedback) - the zipped, downloadable artifact is a release concern, so
-  # skip the aggregation entirely on smoke. The GitHub release job never runs
-  # on smoke, so no `release-asset-*` artifact is needed then.
+  # Smoke builds only need the per-runtime compile to succeed, so skip the zip aggregation; the release job never
+  # runs on smoke, so no `release-asset-*` artifact is needed.
   upload-build-artifacts:
     name: Upload matrix build artifacts job
     if: ${{ !inputs.smoke }}
@@ -103,14 +96,12 @@ jobs:
       - name: Zip build output step
         run: 7z a -t7z ${{ runner.temp }}/Console.7z ${{ runner.temp }}/publish/*
 
-      # GitHub-release asset, uploaded under the `release-asset-<branch>-*`
-      # convention that the `github-release` job in build-release-task.yml
-      # collects by pattern (it never names this job) - so a derived project
-      # swaps its release contents by replacing this leaf task, not the
-      # orchestrator. Branch-suffixed so the publisher's branch matrix can
-      # build both branches in one run without colliding on the artifact name.
+      # GitHub-release asset, uploaded under the `release-asset-<branch>-*` pattern that the `github-release` job
+      # collects. Branch-suffixed so the publisher can build both branches in one run without colliding on the name.
       - name: Upload build artifacts step
         uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6.0.0
         with:
           name: release-asset-${{ inputs.branch }}-executable
           path: ${{ runner.temp }}/Console.7z
+          # Consumed within this run by the github-release job; minimize artifact storage.
+          retention-days: 1

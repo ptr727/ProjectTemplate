@@ -1,34 +1,22 @@
 name: Run codegen and pull request task
 
-# Runs codegen against `main` and `develop` in parallel via a matrix,
-# opens a PR against each base (`codegen-main` branch -> main,
-# `codegen-develop` branch -> develop). The merge-bot auto-merges
-# either PR independently. This keeps both branches current on
-# generated content (date stamps, API-derived data, etc.) without
-# either branch falling behind the other and without main -> develop
-# back-merges (see AGENTS.md "Branching Model" for the forward-only
-# develop invariant).
+# Runs codegen against `main` and `develop` in parallel via a matrix and opens a PR against each base
+# (codegen-main -> main, codegen-develop -> develop), which the merge-bot auto-merges independently.
 
 on:
   workflow_call:
     secrets:
-      # GitHub App credentials to generate an installation token
       CODEGEN_APP_CLIENT_ID:
         required: true
       CODEGEN_APP_PRIVATE_KEY:
         required: true
-      # API Ninjas API key
       NINJA_API_KEY:
         required: true
 
 jobs:
 
-  # Capture ONE UTC timestamp shared by both matrix legs below. `--runtime`
-  # needs the same value on the `main` and `develop` legs so CodeGen.cs comes
-  # out byte-identical and `develop -> main` release merges don't conflict on
-  # it. `github.run_started_at` was used for this but resolves to an empty
-  # string in this reusable-workflow context, so each leg fell back to its own
-  # `DateTime.UtcNow` and the outputs diverged - capture the value here instead.
+  # Capture one UTC timestamp shared by both matrix legs so CodeGen.cs comes out byte-identical and
+  # develop -> main release merges don't conflict on it. (`github.run_started_at` is empty in this context.)
   get-runtime:
     name: Capture shared runtime job
     runs-on: ubuntu-latest
@@ -49,8 +37,7 @@ jobs:
       contents: write
       pull-requests: write
     strategy:
-      # Each branch gets its own parallel codegen run + PR. If one
-      # branch's PR fails (CI, conflicts, etc.) the other is unaffected.
+      # Each branch gets its own parallel codegen run + PR; one branch's failure doesn't affect the other.
       fail-fast: false
       matrix:
         target:
@@ -62,10 +49,7 @@ jobs:
     steps:
 
       - name: Generate GitHub App token step
-        # The App-token-driven PR open fires `pull_request` workflow events
-        # directly. `GITHUB_TOKEN`-driven PR opens do not (GitHub's recursion
-        # guard), which previously required a close/reopen dance under a PAT
-        # to nudge the auto-merge workflow - that dance is gone.
+        # App token so the PR open fires `pull_request` workflow events (GITHUB_TOKEN opens don't).
         id: app-token
         uses: actions/create-github-app-token@bcd2ba49218906704ab6c1aa796996da409d3eb1 # v3.2.0
         with:
@@ -84,14 +68,8 @@ jobs:
           token: ${{ steps.app-token.outputs.token }}
 
       - name: Run codegen step
-        # `--runtime` is template-internal hygiene: passing the SAME timestamp
-        # (captured once in the `get-runtime` job above) to both matrix legs
-        # (main and develop) makes them produce byte-identical CodeGen.cs, so
-        # develop->main release merges don't conflict on this demo file every
-        # release. Derived projects' real codegen should not copy this pattern -
-        # if your generator's per-run state is intentional, design it not to
-        # land on multiple release branches simultaneously, or absorb the merge
-        # cost.
+        # Pass the shared `--runtime` to both legs so they produce byte-identical CodeGen.cs (avoids merge
+        # conflicts on develop -> main).
         run: |
           set -euo pipefail
           dotnet run --project ./CodeGen/CodeGen.csproj -- \
@@ -110,7 +88,7 @@ jobs:
         uses: peter-evans/create-pull-request@5f6978faf089d4d20b00c7766989d076bb2fc7f1 # v8.1.1
         id: cpr
         with:
-          # App token: triggers pull_request workflow events directly, creates verified commits as the app
+          # App token: triggers pull_request workflow events and creates verified commits as the app.
           token: ${{ steps.app-token.outputs.token }}
           base: ${{ matrix.target.ref }}
           branch: ${{ matrix.target.branch }}
