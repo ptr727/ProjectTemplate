@@ -5,7 +5,7 @@
 - .NET - [`CODESTYLE.md`](./CODESTYLE.md)
 - Python - [`PyPiLibrary/CODESTYLE.md`](./PyPiLibrary/CODESTYLE.md)
 
-Treat this file as authoritative for everything else; don't restate its rules elsewhere.
+Treat this file as authoritative for everything else; don't restate its rules elsewhere. A derived repo's **project-specific conventions and public-API/behavioral contracts** (e.g. a "Library API Conventions" section) also live here, **not** in [`.github/copilot-instructions.md`](./.github/copilot-instructions.md) - that file targets GitHub Copilot / VS Code specifically, while this file is the agent-agnostic one every coding agent is directed to read, so any rule a reviewer must honor has to live here to be provider-independent.
 
 ## Git and Commit Rules
 
@@ -129,7 +129,7 @@ The repo runs a review loop on every PR: local agent iteration plus remote autom
 
 1. Push changes to the PR branch.
 2. Re-request a review for the **current head SHA**. Auto-trigger is unreliable, so request it explicitly via the `requestReviews` GraphQL mutation (now reliable end-to-end - see the runbook); the UI is only a fallback.
-3. Wait for review activity on that head.
+3. Wait for review activity on that head. A completed review that raises **no findings** is a valid terminal outcome for that head - proceed; do not re-trigger it or treat the absence of comments as a missing review.
 4. Triage findings.
 5. Apply fixes or write a rationale for declines.
 6. Reply to each thread and resolve what was addressed.
@@ -253,7 +253,7 @@ When you touch code in either language, also respect that language's style guide
 These artifacts are the template's cross-cutting contract. A derived repo must carry **each** of them; copy the file/section as-is and change only the noted placeholders. Re-inventing or omitting any of these is the drift the template exists to prevent.
 
 - **[`AGENTS.md`](./AGENTS.md) "PR Review Etiquette" section** - the provider-agnostic review-loop contract. Copy verbatim. No placeholders to change (it names no owner/repo).
-- **[`.github/copilot-instructions.md`](./.github/copilot-instructions.md)** - the whole file is a drop-in; its "GitHub Copilot Review Runbook" carries the provider mechanics. Copy verbatim and change only the `<owner>` / `<repo>` / `<N>` placeholders in the API snippets; drop language-specific style pointers that don't apply.
+- **[`.github/copilot-instructions.md`](./.github/copilot-instructions.md)** - the whole file is a drop-in; its "GitHub Copilot Review Runbook" carries the provider mechanics. Copy verbatim and change only the `<owner>` / `<repo>` / `<N>` placeholders in the API snippets; drop language-specific style pointers that don't apply. Keep this file **narrow** - provider-specific mechanics (the Copilot review runbook) plus the inline commit/PR-title summary. **Project-specific conventions and API/behavioral contracts do not belong here**; put them in [`AGENTS.md`](./AGENTS.md), the agent-agnostic file every coding agent reads. Non-Copilot agents (Claude Code, Codex, Cursor, ...) are not directed to this file and don't read it by default, so any rule a reviewer must honor has to live in `AGENTS.md` to be provider-independent.
 - **[`.markdownlint-cli2.jsonc`](./.markdownlint-cli2.jsonc)** - the shared lint config read by both the davidanson `markdownlint` IDE extension and CLI/CI `markdownlint-cli2`, so the IDE and command line stay in lock-step. Copy verbatim (it is repo-agnostic). **On first adoption**, a repo's existing docs often carry structural debt this config surfaces (MD022/MD031/MD032 blank lines around headings/fences/lists, MD040 unlabeled fences). Clear it in one pass by running the markdownlint-cli2 Docker command from [Running the Linters Locally](#running-the-linters-locally-known-working-invocations) with `--fix` added (`docker run --rm -v "$PWD":/workdir davidanson/markdownlint-cli2:latest --fix "**/*.md"`), then hand-label any remaining unlabeled fences (MD040 - usually `text` for format/example blocks) and **re-verify the line endings of touched `.md` files** (`--fix` can rewrite a CRLF file as LF).
 - **[`.editorconfig`](./.editorconfig) and [`.gitattributes`](./.gitattributes)** - line-ending governance (see [Line Endings](#line-endings)). `.editorconfig` sets `end_of_line` per file type and `.gitattributes` (`* -text`) stops git from normalizing; a repo missing either, or one that only sets `end_of_line` for `[*.md]` instead of carrying the full per-extension rules, drifts between LF and CRLF. The **defaults + per-extension EOL block is always-verbatim**; the `[*.cs]` + ReSharper style block at the end is **.NET-only** and may be dropped in a non-.NET repo (the file marks the boundary). A repo adopting `.gitattributes` for the **first time** must do a one-time explicit line-ending normalization: `* -text` tells git to stop normalizing, so pre-existing files keep whatever (possibly mixed) endings they have - convert each to its `.editorconfig` ending and commit that as a deliberate one-time pass, best isolated in its own commit.
 
