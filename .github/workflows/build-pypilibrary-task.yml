@@ -79,9 +79,11 @@ jobs:
       - name: Run pytest step
         run: uv run pytest
 
-      # Compute the PEP 440 version string: main -> M.N.P.B (release), develop -> M.N.P.B.dev0. BuildNumber stays in the
-      # release segment so develop sorts above main and `pip install --pre` picks the dev build while plain `pip install`
-      # picks the main release. Other branches (PR smoke, feature) use M.N.P.B as-is and never publish.
+      # Compute the PEP 440 version string: main -> M.N.P.B (release), develop -> M.N.P.B.dev0. BuildNumber (NBGV git
+      # height) is in the release segment, so in steady state develop's height exceeds main's and `pip install --pre`
+      # picks the dev build while plain `pip install` picks the main release. (Transient exception: right after a
+      # develop -> main promotion main's height catches up, so `--pre` can resolve to the main release until the next
+      # develop commit.) Other branches (PR smoke, feature) use M.N.P.B as-is and never publish.
       - name: Compute PyPI version step
         id: pypiver
         run: |
