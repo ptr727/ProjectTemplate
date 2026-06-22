@@ -49,7 +49,7 @@ This is the style guide for the **.NET projects** in this repo. **Adapt the proj
 
 1. **The `.NET Format` clean-compile task** (see [Clean-Compile Verification](#clean-compile-verification))
    - The .NET clean-compile is the **`.NET Format`** VS Code task, which chains `CSharpier Format` -> `.NET Build` -> `dotnet format style --verify-no-changes`. These three task definitions are carried verbatim in [`.vscode/tasks.json`](./.vscode/tasks.json).
-   - After any code change it must pass before commit. Run the `.NET Format` task, or the equivalent native sequence with identical arguments: `dotnet csharpier format .`, then `dotnet build`, then `dotnet format style --verify-no-changes --severity=info --verbosity=detailed`. Bare `dotnet format` alone - skipping CSharpier or the build, or loosening the flags - is not sufficient.
+   - After any code change it must pass before commit. Run the `.NET Format` task, or the equivalent native commands that mirror those task definitions: `dotnet csharpier format --log-level=debug .`, then `dotnet build --verbosity=diagnostic`, then `dotnet format style --verify-no-changes --severity=info --verbosity=detailed`. Bare `dotnet format` alone - skipping CSharpier or the build, or loosening the flags - is not sufficient.
 
 2. **Analyzer configuration**
    - `<AnalysisLevel>latest-all</AnalysisLevel>`
