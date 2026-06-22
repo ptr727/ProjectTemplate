@@ -62,7 +62,7 @@ This is the style guide for the **.NET projects** in this repo. **Adapt the proj
 
 #### Build Tasks
 
-Available VS Code tasks (use via the `run_task` tool). The first three are the clean-compile set, carried verbatim; the rest are convenience tasks a derived repo adapts or drops:
+Available VS Code tasks (run them from VS Code's task runner - **Terminal -> Run Task** - or an agent's task-running tool). The first three are the clean-compile set, carried verbatim; the rest are convenience tasks a derived repo adapts or drops:
 
 - `.NET Build`: Build with diagnostic verbosity *(clean-compile)*
 - `CSharpier Format`: Auto-format code with CSharpier *(clean-compile)*
