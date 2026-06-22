@@ -65,7 +65,10 @@ jobs:
             -property:PackageVersion=${{ needs.get-version.outputs.SemVer2 }}
 
       # Branch-suffixed so the publisher can build `main` and `develop` in one run without colliding on the name.
+      # Skipped on smoke: the aggregation job below is `!smoke`, so the per-runtime output has no consumer and would
+      # only burn artifact storage; smoke just needs the compile to succeed.
       - name: Upload matrix build artifacts step
+        if: ${{ !inputs.smoke }}
         uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6.0.0
         with:
           name: publish-${{ inputs.branch }}-${{ matrix.runtime }}

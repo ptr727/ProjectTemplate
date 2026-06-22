@@ -18,6 +18,12 @@ on:
       branch:
         required: true
         type: string
+      # Smoke mode: build for validation only and skip the release-asset zip/upload. A PR smoke run has no consumer
+      # for the artifact (the github-release job is gated `!smoke`), so uploading it just burns artifact storage.
+      smoke:
+        required: false
+        type: boolean
+        default: false
 
 jobs:
 
@@ -67,11 +73,14 @@ jobs:
             --skip-duplicate
 
       - name: Zip output step
+        if: ${{ !inputs.smoke }}
         run: 7z a -t7z ${{ runner.temp }}/NuGetLibrary.7z ${{ runner.temp }}/publish/*
 
       # GitHub-release asset, uploaded under the `release-asset-<branch>-*` pattern that the `github-release` job
       # collects. Branch-suffixed so the publisher can build both branches in one run without colliding on the name.
+      # Skipped on smoke: the github-release job is `!smoke`, so nothing would consume it.
       - name: Upload build artifacts step
+        if: ${{ !inputs.smoke }}
         uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6.0.0
         with:
           name: release-asset-${{ inputs.branch }}-nugetlibrary

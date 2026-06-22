@@ -74,6 +74,8 @@ jobs:
       branch: ${{ inputs.branch }}
       # Push to NuGet.org, never on a smoke build.
       push: ${{ inputs.nuget && !inputs.smoke }}
+      # Skip the release-asset upload on smoke (nothing consumes it on a PR).
+      smoke: ${{ inputs.smoke }}
 
   # PyPI publishing happens in `publish-release.yml`, not here, so `id-token: write` is only granted at the
   # entry-point job; this workflow just builds and uploads the artifact for that job to download.
@@ -87,6 +89,8 @@ jobs:
       # Pin to the resolved commit so the artifacts match the release tag.
       ref: ${{ needs.get-version.outputs.GitCommitId }}
       branch: ${{ inputs.branch }}
+      # Skip the wheel/sdist upload on smoke (the publish-pypi job runs only on a real publish).
+      smoke: ${{ inputs.smoke }}
 
   build-executable:
     name: Build executable job

@@ -17,6 +17,12 @@ on:
       branch:
         required: true
         type: string
+      # Smoke mode: build for validation only and skip the artifact upload. A PR smoke run has no consumer for the
+      # wheel/sdist (the publish-pypi job runs only on a real publish), so uploading it just burns artifact storage.
+      smoke:
+        required: false
+        type: boolean
+        default: false
     outputs:
       artifact-name:
         value: ${{ jobs.build-pypilibrary.outputs.artifact-name }}
@@ -104,8 +110,10 @@ jobs:
         run: uv build
 
       # Branch-suffixed so the publisher's branch matrix can build both branches in one run without colliding.
+      # Skipped on smoke: the publish-pypi job runs only on a real publish, so nothing would consume it.
       - name: Upload build artifacts step
         id: artifact-upload-step
+        if: ${{ !inputs.smoke }}
         uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6.0.0
         with:
           name: pypilibrary-build-${{ inputs.branch }}
