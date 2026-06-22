@@ -9,7 +9,7 @@ For language-specific style rules, see:
 - .NET - [`CODESTYLE.md`](../CODESTYLE.md) at the repo root.
 - Python - [`PyPiLibrary/CODESTYLE.md`](../PyPiLibrary/CODESTYLE.md).
 
-Do not duplicate language-specific rules here. **Project-specific conventions and API/behavioral contracts also belong in [AGENTS.md](../AGENTS.md), not here** - this file is intentionally limited to the inline commit/PR-title summary and the GitHub Copilot Review Runbook. Non-Copilot agents (Claude Code, Codex, Cursor, ...) never read this file, so any rule a reviewer must honor has to live in `AGENTS.md` to be provider-independent.
+Do not duplicate language-specific rules here. **Project-specific conventions and API/behavioral contracts also belong in [AGENTS.md](../AGENTS.md), not here** - this file is intentionally limited to the inline commit/PR-title summary and the GitHub Copilot Review Runbook. Non-Copilot agents (Claude Code, Codex, Cursor, ...) are not directed to this file and don't read it by default, so any rule a reviewer must honor has to live in `AGENTS.md` to be provider-independent.
 
 ## Commit Messages and Pull Request Titles
 
@@ -59,7 +59,7 @@ mutation($pr: ID!, $bot: ID!) {
 }' -F pr="$PR_NODE" -F bot="$BOT_ID"
 ```
 
-The bot node id is read from an existing Copilot **formal** review (`pullRequest.reviews`), so step 1 needs at least one prior formal review on the PR - the auto-review-on-open normally supplies the first one (it may have **no inline comments**; that still counts, and its bot node id is still readable). Poll for it (give auto-review-on-open a few minutes) before deciding it is missing. If Copilot posted **only an issue comment** and no formal review, the head is covered but `reviews` yields no bot node id - read the id from the Copilot issue comment's author via GraphQL (`... on Bot { id }` on the `issues/<N>/comments` author), or request `Copilot` once through the GitHub PR UI to produce a formal review. Manual UI seeding is the fallback specifically when no formal review exists to read the id from; then use the mutation for every subsequent re-request.
+The bot node id is read from an existing Copilot **formal** review (`pullRequest.reviews`), so step 1 needs at least one prior formal review on the PR - the auto-review-on-open normally supplies the first one (it may have **no inline comments**; that still counts, and its bot node id is still readable). Poll for it (give auto-review-on-open a few minutes) before deciding it is missing. If Copilot posted **only an issue comment** and no formal review, the head is covered but `reviews` yields no bot node id - read the id from the Copilot issue comment's author by querying the PR's issue comments in GraphQL (`pullRequest.comments` -> author `... on Bot { id }`), or request `Copilot` once through the GitHub PR UI to produce a formal review. Manual UI seeding is the fallback specifically when no formal review exists to read the id from; then use the mutation for every subsequent re-request.
 
 **Do NOT post `@Copilot review` as a PR comment.** That comment triggers the Copilot *coding agent* (`copilot-swe-agent[bot]`), which makes code changes rather than posting a review.
 
