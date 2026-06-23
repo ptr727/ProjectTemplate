@@ -28,7 +28,6 @@ internal static class HttpClientFactory
 
     private static readonly Lazy<HttpClient> s_httpClient = new(CreateHttpClient);
 
-    // Returns the shared singleton HttpClient; all callers share the connection pool and circuit breaker state.
     internal static HttpClient GetHttpClient() => s_httpClient.Value;
 
     private static ResilienceHandler CreateResilienceHandler() =>
@@ -102,8 +101,7 @@ internal static class HttpClientFactory
             ? outcome.Exception is not (OperationCanceledException or BrokenCircuitException)
             : outcome.Result is not null && (int)outcome.Result.StatusCode is 408 or 429 or >= 500;
 
-    // Creates a new HttpClient instance; each caller gets an independent resilience handler
-    // and circuit breaker state. Callers should store and reuse the returned instance.
+    // Each call yields independent circuit-breaker state; callers should cache the instance.
     [System.Diagnostics.CodeAnalysis.SuppressMessage(
         "Reliability",
         "CA2000:Dispose objects before losing scope",

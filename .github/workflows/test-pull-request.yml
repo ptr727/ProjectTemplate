@@ -11,10 +11,8 @@ concurrency:
 
 jobs:
 
-  # Detect which delivery targets a PR touches so we smoke-build only what changed.
-  # Build-workflow files are deliberately excluded - a path filter can't tell a logic
-  # change from an action-version bump - so workflow-only changes aren't smoke-built;
-  # lint them with `actionlint` locally. workflow_dispatch forces every target on.
+  # Detect which delivery targets a PR touches so we smoke-build only what changed. Workflow files are excluded
+  # (a path filter can't judge them); workflow_dispatch forces every target on.
   changes:
     name: Detect changed targets job
     runs-on: ubuntu-latest

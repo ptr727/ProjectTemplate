@@ -1,10 +1,8 @@
 name: Merge bot pull request action
 
-# The merge jobs enable auto-merge once per PR on opened/reopened; the disable job turns it off when a
-# maintainer pushes to a bot branch. Merge method is dispatched by base branch (develop = squash, main = merge).
-# All jobs use an App token so the merge commit fires downstream workflows (GITHUB_TOKEN pushes don't, due to
-# GitHub's recursion guard) and so the disable job has write access on Dependabot PRs, which otherwise run with
-# read-only restricted secrets regardless of who triggered the event.
+# Enable auto-merge once per PR on opened/reopened; disable it when a maintainer pushes to a bot branch. Merge
+# method by base branch (develop = squash, main = merge). App token so the merge fires downstream workflows
+# (GITHUB_TOKEN pushes don't) and so the disable job has write access on read-only Dependabot PRs.
 
 on:
   pull_request:

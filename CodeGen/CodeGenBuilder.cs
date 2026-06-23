@@ -4,13 +4,7 @@ namespace ptr727.ProjectTemplate.CodeGen;
 
 internal sealed class CodeGenBuilder(string outputPath, CancellationToken cancellationToken)
 {
-    // `runtime` is a template-internal hook: when the dual-target codegen
-    // matrix passes the same value to both main and develop legs, they
-    // produce byte-identical CodeGen.cs and develop->main merges don't
-    // conflict on this file. Empty -> use DateTime.UtcNow.ToString("o")
-    // (the original demo behavior, kept for local `dotnet run` use).
-    // This plumbing exists for template hygiene only - derived projects'
-    // real codegen should not copy this pattern.
+    // Empty runtime -> UtcNow; a fixed value keeps generated output byte-identical to avoid develop->main merge conflicts.
     internal async Task CodeGenAsync(string quote, string runtime)
     {
         string dateTime = string.IsNullOrEmpty(runtime)

@@ -90,7 +90,9 @@ Clarify devcontainer setup steps in README
 Applies to code and workflow (`#`) comments alike.
 
 - Comment only when the code does not explain itself or the logic is genuinely complex. Self-evident code needs no comment.
-- Write for the human reading *this* project's code now: state what the code does and only the non-obvious *why*. No cross-project references (do not name other repos), no historic or design narrative, no rule citations - governance lives in this file, not echoed inline.
+- Write for the human reading *this* project's code now: state only the non-obvious *why*. No cross-project references (do not name other repos), no historic or design narrative, no rule citations - governance lives in this file, not echoed inline.
+- **Keep it short. One line is the default; a comment earns a second line only by carrying a constraint the code cannot.** Most comments are one sentence. Don't restate *what* the code does - a well-named symbol already says it.
+- **Do not grow a comment across edits.** When you touch code near an existing comment, the comment must come out **same length or shorter** - never append "one more clause" of rationale. If a block comment has crept to multiple sentences of prose, cut it back to its single load-bearing point as part of your change. Verbosity creep is the specific regression to prevent: every iteration that adds a clause is a regression, not an improvement.
 - Match the surrounding code's line length (typically ~120), not an 80-column wrap.
 
 ### Character Set
@@ -122,6 +124,19 @@ Applies to code and workflow (`#`) comments alike.
 
 The repo runs a review loop on every PR: local agent iteration plus remote automated review (GitHub Copilot is the configured reviewer). Treat this as a contract regardless of which local agent authored the changes.
 
+### Merge Gate (read this first)
+
+**Do not merge - and do not enable auto-merge - unless ALL of these hold:**
+
+1. Required status checks are green (`mergeStateStatus: CLEAN`), **and**
+2. A Copilot review is confirmed on the **current head SHA** (not an earlier push), **and**
+3. **Every** Copilot finding on that head SHA is closed out - all review threads resolved, **and** any issue-level Copilot comments (which have no resolve action) triaged and replied to - so zero outstanding findings remain, **and**
+4. The maintainer has given **explicit** permission to merge.
+
+`mergeStateStatus: CLEAN` reflects **only** required statuses - it never reflects open bot review comments, so `CLEAN` alone is **never** sufficient to merge. A green/`CLEAN` PR with an unresolved Copilot finding fails this gate; treat it as "not mergeable" no matter what the merge-state field says. The agent never merges on its own (consistent with "default to staging"; merging is maintainer-authorized).
+
+**Merging is not releasing.** A merge to `main` does **not** publish - by default `PUBLISH_ON_MERGE` is off, so the push only smoke-runs the publisher's no-op job. Publishing happens solely on the weekly schedule or a manual `workflow_dispatch` (see [Release Model](#release-model)). Never describe a merge as cutting a release, and never trigger a publish without explicit maintainer instruction.
+
 ### Expected Review Loop
 
 1. Push changes to the PR branch.
@@ -132,7 +147,7 @@ The repo runs a review loop on every PR: local agent iteration plus remote autom
 6. Reply to each thread and resolve what was addressed.
 7. Re-run the loop after every fix push until no actionable findings remain.
 
-`mergeStateStatus: CLEAN` only checks required statuses; it does not block on bot review comments. Drive the loop to green - review confirmed on the latest head SHA and every actionable finding closed - and then **wait for the maintainer's explicit permission to merge**. The agent does not merge on its own (consistent with "default to staging"; merging is maintainer-authorized).
+Drive the loop to green - review confirmed on the latest head SHA and every actionable finding closed - then stop and apply the **Merge Gate** above: all four preconditions must hold, and `mergeStateStatus: CLEAN` alone never satisfies it.
 
 For provider-specific mechanics (how to request review, query review state, post replies, resolve threads), see the **GitHub Copilot Review Runbook** in [.github/copilot-instructions.md](./.github/copilot-instructions.md). This file owns the contract; that file owns the mechanics.
 
