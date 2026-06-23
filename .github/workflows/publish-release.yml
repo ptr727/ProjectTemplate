@@ -167,8 +167,8 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          # Best-effort housekeeping: the guards (`|| true`, `|| echo`) tolerate a failed delete so it never reds a
-          # successful publish, while `set -e` still catches unexpected failures.
+          # Best-effort housekeeping: a failed list or delete logs a warning and continues so it never reds the run,
+          # while `set -e` still catches unexpected failures.
           set -euo pipefail
           if ! ids=$(gh api repos/${{ github.repository }}/actions/runs/${{ github.run_id }}/artifacts --paginate \
             --jq '.artifacts[].id'); then
