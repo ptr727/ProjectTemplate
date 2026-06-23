@@ -134,13 +134,9 @@ jobs:
         with:
           ref: ${{ needs.get-version.outputs.GitCommitId }}
 
-      # Safety net: a public (main) release must never carry a prerelease identifier - the '-' prerelease separator in
-      # SemVer2 (e.g. the observed '-g<sha>' git-height suffix). Guards against NBGV mis-detecting the public ref (e.g. a
-      # dispatch on a non-default ref) from publishing a malformed non-prerelease release that GitHub would then mark
-      # "Latest". Root-cause-agnostic backstop to the dispatch-ref guard in publish-release.yml.
-      # Strip build metadata ('+...') before testing: in SemVer2 a '-' is the prerelease separator only in the core/
-      # prerelease segment - build metadata after '+' may legitimately contain '-', so testing the raw string for '*-*'
-      # could false-reject a valid public release if the build-metadata format ever changes.
+      # Backstop (main only): a public release must not carry a prerelease '-', guarding against NBGV mis-versioning the
+      # public ref (e.g. a dispatch on a non-default ref) into a malformed "Latest" release. Strip '+buildmetadata'
+      # first - a '-' there is legitimate; only a '-' in the core/prerelease segment marks a prerelease.
       - name: Verify public release version step
         if: ${{ inputs.branch == 'main' }}
         env:
@@ -153,11 +149,9 @@ jobs:
             exit 1
           fi
 
-      # Collect every release asset by the `release-asset-<branch>-*` pattern rather than naming build jobs, so this
-      # step is unaffected when targets are added or removed. `merge-multiple` flattens the matches into one `./Publish`
-      # dir, and the download succeeds with zero matches, so a file-less release (tag + LICENSE/README only) still works.
-      # Subset releases by deleting the target, not via `enable_*: false`: `enable_*` skips a build job, and a skipped
-      # `needs` job would skip this release job too.
+      # Collect assets by the `release-asset-<branch>-*` pattern so this step is target-agnostic; zero matches still
+      # yields a valid file-less release. Subset releases by deleting the target, not `enable_*: false` (a skipped
+      # `needs` job would skip this release job too).
       - name: Download release asset artifacts step
         uses: actions/download-artifact@37930b1c2abaa49bbe596cd826c3c89aef350131 # v7.0.0
         with:

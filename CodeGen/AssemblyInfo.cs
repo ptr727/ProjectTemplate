@@ -32,8 +32,7 @@ internal static class AssemblyInfo
         ?? string.Empty;
 
     internal static string ReleaseVersion =>
-        // E.g. 1.2.3 part of 1.2.3+abc123.abc123
-        // Use major.minor.build from informational version
+        // E.g. 1.2.3 from 1.2.3+abc123.abc123
         InformationalVersion.Split('+', '-')[0];
 
     private static Assembly GetAssembly()

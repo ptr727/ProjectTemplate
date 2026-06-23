@@ -58,8 +58,8 @@ jobs:
         with:
           platforms: ${{ inputs.smoke && 'linux/amd64' || 'linux/amd64,linux/arm64' }}
 
-      # Always login (even for smoke) to get the higher Docker subscription rate limits for pulls and cache reads. The
-      # trade-off: fork PRs without the Docker Hub secrets cannot run the Docker smoke build; acceptable for same-repo PRs.
+      # Always login (even for smoke) for the higher Docker rate limits on pulls/cache reads; fork PRs without the
+      # secrets can't run the Docker smoke build, acceptable for same-repo PRs.
       - name: Login to Docker Hub step
         uses: docker/login-action@c94ce9fb468520275223c153574b00df6fe4bcc9 # v3.7.0
         with:
@@ -76,9 +76,8 @@ jobs:
             docker.io/ptr727/projecttemplate:${{ inputs.branch == 'main' && 'latest' || 'develop' }}
             docker.io/ptr727/projecttemplate:${{ needs.get-version.outputs.SemVer2 }}
           platforms: ${{ inputs.smoke && 'linux/amd64' || 'linux/amd64,linux/arm64' }}
-          # Branch-scoped registry cache: read both branches' caches (layers are near-identical) but write only this branch's
-          # tag, and only when pushing. Branch-scoping lets the weekly matrix build main and develop concurrently without the
-          # two legs overwriting one shared cache.
+          # Read both branches' caches (near-identical layers) but write only this branch's tag, and only when
+          # pushing, so the weekly main+develop matrix legs don't overwrite one shared cache.
           cache-from: |
             type=registry,ref=docker.io/ptr727/projecttemplate:buildcache-main
             type=registry,ref=docker.io/ptr727/projecttemplate:buildcache-develop
