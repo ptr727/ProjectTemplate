@@ -64,13 +64,13 @@ internal sealed class CommandLine
     private static Option<string> CreateApiKeyOption() =>
         new("--apikey", "-a") { Description = "The API key to use (optional).", Required = false };
 
-    // A fixed timestamp keeps generated CodeGen.cs byte-identical across branches to avoid develop->main merge conflicts.
+    // Local-only demo of per-run state; omit for deterministic CI output (the quote alone).
     private static Option<string> CreateRuntimeOption() =>
         new("--runtime", "-r")
         {
             Description =
-                "Override the timestamp embedded in generated content "
-                + "(ISO 8601; defaults to DateTime.UtcNow).",
+                "Embed a timestamp in generated content to demonstrate per-run divergence "
+                + "('now' for current UtcNow, or an ISO 8601 value); omit for deterministic output.",
             Required = false,
         };
 

@@ -43,7 +43,9 @@
                 "--codepath",
                 "${workspaceFolder}/CodeGen",
                 "--apikey",
-                "${env:NINJA_API_KEY}"
+                "${env:NINJA_API_KEY}",
+                "--runtime",
+                "now"
             ],
             "cwd": "${workspaceFolder}/.artifacts/bin/CodeGen/debug",
             "console": "internalConsole",

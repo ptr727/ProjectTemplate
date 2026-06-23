@@ -4,8 +4,11 @@ name: Merge bot pull request action
 # method by base branch (develop = squash, main = merge). App token so the merge fires downstream workflows
 # (GITHUB_TOKEN pushes don't) and so the disable job has write access on read-only Dependabot PRs.
 
+# `pull_request_target` (not `pull_request`): these jobs hold the App private key, so the workflow definition and
+# its action SHAs must resolve from the trusted base branch, not the PR head. Safe because no job checks out PR
+# code - each only runs `gh pr merge` against the PR by URL.
 on:
-  pull_request:
+  pull_request_target:
     types: [opened, reopened, synchronize]
 
 # `cancel-in-progress: false` is required so events process to completion in arrival order: a follow-up

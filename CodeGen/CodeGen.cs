@@ -8,8 +8,7 @@ internal static class CodeGen
 
     internal static void Quote()
     {
-        const string dateTime = "2026-06-23T05:30:24Z";
-        Console.WriteLine($"{dateTime} : {QuoteOfTheDay}");
-        Log.Logger.Information("Quote of the Day: {DateTime} : {Quote}", dateTime, QuoteOfTheDay);
+        Console.WriteLine(QuoteOfTheDay);
+        Log.Logger.Information("Quote of the Day: {Quote}", QuoteOfTheDay);
     }
 }
