@@ -468,6 +468,7 @@ Licensed under the [MIT License][license-link]\
     - `github.event.pull_request.head.repo.full_name == github.repository` - PR is from this repo (not a fork).
     - **Strict head/base pairing** - `(head.ref == 'codegen-main' && base.ref == 'main') || (head.ref == 'codegen-develop' && base.ref == 'develop')`. Codegen runs as a matrix opening one PR per branch; this pairing prevents a misconfigured workflow from sneaking a `codegen-develop` branch into `main` or vice versa.
   - The `disable-auto-merge-on-maintainer-push` job in `merge-bot-pull-request.yml` runs on `synchronize` events against bot-authored PRs (Dependabot or codegen) when the event actor is NOT the same bot - i.e. a maintainer pushed commits. It calls `gh pr merge --disable-auto` so the maintainer's commits don't auto-merge along with the bot's content. Re-enable auto-merge manually (`gh pr merge --auto <PR>` or the GitHub UI) when ready.
+  - `merge-bot-pull-request.yml` triggers on **`pull_request_target`**, not `pull_request`: its jobs mint an App token, so the workflow definition and action SHAs must resolve from the trusted base branch rather than a PR head. This is safe because no job checks out PR code - each only runs `gh pr merge` against the PR by URL.
 
   Codegen targets `main` AND `develop` in parallel (matrix in `run-codegen-pull-request-task.yml`), so generated content lands on both branches independently without any back-merging. See [AGENTS.md "Branching Model"](./AGENTS.md#branching-model) for why this dual-target pattern beats develop-only-with-flow-through.
 

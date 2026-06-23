@@ -7,8 +7,9 @@ on:
     - cron: '0 4 * * *'
 
 concurrency:
-  # A single group per workflow+ref serializes all scheduled/dispatched runs and their internal matrix legs.
-  group: ${{ github.workflow }}-${{ github.ref }}
+  # Workflow-only group (no `-${{ github.ref }}`): the task writes the fixed `codegen-main`/`codegen-develop`
+  # branches regardless of triggering ref, so a dispatch and the scheduled run must not race on them.
+  group: ${{ github.workflow }}
   cancel-in-progress: true
 
 jobs:
