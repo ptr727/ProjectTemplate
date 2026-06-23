@@ -15,23 +15,8 @@ on:
 
 jobs:
 
-  # Capture one UTC timestamp shared by both matrix legs so CodeGen.cs comes out byte-identical and
-  # develop -> main release merges don't conflict on it. (`github.run_started_at` is empty in this context.)
-  get-runtime:
-    name: Capture shared runtime job
-    runs-on: ubuntu-latest
-    outputs:
-      runtime: ${{ steps.runtime.outputs.runtime }}
-    steps:
-      - name: Capture shared runtime step
-        id: runtime
-        run: |
-          set -euo pipefail
-          echo "runtime=$(date -u +%Y-%m-%dT%H:%M:%SZ)" >> "$GITHUB_OUTPUT"
-
   codegen:
     name: Run ${{ matrix.target.ref }} codegen and pull request job
-    needs: [get-runtime]
     runs-on: ubuntu-latest
     permissions:
       contents: write
@@ -68,14 +53,11 @@ jobs:
           token: ${{ steps.app-token.outputs.token }}
 
       - name: Run codegen step
-        # Pass the shared `--runtime` to both legs so they produce byte-identical CodeGen.cs (avoids merge
-        # conflicts on develop -> main).
         run: |
           set -euo pipefail
           dotnet run --project ./CodeGen/CodeGen.csproj -- \
             --codepath ./CodeGen \
-            --apikey "${{ secrets.NINJA_API_KEY }}" \
-            --runtime "${{ needs.get-runtime.outputs.runtime }}"
+            --apikey "${{ secrets.NINJA_API_KEY }}"
 
       - name: Format code step
         run: |
