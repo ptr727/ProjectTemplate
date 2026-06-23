@@ -9,10 +9,9 @@ on:
     # everything (also refreshing the Docker base image).
     - cron: '0 2 * * MON'
 
-# Real publishes (schedule, dispatch, or push with PUBLISH_ON_MERGE) share one global group so they serialize: they
-# push both branches' shared Docker tags/caches and create releases for both regardless of the triggering ref, so a
-# ref-scoped group could let two real publishes run concurrently and double-push. Non-publishing push runs get a
-# unique per-run group so they don't queue behind a real publish; they only run the no-op setup job.
+# Real publishes share one global group so they serialize: they push both branches' shared Docker tags/caches and
+# releases regardless of ref, so a ref-scoped group could double-push. Non-publishing push runs get a unique per-run
+# group so they don't queue behind a real publish.
 concurrency:
   group: ${{ (github.event_name == 'schedule' || github.event_name == 'workflow_dispatch' || vars.PUBLISH_ON_MERGE == 'true') && github.workflow || format('{0}-noop-{1}', github.workflow, github.run_id) }}
   # Queue instead of cancel: cancelling a publish mid-flight can leave a partially pushed multi-arch tag set or a
@@ -38,10 +37,8 @@ jobs:
           PUBLISH_ON_MERGE: ${{ vars.PUBLISH_ON_MERGE }}
         run: |
           set -euo pipefail
-          # A schedule or dispatch builds BOTH branches in the matrix regardless of the triggering ref (a push builds
-          # only the pushed branch). Dispatching on a non-default ref makes the main leg mis-version (NBGV can't resolve
-          # the public main ref), publishing a malformed non-prerelease release that GitHub marks "Latest". Fail fast:
-          # dispatch only from the default branch.
+          # Schedule/dispatch builds both branches regardless of triggering ref. A dispatch on a non-default ref
+          # mis-versions the main leg (NBGV can't resolve the public main ref), so fail fast: dispatch from default only.
           if [[ "${{ github.event_name }}" == "workflow_dispatch" \
                 && "${{ github.ref_name }}" != "${{ github.event.repository.default_branch }}" ]]; then
             echo "::error::Dispatch publish-release from the default branch (${{ github.event.repository.default_branch }}); the matrix builds both branches. Re-dispatch on the default branch."
@@ -103,9 +100,8 @@ jobs:
     environment:
       name: pypi
       url: https://pypi.org/project/ptr727-projecttemplate-library/
-    # A permissions block collapses every unlisted scope to none. This job needs id-token:write for Trusted Publishing's
-    # OIDC token exchange, contents:read for repo metadata, and actions:read so download-artifact can fetch the build
-    # artifact from earlier in this run.
+    # id-token:write for Trusted Publishing's OIDC exchange, contents:read for repo metadata, actions:read so
+    # download-artifact can fetch this run's build artifact.
     permissions:
       id-token: write
       contents: read
