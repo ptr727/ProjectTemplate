@@ -130,7 +130,7 @@ The repo runs a review loop on every PR: local agent iteration plus remote autom
 
 1. Required status checks are green (`mergeStateStatus: CLEAN`), **and**
 2. A Copilot review is confirmed on the **current head SHA** (not an earlier push), **and**
-3. **Zero** open or unresolved Copilot review threads remain on that head SHA, **and**
+3. **Every** Copilot finding on that head SHA is closed out - all review threads resolved, **and** any issue-level Copilot comments (which have no resolve action) triaged and replied to - so zero outstanding findings remain, **and**
 4. The maintainer has given **explicit** permission to merge.
 
 `mergeStateStatus: CLEAN` reflects **only** required statuses - it never reflects open bot review comments, so `CLEAN` alone is **never** sufficient to merge. A green/`CLEAN` PR with an unresolved Copilot finding fails this gate; treat it as "not mergeable" no matter what the merge-state field says. The agent never merges on its own (consistent with "default to staging"; merging is maintainer-authorized).
