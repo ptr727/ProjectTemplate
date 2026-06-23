@@ -80,7 +80,7 @@ jobs:
         run: uv run pytest
 
       # PEP 440 version: develop -> M.N.P.B.dev0 (prerelease), else M.N.P.B. The NBGV git height sits in the release
-      # segment, so develop's normally exceeds main's and `pip install --pre` picks the dev build; non-develop never publishes.
+      # segment, so develop's normally exceeds main's and `pip install --pre` picks the dev build over the main release.
       - name: Compute PyPI version step
         id: pypiver
         run: |
