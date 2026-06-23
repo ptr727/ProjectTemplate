@@ -135,6 +135,8 @@ The repo runs a review loop on every PR: local agent iteration plus remote autom
 
 `mergeStateStatus: CLEAN` reflects **only** required statuses - it never reflects open bot review comments, so `CLEAN` alone is **never** sufficient to merge. A green/`CLEAN` PR with an unresolved Copilot finding fails this gate; treat it as "not mergeable" no matter what the merge-state field says. The agent never merges on its own (consistent with "default to staging"; merging is maintainer-authorized).
 
+**Merging is not releasing.** A merge to `main` does **not** publish - by default `PUBLISH_ON_MERGE` is off, so the push only smoke-runs the publisher's no-op job. Publishing happens solely on the weekly schedule or a manual `workflow_dispatch` (see [Release Model](#release-model)). Never describe a merge as cutting a release, and never trigger a publish without explicit maintainer instruction.
+
 ### Expected Review Loop
 
 1. Push changes to the PR branch.
