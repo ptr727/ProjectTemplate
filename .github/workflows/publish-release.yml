@@ -144,7 +144,6 @@ jobs:
       contents: read
     with:
       ref: main
-      repositories: '["ptr727/projecttemplate"]'
 
   # Release artifacts are an intra-run handoff (durable copies live on the GitHub release), so leaving them accumulates
   # against the small account-wide storage quota; delete them once every consumer has read them.
