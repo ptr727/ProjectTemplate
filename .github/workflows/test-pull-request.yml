@@ -152,11 +152,12 @@ jobs:
       actions: write
     steps:
       - name: Delete workflow artifacts step
+        # Best-effort housekeeping: continue-on-error guarantees a failure here (even an unexpected one) never reds the
+        # run; the in-script guards still log warnings and delete as many artifacts as possible.
+        continue-on-error: true
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          # Best-effort housekeeping: a failed list or delete logs a warning and continues so it never reds the run,
-          # while `set -e` still catches unexpected failures.
           set -euo pipefail
           if ! ids=$(gh api repos/${{ github.repository }}/actions/runs/${{ github.run_id }}/artifacts --paginate \
             --jq '.artifacts[].id'); then
