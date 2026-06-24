@@ -37,6 +37,7 @@ on:
         type: string
         default: ''
       # Optional same-run workflow artifact to download before the transform (e.g. version includes the m4 render needs).
+      # Using this requires the caller to grant `permissions: actions: read` so download-artifact can read the run's artifacts.
       transform-artifact:
         required: false
         type: string
