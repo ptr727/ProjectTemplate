@@ -9,3 +9,7 @@
 # git enforces LF on checkout and `--renormalize`. A repo shipping extensionless scripts adds an explicit path rule,
 # e.g. for s6-overlay init: `Docker/s6-overlay/** text eol=lf`.
 *.sh text eol=lf
+
+# Dockerfiles must be LF - a CRLF breaks RUN heredocs and line continuations.
+Dockerfile text eol=lf
+*.Dockerfile text eol=lf
