@@ -277,9 +277,18 @@ When the template changes one of these, re-sync the derived repo from the new ve
 
 ### Staying in Sync and Reporting Drift Upstream
 
-A derived repo is expected to **re-sync against the template periodically**, not just at creation: pull the current version of each verbatim-carry artifact above and re-apply it (adapting only the noted placeholders). For [`CODESTYLE.md`](./CODESTYLE.md), re-sync the whole file from the template and then drop the language section(s) you don't ship (always keeping the General section) - replacing the file wholesale and trimming whole sections is simpler to keep current than hand-editing per-language snippets.
+A derived repo is expected to **re-sync against the template periodically**, not just at creation: pull the current version of each verbatim-carry artifact above and re-apply it by **full replacement** - replace the whole file or carried section, never reconcile a partial hand-merge - adapting only the noted placeholders. For [`CODESTYLE.md`](./CODESTYLE.md), re-sync the whole file from the template and then drop the language section(s) you don't ship (always keeping the General section) - replacing the file wholesale and trimming whole sections is simpler to keep current than hand-editing per-language snippets. Re-syncing is **not** an occasion to add or grow comments: the carried text is authoritative as-is (see [Comments](#comments)).
 
 **Drift flows back upstream as an issue, not a private fix.** When porting or re-syncing, if you find a discrepancy that should be fixed in the **template itself** - a gap, an outdated instruction, a missing rule, something that bit this repo and would bite the next derived repo too - **open an issue in [`ptr727/ProjectTemplate`](https://github.com/ptr727/ProjectTemplate)** describing it, rather than only patching it locally. A local fix realigns *this* repo; an upstream issue (then fix) corrects it *for every future derived repo* and keeps the template the single source of truth. This is exactly how the current review-loop / lint-config / brownfield-migration gaps were surfaced.
+
+#### Orchestrated Re-Sync: Hub and Downstream Personas
+
+When one operator re-syncs the whole fleet from the hub (every derived repo checked out on one machine), the work splits into two personas with separated duties. This playbook lives **here, committed**, because per-machine agent memory does not survive a machine switch.
+
+- **Hub / orchestrator** (acting in this template repo): owns the source of truth and *drives* consolidation. It directs each downstream sync, then **validates the result against the template** - confirming carried artifacts were **fully replaced, not partially hand-merged**, that **no comments were added or grown** (see [Comments](#comments)), and that line endings and lint match spec. It collects the template gaps the syncs surface, fixes them in the template through the normal review gate, has affected downstreams re-pull, and **never merges without the maintainer's OK**.
+- **Downstream / derived** (acting in a derived repo): performs the local re-sync **under the orchestrator's direction** - **full-replace** each carried artifact, **honor the [Comments](#comments) rules** (no new prose, no growth), and **report any template gap upstream** rather than patching the template's intent locally.
+
+This guards the two recurring downstream regressions: *partial* updates where carry means full replacement, and comment accretion against the comment rules. The orchestrator catches both by diffing every result against the template.
 
 #### Known Downstream Projects
 
