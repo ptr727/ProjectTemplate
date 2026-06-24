@@ -152,8 +152,7 @@ jobs:
       actions: write
     steps:
       - name: Delete workflow artifacts step
-        # Best-effort housekeeping: continue-on-error guarantees a failure here (even an unexpected one) never reds the
-        # run; the in-script guards still log warnings and delete as many artifacts as possible.
+        # continue-on-error: best-effort housekeeping must never red the run, even on an unexpected failure.
         continue-on-error: true
         env:
           GH_TOKEN: ${{ github.token }}
