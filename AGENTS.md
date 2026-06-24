@@ -283,7 +283,7 @@ A derived repo is expected to **re-sync against the template periodically**, not
 
 #### Orchestrated Re-Sync: Hub and Downstream Personas
 
-When one operator re-syncs the whole fleet from the hub (every derived repo checked out on one machine), the work splits into two personas with separated duties. This playbook lives **here, committed**, because per-machine agent memory does not survive a machine switch.
+When one operator re-syncs the whole fleet from the hub (every derived repo checked out on one machine), the work splits into two personas with separate duties. This playbook lives **here, committed**, because per-machine agent memory does not survive a machine switch.
 
 - **Hub / orchestrator** (acting in this template repo): owns the source of truth and *drives* consolidation. It directs each downstream sync, then **validates the result against the template** - confirming carried artifacts were **fully replaced, not partially hand-merged**, that **no comments were added or grown** (see [Comments](#comments)), and that line endings and lint match spec. It collects the template gaps the syncs surface, fixes them in the template through the normal review gate, has affected downstreams re-pull, and **never merges without the maintainer's OK**.
 - **Downstream / derived** (acting in a derived repo): performs the local re-sync **under the orchestrator's direction** - **full-replace** each carried artifact, **honor the [Comments](#comments) rules** (no new prose, no growth), and **report any template gap upstream** rather than patching the template's intent locally.
