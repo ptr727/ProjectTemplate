@@ -38,7 +38,7 @@ These apply repo-wide, in every directory:
 
 ## .NET
 
-*This section applies only to the .NET side. A repo with no .NET projects drops the whole section.*
+*This section applies only to the .NET side. A repo with no .NET projects still carries it (the file is carried whole) and ignores it.*
 
 This is the style guide for the **.NET projects** in this repo.
 
@@ -347,7 +347,7 @@ Follow the scope hierarchy in [Analyzer Diagnostics and Suppressions](#analyzer-
 
 ## Python
 
-*This section applies only to the Python side. A repo with no Python projects drops the whole section.*
+*This section applies only to the Python side. A repo with no Python projects still carries it (the file is carried whole) and ignores it.*
 
 This is the style guide for the **Python project** in this repo.
 

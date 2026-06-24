@@ -1,6 +1,6 @@
 # Instructions for AI Coding Agents
 
-**ProjectTemplate** is a polyglot template repo. The .NET side ships under [`NuGetLibrary/`](./NuGetLibrary/) (plus `Console/`, `Tests/`, `Benchmarks/`, `CodeGen/`); the Python side ships under [`PyPiLibrary/`](./PyPiLibrary/). This file is the single source of truth for cross-cutting rules. Code style lives in [`CODESTYLE.md`](./CODESTYLE.md) at the repo root - one guide with a General section that applies to every language plus droppable per-language sections (.NET, Python).
+**ProjectTemplate** is a polyglot template repo. The .NET side ships under [`NuGetLibrary/`](./NuGetLibrary/) (plus `Console/`, `Tests/`, `Benchmarks/`, `CodeGen/`); the Python side ships under [`PyPiLibrary/`](./PyPiLibrary/). This file is the single source of truth for cross-cutting rules. Code style lives in [`CODESTYLE.md`](./CODESTYLE.md) at the repo root - one guide with a General section that applies to every language plus per-language sections (.NET, Python); the file is carried whole and a repo reads only the sections for the languages it ships.
 
 Treat this file as authoritative for everything else; don't restate its rules elsewhere. A derived repo's **project-specific conventions and public-API/behavioral contracts** (e.g. a "Library API Conventions" section) also live here, **not** in [`.github/copilot-instructions.md`](./.github/copilot-instructions.md) - that file targets GitHub Copilot / VS Code specifically, while this file is the agent-agnostic one every coding agent is directed to read, so any rule a reviewer must honor has to live here to be provider-independent.
 
@@ -252,7 +252,7 @@ When you touch code in either language, also respect that language's style guide
 ## Quick Start for Derived Projects
 
 1. **Clone this template** as the baseline for your project.
-2. **Decide** which language sides you need. If you need only one, delete the other folder and its references - drop that language's section in [CODESTYLE.md](./CODESTYLE.md) and follow its "Adopting Without ..." deletion checklist.
+2. **Decide** which language sides you need. If you need only one, delete the other language's folder and its build/release wiring; keep [CODESTYLE.md](./CODESTYLE.md) **whole** (carry the file in full per [Files and Sections Derived Repos Must Carry Verbatim](#files-and-sections-derived-repos-must-carry-verbatim)) and simply ignore the unused language's section.
 3. **Read** [CODESTYLE.md](./CODESTYLE.md) - the General section plus the section(s) for the language(s) you keep (.NET, Python).
 4. **Carry the mandatory shared files and sections verbatim** - do not re-invent them per repo. See [Files and Sections Derived Repos Must Carry Verbatim](#files-and-sections-derived-repos-must-carry-verbatim) for the exact list (review-loop contract + runbook, lint config, line-ending governance) and what to adapt.
 5. **Update project-specific values** - `PackageId`/`RootNamespace` in `.csproj`, `name` in `pyproject.toml`, namespace conventions, `README.md`, `HISTORY.md`, `version.json`, `LICENSE`, NuGet/PyPI badge URLs.
