@@ -42,12 +42,12 @@ jobs:
       # No NuGet restore caching: restore is cheap here, and setup-dotnet's cache needs a packages.lock.json that
       # Central Package Management doesn't produce by default.
       - name: Setup .NET SDK step
-        uses: actions/setup-dotnet@c2fa09f4bde5ebb9d1777cf28262a3eb3db3ced7 # v5.2.0
+        uses: actions/setup-dotnet@9a946fdbd5fb07b82b2f5a4466058b876ab72bb2 # v5.3.0
         with:
           dotnet-version: 10.x
 
       - name: Checkout code step
-        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
         with:
           ref: ${{ inputs.ref }}
 
@@ -68,7 +68,7 @@ jobs:
       # job is `!smoke`, so the per-runtime output would have no consumer.
       - name: Upload matrix build artifacts step
         if: ${{ !inputs.smoke }}
-        uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6.0.0
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: publish-${{ inputs.branch }}-${{ matrix.runtime }}
           path: ${{ runner.temp }}/publish
@@ -86,7 +86,7 @@ jobs:
     steps:
 
       - name: Download matrix build artifacts step
-        uses: actions/download-artifact@37930b1c2abaa49bbe596cd826c3c89aef350131 # v7.0.0
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
         with:
           pattern: publish-${{ inputs.branch }}-*
           merge-multiple: true
@@ -98,7 +98,7 @@ jobs:
       # GitHub-release asset, uploaded under the `release-asset-<branch>-*` pattern that the `github-release` job
       # collects. Branch-suffixed so the publisher can build both branches in one run without colliding on the name.
       - name: Upload build artifacts step
-        uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6.0.0
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: release-asset-${{ inputs.branch }}-executable
           path: ${{ runner.temp }}/Console.7z
