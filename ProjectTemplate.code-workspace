@@ -1,9 +1,9 @@
 {
     "folders": [
-        {
-            "path": "."
-        }
-    ],
+		{
+			"path": "."
+		}
+	],
     "settings": {
         "cSpell.words": [
             "accessibilities",
@@ -51,7 +51,6 @@
             "Pieter",
             "postCreateCommand",
             "ProjectTemplate",
-            "purpleair",
             "pypi",
             "pypilibrary",
             "pyproject",
@@ -94,20 +93,30 @@
             "editor.formatOnSave": true,
             "editor.defaultFormatter": "csharpier.csharpier-vscode"
         },
+        "[python]": {
+            "editor.formatOnSave": true,
+            "editor.defaultFormatter": "charliermarsh.ruff",
+            "editor.codeActionsOnSave": {
+                "source.organizeImports": "explicit"
+            }
+        },
+        "python.terminal.activateEnvironment": false,
         "git.alwaysSignOff": true,
         "markdown.extension.toc.levels": "2..3"
     },
     "extensions": {
         "recommendations": [
+            "charliermarsh.ruff",
             "csharpier.csharpier-vscode",
             "davidanson.vscode-markdownlint",
             "editorconfig.editorconfig",
+            "fanaticpythoner.better-todo-tree",
             "github.vscode-github-actions",
             "ms-azuretools.vscode-docker",
             "ms-dotnettools.csdevkit",
+            "ms-python.python",
             "streetsidesoftware.code-spell-checker",
-            "yzhang.markdown-all-in-one",
-            "fanaticpythoner.better-todo-tree"
+            "yzhang.markdown-all-in-one"
         ]
     }
 }
