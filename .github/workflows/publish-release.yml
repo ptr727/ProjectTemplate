@@ -123,35 +123,27 @@ jobs:
           # Skip rather than fail when the version already exists; the weekly republish re-uploads unchanged versions.
           skip-existing: true
 
+  # Caller-gated to main: the badge and Docker Hub overview have no per-branch context, so they update only when main
+  # is among the published branches (a develop-only push skips them). One invocation, not a per-branch matrix leg.
   date-badge:
     name: Create BYOB date badge job
     needs: [setup, publish]
-    if: ${{ needs.setup.outputs.publish == 'true' }}
-    strategy:
-      matrix:
-        branch: ${{ fromJSON(needs.setup.outputs.branches) }}
+    if: ${{ needs.setup.outputs.publish == 'true' && contains(fromJSON(needs.setup.outputs.branches), 'main') }}
     uses: ./.github/workflows/build-datebadge-task.yml
     secrets: inherit
     permissions:
       contents: write
-    with:
-      # The badge task self-gates to main; the develop leg is a no-op.
-      branch: ${{ matrix.branch }}
 
   docker-readme:
     name: Publish Docker Hub readme job
     needs: [setup, publish]
-    if: ${{ needs.setup.outputs.publish == 'true' }}
-    strategy:
-      matrix:
-        branch: ${{ fromJSON(needs.setup.outputs.branches) }}
+    if: ${{ needs.setup.outputs.publish == 'true' && contains(fromJSON(needs.setup.outputs.branches), 'main') }}
     uses: ./.github/workflows/publish-docker-readme-task.yml
     secrets: inherit
     permissions:
       contents: read
     with:
-      # The task self-gates to main; the develop leg is a no-op.
-      branch: ${{ matrix.branch }}
+      ref: main
 
   # Release artifacts are an intra-run handoff (durable copies live on the GitHub release), so leaving them accumulates
   # against the small account-wide storage quota; delete them once every consumer has read them.
