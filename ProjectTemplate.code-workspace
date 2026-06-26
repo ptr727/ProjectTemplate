@@ -1,9 +1,9 @@
 {
     "folders": [
-		{
-			"path": "."
-		}
-	],
+        {
+            "path": "."
+        }
+    ],
     "settings": {
         "cSpell.words": [
             "accessibilities",
@@ -15,6 +15,7 @@
             "buildtransitive",
             "Buildx",
             "codegen",
+            "commitish",
             "contentfiles",
             "csdevkit",
             "datebadge",
@@ -22,24 +23,32 @@
             "debuglevel",
             "devcontainer",
             "distros",
+            "dockerbuild",
+            "Dockerfiles",
             "dockerhub",
             "dorny",
             "dotnettools",
+            "downstreams",
             "dryrun",
             "Emby",
             "envsubst",
+            "extensionless",
             "finalizers",
+            "Genericize",
             "gpgsign",
             "gruntfuggly",
             "HACS",
             "hatchling",
+            "heredocs",
             "homeassistant",
             "Jellyfin",
             "Keychain",
+            "kicad",
             "lastbuild",
             "libsecret",
             "LINQ",
             "logfile",
+            "mktemp",
             "nameof",
             "nbgv",
             "nektos",
@@ -47,25 +56,32 @@
             "noninteractive",
             "nugetlibrary",
             "onCreateCommand",
+            "Optix",
             "othercommand",
             "Pieter",
+            "pipefail",
             "postCreateCommand",
             "ProjectTemplate",
+            "purpleair",
             "pypi",
             "pypilibrary",
             "pyproject",
             "pyright",
             "quoteoftheday",
             "resharper",
+            "rhysd",
             "Rubba",
             "ruff",
             "Serilog",
             "settingsfile",
+            "shellcheck",
             "signingkey",
             "slnx",
             "snupkg",
             "softprops",
             "somecommand",
+            "subsetting",
+            "Triaging",
             "tzdata",
             "unvalidated",
             "venv",
@@ -116,7 +132,9 @@
             "ms-dotnettools.csdevkit",
             "ms-python.python",
             "streetsidesoftware.code-spell-checker",
-            "yzhang.markdown-all-in-one"
+            "yzhang.markdown-all-in-one",
+            "timonwong.shellcheck",
+            "arahata.linter-actionlint"
         ]
     }
 }

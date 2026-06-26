@@ -282,9 +282,25 @@ These artifacts are the template's cross-cutting contract. A derived repo must c
 
 When the template changes one of these, re-sync the derived repo from the new version (see below).
 
+The branch rulesets ([`.github/rulesets/{develop,main}.json`](./.github/rulesets/)) are deliberately **not** in this carry set: they are live GitHub config, not a file a derived repo consumes, so carrying and re-syncing them downstream only adds noise. They are maintained **in this template** as the source of truth and are reconciled against each repo's *live* config during porting/re-sync - see [Staying in Sync](#staying-in-sync-and-reporting-drift-upstream).
+
 ### Staying in Sync and Reporting Drift Upstream
 
 A derived repo is expected to **re-sync against the template periodically**, not just at creation: pull the current version of each verbatim-carry artifact above and re-apply it by **full replacement** - replace the whole file or carried section, never reconcile a partial hand-merge - adapting only the noted placeholders. For [`CODESTYLE.md`](./CODESTYLE.md) and [`.editorconfig`](./.editorconfig), re-sync the **whole file** from the template - every section, including languages the repo doesn't ship (inert sections cost nothing) - so re-sync stays a clean overwrite, never a per-section merge. Re-syncing is **not** an occasion to add or grow comments: the carried text is authoritative as-is (see [Comments](#comments)).
+
+**Rulesets are reconciled live, not carried as files.** The branch rulesets are maintained **in this template** as [`.github/rulesets/{develop,main}.json`](./.github/rulesets/) - they are live GitHub config, not a file a derived repo consumes, so they are **not** carried and re-synced downstream as a per-repo copy. Instead they ride the re-sync loop from the hub: working from the template checkout, diff each derived repo's *live* rulesets against the template's committed JSON and correct any drift with a **full-payload PUT** (GET -> change -> PUT the whole object; partial PUTs `422`, per [README "Rules / Rulesets"](./README.md#rules--rulesets)). The diff catches drift either way - a corrected template ruleset a derived repo never picked up, or a live ruleset hand-edited away from the committed intent (`strict` re-enabled, a rule dropped, a merge method changed):
+
+```sh
+# Sort the order-insensitive rules[] / bypass_actors[] before diffing - GitHub returns
+# them unordered, so a reordered-but-equivalent ruleset must not read as drift.
+norm='{name,target,enforcement,bypass_actors,conditions,rules} | .rules|=sort_by(.type) | .bypass_actors|=sort_by(.actor_id)'
+for b in develop main; do
+  id=$(gh api "repos/<owner>/<repo>/rulesets" --jq ".[]|select(.name==\"$b\").id")
+  diff <(jq -S "$norm" ".github/rulesets/$b.json") \
+       <(gh api "repos/<owner>/<repo>/rulesets/$id" --jq '{name,target,enforcement,bypass_actors,conditions,rules}' | jq -S "$norm") \
+    && echo "$b: in sync" || echo "$b: DRIFT (see diff)"
+done
+```
 
 **Drift flows back upstream as an issue, not a private fix.** When porting or re-syncing, if you find a discrepancy that should be fixed in the **template itself** - a gap, an outdated instruction, a missing rule, something that bit this repo and would bite the next derived repo too - **open an issue in [`ptr727/ProjectTemplate`](https://github.com/ptr727/ProjectTemplate)** describing it, rather than only patching it locally. A local fix realigns *this* repo; an upstream issue (then fix) corrects it *for every future derived repo* and keeps the template the single source of truth. This is exactly how the current review-loop / lint-config / brownfield-migration gaps were surfaced.
 
