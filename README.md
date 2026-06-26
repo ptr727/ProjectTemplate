@@ -487,7 +487,7 @@ Licensed under the [MIT License][license-link]\
     - `Always suggest updating pull request branches`
     - `Allow auto-merge`
 - Rules / Rulesets - **separate rulesets per branch**. Develop and main intentionally diverge on two rules - allowed merge methods and `Require linear history`. `Require branches to be up to date before merging` is **off on both** for related-but-distinct reasons (below); everything else is shared.
-  - **Configure these by exporting the template's rulesets and re-importing them - do not hand-build the rules.** The result must be **exactly two rulesets named `develop` and `main`** (the names are load-bearing: `AGENTS.md` and these docs reference them). Reconstructing each rule by hand is the step that has gone wrong on past ports.
+  - **Configure these by importing the committed ruleset JSON (`.github/rulesets/develop.json`, `.github/rulesets/main.json`) - do not hand-build the rules.** Those files are the versioned, PR-gated source of truth (carried into every derived repo, see [AGENTS.md "Staying in Sync"](./AGENTS.md#staying-in-sync-and-reporting-drift-upstream)); the result must be **exactly two rulesets named `develop` and `main`** (the names are load-bearing: `AGENTS.md` and these docs reference them). Reconstructing each rule by hand is the step that has gone wrong on past ports.
     - **Step 0 - remove ALL legacy protection first.** Delete **every** classic branch-protection rule (Settings -> Branches) and **every** pre-existing or stray **ruleset** (Settings -> Rules -> Rulesets) - not just some - so enforcement isn't doubled or contradicted. This template uses rulesets *only*, configured exclusively by the JSON export/import in Steps 1-2 below; never hand-build the rules in the UI. Partial cleanup (leaving a stray ruleset or a classic rule behind) is what has gone wrong on past ports. Equivalent API:
 
       ```sh
@@ -498,21 +498,22 @@ Licensed under the [MIT License][license-link]\
       # gh api -X DELETE "repos/<owner>/<repo>/rulesets/<id>"
       ```
 
-    - **Step 1 - export the template's two rulesets**, keeping only the re-importable fields (the GET response also carries `id`, timestamps, `_links`, `source`, etc. that a create call rejects):
+    - **Step 1 - the canonical rulesets are the committed files** `.github/rulesets/{develop,main}.json`, each holding only the re-importable writable subset (`{name, target, enforcement, bypass_actors, conditions, rules}` - the live GET response also carries `id`, timestamps, `_links`, `source`, etc. that a create call rejects). They port verbatim with no placeholders (`conditions` key on `refs/heads/develop`|`refs/heads/main`, `bypass_actors` uses the global Admin role `actor_id: 5`, the required check binds by name), so import them as-is - no per-repo edits. **To change a ruleset, edit the live template rulesets, then regenerate the committed files from them** (this export is the source-of-truth refresh, run in the template repo and committed via PR - never the per-port export it replaces):
 
       ```sh
       for name in develop main; do
         id=$(gh api repos/ptr727/ProjectTemplate/rulesets --jq ".[] | select(.name==\"$name\") | .id")
         gh api "repos/ptr727/ProjectTemplate/rulesets/$id" \
-          --jq '{name, target, enforcement, bypass_actors, conditions, rules}' > "$name-ruleset.json"
+          --jq '{name, target, enforcement, bypass_actors, conditions, rules}' \
+          | jq -S '.' > ".github/rulesets/$name.json"
       done
       ```
 
-    - **Step 2 - import into the new repo:**
+    - **Step 2 - import into the new repo from the committed files:**
 
       ```sh
-      for name in develop main; do
-        gh api -X POST "repos/<owner>/<repo>/rulesets" --input "$name-ruleset.json"
+      for b in develop main; do
+        gh api -X POST "repos/<owner>/<repo>/rulesets" --input ".github/rulesets/$b.json"
       done
       ```
 
@@ -632,6 +633,9 @@ Template improvements identified but deferred until a real project needs them, s
 
 - **Factor the unit-test job out of `test-pull-request.yml` into a `test-*-task.yml`** so the entry-point file is target-agnostic. Trigger: a non-.NET repo that wants the aggregator without hand-deleting the `unit-test` job.
 - **Per-language / per-project-type test scaffolds** (a Python test task, a Docker smoke/health-check test, etc.), added as each language or project type is actually exercised downstream. Trigger: the first repo that ships that language/type and needs CI coverage for it.
+- **Factor the `cleanup-artifacts` job into a reusable workflow** so the run-artifact-deletion housekeeping lives in one place instead of being copy-pasted into each entry-point workflow (currently duplicated in `test-pull-request.yml` and `publish-release.yml`). Trigger: a third workflow needs the same cleanup, or the duplicated copies drift. Ref [ptr727/ESPHome-NonRoot#82](https://github.com/ptr727/ESPHome-NonRoot/pull/82#discussion_r3471767650).
+- **Resync the `publish-docker-readme-task.yml` "Validate inputs step" downstream** so derived repos pick up the input-contract guard (mutually-exclusive `repositories` vs `manifest`, paired `manifest` + `manifest-jq`). Trigger: the next orchestrated template re-sync, or a derived repo that hits a silent fall-through from a half-filled manifest pair.
+- **Generalize the input-validation step into a reusable pattern** applied wherever a reusable workflow consumes a free-form input that fails late and cryptically (e.g. a `repositories` string later fed to `fromJSON(...)` errors deep in matrix expansion, not at the call site). Validate-and-fail-early with a clear message — same shape as the `publish-docker-readme-task.yml` "Validate inputs step" — so callers get an actionable error. Trigger: the next reusable workflow with a parse-or-die input, or a derived repo that hits a hard-to-diagnose `fromJSON`/matrix failure. Ref [ptr727/NxWitness#448](https://github.com/ptr727/NxWitness/pull/448#discussion_r3471769663).
 
 <!--- Shields links (alphabetized per AGENTS.md) --->
 
