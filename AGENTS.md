@@ -289,10 +289,13 @@ A derived repo is expected to **re-sync against the template periodically**, not
 **Rulesets need a live-config step beyond the file carry.** The carried [`.github/rulesets/{develop,main}.json`](./.github/rulesets/) are the source of truth, but a derived repo's *live* GitHub rulesets only change when re-imported or PUT - so after re-syncing the files, diff them against live config and correct any drift with a **full-payload PUT** (GET -> change -> PUT the whole object; partial PUTs `422`, per [README "Rules / Rulesets"](./README.md#rules--rulesets)). The diff also catches drift the other way - a live ruleset that was hand-edited away from the committed intent (e.g. `strict` re-enabled, a rule dropped, a merge method changed):
 
 ```sh
+# Sort the order-insensitive rules[] / bypass_actors[] before diffing - GitHub returns
+# them unordered, so a reordered-but-equivalent ruleset must not read as drift.
+norm='{name,target,enforcement,bypass_actors,conditions,rules} | .rules|=sort_by(.type) | .bypass_actors|=sort_by(.actor_id)'
 for b in develop main; do
   id=$(gh api "repos/<owner>/<repo>/rulesets" --jq ".[]|select(.name==\"$b\").id")
-  diff <(jq -S '{name,target,enforcement,bypass_actors,conditions,rules}' ".github/rulesets/$b.json") \
-       <(gh api "repos/<owner>/<repo>/rulesets/$id" --jq '{name,target,enforcement,bypass_actors,conditions,rules}' | jq -S '.') \
+  diff <(jq -S "$norm" ".github/rulesets/$b.json") \
+       <(gh api "repos/<owner>/<repo>/rulesets/$id" --jq '{name,target,enforcement,bypass_actors,conditions,rules}' | jq -S "$norm") \
     && echo "$b: in sync" || echo "$b: DRIFT (see diff)"
 done
 ```
