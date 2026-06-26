@@ -129,16 +129,22 @@ jobs:
       # delete it by exact name to free the storage quota. A failure before this leaves it for the retention-days: 1
       # backstop.
       - name: Delete consumed PyPI build artifact step
+        # Best-effort: PyPI is already published, so a listing/delete hiccup must never red the job; the
+        # retention-days: 1 backstop reaps anything missed. Deletes every matching id (a rerun can upload duplicates).
+        continue-on-error: true
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
           set -euo pipefail
-          id=$(gh api "repos/$GITHUB_REPOSITORY/actions/runs/${{ github.run_id }}/artifacts" --paginate \
-            --jq ".artifacts[] | select(.name == \"pypilibrary-build-${{ matrix.branch }}\") | .id")
-          if [[ -n "$id" ]]; then
+          if ! ids=$(gh api "repos/$GITHUB_REPOSITORY/actions/runs/${{ github.run_id }}/artifacts" --paginate \
+            --jq ".artifacts[] | select(.name == \"pypilibrary-build-${{ matrix.branch }}\") | .id"); then
+            echo "::warning::Could not list run artifacts; retention-days backstop will reap them."
+            ids=""
+          fi
+          for id in $ids; do
             gh api --method DELETE "repos/$GITHUB_REPOSITORY/actions/artifacts/$id" \
               || echo "::warning::Failed to delete artifact $id; retention-days backstop will reap it."
-          fi
+          done
 
   # Caller-gated to main: the badge and Docker Hub overview have no per-branch context, so they update only when main
   # is among the published branches (a develop-only push skips them). One invocation, not a per-branch matrix leg.
