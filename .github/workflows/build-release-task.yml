@@ -208,3 +208,20 @@ jobs:
             LICENSE
             README.md
             ./Publish/*
+
+      # Surgical cleanup at the point of consumption: the release-asset-<branch>-* transfer artifacts now have durable
+      # copies on the release, so delete them by exact pattern to free the storage quota - scoped to this branch's
+      # assets, leaving diagnostics and any other artifacts. A job that fails before this leaves its artifacts for the
+      # retention-days: 1 backstop. Needs the caller to grant `actions: write` (publish-release's publish job does).
+      - name: Delete consumed release asset artifacts step
+        if: ${{ inputs.expect_release_assets }}
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          ids=$(gh api "repos/$GITHUB_REPOSITORY/actions/runs/${{ github.run_id }}/artifacts" --paginate \
+            --jq ".artifacts[] | select(.name | startswith(\"release-asset-${{ inputs.branch }}-\")) | .id")
+          for id in $ids; do
+            gh api --method DELETE "repos/$GITHUB_REPOSITORY/actions/artifacts/$id" \
+              || echo "::warning::Failed to delete artifact $id; retention-days backstop will reap it."
+          done

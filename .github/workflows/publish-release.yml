@@ -77,6 +77,8 @@ jobs:
     secrets: inherit
     permissions:
       contents: write
+      # actions:write lets the github-release job delete the release-asset-* artifacts it consumes (surgical cleanup).
+      actions: write
     with:
       ref: ${{ matrix.branch }}
       branch: ${{ matrix.branch }}
@@ -100,12 +102,12 @@ jobs:
     environment:
       name: pypi
       url: https://pypi.org/project/ptr727-projecttemplate-library/
-    # id-token:write for Trusted Publishing's OIDC exchange, contents:read for repo metadata, actions:read so
-    # download-artifact can fetch this run's build artifact.
+    # id-token:write for Trusted Publishing's OIDC exchange, contents:read for repo metadata, actions:write so
+    # download-artifact can fetch this run's build artifact and the surgical cleanup step can delete it afterwards.
     permissions:
       id-token: write
       contents: read
-      actions: read
+      actions: write
 
     steps:
 
@@ -122,6 +124,21 @@ jobs:
           packages-dir: ./dist
           # Skip rather than fail when the version already exists; the weekly republish re-uploads unchanged versions.
           skip-existing: true
+
+      # Surgical cleanup at the point of consumption: the pypilibrary-build-<branch> artifact has been published, so
+      # delete it by exact name to free the storage quota. A failure before this leaves it for the retention-days: 1
+      # backstop.
+      - name: Delete consumed PyPI build artifact step
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          id=$(gh api "repos/$GITHUB_REPOSITORY/actions/runs/${{ github.run_id }}/artifacts" --paginate \
+            --jq ".artifacts[] | select(.name == \"pypilibrary-build-${{ matrix.branch }}\") | .id")
+          if [[ -n "$id" ]]; then
+            gh api --method DELETE "repos/$GITHUB_REPOSITORY/actions/artifacts/$id" \
+              || echo "::warning::Failed to delete artifact $id; retention-days backstop will reap it."
+          fi
 
   # Caller-gated to main: the badge and Docker Hub overview have no per-branch context, so they update only when main
   # is among the published branches (a develop-only push skips them). One invocation, not a per-branch matrix leg.
@@ -144,30 +161,3 @@ jobs:
       contents: read
     with:
       ref: main
-
-  # Release artifacts are an intra-run handoff (durable copies live on the GitHub release), so leaving them accumulates
-  # against the small account-wide storage quota; delete them once every consumer has read them.
-  cleanup-artifacts:
-    name: Delete workflow artifacts job
-    needs: [setup, publish, publish-pypi, date-badge, docker-readme]
-    if: ${{ always() && needs.setup.outputs.publish == 'true' }}
-    runs-on: ubuntu-latest
-    permissions:
-      actions: write
-    steps:
-      - name: Delete workflow artifacts step
-        # continue-on-error: best-effort housekeeping must never red the run, even on an unexpected failure.
-        continue-on-error: true
-        env:
-          GH_TOKEN: ${{ github.token }}
-        run: |
-          set -euo pipefail
-          if ! ids=$(gh api repos/${{ github.repository }}/actions/runs/${{ github.run_id }}/artifacts --paginate \
-            --jq '.artifacts[].id'); then
-            echo "::warning::Could not list run artifacts; skipping cleanup (storage may not be freed)."
-            ids=""
-          fi
-          for artifact_id in $ids; do
-            gh api --method DELETE "repos/${{ github.repository }}/actions/artifacts/$artifact_id" \
-              || echo "::warning::Failed to delete artifact $artifact_id; continuing."
-          done
