@@ -28,7 +28,6 @@ jobs:
     secrets: inherit
     with:
       ref: ${{ inputs.ref }}
-      branch: ${{ inputs.branch }}
 
   build-executable-matrix:
     name: Build executable project matrix job

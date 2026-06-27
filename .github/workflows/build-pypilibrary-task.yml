@@ -36,7 +36,6 @@ jobs:
     uses: ./.github/workflows/get-version-task.yml
     with:
       ref: ${{ inputs.ref }}
-      branch: ${{ inputs.branch }}
 
   build-pypilibrary:
     name: Build PyPI library project job
