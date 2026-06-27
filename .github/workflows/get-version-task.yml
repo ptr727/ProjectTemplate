@@ -57,4 +57,4 @@ jobs:
           # override it (the runner re-injects the dispatch ref), so on a publish dispatched from the default branch NBGV
           # would classify every leg as the public ref. IGNORE_GITHUB_REF makes NBGV ignore GITHUB_REF and use the
           # checked-out branch, which each matrix leg already is. The validate-release gate backstops any misclassification.
-          IGNORE_GITHUB_REF: true
+          IGNORE_GITHUB_REF: "true"
