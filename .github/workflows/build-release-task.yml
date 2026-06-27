@@ -82,8 +82,14 @@ jobs:
         env:
           SEMVER2: ${{ needs.get-version.outputs.SemVer2 }}
           BRANCH: ${{ inputs.branch }}
+          SMOKE: ${{ inputs.smoke }}
         run: |
           set -euo pipefail
+          # Smoke builds never publish and always version as prerelease (detached PR HEAD), which would trip the main arm.
+          if [[ "$SMOKE" == "true" ]]; then
+            echo "Smoke build; skipping release version validation."
+            exit 0
+          fi
           CORE_AND_PRE="${SEMVER2%%+*}"
           if [[ "$BRANCH" == "main" ]]; then
             if [[ "$CORE_AND_PRE" == *-* ]]; then
