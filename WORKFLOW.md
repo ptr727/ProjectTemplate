@@ -195,8 +195,9 @@ failure-mode it prevents. A workflow that violates any *applicable* guarantee is
 - **D1.2 A validation job always runs.** Input: any PR. Output: a type-appropriate validation job
   runs unconditionally and the aggregator `needs:` it. In a .NET repo this is the `unit-test` job
   (format/style/test); a non-.NET repo **replaces** it (not deletes) with its own validator (lint,
-  schema-check) and keeps the aggregator wired to the replacement. *Prevents: a PR merging with no
-  validation, or a dangling aggregator `needs:`.*
+  schema-check) and re-points **every** `needs:` on it - both the aggregator and `smoke-build`
+  (which `needs:` the validation job by name) - to the replacement. *Prevents: a PR merging with no
+  validation, or a dangling `needs:` that fails the whole workflow to load.*
 - **D1.3 Smoke never publishes and never uploads.** Input: `smoke: true`. Output: full
   compile/lint/test, but no registry/image push, no release, and **no** artifact uploads (every
   `upload-artifact`, including any aggregation job, is gated `!smoke`). *Prevents: a PR publishing;
@@ -397,7 +398,8 @@ input in the file that declares it.
   that job (absent from the build/PR path); `skip-existing: true` is set on the publish action;
   the build artifact is deleted after publish; the `pypi` environment has a deployment-branch rule.
 - **Docker:** a Docker-only repo's caller passes `expect_release_assets: false`; the leaf reads the
-  external state file for a wrapper's tag (not `SemVer2`); the readme/date-badge jobs are gated
+  external state file for the tag instead of `SemVer2` **(wrapper repos only** - a plain Docker repo
+  correctly tags off `SemVer2` and records this N/A**)**; the readme/date-badge jobs are gated
   main-only; the docker-readme task validates `repositories` XOR `manifest`+`manifest-jq`; the
   buildcache follows D9.4.
 
@@ -481,7 +483,7 @@ the self-check that the contract holds for each shape.
   `release-asset-*`; a PyPI-only repo sets `expect_release_assets: false` at the caller. Test: S7
   default leg publishes a release, non-default a `.dev0`; S9 is a `skip-existing` no-op; 5C inspects
   the `dist/*` filenames and the compute-version log.
-- **Docker image.** The leaf pushes multi-arch tags with a per-image registry buildcache (`cache-to`
+- **Docker image.** The leaf pushes multi-arch tags with a per-branch registry buildcache (`buildcache-<branch>`; a multi-image repo adds a per-image tag) (`cache-to`
   only the built branch and only on push, `cache-from` both branches); no `release-asset-*`, so a
   Docker-only repo's caller passes `expect_release_assets: false`; the readme (`peter-evans/dockerhub-description`,
   `DOCKER_HUB_ACCESS_TOKEN`) and date-badge jobs run **only** when the default branch publishes; the
@@ -501,17 +503,20 @@ the self-check that the contract holds for each shape.
   task, and a `library` paths-filter entry + `changes` output + `smoke-build` enable-forward in the
   PR workflow (without it, D1.1 never smoke-builds the library). Keep `expect_release_assets: true`
   (it has a file target, unlike Docker). The .NET `unit-test` job is replaced by a type-appropriate
-  validator while the aggregator stays wired to it (D1.2/D1.5); `version.json` + the NBGV
-  `get-version` step are retained (they own the tag). Test: S1 smoke runs validate+zip and uploads
-  nothing; S7 attaches the zip, prerelease on the non-default leg; S9 release-create + asset-delete
-  skip, the existing zip is untouched, no registry push. N/A: the nuget/pypi/docker/executable 5A
+  validator with the aggregator **and** `smoke-build` both re-pointed to it (D1.2/D1.5);
+  `version.json` + the NBGV `get-version` step are retained (they own the tag). Test: S1 smoke runs
+  validate+zip and uploads nothing; S7 attaches the zip, prerelease on the non-default leg; S9 on a
+  *scheduled* re-run release-create + asset-delete skip (the existing zip is untouched, no registry
+  push), while a `workflow_dispatch` re-run **refreshes** the release and re-runs the asset-delete
+  (the asset is re-uploaded then re-deleted). N/A: the nuget/pypi/docker/executable 5A
   addenda and their scenario clauses.
 - **Source-only / no build.** No package/image leaf: remove all four `build-*` jobs and their
   `github-release` `needs:` entries (leaving `get-version -> validate-release -> github-release`,
   which fires on `github && !smoke`), and the caller passes `expect_release_assets: false` so the
   release is tag + source zip + README + LICENSE with no asset download. With no target the
   paths-filter matches nothing, so `smoke-build` is **structurally always skipped** - validation is
-  carried solely by the (replaced, non-.NET) validation job the aggregator gates on. NBGV and
+  carried solely by the (replaced, non-.NET) validation job that the aggregator and `smoke-build`'s
+  own `needs:` must both point at (D1.2; or drop the never-running `smoke-build` job). NBGV and
   `version.json` are still retained (they own the tag). Applicable scenarios: S1 (validation only), S5/S6
   (publish gating), S7 (tag-only release), S8 (dispatch guard), S9 (no-op republish), S10
   (classification gate). N/A: S2-S4 (assume a smoke-built target), the artifact-lifecycle and
