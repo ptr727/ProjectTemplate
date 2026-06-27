@@ -33,7 +33,6 @@ jobs:
     secrets: inherit
     with:
       ref: ${{ inputs.ref }}
-      branch: ${{ inputs.branch }}
 
   build-docker:
     name: Build Docker image job
