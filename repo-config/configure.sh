@@ -15,10 +15,16 @@ for file in "$script_dir"/*.json; do
     name="$(jq -r '.name' "$file")"
     # Paginate so a name match on a later page is never missed (which would create a duplicate ruleset), and
     # fail loudly if the API call itself fails (auth/404/network) rather than treating it as "not found".
-    if ! id="$(gh api --paginate "repos/$repo/rulesets" --jq ".[] | select(.name==\"$name\") | .id")"; then
+    if ! ids="$(gh api --paginate "repos/$repo/rulesets" --jq ".[] | select(.name==\"$name\") | .id")"; then
         echo "Failed to list rulesets for $repo (check auth and repo access)." >&2
         exit 1
     fi
+    # Pre-existing drift can leave more than one ruleset with the same name; update the first and warn.
+    count="$(printf '%s' "$ids" | grep -c .)"
+    if [ "$count" -gt 1 ]; then
+        echo "Warning: $count rulesets named '$name' on $repo; updating the first (resolve the duplicates)." >&2
+    fi
+    id="$(printf '%s\n' "$ids" | sed -n '1p')"
     if [ -n "$id" ]; then
         echo "Updating ruleset '$name' (id $id) on $repo"
         gh api --method PUT "repos/$repo/rulesets/$id" --input "$file" >/dev/null

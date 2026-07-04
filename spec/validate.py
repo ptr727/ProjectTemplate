@@ -41,11 +41,21 @@ def main():
     target_mech = secrets["targetMechanisms"]
     mechanisms = secrets["mechanisms"]
 
-    for repo in repos["repos"]:
-        name = repo["name"]
-        if repo["status"] == "backlog":
+    for i, repo in enumerate(repos["repos"]):
+        if not isinstance(repo, dict):
+            errors.append(f"repo #{i} is not an object")
+            continue
+        name = repo.get("name", f"#{i}")
+        status = repo.get("status")
+        if status is None:
+            errors.append(f"{name}: missing 'status'")
+            continue
+        if status == "backlog":
             if not repo.get("classificationPending"):
                 errors.append(f"{name}: backlog repo without classificationPending")
+            continue
+        if status != "cataloged":
+            errors.append(f"{name}: unknown status '{status}'")
             continue
 
         repo_types = repo.get("types", [])
@@ -57,6 +67,9 @@ def main():
 
         required = set(repo.get("requiredSecrets", []))
         for pub in repo.get("publish", []):
+            if not isinstance(pub, dict) or "target" not in pub or "mechanism" not in pub:
+                errors.append(f"{name}: publish entry missing 'target'/'mechanism'")
+                continue
             target, mech = pub["target"], pub["mechanism"]
             if target not in target_mech:
                 errors.append(f"{name}: publish target '{target}' unknown")
@@ -87,8 +100,8 @@ def main():
         for e in errors:
             print(f"  - {e}")
         return 1
-    cataloged = sum(1 for r in repos["repos"] if r["status"] == "cataloged")
-    backlog = sum(1 for r in repos["repos"] if r["status"] == "backlog")
+    cataloged = sum(1 for r in repos["repos"] if isinstance(r, dict) and r.get("status") == "cataloged")
+    backlog = sum(1 for r in repos["repos"] if isinstance(r, dict) and r.get("status") == "backlog")
     print(f"Spec validation OK: {cataloged} cataloged, {backlog} backlog repos classify cleanly.")
     return 0
 
