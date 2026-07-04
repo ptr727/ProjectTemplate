@@ -48,7 +48,10 @@ def main():
                 errors.append(f"{name}: backlog repo without classificationPending")
             continue
 
-        for t in repo.get("types", []):
+        repo_types = repo.get("types", [])
+        if not repo_types:
+            errors.append(f"{name}: cataloged repo has no types (add types or mark it backlog)")
+        for t in repo_types:
             if t not in known_types:
                 errors.append(f"{name}: type '{t}' not defined in project-types.json")
 
