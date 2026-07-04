@@ -77,6 +77,8 @@ jobs:
     secrets: inherit
     permissions:
       contents: write
+      # actions:write lets the github-release job delete the release-asset-* artifacts it consumes (surgical cleanup).
+      actions: write
     with:
       ref: ${{ matrix.branch }}
       branch: ${{ matrix.branch }}
@@ -100,17 +102,17 @@ jobs:
     environment:
       name: pypi
       url: https://pypi.org/project/ptr727-projecttemplate-library/
-    # id-token:write for Trusted Publishing's OIDC exchange, contents:read for repo metadata, actions:read so
-    # download-artifact can fetch this run's build artifact.
+    # id-token:write for Trusted Publishing's OIDC exchange, contents:read for repo metadata, actions:write so
+    # download-artifact can fetch this run's build artifact and the surgical cleanup step can delete it afterwards.
     permissions:
       id-token: write
       contents: read
-      actions: read
+      actions: write
 
     steps:
 
       - name: Download PyPI library build artifacts step
-        uses: actions/download-artifact@37930b1c2abaa49bbe596cd826c3c89aef350131 # v7.0.0
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
         with:
           # Branch-suffixed name so both branch legs in this run stay distinct.
           name: pypilibrary-build-${{ matrix.branch }}
@@ -123,59 +125,45 @@ jobs:
           # Skip rather than fail when the version already exists; the weekly republish re-uploads unchanged versions.
           skip-existing: true
 
-  date-badge:
-    name: Create BYOB date badge job
-    needs: [setup, publish]
-    if: ${{ needs.setup.outputs.publish == 'true' }}
-    strategy:
-      matrix:
-        branch: ${{ fromJSON(needs.setup.outputs.branches) }}
-    uses: ./.github/workflows/build-datebadge-task.yml
-    secrets: inherit
-    permissions:
-      contents: write
-    with:
-      # The badge task self-gates to main; the develop leg is a no-op.
-      branch: ${{ matrix.branch }}
-
-  docker-readme:
-    name: Publish Docker Hub readme job
-    needs: [setup, publish]
-    if: ${{ needs.setup.outputs.publish == 'true' }}
-    strategy:
-      matrix:
-        branch: ${{ fromJSON(needs.setup.outputs.branches) }}
-    uses: ./.github/workflows/publish-docker-readme-task.yml
-    secrets: inherit
-    permissions:
-      contents: read
-    with:
-      # The task self-gates to main; the develop leg is a no-op.
-      branch: ${{ matrix.branch }}
-
-  # Release artifacts are an intra-run handoff (durable copies live on the GitHub release), so leaving them accumulates
-  # against the small account-wide storage quota; delete them once every consumer has read them.
-  cleanup-artifacts:
-    name: Delete workflow artifacts job
-    needs: [setup, publish, publish-pypi, date-badge, docker-readme]
-    if: ${{ always() && needs.setup.outputs.publish == 'true' }}
-    runs-on: ubuntu-latest
-    permissions:
-      actions: write
-    steps:
-      - name: Delete workflow artifacts step
-        # continue-on-error: best-effort housekeeping must never red the run, even on an unexpected failure.
+      # Surgical cleanup at the point of consumption: the pypilibrary-build-<branch> artifact has been published, so
+      # delete it by exact name to free the storage quota. A failure before this leaves it for the retention-days: 1
+      # backstop.
+      - name: Delete consumed PyPI build artifact step
+        # Best-effort: PyPI is already published, so a listing/delete hiccup must never red the job; the
+        # retention-days: 1 backstop reaps anything missed. Deletes every matching id (a rerun can upload duplicates).
         continue-on-error: true
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
           set -euo pipefail
-          if ! ids=$(gh api repos/${{ github.repository }}/actions/runs/${{ github.run_id }}/artifacts --paginate \
-            --jq '.artifacts[].id'); then
-            echo "::warning::Could not list run artifacts; skipping cleanup (storage may not be freed)."
+          if ! ids=$(gh api "repos/$GITHUB_REPOSITORY/actions/runs/${{ github.run_id }}/artifacts" --paginate \
+            --jq ".artifacts[] | select(.name == \"pypilibrary-build-${{ matrix.branch }}\") | .id"); then
+            echo "::warning::Could not list run artifacts; retention-days backstop will reap them."
             ids=""
           fi
-          for artifact_id in $ids; do
-            gh api --method DELETE "repos/${{ github.repository }}/actions/artifacts/$artifact_id" \
-              || echo "::warning::Failed to delete artifact $artifact_id; continuing."
+          for id in $ids; do
+            gh api --method DELETE "repos/$GITHUB_REPOSITORY/actions/artifacts/$id" \
+              || echo "::warning::Failed to delete artifact $id; retention-days backstop will reap it."
           done
+
+  # Caller-gated to main: the badge and Docker Hub overview have no per-branch context, so they update only when main
+  # is among the published branches (a develop-only push skips them). One invocation, not a per-branch matrix leg.
+  date-badge:
+    name: Create BYOB date badge job
+    needs: [setup, publish]
+    if: ${{ needs.setup.outputs.publish == 'true' && contains(fromJSON(needs.setup.outputs.branches), 'main') }}
+    uses: ./.github/workflows/build-datebadge-task.yml
+    secrets: inherit
+    permissions:
+      contents: write
+
+  docker-readme:
+    name: Publish Docker Hub readme job
+    needs: [setup, publish]
+    if: ${{ needs.setup.outputs.publish == 'true' && contains(fromJSON(needs.setup.outputs.branches), 'main') }}
+    uses: ./.github/workflows/publish-docker-readme-task.yml
+    secrets: inherit
+    permissions:
+      contents: read
+    with:
+      ref: main

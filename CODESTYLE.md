@@ -1,6 +1,6 @@
 # Code Style and Formatting Rules
 
-This is the single code-style guide for the repo. The **General** section applies to every language and is always carried. Each **language section** (.NET, Python) is self-contained and **droppable**: a repo with no .NET side drops the .NET section, a repo with no Python side drops the Python section - the same per-language model as [`.editorconfig`](./.editorconfig), whose `[*.cs]` block a non-.NET repo drops.
+This is the single code-style guide for the repo. The **General** section applies to every language. Each **language section** (.NET, Python) is self-contained: a repo reads only the section(s) for the languages it ships and ignores the rest. The whole file is carried, not trimmed - an unused-language section costs nothing and keeps re-sync a clean overwrite, the same carry-whole model as [`.editorconfig`](./.editorconfig), whose inert `[*.cs]` block a non-.NET repo keeps.
 
 Cross-cutting *process* rules (PR titles, branching, US English, markdown style, comments philosophy, workflow YAML, PR review etiquette) live in [AGENTS.md](./AGENTS.md) and are not repeated here.
 
@@ -18,7 +18,7 @@ Each language defines a **clean-compile** verification - the combination of buil
 
 - **Run it after every code change.** The relevant language's clean-compile must pass before you commit; CI runs the same checks as a backstop.
 - **The named task definition is the canonical spec** - its exact command sequence, arguments, and strictness. You may run it through the VS Code task **or** by invoking the equivalent native commands directly; either is fine **only if the sequence, arguments, and strictness match exactly**. No shortcuts and no more-lenient options (for example, never drop `--verify-no-changes` or loosen a `--severity`).
-- **A local commit/pre-commit gate is the derived repo's choice - the template ships no hook runner only because no single runner fits every language it targets** (a `dotnet`-tool runner like Husky.Net suits .NET but not Python), **not** as a recommendation against commit gates. CI is the authoritative backstop regardless; a local gate is an additive convenience a repo may wire and keep - Husky.Net (and `dotnet husky run` as a style step) for .NET, `pre-commit` for Python. Keeping a working gate is not drift, and "no hooks ship by default" must not be read as "remove your gate to stay aligned".
+- **A local commit/pre-commit gate is the repo's choice.** No single hook runner fits every language (a `dotnet`-tool runner like Husky.Net suits .NET but not Python), so none is mandated - but that is **not** a recommendation against commit gates. CI is the authoritative backstop regardless; a local gate is an additive convenience a repo may wire and keep - Husky.Net (and `dotnet husky run` as a style step) for .NET, `pre-commit` for Python. Keeping a working gate is not drift.
 
 ### Analyzer Diagnostics and Suppressions
 
@@ -33,14 +33,14 @@ Each language defines a **clean-compile** verification - the combination of buil
 
 These apply repo-wide, in every directory:
 
-1. **Markdown linting**: All `.md` files must be lint-clean (error and warning free) via the VS Code `markdownlint` extension. [`.markdownlint-cli2.jsonc`](./.markdownlint-cli2.jsonc) at the repo root is the single source of truth - the davidanson `markdownlint` extension and a command-line `markdownlint-cli2` run both read it, so the IDE and CLI stay in lock-step. Rules it deliberately disables (e.g. `MD013` line-length, `MD033` inline HTML) are **intentional** - do not "fix" them. This file is carried verbatim by every derived repo (see the template's [Files and Sections Derived Repos Must Carry Verbatim](https://github.com/ptr727/ProjectTemplate/blob/main/AGENTS.md#files-and-sections-derived-repos-must-carry-verbatim) list). Fix violations at the source rather than disabling rules.
+1. **Markdown linting**: All `.md` files must be lint-clean (error and warning free) via the VS Code `markdownlint` extension. [`.markdownlint-cli2.jsonc`](./.markdownlint-cli2.jsonc) at the repo root is the single source of truth - the davidanson `markdownlint` extension and a command-line `markdownlint-cli2` run both read it, so the IDE and CLI stay in lock-step. Rules it deliberately disables (e.g. `MD013` line-length, `MD033` inline HTML) are **intentional** - do not "fix" them. Fix violations at the source rather than disabling rules.
 2. **Spelling**: All spelling must be clean via the CSpell VS Code integration; words must be correctly spelled in **US English** (the repo-wide convention - see [AGENTS.md](./AGENTS.md)). Project-specific terms go in the workspace CSpell config.
 
 ## .NET
 
-*This section applies only to the .NET side. A repo with no .NET projects drops the whole section - see [Adopting Without .NET](#adopting-without-net) at its end.*
+*This section applies only to the .NET side. A repo with no .NET projects still carries it (the file is carried whole) and ignores it.*
 
-This is the style guide for the **.NET projects** in this repo. **Adapt the project list to your repo**: this template ships [`NuGetLibrary/`](./NuGetLibrary/), [`Console/`](./Console/), [`Tests/`](./Tests/), [`Benchmarks/`](./Benchmarks/), and [`CodeGen/`](./CodeGen/); a derived repo names its own projects.
+This is the style guide for any **.NET projects** in this repo.
 
 ### Build Requirements
 
@@ -53,24 +53,20 @@ This is the style guide for the **.NET projects** in this repo. **Adapt the proj
    - After any code change it must pass before commit. Run the `.NET Format` task. To run it natively instead, reproduce that task chain from [`.vscode/tasks.json`](./.vscode/tasks.json) exactly - `CSharpier Format`, then `.NET Build`, then the `dotnet format style --verify-no-changes --severity=info ...` verify - without dropping or loosening any argument (tasks.json is the canonical command spec). Bare `dotnet format` alone, skipping CSharpier or the build, is not sufficient.
 
 2. **Analyzer configuration**
-   - `<AnalysisLevel>latest-all</AnalysisLevel>`
-   - `<EnableNETAnalyzers>true</EnableNETAnalyzers>`
-   - Analyzer severity is `suggestion`, but all warnings must be addressed - see [Analyzer Diagnostics and Suppressions](#analyzer-diagnostics-and-suppressions); do not relax rules to dodge them.
+   - `<EnableNETAnalyzers>true</EnableNETAnalyzers>` with `<AnalysisLevel>latest-all</AnalysisLevel>` and `<AnalysisMode>All</AnalysisMode>` (full analyzer set enabled)
+   - `<TreatWarningsAsErrors>true</TreatWarningsAsErrors>` - any diagnostic surfaced as a warning fails the build, so it must be fixed or deliberately suppressed, not left to accumulate (see [Analyzer Diagnostics and Suppressions](#analyzer-diagnostics-and-suppressions))
 
 3. **CI lint backstop**
-   - `dotnet csharpier check` and `dotnet format style --verify-no-changes` run on every PR
-   - No git hooks ship by default - see README "Optional: enable git hooks locally" to opt in
+   - CI runs the clean-compile checks on every PR as the authoritative backstop
+   - Git hooks are optional; a repo may wire a local runner (Husky.Net) for pre-commit enforcement, but CI is the gate that matters
 
 #### Build Tasks
 
-Available VS Code tasks (run them from VS Code's task runner - **Terminal -> Run Task** - or an agent's task-running tool). The first three are the clean-compile set, carried verbatim; the rest are convenience tasks a derived repo adapts or drops:
+Available VS Code tasks (run them from VS Code's task runner - **Terminal -> Run Task** - or an agent's task-running tool). The three clean-compile tasks below are carried verbatim; a repo adds its own convenience tasks (tool updates, dependency upgrades, benchmarks) on top:
 
 - `.NET Build`: Build with diagnostic verbosity *(clean-compile)*
 - `CSharpier Format`: Auto-format code with CSharpier *(clean-compile)*
 - `.NET Format`: Run CSharpier and build, then verify formatting and style with `--verify-no-changes` *(clean-compile; the task to run after edits)*
-- `.NET Tool Update`: Update dotnet tools *(convenience)*
-- `.NET Outdated Upgrade`: Upgrade outdated NuGet dependencies, interactive prompt *(convenience)*
-- `.NET Benchmark`: Run BenchmarkDotNet *(project-specific; present only if a Benchmarks project exists)*
 
 ### Tooling and Editor
 
@@ -84,7 +80,7 @@ Available VS Code tasks (run them from VS Code's task runner - **Terminal -> Run
    - `dotnet-outdated-tool`: Dependency update checks
    - Nerdbank.GitVersioning: Version management
 
-Pre-commit git hooks are not installed by default - CI is the lint backstop. See README "Optional: enable git hooks locally" if you want Husky.Net (or another runner) wired up locally.
+CI is the authoritative lint backstop. Local pre-commit hooks are optional - wire Husky.Net (or another runner) if you want local enforcement.
 
 #### Editor Baseline
 
@@ -112,7 +108,7 @@ Note: Code snippets are illustrative examples only. Replace namespaces/types to 
    - Top-level statements for console apps
    - Pattern matching over traditional checks
    - Collection expressions when types loosely match
-   - Extension methods using `extension()` syntax
+   - Extension methods - the classic `this`-parameter form, or an `extension(<receiver>) { ... }` block on C# 14+
    - Implicit object creation when type is apparent
    - Range and index operators
 
@@ -204,7 +200,7 @@ Note: Code snippets are illustrative examples only. Replace namespaces/types to 
    - `<GenerateDocumentationFile>true</GenerateDocumentationFile>`
    - Missing XML comments for public APIs are suppressed (`.editorconfig`)
    - Must document all public surfaces.
-   - Single-line summaries, additional details in remarks, document input parameters, returns values, exceptions, and add crefs
+   - Single-line summaries, additional details in remarks, document input parameters, return values, exceptions, and add crefs
 
    ```csharp
    /// <summary>
@@ -336,8 +332,8 @@ Follow the scope hierarchy in [Analyzer Diagnostics and Suppressions](#analyzer-
 
    ```xml
    <ItemGroup>
-     <InternalsVisibleTo Include="Benchmarks" />
-     <InternalsVisibleTo Include="Tests" />
+     <InternalsVisibleTo Include="YourBenchmarkProject" />
+     <InternalsVisibleTo Include="YourTestProject" />
    </ItemGroup>
    ```
 
@@ -345,15 +341,11 @@ Follow the scope hierarchy in [Analyzer Diagnostics and Suppressions](#analyzer-
 
 1. **Code reviews**: All changes go through pull requests
 
-### Adopting Without .NET
-
-If your derived project has no .NET side, drop this entire `.NET` section and delete the .NET projects and their build/release wiring: the NuGet build/publish jobs, the `[*.cs]` / ReSharper block in `.editorconfig`, the `.NET` task group in `.vscode/tasks.json`, and the `nuget` entries in `.github/dependabot.yml`. See [README.md](./README.md) Template Adoption for the full checklist. The Python side stands alone.
-
 ## Python
 
-*This section applies only to the Python side. A repo with no Python projects drops the whole section - see [Adopting Without Python](#adopting-without-python) at its end.*
+*This section applies only to the Python side. A repo with no Python projects still carries it (the file is carried whole) and ignores it.*
 
-This is the style guide for the **Python project** in this repo ([`PyPiLibrary/`](./PyPiLibrary/)).
+This is the style guide for any **Python project(s)** in this repo.
 
 ### Toolchain
 
@@ -369,7 +361,7 @@ This is the style guide for the **Python project** in this repo ([`PyPiLibrary/`
 
 ### Local Development Loop
 
-From inside `PyPiLibrary/`:
+From inside the Python project directory:
 
 ```sh
 uv sync                          # creates .venv, installs deps + dev group
@@ -382,19 +374,19 @@ uv run pytest                    # run tests
 uv build                         # produce wheel + sdist in ./dist
 ```
 
-The Python clean-compile (see [Clean-Compile Verification](#clean-compile-verification)) is `uv run ruff format` + `uv run ruff check` + `uv run pyright`; run it (plus `uv run pytest`) before committing. The template ships these as documented commands, not VS Code tasks. CI runs the same commands via [`.github/workflows/build-pypilibrary-task.yml`](./.github/workflows/build-pypilibrary-task.yml). No git hooks ship by default - see the root README's "Optional: enable git hooks locally" section to wire up `pre-commit` for `ruff` and `pyright` if you want pre-commit checks locally.
+The Python clean-compile (see [Clean-Compile Verification](#clean-compile-verification)) is `uv run ruff format` + `uv run ruff check` + `uv run pyright`; run it (plus `uv run pytest`) before committing. These are documented commands, not VS Code tasks. CI runs the same clean-compile commands as the authoritative backstop. Git hooks are opt-in; wire `pre-commit` for `ruff` and `pyright` yourself if you want local enforcement.
 
 ### Layout
 
 `src` layout - keeps the package out of the repo root and prevents accidental imports of unbuilt code:
 
 ```text
-PyPiLibrary/
+<python-project>/
     pyproject.toml
     README.md
     uv.lock                # committed for reproducible CI
     src/
-        ptr727_projecttemplate_library/
+        <package_name>/
             __init__.py
             _version.py
             <modules>.py
@@ -460,16 +452,12 @@ PyPiLibrary/
 
 ### Versioning
 
-`_version.py` ships with `__version__ = "0.0.0"` as a placeholder. The publish workflow uses `skip-existing: true` so the workflow won't fail, but no new PyPI versions will land until you wire `_version.py` to something that increments. See the **Template Adoption** section of [`README.md`](./PyPiLibrary/README.md) for the three usual options (`hatch-vcs`, version.json bridge, manual bumps).
+`_version.py` ships with `__version__ = "0.0.0"` as a placeholder. Until you wire `_version.py` to something that increments (the usual options are `hatch-vcs`, a version.json bridge, or manual bumps), no new PyPI versions will land - publishing with `skip-existing: true` keeps a stuck placeholder version from failing the run.
 
 ### Linter Cleanliness
 
 Before pushing or opening a PR:
 
 - VS Code's **Problems** pane should be quiet for the files you touched. The relevant linters are ruff (via the `charliermarsh.ruff` extension) and pyright (via the `ms-python.python` extension's bundled Pylance).
-- The CI gate is `uv run ruff check && uv run ruff format --check && uv run pyright && uv run pytest` - same as the local commands above, run from `PyPiLibrary/`.
+- The CI gate is `uv run ruff check && uv run ruff format --check && uv run pyright && uv run pytest` - same as the local commands above, run from the Python project directory.
 - Markdown in this directory follows the repo-wide [Markdown and Spelling](#markdown-and-spelling) rules.
-
-### Adopting Without Python
-
-If your derived project does not need a Python side, delete the entire `PyPiLibrary/` folder, the `build-pypilibrary` job in `build-release-task.yml`, the `publish-pypi` job in `publish-release.yml`, the `build-pypilibrary-task.yml` workflow, the `uv` block in `.github/dependabot.yml`, the `Python.code-workspace` file, and the `.devcontainer/python/` directory. The .NET side stands alone.
