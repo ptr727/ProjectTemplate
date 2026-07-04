@@ -2,45 +2,122 @@
 
 Governance, agent-orchestration, and workflow-audit hub for a fleet of related repositories.
 
-[![Last Commit](https://img.shields.io/github/last-commit/ptr727/ProjectTemplate?logo=github)](https://github.com/ptr727/ProjectTemplate/commits)
-[![License](https://img.shields.io/github/license/ptr727/ProjectTemplate)](./LICENSE)
+[![Last Commit][last-commit-shield]][commits-link]\
+[![License][license-shield]][license]
 
 ## What This Repo Is
 
 This repo no longer ships sample application code. It is the single home for the shared rules the fleet follows, a machine-readable spec those rules are checked against, a registry of the projects, and an audit-agent instruction set. Instead of copying files between a template and its derivatives, each project owns its own implementation and is **audited** against the ground truth here - to the letter (exact file, section, or config) or to intent (an equivalent outcome).
 
-- **[AGENTS.md](./AGENTS.md)** - cross-cutting rules for AI coding agents: git, branching, release model, doc style, the recurring-violation rules (comments, ASCII charset, US spelling, line endings), PR review etiquette, and workflow YAML conventions.
-- **[CODESTYLE.md](./CODESTYLE.md)** - code style for .NET and Python.
-- **[WORKFLOW.md](./WORKFLOW.md)** - the CI/CD workflow contract (behavioral guarantees D1-D9) and its audit methodology.
-- **[AUDIT.md](./AUDIT.md)** - how an agent audits a repository against the spec and reports drift.
-- **[spec/](./spec/)** - the machine-readable ground truth: project-type requirements, the file/section baseline, required/forbidden secrets, and the preferred README structure.
-- **[registry/repos.json](./registry/repos.json)** - the fleet registry: every project, its type(s), publish mechanism, and status (cataloged or standardization backlog).
-- **[repo-config/](./repo-config/)** - branch rulesets and the apply script (kept out of `.github/`, which is Actions-owned), plus the GitHub setup reference.
-- **[catalog/](./catalog/)** - reusable reference snippets (workflow tasks, config exemplars, devcontainers) the audit compares implementations against.
-- **[reports/](./reports/)** - per-repo audit output.
+- **[AGENTS.md][agents]** - cross-cutting rules for AI coding agents: git, branching, release model, doc style, the recurring-violation rules (comments, ASCII charset, US spelling, line endings), PR review etiquette, and workflow YAML conventions.
+- **[CODESTYLE.md][codestyle]** - code style for .NET and Python.
+- **[WORKFLOW.md][workflow]** - the CI/CD workflow contract (behavioral guarantees D1-D9) and its audit methodology.
+- **[AUDIT.md][audit]** - how an agent audits a repository against the spec and reports drift.
+- **[spec/][spec]** - the machine-readable ground truth: project-type requirements, the file/section baseline, required/forbidden secrets, and the preferred README structure.
+- **[registry/repos.json][repos]** - the fleet registry: every project, its type(s), publish mechanism, and status (cataloged or standardization backlog).
+- **[repo-config/][repo-config]** - branch rulesets and the apply script (kept out of `.github/`, which is Actions-owned), plus the GitHub setup reference.
+- **[catalog/][catalog]** - reusable reference snippets (workflow tasks, config exemplars, devcontainers) the audit compares implementations against.
+- **[reports/][reports]** - per-repo audit output.
 
 ## How This Repo Operates
 
-ProjectTemplate follows the same model it documents, and audits its own rules against itself (it classifies as the source-only project type in [WORKFLOW.md](./WORKFLOW.md)).
+ProjectTemplate follows the same model it documents, and audits its own rules against itself (it classifies as the source-only project type in [WORKFLOW.md][workflow]).
 
-- **Branching.** Persistent `main` and `develop`, each with its own ruleset. Commit on feature branches only. Feature branch to `develop` is squash-merged; `develop` to `main` is a merge commit. `develop` is forward-only (no `main -> develop` back-merges). See [AGENTS.md "Branching Model"](./AGENTS.md#branching-model).
+- **Branching.** Persistent `main` and `develop`, each with its own ruleset. Commit on feature branches only. Feature branch to `develop` is squash-merged; `develop` to `main` is a merge commit. `develop` is forward-only (no `main -> develop` back-merges). See [AGENTS.md "Branching Model"][agents-branching-model].
 - **CI is lint-only.** There is no build or unit test; the PR gate runs markdownlint, cspell, JSON-schema validation, and actionlint, and exposes the ruleset-bound `Check pull request workflow status` aggregator. The same lint configs (`.markdownlint-cli2.jsonc`, `cspell.json`) drive the editor extensions, the CLI, and CI.
-- **Review loop.** Every PR is reviewed by GitHub Copilot; the agent drives the review loop to green and merges only with explicit maintainer permission. See [AGENTS.md "PR Review Etiquette"](./AGENTS.md#pr-review-etiquette).
-- **Release.** A `develop -> main` merge is promoted through a GitHub release (tag plus a source zip, README, and LICENSE); versioning is NBGV-driven from [version.json](./version.json). See [WORKFLOW.md](./WORKFLOW.md).
+- **Review loop.** Every PR is reviewed by GitHub Copilot; the agent drives the review loop to green and merges only with explicit maintainer permission. See [AGENTS.md "PR Review Etiquette"][agents-pr-review-etiquette].
+- **Release.** A `develop -> main` merge is promoted through a GitHub release (tag plus a source zip, README, and LICENSE); versioning is NBGV-driven from [version.json][version]. See [WORKFLOW.md][workflow].
+
+## Rules
+
+A human-readable index of the rules agents enforce, implement, and audit. The authority for each is [AGENTS.md][agents], [CODESTYLE.md][codestyle], and [WORKFLOW.md][workflow]; the machine-checkable form lives in [spec/][spec].
+
+### Always
+
+- Sign every commit (SSH or GPG).
+- Branch feature -> develop (squash) -> main (merge commit); develop is forward-only.
+- Drive every PR through the Copilot review loop and merge only with maintainer approval.
+- Write US English and ASCII only (no em-dash, straight quotes).
+- Keep comments concise and only for the non-obvious, and never grow them on edit.
+- Follow `.editorconfig` line endings (CRLF default, LF for shell and Docker) and preserve a file's endings on edit.
+- One logical paragraph per line, with a trailing `\` for an intentional hard break.
+- Pin every GitHub Action to a commit SHA with a version comment.
+- Share one lint config per tool across the editor, the CLI, and CI.
+
+### Never
+
+- Never force-push or rewrite shared history.
+- Never treat a merge as a release; publishing is a separate, explicit step.
+- Never blanket-delete a workflow run's artifacts.
+- Never store a static key when OIDC Trusted Publishing is available.
+
+### If a C# Project
+
+- Carry the shared `[*.cs]` block in `.editorconfig` and build with zero warnings.
+
+### If a Python Project
+
+- Configure ruff and pyright in `pyproject.toml`.
+
+### If Publishing a Package (NuGet or PyPI)
+
+- Publish via OIDC Trusted Publishing, never a stored API key.
+
+### If a Docker Image
+
+- Cache layers to a registry tag (never `type=gha`) and publish the size-limited Docker Hub README separately.
+
+### For a README or Human-Facing Doc
+
+- Follow the section order in [spec/readme-structure.md][readme-structure] and put every URI as a grouped, alphabetized reference link at the bottom.
+
+### For Workflows
+
+- Make GitHub Actions satisfy the [WORKFLOW.md][workflow] contract (guarantees D1-D9), which the audit verifies.
 
 ## Development Environment
 
-Contributors sign every commit. See [docs/ssh-signing.md](./docs/ssh-signing.md) for SSH commit-signing setup, [docs/host-setup.md](./docs/host-setup.md) for host prerequisites, and [docs/devcontainer.md](./docs/devcontainer.md) for devcontainer SSH-agent forwarding. Run the linters before pushing (see [AGENTS.md "Running the Linters Locally"](./AGENTS.md#running-the-linters-locally-known-working-invocations)).
+Contributors sign every commit. See [docs/ssh-signing.md][ssh-signing] for SSH commit-signing setup, [docs/host-setup.md][host-setup] for host prerequisites, and [docs/devcontainer.md][devcontainer] for devcontainer SSH-agent forwarding. Run the linters before pushing (see [AGENTS.md "Running the Linters Locally"][agents-running-the-linters-locally-known-working-invocations]).
 
 ## TODO
 
 Running backlog (kept here, in a committed file, rather than in agent memory that does not persist across environments).
 
-- Run the first per-repo audits and populate [reports/](./reports/) for the seven cataloged repos.
-- Classify the standardization-backlog repos in [registry/repos.json](./registry/repos.json) (marked `classificationPending`) on first audit.
+- Run the first per-repo audits and populate [reports/][reports] for the seven cataloged repos.
+- Classify the standardization-backlog repos in [registry/repos.json][repos] (marked `classificationPending`) on first audit.
 - Canonicalize Python linter-config placement on `pyproject.toml` (one cataloged repo uses standalone `.ruff.toml` + `pyrightconfig.json`); track as a drift finding, fix downstream.
 - Consider renaming this repo to reflect the audit-catalog identity (updates badge and link URLs across the fleet).
 
 ## License
 
-See [LICENSE](./LICENSE).
+See [LICENSE][license].
+
+<!-- Shields -->
+
+[last-commit-shield]: https://img.shields.io/github/last-commit/ptr727/ProjectTemplate?logo=github
+[license-shield]: https://img.shields.io/github/license/ptr727/ProjectTemplate
+
+<!-- Repo -->
+
+[agents]: ./AGENTS.md
+[agents-branching-model]: ./AGENTS.md#branching-model
+[agents-pr-review-etiquette]: ./AGENTS.md#pr-review-etiquette
+[agents-running-the-linters-locally-known-working-invocations]: ./AGENTS.md#running-the-linters-locally-known-working-invocations
+[audit]: ./AUDIT.md
+[catalog]: ./catalog/
+[codestyle]: ./CODESTYLE.md
+[devcontainer]: ./docs/devcontainer.md
+[host-setup]: ./docs/host-setup.md
+[license]: ./LICENSE
+[readme-structure]: ./spec/readme-structure.md
+[repo-config]: ./repo-config/
+[reports]: ./reports/
+[repos]: ./registry/repos.json
+[spec]: ./spec/
+[ssh-signing]: ./docs/ssh-signing.md
+[version]: ./version.json
+[workflow]: ./WORKFLOW.md
+
+<!-- External -->
+
+[commits-link]: https://github.com/ptr727/ProjectTemplate/commits

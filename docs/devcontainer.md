@@ -1,15 +1,15 @@
 # Devcontainer Setup
 
-The repo ships **two per-language [Dev Containers](https://containers.dev/)** so each container carries only one toolchain, one extension surface, and one `postCreateCommand` - matching the language you'll actually edit.
+The repo ships **two per-language [Dev Containers][containers-link]** so each container carries only one toolchain, one extension surface, and one `postCreateCommand` - matching the language you'll actually edit.
 
 | Workspace | Devcontainer | Image | Toolchain |
 | --------- | ------------ | ----- | --------- |
-| `DotNet.code-workspace` | [`catalog/snippets/devcontainer/dotnet/devcontainer.json`](../catalog/snippets/devcontainer/dotnet/devcontainer.json) | `mcr.microsoft.com/devcontainers/dotnet:1-10.0` | .NET 10 SDK |
-| `Python.code-workspace` | [`catalog/snippets/devcontainer/python/devcontainer.json`](../catalog/snippets/devcontainer/python/devcontainer.json) | `mcr.microsoft.com/devcontainers/python:1-3.14-bookworm` | Python 3.14 + version-pinned `uv` |
+| `DotNet.code-workspace` | [`catalog/snippets/devcontainer/dotnet/devcontainer.json`][devcontainer] | `mcr.microsoft.com/devcontainers/dotnet:1-10.0` | .NET 10 SDK |
+| `Python.code-workspace` | [`catalog/snippets/devcontainer/python/devcontainer.json`][devcontainer-2] | `mcr.microsoft.com/devcontainers/python:1-3.14-bookworm` | Python 3.14 + version-pinned `uv` |
 
-Open the workspace file matching the language you want, install the [Dev Containers extension](https://marketplace.visualstudio.com/items?itemName=ms-vscode-remote.remote-containers), and pick **Reopen in Container**.
+Open the workspace file matching the language you want, install the [Dev Containers extension][marketplace-link], and pick **Reopen in Container**.
 
-Prerequisite: complete [host setup](./host-setup.md) first - without git config, an SSH key, and the allowed-signers file on the host, neither devcontainer will be able to sign commits.
+Prerequisite: complete [host setup][host-setup] first - without git config, an SSH key, and the allowed-signers file on the host, neither devcontainer will be able to sign commits.
 
 ## What's Inside (Both Containers)
 
@@ -25,13 +25,13 @@ Each devcontainer's extension list and the matching workspace's `recommendations
 
 ## Bind Mounts (Both Containers)
 
-The host SSH key, allowed-signers file, and `gh` config directory are mounted into the container so commits sign correctly and `gh` is pre-authenticated **when the host stores its `gh` token in a file** (`~/.config/gh/hosts.yml`). Hosts that store the token in macOS Keychain or Linux libsecret will need an in-container `gh auth login` instead - see [`gh` credential store](#gh-credential-store) below for the full picture.
+The host SSH key, allowed-signers file, and `gh` config directory are mounted into the container so commits sign correctly and `gh` is pre-authenticated **when the host stores its `gh` token in a file** (`~/.config/gh/hosts.yml`). Hosts that store the token in macOS Keychain or Linux libsecret will need an in-container `gh auth login` instead - see [`gh` credential store][gh-credential-store] below for the full picture.
 
 | Host path | Container path | Mode | Purpose |
 | --------- | -------------- | ---- | ------- |
 | `~/.ssh/id_ed25519.pub` | `/home/vscode/.ssh/id_ed25519.pub` | read-only | Public half of the SSH key. The private key never enters the container - SSH agent forwarding handles signing. |
 | `~/.config/git/allowed_signers` | `/home/vscode/.config/git/allowed_signers` | read-only | Maps your email to your public key so `git verify-commit` and `git log --show-signature` work inside the container. |
-| `~/.config/gh` | `/home/vscode/.config/gh` | read-write | `gh` CLI auth state shared with the host. See [`gh` credential store](#gh-credential-store) below. |
+| `~/.config/gh` | `/home/vscode/.config/gh` | read-write | `gh` CLI auth state shared with the host. See [`gh` credential store][gh-credential-store] below. |
 
 VS Code Dev Containers automatically copies your host `~/.gitconfig` into the container at startup, so `user.name`, `user.email`, `user.signingkey`, `gpg.format`, and `commit.gpgsign` propagate without an explicit mount.
 
@@ -96,16 +96,28 @@ which dotnet                                       # nothing - dotnet intentiona
 cd PyPiLibrary && uv sync && uv run pytest         # tests pass
 ```
 
-If `git -c gpg.format=ssh commit -S` errors with `signing failed: no allowed signers`, the bind-mount of `allowed_signers` is missing or the file on the host is empty - re-run the snippet in [host setup](./host-setup.md).
+If `git -c gpg.format=ssh commit -S` errors with `signing failed: no allowed signers`, the bind-mount of `allowed_signers` is missing or the file on the host is empty - re-run the snippet in [host setup][host-setup].
 
 ## Troubleshooting
 
 **Permission denied writing to `~/.ssh/known_hosts` in the container** - The `onCreateCommand` should have chowned `~/.ssh` to `vscode`. Rebuild the container; if it persists, open a shell and run the same `sudo install -d -m 700 -o vscode -g vscode ~/.ssh` manually.
 
-**`git commit` fails with "no SSH agent socket"** - VS Code Dev Containers forwards `SSH_AUTH_SOCK` automatically, but only if the host has `ssh-agent` running with at least one key. Run `ssh-add -l` on the host first; if it says "could not open a connection to your authentication agent", start the agent (see [host setup](./host-setup.md)).
+**`git commit` fails with "no SSH agent socket"** - VS Code Dev Containers forwards `SSH_AUTH_SOCK` automatically, but only if the host has `ssh-agent` running with at least one key. Run `ssh-add -l` on the host first; if it says "could not open a connection to your authentication agent", start the agent (see [host setup][host-setup]).
 
 **uv not on `PATH` after rebuild** (Python container) - The post-create installer adds `~/.local/bin` to `PATH` via the user shell init scripts, which take effect on next shell. Either re-open the integrated terminal or `source ~/.bashrc`.
 
 **Container builds but extensions don't auto-install** - Make sure VS Code is using the Dev Containers extension (not "Remote - SSH" or "Remote - Tunnels"). The extension auto-install is keyed on `customizations.vscode.extensions` and only Dev Containers honors that.
 
 **Wrong-language work in the wrong container** - The `.NET` container has no `uv` and no Python extensions; the Python container has no `dotnet` SDK and no C# extensions. This is intentional - open the matching workspace and rebuild rather than installing the missing toolchain ad hoc.
+
+<!-- Repo -->
+
+[devcontainer]: ../catalog/snippets/devcontainer/dotnet/devcontainer.json
+[devcontainer-2]: ../catalog/snippets/devcontainer/python/devcontainer.json
+[gh-credential-store]: #gh-credential-store
+[host-setup]: ./host-setup.md
+
+<!-- External -->
+
+[containers-link]: https://containers.dev/
+[marketplace-link]: https://marketplace.visualstudio.com/items?itemName=ms-vscode-remote.remote-containers

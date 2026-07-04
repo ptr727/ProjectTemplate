@@ -16,6 +16,12 @@ docker run --rm docker.io/ptr727/projecttemplate:latest
 
 ## Links
 
-- Source, issues, and CI/CD: [GitHub](https://github.com/ptr727/ProjectTemplate)
-- Versioned releases: [GitHub Releases](https://github.com/ptr727/ProjectTemplate/releases)
-- License: [MIT](https://github.com/ptr727/ProjectTemplate/blob/main/LICENSE)
+- Source, issues, and CI/CD: [GitHub][projecttemplate-link]
+- Versioned releases: [GitHub Releases][releases-link]
+- License: [MIT][license-link]
+
+<!-- External -->
+
+[license-link]: https://github.com/ptr727/ProjectTemplate/blob/main/LICENSE
+[projecttemplate-link]: https://github.com/ptr727/ProjectTemplate
+[releases-link]: https://github.com/ptr727/ProjectTemplate/releases
