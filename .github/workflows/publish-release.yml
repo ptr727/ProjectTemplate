@@ -64,106 +64,67 @@ jobs:
           echo "publish=$publish" >> "$GITHUB_OUTPUT"
 
   # Full build + publish of every target per planned branch. The matrix lets one run publish main (Release/latest)
-  # and develop (Debug/develop) - each leg checks out and versions its own branch via the threaded ref/branch.
+  # Publish each planned branch: NBGV computes the tag from the checked-out branch, then a GitHub release is created
+  # (tag + auto source archive + README + LICENSE). Source-only repo - no package or image targets.
   publish:
     name: Publish project release job
     needs: [setup]
     if: ${{ needs.setup.outputs.publish == 'true' }}
-    strategy:
-      fail-fast: false
-      matrix:
-        branch: ${{ fromJSON(needs.setup.outputs.branches) }}
-    uses: ./.github/workflows/build-release-task.yml
-    secrets: inherit
     permissions:
       contents: write
-      # actions:write lets the github-release job delete the release-asset-* artifacts it consumes (surgical cleanup).
-      actions: write
-    with:
-      ref: ${{ matrix.branch }}
-      branch: ${{ matrix.branch }}
-      smoke: false
-      # Push to GitHub and NuGet and Docker Hub.
-      github: true
-      nuget: true
-      dockerhub: true
-
-  publish-pypi:
-    name: Publish PyPI library job
-    needs: [setup, publish]
-    if: ${{ needs.setup.outputs.publish == 'true' }}
     strategy:
       fail-fast: false
       matrix:
         branch: ${{ fromJSON(needs.setup.outputs.branches) }}
     runs-on: ubuntu-latest
-    # build-pypilibrary-task.yml picks the PEP 440 version per branch (M.N.P.B on main, M.N.P.B.dev0 on develop). The
-    # pypi environment's deployment branch rule restricts uploads to main + develop as defense in depth.
-    environment:
-      name: pypi
-      url: https://pypi.org/project/ptr727-projecttemplate-library/
-    # id-token:write for Trusted Publishing's OIDC exchange, contents:read for repo metadata, actions:write so
-    # download-artifact can fetch this run's build artifact and the surgical cleanup step can delete it afterwards.
-    permissions:
-      id-token: write
-      contents: read
-      actions: write
 
     steps:
 
-      - name: Download PyPI library build artifacts step
-        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+      - name: Setup .NET SDK step
+        uses: actions/setup-dotnet@9a946fdbd5fb07b82b2f5a4466058b876ab72bb2 # v5.3.0
         with:
-          # Branch-suffixed name so both branch legs in this run stay distinct.
-          name: pypilibrary-build-${{ matrix.branch }}
-          path: ./dist
+          dotnet-version: 10.x
 
-      - name: Publish to PyPI step
-        uses: pypa/gh-action-pypi-publish@cef221092ed1bacb1cc03d23a2d87d1d172e277b # v1.14.0
+      # Full history so NBGV can compute the git height for the checked-out branch.
+      - name: Checkout code step
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
         with:
-          packages-dir: ./dist
-          # Skip rather than fail when the version already exists; the weekly republish re-uploads unchanged versions.
-          skip-existing: true
+          ref: ${{ matrix.branch }}
+          fetch-depth: 0
 
-      # Surgical cleanup at the point of consumption: the pypilibrary-build-<branch> artifact has been published, so
-      # delete it by exact name to free the storage quota. A failure before this leaves it for the retention-days: 1
-      # backstop.
-      - name: Delete consumed PyPI build artifact step
-        # Best-effort: PyPI is already published, so a listing/delete hiccup must never red the job; the
-        # retention-days: 1 backstop reaps anything missed. Deletes every matching id (a rerun can upload duplicates).
-        continue-on-error: true
+      # nbgv floats on @master (its tag stream lags master). IGNORE_GITHUB_REF versions the checked-out branch, not the
+      # CI ref, so a dispatch from main still classifies the develop leg as a prerelease.
+      - name: Compute version step
+        id: nbgv
+        uses: dotnet/nbgv@master
+        env:
+          IGNORE_GITHUB_REF: "true"
+
+      # The weekly publisher re-runs with no new commits, so the tag may already exist. Skip create on an existing tag
+      # (no-op republish); a manual dispatch refreshes it.
+      - name: Check for existing release step
+        id: release-exists
         env:
           GH_TOKEN: ${{ github.token }}
+          TAG: ${{ steps.nbgv.outputs.SemVer2 }}
         run: |
           set -euo pipefail
-          if ! ids=$(gh api "repos/$GITHUB_REPOSITORY/actions/runs/${{ github.run_id }}/artifacts" --paginate \
-            --jq ".artifacts[] | select(.name == \"pypilibrary-build-${{ matrix.branch }}\") | .id"); then
-            echo "::warning::Could not list run artifacts; retention-days backstop will reap them."
-            ids=""
+          if gh release view "$TAG" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
+            echo "exists=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "exists=false" >> "$GITHUB_OUTPUT"
           fi
-          for id in $ids; do
-            gh api --method DELETE "repos/$GITHUB_REPOSITORY/actions/artifacts/$id" \
-              || echo "::warning::Failed to delete artifact $id; retention-days backstop will reap it."
-          done
 
-  # Caller-gated to main: the badge and Docker Hub overview have no per-branch context, so they update only when main
-  # is among the published branches (a develop-only push skips them). One invocation, not a per-branch matrix leg.
-  date-badge:
-    name: Create BYOB date badge job
-    needs: [setup, publish]
-    if: ${{ needs.setup.outputs.publish == 'true' && contains(fromJSON(needs.setup.outputs.branches), 'main') }}
-    uses: ./.github/workflows/build-datebadge-task.yml
-    secrets: inherit
-    permissions:
-      contents: write
-
-  docker-readme:
-    name: Publish Docker Hub readme job
-    needs: [setup, publish]
-    if: ${{ needs.setup.outputs.publish == 'true' && contains(fromJSON(needs.setup.outputs.branches), 'main') }}
-    uses: ./.github/workflows/publish-docker-readme-task.yml
-    secrets: inherit
-    permissions:
-      contents: read
-    with:
-      ref: main
+      # target_commitish pins the tag to the exact built commit (GitCommitId), not the default branch. The release is
+      # the tag plus GitHub's auto source archive, README, and LICENSE - no build assets (source-only).
+      - name: Create GitHub release step
+        if: ${{ steps.release-exists.outputs.exists == 'false' || github.event_name == 'workflow_dispatch' }}
+        uses: softprops/action-gh-release@718ea10b132b3b2eba29c1007bb80653f286566b # v3.0.1
+        with:
+          generate_release_notes: true
+          tag_name: ${{ steps.nbgv.outputs.SemVer2 }}
+          target_commitish: ${{ steps.nbgv.outputs.GitCommitId }}
+          prerelease: ${{ matrix.branch != 'main' }}
+          files: |
+            LICENSE
+            README.md

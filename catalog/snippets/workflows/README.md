@@ -8,6 +8,8 @@ downstream repo's own Actions satisfy those guarantees, not that they match thes
 
 | File | Role | WORKFLOW.md guarantees |
 | --- | --- | --- |
+| `build-release-task.yml` | Multi-target release orchestrator: get-version, validate-release, github-release plus per-target build jobs | D3, D4, D5, D6 |
+| `get-version-task.yml` | NBGV version/tag computation (reusable) | D3 |
 | `build-executable-task.yml` | Console/executable per-runtime publish, aggregate to one release asset | D5, D6; §6 Console walkthrough |
 | `build-nugetlibrary-task.yml` | Build + `dotnet nuget push` (OIDC), upload release asset | D3.4, D4.4, D6; §6 NuGet walkthrough |
 | `build-pypilibrary-task.yml` | Build PyPI package; publish split to an OIDC job | D3.4, D4, D7.2; §6 PyPI walkthrough |
