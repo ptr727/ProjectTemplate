@@ -24,6 +24,7 @@ def main():
     secrets = load("spec/secrets.json")
 
     for key, obj, fname in [
+        ("repos", repos, "repos.json"),
         ("types", types, "project-types.json"),
         ("mechanisms", secrets, "secrets.json"),
         ("targetMechanisms", secrets, "secrets.json"),
@@ -59,6 +60,9 @@ def main():
                 continue
             mech_key = target_mech[target]
             if mech_key is None:
+                continue
+            if mech_key not in mechanisms:
+                errors.append(f"{name}: target '{target}' maps to undefined mechanism '{mech_key}'")
                 continue
             spec_mech = mechanisms[mech_key]
             # docker/static-secret must carry its required secrets
