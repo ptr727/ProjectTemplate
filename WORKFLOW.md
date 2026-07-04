@@ -44,7 +44,7 @@ Prescriptive style/legibility rules. Cheap to check, necessary but not sufficien
 
 ### Two Layers: Orchestration vs Build
 
-- **Orchestration** is generic and intended to be synced verbatim **at the job level**: the publish-plan + branch matrix in the publisher, the `get-version`, `validate-release`, and `github-release` jobs, the date-badge job, and the `changes -> smoke-build -> aggregator` shape of the PR workflow. These job *bodies* should not need per-repo edits.
+- **Orchestration** is generic and forms the standardization baseline **at the job level**: the publish-plan + branch matrix in the publisher, the `get-version`, `validate-release`, and `github-release` jobs, the date-badge job, and the `changes -> smoke-build -> aggregator` shape of the PR workflow. These job *bodies* should not need per-repo edits.
 - **Build** is repo-owned: the `build-<target>-task.yml` leaf tasks.
 - **What the repo curates** (by design, not a leak): the *list* of targets. This is **not** a byte-for-byte file carry. Adding or dropping a target edits the orchestrator's surface - the `enable_<target>` inputs and the `build-<target>` job + its `github-release` `needs:` entry in the release task, **and** the `changes` paths-filter entry + output + the `smoke-build` enable-forward in the PR workflow. "Verbatim" applies to the `github-release` job and the version/publish-plan logic, not to the release task's job list or the paths-filter. Subsetting is symmetric: the same surface you trim to drop a target you extend to add a new one (e.g. a `release-asset-<branch>-library` producer needs a new `enable_library` input, a `build-library` job, a `needs:` entry, and a `library` paths-filter).
 

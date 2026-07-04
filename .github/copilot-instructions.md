@@ -151,4 +151,4 @@ After the final push, sweep-resolve stale older threads for removed code paths.
 
 Read [AGENTS.md](../AGENTS.md) for this repo's conventions. For code-style rules, [`CODESTYLE.md`](../CODESTYLE.md) (its General section plus the relevant language section) is authoritative. Don't restate any of these files' rules in commit bodies or PR descriptions - keep those focused on the change itself.
 
-**In a derived repo:** if you find a discrepancy that should be fixed in the template itself (this file or AGENTS.md is out of date, a rule is missing, something bit this repo and would bite the next), open an issue upstream in [`ptr727/ProjectTemplate`](https://github.com/ptr727/ProjectTemplate) rather than only fixing it locally - see the template's [AGENTS.md "Staying in Sync and Reporting Drift Upstream"](https://github.com/ptr727/ProjectTemplate/blob/main/AGENTS.md#staying-in-sync-and-reporting-drift-upstream).
+If you find a gap in the governance itself (this file or AGENTS.md is out of date, a rule is missing, something bit this repo and would bite the next), fix it in the governance docs as part of your change rather than only working around it locally.
