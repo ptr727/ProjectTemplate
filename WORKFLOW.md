@@ -42,6 +42,15 @@ Prescriptive style/legibility rules. Cheap to check, necessary but not sufficien
 
 ## 3. Architecture
 
+### Branch Model
+
+```mermaid
+flowchart LR
+  feature[feature branch] -->|squash| develop
+  develop -->|merge commit| main
+  main -.->|no back-merge| develop
+```
+
 ### Two Layers: Orchestration vs Build
 
 - **Orchestration** is generic and forms the standardization baseline **at the job level**: the publish-plan + branch matrix in the publisher, the `get-version`, `validate-release`, and `github-release` jobs, the date-badge job, and the `changes -> smoke-build -> aggregator` shape of the PR workflow. These job *bodies* should not need per-repo edits.
@@ -51,6 +60,14 @@ Prescriptive style/legibility rules. Cheap to check, necessary but not sufficien
 ### The Seam Contract
 
 A target contributes a file to the GitHub release by uploading a workflow artifact named `release-asset-<branch>-<target>`. The release job collects **every** matching artifact by **pattern** (`pattern: release-asset-<branch>-*` + `merge-multiple: true`), never an `artifact-ids:` naming one job's output. Canonical for **every** repo, single-target included; switching to an `artifact-id` handoff forks the release download and breaks the verbatim carry.
+
+```mermaid
+flowchart LR
+  leafa[leaf: target A] -->|release-asset-branch-A| store[(run artifacts)]
+  leafb[leaf: target B] -->|release-asset-branch-B| store
+  store -->|pattern + merge-multiple| rel[github-release job]
+  reg[registry leaf: nuget / pypi / docker] -->|push, no asset| registries[(registries)]
+```
 
 ### Reusable-Task Parameter Contract
 
@@ -72,9 +89,31 @@ Workflow artifacts are an **intra-run handoff** only; durable copies live on the
 
 PRs validate fast and never publish: a paths-filter smoke-builds only changed targets; a validation job always runs; smoke builds compile/lint/test but upload nothing and push nothing; one required aggregator gates the merge. See D1.
 
+```mermaid
+flowchart TD
+  pr[pull request] --> ch[changes paths-filter]
+  ch -->|target changed| sb[smoke-build changed targets]
+  ch -->|workflow-only or docs| skip[smoke-build skipped]
+  val[validation job] --> agg[Check pull request workflow status]
+  sb --> agg
+  skip --> agg
+  agg -->|success| ok[merge allowed]
+```
+
 ### Release Model
 
 Two-phase by default: PRs smoke-test, merges do not publish. The publisher (weekly schedule + manual dispatch) builds and publishes **both** branches via a matrix; its `push` trigger publishes only when an opt-in repository variable is set. Every release is a tag on the built commit plus a source zip, README, and LICENSE; targets amend it with `release-asset-*` files or push to their own registry. An unchanged version re-pushes nothing (no-op republish); Docker re-pushes by design.
+
+```mermaid
+flowchart TD
+  trig[schedule / dispatch / opt-in push] --> plan[publish plan + branch matrix]
+  plan --> mmain[leg: main]
+  plan --> mdev[leg: develop]
+  mmain --> vmain[version X.Y.Z stable]
+  mdev --> vdev[version X.Y.Z-g-sha prerelease]
+  vmain --> relm[github-release + registries: latest]
+  vdev --> reld[github-release + registries: prerelease]
+```
 
 ### Output Seam by Destination
 
