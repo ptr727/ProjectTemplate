@@ -10,6 +10,7 @@
 # and `--renormalize`. Any repo whose tooling ships extensionless scripts adds the matching path pin, e.g. s6-overlay
 # init `Docker/s6-overlay/** text eol=lf` or husky/git hooks `.husky/pre-commit text eol=lf`.
 *.sh text eol=lf
+*.py text eol=lf
 
 # Dockerfiles must be LF - a CRLF breaks RUN heredocs and line continuations.
 Dockerfile text eol=lf
