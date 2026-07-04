@@ -14,7 +14,7 @@ Given this document, an agent must be able to do three things to any project:
 
 The guarantees are distilled from failures observed in practice and stated as the **failure-mode each prevents**, so the document stays portable to any project.
 
-## 1. Purpose and how to use this document
+## 1. Purpose and How to Use This Document
 
 - **Contract, not implementation.** Conform to the *outcomes* in section 4. Shape, job names, and file layout may differ between repos; the input/output behavior may not.
 - **Applicability.** A guarantee (or a 5A check, or a 5B scenario) is **applicable** only if the repo contains the construct it governs - a given target, a transfer artifact, a registry push, a wrapper-version source. An item that governs an absent construct is **N/A**: record it as N/A and **exclude it from the verdict**. N/A is never a defect. Section 6 names which items go N/A per project type; a near-empty pipeline (source-only) is mostly N/A and that is fine.
@@ -23,7 +23,7 @@ The guarantees are distilled from failures observed in practice and stated as th
 - **Two layers when auditing.** The pipeline splits into an **orchestrator** layer (the PR entry workflow, the publisher, and the version/release/badge jobs) and a **build-leaf** layer (`build-<target>-task.yml`). Inputs like `github`/`nuget`/`dockerhub`/`expect_release_assets` live on the orchestrator; a leaf only ever receives `ref`/`branch`/`smoke` (and a derived `push`). When a check names an input, assert it in the layer that declares it.
 - **The three verbs.** Audit (static), Test (trace + probe), Assess (verdict). Section 5 gives the exact procedure.
 
-## 2. Workflow style conventions
+## 2. Workflow Style Conventions
 
 Prescriptive style/legibility rules. Cheap to check, necessary but not sufficient (a perfectly styled workflow can still violate section 4).
 
@@ -42,17 +42,17 @@ Prescriptive style/legibility rules. Cheap to check, necessary but not sufficien
 
 ## 3. Architecture
 
-### Two layers: orchestration vs build
+### Two Layers: Orchestration vs Build
 
 - **Orchestration** is generic and intended to be synced verbatim **at the job level**: the publish-plan + branch matrix in the publisher, the `get-version`, `validate-release`, and `github-release` jobs, the date-badge job, and the `changes -> smoke-build -> aggregator` shape of the PR workflow. These job *bodies* should not need per-repo edits.
 - **Build** is repo-owned: the `build-<target>-task.yml` leaf tasks.
 - **What the repo curates** (by design, not a leak): the *list* of targets. This is **not** a byte-for-byte file carry. Adding or dropping a target edits the orchestrator's surface - the `enable_<target>` inputs and the `build-<target>` job + its `github-release` `needs:` entry in the release task, **and** the `changes` paths-filter entry + output + the `smoke-build` enable-forward in the PR workflow. "Verbatim" applies to the `github-release` job and the version/publish-plan logic, not to the release task's job list or the paths-filter. Subsetting is symmetric: the same surface you trim to drop a target you extend to add a new one (e.g. a `release-asset-<branch>-library` producer needs a new `enable_library` input, a `build-library` job, a `needs:` entry, and a `library` paths-filter).
 
-### The seam contract
+### The Seam Contract
 
 A target contributes a file to the GitHub release by uploading a workflow artifact named `release-asset-<branch>-<target>`. The release job collects **every** matching artifact by **pattern** (`pattern: release-asset-<branch>-*` + `merge-multiple: true`), never an `artifact-ids:` naming one job's output. Canonical for **every** repo, single-target included; switching to an `artifact-id` handoff forks the release download and breaks the verbatim carry.
 
-### Reusable-task parameter contract
+### Reusable-Task Parameter Contract
 
 Every leaf and the release task take `ref`, `branch` (the **logical** branch that drives config/tags/prerelease), and where relevant `smoke`. Branch-derived config keys off `inputs.branch`, **never** `github.ref_name` (the publisher matrix builds the non-default branch from a run whose `github.ref_name` is the default branch). Artifact names are branch-suffixed so both legs coexist.
 
@@ -60,23 +60,23 @@ Every leaf and the release task take `ref`, `branch` (the **logical** branch tha
 
 NBGV computes the version and MUST version from the **checked-out branch**, not the runner CI ref (set `IGNORE_GITHUB_REF=true`; `GITHUB_REF` is reserved and a step `env:` cannot override it). The default branch is the public-release ref, so it builds clean `X.Y.Z`; every other branch builds a prerelease `X.Y.Z-g<sha>`. `version.json`'s `version` is the major.minor floor; NBGV appends the git height as the patch. **NBGV and `version.json` are retained even by a repo with no compiled code** - they are the source of the release tag (`SemVer2`) and `target_commitish` (`GitCommitId`) and the prerelease classification; the .NET SDK is pulled in only as the versioning toolchain. A package build derives its registry version from the same NBGV outputs, but **not always from `SemVer2`**: the PyPI version is built from `AssemblyFileVersion` (four-part `M.N.P.B`) with a PEP 440 `.dev0` appended on the `develop` branch. A wrapper repo may drive its build/image version from an external committed `name -> version` state file while NBGV still tags the release.
 
-### Validate-at-entry
+### Validate-at-Entry
 
 When a workflow's inputs carry a cross-input or input-versus-derived-state invariant, assert it **once** in a dedicated entry job/step the downstream jobs `needs:`, failing fast with `::error::` before any build or publish.
 
-### Resource lifecycle
+### Resource Lifecycle
 
 Workflow artifacts are an **intra-run handoff** only; durable copies live on the release/registry. The rule: a transfer artifact handed **between jobs** is deleted by exact name/pattern **at its point of consumption**, the delete is **gated to the same condition as the consumer**, and it is **best-effort**. **Every** `upload-artifact` sets `retention-days: 1` as the universal failure-path backstop, so no terminal blanket-delete job is needed - and an intermediate consumed only within the same run (e.g. an executable's per-runtime outputs feeding an aggregation step) may rely on the retention backstop alone. The run is **never** blanket-deleted (`.artifacts[].id`). See D5.
 
-### Fast PR feedback
+### Fast PR Feedback
 
 PRs validate fast and never publish: a paths-filter smoke-builds only changed targets; a validation job always runs; smoke builds compile/lint/test but upload nothing and push nothing; one required aggregator gates the merge. See D1.
 
-### Release model
+### Release Model
 
 Two-phase by default: PRs smoke-test, merges do not publish. The publisher (weekly schedule + manual dispatch) builds and publishes **both** branches via a matrix; its `push` trigger publishes only when an opt-in repository variable is set. Every release is a tag on the built commit plus a source zip, README, and LICENSE; targets amend it with `release-asset-*` files or push to their own registry. An unchanged version re-pushes nothing (no-op republish); Docker re-pushes by design.
 
-### Output seam by destination
+### Output Seam by Destination
 
 Pick each output's path by **where the artifact goes**:
 
@@ -85,11 +85,11 @@ Pick each output's path by **where the artifact goes**:
 - **Image-registry push** (Docker): the leaf pushes multi-arch tags, contributes no `release-asset-*`.
 - **No file target** (Docker-only, PyPI-only, source-only): the release is tag + source zip + README + LICENSE. The repo's **caller MUST pass `expect_release_assets: false`** to the release task (the input is never set by the template's own publisher, which ships file targets and keeps the default `true`). This is the one case where the otherwise-verbatim publisher is edited; with the default `true` and no assets, the release-create step fails on `fail_on_unmatched_files`.
 
-## 4. Behavioral contract - expected outcomes
+## 4. Behavioral Contract - Expected Outcomes
 
 The required behaviors, organized by domain. Each is a **MUST**, stated as input -> output plus the failure-mode it prevents. A workflow that violates any *applicable* guarantee is **not operational**.
 
-### D1 - PR fast-feedback (smoke)
+### D1 - PR Fast-Feedback (Smoke)
 
 - **D1.1 Only changed targets build.** Input: a PR touching some targets. Output: the paths-filter marks exactly those targets and only their smoke builds run; unchanged targets skip. A repo's own targets MUST each have a filter entry (so a touched target is never silently skipped). *Prevents: rebuilding everything, and a changed target slipping through unbuilt.*
 - **D1.2 A validation job always runs.** Input: any PR. Output: a type-appropriate validation job runs unconditionally and the aggregator `needs:` it. In a .NET repo this is the `unit-test` job (format/style/test); a non-.NET repo **replaces** it (not deletes) with its own validator (lint, schema-check) and re-points **every** `needs:` on it - both the aggregator and `smoke-build` (which `needs:` the validation job by name) - to the replacement. *Prevents: a PR merging with no validation, or a dangling `needs:` that fails the whole workflow to load.*
@@ -97,14 +97,14 @@ The required behaviors, organized by domain. Each is a **MUST**, stated as input
 - **D1.4 Workflow-file changes are not smoke-built.** Input: a PR changing only `.github/workflows/**`. Output: the paths-filter excludes workflow files, so smoke-build skips. *Implication: there is no CI workflow-lint; lint workflow edits locally (actionlint).*
 - **D1.5 One required aggregator gates merge.** Input: any PR. Output: a single aggregator job must **succeed**, `needs:` the changes job and the validation job, treat a **skipped** smoke build as pass, and **block** on `failure`/`cancelled`. Its name is ruleset-bound and MUST NOT be renamed. *Prevents: a paths-filter error letting a target-changing PR merge unbuilt.*
 
-### D2 - Input/state validation at entry
+### D2 - Input/State Validation at Entry
 
 - **D2.1 Validate before expensive work.** Output: a dedicated entry job/step asserts each cross-input/derived-state invariant and fails fast before builds; downstream jobs `needs:` it.
 - **D2.2 Release branch matches version classification.** Input: a real (non-smoke) release build. Output: the gate fails loudly if the default branch carries a prerelease suffix **or** a non-default branch carries none; it strips `+buildmetadata` before testing for the prerelease `-` (only a core/prerelease `-` counts); and it is **skipped on smoke** (a detached PR head always versions as prerelease). *Prevents: a non-default leg published as stable; a build-metadata false-positive; the gate blocking every default-base promotion PR.*
 - **D2.3 Publish only from the default branch.** Input: a dispatch/schedule publish. Output: a dispatch from a non-default ref fails fast. *Prevents: the matrix building the other leg from the wrong ref and shipping a malformed non-prerelease "Latest".*
 - **D2.4 Mutually-exclusive / paired inputs are validated.** Input: a workflow with either/or or must-pair inputs (e.g. the docker-readme task's `repositories` XOR `manifest`+`manifest-jq`). Output: a half-filled or conflicting combination fails fast. *Prevents: a silent fall-through.*
 
-### D3 - Versioning and classification
+### D3 - Versioning and Classification
 
 - **D3.1 Version from the checked-out branch.** Input: a matrix publish dispatched from the default branch, each leg checking out its own branch. Output: each leg's version reflects **its** branch (`IGNORE_GITHUB_REF=true`). *Prevents: every leg classified as the public ref because the CI ref is the default branch.*
 - **D3.2 Default = public, others = prerelease.** Output: default branch -> `X.Y.Z`; any other -> `X.Y.Z-g<sha>`. The default-branch literal in the gate, the `prerelease` expression, and `version.json` MUST all name the repo's real default branch.
@@ -112,14 +112,14 @@ The required behaviors, organized by domain. Each is a **MUST**, stated as input
 - **D3.4 Registry versions follow the classification, per registry.** Output: NuGet default = stable, others = prerelease (derived by NuGet.org from the SemVer2 `-g<sha>` suffix on `PackageVersion`, not a flag the workflow sets). PyPI builds from `AssemblyFileVersion` (`M.N.P.B`) and appends `.dev0` on the `develop` branch only (a two-branch literal, not a generic N-branch rule); the develop `.dev0` build must remain `pip install --pre`-selectable and sort above the default release (NBGV git height in the release segment keeps develop ahead). *Prevents: a non-default leg published as a release; a renamed/extra branch silently getting a plain version.*
 - **D3.5 Wrapper repos may use an external version.** Output: a repo wrapping an upstream release drives its build/image version from a committed `name -> version` state file, while NBGV still tags the release. *Note: the template ships the tracker (the writer) but no consumer wiring - a wrapper must wire the leaf to read the state file (e.g. `jq` into the image tag) instead of `SemVer2`; if the leaf still tags off NBGV, the wrapper is not actually pinned to upstream.*
 
-### D4 - Release / publish
+### D4 - Release / Publish
 
 - **D4.1 Two-phase by default.** Output: PRs smoke-test; merges do **not** publish unless the opt-in variable is set; the publisher's schedule and dispatch always publish both branches.
 - **D4.2 Tag the built commit.** Output: the release `target_commitish` is the built commit's SHA (NBGV's commit id), never `github.sha` or a moving branch ref. *Prevents: the tag landing on the default branch instead of the built tree.*
 - **D4.3 Release contents.** Output: every release is a tag on the built commit plus the auto source zip, README, and LICENSE; file-producing targets attach `release-asset-*`; `prerelease` equals `branch != default`. A no-file-target repo reaches the tag-only shape **only** with `expect_release_assets: false` set by the caller (which relaxes `fail_on_unmatched_files` and skips the asset download); with the default `true` and no assets the release-create step fails.
 - **D4.4 No-op republish.** Input: a re-run whose version is unchanged. Output: nothing is re-pushed - the release-create step is skipped when the tag exists (refreshed only on `workflow_dispatch`), and the paired asset-delete is skipped with it; registry pushes are no-ops. The NuGet/PyPI publish steps are **not** statically gated on existence - they run and the **server** dedupes (`dotnet nuget push --skip-duplicate` turns a 409 into success; PyPI `skip-existing: true`). **Docker always re-pushes** the image (base-image refresh), independently of the release-create skip, within the same run. *Prevents: duplicate releases and wasted pushes.*
 
-### D5 - Resource cleanup
+### D5 - Resource Cleanup
 
 - **D5.1 Delete at the point of consumption.** Output: the job that downloads a **cross-job** transfer artifact deletes it (by exact name/pattern) right after consuming it. An intermediate consumed only within the same run (e.g. an executable's per-runtime outputs feeding an in-run aggregation) MAY instead rely on the `retention-days: 1` backstop. *Prevents: transfer artifacts accumulating against the storage quota.*
 - **D5.2 Gate the delete to the consumer's condition.** Output: the delete runs under the **same** condition as its consuming step. Where the consumer is conditional (the GitHub release create), the delete is conditional too; where the consumer always runs when its job runs (the PyPI publish step), the delete always runs - so on a no-op re-run the `release-asset-*` delete is **skipped** while the PyPI build-artifact delete still **runs** (its publish ran). *Prevents: deleting freshly built assets on a no-op re-run.*
@@ -127,27 +127,27 @@ The required behaviors, organized by domain. Each is a **MUST**, stated as input
 - **D5.4 Retention backstop.** Output: **every** `upload-artifact` sets `retention-days: 1`.
 - **D5.5 Never blanket-delete.** Output: cleanup MUST NOT enumerate and delete the run's whole artifact set. *Prevents: destroying diagnostic/log artifacts and auto-emitted build-records.*
 
-### D6 - Seam / architecture conformance
+### D6 - Seam / Architecture Conformance
 
 - **D6.1 Pattern handoff.** Output: the release job downloads by `pattern:`/`merge-multiple:`, not `artifact-ids:`; targets upload `release-asset-<branch>-<target>`. Canonical for single-target.
 - **D6.2 Branch drives config.** Output: branch-derived config reads `inputs.branch`, never `github.ref_name`.
 - **D6.3 Branch-suffixed artifacts.** Output: artifact names are branch-suffixed so both legs coexist.
 - **D6.4 Target add/drop is consistent.** Output: adding or dropping a target updates **all** of: the `enable_<target>` input, the `build-<target>` job and its `github-release` `needs:` entry, the `changes` paths-filter entry + output, and the `smoke-build` enable-forward (and, for PyPI, the separate `publish-pypi` job). The `github-release` job body stays verbatim. *Prevents: a partial subset that startup-fails on a missing leaf or never smoke-builds a target.*
 
-### D7 - Concurrency, permissions, safety
+### D7 - Concurrency, Permissions, Safety
 
 - **D7.1 Publisher serializes.** Output: the publisher uses a **global, ref-independent** concurrency group with `cancel-in-progress: false`. *Prevents: a schedule and a dispatch double-pushing, or a cancelled publish leaving a partial release.*
 - **D7.2 Skipped jobs still need valid permissions.** Output: every reusable job declares valid `permissions:`; a callee's extra scope (e.g. `actions: write` for cleanup, or `id-token: write` for OIDC) is granted by the caller and appears at exactly the one entry point that needs it.
 - **D7.3 Boolean inputs both forms.** Output: declared in both trigger blocks, compared against `true` and `'true'`.
 - **D7.4 Optional-dependency chaining.** Output: cross-job conditions allowlist `success`/`skipped` explicitly.
 
-### D8 - Bots / automation
+### D8 - Bots / Automation
 
 - **D8.1 Merge-bot.** Output: enables auto-merge on `opened`/`reopened`; dispatches `--squash`/`--merge` by the PR's base ref; disables on a maintainer-pushed `synchronize`; concurrency keyed on the **PR number**, not `github.ref`. *Prevents: two PRs colliding in auto-merge.*
 - **D8.2 CodeGen and Dependabot.** Output: codegen runs as a matrix over both branches and is deterministic from an external source; Dependabot targets both branches, security PRs to default.
 - **D8.3 Upstream-version tracker.** Output: a scheduled resolver prints a JSON `name -> version` object to a committed state file, opens a rolling per-branch bump PR naming only the moved keys, the merge-bot auto-merges it, and the bump ships on the **next** publish. The tracker's `bump-branch-prefix` + `branches` MUST match the merge-bot's hard-coded `<prefix>-<base>` head/base pairs, or auto-merge silently never fires.
 
-### D9 - Style / static (see section 2)
+### D9 - Style / Static (See Section 2)
 
 - **D9.1** Every action SHA-pinned with a version comment (sole exception: the documented lagging-tag tool).
 - **D9.2** File/workflow/job/step names follow the suffix rules; ruleset-bound names verbatim.
@@ -155,11 +155,11 @@ The required behaviors, organized by domain. Each is a **MUST**, stated as input
 - **D9.4** Docker layer cache targets a registry tag, not `type=gha`; `cache-to` writes only the built branch's `buildcache-<branch>` and only on push, while `cache-from` reads both branches; multi-image repos use a per-image cache tag.
 - **D9.5** Line endings follow `.editorconfig`.
 
-## 5. Test methodology
+## 5. Test Methodology
 
 An agent verifies a project in three escalating modes, then renders a verdict. **Skip N/A items** (section 1): a check or scenario for an absent construct is recorded N/A, not failed.
 
-### 5A. Static audit (no execution)
+### 5A. Static Audit (No Execution)
 
 Read the workflow files plus `version.json` and assert the structural fact behind each *applicable* D-guarantee, each pass/fail/N-A with a `file:line` citation. Remember the two layers: assert each input in the file that declares it.
 
@@ -181,7 +181,7 @@ Read the workflow files plus `version.json` and assert the structural fact behin
 - **PyPI:** `publish-pypi` declares `environment: { name: pypi }`; `id-token: write` appears only on that job (absent from the build/PR path); `skip-existing: true` is set on the publish action; the build artifact is deleted after publish; the `pypi` environment has a deployment-branch rule.
 - **Docker:** a Docker-only repo's caller passes `expect_release_assets: false`; the leaf reads the external state file for the tag instead of `SemVer2` (wrapper repos only - a plain Docker repo correctly tags off `SemVer2` and records this N/A); the readme/date-badge jobs are gated main-only; the docker-readme task validates `repositories` XOR `manifest`+`manifest-jq`; the buildcache follows D9.4.
 
-### 5B. End-to-end trace scenarios (no execution, deterministic from the YAML)
+### 5B. End-to-End Trace Scenarios (No Execution, Deterministic from the YAML)
 
 For each *applicable* scenario, evaluate every job's `if:`/`needs:` against the inputs and emit the predicted **run/skip + version + release + artifact-end-state** table, then compare to the expected. Scenarios that exercise an absent target are N/A. Minimum set:
 
@@ -199,7 +199,7 @@ For each *applicable* scenario, evaluate every job's `if:`/`needs:` against the 
 | S10 | branch/version classification disagree | validate-release **fails loud**; build/publish skip | D2.2 |
 | S11 | scheduled upstream-version bump (wrapper) | resolver detects a change -> commits the state file -> opens a `<prefix>-<branch>` PR -> merge-bot auto-merges -> the new version ships on the **next** publish | D8.3, D3.5 |
 
-### 5C. Live probe (where warranted)
+### 5C. Live Probe (Where Warranted)
 
 - Open a trivial-change PR touching one target and confirm S1.
 - Drive a `smoke: true` push-probe of the build task for **both** the default and a non-default branch and assert the version classification (clean vs prerelease) and that the gate passes - **without publishing**. *Caveat: the Docker leg logs in to the registry even on smoke and reads the buildcache, so it needs `DOCKER_HUB_*` secrets and cannot run on a fork PR (same-repo only).*
@@ -215,7 +215,7 @@ The workflow is **operational** iff every *applicable* 5A item passes and every 
 3. **Probe** with 5C only for guarantees a static trace cannot settle (live version classification, registry state, artifact lifecycle).
 4. **Verdict:** operational / not operational, with the failing guarantee(s) and the triggering input for each, and the list of items recorded N/A.
 
-## 6. Per-project-type test walkthroughs
+## 6. Per-Project-Type Test Walkthroughs
 
 Each type maps the *applicable* S-scenarios onto its targets; the differences are which leaf tasks exist and what each produces, which 5A addenda apply, and which scenarios are N/A. Walking these is the self-check that the contract holds for each shape.
 
