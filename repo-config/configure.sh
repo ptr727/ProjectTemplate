@@ -10,17 +10,15 @@ set -euo pipefail
 repo="${1:-$(gh repo view --json nameWithOwner --jq '.nameWithOwner')}"
 script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
-# Fetch the ruleset list once and fail loudly if the API call itself fails (auth/404/network), so a
-# failed fetch is never mistaken for "no ruleset exists" and silently turned into a create.
-if ! rulesets="$(gh api "repos/$repo/rulesets")"; then
-    echo "Failed to list rulesets for $repo (check auth and repo access)." >&2
-    exit 1
-fi
-
 for file in "$script_dir"/*.json; do
     [ -e "$file" ] || continue
     name="$(jq -r '.name' "$file")"
-    id="$(jq -r ".[] | select(.name==\"$name\") | .id" <<<"$rulesets")"
+    # Paginate so a name match on a later page is never missed (which would create a duplicate ruleset), and
+    # fail loudly if the API call itself fails (auth/404/network) rather than treating it as "not found".
+    if ! id="$(gh api --paginate "repos/$repo/rulesets" --jq ".[] | select(.name==\"$name\") | .id")"; then
+        echo "Failed to list rulesets for $repo (check auth and repo access)." >&2
+        exit 1
+    fi
     if [ -n "$id" ]; then
         echo "Updating ruleset '$name' (id $id) on $repo"
         gh api --method PUT "repos/$repo/rulesets/$id" --input "$file" >/dev/null
