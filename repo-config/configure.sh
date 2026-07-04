@@ -19,12 +19,16 @@ for file in "$script_dir"/*.json; do
         echo "Failed to list rulesets for $repo (check auth and repo access)." >&2
         exit 1
     fi
-    # Pre-existing drift can leave more than one ruleset with the same name; update the first and warn.
-    count="$(printf '%s' "$ids" | grep -c .)"
-    if [ "$count" -gt 1 ]; then
-        echo "Warning: $count rulesets named '$name' on $repo; updating the first (resolve the duplicates)." >&2
+    # Pre-existing drift can leave more than one ruleset with the same name; update the first and warn. Guard
+    # on non-empty so `grep -c` (which exits non-zero on empty input under `set -e`) can't abort the create path.
+    id=""
+    if [ -n "$ids" ]; then
+        count="$(printf '%s\n' "$ids" | grep -c .)"
+        if [ "$count" -gt 1 ]; then
+            echo "Warning: $count rulesets named '$name' on $repo; updating the first (resolve the duplicates)." >&2
+        fi
+        id="$(printf '%s\n' "$ids" | sed -n '1p')"
     fi
-    id="$(printf '%s\n' "$ids" | sed -n '1p')"
     if [ -n "$id" ]; then
         echo "Updating ruleset '$name' (id $id) on $repo"
         gh api --method PUT "repos/$repo/rulesets/$id" --input "$file" >/dev/null
