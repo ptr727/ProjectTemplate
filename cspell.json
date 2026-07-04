@@ -3,7 +3,7 @@
     "language": "en",
     "ignorePaths": [
         ".git/**",
-        "reports/**",
+        "reports/*/**",
         "**/*.min.*"
     ],
     "ignoreRegExpList": [

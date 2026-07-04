@@ -23,6 +23,19 @@ def main():
     types = load("spec/project-types.json")
     secrets = load("spec/secrets.json")
 
+    for key, obj, fname in [
+        ("types", types, "project-types.json"),
+        ("mechanisms", secrets, "secrets.json"),
+        ("targetMechanisms", secrets, "secrets.json"),
+    ]:
+        if key not in obj:
+            errors.append(f"{fname}: missing required key '{key}'")
+    if errors:
+        print("Spec validation FAILED:")
+        for e in errors:
+            print(f"  - {e}")
+        return 1
+
     known_types = set(types["types"])
     target_mech = secrets["targetMechanisms"]
     mechanisms = secrets["mechanisms"]
