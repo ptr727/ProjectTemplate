@@ -1,59 +1,12 @@
 # https://docs.github.com/en/code-security/dependabot/dependabot-version-updates/configuration-options-for-the-dependabot.yml-file
 #
-# Every ecosystem appears **twice**: once with `target-branch: "main"`
-# and once with `target-branch: "develop"`. Dependabot will open
-# parallel PRs against each branch, so both stay current on
-# dependency versions independently of the develop -> main release
-# cadence.
-#
-# Why dual-target and not develop-only:
-# - `develop` is the integration branch and ships content forward to
-#   `main` through merge-commit releases, but the time between releases
-#   can be long (a feature branch may sit on develop for weeks).
-# - Push-distribution channels (e.g. HACS for Home Assistant
-#   integrations, distros that pull from main) consume `main` directly.
-#   If `main` only got dependency bumps via the next develop -> main
-#   release, those channels would ship outdated code in the interim.
-# - Codegen workflows take the same dual-target shape for the same
-#   reason - see .github/workflows/run-codegen-pull-request-task.yml.
-#
-# The merge-bot's `case` statement in
-# .github/workflows/merge-bot-pull-request.yml dispatches the merge
-# method per base ref (squash on develop, merge on main) so both bases
-# auto-merge cleanly. `develop` remains strictly forward-only: there
-# are no main -> develop back-merges; each branch absorbs its own
-# Dependabot PRs and codegen PRs independently.
-#
-# Security update PRs (CVE-driven) are opened by Dependabot against
-# the repo default branch (`main`) regardless of any `target-branch`
-# config - the `case` statement handles them in the same code path.
+# github-actions is the only ecosystem this repo ships. Dual-target (main + develop) so both branches
+# stay current independently of the develop -> main release cadence; the merge-bot auto-merges each
+# base with its per-base method. See catalog/snippets/configs/dependabot.yml for the multi-ecosystem
+# reference (nuget, uv) a code-shipping repo uses.
 version: 2
 updates:
 
-  # ----- nuget -----
-
-  - package-ecosystem: "nuget"
-    target-branch: "main"
-    directory: "/"
-    schedule:
-      interval: "daily"
-    groups:
-      nuget-deps:
-        patterns:
-          - "*"
-
-  - package-ecosystem: "nuget"
-    target-branch: "develop"
-    directory: "/"
-    schedule:
-      interval: "daily"
-    groups:
-      nuget-deps:
-        patterns:
-          - "*"
-
-  # ----- github-actions -----
-
   - package-ecosystem: "github-actions"
     target-branch: "main"
     directory: "/"
@@ -71,27 +24,5 @@ updates:
       interval: "daily"
     groups:
       actions-deps:
-        patterns:
-          - "*"
-
-  # ----- uv (PyPiLibrary) -----
-
-  - package-ecosystem: "uv"
-    target-branch: "main"
-    directory: "/PyPiLibrary"
-    schedule:
-      interval: "daily"
-    groups:
-      pypi-deps:
-        patterns:
-          - "*"
-
-  - package-ecosystem: "uv"
-    target-branch: "develop"
-    directory: "/PyPiLibrary"
-    schedule:
-      interval: "daily"
-    groups:
-      pypi-deps:
         patterns:
           - "*"

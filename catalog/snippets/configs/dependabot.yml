@@ -1,0 +1,72 @@
+# Reference: multi-ecosystem dual-target Dependabot config for a code-shipping repo.
+# https://docs.github.com/en/code-security/dependabot/dependabot-version-updates/configuration-options-for-the-dependabot.yml-file
+#
+# Every ecosystem appears twice, once per target branch (main and develop), so both branches stay
+# current on dependency versions independently of the develop -> main release cadence. Push-distribution
+# channels (HACS, distros that pull main) consume main directly, so main must get bumps without waiting
+# for the next release. The merge-bot dispatches the merge method per base ref (squash on develop, merge
+# on main). develop is strictly forward-only; each branch absorbs its own PRs. Security (CVE) PRs always
+# target the default branch regardless of target-branch. Keep only the ecosystems the repo actually ships.
+version: 2
+updates:
+
+  - package-ecosystem: "nuget"
+    target-branch: "main"
+    directory: "/"
+    schedule:
+      interval: "daily"
+    groups:
+      nuget-deps:
+        patterns:
+          - "*"
+
+  - package-ecosystem: "nuget"
+    target-branch: "develop"
+    directory: "/"
+    schedule:
+      interval: "daily"
+    groups:
+      nuget-deps:
+        patterns:
+          - "*"
+
+  - package-ecosystem: "github-actions"
+    target-branch: "main"
+    directory: "/"
+    schedule:
+      interval: "daily"
+    groups:
+      actions-deps:
+        patterns:
+          - "*"
+
+  - package-ecosystem: "github-actions"
+    target-branch: "develop"
+    directory: "/"
+    schedule:
+      interval: "daily"
+    groups:
+      actions-deps:
+        patterns:
+          - "*"
+
+  # uv directory points at the Python package root (e.g. /PackageName); adjust per repo layout.
+  - package-ecosystem: "uv"
+    target-branch: "main"
+    directory: "/PythonPackage"
+    schedule:
+      interval: "daily"
+    groups:
+      pypi-deps:
+        patterns:
+          - "*"
+
+  - package-ecosystem: "uv"
+    target-branch: "develop"
+    directory: "/PythonPackage"
+    schedule:
+      interval: "daily"
+    groups:
+      pypi-deps:
+        patterns:
+          - "*"
