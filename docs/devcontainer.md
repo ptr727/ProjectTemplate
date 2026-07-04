@@ -4,8 +4,8 @@ The repo ships **two per-language [Dev Containers](https://containers.dev/)** so
 
 | Workspace | Devcontainer | Image | Toolchain |
 | --------- | ------------ | ----- | --------- |
-| [`DotNet.code-workspace`](../DotNet.code-workspace) | [`.devcontainer/dotnet/devcontainer.json`](../.devcontainer/dotnet/devcontainer.json) | `mcr.microsoft.com/devcontainers/dotnet:1-10.0` | .NET 10 SDK |
-| [`Python.code-workspace`](../Python.code-workspace) | [`.devcontainer/python/devcontainer.json`](../.devcontainer/python/devcontainer.json) | `mcr.microsoft.com/devcontainers/python:1-3.14-bookworm` | Python 3.14 + version-pinned `uv` |
+| `DotNet.code-workspace` | [`catalog/snippets/devcontainer/dotnet/devcontainer.json`](../catalog/snippets/devcontainer/dotnet/devcontainer.json) | `mcr.microsoft.com/devcontainers/dotnet:1-10.0` | .NET 10 SDK |
+| `Python.code-workspace` | [`catalog/snippets/devcontainer/python/devcontainer.json`](../catalog/snippets/devcontainer/python/devcontainer.json) | `mcr.microsoft.com/devcontainers/python:1-3.14-bookworm` | Python 3.14 + version-pinned `uv` |
 
 Open the workspace file matching the language you want, install the [Dev Containers extension](https://marketplace.visualstudio.com/items?itemName=ms-vscode-remote.remote-containers), and pick **Reopen in Container**.
 
@@ -19,7 +19,7 @@ Prerequisite: complete [host setup](./host-setup.md) first - without git config,
 | Common utilities | `ghcr.io/devcontainers/features/common-utils:2` | bash, curl, wget, sudo, `vscode` user |
 | VS Code extensions | `customizations.vscode.extensions` in each `devcontainer.json` | Mirrors the matching workspace's `recommendations` so the container has the same tooling |
 
-The .NET container additionally ships the `csharpier`/`dotnet-outdated` local tools (restored by `.devcontainer/dotnet/post-create.sh`). The Python container additionally ships `uv` (installed by `.devcontainer/python/post-create.sh` from a version-pinned URL) and pre-syncs the `PyPiLibrary` venv.
+The .NET container additionally ships the `csharpier`/`dotnet-outdated` local tools (restored by `catalog/snippets/devcontainer/dotnet/post-create.sh`). The Python container additionally ships `uv` (installed by `catalog/snippets/devcontainer/python/post-create.sh` from a version-pinned URL) and pre-syncs the `PyPiLibrary` venv.
 
 Each devcontainer's extension list and the matching workspace's `recommendations` are kept identical - when you add an extension to one, add it to the other.
 
@@ -43,8 +43,8 @@ Both `devcontainer.json` files run two scripts at well-defined points:
 
 - **`onCreateCommand`** - `sudo install -d -m 700 -o vscode -g vscode /home/vscode/.ssh`. On macOS hosts the bind-mount surfaces `/home/vscode/.ssh` as root-owned, which would block writes from inside the container (e.g. `gh` updating `known_hosts`). This chown fixes it. Idempotent on Linux and WSL2.
 - **`postCreateCommand`** - language-specific:
-  - .NET: `.devcontainer/dotnet/post-create.sh` - runs `dotnet tool restore` (csharpier, dotnet-outdated).
-  - Python: `.devcontainer/python/post-create.sh` - installs the pinned `uv` and pre-syncs `PyPiLibrary` if it exists.
+  - .NET: `catalog/snippets/devcontainer/dotnet/post-create.sh` - runs `dotnet tool restore` (csharpier, dotnet-outdated).
+  - Python: `catalog/snippets/devcontainer/python/post-create.sh` - installs the pinned `uv` and pre-syncs `PyPiLibrary` if it exists.
 
 Re-runs of either are idempotent. No git hooks are installed by default - see the README's **Optional: enable git hooks locally** section if you want pre-commit checks.
 
