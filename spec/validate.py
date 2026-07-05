@@ -42,17 +42,16 @@ def main():
     target_mech = secrets["targetMechanisms"]
     mechanisms = secrets["mechanisms"]
 
-    # secrets.json structure: CI runs no JSON-schema validation, so verify the shape here and fail with a
-    # clear message rather than crash the loops below. baseline and every mechanism is an object with list
-    # requires/forbids; a mechanism also declares a recognized kind, and an oidc kind must forbid a static
-    # credential (forbids, not an empty requires, is what enforces "no static key").
+    # CI runs no JSON-schema validation, so shape-check secrets.json here to fail with a clear message
+    # rather than crash the cross-reference loops below.
     def check_secret_set(label, entry, need_kind):
         if not isinstance(entry, dict):
             errors.append(f"secrets.json: {label} is not an object")
             return
         for field in ("requires", "forbids"):
-            if not isinstance(entry.get(field), list):
-                errors.append(f"secrets.json: {label} '{field}' is missing or not an array")
+            val = entry.get(field)
+            if not isinstance(val, list) or not all(isinstance(x, str) for x in val):
+                errors.append(f"secrets.json: {label} '{field}' must be an array of strings")
         if need_kind:
             if entry.get("kind") not in ("oidc", "static-secret"):
                 errors.append(f"secrets.json: {label} has a missing or invalid kind")
@@ -71,6 +70,13 @@ def main():
         for t, v in target_mech.items():
             if not (v is None or isinstance(v, str)):
                 errors.append(f"secrets.json: targetMechanisms['{t}'] must be a mechanism name or null")
+    feature_mech = secrets.get("featureMechanisms", {})
+    if not isinstance(feature_mech, dict):
+        errors.append("secrets.json: 'featureMechanisms' is not an object")
+    else:
+        for f, v in feature_mech.items():
+            if not (v is None or isinstance(v, str)):
+                errors.append(f"secrets.json: featureMechanisms['{f}'] must be a mechanism name or null")
     if errors:
         print("Spec validation FAILED:")
         for e in errors:
