@@ -20,11 +20,11 @@ Governance, agent-orchestration, and workflow-audit hub for a fleet of related r
 
 ### Release Notes <!-- omit from toc -->
 
-**Version: 1.0**:
+**Version: 2.0**:
 
 **Summary**:
 
-- Governance, agent-orchestration, and workflow-audit hub for the fleet: shared rules, a machine-readable spec, a fleet registry, and an audit-agent instruction set.
+- Governance, agent-orchestration, and workflow-audit hub for the fleet: shared rules, a machine-readable spec, a fleet registry, per-repo audit reports, and an audit-agent instruction set. Ships no application code.
 
 See [Release History][history] for the full history.
 
