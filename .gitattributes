@@ -11,6 +11,11 @@
 # init `Docker/s6-overlay/** text eol=lf` or husky/git hooks `.husky/pre-commit text eol=lf`.
 *.sh text eol=lf
 
+# Vanilla `.py` follows the CRLF default - Python's universal newlines accept CRLF, and it is
+# commonly edited on Windows. Pin LF only for a `.py` executed directly via its shebang, by path -
+# here the CI validation entry point; do not re-add a blanket `*.py text eol=lf`.
+spec/validate.py text eol=lf
+
 # Dockerfiles must be LF - a CRLF breaks RUN heredocs and line continuations.
 Dockerfile text eol=lf
 *.Dockerfile text eol=lf

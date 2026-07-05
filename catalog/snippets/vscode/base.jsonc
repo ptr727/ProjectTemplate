@@ -1,7 +1,9 @@
+// Standard workspace fragment carried by every fleet repo: the shared editor
+// settings and the extension set common to all repos. A repo's
+// `<Repo>.code-workspace` is `{ "folders": [{ "path": "." }] }` plus this base,
+// merged with the per-type fragments (dotnet, python, docker) for the languages
+// and targets it ships.
 {
-    "folders": [
-        { "path": "." }
-    ],
     "settings": {
         "markdown.extension.toc.levels": "2..3",
         "files.trimTrailingWhitespace": true,

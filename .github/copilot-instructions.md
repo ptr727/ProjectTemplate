@@ -139,6 +139,13 @@ mutation($threadId: ID!) {
 
 Issue-level Copilot comments (those in `issues/<N>/comments`) have no resolution action - GitHub provides no API or UI to resolve them. Reply if the finding warrants it; no resolution step is needed or possible.
 
+### PR Edits and Merge-State Gotchas
+
+- **`gh pr edit --title/--body` is broken here.** It touches the deprecated Projects-classic `projectCards` GraphQL field and **exits non-zero without applying the change** (a stale PR description then survives review rounds). Edit the title/body via the API and verify it took: GraphQL `updatePullRequest(input: { pullRequestId, title, body })`, or REST `gh api -X PATCH repos/<owner>/<repo>/pulls/<N> -F body=@body.md` (the `@` reads the body from a file - name it explicitly, not the literal `file`).
+- **`main`/`develop` use rulesets, not classic branch protection.** The classic protection REST endpoint (`repos/.../branches/<b>/protection`) 404s - read the ruleset instead. A `mergeStateStatus` of `BLOCKED` on a green PR is usually just **unresolved review threads** (the ruleset requires thread resolution); resolving them moves it to `CLEAN`. (`BLOCKED` is a `mergeStateStatus` value; don't confuse it with the separate `mergeable` field's `MERGEABLE`/`CONFLICTING`, which reports merge conflicts, not review gates.)
+- **Push -> head-SHA read race.** A `headRefOid` read taken immediately after a push can return the **old** head; re-read after the push registers, or a coverage poll evaluates the stale SHA.
+- **Copilot is sometimes factually wrong** (e.g. it claimed `actionlint -color` "requires a value" - it is a boolean flag). Verify a finding before fixing; decline with evidence when it is wrong - that is distinct from dismissing a still-present finding as stale.
+
 Reply-body conventions:
 
 - Accepted bug/style fix: include fixing commit SHA and a one-line summary.
@@ -151,4 +158,4 @@ After the final push, sweep-resolve stale older threads for removed code paths.
 
 Read [AGENTS.md](../AGENTS.md) for this repo's conventions. For code-style rules, [`CODESTYLE.md`](../CODESTYLE.md) (its General section plus the relevant language section) is authoritative. Don't restate any of these files' rules in commit bodies or PR descriptions - keep those focused on the change itself.
 
-**In a derived repo:** if you find a discrepancy that should be fixed in the template itself (this file or AGENTS.md is out of date, a rule is missing, something bit this repo and would bite the next), open an issue upstream in [`ptr727/ProjectTemplate`](https://github.com/ptr727/ProjectTemplate) rather than only fixing it locally - see the template's [AGENTS.md "Staying in Sync and Reporting Drift Upstream"](https://github.com/ptr727/ProjectTemplate/blob/main/AGENTS.md#staying-in-sync-and-reporting-drift-upstream).
+If you find a gap in the governance itself (this file or AGENTS.md is out of date, a rule is missing, something bit this repo and would bite the next), fix it in the governance docs as part of your change rather than only working around it locally.

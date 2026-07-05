@@ -29,7 +29,7 @@ ssh-keygen -t ed25519 -C "you@example.com" -f ~/.ssh/id_ed25519
 
 Add the public key (`~/.ssh/id_ed25519.pub`) to GitHub twice:
 
-1. **Authentication key** - [GitHub -> Settings -> SSH and GPG keys -> New SSH key](https://github.com/settings/keys), key type **Authentication Key**.
+1. **Authentication key** - [GitHub -> Settings -> SSH and GPG keys -> New SSH key][keys-link], key type **Authentication Key**.
 2. **Signing key** - same page, but **Signing Key** type. GitHub treats these independently even though it's the same public key.
 
 Test the auth key:
@@ -108,11 +108,11 @@ git config --global commit.gpgsign true
 git config --global tag.gpgsign true
 ```
 
-See [SSH commit signing](./ssh-signing.md) for verification steps and per-OS troubleshooting.
+See [SSH commit signing][ssh-signing] for verification steps and per-OS troubleshooting.
 
 ## GitHub CLI
 
-Install [`gh`](https://cli.github.com/) and authenticate.
+Install [`gh`][cli-link] and authenticate.
 
 ```shell
 gh auth login --hostname github.com --git-protocol ssh
@@ -134,5 +134,15 @@ If signing fails locally, the devcontainer will fail too - fix here first.
 
 ## Next Steps
 
-- [Devcontainer setup](./devcontainer.md) - open the repo in the per-language .NET or Python devcontainer.
-- [SSH commit signing](./ssh-signing.md) - per-OS setup details, verification, and troubleshooting.
+- [Devcontainer setup][devcontainer] - open the repo in the per-language .NET or Python devcontainer.
+- [SSH commit signing][ssh-signing] - per-OS setup details, verification, and troubleshooting.
+
+<!-- Repo -->
+
+[devcontainer]: ./devcontainer.md
+[ssh-signing]: ./ssh-signing.md
+
+<!-- External -->
+
+[cli-link]: https://cli.github.com/
+[keys-link]: https://github.com/settings/keys

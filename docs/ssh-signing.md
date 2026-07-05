@@ -2,7 +2,7 @@
 
 This repo enforces signed commits on `main` and `develop` via branch protection. Use SSH signing - one Ed25519 key serves both authentication (push) and signing.
 
-If you haven't generated a key and configured git yet, follow [host setup](./host-setup.md) first.
+If you haven't generated a key and configured git yet, follow [host setup][host-setup] first.
 
 ## Why SSH Signing
 
@@ -109,7 +109,7 @@ The container picks up:
 - The `~/.ssh/id_ed25519.pub` and `~/.config/git/allowed_signers` files via bind-mount declared in `devcontainer.json`.
 - The forwarded SSH agent socket from `SSH_AUTH_SOCK`, so signing happens with the host's loaded private key without the private key ever entering the container.
 
-If the container's `~/.ssh` directory exists with the wrong owner (root, surfaced by macOS bind-mount semantics), `gh auth login` writes to `~/.ssh/known_hosts` may fail. The `onCreateCommand` in `devcontainer.json` chowns the directory to `vscode` to fix this - see [devcontainer setup](./devcontainer.md) for the rationale.
+If the container's `~/.ssh` directory exists with the wrong owner (root, surfaced by macOS bind-mount semantics), `gh auth login` writes to `~/.ssh/known_hosts` may fail. The `onCreateCommand` in `devcontainer.json` chowns the directory to `vscode` to fix this - see [devcontainer setup][devcontainer] for the rationale.
 
 ## Troubleshooting
 
@@ -120,3 +120,8 @@ If the container's `~/.ssh` directory exists with the wrong owner (root, surface
 **Verifies on the host but not in the container** - The bind-mount source path differs. `${localEnv:HOME}` resolves on Linux/macOS hosts; on Windows hosts (WSL2 backend) the `${localEnv:USERPROFILE}` fallback in `devcontainer.json` handles it. Check the actual mount with `mount | grep ssh` inside the container.
 
 **SSH agent says "could not open a connection"** - The host's agent isn't running. Linux: `systemctl --user start ssh-agent.socket`. macOS: open a new terminal so launchd starts the agent.
+
+<!-- Repo -->
+
+[devcontainer]: ./devcontainer.md
+[host-setup]: ./host-setup.md

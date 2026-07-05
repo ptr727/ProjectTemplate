@@ -1,0 +1,142 @@
+{
+    "$schema": "./repos.schema.json",
+    "owner": "ptr727",
+    "defaults": {
+        "groundTruthBranch": "main",
+        "releaseTrigger": "two-phase"
+    },
+    "repos": [
+        {
+            "name": "ProjectTemplate",
+            "url": "https://github.com/ptr727/ProjectTemplate",
+            "status": "cataloged",
+            "types": ["source-only", "docs"],
+            "groundTruthBranch": "main",
+            "hasDevelop": true,
+            "publish": [{ "target": "github-release", "mechanism": "none" }],
+            "requiredSecrets": [],
+            "consumerModel": "pull",
+            "releaseTrigger": "two-phase",
+            "configLayout": { "rulesetsDir": "repo-config", "pythonConfig": null },
+            "driftNotes": ["Governance hub; audits its own rules against itself."]
+        },
+        {
+            "name": "Utilities",
+            "url": "https://github.com/ptr727/Utilities",
+            "status": "cataloged",
+            "types": ["csharp", "nuget"],
+            "groundTruthBranch": "main",
+            "hasDevelop": true,
+            "publish": [{ "target": "nuget", "mechanism": "oidc" }],
+            "requiredSecrets": ["NUGET_USERNAME"],
+            "consumerModel": "pull",
+            "releaseTrigger": "two-phase",
+            "configLayout": { "rulesetsDir": "repo-config", "pythonConfig": null },
+            "driftNotes": ["No get-version-task; relies on validate-task."]
+        },
+        {
+            "name": "LanguageTags",
+            "url": "https://github.com/ptr727/LanguageTags",
+            "status": "cataloged",
+            "types": ["csharp", "nuget", "codegen"],
+            "groundTruthBranch": "main",
+            "hasDevelop": true,
+            "publish": [{ "target": "nuget", "mechanism": "oidc" }],
+            "requiredSecrets": ["NUGET_USERNAME"],
+            "consumerModel": "pull",
+            "releaseTrigger": "two-phase",
+            "configLayout": { "rulesetsDir": "repo-config", "pythonConfig": null },
+            "driftNotes": ["No get-version-task; relies on validate-task."]
+        },
+        {
+            "name": "aiopurpleair",
+            "url": "https://github.com/ptr727/aiopurpleair",
+            "status": "cataloged",
+            "types": ["python", "pypi"],
+            "groundTruthBranch": "main",
+            "hasDevelop": true,
+            "publish": [{ "target": "pypi", "mechanism": "oidc" }],
+            "requiredSecrets": [],
+            "consumerModel": "pull",
+            "releaseTrigger": "two-phase",
+            "configLayout": { "rulesetsDir": "repo-config", "pythonConfig": "pyproject.toml" },
+            "driftNotes": []
+        },
+        {
+            "name": "homeassistant-purpleair",
+            "url": "https://github.com/ptr727/homeassistant-purpleair",
+            "status": "cataloged",
+            "types": ["python", "homeassistant"],
+            "groundTruthBranch": "main",
+            "hasDevelop": true,
+            "publish": [{ "target": "github-release", "mechanism": "none" }],
+            "requiredSecrets": [],
+            "consumerModel": "push",
+            "releaseTrigger": "dispatch-only",
+            "configLayout": { "rulesetsDir": "repo-config", "pythonConfig": "standalone" },
+            "driftNotes": [
+                "ruff/pyright in standalone .ruff.toml + pyrightconfig.json instead of pyproject.toml (canonicalize).",
+                "cspell.json missing."
+            ]
+        },
+        {
+            "name": "PlexCleaner",
+            "url": "https://github.com/ptr727/PlexCleaner",
+            "status": "cataloged",
+            "types": ["csharp", "console", "docker"],
+            "groundTruthBranch": "main",
+            "hasDevelop": true,
+            "publish": [
+                { "target": "docker", "mechanism": "static-secret" },
+                { "target": "github-release", "mechanism": "none" }
+            ],
+            "requiredSecrets": ["DOCKER_HUB_USERNAME", "DOCKER_HUB_ACCESS_TOKEN"],
+            "consumerModel": "pull",
+            "releaseTrigger": "two-phase",
+            "configLayout": { "rulesetsDir": "repo-config", "pythonConfig": null },
+            "driftNotes": ["Carries ARCHITECTURE.md and codecov.yml beyond the baseline."]
+        },
+        {
+            "name": "ESPHome-NonRoot",
+            "url": "https://github.com/ptr727/ESPHome-NonRoot",
+            "status": "cataloged",
+            "types": ["docker", "upstream-wrapper"],
+            "groundTruthBranch": "main",
+            "hasDevelop": true,
+            "publish": [{ "target": "docker", "mechanism": "static-secret" }],
+            "requiredSecrets": ["DOCKER_HUB_USERNAME", "DOCKER_HUB_ACCESS_TOKEN"],
+            "consumerModel": "pull",
+            "releaseTrigger": "two-phase",
+            "configLayout": { "rulesetsDir": "repo-config", "pythonConfig": null },
+            "driftNotes": ["Upstream-version tracker drives the image tag."]
+        },
+        {
+            "name": "VSCode-Server-DotNetCore",
+            "url": "https://github.com/ptr727/VSCode-Server-DotNetCore",
+            "status": "cataloged",
+            "types": ["docker"],
+            "groundTruthBranch": "main",
+            "hasDevelop": true,
+            "publish": [{ "target": "docker", "mechanism": "static-secret" }],
+            "requiredSecrets": ["DOCKER_HUB_USERNAME", "DOCKER_HUB_ACCESS_TOKEN"],
+            "consumerModel": "pull",
+            "releaseTrigger": "two-phase",
+            "configLayout": { "rulesetsDir": "repo-config", "pythonConfig": null },
+            "driftNotes": ["Separate publish-docker-readme-task for the Hub overview."]
+        },
+        { "name": "NxWitness", "url": "https://github.com/ptr727/NxWitness", "status": "backlog", "types": [], "classificationPending": true },
+        { "name": "HomeAutomation", "url": "https://github.com/ptr727/HomeAutomation", "status": "backlog", "types": [], "classificationPending": true },
+        { "name": "KiCadLibrary", "url": "https://github.com/ptr727/KiCadLibrary", "status": "backlog", "types": [], "classificationPending": true },
+        { "name": "EspDinIoT", "url": "https://github.com/ptr727/EspDinIoT", "status": "backlog", "types": [], "classificationPending": true },
+        { "name": "ESPHome-Config", "url": "https://github.com/ptr727/ESPHome-Config", "status": "backlog", "types": [], "classificationPending": true },
+        { "name": "HomeAssistant-Config", "url": "https://github.com/ptr727/HomeAssistant-Config", "status": "backlog", "types": [], "classificationPending": true },
+        { "name": "DevKitCIoT", "url": "https://github.com/ptr727/DevKitCIoT", "status": "backlog", "types": [], "classificationPending": true },
+        { "name": "PhotoCleaner", "url": "https://github.com/ptr727/PhotoCleaner", "status": "backlog", "types": [], "classificationPending": true },
+        { "name": "MediaTools", "url": "https://github.com/ptr727/MediaTools", "status": "backlog", "types": [], "classificationPending": true },
+        { "name": "AudioCleaner", "url": "https://github.com/ptr727/AudioCleaner", "status": "backlog", "types": [], "classificationPending": true },
+        { "name": "Vantage-Config", "url": "https://github.com/ptr727/Vantage-Config", "status": "backlog", "types": [], "classificationPending": true },
+        { "name": "HolidayLights", "url": "https://github.com/ptr727/HolidayLights", "status": "backlog", "types": [], "classificationPending": true },
+        { "name": ".github", "url": "https://github.com/ptr727/.github", "status": "backlog", "types": [], "classificationPending": true },
+        { "name": "TelemetryImporter", "url": "https://github.com/ptr727/TelemetryImporter", "status": "backlog", "types": [], "classificationPending": true }
+    ]
+}
