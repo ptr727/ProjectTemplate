@@ -69,6 +69,7 @@ A human-readable index of the rules agents enforce, implement, and audit. The au
 - One logical paragraph per line, with a trailing `\` for an intentional hard break.
 - Pin every GitHub Action to a commit SHA with a version comment.
 - Share one lint config per tool across the editor, the CLI, and CI.
+- Favor VS Code tasks and launch configs for building, running, and testing over ad-hoc shell scripts.
 
 ### Never
 

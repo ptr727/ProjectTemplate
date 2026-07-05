@@ -226,6 +226,13 @@ When pulling a public image fails on a Docker-Desktop/WSL credential-helper erro
 
 Contributors commit to this repo with signed commits; the SSH-signing setup lives in [docs/ssh-signing.md](./docs/ssh-signing.md), host prerequisites in [docs/host-setup.md](./docs/host-setup.md), and devcontainer SSH-agent forwarding in [docs/devcontainer.md](./docs/devcontainer.md). This repo ships no application toolchain; the per-language devcontainer definitions it once used are kept as reference under [`catalog/snippets/devcontainer/`](./catalog/snippets/devcontainer/).
 
+## Editor and Tasks
+
+- **VS Code is the primary IDE, and the experience favors it.** Prefer VS Code tasks and launch configurations for building, running, and testing over ad-hoc shell scripts; a script is the fallback, not the default.
+- The `.code-workspace` file carries the shared editor settings and the recommended-extension set. A **standard set** of extensions applies to every repo (markdownlint, cspell, editorconfig, markdown-all-in-one, better-todo-tree, github-actions, actionlint, shellcheck, claude-code); **language-specific** extensions are added per project (.NET: csdevkit, csharpier; Python: python, pylance, ruff, mypy; Docker: the Docker extension). The catalog holds the full set and per-language additions: [`catalog/snippets/vscode/`](./catalog/snippets/vscode/).
+- The Table of Contents is maintained by the Markdown All in One extension; `markdown.extension.toc.levels` in the workspace sets which heading levels it includes.
+- **Agents: editing the active `.code-workspace` can reload the VS Code window and drop the agent's session.** Commit all state first, prefer opening the folder rather than the workspace while editing it, or leave workspace edits to the maintainer (a maintainer edit does not reload).
+
 ## Repository Layout
 
 - [`AGENTS.md`](./AGENTS.md), [`CODESTYLE.md`](./CODESTYLE.md), [`WORKFLOW.md`](./WORKFLOW.md), [`AUDIT.md`](./AUDIT.md) - the governance and audit docs; this file is the cross-cutting-rules authority.
