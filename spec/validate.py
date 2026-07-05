@@ -45,6 +45,8 @@ def main():
     # Spec integrity: an oidc-kind mechanism must forbid its static-credential counterpart
     # (forbids, not an empty requires, is what enforces "no static key").
     for mname, m in mechanisms.items():
+        if m.get("kind") not in ("oidc", "static-secret"):
+            errors.append(f"secrets.json: mechanism '{mname}' has a missing or invalid kind")
         if m.get("kind") == "oidc" and not m.get("forbids"):
             errors.append(f"secrets.json: oidc mechanism '{mname}' forbids no static credential")
 
@@ -89,11 +91,11 @@ def main():
                 continue
             spec_mech = mechanisms[mech_key]
             # docker/static-secret must carry its required secrets
-            for req in spec_mech["requires"]:
+            for req in spec_mech.get("requires", []):
                 if req not in required:
                     errors.append(f"{name}: {target} requires secret '{req}' (missing)")
             # oidc mechanisms must not carry a forbidden static key
-            for bad in spec_mech["forbids"]:
+            for bad in spec_mech.get("forbids", []):
                 if bad in required:
                     errors.append(f"{name}: {target} forbids secret '{bad}' (present)")
             # mechanism label must match the target's expected mechanism family
