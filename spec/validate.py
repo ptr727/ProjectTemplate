@@ -26,6 +26,7 @@ def main():
     for key, obj, fname in [
         ("repos", repos, "repos.json"),
         ("types", types, "project-types.json"),
+        ("baseline", secrets, "secrets.json"),
         ("mechanisms", secrets, "secrets.json"),
         ("targetMechanisms", secrets, "secrets.json"),
     ]:
@@ -44,7 +45,7 @@ def main():
     # Spec integrity: an oidc-kind mechanism must forbid its static-credential counterpart
     # (forbids, not an empty requires, is what enforces "no static key").
     for mname, m in mechanisms.items():
-        if m.get("kind") == "oidc" and not m["forbids"]:
+        if m.get("kind") == "oidc" and not m.get("forbids"):
             errors.append(f"secrets.json: oidc mechanism '{mname}' forbids no static credential")
 
     for i, repo in enumerate(repos["repos"]):
