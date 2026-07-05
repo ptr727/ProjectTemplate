@@ -41,8 +41,9 @@ indent_size = 2
 [*.sh]
 end_of_line = lf
 
-# Python - LF so shebang scripts stay executable
-[*.py]
+# Python is CRLF by the `[*]` default (universal newlines; commonly edited on Windows). Pin LF
+# only for a `.py` executed directly via its shebang, by path - here the CI validation entry point.
+[spec/validate.py]
 end_of_line = lf
 
 # Dockerfiles - CRLF breaks RUN heredocs and line continuations
