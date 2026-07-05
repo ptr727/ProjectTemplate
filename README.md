@@ -1,13 +1,53 @@
-# ProjectTemplate
+# ProjectTemplate <!-- omit from toc -->
 
 Governance, agent-orchestration, and workflow-audit hub for a fleet of related repositories.
 
+## Build and Distribution <!-- omit from toc -->
+
+- **Source Code**: [GitHub][projecttemplate-link] - source, issues, discussions, and CI/CD pipelines.
+- **Versioned Releases**: [GitHub Releases][releases-link] - version-tagged source archives.
+
+### Build Status <!-- omit from toc -->
+
+[![Releases Build][releases-build-shield]][actions-link]\
 [![Last Commit][last-commit-shield]][commits-link]\
 [![License][license-shield]][license]
 
+### Releases <!-- omit from toc -->
+
+[![GitHub Release][github-release-shield]][releases-link]\
+[![GitHub Pre-Release][github-pre-release-shield]][releases-link]
+
+### Release Notes <!-- omit from toc -->
+
+**Version: 1.0**:
+
+**Summary**:
+
+- Governance, agent-orchestration, and workflow-audit hub for the fleet: shared rules, a machine-readable spec, a fleet registry, and an audit-agent instruction set.
+
+See [Release History][history] for the full history.
+
+## Table of Contents <!-- omit from toc -->
+
+- [What This Repo Is](#what-this-repo-is)
+- [How This Repo Operates](#how-this-repo-operates)
+- [Rules](#rules)
+  - [Always](#always)
+  - [Never](#never)
+  - [If a C# Project](#if-a-c-project)
+  - [If a Python Project](#if-a-python-project)
+  - [If Publishing a Package (NuGet or PyPI)](#if-publishing-a-package-nuget-or-pypi)
+  - [If a Docker Image](#if-a-docker-image)
+  - [For a README or Human-Facing Doc](#for-a-readme-or-human-facing-doc)
+  - [For Workflows](#for-workflows)
+- [Development Environment Setup](#development-environment-setup)
+- [TODO](#todo)
+- [License](#license)
+
 ## What This Repo Is
 
-This repo no longer ships sample application code. It is the single home for the shared rules the fleet follows, a machine-readable spec those rules are checked against, a registry of the projects, and an audit-agent instruction set. Instead of copying files between a template and its derivatives, each project owns its own implementation and is **audited** against the ground truth here - to the letter (exact file, section, or config) or to intent (an equivalent outcome).
+This repo is the single home for the shared rules the fleet follows, a machine-readable spec those rules are checked against, a registry of the projects, and an audit-agent instruction set. It ships no application code. Each project owns its own implementation and is **audited** against the ground truth here - to the letter (exact file, section, or config) or to intent (an equivalent outcome).
 
 - **[AGENTS.md][agents]** - cross-cutting rules for AI coding agents: git, branching, release model, doc style, the recurring-violation rules (comments, ASCII charset, US spelling, line endings), PR review etiquette, and workflow YAML conventions.
 - **[CODESTYLE.md][codestyle]** - code style for .NET and Python.
@@ -38,11 +78,13 @@ A human-readable index of the rules agents enforce, implement, and audit. The au
 - Branch feature -> develop (squash) -> main (merge commit); develop is forward-only.
 - Drive every PR through the Copilot review loop and merge only with maintainer approval.
 - Write US English and ASCII only (no em-dash, straight quotes).
+- Write docs and comments in the present tense, describing only the current state - never as a change from a prior one.
 - Keep comments concise and only for the non-obvious, and never grow them on edit.
 - Follow `.editorconfig` line endings (CRLF default, LF for shell and Docker) and preserve a file's endings on edit.
 - One logical paragraph per line, with a trailing `\` for an intentional hard break.
 - Pin every GitHub Action to a commit SHA with a version comment.
 - Share one lint config per tool across the editor, the CLI, and CI.
+- Favor VS Code tasks and launch configs for building, running, and testing over ad-hoc shell scripts.
 
 ### Never
 
@@ -75,13 +117,13 @@ A human-readable index of the rules agents enforce, implement, and audit. The au
 
 - Make GitHub Actions satisfy the [WORKFLOW.md][workflow] contract (guarantees D1-D9), which the audit verifies.
 
-## Development Environment
+## Development Environment Setup
 
 Contributors sign every commit. See [docs/ssh-signing.md][ssh-signing] for SSH commit-signing setup, [docs/host-setup.md][host-setup] for host prerequisites, and [docs/devcontainer.md][devcontainer] for devcontainer SSH-agent forwarding. Run the linters before pushing (see [AGENTS.md "Running the Linters Locally"][agents-running-the-linters-locally-known-working-invocations]).
 
 ## TODO
 
-Running backlog (kept here, in a committed file, rather than in agent memory that does not persist across environments).
+Running backlog (kept here, in a committed file, so the guidance survives across environments where agent memory does not).
 
 - Run the first per-repo audits and populate [reports/][reports] for the seven cataloged repos.
 - Classify the standardization-backlog repos in [registry/repos.json][repos] (marked `classificationPending`) on first audit.
@@ -94,8 +136,11 @@ See [LICENSE][license].
 
 <!-- Shields -->
 
-[last-commit-shield]: https://img.shields.io/github/last-commit/ptr727/ProjectTemplate?logo=github
-[license-shield]: https://img.shields.io/github/license/ptr727/ProjectTemplate
+[github-pre-release-shield]: https://img.shields.io/github/v/release/ptr727/ProjectTemplate?include_prereleases&label=GitHub%20Pre-Release&logo=github
+[github-release-shield]: https://img.shields.io/github/v/release/ptr727/ProjectTemplate?logo=github&label=GitHub%20Release
+[last-commit-shield]: https://img.shields.io/github/last-commit/ptr727/ProjectTemplate?logo=github&label=Last%20Commit
+[license-shield]: https://img.shields.io/github/license/ptr727/ProjectTemplate?label=License
+[releases-build-shield]: https://img.shields.io/github/actions/workflow/status/ptr727/ProjectTemplate/publish-release.yml?event=schedule&logo=github&label=Releases%20Build
 
 <!-- Repo -->
 
@@ -107,6 +152,7 @@ See [LICENSE][license].
 [catalog]: ./catalog/
 [codestyle]: ./CODESTYLE.md
 [devcontainer]: ./docs/devcontainer.md
+[history]: ./HISTORY.md
 [host-setup]: ./docs/host-setup.md
 [license]: ./LICENSE
 [readme-structure]: ./spec/readme-structure.md
@@ -120,4 +166,7 @@ See [LICENSE][license].
 
 <!-- External -->
 
+[actions-link]: https://github.com/ptr727/ProjectTemplate/actions
 [commits-link]: https://github.com/ptr727/ProjectTemplate/commits
+[projecttemplate-link]: https://github.com/ptr727/ProjectTemplate
+[releases-link]: https://github.com/ptr727/ProjectTemplate/releases

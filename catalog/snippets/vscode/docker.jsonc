@@ -1,0 +1,9 @@
+// Docker additions: merge into the base fragment for a repo that ships a Docker
+// image. The Docker extension adds authoring support only; no settings of its own.
+{
+    "extensions": {
+        "recommendations": [
+            "ms-azuretools.vscode-docker"
+        ]
+    }
+}

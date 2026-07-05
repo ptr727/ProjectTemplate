@@ -1,0 +1,18 @@
+// Python additions: merge into the base fragment for a repo that ships Python.
+{
+    "settings": {
+        "[python]": {
+            "editor.defaultFormatter": "charliermarsh.ruff",
+            "editor.formatOnSave": true,
+            "editor.codeActionsOnSave": { "source.organizeImports": "explicit" }
+        }
+    },
+    "extensions": {
+        "recommendations": [
+            "ms-python.python",
+            "ms-python.vscode-pylance",
+            "charliermarsh.ruff",
+            "ms-python.mypy-type-checker"
+        ]
+    }
+}
