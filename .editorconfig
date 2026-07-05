@@ -13,9 +13,13 @@
 # Root config
 root = true
 
-# Defaults
+# Defaults - CRLF is the default; only the LF exceptions below are declared,
+# mirroring `.gitattributes` (`* -text` plus the same LF pins). Keep the `[*]`
+# `end_of_line = crlf` default - it is required for the Windows-GUI/WSL-engine
+# workflow (Windows tooling misbehaves on LF) and every uncovered file type relies on it.
 [*]
 charset = utf-8
+end_of_line = crlf
 indent_size = 4
 indent_style = space
 insert_final_newline = true
@@ -23,22 +27,15 @@ trim_trailing_whitespace = true
 
 # Markdown files
 [*.md]
-end_of_line = crlf
 trim_trailing_whitespace = false
 
 # Xml files
 [*.{xml,csproj,props,targets}]
-end_of_line = crlf
 indent_size = 2
 
 # Yaml files
 [*.{yml,yaml}]
-end_of_line = crlf
 indent_size = 2
-
-# JSON and JSONC files
-[*.{json,jsonc}]
-end_of_line = crlf
 
 # Linux scripts
 [*.sh]
@@ -52,16 +49,11 @@ end_of_line = lf
 [{Dockerfile,*.Dockerfile}]
 end_of_line = lf
 
-# Windows scripts
-[*.{cmd,bat,ps1}]
-end_of_line = crlf
-
 # --- .NET-only below: C# and ReSharper style. Everything above is the line-ending
 # governance every derived repo carries; a non-.NET repo may drop from here down. ---
 
 # C# files
 [*.cs]
-end_of_line = crlf
 # Suppressions follow CODESTYLE.md "Analyzer Diagnostics and Suppressions": prefer a
 # [SuppressMessage] attribute or the owning project's .editorconfig; relax a rule
 # repo-wide here only when it applies to every project (never a brownfield batch).
