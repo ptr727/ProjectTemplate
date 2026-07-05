@@ -42,13 +42,31 @@ def main():
     target_mech = secrets["targetMechanisms"]
     mechanisms = secrets["mechanisms"]
 
-    # Spec integrity: an oidc-kind mechanism must forbid its static-credential counterpart
-    # (forbids, not an empty requires, is what enforces "no static key").
-    for mname, m in mechanisms.items():
-        if m.get("kind") not in ("oidc", "static-secret"):
-            errors.append(f"secrets.json: mechanism '{mname}' has a missing or invalid kind")
-        if m.get("kind") == "oidc" and not m.get("forbids"):
-            errors.append(f"secrets.json: oidc mechanism '{mname}' forbids no static credential")
+    # secrets.json structure: CI runs no JSON-schema validation, so verify the shape here and fail with a
+    # clear message rather than crash the loops below. Each baseline/mechanism is an object with list
+    # requires/forbids; a mechanism also declares a recognized kind, and an oidc kind must forbid a
+    # static credential (forbids, not an empty requires, is what enforces "no static key").
+    if not isinstance(secrets.get("baseline"), dict):
+        errors.append("secrets.json: 'baseline' is not an object")
+    if not isinstance(mechanisms, dict):
+        errors.append("secrets.json: 'mechanisms' is not an object")
+    else:
+        for mname, m in mechanisms.items():
+            if not isinstance(m, dict):
+                errors.append(f"secrets.json: mechanism '{mname}' is not an object")
+                continue
+            for field in ("requires", "forbids"):
+                if not isinstance(m.get(field), list):
+                    errors.append(f"secrets.json: mechanism '{mname}' '{field}' is missing or not an array")
+            if m.get("kind") not in ("oidc", "static-secret"):
+                errors.append(f"secrets.json: mechanism '{mname}' has a missing or invalid kind")
+            elif m.get("kind") == "oidc" and not m.get("forbids"):
+                errors.append(f"secrets.json: oidc mechanism '{mname}' forbids no static credential")
+    if errors:
+        print("Spec validation FAILED:")
+        for e in errors:
+            print(f"  - {e}")
+        return 1
 
     for i, repo in enumerate(repos["repos"]):
         if not isinstance(repo, dict):
