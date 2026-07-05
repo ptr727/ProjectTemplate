@@ -80,6 +80,18 @@ Write `reports/<repo>/audit.md` from [`reports/_template.md`][template]: a dimen
 
 Surface spec questions rather than resolving them silently - e.g. the Python config-placement canonicalization, or a new construct no type covers. A repeated letter miss that many repos share is a signal the spec (not each repo) needs adjusting; raise it.
 
+## 10. Converge - Apply the Fixes
+
+The audit is read-only, but the drift it finds is **resolved by applying fixes to the target repo, not left as a report**. The convergence loop:
+
+- **Apply via a pull request on the target repo.** Branch from the target's `develop` (or `main` for a `main`-only repo), make the fix, and open a PR. Never push a fix directly to a protected branch, and never hand-edit a target outside a PR.
+- **Drive the PR's Copilot review to green** - the same loop this repo runs (see [AGENTS.md "PR Review Etiquette"][agents] and the Copilot runbook): request review on every push, address and resolve every thread, and confirm the review covers the head SHA.
+- **Merge only with explicit maintainer approval.** The agent drives to green and stops; the maintainer merges.
+- **One focused PR per drift class**, cross-referencing the audit finding - a sprawling all-drifts PR draws many review rounds and never feels done.
+- **Fix systemic drift in the hub, not per repo.** When many repos share a drift, fix the spec/rule (or add a machine check) here and let a re-audit re-flag it, rather than hand-patching each repo for the shared cause.
+
+The convergence model: the hub audits and the agent **applies** the fixes via target PRs, and the maintainer gates every merge. It supersedes any "the hub only reports; downstream operators apply by hand" framing.
+
 <!-- Workflow -->
 
 [workflows]: ./catalog/snippets/workflows/
