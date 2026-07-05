@@ -1,0 +1,67 @@
+{
+    "$schema": "https://json-schema.org/draft/2020-12/schema",
+    "$id": "https://github.com/ptr727/ProjectTemplate/registry/repos.schema.json",
+    "title": "Fleet registry",
+    "type": "object",
+    "required": ["owner", "repos"],
+    "additionalProperties": false,
+    "properties": {
+        "$schema": { "type": "string" },
+        "owner": { "type": "string" },
+        "defaults": {
+            "type": "object",
+            "additionalProperties": false,
+            "properties": {
+                "groundTruthBranch": { "type": "string" },
+                "releaseTrigger": { "$ref": "#/$defs/releaseTrigger" }
+            }
+        },
+        "repos": {
+            "type": "array",
+            "items": { "$ref": "#/$defs/repo" }
+        }
+    },
+    "$defs": {
+        "releaseTrigger": { "enum": ["two-phase", "publish-on-merge", "dispatch-only"] },
+        "mechanism": { "enum": ["oidc", "static-secret", "none"] },
+        "target": { "enum": ["nuget", "pypi", "docker", "github-release"] },
+        "repo": {
+            "type": "object",
+            "required": ["name", "url", "status"],
+            "additionalProperties": false,
+            "properties": {
+                "name": { "type": "string" },
+                "url": { "type": "string", "format": "uri" },
+                "status": { "enum": ["cataloged", "backlog"] },
+                "types": { "type": "array", "items": { "type": "string" } },
+                "classificationPending": { "type": "boolean" },
+                "groundTruthBranch": { "type": "string" },
+                "hasDevelop": { "type": "boolean" },
+                "publish": {
+                    "type": "array",
+                    "items": {
+                        "type": "object",
+                        "required": ["target", "mechanism"],
+                        "additionalProperties": false,
+                        "properties": {
+                            "target": { "$ref": "#/$defs/target" },
+                            "mechanism": { "$ref": "#/$defs/mechanism" }
+                        }
+                    }
+                },
+                "requiredSecrets": { "type": "array", "items": { "type": "string" } },
+                "consumerModel": { "enum": ["push", "pull"] },
+                "releaseTrigger": { "$ref": "#/$defs/releaseTrigger" },
+                "configLayout": {
+                    "type": "object",
+                    "additionalProperties": false,
+                    "properties": {
+                        "rulesetsDir": { "type": "string" },
+                        "pythonConfig": { "type": ["string", "null"] }
+                    }
+                },
+                "driftNotes": { "type": "array", "items": { "type": "string" } }
+            }
+        }
+    }
+}

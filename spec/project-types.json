@@ -1,0 +1,136 @@
+{
+    "$schema": "./project-types.schema.json",
+    "note": "Type -> requirements and checks. Each check names a verdict tier (letter = exact form, intent = equivalent outcome) and points at the prose section that owns the rationale. The audit (AUDIT.md) runs the checks for a repo's applicable types plus the cross-cutting dimensions; an absent construct is N/A, not a defect.",
+    "types": {
+        "csharp": {
+            "detect": ["*.csproj", "*.slnx", "*.sln"],
+            "intentRefs": ["CODESTYLE.md", "AGENTS.md#line-endings"],
+            "requiredFiles": [".editorconfig", ".gitattributes"],
+            "checks": [
+                { "id": "csharp.editorconfig.ruleblock", "verdict": "letter", "assert": ".editorconfig carries the shared [*.cs] plus ReSharper rule block.", "intentRef": "CODESTYLE.md" },
+                { "id": "csharp.analyzers.zerowarnings", "verdict": "intent", "assert": "Analyzer severities are enforced; warnings are not relaxed or suppressed wholesale.", "intentRef": "CODESTYLE.md" }
+            ]
+        },
+        "nuget": {
+            "detect": ["build-nugetlibrary-task.yml", "dotnet nuget push"],
+            "forbiddenSecrets": ["NUGET_API_KEY"],
+            "checks": [
+                { "id": "nuget.publish.oidc", "verdict": "intent", "assert": "NuGet publish uses OIDC Trusted Publishing (NuGet/login), not a stored API key.", "workflowRef": "WORKFLOW.md#d4-release--publish" },
+                { "id": "nuget.publish.skipduplicate", "verdict": "letter", "assert": "The push uses --skip-duplicate and is gated on push, not on an existence check.", "workflowRef": "WORKFLOW.md#d4-release--publish" }
+            ]
+        },
+        "pypi": {
+            "detect": ["build-pypilibrary-task.yml", "pypa/gh-action-pypi-publish"],
+            "forbiddenSecrets": ["PYPI_API_TOKEN", "TWINE_PASSWORD"],
+            "checks": [
+                { "id": "pypi.publish.oidc", "verdict": "intent", "assert": "PyPI publish uses OIDC Trusted Publishing (no stored token).", "workflowRef": "WORKFLOW.md#d4-release--publish" },
+                { "id": "pypi.publish.environment", "verdict": "letter", "assert": "The publish job declares environment: pypi and id-token: write, with skip-existing: true.", "workflowRef": "WORKFLOW.md#d7-concurrency-permissions-safety" }
+            ]
+        },
+        "python": {
+            "detect": ["pyproject.toml", "setup.py"],
+            "canonicalPlacement": "pyproject.toml",
+            "checks": [
+                { "id": "python.ruff.config", "verdict": "intent", "assert": "A ruff configuration is present.", "intentRef": "CODESTYLE.md" },
+                { "id": "python.pyright.config", "verdict": "intent", "assert": "A pyright configuration is present.", "intentRef": "CODESTYLE.md" },
+                { "id": "python.config.placement", "verdict": "letter", "assert": "ruff and pyright config live in pyproject.toml (canonical); standalone .ruff.toml / pyrightconfig.json is a drift finding.", "intentRef": "CODESTYLE.md" }
+            ]
+        },
+        "console": {
+            "detect": ["build-executable-task.yml", "System.CommandLine"],
+            "checks": [
+                { "id": "console.smoke.subset", "verdict": "letter", "assert": "The smoke runtime matrix is a strict non-empty subset of the full matrix.", "workflowRef": "WORKFLOW.md#6-per-project-type-test-walkthroughs" },
+                { "id": "console.aggregate.asset", "verdict": "letter", "assert": "Per-runtime outputs are aggregated by pattern+merge-multiple into one release-asset-<branch>-<target>, gated !smoke.", "workflowRef": "WORKFLOW.md#d6---seam--architecture-conformance" }
+            ]
+        },
+        "docker": {
+            "detect": ["Dockerfile", "build-docker-task.yml"],
+            "requiredSecrets": ["DOCKER_HUB_USERNAME", "DOCKER_HUB_ACCESS_TOKEN"],
+            "checks": [
+                { "id": "docker.cache.registry", "verdict": "intent", "assert": "Layer cache targets a registry tag (buildcache-<branch>), never type=gha.", "workflowRef": "WORKFLOW.md#d9---style--static-see-section-2" },
+                { "id": "docker.hub.readme", "verdict": "intent", "assert": "Where the Docker Hub overview differs from the project README, a Docker/README.md is published via the docker-readme task (Hub description is size-limited).", "workflowRef": "WORKFLOW.md#6-per-project-type-test-walkthroughs" },
+                { "id": "docker.always.repush", "verdict": "letter", "assert": "The image always re-pushes on publish (base-image refresh), independent of the release-create skip.", "workflowRef": "WORKFLOW.md#d4-release--publish" }
+            ]
+        },
+        "homeassistant": {
+            "detect": ["custom_components/*/manifest.json", "hacs.json"],
+            "checks": [
+                { "id": "ha.release.only", "verdict": "intent", "assert": "Distribution is a GitHub release for HACS (push consumer model); no registry publish.", "workflowRef": "WORKFLOW.md#d4-release--publish" }
+            ]
+        },
+        "codegen": {
+            "detect": ["run-codegen-pull-request-task.yml"],
+            "requiredSecrets": ["CODEGEN_APP_CLIENT_ID", "CODEGEN_APP_PRIVATE_KEY"],
+            "checks": [
+                { "id": "codegen.deterministic", "verdict": "intent", "assert": "Codegen output is deterministic from its inputs (no per-run timestamps/GUIDs); runs as a matrix over both branches.", "workflowRef": "WORKFLOW.md#d8---bots--automation" }
+            ]
+        },
+        "upstream-wrapper": {
+            "detect": ["check-upstream-version-task.yml", "upstream-version.json"],
+            "checks": [
+                { "id": "wrapper.tag.fromstate", "verdict": "letter", "assert": "The build reads the committed name->version state file for the tag instead of SemVer2.", "workflowRef": "WORKFLOW.md#d3---versioning-and-classification" },
+                { "id": "wrapper.tracker.branches", "verdict": "letter", "assert": "The tracker's bump-branch-prefix and branches match the merge-bot's head/base pairs.", "workflowRef": "WORKFLOW.md#d8---bots--automation" }
+            ]
+        },
+        "source-only": {
+            "detect": ["no build-*-task.yml"],
+            "checks": [
+                { "id": "sourceonly.release.tagonly", "verdict": "letter", "assert": "The caller passes expect_release_assets:false; the release is tag + source zip + README + LICENSE.", "workflowRef": "WORKFLOW.md#6-per-project-type-test-walkthroughs" },
+                { "id": "sourceonly.nbgv.retained", "verdict": "letter", "assert": "version.json and the NBGV get-version step are retained (they own the tag).", "workflowRef": "WORKFLOW.md#d3---versioning-and-classification" }
+            ]
+        },
+        "docs": {
+            "detect": ["governance-only repo"],
+            "checks": [
+                { "id": "docs.ci.lintonly", "verdict": "intent", "assert": "CI runs linting only (markdownlint, cspell, JSON schema, actionlint); no build/test.", "intentRef": "AGENTS.md" }
+            ]
+        }
+    },
+    "crossCutting": {
+        "workflow": {
+            "appliesTo": "*",
+            "contract": "WORKFLOW.md",
+            "method": "Run the WORKFLOW.md 5A static audit and 5B trace scenarios for each applicable D-guarantee against the repo's own Actions.",
+            "note": "GitHub Actions may be repo-specific; assert they implement the contract by outcome, not that they match the catalog snippets byte for byte."
+        },
+        "branch-model": {
+            "appliesTo": "*",
+            "checks": [
+                { "id": "branch.both-protected", "verdict": "letter", "assert": "main and develop both exist and are protected.", "intentRef": "AGENTS.md#branching-model" },
+                { "id": "branch.ruleset.develop", "verdict": "letter", "assert": "The live develop ruleset matches repo-config/develop.json (normalized diff).", "intentRef": "repo-config/README.md" },
+                { "id": "branch.ruleset.main", "verdict": "letter", "assert": "The live main ruleset matches repo-config/main.json (normalized diff).", "intentRef": "repo-config/README.md" }
+            ]
+        },
+        "repo-setup": {
+            "appliesTo": "*",
+            "checks": [
+                { "id": "setup.secrets.present", "verdict": "letter", "assert": "Every requiredSecret for the repo's publish mechanisms is configured (per spec/secrets.json).", "intentRef": "repo-config/README.md" },
+                { "id": "setup.secrets.noforbidden", "verdict": "letter", "assert": "No forbidden secret is present (e.g. a static NUGET_API_KEY on an OIDC repo).", "intentRef": "spec/secrets.json" }
+            ]
+        },
+        "linter-parity": {
+            "appliesTo": "*",
+            "checks": [
+                { "id": "parity.markdownlint", "verdict": "letter", "assert": "One .markdownlint-cli2.jsonc drives the VS Code extension, the CLI, and CI, and CI runs it.", "intentRef": "AGENTS.md#running-the-linters-locally-known-working-invocations" },
+                { "id": "parity.cspell", "verdict": "letter", "assert": "A cspell.json (not only a workspace word list) drives the extension, the CLI, and CI.", "intentRef": "AGENTS.md" },
+                { "id": "parity.lang", "verdict": "intent", "assert": "ruff/pyright (Python) and editorconfig/csharpier (C#) configs are shared by editor, CLI, and CI where those languages are present.", "intentRef": "CODESTYLE.md" }
+            ]
+        },
+        "recurring-violations": {
+            "appliesTo": "*",
+            "priority": "high",
+            "checks": [
+                { "id": "recurring.comments", "verdict": "letter", "assert": "Comments are concise, only the non-obvious, no prose narration, and do not grow on re-edit.", "intentRef": "AGENTS.md#comments" },
+                { "id": "recurring.charset", "verdict": "letter", "assert": "ASCII only in agent-authored text: no em-dash (use a spaced hyphen), no smart quotes, no stray non-ASCII.", "intentRef": "AGENTS.md#character-set" },
+                { "id": "recurring.spelling", "verdict": "letter", "assert": "US English spelling.", "intentRef": "AGENTS.md#pull-request-title-and-commit-message-conventions" },
+                { "id": "recurring.eol", "verdict": "letter", "assert": "Line endings follow .editorconfig (Windows+Linux friendly: CRLF default, LF for execution-sensitive files); edits preserve the file's endings.", "intentRef": "AGENTS.md#line-endings" }
+            ]
+        },
+        "readme-structure": {
+            "appliesTo": "*",
+            "checks": [
+                { "id": "readme.sections", "verdict": "intent", "assert": "The README follows the sections and order in spec/readme-structure.md (applicable sections only).", "intentRef": "spec/readme-structure.md" }
+            ]
+        }
+    }
+}

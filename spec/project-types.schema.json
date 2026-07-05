@@ -1,0 +1,36 @@
+{
+    "$schema": "https://json-schema.org/draft/2020-12/schema",
+    "$id": "https://github.com/ptr727/ProjectTemplate/spec/project-types.schema.json",
+    "title": "Project types and cross-cutting dimensions",
+    "type": "object",
+    "required": ["types", "crossCutting"],
+    "properties": {
+        "$schema": { "type": "string" },
+        "note": { "type": "string" },
+        "types": { "type": "object", "additionalProperties": { "$ref": "#/$defs/typeDef" } },
+        "crossCutting": { "type": "object", "additionalProperties": { "$ref": "#/$defs/typeDef" } }
+    },
+    "$defs": {
+        "check": {
+            "type": "object",
+            "required": ["id", "verdict", "assert"],
+            "additionalProperties": false,
+            "properties": {
+                "id": { "type": "string" },
+                "verdict": { "enum": ["letter", "intent"] },
+                "assert": { "type": "string" },
+                "intentRef": { "type": "string" },
+                "workflowRef": { "type": "string" }
+            }
+        },
+        "typeDef": {
+            "type": "object",
+            "additionalProperties": true,
+            "properties": {
+                "checks": { "type": "array", "items": { "$ref": "#/$defs/check" } },
+                "appliesTo": { "type": ["string", "array"] },
+                "priority": { "enum": ["high", "normal"] }
+            }
+        }
+    }
+}

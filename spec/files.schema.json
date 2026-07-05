@@ -1,0 +1,28 @@
+{
+    "$schema": "https://json-schema.org/draft/2020-12/schema",
+    "$id": "https://github.com/ptr727/ProjectTemplate/spec/files.schema.json",
+    "title": "Standardization baseline files",
+    "type": "object",
+    "required": ["baseline"],
+    "properties": {
+        "$schema": { "type": "string" },
+        "note": { "type": "string" },
+        "baseline": {
+            "type": "array",
+            "items": {
+                "type": "object",
+                "required": ["path"],
+                "additionalProperties": false,
+                "properties": {
+                    "path": { "type": "string" },
+                    "whole": { "type": "boolean" },
+                    "sections": { "type": "array", "items": { "type": "string" } },
+                    "placeholders": { "type": "array", "items": { "type": "string" } },
+                    "reference": { "type": "string" },
+                    "intentRef": { "type": "string" },
+                    "appliesTo": { "type": ["string", "array"] }
+                }
+            }
+        }
+    }
+}

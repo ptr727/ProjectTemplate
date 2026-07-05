@@ -1,6 +1,6 @@
 # WORKFLOW.md
 
-The guide for CI/CD **workflows** (GitHub Actions): a deliberate mixture of code style, architecture, a **behavioral contract** (expected inputs and outputs), and a **test methodology**. Code style lives in [`CODESTYLE.md`](./CODESTYLE.md); this file is its sibling for everything under [`.github/workflows/`](./.github/workflows/).
+The guide for CI/CD **workflows** (GitHub Actions): a deliberate mixture of code style, architecture, a **behavioral contract** (expected inputs and outputs), and a **test methodology**. Code style lives in [`CODESTYLE.md`][codestyle]; this file is its sibling for everything under [`.github/workflows/`][workflows].
 
 Its defining principle: **it describes required outcomes, not a required implementation.** Two repos may implement the same guarantee with different YAML. A workflow is correct when it **satisfies the contract** in section 4 and is **defect-free against the expected inputs and outputs** - not when it matches the template byte for byte. The conventions in section 2 keep workflows legible; the contract in section 4 is what they must *do*.
 
@@ -42,15 +42,32 @@ Prescriptive style/legibility rules. Cheap to check, necessary but not sufficien
 
 ## 3. Architecture
 
+### Branch Model
+
+```mermaid
+flowchart LR
+  feature[feature branch] -->|squash| develop
+  develop -->|merge commit| main
+  main -.->|no back-merge| develop
+```
+
 ### Two Layers: Orchestration vs Build
 
-- **Orchestration** is generic and intended to be synced verbatim **at the job level**: the publish-plan + branch matrix in the publisher, the `get-version`, `validate-release`, and `github-release` jobs, the date-badge job, and the `changes -> smoke-build -> aggregator` shape of the PR workflow. These job *bodies* should not need per-repo edits.
+- **Orchestration** is generic and forms the standardization baseline **at the job level**: the publish-plan + branch matrix in the publisher, the `get-version`, `validate-release`, and `github-release` jobs, the date-badge job, and the `changes -> smoke-build -> aggregator` shape of the PR workflow. These job *bodies* should not need per-repo edits.
 - **Build** is repo-owned: the `build-<target>-task.yml` leaf tasks.
 - **What the repo curates** (by design, not a leak): the *list* of targets. This is **not** a byte-for-byte file carry. Adding or dropping a target edits the orchestrator's surface - the `enable_<target>` inputs and the `build-<target>` job + its `github-release` `needs:` entry in the release task, **and** the `changes` paths-filter entry + output + the `smoke-build` enable-forward in the PR workflow. "Verbatim" applies to the `github-release` job and the version/publish-plan logic, not to the release task's job list or the paths-filter. Subsetting is symmetric: the same surface you trim to drop a target you extend to add a new one (e.g. a `release-asset-<branch>-library` producer needs a new `enable_library` input, a `build-library` job, a `needs:` entry, and a `library` paths-filter).
 
 ### The Seam Contract
 
 A target contributes a file to the GitHub release by uploading a workflow artifact named `release-asset-<branch>-<target>`. The release job collects **every** matching artifact by **pattern** (`pattern: release-asset-<branch>-*` + `merge-multiple: true`), never an `artifact-ids:` naming one job's output. Canonical for **every** repo, single-target included; switching to an `artifact-id` handoff forks the release download and breaks the verbatim carry.
+
+```mermaid
+flowchart LR
+  leafa[leaf: target A] -->|release-asset-branch-A| store[(run artifacts)]
+  leafb[leaf: target B] -->|release-asset-branch-B| store
+  store -->|pattern + merge-multiple| rel[github-release job]
+  reg[registry leaf: nuget / pypi / docker] -->|push, no asset| registries[(registries)]
+```
 
 ### Reusable-Task Parameter Contract
 
@@ -72,9 +89,31 @@ Workflow artifacts are an **intra-run handoff** only; durable copies live on the
 
 PRs validate fast and never publish: a paths-filter smoke-builds only changed targets; a validation job always runs; smoke builds compile/lint/test but upload nothing and push nothing; one required aggregator gates the merge. See D1.
 
+```mermaid
+flowchart TD
+  pr[pull request] --> ch[changes paths-filter]
+  ch -->|target changed| sb[smoke-build changed targets]
+  ch -->|workflow-only or docs| skip[smoke-build skipped]
+  val[validation job] --> agg[Check pull request workflow status]
+  sb --> agg
+  skip --> agg
+  agg -->|success| ok[merge allowed]
+```
+
 ### Release Model
 
 Two-phase by default: PRs smoke-test, merges do not publish. The publisher (weekly schedule + manual dispatch) builds and publishes **both** branches via a matrix; its `push` trigger publishes only when an opt-in repository variable is set. Every release is a tag on the built commit plus a source zip, README, and LICENSE; targets amend it with `release-asset-*` files or push to their own registry. An unchanged version re-pushes nothing (no-op republish); Docker re-pushes by design.
+
+```mermaid
+flowchart TD
+  trig[schedule / dispatch / opt-in push] --> plan[publish plan + branch matrix]
+  plan --> mmain[leg: main]
+  plan --> mdev[leg: develop]
+  mmain --> vmain[version X.Y.Z stable]
+  mdev --> vdev[version X.Y.Z-g-sha prerelease]
+  vmain --> relm[github-release + registries: latest]
+  vdev --> reld[github-release + registries: prerelease]
+```
 
 ### Output Seam by Destination
 
@@ -225,3 +264,11 @@ Each type maps the *applicable* S-scenarios onto its targets; the differences ar
 - **Docker image.** The leaf pushes multi-arch tags with a per-branch registry buildcache (`buildcache-<branch>`; a multi-image repo adds a per-image tag) (`cache-to` only the built branch and only on push, `cache-from` both branches); no `release-asset-*`, so a Docker-only repo's caller passes `expect_release_assets: false`; the readme (`peter-evans/dockerhub-description`, `DOCKER_HUB_ACCESS_TOKEN`) and date-badge jobs run **only** when the default branch publishes; the docker-readme task validates `repositories` XOR `manifest`+`manifest-jq` and a multi-image repo derives its publish matrix from the manifest. Docker **always re-pushes** the image, independently of a skipped release-create (S9). A **wrapper** repo tracks an upstream release: the upstream tracker writes a `name -> version` state file and the merge-bot auto-merges the bump PR (S11), and the leaf MUST read that file for the immutable tag instead of `SemVer2` (the template ships the tracker but not this consumer wiring). Test: S7 default leg pushes `latest` + the version tag and updates readme/badge; non-default pushes the develop tag; S9 still re-pushes; S11 ships the bumped upstream version next publish. 5C Docker probe needs `DOCKER_HUB_*` secrets and same-repo (not fork) runs.
 - **Data / asset library.** A single new leaf: validate -> zip -> upload `release-asset-<branch>-library` (`retention-days: 1`, upload gated `!smoke` - mirror the nugetlibrary leaf's shape). Because the template has no such leaf, you **add a target** (D6.4): a new `enable_library` input + `build-library` job + `github-release` `needs:` entry in the release task, and a `library` paths-filter entry + `changes` output + `smoke-build` enable-forward in the PR workflow (without it, D1.1 never smoke-builds the library). Keep `expect_release_assets: true` (it has a file target, unlike Docker). The .NET `unit-test` job is replaced by a type-appropriate validator with the aggregator **and** `smoke-build` both re-pointed to it (D1.2/D1.5); `version.json` + the NBGV `get-version` step are retained (they own the tag). Test: S1 smoke runs validate+zip and uploads nothing; S7 attaches the zip, prerelease on the non-default leg; S9 on a *scheduled* re-run release-create + asset-delete skip (the existing zip is untouched, no registry push), while a `workflow_dispatch` re-run **refreshes** the release and re-runs the asset-delete (the asset is re-uploaded then re-deleted). N/A: the nuget/pypi/docker/executable 5A addenda and their scenario clauses.
 - **Source-only / no build.** No package/image leaf: remove all four `build-*` jobs and their `github-release` `needs:` entries (leaving `get-version -> validate-release -> github-release`, which fires on `github && !smoke`), and the caller passes `expect_release_assets: false` so the release is tag + source zip + README + LICENSE with no asset download. With no target the paths-filter matches nothing, so `smoke-build` is **structurally always skipped** - validation is carried solely by the (replaced, non-.NET) validation job that the aggregator and `smoke-build`'s own `needs:` must both point at (D1.2; or drop the never-running `smoke-build` job). NBGV and `version.json` are still retained (they own the tag). Applicable scenarios: S1 (validation only), S5/S6 (publish gating), S7 (tag-only release), S8 (dispatch guard), S9 (no-op republish), S10 (classification gate). N/A: S2-S4 (assume a smoke-built target), the artifact-lifecycle and registry clauses of S7/S9, the D5/D6 artifact items, and all per-type 5A addenda - recorded N/A, not failed.
+
+<!-- Workflow -->
+
+[workflows]: ./.github/workflows/
+
+<!-- Repo -->
+
+[codestyle]: ./CODESTYLE.md
