@@ -2,12 +2,12 @@
 
 - **Audited branch:** main (`8de105fd101c6ce4b60447bc1d99b5e6ab08683e`)
 - **Types:** csharp, nuget (from registry)
-- **Verdict:** operational (no applicable defects; drift findings to address)
+- **Verdict:** operational
 - **Date:** 2026-07-04
 
 ## Develop Drift
 
-`develop` vs `main`: ahead 0, behind 28 (`gh api repos/ptr727/Utilities/compare/main...develop` -> `status: behind, ahead_by: 0, behind_by: 28`). **Stale - a drift finding.** develop has none of main's 28 commits, including the CI/CD rework that is the audited main state. Under the forward-only model (no `main -> develop` back-merge) develop must receive those changes directly; it has not, so develop does not reflect the released pipeline.
+`develop` vs `main`: ahead 0, behind 28 (`gh api repos/ptr727/Utilities/compare/main...develop` -> `status: behind, ahead_by: 0, behind_by: 28`). **Stale - a drift finding.** `develop` has none of `main`'s 28 commits, including the CI/CD rework that is the audited `main` state. Under the forward-only model (no `main -> develop` back-merge) `develop` must receive those changes directly; it has not, so `develop` does not reflect the released pipeline.
 
 ## Dimensions
 
