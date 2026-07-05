@@ -92,8 +92,8 @@ def main():
             # mechanism label must match the target's expected mechanism family
             if mech == "static-secret" and not spec_mech["requires"]:
                 errors.append(f"{name}: {target} marked static-secret but mechanism needs no secret")
-            if mech == "oidc" and spec_mech["requires"]:
-                errors.append(f"{name}: {target} marked oidc but mechanism requires stored secrets")
+            # An OIDC mechanism may still require a non-secret stored value (e.g. NUGET_USERNAME for
+            # NuGet/login); the `forbids` list - not an empty `requires` - is what enforces "no static key".
 
     if errors:
         print("Spec validation FAILED:")
