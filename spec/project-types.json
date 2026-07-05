@@ -122,7 +122,7 @@
             "checks": [
                 { "id": "recurring.comments", "verdict": "letter", "assert": "Comments are concise, only the non-obvious, no prose narration, and do not grow on re-edit.", "intentRef": "AGENTS.md#comments" },
                 { "id": "recurring.charset", "verdict": "letter", "assert": "ASCII only in agent-authored text: no em-dash (use a spaced hyphen), no smart quotes, no stray non-ASCII.", "intentRef": "AGENTS.md#character-set" },
-                { "id": "recurring.spelling", "verdict": "letter", "assert": "US English spelling.", "intentRef": "AGENTS.md#pull-request-title-and-commit-message-conventions" },
+                { "id": "recurring.spelling", "verdict": "letter", "assert": "US English spelling; the shared cspell.json sets language en-US (a bare en accepts British spellings too).", "intentRef": "AGENTS.md#pull-request-title-and-commit-message-conventions" },
                 { "id": "recurring.eol", "verdict": "letter", "assert": "Line endings follow .editorconfig (Windows+Linux friendly: CRLF default, LF for execution-sensitive files); edits preserve the file's endings.", "intentRef": "AGENTS.md#line-endings" }
             ]
         },
