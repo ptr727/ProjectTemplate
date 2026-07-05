@@ -1,30 +1,38 @@
 # README Structure
 
-The preferred `README.md` shape for a fleet project. The audit's `readme-structure` dimension checks a repo's README against this: the required sections in this order (to the letter where a section applies, to intent where a project legitimately has nothing to say). Sections that do not apply to a project type are N/A, not a defect (a library has no "Installation" of a running app; a source-only repo has no "Usage").
+The preferred `README.md` shape for a fleet project. The audit's `readme-structure` dimension checks a repo's README against this: the sections below, in this order (to the letter where a section applies, to intent where a project legitimately has nothing to say). A section that does not apply to a project type is N/A, not a defect (a library has no running-app "Installation"; a source-only repo has no "Usage").
 
-## Required Sections and Order
+## Sections and Order
 
-1. **Title (`# <Name>`)** - the repo name, followed by a one-line description of what it is.
-2. **Shields** - build/release status and version badges immediately under the title, one logical line per group with a trailing backslash for the hard break. Alphabetize the shield link-reference definitions block at the bottom of the file (per AGENTS.md Markdown rules).
-3. **Build and Distribution** - where releases and packages are published (GitHub Releases, NuGet, PyPI, Docker Hub), and a short **Release Notes** summary (full history in `HISTORY.md`).
-4. **Getting Started** - the shortest path to using the project.
-5. **Use Cases** - what problems it solves (optional for a library whose purpose is obvious from the description).
-6. **Installation** - how to install or pull it, per distribution channel. N/A for source-only.
-7. **Configuration** - settings, environment, config files. N/A when there is nothing to configure.
-8. **Usage** - commands, API, or integration steps. For a CLI, a command quick-reference and the global options. N/A for source-only.
-9. **Questions or Issues** - where to file issues and ask questions.
-10. **Development Environment** - how to build, test, and lint locally; commit-signing setup; devcontainer notes. Point at shared docs rather than restating them.
-11. **3rd Party Tools** - notable dependencies and their licenses, where relevant.
-12. **License** - a pointer to `LICENSE`.
+1. **Title (`# <Name>`)** - the repo name, then a one-line description as the next paragraph.
+2. **Build and Distribution (`##`)** - a bullet per distribution channel the project actually ships, each linking where it lives: **Source Code** (the GitHub repo), **Versioned Releases** (GitHub Releases), **Docker Images** (Docker Hub), **NuGet Packages** (NuGet.org), **PyPI Packages** (PyPI.org). List only the channels the project uses. It carries three sub-sections:
+   - **Build Status (`###`)** - the CI/build status shields (release build, Docker build, last commit, last build).
+   - **Releases (`###`)** - the version shields (GitHub release, GitHub pre-release, Docker latest/develop, NuGet, PyPI), one per channel the project publishes.
+   - **Release Notes (`###`)** - the current version and a short summary, any breaking-change callout, then a link to `HISTORY.md` for the full history.
+3. **Getting Started (`##`)** - *optional.* The shortest path to using the project. The **default is to omit it and go straight to the Table of Contents**; include Getting Started only when it is short and genuinely helpful, and skip it when it would be long or complex.
+4. **Table of Contents (`##`)**.
+5. **Use Cases (`##`)** - what problems it solves (optional for a library whose purpose is obvious from the description).
+6. **Installation (`##`)** - how to install or pull it, per channel. N/A for source-only.
+7. **Configuration (`##`)** - settings, environment, config files. N/A when there is nothing to configure.
+8. **Usage (`##`)** - commands, API, or integration. For a CLI, sub-sections such as `### Command Quick Reference`, `### Global Options`, and a test/example command. N/A for source-only.
+9. **Questions or Issues (`##`)** - where to file issues and ask questions.
+10. **Development Environment Setup (`##`)** - build, test, and lint locally; commit-signing; devcontainer. Point at shared docs rather than restating them.
+11. **3rd Party Tools (`##`)** - notable dependencies and their licenses, where relevant.
+12. **License (`##`)** - a pointer to `LICENSE`.
+
+## Shields
+
+Shields are not a top-level section - they live under **Build and Distribution** as the **Build Status** and **Releases** sub-sections. Each shield is a reference-style link; group the definitions under `<!-- Shields -->` at the bottom of the file. Stack a group's badges by ending each line except the last with a trailing backslash.
 
 ## Style
 
-- Write in the current state, not as a change from a prior one (AGENTS.md Documentation Style).
+- Write in the current state, present tense, so the reader needs no knowledge beyond what they are reading (AGENTS.md Documentation Style).
 - One logical paragraph per line; no hard-wrap.
 - Title-case headings with lowercase short bind words.
 - US English, ASCII only (no em-dash; use a spaced hyphen), straight quotes.
 - Verify every quantitative claim (counts, versions, supported platforms) against current code.
 - A project README describes only that project - no cross-repo references and no template or inheritance framing.
+- Reference-style links only: every URI is a reference link defined at the bottom of the file, grouped by type under an HTML-comment header (`<!-- Shields -->`, `<!-- Workflow -->`, `<!-- Repo -->`, `<!-- External -->`) and alphabetized within each group.
 
 ## Docker Hub README
 

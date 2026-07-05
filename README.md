@@ -2,8 +2,40 @@
 
 Governance, agent-orchestration, and workflow-audit hub for a fleet of related repositories.
 
+## Build and Distribution
+
+- **Source Code**: [GitHub][projecttemplate-link] - source, issues, discussions, and CI/CD pipelines.
+- **Versioned Releases**: [GitHub Releases][releases-link] - version-tagged source archives.
+
+### Build Status
+
+[![Releases Build][releases-build-shield]][actions-link]\
 [![Last Commit][last-commit-shield]][commits-link]\
 [![License][license-shield]][license]
+
+### Releases
+
+[![GitHub Release][github-release-shield]][releases-link]\
+[![GitHub Pre-Release][github-pre-release-shield]][releases-link]
+
+### Release Notes
+
+**Version: 1.0**:
+
+**Summary**:
+
+- Governance, agent-orchestration, and workflow-audit hub for the fleet: shared rules, a machine-readable spec, a fleet registry, and an audit-agent instruction set.
+
+See [Release History][history] for the full history.
+
+## Table of Contents
+
+- [What This Repo Is][what-this-repo-is]
+- [How This Repo Operates][how-this-repo-operates]
+- [Rules][rules]
+- [Development Environment Setup][development-environment-setup]
+- [TODO][todo]
+- [License][license-2]
 
 ## What This Repo Is
 
@@ -76,13 +108,13 @@ A human-readable index of the rules agents enforce, implement, and audit. The au
 
 - Make GitHub Actions satisfy the [WORKFLOW.md][workflow] contract (guarantees D1-D9), which the audit verifies.
 
-## Development Environment
+## Development Environment Setup
 
 Contributors sign every commit. See [docs/ssh-signing.md][ssh-signing] for SSH commit-signing setup, [docs/host-setup.md][host-setup] for host prerequisites, and [docs/devcontainer.md][devcontainer] for devcontainer SSH-agent forwarding. Run the linters before pushing (see [AGENTS.md "Running the Linters Locally"][agents-running-the-linters-locally-known-working-invocations]).
 
 ## TODO
 
-Running backlog (kept here, in a committed file, rather than in agent memory that does not persist across environments).
+Running backlog (kept here, in a committed file, so the guidance survives across environments where agent memory does not).
 
 - Run the first per-repo audits and populate [reports/][reports] for the seven cataloged repos.
 - Classify the standardization-backlog repos in [registry/repos.json][repos] (marked `classificationPending`) on first audit.
@@ -95,8 +127,11 @@ See [LICENSE][license].
 
 <!-- Shields -->
 
-[last-commit-shield]: https://img.shields.io/github/last-commit/ptr727/ProjectTemplate?logo=github
-[license-shield]: https://img.shields.io/github/license/ptr727/ProjectTemplate
+[github-pre-release-shield]: https://img.shields.io/github/v/release/ptr727/ProjectTemplate?include_prereleases&label=GitHub%20Pre-Release&logo=github
+[github-release-shield]: https://img.shields.io/github/v/release/ptr727/ProjectTemplate?logo=github&label=GitHub%20Release
+[last-commit-shield]: https://img.shields.io/github/last-commit/ptr727/ProjectTemplate?logo=github&label=Last%20Commit
+[license-shield]: https://img.shields.io/github/license/ptr727/ProjectTemplate?label=License
+[releases-build-shield]: https://img.shields.io/github/actions/workflow/status/ptr727/ProjectTemplate/publish-release.yml?event=schedule&logo=github&label=Releases%20Build
 
 <!-- Repo -->
 
@@ -108,17 +143,27 @@ See [LICENSE][license].
 [catalog]: ./catalog/
 [codestyle]: ./CODESTYLE.md
 [devcontainer]: ./docs/devcontainer.md
+[development-environment-setup]: #development-environment-setup
+[history]: ./HISTORY.md
 [host-setup]: ./docs/host-setup.md
+[how-this-repo-operates]: #how-this-repo-operates
 [license]: ./LICENSE
+[license-2]: #license
 [readme-structure]: ./spec/readme-structure.md
 [repo-config]: ./repo-config/
 [reports]: ./reports/
 [repos]: ./registry/repos.json
+[rules]: #rules
 [spec]: ./spec/
 [ssh-signing]: ./docs/ssh-signing.md
+[todo]: #todo
 [version]: ./version.json
+[what-this-repo-is]: #what-this-repo-is
 [workflow]: ./WORKFLOW.md
 
 <!-- External -->
 
+[actions-link]: https://github.com/ptr727/ProjectTemplate/actions
 [commits-link]: https://github.com/ptr727/ProjectTemplate/commits
+[projecttemplate-link]: https://github.com/ptr727/ProjectTemplate
+[releases-link]: https://github.com/ptr727/ProjectTemplate/releases
