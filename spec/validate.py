@@ -93,7 +93,10 @@ def main():
             if mech == "static-secret" and not spec_mech["requires"]:
                 errors.append(f"{name}: {target} marked static-secret but mechanism needs no secret")
             # An OIDC mechanism may still require a non-secret stored value (e.g. NUGET_USERNAME for
-            # NuGet/login); the `forbids` list - not an empty `requires` - is what enforces "no static key".
+            # NuGet/login), so an empty `requires` is not the OIDC signal; the `forbids` list is what
+            # enforces "no static key", so an oidc mechanism must forbid its static-credential counterpart.
+            if mech == "oidc" and not spec_mech["forbids"]:
+                errors.append(f"{name}: {target} marked oidc but mechanism forbids no static credential")
 
     if errors:
         print("Spec validation FAILED:")
