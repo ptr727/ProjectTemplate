@@ -30,13 +30,6 @@ See [Release History][history] for the full history.
 
 ## Table of Contents
 
-- [What This Repo Is][what-this-repo-is]
-- [How This Repo Operates][how-this-repo-operates]
-- [Rules][rules]
-- [Development Environment Setup][development-environment-setup]
-- [TODO][todo]
-- [License][license-2]
-
 ## What This Repo Is
 
 This repo is the single home for the shared rules the fleet follows, a machine-readable spec those rules are checked against, a registry of the projects, and an audit-agent instruction set. It ships no application code. Each project owns its own implementation and is **audited** against the ground truth here - to the letter (exact file, section, or config) or to intent (an equivalent outcome).
@@ -143,22 +136,16 @@ See [LICENSE][license].
 [catalog]: ./catalog/
 [codestyle]: ./CODESTYLE.md
 [devcontainer]: ./docs/devcontainer.md
-[development-environment-setup]: #development-environment-setup
 [history]: ./HISTORY.md
 [host-setup]: ./docs/host-setup.md
-[how-this-repo-operates]: #how-this-repo-operates
 [license]: ./LICENSE
-[license-2]: #license
 [readme-structure]: ./spec/readme-structure.md
 [repo-config]: ./repo-config/
 [reports]: ./reports/
 [repos]: ./registry/repos.json
-[rules]: #rules
 [spec]: ./spec/
 [ssh-signing]: ./docs/ssh-signing.md
-[todo]: #todo
 [version]: ./version.json
-[what-this-repo-is]: #what-this-repo-is
 [workflow]: ./WORKFLOW.md
 
 <!-- External -->
