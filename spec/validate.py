@@ -43,25 +43,34 @@ def main():
     mechanisms = secrets["mechanisms"]
 
     # secrets.json structure: CI runs no JSON-schema validation, so verify the shape here and fail with a
-    # clear message rather than crash the loops below. Each baseline/mechanism is an object with list
-    # requires/forbids; a mechanism also declares a recognized kind, and an oidc kind must forbid a
-    # static credential (forbids, not an empty requires, is what enforces "no static key").
-    if not isinstance(secrets.get("baseline"), dict):
-        errors.append("secrets.json: 'baseline' is not an object")
+    # clear message rather than crash the loops below. baseline and every mechanism is an object with list
+    # requires/forbids; a mechanism also declares a recognized kind, and an oidc kind must forbid a static
+    # credential (forbids, not an empty requires, is what enforces "no static key").
+    def check_secret_set(label, entry, need_kind):
+        if not isinstance(entry, dict):
+            errors.append(f"secrets.json: {label} is not an object")
+            return
+        for field in ("requires", "forbids"):
+            if not isinstance(entry.get(field), list):
+                errors.append(f"secrets.json: {label} '{field}' is missing or not an array")
+        if need_kind:
+            if entry.get("kind") not in ("oidc", "static-secret"):
+                errors.append(f"secrets.json: {label} has a missing or invalid kind")
+            elif entry.get("kind") == "oidc" and not entry.get("forbids"):
+                errors.append(f"secrets.json: oidc {label} forbids no static credential")
+
+    check_secret_set("baseline", secrets.get("baseline"), need_kind=False)
     if not isinstance(mechanisms, dict):
         errors.append("secrets.json: 'mechanisms' is not an object")
     else:
         for mname, m in mechanisms.items():
-            if not isinstance(m, dict):
-                errors.append(f"secrets.json: mechanism '{mname}' is not an object")
-                continue
-            for field in ("requires", "forbids"):
-                if not isinstance(m.get(field), list):
-                    errors.append(f"secrets.json: mechanism '{mname}' '{field}' is missing or not an array")
-            if m.get("kind") not in ("oidc", "static-secret"):
-                errors.append(f"secrets.json: mechanism '{mname}' has a missing or invalid kind")
-            elif m.get("kind") == "oidc" and not m.get("forbids"):
-                errors.append(f"secrets.json: oidc mechanism '{mname}' forbids no static credential")
+            check_secret_set(f"mechanism '{mname}'", m, need_kind=True)
+    if not isinstance(target_mech, dict):
+        errors.append("secrets.json: 'targetMechanisms' is not an object")
+    else:
+        for t, v in target_mech.items():
+            if not (v is None or isinstance(v, str)):
+                errors.append(f"secrets.json: targetMechanisms['{t}'] must be a mechanism name or null")
     if errors:
         print("Spec validation FAILED:")
         for e in errors:
