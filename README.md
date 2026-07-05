@@ -7,7 +7,7 @@ Governance, agent-orchestration, and workflow-audit hub for a fleet of related r
 
 ## What This Repo Is
 
-This repo no longer ships sample application code. It is the single home for the shared rules the fleet follows, a machine-readable spec those rules are checked against, a registry of the projects, and an audit-agent instruction set. Instead of copying files between a template and its derivatives, each project owns its own implementation and is **audited** against the ground truth here - to the letter (exact file, section, or config) or to intent (an equivalent outcome).
+This repo is the single home for the shared rules the fleet follows, a machine-readable spec those rules are checked against, a registry of the projects, and an audit-agent instruction set. It ships no application code. Each project owns its own implementation and is **audited** against the ground truth here - to the letter (exact file, section, or config) or to intent (an equivalent outcome).
 
 - **[AGENTS.md][agents]** - cross-cutting rules for AI coding agents: git, branching, release model, doc style, the recurring-violation rules (comments, ASCII charset, US spelling, line endings), PR review etiquette, and workflow YAML conventions.
 - **[CODESTYLE.md][codestyle]** - code style for .NET and Python.
@@ -38,6 +38,7 @@ A human-readable index of the rules agents enforce, implement, and audit. The au
 - Branch feature -> develop (squash) -> main (merge commit); develop is forward-only.
 - Drive every PR through the Copilot review loop and merge only with maintainer approval.
 - Write US English and ASCII only (no em-dash, straight quotes).
+- Write docs and comments in the present tense, describing only the current state - never as a change from a prior one.
 - Keep comments concise and only for the non-obvious, and never grow them on edit.
 - Follow `.editorconfig` line endings (CRLF default, LF for shell and Docker) and preserve a file's endings on edit.
 - One logical paragraph per line, with a trailing `\` for an intentional hard break.
