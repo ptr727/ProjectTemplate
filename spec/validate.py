@@ -26,6 +26,7 @@ def main():
     for key, obj, fname in [
         ("repos", repos, "repos.json"),
         ("types", types, "project-types.json"),
+        ("baseline", secrets, "secrets.json"),
         ("mechanisms", secrets, "secrets.json"),
         ("targetMechanisms", secrets, "secrets.json"),
     ]:
@@ -40,6 +41,47 @@ def main():
     known_types = set(types["types"])
     target_mech = secrets["targetMechanisms"]
     mechanisms = secrets["mechanisms"]
+
+    # CI runs no JSON-schema validation, so shape-check secrets.json here to fail with a clear message
+    # rather than crash the cross-reference loops below.
+    def check_secret_set(label, entry, need_kind):
+        if not isinstance(entry, dict):
+            errors.append(f"secrets.json: {label} is not an object")
+            return
+        for field in ("requires", "forbids"):
+            val = entry.get(field)
+            if not isinstance(val, list) or not all(isinstance(x, str) for x in val):
+                errors.append(f"secrets.json: {label} '{field}' must be an array of strings")
+        if need_kind:
+            if entry.get("kind") not in ("oidc", "static-secret"):
+                errors.append(f"secrets.json: {label} has a missing or invalid kind")
+            elif entry.get("kind") == "oidc" and not entry.get("forbids"):
+                errors.append(f"secrets.json: oidc {label} forbids no static credential")
+
+    check_secret_set("baseline", secrets.get("baseline"), need_kind=False)
+    if not isinstance(mechanisms, dict):
+        errors.append("secrets.json: 'mechanisms' is not an object")
+    else:
+        for mname, m in mechanisms.items():
+            check_secret_set(f"mechanism '{mname}'", m, need_kind=True)
+    if not isinstance(target_mech, dict):
+        errors.append("secrets.json: 'targetMechanisms' is not an object")
+    else:
+        for t, v in target_mech.items():
+            if not (v is None or isinstance(v, str)):
+                errors.append(f"secrets.json: targetMechanisms['{t}'] must be a mechanism name or null")
+    feature_mech = secrets.get("featureMechanisms", {})
+    if not isinstance(feature_mech, dict):
+        errors.append("secrets.json: 'featureMechanisms' is not an object")
+    else:
+        for f, v in feature_mech.items():
+            if not (v is None or isinstance(v, str)):
+                errors.append(f"secrets.json: featureMechanisms['{f}'] must be a mechanism name or null")
+    if errors:
+        print("Spec validation FAILED:")
+        for e in errors:
+            print(f"  - {e}")
+        return 1
 
     for i, repo in enumerate(repos["repos"]):
         if not isinstance(repo, dict):
@@ -82,18 +124,20 @@ def main():
                 continue
             spec_mech = mechanisms[mech_key]
             # docker/static-secret must carry its required secrets
-            for req in spec_mech["requires"]:
+            for req in spec_mech.get("requires", []):
                 if req not in required:
                     errors.append(f"{name}: {target} requires secret '{req}' (missing)")
             # oidc mechanisms must not carry a forbidden static key
-            for bad in spec_mech["forbids"]:
+            for bad in spec_mech.get("forbids", []):
                 if bad in required:
                     errors.append(f"{name}: {target} forbids secret '{bad}' (present)")
             # mechanism label must match the target's expected mechanism family
-            if mech == "static-secret" and not spec_mech["requires"]:
-                errors.append(f"{name}: {target} marked static-secret but mechanism needs no secret")
-            if mech == "oidc" and spec_mech["requires"]:
-                errors.append(f"{name}: {target} marked oidc but mechanism requires stored secrets")
+            # The repo's mechanism label (oidc / static-secret) must match the target mechanism's kind.
+            # An OIDC mechanism may still require a non-secret stored value (e.g. NUGET_USERNAME for
+            # NuGet/login), so requires-emptiness is not the signal - match on the explicit kind.
+            kind = spec_mech.get("kind")
+            if kind and mech != kind:
+                errors.append(f"{name}: {target} labeled '{mech}' but its mechanism is '{kind}'")
 
     if errors:
         print("Spec validation FAILED:")

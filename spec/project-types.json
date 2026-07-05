@@ -60,7 +60,7 @@
         },
         "codegen": {
             "detect": ["run-codegen-pull-request-task.yml"],
-            "requiredSecrets": ["CODEGEN_APP_CLIENT_ID", "CODEGEN_APP_PRIVATE_KEY"],
+            "requiredSecrets": [],
             "checks": [
                 { "id": "codegen.deterministic", "verdict": "intent", "assert": "Codegen output is deterministic from its inputs (no per-run timestamps/GUIDs); runs as a matrix over both branches.", "workflowRef": "WORKFLOW.md#d8---bots--automation" }
             ]
