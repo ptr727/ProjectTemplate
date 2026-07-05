@@ -41,6 +41,12 @@ def main():
     target_mech = secrets["targetMechanisms"]
     mechanisms = secrets["mechanisms"]
 
+    # Spec integrity: an oidc-kind mechanism must forbid its static-credential counterpart
+    # (forbids, not an empty requires, is what enforces "no static key").
+    for mname, m in mechanisms.items():
+        if m.get("kind") == "oidc" and not m["forbids"]:
+            errors.append(f"secrets.json: oidc mechanism '{mname}' forbids no static credential")
+
     for i, repo in enumerate(repos["repos"]):
         if not isinstance(repo, dict):
             errors.append(f"repo #{i} is not an object")
@@ -90,13 +96,12 @@ def main():
                 if bad in required:
                     errors.append(f"{name}: {target} forbids secret '{bad}' (present)")
             # mechanism label must match the target's expected mechanism family
-            if mech == "static-secret" and not spec_mech["requires"]:
-                errors.append(f"{name}: {target} marked static-secret but mechanism needs no secret")
+            # The repo's mechanism label (oidc / static-secret) must match the target mechanism's kind.
             # An OIDC mechanism may still require a non-secret stored value (e.g. NUGET_USERNAME for
-            # NuGet/login), so an empty `requires` is not the OIDC signal; the `forbids` list is what
-            # enforces "no static key", so an oidc mechanism must forbid its static-credential counterpart.
-            if mech == "oidc" and not spec_mech["forbids"]:
-                errors.append(f"{name}: {target} marked oidc but mechanism forbids no static credential")
+            # NuGet/login), so requires-emptiness is not the signal - match on the explicit kind.
+            kind = spec_mech.get("kind")
+            if kind and mech != kind:
+                errors.append(f"{name}: {target} labeled '{mech}' but its mechanism is '{kind}'")
 
     if errors:
         print("Spec validation FAILED:")
