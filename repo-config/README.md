@@ -7,7 +7,7 @@ Repository and branch configuration held as committed files, kept out of `.githu
 
 ## Rulesets
 
-`main` requires merge-commit merges (no linear-history rule); `develop` requires squash merges with linear history. Both require signed commits, a passing `Check pull request workflow status`, resolved review threads, and Copilot review, and block force-pushes and deletion. Both intentionally leave "Require branches to be up to date before merging" **off** - see [AGENTS.md "Branching Model"][agents-branching-model].
+`main` requires merge-commit merges (no linear-history rule); `develop` requires squash merges with linear history. Both require signed commits, a passing `Check pull request workflow status job`, resolved review threads, and Copilot review, and block force-pushes and deletion. Both intentionally leave "Require branches to be up to date before merging" **off** - see [AGENTS.md "Branching Model"][agents-branching-model].
 
 **Configure by importing these JSON files, never by hand-building the rules** (hand reconstruction has gone wrong on past setups). The result must be **exactly two rulesets named `develop` and `main`** - the names are load-bearing (`AGENTS.md` and the workflows reference them). First remove all legacy classic branch-protection rules and any stray rulesets, then run `configure.sh` (or `gh api -X POST repos/<owner>/<repo>/rulesets --input repo-config/<name>.json` per file). `gh ruleset` is read-only; creation goes through `gh api`. The required check binds by name and only turns green after `test-pull-request.yml` runs once. To edit a ruleset, GET it, change the field, and PUT the whole writable subset back (a partial PUT `422`s).
 

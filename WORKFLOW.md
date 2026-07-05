@@ -30,7 +30,7 @@ Prescriptive style/legibility rules. Cheap to check, necessary but not sufficien
 - **Action pinning.** Pin **every** action to a commit SHA with a trailing `# vX.Y.Z` comment. Use `# vX` only when the upstream floating major tag has no specific patch SHA. The single documented no-pin exception is a tool whose tag stream lags `master` such that tag-tracking would downgrade (here, `dotnet/nbgv@master`); invent no others.
 - **Filename.** Reusable workflows (`on: workflow_call`) end in `-task.yml`; entry-point workflows do not (`-pull-request.yml`, `-release.yml`). Lowercase, hyphen-separated.
 - **Workflow `name:`.** Reusable names end in **"task"**; entry-point names end in **"action"**.
-- **Job and step `name:`.** Every job ends in **"job"**, every step in **"step"**. **Exception:** a job whose `name:` is a ruleset-bound required-check `context:` keeps that exact name.
+- **Job and step `name:`.** Every job ends in **"job"**, every step in **"step"** - including a ruleset-bound required-check job, whose `name:` and the ruleset `context:` are one string renamed together (never independently).
 - **Concurrency.** Top-level workflows declare `concurrency: { group: '${{ github.workflow }}-${{ github.ref }}', cancel-in-progress: true }`. Document exceptions inline (D7).
 - **Shells.** Every multi-line bash `run:` starts `set -euo pipefail`.
 - **Conditionals.** Multi-line `if:` uses the folded scalar `if: >-`.
@@ -94,7 +94,7 @@ flowchart TD
   pr[pull request] --> ch[changes paths-filter]
   ch -->|target changed| sb[smoke-build changed targets]
   ch -->|workflow-only or docs| skip[smoke-build skipped]
-  val[validation job] --> agg[Check pull request workflow status]
+  val[validation job] --> agg[Check pull request workflow status job]
   sb --> agg
   skip --> agg
   agg -->|success| ok[merge allowed]
@@ -134,7 +134,7 @@ The required behaviors, organized by domain. Each is a **MUST**, stated as input
 - **D1.2 A validation job always runs.** Input: any PR. Output: a type-appropriate validation job runs unconditionally and the aggregator `needs:` it. In a .NET repo this is the `unit-test` job (format/style/test); a non-.NET repo **replaces** it (not deletes) with its own validator (lint, schema-check) and re-points **every** `needs:` on it - both the aggregator and `smoke-build` (which `needs:` the validation job by name) - to the replacement. *Prevents: a PR merging with no validation, or a dangling `needs:` that fails the whole workflow to load.*
 - **D1.3 Smoke never publishes and never uploads.** Input: `smoke: true`. Output: full compile/lint/test, but no registry/image push, no release, and **no** artifact uploads (every `upload-artifact`, including any aggregation job, is gated `!smoke`). *Prevents: a PR publishing; orphaned artifacts churning the storage quota.*
 - **D1.4 Workflow-file changes are not smoke-built.** Input: a PR changing only `.github/workflows/**`. Output: the paths-filter excludes workflow files, so smoke-build skips. *Implication: there is no CI workflow-lint; lint workflow edits locally (actionlint).*
-- **D1.5 One required aggregator gates merge.** Input: any PR. Output: a single aggregator job must **succeed**, `needs:` the changes job and the validation job, treat a **skipped** smoke build as pass, and **block** on `failure`/`cancelled`. Its name is ruleset-bound and MUST NOT be renamed. *Prevents: a paths-filter error letting a target-changing PR merge unbuilt.*
+- **D1.5 One required aggregator gates merge.** Input: any PR. Output: a single aggregator job must **succeed**, `needs:` the changes job and the validation job, treat a **skipped** smoke build as pass, and **block** on `failure`/`cancelled`. Its name is ruleset-bound: the job `name:` and the ruleset `context:` are the same string and MUST be renamed together, never independently. *Prevents: a paths-filter error letting a target-changing PR merge unbuilt.*
 
 ### D2 - Input/State Validation at Entry
 
@@ -189,7 +189,7 @@ The required behaviors, organized by domain. Each is a **MUST**, stated as input
 ### D9 - Style / Static (See Section 2)
 
 - **D9.1** Every action SHA-pinned with a version comment (sole exception: the documented lagging-tag tool).
-- **D9.2** File/workflow/job/step names follow the suffix rules; ruleset-bound names verbatim.
+- **D9.2** File/workflow/job/step names follow the suffix rules; a ruleset-bound job's `name:` equals its ruleset `context:` (renamed together).
 - **D9.3** Bash `run:` blocks start `set -euo pipefail`; multi-line `if:` uses `>-`.
 - **D9.4** Docker layer cache targets a registry tag, not `type=gha`; `cache-to` writes only the built branch's `buildcache-<branch>` and only on push, while `cache-from` reads both branches; multi-image repos use a per-image cache tag.
 - **D9.5** Line endings follow `.editorconfig`.
