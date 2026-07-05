@@ -1,6 +1,6 @@
 # VS Code Workspace Catalog
 
-The shared `.code-workspace` set for the fleet: the standard extensions every repo recommends, the language-specific additions, and the settings that go with them. A repo's `<Repo>.code-workspace` composes the standard set plus the additions for the languages and targets it ships. Discovered from the fleet's workspace files.
+The shared `.code-workspace` set for the fleet: the standard extensions every repo recommends, the language-specific additions, and the settings that go with them. Each piece is a copyable JSON fragment in this directory - `base.jsonc` for the standard set, and `dotnet.jsonc`, `python.jsonc`, `docker.jsonc` for the per-type additions. A repo's `<Repo>.code-workspace` composes `base.jsonc` plus the fragments for the languages and targets it ships. Discovered from the fleet's workspace files.
 
 ## Standard Extensions (every repo)
 
@@ -16,9 +16,9 @@ The shared `.code-workspace` set for the fleet: the standard extensions every re
 
 ## Language and Target Additions
 
-- **.NET / C#**: `ms-dotnettools.csdevkit`, `csharpier.csharpier-vscode`.
-- **Python**: `ms-python.python`, `ms-python.vscode-pylance`, `charliermarsh.ruff`, `ms-python.mypy-type-checker`.
-- **Docker**: `ms-azuretools.vscode-docker`.
+- **.NET / C#** (`dotnet.jsonc`): `ms-dotnettools.csdevkit`, `csharpier.csharpier-vscode`; format-on-save for `[csharp]` via CSharpier.
+- **Python** (`python.jsonc`): `ms-python.python`, `ms-python.vscode-pylance`, `charliermarsh.ruff`, `ms-python.mypy-type-checker`; format-on-save and import organization for `[python]` via Ruff.
+- **Docker** (`docker.jsonc`): `ms-azuretools.vscode-docker`.
 
 ## Settings
 
@@ -29,4 +29,4 @@ The shared `.code-workspace` set for the fleet: the standard extensions every re
 
 ## Composing a Workspace
 
-A repo's `<Repo>.code-workspace` is a single-folder workspace (`"folders": [{ "path": "." }]`) whose `extensions.recommendations` is the standard set plus its language and target additions, and whose `settings` carry the TOC level, the per-language formatters, and the shared editor defaults. This repo's own `ProjectTemplate.code-workspace` carries the standard set only, since it ships no application language.
+A repo's `<Repo>.code-workspace` is a single-folder workspace (`"folders": [{ "path": "." }]`) that merges `base.jsonc` with the per-type fragments for the languages and targets it ships: the merged `extensions.recommendations` is the standard set plus each type's additions, and the merged `settings` are the shared editor defaults plus each type's formatter block. This repo's own `ProjectTemplate.code-workspace` carries `base.jsonc` only, since it ships no application language.

@@ -1,24 +1,24 @@
-# ProjectTemplate
+# ProjectTemplate <!-- omit from toc -->
 
 Governance, agent-orchestration, and workflow-audit hub for a fleet of related repositories.
 
-## Build and Distribution
+## Build and Distribution <!-- omit from toc -->
 
 - **Source Code**: [GitHub][projecttemplate-link] - source, issues, discussions, and CI/CD pipelines.
 - **Versioned Releases**: [GitHub Releases][releases-link] - version-tagged source archives.
 
-### Build Status
+### Build Status <!-- omit from toc -->
 
 [![Releases Build][releases-build-shield]][actions-link]\
 [![Last Commit][last-commit-shield]][commits-link]\
 [![License][license-shield]][license]
 
-### Releases
+### Releases <!-- omit from toc -->
 
 [![GitHub Release][github-release-shield]][releases-link]\
 [![GitHub Pre-Release][github-pre-release-shield]][releases-link]
 
-### Release Notes
+### Release Notes <!-- omit from toc -->
 
 **Version: 1.0**:
 
@@ -28,7 +28,22 @@ Governance, agent-orchestration, and workflow-audit hub for a fleet of related r
 
 See [Release History][history] for the full history.
 
-## Table of Contents
+## Table of Contents <!-- omit from toc -->
+
+- [What This Repo Is](#what-this-repo-is)
+- [How This Repo Operates](#how-this-repo-operates)
+- [Rules](#rules)
+  - [Always](#always)
+  - [Never](#never)
+  - [If a C# Project](#if-a-c-project)
+  - [If a Python Project](#if-a-python-project)
+  - [If Publishing a Package (NuGet or PyPI)](#if-publishing-a-package-nuget-or-pypi)
+  - [If a Docker Image](#if-a-docker-image)
+  - [For a README or Human-Facing Doc](#for-a-readme-or-human-facing-doc)
+  - [For Workflows](#for-workflows)
+- [Development Environment Setup](#development-environment-setup)
+- [TODO](#todo)
+- [License](#license)
 
 ## What This Repo Is
 
