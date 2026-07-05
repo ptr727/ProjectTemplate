@@ -64,7 +64,7 @@ This repo is the single home for the shared rules the fleet follows, a machine-r
 ProjectTemplate follows the same model it documents, and audits its own rules against itself (it classifies as the source-only project type in [WORKFLOW.md][workflow]).
 
 - **Branching.** Persistent `main` and `develop`, each with its own ruleset. Commit on feature branches only. Feature branch to `develop` is squash-merged; `develop` to `main` is a merge commit. `develop` is forward-only (no `main -> develop` back-merges). See [AGENTS.md "Branching Model"][agents-branching-model].
-- **CI is lint-only.** There is no build or unit test; the PR gate runs markdownlint, cspell, JSON-schema validation, and actionlint, and exposes the ruleset-bound `Check pull request workflow status job` aggregator. The same lint configs (`.markdownlint-cli2.jsonc`, `cspell.json`) drive the editor extensions, the CLI, and CI.
+- **CI is lint-only.** There is no build or unit test; the PR gate runs markdownlint, cspell, registry/spec JSON validation (`jq` well-formedness plus the `spec/validate.py` cross-reference and shape checks), and actionlint, and exposes the ruleset-bound `Check pull request workflow status job` aggregator. The same lint configs (`.markdownlint-cli2.jsonc`, `cspell.json`) drive the editor extensions, the CLI, and CI.
 - **Review loop.** Every PR is reviewed by GitHub Copilot; the agent drives the review loop to green and merges only with explicit maintainer permission. See [AGENTS.md "PR Review Etiquette"][agents-pr-review-etiquette].
 - **Release.** A `develop -> main` merge is promoted through a GitHub release (tag plus a source zip, README, and LICENSE); versioning is NBGV-driven from [version.json][version]. See [WORKFLOW.md][workflow].
 
