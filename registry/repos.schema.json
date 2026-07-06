@@ -22,7 +22,7 @@
         }
     },
     "$defs": {
-        "releaseTrigger": { "enum": ["two-phase", "publish-on-merge", "dispatch-only"] },
+        "releaseTrigger": { "enum": ["two-phase", "publish-on-merge", "dispatch-only", "none"] },
         "mechanism": { "enum": ["oidc", "static-secret", "none"] },
         "target": { "enum": ["nuget", "pypi", "docker", "github-release"] },
         "repo": {
