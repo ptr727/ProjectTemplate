@@ -377,7 +377,7 @@ uv run pytest                    # run tests
 uv build                         # produce wheel + sdist in ./dist
 ```
 
-The Python clean-compile (see [Clean-Compile Verification][clean-compile-verification]) is `uv run ruff format` + `uv run ruff check` + `uv run pyright`; run it (plus `uv run pytest`) before committing. These are documented commands, not VS Code tasks. CI runs the same clean-compile commands as the authoritative backstop. Git hooks are opt-in; wire `pre-commit` for `ruff` and `pyright` yourself if you want local enforcement.
+The Python clean-compile (see [Clean-Compile Verification][clean-compile-verification]) is `uv run ruff format` + `uv run ruff check` + `uv run pyright` (plus the repo's mypy command, e.g. `uv run mypy src`, where mypy is used - see Type checking above); run it (plus `uv run pytest`) before committing. These are documented commands, not VS Code tasks. CI runs the same clean-compile commands as the authoritative backstop. Git hooks are opt-in; wire `pre-commit` for `ruff` and `pyright` yourself if you want local enforcement.
 
 ### Layout
 
