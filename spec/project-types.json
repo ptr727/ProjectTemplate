@@ -15,16 +15,16 @@
             "detect": ["build-nugetlibrary-task.yml", "dotnet nuget push"],
             "forbiddenSecrets": ["NUGET_API_KEY"],
             "checks": [
-                { "id": "nuget.publish.oidc", "verdict": "intent", "assert": "NuGet publish uses OIDC Trusted Publishing (NuGet/login), not a stored API key.", "workflowRef": "WORKFLOW.md#d4-release--publish" },
-                { "id": "nuget.publish.skipduplicate", "verdict": "letter", "assert": "The push uses --skip-duplicate and is gated on push, not on an existence check.", "workflowRef": "WORKFLOW.md#d4-release--publish" }
+                { "id": "nuget.publish.oidc", "verdict": "intent", "assert": "NuGet publish uses OIDC Trusted Publishing (NuGet/login), not a stored API key.", "workflowRef": "WORKFLOW.md#d4---release--publish" },
+                { "id": "nuget.publish.skipduplicate", "verdict": "letter", "assert": "The push uses --skip-duplicate and is gated on push, not on an existence check.", "workflowRef": "WORKFLOW.md#d4---release--publish" }
             ]
         },
         "pypi": {
             "detect": ["build-pypilibrary-task.yml", "pypa/gh-action-pypi-publish"],
             "forbiddenSecrets": ["PYPI_API_TOKEN", "TWINE_PASSWORD"],
             "checks": [
-                { "id": "pypi.publish.oidc", "verdict": "intent", "assert": "PyPI publish uses OIDC Trusted Publishing (no stored token).", "workflowRef": "WORKFLOW.md#d4-release--publish" },
-                { "id": "pypi.publish.environment", "verdict": "letter", "assert": "The publish job declares environment: pypi and id-token: write, with skip-existing: true.", "workflowRef": "WORKFLOW.md#d7-concurrency-permissions-safety" }
+                { "id": "pypi.publish.oidc", "verdict": "intent", "assert": "PyPI publish uses OIDC Trusted Publishing (no stored token).", "workflowRef": "WORKFLOW.md#d4---release--publish" },
+                { "id": "pypi.publish.environment", "verdict": "letter", "assert": "The publish job declares environment: pypi and id-token: write, with skip-existing: true.", "workflowRef": "WORKFLOW.md#d7---concurrency-permissions-safety" }
             ]
         },
         "python": {
@@ -50,13 +50,13 @@
             "checks": [
                 { "id": "docker.cache.registry", "verdict": "intent", "assert": "Layer cache targets a registry tag (buildcache-<branch>), never type=gha.", "workflowRef": "WORKFLOW.md#d9---style--static-see-section-2" },
                 { "id": "docker.hub.readme", "verdict": "intent", "assert": "Where the Docker Hub overview differs from the project README, a Docker/README.md is published via the docker-readme task (Hub description is size-limited).", "workflowRef": "WORKFLOW.md#6-per-project-type-test-walkthroughs" },
-                { "id": "docker.always.repush", "verdict": "letter", "assert": "The image always re-pushes on publish (base-image refresh), independent of the release-create skip.", "workflowRef": "WORKFLOW.md#d4-release--publish" }
+                { "id": "docker.always.repush", "verdict": "letter", "assert": "The image always re-pushes on publish (base-image refresh), independent of the release-create skip.", "workflowRef": "WORKFLOW.md#d4---release--publish" }
             ]
         },
         "homeassistant": {
             "detect": ["custom_components/*/manifest.json", "hacs.json"],
             "checks": [
-                { "id": "ha.release.only", "verdict": "intent", "assert": "Distribution is a GitHub release for HACS (push consumer model); no registry publish.", "workflowRef": "WORKFLOW.md#d4-release--publish" },
+                { "id": "ha.release.only", "verdict": "intent", "assert": "Distribution is a GitHub release for HACS (push consumer model); no registry publish.", "workflowRef": "WORKFLOW.md#d4---release--publish" },
                 { "id": "ha.python.conventions", "verdict": "intent", "assert": "Follows home-assistant/core Python conventions (pip + requirements*.txt, custom_components/<domain> layout, standalone .ruff.toml + pyrightconfig.json) - expected, not drift.", "intentRef": "CODESTYLE.md" },
                 { "id": "ha.typecheck.mypy", "verdict": "letter", "assert": "mypy --strict runs in CI (platinum strict-typing quality-scale tier).", "intentRef": "CODESTYLE.md" }
             ]
@@ -64,7 +64,7 @@
         "eda": {
             "detect": ["*.kicad_pcb", "*.kicad_sym", "*.kicad_mod", "*.kicad_sch", "*.pretty"],
             "checks": [
-                { "id": "eda.release.zip", "verdict": "intent", "assert": "Distribution is a GitHub release data zip pulled into a local EDA install (pull consumer); no package or image registry.", "workflowRef": "WORKFLOW.md#d4-release--publish" },
+                { "id": "eda.release.zip", "verdict": "intent", "assert": "Distribution is a GitHub release data zip pulled into a local EDA install (pull consumer); no package or image registry.", "workflowRef": "WORKFLOW.md#d4---release--publish" },
                 { "id": "eda.validation", "verdict": "intent", "assert": "CI runs EDA-specific validation (e.g. kicad-cli ERC/DRC or library linting) - the design-data analogue of the code linters.", "intentRef": "CODESTYLE.md" },
                 { "id": "eda.build.deterministic", "verdict": "intent", "assert": "Any build-time artifact generation (gerbers, drill, BOM) and version injection is deterministic from the design inputs; aspirational for data-only repos not yet building artifacts.", "workflowRef": "WORKFLOW.md#d3---versioning-and-classification" }
             ]
