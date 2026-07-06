@@ -33,7 +33,7 @@
             "checks": [
                 { "id": "python.ruff.config", "verdict": "intent", "assert": "A ruff configuration is present.", "intentRef": "CODESTYLE.md" },
                 { "id": "python.pyright.config", "verdict": "intent", "assert": "pyright is configured and runs strict on first-party code (src or the integration package) - the strong typing baseline; third-party strictness is relaxed only where a dependency has no usable types.", "intentRef": "CODESTYLE.md" },
-                { "id": "python.config.placement", "verdict": "letter", "assert": "ruff and pyright config live in pyproject.toml for the default profile (canonical); a Home Assistant integration follows home-assistant/core conventions (standalone .ruff.toml + pyrightconfig.json) and is exempt.", "intentRef": "CODESTYLE.md" },
+                { "id": "python.config.placement", "verdict": "letter", "assert": "ruff and pyright config live in pyproject.toml (canonical); standalone .ruff.toml / pyrightconfig.json is a drift finding. A Home Assistant integration is the exception - it follows home-assistant/core standalone-config conventions and is scored by ha.python.conventions instead.", "intentRef": "CODESTYLE.md" },
                 { "id": "python.mypy.allowed", "verdict": "intent", "assert": "mypy is permitted as an additional type checker (not banned); required for a Home Assistant integration (platinum strict-typing). When used it runs in CI and the editor.", "intentRef": "CODESTYLE.md" }
             ]
         },

@@ -355,7 +355,7 @@ This is the style guide for any **Python project(s)** in this repo.
 | [hatchling][latest-link] | build backend | `pyproject.toml` `[build-system]` |
 | [ruff][ruff-link] | lint + format + import sort | `pyproject.toml` `[tool.ruff]` |
 | [pyright][pyright-link] | type checker (strict baseline) | `pyproject.toml` `[tool.pyright]` |
-| [mypy][mypy-link] | additional type checker (optional; required for Home Assistant) | `pyproject.toml` `[tool.mypy]` |
+| [mypy][mypy-link] | additional type checker (optional; required for Home Assistant) | `pyproject.toml` `[tool.mypy]` (or per home-assistant/core) |
 | [pytest][docs-link] | test runner | `pyproject.toml` `[tool.pytest.ini_options]` |
 
 **Type checking targets strongly typed, deterministic code.** `pyright` in **strict** mode is the required baseline on first-party code (`[tool.pyright]` `strict = ["src"]`, or the integration package for a Home Assistant repo; tests run standard mode). pyright is the anchor because **Pylance embeds it**, so the editor and the CLI/CI (`uv run pyright`) run the *same* engine and never disagree; the standalone `ms-pyright.pyright` extension stays in `unwantedRecommendations` because Pylance covers it. Relax strictness on **third-party** code only when a dependency has no usable types and no alternative (e.g. `pandas`): a targeted, commented `# pyright: ignore[...]` or a scoped `[tool.pyright]` override, never a blanket relaxation.
