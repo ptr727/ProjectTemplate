@@ -133,8 +133,8 @@
             "publish": [{ "target": "docker", "mechanism": "static-secret" }, { "target": "github-release", "mechanism": "none" }],
             "requiredSecrets": ["DOCKER_HUB_USERNAME", "DOCKER_HUB_ACCESS_TOKEN", "CODEGEN_APP_CLIENT_ID", "CODEGEN_APP_PRIVATE_KEY"],
             "consumerModel": "pull",
-            "releaseTrigger": "dispatch-only",
-            "driftNotes": ["Docker image wrapping upstream Nx products; C# (CreateMatrix) is the codegen generator, not a shipped package (IsPackable=false, no nuget push).", "Release is workflow_dispatch + weekly schedule + a Make/Matrix.json path-scoped push (codegen pin); ordinary merges do not publish - broader than dispatch-only.", "Docker Hub README published per-image via a Matrix.json-derived matrix."]
+            "releaseTrigger": "two-phase",
+            "driftNotes": ["Docker image wrapping upstream Nx products; C# (CreateMatrix) is the codegen generator, not a shipped package (IsPackable=false, no nuget push).", "Release is the two-phase model (weekly schedule + workflow_dispatch publish; ordinary merges do not) plus an extra Make/Matrix.json path-scoped push that republishes when the codegen version pin bumps.", "Docker Hub README published per-image via a Matrix.json-derived matrix."]
         },
         {
             "name": "HomeAutomation",
