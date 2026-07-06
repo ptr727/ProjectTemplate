@@ -58,7 +58,7 @@
             "publish": [{ "target": "pypi", "mechanism": "oidc" }],
             "requiredSecrets": [],
             "consumerModel": "pull",
-            "releaseTrigger": "two-phase",
+            "releaseTrigger": "publish-on-merge",
             "configLayout": { "rulesetsDir": "repo-config", "pythonConfig": "pyproject.toml" },
             "driftNotes": []
         },
@@ -75,8 +75,7 @@
             "releaseTrigger": "dispatch-only",
             "configLayout": { "rulesetsDir": "repo-config", "pythonConfig": "standalone" },
             "driftNotes": [
-                "ruff/pyright in standalone .ruff.toml + pyrightconfig.json instead of pyproject.toml (canonicalize).",
-                "cspell.json missing."
+                "ruff/pyright in standalone .ruff.toml + pyrightconfig.json instead of pyproject.toml (canonicalize)."
             ]
         },
         {
