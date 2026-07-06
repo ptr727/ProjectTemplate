@@ -354,10 +354,13 @@ This is the style guide for any **Python project(s)** in this repo.
 | [uv][uv-link] | env, deps, build, publish | `pyproject.toml` `[dependency-groups]`, `uv.lock` |
 | [hatchling][latest-link] | build backend | `pyproject.toml` `[build-system]` |
 | [ruff][ruff-link] | lint + format + import sort | `pyproject.toml` `[tool.ruff]` |
-| [pyright][pyright-link] | type checker | `pyproject.toml` `[tool.pyright]` |
+| [pyright][pyright-link] | type checker (strict baseline) | `pyproject.toml` `[tool.pyright]` |
+| [mypy][mypy-link] | additional type checker (optional; required for Home Assistant) | `pyproject.toml` `[tool.mypy]` |
 | [pytest][docs-link] | test runner | `pyproject.toml` `[tool.pytest.ini_options]` |
 
-`pyright` is consumed in two places: as a dev dependency (`uv run pyright` for CI/scripted runs) and via VS Code's **Pylance** extension (which embeds pyright). The standalone `ms-pyright.pyright` extension is in `unwantedRecommendations` because Pylance covers it. `mypy` is **not used** here - don't introduce it.
+**Type checking targets strong-typed, deterministic code.** `pyright` in **strict** mode is the required baseline on first-party code (`[tool.pyright]` `strict = ["src"]`, or the integration package for a Home Assistant repo; tests run standard mode). pyright is the anchor because **Pylance embeds it**, so the editor and the CLI/CI (`uv run pyright`) run the *same* engine and never disagree; the standalone `ms-pyright.pyright` extension stays in `unwantedRecommendations` because Pylance covers it. Relax strictness on **third-party** code only when a dependency has no usable types and no alternative (e.g. `pandas`): a targeted, commented `# pyright: ignore[...]` or a scoped `[tool.pyright]` override, never a blanket relaxation.
+
+**`mypy` is allowed, and required where the ecosystem demands it - it is not banned.** Running more than one checker is normal when each serves a purpose - the .NET side pairs `CSharpier` and `dotnet format` the same way - and pyright's inference and mypy's plugin ecosystem (e.g. `pydantic.mypy`) catch different classes of error. A **Home Assistant** integration runs `mypy --strict` because the platinum `strict-typing` quality-scale tier requires it; a pydantic-heavy library may opt in for the plugin. When a repo uses mypy it runs in **CI and the editor** (the `ms-python.mypy-type-checker` extension) so the two stay consistent, and its mypy command joins the clean-compile; a repo with no such need stays pyright-only, which is lighter and inherently consistent.
 
 ### Local Development Loop
 
@@ -480,5 +483,6 @@ Before pushing or opening a PR:
 [latest-link]: https://hatch.pypa.io/latest/
 [pep-0257-link]: https://peps.python.org/pep-0257/
 [pyright-link]: https://microsoft.github.io/pyright/
+[mypy-link]: https://mypy-lang.org/
 [ruff-link]: https://docs.astral.sh/ruff/
 [uv-link]: https://docs.astral.sh/uv/
