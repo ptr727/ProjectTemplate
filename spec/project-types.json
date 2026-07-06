@@ -32,8 +32,9 @@
             "canonicalPlacement": "pyproject.toml",
             "checks": [
                 { "id": "python.ruff.config", "verdict": "intent", "assert": "A ruff configuration is present.", "intentRef": "CODESTYLE.md" },
-                { "id": "python.pyright.config", "verdict": "intent", "assert": "A pyright configuration is present.", "intentRef": "CODESTYLE.md" },
-                { "id": "python.config.placement", "verdict": "letter", "assert": "ruff and pyright config live in pyproject.toml (canonical); standalone .ruff.toml / pyrightconfig.json is a drift finding.", "intentRef": "CODESTYLE.md" }
+                { "id": "python.pyright.config", "verdict": "intent", "assert": "pyright is configured and runs strict on first-party code (src or the integration package) - the strong typing baseline; third-party strictness is relaxed only where a dependency has no usable types.", "intentRef": "CODESTYLE.md" },
+                { "id": "python.config.placement", "verdict": "letter", "assert": "ruff and pyright config live in pyproject.toml (canonical); standalone .ruff.toml / pyrightconfig.json is a drift finding. A Home Assistant integration is the exception - it follows home-assistant/core standalone-config conventions and is scored by ha.python.conventions instead.", "intentRef": "CODESTYLE.md" },
+                { "id": "python.mypy.allowed", "verdict": "intent", "assert": "mypy is permitted as an additional type checker (not banned); required for a Home Assistant integration (platinum strict-typing). When used it runs in CI and the editor.", "intentRef": "CODESTYLE.md" }
             ]
         },
         "console": {
@@ -55,7 +56,9 @@
         "homeassistant": {
             "detect": ["custom_components/*/manifest.json", "hacs.json"],
             "checks": [
-                { "id": "ha.release.only", "verdict": "intent", "assert": "Distribution is a GitHub release for HACS (push consumer model); no registry publish.", "workflowRef": "WORKFLOW.md#d4-release--publish" }
+                { "id": "ha.release.only", "verdict": "intent", "assert": "Distribution is a GitHub release for HACS (push consumer model); no registry publish.", "workflowRef": "WORKFLOW.md#d4-release--publish" },
+                { "id": "ha.python.conventions", "verdict": "intent", "assert": "Follows home-assistant/core Python conventions (pip + requirements*.txt, custom_components/<domain> layout, standalone .ruff.toml + pyrightconfig.json) - expected, not drift.", "intentRef": "CODESTYLE.md" },
+                { "id": "ha.typecheck.mypy", "verdict": "letter", "assert": "mypy --strict runs in CI (platinum strict-typing quality-scale tier).", "intentRef": "CODESTYLE.md" }
             ]
         },
         "codegen": {
