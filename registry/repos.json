@@ -154,20 +154,20 @@
             "url": "https://github.com/ptr727/KiCadLibrary",
             "status": "cataloged",
             "types": ["eda"],
-            "groundTruthBranch": "main",
+            "groundTruthBranch": "develop",
             "hasDevelop": true,
             "publish": [{ "target": "github-release", "mechanism": "none" }],
             "requiredSecrets": [],
             "consumerModel": "pull",
             "releaseTrigger": "two-phase",
-            "driftNotes": ["EDA/KiCad part library; delivers a github-release data zip.", "Ground-truth branch main is stale: the full fleet CI, NBGV version.json, and the Python build/verify pipeline live only on develop - promote to main.", "Python tooling uses requirements-dev.txt, not pyproject.toml; no repo-config/ rulesets."]
+            "driftNotes": ["EDA/KiCad part library; delivers a github-release data zip.", "main is stale (data + README only): the full fleet CI, NBGV version.json, and the Python build/verify pipeline live only on develop (the recorded ground-truth branch) - promote to main to converge.", "Python tooling uses requirements-dev.txt, not pyproject.toml; no repo-config/ rulesets."]
         },
         {
             "name": "EspDinIoT",
             "url": "https://github.com/ptr727/EspDinIoT",
             "status": "cataloged",
             "types": ["eda"],
-            "groundTruthBranch": "main",
+            "groundTruthBranch": "develop",
             "hasDevelop": true,
             "publish": [],
             "requiredSecrets": [],
@@ -237,7 +237,7 @@
             "publish": [],
             "requiredSecrets": [],
             "consumerModel": "pull",
-            "releaseTrigger": "two-phase",
+            "releaseTrigger": "none",
             "driftNotes": ["Non-conformant: default/only branch is 'first-branch'; neither 'main' nor 'develop' exists - must create the main+develop model (should never be permanent).", "NuGet publish uses a static NUGET_API_KEY (dotnet nuget push --api-key) - forbidden; the fleet requires OIDC Trusted Publishing. publish[] left empty pending correction.", "publish-release.yml triggers on push to main/develop, which do not exist here, so nothing publishes.", "No repo-config/ rulesets committed."]
         },
         {
@@ -271,7 +271,7 @@
             "url": "https://github.com/ptr727/HolidayLights",
             "status": "cataloged",
             "types": ["source-only"],
-            "groundTruthBranch": "main",
+            "groundTruthBranch": "develop",
             "hasDevelop": true,
             "publish": [],
             "requiredSecrets": [],

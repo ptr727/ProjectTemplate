@@ -64,7 +64,7 @@
         "eda": {
             "detect": ["*.kicad_pcb", "*.kicad_sym", "*.kicad_mod", "*.kicad_sch", "*.pretty"],
             "checks": [
-                { "id": "eda.release.zip", "verdict": "intent", "assert": "Distribution is a GitHub-release data zip pulled into a local EDA install (pull consumer); no package or image registry.", "workflowRef": "WORKFLOW.md#d4-release--publish" },
+                { "id": "eda.release.zip", "verdict": "intent", "assert": "Distribution is a GitHub release data zip pulled into a local EDA install (pull consumer); no package or image registry.", "workflowRef": "WORKFLOW.md#d4-release--publish" },
                 { "id": "eda.validation", "verdict": "intent", "assert": "CI runs EDA-specific validation (e.g. kicad-cli ERC/DRC or library linting) - the design-data analogue of the code linters.", "intentRef": "CODESTYLE.md" },
                 { "id": "eda.build.deterministic", "verdict": "intent", "assert": "Any build-time artifact generation (gerbers, drill, BOM) and version injection is deterministic from the design inputs; aspirational for data-only repos not yet building artifacts.", "workflowRef": "WORKFLOW.md#d3-versioning-and-classification" }
             ]
