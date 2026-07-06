@@ -481,8 +481,8 @@ Before pushing or opening a PR:
 
 [docs-link]: https://docs.pytest.org/
 [latest-link]: https://hatch.pypa.io/latest/
+[mypy-link]: https://mypy-lang.org/
 [pep-0257-link]: https://peps.python.org/pep-0257/
 [pyright-link]: https://microsoft.github.io/pyright/
-[mypy-link]: https://mypy-lang.org/
 [ruff-link]: https://docs.astral.sh/ruff/
 [uv-link]: https://docs.astral.sh/uv/
