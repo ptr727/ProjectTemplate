@@ -34,6 +34,9 @@ jobs:
       - name: Lint workflows step
         run: docker run --rm -v "$PWD":/repo --workdir /repo rhysd/actionlint@sha256:b1934ee5f1c509618f2508e6eb47ee0d3520686341fec936f3b79331f9315667 -color # actionlint v1.7.12
 
+      - name: Check line endings step
+        run: docker run --rm -v "$PWD":/check --workdir /check mstruebing/editorconfig-checker@sha256:67b9e9b16a674e36f7c05919da789f03a01d343ca8423eb8797179399af07c00 ec # editorconfig-checker v3.4.0
+
       - name: Validate registry and spec step
         run: |
           set -euo pipefail

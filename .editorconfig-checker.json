@@ -1,0 +1,9 @@
+{
+  "Disable": {
+    "Indentation": true,
+    "IndentSize": true,
+    "TrimTrailingWhitespace": true,
+    "InsertFinalNewline": true,
+    "MaxLineLength": true
+  }
+}
