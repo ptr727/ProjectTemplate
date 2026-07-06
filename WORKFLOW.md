@@ -53,7 +53,7 @@ flowchart LR
 
 ### Two Layers: Orchestration vs Build
 
-- **Orchestration** is generic and forms the standardization baseline **at the job level**: the publish-plan + branch matrix in the publisher, the `get-version`, `validate-release`, and `github-release` jobs, the date-badge job, and the `changes -> smoke-build -> aggregator` shape of the PR workflow. These job *bodies* should not need per-repo edits.
+- **Orchestration** is generic and forms the standardization baseline **at the job level**: the single-branch publisher, the `get-version`, `validate-release`, and `github-release` jobs, the date-badge job, and the `changes -> smoke-build -> aggregator` shape of the PR workflow. These job *bodies* should not need per-repo edits.
 - **Build** is repo-owned: the `build-<target>-task.yml` leaf tasks.
 - **What the repo curates** (by design, not a leak): the *list* of targets. This is **not** a byte-for-byte file carry. Adding or dropping a target edits the orchestrator's surface - the `enable_<target>` inputs and the `build-<target>` job + its `github-release` `needs:` entry in the release task, **and** the `changes` paths-filter entry + output + the `smoke-build` enable-forward in the PR workflow. "Verbatim" applies to the `github-release` job and the version/publish-plan logic, not to the release task's job list or the paths-filter. Subsetting is symmetric: the same surface you trim to drop a target you extend to add a new one (e.g. a `release-asset-<branch>-library` producer needs a new `enable_library` input, a `build-library` job, a `needs:` entry, and a `library` paths-filter).
 
@@ -71,11 +71,11 @@ flowchart LR
 
 ### Reusable-Task Parameter Contract
 
-Every leaf and the release task take `ref`, `branch` (the **logical** branch that drives config/tags/prerelease), and where relevant `smoke`. Branch-derived config keys off `inputs.branch`, **never** `github.ref_name` (the publisher matrix builds the non-default branch from a run whose `github.ref_name` is the default branch). Artifact names are branch-suffixed so both legs coexist.
+Every leaf and the release task take `ref`, `branch` (the **logical** branch that drives config/tags/prerelease), and where relevant `smoke`. Branch-derived config keys off `inputs.branch` (the logical branch the caller passes); artifact names are branch-suffixed.
 
 ### Versioning
 
-NBGV computes the version and MUST version from the **checked-out branch**, not the runner CI ref (set `IGNORE_GITHUB_REF=true`; `GITHUB_REF` is reserved and a step `env:` cannot override it). The default branch is the public-release ref, so it builds clean `X.Y.Z`; every other branch builds a prerelease `X.Y.Z-g<sha>`. `version.json`'s `version` is the major.minor floor; NBGV appends the git height as the patch. **NBGV and `version.json` are retained even by a repo with no compiled code** - they are the source of the release tag (`SemVer2`) and `target_commitish` (`GitCommitId`) and the prerelease classification; the .NET SDK is pulled in only as the versioning toolchain. A package build derives its registry version from the same NBGV outputs, but **not always from `SemVer2`**: the PyPI version is built from `AssemblyFileVersion` (four-part `M.N.P.B`) with a PEP 440 `.dev0` appended on the `develop` branch. A wrapper repo may drive its build/image version from an external committed `name -> version` state file while NBGV still tags the release.
+NBGV versions the branch being published. Each run builds a single branch (the trigger ref), so `GITHUB_REF` already names it and NBGV classifies it directly - no `IGNORE_GITHUB_REF` override is required. The default branch is the public-release ref, so it builds clean `X.Y.Z`; every other branch builds a prerelease `X.Y.Z-g<sha>`. `version.json`'s `version` is the major.minor floor; NBGV appends the git height as the patch. **NBGV and `version.json` are retained even by a repo with no compiled code** - they are the source of the release tag (`SemVer2`) and `target_commitish` (`GitCommitId`) and the prerelease classification; the .NET SDK is pulled in only as the versioning toolchain. A package build derives its registry version from the same NBGV outputs, but **not always from `SemVer2`**: the PyPI version is built from `AssemblyFileVersion` (four-part `M.N.P.B`) with a PEP 440 `.dev0` appended on the `develop` branch. A wrapper repo may drive its build/image version from an external committed `name -> version` state file while NBGV still tags the release.
 
 ### Validate-at-Entry
 
@@ -102,15 +102,13 @@ flowchart TD
 
 ### Release Model
 
-Two-phase by default: PRs smoke-test, merges do not publish. The publisher (weekly schedule + manual dispatch) builds and publishes **both** branches via a matrix; its `push` trigger publishes only when an opt-in repository variable is set. Every release is a tag on the built commit plus a source zip, README, and LICENSE; targets amend it with `release-asset-*` files or push to their own registry. An unchanged version re-pushes nothing (no-op republish); Docker re-pushes by design.
+Each publish builds a **single branch** - the trigger ref (`main` a release, `develop` a prerelease) - so there is no branch matrix and `github.ref` always names the built branch. A **Docker or package** repo self-releases the pushed branch on a release-affecting push to `main` or `develop` (a shared paths filter, so a non-substantive change like a GitHub Actions bump publishes nothing), refreshes the released image on a **main-only weekly schedule**, and publishes on manual dispatch. A **source-only** repo publishes on **manual dispatch only**. Every release is a tag on the built commit plus a source archive, README, and LICENSE; targets amend it with `release-asset-*` files or push to their own registry. An unchanged version re-pushes nothing (no-op republish); Docker re-pushes by design.
 
 ```mermaid
 flowchart TD
-  trig[schedule / dispatch / opt-in push] --> plan[publish plan + branch matrix]
-  plan --> mmain[leg: main]
-  plan --> mdev[leg: develop]
-  mmain --> vmain[version X.Y.Z stable]
-  mdev --> vdev[version X.Y.Z-g-sha prerelease]
+  trig[main-only schedule / dispatch / paths-filtered push] --> one[build the one trigger branch]
+  one -->|main| vmain[version X.Y.Z stable]
+  one -->|develop| vdev[version X.Y.Z-g-sha prerelease]
   vmain --> relm[github-release + registries: latest]
   vdev --> reld[github-release + registries: prerelease]
 ```
@@ -140,12 +138,12 @@ The required behaviors, organized by domain. Each is a **MUST**, stated as input
 
 - **D2.1 Validate before expensive work.** Output: a dedicated entry job/step asserts each cross-input/derived-state invariant and fails fast before builds; downstream jobs `needs:` it.
 - **D2.2 Release branch matches version classification.** Input: a real (non-smoke) release build. Output: the gate fails loudly if the default branch carries a prerelease suffix **or** a non-default branch carries none; it strips `+buildmetadata` before testing for the prerelease `-` (only a core/prerelease `-` counts); and it is **skipped on smoke** (a detached PR head always versions as prerelease). *Prevents: a non-default leg published as stable; a build-metadata false-positive; the gate blocking every default-base promotion PR.*
-- **D2.3 Publish only from the default branch.** Input: a dispatch/schedule publish. Output: a dispatch from a non-default ref fails fast. *Prevents: the matrix building the other leg from the wrong ref and shipping a malformed non-prerelease "Latest".*
+- **D2.3 Publish only from main or develop.** Input: a dispatch publish. Output: a dispatch from any ref other than `main` or `develop` fails fast. *Prevents: cutting a release from an unintended branch.*
 - **D2.4 Mutually-exclusive / paired inputs are validated.** Input: a workflow with either/or or must-pair inputs (e.g. the docker-readme task's `repositories` XOR `manifest`+`manifest-jq`). Output: a half-filled or conflicting combination fails fast. *Prevents: a silent fall-through.*
 
 ### D3 - Versioning and Classification
 
-- **D3.1 Version from the checked-out branch.** Input: a matrix publish dispatched from the default branch, each leg checking out its own branch. Output: each leg's version reflects **its** branch (`IGNORE_GITHUB_REF=true`). *Prevents: every leg classified as the public ref because the CI ref is the default branch.*
+- **D3.1 One branch per run.** Input: a publish triggered on `main` or `develop`. Output: the run builds and versions that one branch, and `github.ref` names it, so NBGV classifies it directly (no `IGNORE_GITHUB_REF`). *Prevents: a cross-branch ref mismatch misclassifying the version.*
 - **D3.2 Default = public, others = prerelease.** Output: default branch -> `X.Y.Z`; any other -> `X.Y.Z-g<sha>`. The default-branch literal in the gate, the `prerelease` expression, and `version.json` MUST all name the repo's real default branch.
 - **D3.3 Version floor + git height.** Output: `version.json` sets the major.minor floor; NBGV appends the git height as the patch, bumped only for a functional change by the maintainer. NBGV and `version.json` are retained even by a no-compiler repo (they own the tag).
 - **D3.4 Registry versions follow the classification, per registry.** Output: NuGet default = stable, others = prerelease (derived by NuGet.org from the SemVer2 `-g<sha>` suffix on `PackageVersion`, not a flag the workflow sets). PyPI builds from `AssemblyFileVersion` (`M.N.P.B`) and appends `.dev0` on the `develop` branch only (a two-branch literal, not a generic N-branch rule); the develop `.dev0` build must remain `pip install --pre`-selectable and sort above the default release (NBGV git height in the release segment keeps develop ahead). *Prevents: a non-default leg published as a release; a renamed/extra branch silently getting a plain version.*
@@ -153,7 +151,7 @@ The required behaviors, organized by domain. Each is a **MUST**, stated as input
 
 ### D4 - Release / Publish
 
-- **D4.1 Two-phase by default.** Output: PRs smoke-test; merges do **not** publish unless the opt-in variable is set; the publisher's schedule and dispatch always publish both branches.
+- **D4.1 Symmetric single-branch self-release.** Output: PRs smoke-test and publish nothing. A Docker/package repo self-releases the pushed branch on a release-affecting push to `main` or `develop` (a non-substantive change - e.g. an Actions bump - matches no release path and publishes nothing), refreshes the released image on a main-only weekly schedule, and publishes on dispatch; a source-only repo publishes on dispatch only. Each run builds one branch.
 - **D4.2 Tag the built commit.** Output: the release `target_commitish` is the built commit's SHA (NBGV's commit id), never `github.sha` or a moving branch ref. *Prevents: the tag landing on the default branch instead of the built tree.*
 - **D4.3 Release contents.** Output: every release is a tag on the built commit plus the auto source zip, README, and LICENSE; file-producing targets attach `release-asset-*`; `prerelease` equals `branch != default`. A no-file-target repo reaches the tag-only shape **only** with `expect_release_assets: false` set by the caller (which relaxes `fail_on_unmatched_files` and skips the asset download); with the default `true` and no assets the release-create step fails.
 - **D4.4 No-op republish.** Input: a re-run whose version is unchanged. Output: nothing is re-pushed - the release-create step is skipped when the tag exists (refreshed only on `workflow_dispatch`), and the paired asset-delete is skipped with it; registry pushes are no-ops. The NuGet/PyPI publish steps are **not** statically gated on existence - they run and the **server** dedupes (`dotnet nuget push --skip-duplicate` turns a 409 into success; PyPI `skip-existing: true`). **Docker always re-pushes** the image (base-image refresh), independently of the release-create skip, within the same run. *Prevents: duplicate releases and wasted pushes.*
@@ -170,7 +168,7 @@ The required behaviors, organized by domain. Each is a **MUST**, stated as input
 
 - **D6.1 Pattern handoff.** Output: the release job downloads by `pattern:`/`merge-multiple:`, not `artifact-ids:`; targets upload `release-asset-<branch>-<target>`. Canonical for single-target.
 - **D6.2 Branch drives config.** Output: branch-derived config reads `inputs.branch`, never `github.ref_name`.
-- **D6.3 Branch-suffixed artifacts.** Output: artifact names are branch-suffixed so both legs coexist.
+- **D6.3 Branch-suffixed artifacts.** Output: artifact names are branch-suffixed so a branch's artifacts do not collide with another branch's.
 - **D6.4 Target add/drop is consistent.** Output: adding or dropping a target updates **all** of: the `enable_<target>` input, the `build-<target>` job and its `github-release` `needs:` entry, the `changes` paths-filter entry + output, and the `smoke-build` enable-forward (and, for PyPI, the separate `publish-pypi` job). The `github-release` job body stays verbatim. *Prevents: a partial subset that startup-fails on a missing leaf or never smoke-builds a target.*
 
 ### D7 - Concurrency, Permissions, Safety
@@ -205,8 +203,8 @@ Read the workflow files plus `version.json` and assert the structural fact behin
 **Core (every repo):**
 
 - **D1:** a `changes` paths-filter job exists, covers each of the repo's targets, and **excludes** `.github/workflows/**`; the PR entry workflow's smoke call sets `github/nuget/dockerhub: false` on the release task; the leaf receives `smoke: true` and a derived `push` (false on smoke); every build-task `upload-artifact` (and any aggregation job) is gated `!smoke`; the aggregator `needs:` the `changes` and validation jobs, blocks on `failure`/`cancelled`, passes on `skipped`; a validation job runs unconditionally.
-- **D2:** an entry validation job/step exists per complex-input workflow; the release gate checks both directions, strips `+buildmetadata`, and skips on smoke; the publisher rejects a non-default-ref dispatch.
-- **D3:** the version step sets `IGNORE_GITHUB_REF=true`; the default-branch literal in the gate (`== 'main'`), the `prerelease` expression (`!= 'main'`), and `version.json`'s `publicReleaseRefSpec` all name the repo's actual default branch.
+- **D2:** an entry validation job/step exists per complex-input workflow; the release gate checks both directions, strips `+buildmetadata`, and skips on smoke; the publisher rejects a dispatch from a ref other than `main` or `develop`.
+- **D3:** each run builds one branch, so NBGV classifies `github.ref` directly (no `IGNORE_GITHUB_REF`); the default-branch literal in the gate (`== 'main'`), the `prerelease` expression (`!= 'main'`), and `version.json`'s `publicReleaseRefSpec` all name the repo's actual default branch.
 - **D4:** `target_commitish` is the NBGV commit id; `prerelease` equals `branch != default`; the release-create step is gated `exists == false || workflow_dispatch`; the asset-delete step is gated identically.
 - **D5:** each cross-job transfer artifact has a delete step at its consumer, gated to the consumer's condition, `continue-on-error: true`, looping all ids; **every** upload sets `retention-days: 1`; **no** `.artifacts[].id` blanket delete exists anywhere.
 - **D6:** the release download uses `pattern:`/`merge-multiple:` (no `artifact-ids:`); branch-derived config reads `inputs.branch` (a `github.ref_name` in such config is a finding); artifact names are branch-suffixed; the target set is consistent across the release task and the paths-filter.
@@ -230,10 +228,10 @@ For each *applicable* scenario, evaluate every job's `if:`/`needs:` against the 
 | S2 | PR changing only docs | smoke-build **skipped**; validation runs; aggregator **success** | D1.1, D1.5 |
 | S3 | PR changing only `.github/workflows/**` | filter excludes -> smoke-build **skipped**; aggregator **success** | D1.4 |
 | S4 | PR base = default branch, carrying a build target | smoke versions as prerelease; validate-release **skipped (smoke)** so the default-branch arm does **not** fire; aggregator **success**; promotion not blocked | D1.3, D2.2 |
-| S5 | push to non-default branch, opt-in unset | `setup` -> publish=false; nothing publishes | D4.1 |
-| S6 | push to non-default branch, opt-in set | publish=true; that branch publishes a **prerelease** | D3, D4 |
-| S7 | scheduled/dispatched publish from default branch | both legs: non-default -> `X.Y.Z-g<sha>`, `prerelease=true`, registry prerelease, `release-asset-*` consumed-then-deleted; default -> `X.Y.Z`, `prerelease=false`, registry stable, badge/readme run; PyPI build-artifact deleted after its publish; **no dangling artifacts** | D3, D4, D5, D6, D7 |
-| S8 | dispatch from a non-default ref | `setup` **fails fast** | D2.3 |
+| S5 | push to `main`/`develop` not touching a release path (e.g. an Actions bump) | the paths filter excludes it; nothing publishes | D4.1 |
+| S6 | release-affecting push to `main` or `develop` | that branch self-publishes (`main` a release, `develop` a prerelease) | D3, D4 |
+| S7 | publish run (main-only schedule, or a push/dispatch of the branch) | builds the **one** trigger branch: `main` -> `X.Y.Z`, `prerelease=false`, registry stable, badge/readme run; `develop` -> `X.Y.Z-g<sha>`, `prerelease=true`, registry prerelease; `release-asset-*` consumed-then-deleted; PyPI build-artifact deleted after its publish; **no dangling artifacts** | D3, D4, D5, D6, D7 |
+| S8 | dispatch from a ref other than `main` or `develop` | **fails fast** | D2.3 |
 | S9 | re-run publish, version unchanged | release-create **skipped**, `release-asset-*` delete **skipped**; NuGet/PyPI pushes no-op (server dedupe); **PyPI build-artifact still deleted** (its publish ran); **Docker still re-pushes** the image; no duplicate release | D4.4, D5.2 |
 | S10 | branch/version classification disagree | validate-release **fails loud**; build/publish skip | D2.2 |
 | S11 | scheduled upstream-version bump (wrapper) | resolver detects a change -> commits the state file -> opens a `<prefix>-<branch>` PR -> merge-bot auto-merges -> the new version ships on the **next** publish | D8.3, D3.5 |
