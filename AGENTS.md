@@ -248,6 +248,14 @@ Contributors commit to this repo with signed commits; the SSH-signing setup live
 - The Table of Contents is maintained by the Markdown All in One extension; `markdown.extension.toc.levels` in the workspace sets which heading levels it includes (see the Markdown rules for the authoring convention and the `<!-- omit from toc -->` exclusion marker).
 - **Agents: editing the active `.code-workspace` can reload the VS Code window and drop the agent's session.** Commit all state first, prefer opening the folder rather than the workspace while editing it, or leave workspace edits to the maintainer (a maintainer edit does not reload).
 
+## Repository Details
+
+Every repo's GitHub repository details (the About panel) follow a fixed convention so the fleet stays consistent and self-describing.
+
+- **Description** matches the README's first non-empty line after the `#` H1 heading, as plain text - strip markdown links (`[text](url)` and `[text][ref]` become `text`) since a description is not rendered. The README is the source of truth: set the description from it (`gh api -X PATCH repos/<owner>/<repo> -f description=...`), never the reverse. When the current description is *more specific* than the README (a chip revision or variant the README omits), surface the drift to the maintainer rather than silently discarding the detail - the fix is to sharpen the README so the description follows it.
+- **Topics** are optional; any that are present match the repo's actual content. Do not invent topics to fill the field.
+- **Include in the home page**: Releases on, Deployments off, Packages off. These toggles are UI-only - the REST and GraphQL APIs neither read nor write them - so they are set by hand and cannot be audited through `gh`.
+
 ## Repository Layout
 
 - [`AGENTS.md`](./AGENTS.md), [`CODESTYLE.md`](./CODESTYLE.md), [`WORKFLOW.md`](./WORKFLOW.md), [`AUDIT.md`](./AUDIT.md) - the governance and audit docs; this file is the cross-cutting-rules authority.
