@@ -15,16 +15,16 @@
             "detect": ["build-nugetlibrary-task.yml", "dotnet nuget push"],
             "forbiddenSecrets": ["NUGET_API_KEY"],
             "checks": [
-                { "id": "nuget.publish.oidc", "verdict": "intent", "assert": "NuGet publish uses OIDC Trusted Publishing (NuGet/login), not a stored API key.", "workflowRef": "WORKFLOW.md#d4-release--publish" },
-                { "id": "nuget.publish.skipduplicate", "verdict": "letter", "assert": "The push uses --skip-duplicate and is gated on push, not on an existence check.", "workflowRef": "WORKFLOW.md#d4-release--publish" }
+                { "id": "nuget.publish.oidc", "verdict": "intent", "assert": "NuGet publish uses OIDC Trusted Publishing (NuGet/login), not a stored API key.", "workflowRef": "WORKFLOW.md#d4---release--publish" },
+                { "id": "nuget.publish.skipduplicate", "verdict": "letter", "assert": "The push uses --skip-duplicate and is gated on push, not on an existence check.", "workflowRef": "WORKFLOW.md#d4---release--publish" }
             ]
         },
         "pypi": {
             "detect": ["build-pypilibrary-task.yml", "pypa/gh-action-pypi-publish"],
             "forbiddenSecrets": ["PYPI_API_TOKEN", "TWINE_PASSWORD"],
             "checks": [
-                { "id": "pypi.publish.oidc", "verdict": "intent", "assert": "PyPI publish uses OIDC Trusted Publishing (no stored token).", "workflowRef": "WORKFLOW.md#d4-release--publish" },
-                { "id": "pypi.publish.environment", "verdict": "letter", "assert": "The publish job declares environment: pypi and id-token: write, with skip-existing: true.", "workflowRef": "WORKFLOW.md#d7-concurrency-permissions-safety" }
+                { "id": "pypi.publish.oidc", "verdict": "intent", "assert": "PyPI publish uses OIDC Trusted Publishing (no stored token).", "workflowRef": "WORKFLOW.md#d4---release--publish" },
+                { "id": "pypi.publish.environment", "verdict": "letter", "assert": "The publish job declares environment: pypi and id-token: write, with skip-existing: true.", "workflowRef": "WORKFLOW.md#d7---concurrency-permissions-safety" }
             ]
         },
         "python": {
@@ -32,8 +32,9 @@
             "canonicalPlacement": "pyproject.toml",
             "checks": [
                 { "id": "python.ruff.config", "verdict": "intent", "assert": "A ruff configuration is present.", "intentRef": "CODESTYLE.md" },
-                { "id": "python.pyright.config", "verdict": "intent", "assert": "A pyright configuration is present.", "intentRef": "CODESTYLE.md" },
-                { "id": "python.config.placement", "verdict": "letter", "assert": "ruff and pyright config live in pyproject.toml (canonical); standalone .ruff.toml / pyrightconfig.json is a drift finding.", "intentRef": "CODESTYLE.md" }
+                { "id": "python.pyright.config", "verdict": "intent", "assert": "pyright is configured and runs strict on first-party code (src or the integration package) - the strong typing baseline; third-party strictness is relaxed only where a dependency has no usable types.", "intentRef": "CODESTYLE.md" },
+                { "id": "python.config.placement", "verdict": "letter", "assert": "ruff and pyright config live in pyproject.toml (canonical); standalone .ruff.toml / pyrightconfig.json is a drift finding. A Home Assistant integration is the exception - it follows home-assistant/core standalone-config conventions and is scored by ha.python.conventions instead.", "intentRef": "CODESTYLE.md" },
+                { "id": "python.mypy.allowed", "verdict": "intent", "assert": "mypy is permitted as an additional type checker (not banned); required for a Home Assistant integration (platinum strict-typing). When used it runs in CI and the editor.", "intentRef": "CODESTYLE.md" }
             ]
         },
         "console": {
@@ -49,13 +50,23 @@
             "checks": [
                 { "id": "docker.cache.registry", "verdict": "intent", "assert": "Layer cache targets a registry tag (buildcache-<branch>), never type=gha.", "workflowRef": "WORKFLOW.md#d9---style--static-see-section-2" },
                 { "id": "docker.hub.readme", "verdict": "intent", "assert": "Where the Docker Hub overview differs from the project README, a Docker/README.md is published via the docker-readme task (Hub description is size-limited).", "workflowRef": "WORKFLOW.md#6-per-project-type-test-walkthroughs" },
-                { "id": "docker.always.repush", "verdict": "letter", "assert": "The image always re-pushes on publish (base-image refresh), independent of the release-create skip.", "workflowRef": "WORKFLOW.md#d4-release--publish" }
+                { "id": "docker.always.repush", "verdict": "letter", "assert": "The image always re-pushes on publish (base-image refresh), independent of the release-create skip.", "workflowRef": "WORKFLOW.md#d4---release--publish" }
             ]
         },
         "homeassistant": {
             "detect": ["custom_components/*/manifest.json", "hacs.json"],
             "checks": [
-                { "id": "ha.release.only", "verdict": "intent", "assert": "Distribution is a GitHub release for HACS (push consumer model); no registry publish.", "workflowRef": "WORKFLOW.md#d4-release--publish" }
+                { "id": "ha.release.only", "verdict": "intent", "assert": "Distribution is a GitHub release for HACS (push consumer model); no registry publish.", "workflowRef": "WORKFLOW.md#d4---release--publish" },
+                { "id": "ha.python.conventions", "verdict": "intent", "assert": "Follows home-assistant/core Python conventions (pip + requirements*.txt, custom_components/<domain> layout, standalone .ruff.toml + pyrightconfig.json) - expected, not drift.", "intentRef": "CODESTYLE.md" },
+                { "id": "ha.typecheck.mypy", "verdict": "letter", "assert": "mypy --strict runs in CI (platinum strict-typing quality-scale tier).", "intentRef": "CODESTYLE.md" }
+            ]
+        },
+        "eda": {
+            "detect": ["*.kicad_pcb", "*.kicad_sym", "*.kicad_mod", "*.kicad_sch", "*.pretty"],
+            "checks": [
+                { "id": "eda.release.zip", "verdict": "intent", "assert": "Distribution is a GitHub release data zip pulled into a local EDA install (pull consumer); no package or image registry.", "workflowRef": "WORKFLOW.md#d4---release--publish" },
+                { "id": "eda.validation", "verdict": "intent", "assert": "CI runs EDA-specific validation (e.g. kicad-cli ERC/DRC or library linting) - the design-data analogue of the code linters.", "intentRef": "CODESTYLE.md" },
+                { "id": "eda.build.deterministic", "verdict": "intent", "assert": "Any build-time artifact generation (gerbers, drill, BOM) and version injection is deterministic from the design inputs; aspirational for data-only repos not yet building artifacts.", "workflowRef": "WORKFLOW.md#d3---versioning-and-classification" }
             ]
         },
         "codegen": {
@@ -123,7 +134,7 @@
                 { "id": "recurring.comments", "verdict": "letter", "assert": "Comments are concise, only the non-obvious, no prose narration, and do not grow on re-edit.", "intentRef": "AGENTS.md#comments" },
                 { "id": "recurring.charset", "verdict": "letter", "assert": "ASCII only in agent-authored text: no em-dash (use a spaced hyphen), no smart quotes, no stray non-ASCII.", "intentRef": "AGENTS.md#character-set" },
                 { "id": "recurring.spelling", "verdict": "letter", "assert": "US English spelling; the shared cspell.json sets language en-US (a bare en accepts British spellings too).", "intentRef": "CODESTYLE.md#markdown-and-spelling" },
-                { "id": "recurring.eol", "verdict": "letter", "assert": "Line endings follow .editorconfig, which carries a global [*] end_of_line = crlf default plus LF pins for execution-sensitive files (shell, Dockerfiles, shebang-executable .py by path); a per-extension-only form lacking the global [*] default is a drift finding. Edits preserve the file's endings.", "intentRef": "AGENTS.md#line-endings" }
+                { "id": "recurring.eol", "verdict": "letter", "assert": "Line endings follow .editorconfig, which carries a global [*] end_of_line = crlf default plus LF pins for execution-sensitive files (shell, Dockerfiles, shebang-executable .py by path), plus workflow YAML in .github/workflows/* enforced by editorconfig-checker in CI; a per-extension-only form lacking the global [*] default is a drift finding. Edits preserve the file's endings.", "intentRef": "AGENTS.md#line-endings" }
             ]
         },
         "readme-structure": {
