@@ -79,6 +79,24 @@
             ]
         },
         {
+            "name": "Financial-Modeling",
+            "url": "https://github.com/ptr727/Financial-Modeling",
+            "status": "cataloged",
+            "types": ["python", "source-only"],
+            "groundTruthBranch": "main",
+            "hasDevelop": true,
+            "publish": [],
+            "requiredSecrets": [],
+            "consumerModel": "pull",
+            "releaseTrigger": "none",
+            "configLayout": { "pythonConfig": "pyproject.toml" },
+            "driftNotes": [
+                "Personal Python toolkit (uv/pyproject, src/ + tests/ + analysis/data/docs); private.",
+                "No .github/workflows yet - source-lint and Python test CI not established (modernization candidate).",
+                "Already carries .markdownlint-cli2.jsonc and AGENTS.md."
+            ]
+        },
+        {
             "name": "PlexCleaner",
             "url": "https://github.com/ptr727/PlexCleaner",
             "status": "cataloged",
