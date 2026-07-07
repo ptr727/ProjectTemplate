@@ -276,13 +276,13 @@
             "url": "https://github.com/ptr727/Vantage-Config",
             "status": "cataloged",
             "types": ["source-only"],
-            "groundTruthBranch": "main",
-            "hasDevelop": false,
+            "groundTruthBranch": "develop",
+            "hasDevelop": true,
             "publish": [],
             "requiredSecrets": [],
             "consumerModel": "pull",
             "releaseTrigger": "none",
-            "driftNotes": ["Maintainer config/asset archive (Vantage InFusion) with vendored binaries (MSI/7z/PDF) and versioned project snapshots; in scope as a config repo.", "The lone FindInFile C# helper is incidental, not a governed artifact.", "No develop branch; no CI/governance scaffolding."]
+            "driftNotes": ["Maintainer config/asset archive (Vantage InFusion) with vendored binaries (MSI/7z/PDF) and versioned project snapshots; in scope as a config repo.", "The lone FindInFile C# helper is incidental, not a governed artifact.", "The develop branch now holds the ground truth (README/tagline edits) while main is stale - converge. No CI/governance scaffolding (no .github/workflows)."]
         },
         {
             "name": "HolidayLights",
