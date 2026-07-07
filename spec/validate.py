@@ -77,6 +77,13 @@ def main():
         for f, v in feature_mech.items():
             if not (v is None or isinstance(v, str)):
                 errors.append(f"secrets.json: featureMechanisms['{f}'] must be a mechanism name or null")
+    type_mech = secrets.get("typeMechanisms", {})
+    if not isinstance(type_mech, dict):
+        errors.append("secrets.json: 'typeMechanisms' is not an object")
+    else:
+        for t, v in type_mech.items():
+            if not (v is None or isinstance(v, str)):
+                errors.append(f"secrets.json: typeMechanisms['{t}'] must be a mechanism name or null")
     if errors:
         print("Spec validation FAILED:")
         for e in errors:
