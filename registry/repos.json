@@ -309,19 +309,6 @@
             "consumerModel": "pull",
             "releaseTrigger": "none",
             "driftNotes": ["GitHub org community-health/profile repo (default org files); single-branch (no develop) is expected for this repo type - branch-model N/A.", "Maintainer notes it was a low-value org-config attempt and is considering removal."]
-        },
-        {
-            "name": "TelemetryImporter",
-            "url": "https://github.com/ptr727/TelemetryImporter",
-            "status": "cataloged",
-            "types": ["csharp", "console"],
-            "groundTruthBranch": "develop",
-            "hasDevelop": true,
-            "publish": [],
-            "requiredSecrets": [],
-            "consumerModel": "pull",
-            "releaseTrigger": "none",
-            "driftNotes": ["ABANDONED - maintainer to salvage anything useful or delete the repo.", "CI is Azure DevOps (azure-pipelines.yml), not GitHub Actions - outside the fleet workflow contract; no .github/ at all.", "Non-conformant: default/only branch is 'develop', no 'main'.", "EOL targets (netcoreapp3.1 / netstandard2.1), beta package refs; carries a .sqlproj database project and an unpackaged TelemetryLibrary."]
         }
     ]
 }
