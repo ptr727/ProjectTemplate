@@ -111,7 +111,7 @@
             "consumerModel": "pull",
             "releaseTrigger": "two-phase",
             "configLayout": { "rulesetsDir": "repo-config", "pythonConfig": null },
-            "driftNotes": ["Carries ARCHITECTURE.md and codecov.yml beyond the baseline."]
+            "driftNotes": ["Carries ARCHITECTURE.md and codecov.yml beyond the baseline.", "Branch hygiene: 3 stale Dependabot nuget branches (PRs closed/superseded) and an unmerged feature/727-decouple-release-assets branch linger; main+develop otherwise clean after the 2026-07 sweep."]
         },
         {
             "name": "ESPHome-NonRoot",
@@ -152,7 +152,7 @@
             "requiredSecrets": ["DOCKER_HUB_USERNAME", "DOCKER_HUB_ACCESS_TOKEN"],
             "consumerModel": "pull",
             "releaseTrigger": "two-phase",
-            "driftNotes": ["Docker image wrapping upstream Nx products; C# (CreateMatrix) is the codegen generator, not a shipped package (IsPackable=false, no nuget push).", "Release is the two-phase model (weekly schedule + workflow_dispatch publish; ordinary merges do not) plus an extra Make/Matrix.json path-scoped push that republishes when the codegen version pin bumps.", "Docker Hub README published per-image via a Matrix.json-derived matrix."]
+            "driftNotes": ["Docker image wrapping upstream Nx products; C# (CreateMatrix) is the codegen generator, not a shipped package (IsPackable=false, no nuget push).", "Release is the two-phase model (weekly schedule + workflow_dispatch publish; ordinary merges do not) plus an extra Make/Matrix.json path-scoped push that republishes when the codegen version pin bumps.", "Docker Hub README published per-image via a Matrix.json-derived matrix.", "Branch hygiene: 3 stale Dependabot nuget branches (PRs closed/superseded) linger, safe to delete; main+develop otherwise clean after the 2026-07 sweep."]
         },
         {
             "name": "HomeAutomation",
@@ -230,7 +230,7 @@
             "requiredSecrets": [],
             "consumerModel": "pull",
             "releaseTrigger": "none",
-            "driftNotes": ["EDA/KiCad PCB design + fabrication data (gerbers/BOM); no CI on any branch, no release pipeline.", "Depends on KiCadLibrary as an upstream part source (manual git clone)."]
+            "driftNotes": ["EDA/KiCad PCB design + fabrication data (gerbers/BOM); no CI on any branch, no release pipeline.", "Depends on KiCadLibrary as an upstream part source (manual git clone).", "Branch hygiene: develop and main have diverged (not forward-only); feature/kicad10-upgrade is merged (PR#4) but retained for the in-progress KiCad 10 migration. A stale THT branch was removed in the 2026-07 sweep."]
         },
         {
             "name": "PhotoCleaner",
