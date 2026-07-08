@@ -250,13 +250,13 @@
             "url": "https://github.com/ptr727/MediaTools",
             "status": "cataloged",
             "types": ["csharp", "nuget"],
-            "groundTruthBranch": "first-branch",
-            "hasDevelop": false,
-            "publish": [],
-            "requiredSecrets": [],
+            "groundTruthBranch": "main",
+            "hasDevelop": true,
+            "publish": [{ "target": "nuget", "mechanism": "oidc" }],
+            "requiredSecrets": ["NUGET_USERNAME"],
             "consumerModel": "pull",
-            "releaseTrigger": "none",
-            "driftNotes": ["Non-conformant: default/only branch is 'first-branch'; neither 'main' nor 'develop' exists - must create the main+develop model (should never be permanent).", "NuGet publish uses a static NUGET_API_KEY (dotnet nuget push --api-key) - forbidden; the fleet requires OIDC Trusted Publishing. publish[] left empty pending correction.", "publish-release.yml triggers on push to main/develop, which do not exist here, so nothing publishes.", "No repo-config/ rulesets committed."]
+            "releaseTrigger": "two-phase",
+            "driftNotes": ["Rulesets applied from the hub canonical repo-config/, not committed in-repo (no repo-config/ directory), as with NxWitness.", "No WORKFLOW.md sibling doc (pending fleet-wide ratification, ptr727/ProjectTemplate#223); workflow comments carry the rationale inline."]
         },
         {
             "name": "AudioCleaner",
