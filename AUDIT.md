@@ -47,7 +47,15 @@ A check with `intentRef`/`workflowRef` points at the prose section that owns the
 
 Run [`WORKFLOW.md`][workflow]'s methodology against the repo's **own** Actions: the 5A static audit (structural facts per applicable D-guarantee, each with a `file:line` citation) and the 5B trace scenarios (predicted run/skip + version + release + artifact-end-state vs expected). The contract in WORKFLOW.md section 4 is satisfied by **outcome**, not by matching the catalog snippets in [`catalog/snippets/workflows/`][workflows] byte for byte - those are the reference implementation, not required bytes.
 
-## 6. Validate Rulesets and Secrets
+## 6. Validate Settings, Rulesets, and Secrets
+
+- **General settings** - diff the live repository settings against [`repo-config/settings.json`][repo-config], and confirm the two state-dependent settings: `has_discussions` follows visibility (public on / private off) and `default_branch` is `main`.
+
+  ```sh
+  live=$(gh api "repos/<owner>/<repo>" --jq '{has_wiki,has_projects,allow_merge_commit,allow_squash_merge,allow_rebase_merge,allow_auto_merge,allow_update_branch,delete_branch_on_merge}')
+  diff <(jq -S . repo-config/settings.json) <(jq -S . <<<"$live") \
+    && echo "settings: in sync" || echo "settings: DRIFT"
+  ```
 
 - **Rulesets** - diff each live ruleset against the committed expected payload with a normalized comparison (sort the order-insensitive `rules[]` and `bypass_actors[]` before diffing so a reordered but equivalent ruleset does not read as drift):
 
