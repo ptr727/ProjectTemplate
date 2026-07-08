@@ -18,7 +18,7 @@ for name in develop main; do
   id=$(gh api repos/ptr727/ProjectTemplate/rulesets --jq ".[] | select(.name==\"$name\") | .id")
   gh api "repos/ptr727/ProjectTemplate/rulesets/$id" \
     --jq '{name, target, enforcement, bypass_actors, conditions, rules}' \
-    | jq -S '.' > "repo-config/$name.json"
+    | jq -S --indent 4 '.' > "repo-config/$name.json"
 done
 ```
 
