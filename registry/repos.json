@@ -296,19 +296,6 @@
             "consumerModel": "pull",
             "releaseTrigger": "none",
             "driftNotes": ["xLights show sequences/models (asset repo).", "main is near-empty - all content lives on develop; promote to main.", "No CI/governance scaffolding."]
-        },
-        {
-            "name": ".github",
-            "url": "https://github.com/ptr727/.github",
-            "status": "cataloged",
-            "types": ["docs"],
-            "groundTruthBranch": "main",
-            "hasDevelop": false,
-            "publish": [],
-            "requiredSecrets": [],
-            "consumerModel": "pull",
-            "releaseTrigger": "none",
-            "driftNotes": ["GitHub org community-health/profile repo (default org files); single-branch (no develop) is expected for this repo type - branch-model N/A.", "Maintainer notes it was a low-value org-config attempt and is considering removal."]
         }
     ]
 }
