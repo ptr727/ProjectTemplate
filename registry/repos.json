@@ -28,7 +28,7 @@
             "groundTruthBranch": "main",
             "hasDevelop": true,
             "publish": [{ "target": "nuget", "mechanism": "oidc" }],
-            "requiredSecrets": ["NUGET_USERNAME"],
+            "requiredSecrets": ["NUGET_USERNAME", "CODECOV_TOKEN"],
             "consumerModel": "pull",
             "releaseTrigger": "two-phase",
             "configLayout": { "rulesetsDir": "repo-config", "pythonConfig": null },
@@ -42,7 +42,7 @@
             "groundTruthBranch": "main",
             "hasDevelop": true,
             "publish": [{ "target": "nuget", "mechanism": "oidc" }],
-            "requiredSecrets": ["NUGET_USERNAME"],
+            "requiredSecrets": ["NUGET_USERNAME", "CODECOV_TOKEN"],
             "consumerModel": "pull",
             "releaseTrigger": "two-phase",
             "configLayout": { "rulesetsDir": "repo-config", "pythonConfig": null },
@@ -56,11 +56,11 @@
             "groundTruthBranch": "main",
             "hasDevelop": true,
             "publish": [{ "target": "pypi", "mechanism": "oidc" }],
-            "requiredSecrets": [],
+            "requiredSecrets": ["CODECOV_TOKEN"],
             "consumerModel": "pull",
             "releaseTrigger": "publish-on-merge",
             "configLayout": { "rulesetsDir": "repo-config", "pythonConfig": "pyproject.toml" },
-            "driftNotes": []
+            "driftNotes": ["Enforces a 99%+ coverage threshold, beyond the fleet's report-only codecov default."]
         },
         {
             "name": "homeassistant-purpleair",
@@ -70,12 +70,13 @@
             "groundTruthBranch": "main",
             "hasDevelop": true,
             "publish": [{ "target": "github-release", "mechanism": "none" }],
-            "requiredSecrets": [],
+            "requiredSecrets": ["CODECOV_TOKEN"],
             "consumerModel": "push",
             "releaseTrigger": "dispatch-only",
             "configLayout": { "rulesetsDir": "repo-config", "pythonConfig": "standalone" },
             "driftNotes": [
-                "ruff/pyright in standalone .ruff.toml + pyrightconfig.json instead of pyproject.toml (canonicalize)."
+                "ruff/pyright in standalone .ruff.toml + pyrightconfig.json instead of pyproject.toml (canonicalize).",
+                "Enforces a 99%+ coverage threshold, beyond the fleet's report-only codecov default."
             ]
         },
         {
@@ -86,7 +87,7 @@
             "groundTruthBranch": "main",
             "hasDevelop": true,
             "publish": [],
-            "requiredSecrets": [],
+            "requiredSecrets": ["CODECOV_TOKEN"],
             "consumerModel": "pull",
             "releaseTrigger": "none",
             "configLayout": { "pythonConfig": "pyproject.toml" },
@@ -107,7 +108,7 @@
                 { "target": "docker", "mechanism": "static-secret" },
                 { "target": "github-release", "mechanism": "none" }
             ],
-            "requiredSecrets": ["DOCKER_HUB_USERNAME", "DOCKER_HUB_ACCESS_TOKEN"],
+            "requiredSecrets": ["DOCKER_HUB_USERNAME", "DOCKER_HUB_ACCESS_TOKEN", "CODECOV_TOKEN"],
             "consumerModel": "pull",
             "releaseTrigger": "two-phase",
             "configLayout": { "rulesetsDir": "repo-config", "pythonConfig": null },
@@ -149,7 +150,7 @@
             "groundTruthBranch": "main",
             "hasDevelop": true,
             "publish": [{ "target": "docker", "mechanism": "static-secret" }, { "target": "github-release", "mechanism": "none" }],
-            "requiredSecrets": ["DOCKER_HUB_USERNAME", "DOCKER_HUB_ACCESS_TOKEN"],
+            "requiredSecrets": ["DOCKER_HUB_USERNAME", "DOCKER_HUB_ACCESS_TOKEN", "CODECOV_TOKEN"],
             "consumerModel": "pull",
             "releaseTrigger": "two-phase",
             "driftNotes": ["Docker image wrapping upstream Nx products; C# (CreateMatrix) is the codegen generator, not a shipped package (IsPackable=false, no nuget push).", "Release is the two-phase model (weekly schedule + workflow_dispatch publish; ordinary merges do not) plus an extra Make/Matrix.json path-scoped push that republishes when the codegen version pin bumps.", "Docker Hub README published per-image via a Matrix.json-derived matrix.", "Branch hygiene: 3 stale Dependabot nuget branches (PRs closed/superseded) linger, safe to delete; main+develop otherwise clean after the 2026-07 sweep."]
@@ -240,7 +241,7 @@
             "groundTruthBranch": "develop",
             "hasDevelop": true,
             "publish": [],
-            "requiredSecrets": [],
+            "requiredSecrets": ["CODECOV_TOKEN"],
             "consumerModel": "pull",
             "releaseTrigger": "none",
             "driftNotes": ["Work-in-progress: pre-CI (no .github/workflows, no version.json, no repo-config).", "Non-conformant: default/only branch is 'develop', no 'main' - must create main (should never be permanent).", "Dockerfile present but no docker build/push workflow, so no publish wired."]
@@ -253,7 +254,7 @@
             "groundTruthBranch": "main",
             "hasDevelop": true,
             "publish": [{ "target": "nuget", "mechanism": "oidc" }],
-            "requiredSecrets": ["NUGET_USERNAME"],
+            "requiredSecrets": ["NUGET_USERNAME", "CODECOV_TOKEN"],
             "consumerModel": "pull",
             "releaseTrigger": "two-phase",
             "driftNotes": ["Rulesets applied from the hub canonical repo-config/, not committed in-repo (no repo-config/ directory), as with NxWitness.", "No WORKFLOW.md sibling doc (pending fleet-wide ratification, ptr727/ProjectTemplate#223); workflow comments carry the rationale inline."]
@@ -266,7 +267,7 @@
             "groundTruthBranch": "main",
             "hasDevelop": true,
             "publish": [],
-            "requiredSecrets": [],
+            "requiredSecrets": ["CODECOV_TOKEN"],
             "consumerModel": "pull",
             "releaseTrigger": "none",
             "driftNotes": ["Work-in-progress: pre-CI (no .github/workflows, no version.json, no repo-config). main+develop both exist."]
