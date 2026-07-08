@@ -238,7 +238,7 @@
             "requiredSecrets": ["NUGET_USERNAME"],
             "consumerModel": "pull",
             "releaseTrigger": "two-phase",
-            "driftNotes": ["Rulesets applied from the hub canonical repo-config/, not committed in-repo (no repo-config/ directory), as with NxWitness.", "No WORKFLOW.md sibling doc yet (pending fleet-wide ratification, ptr727/ProjectTemplate#223); workflow comments carry the rationale inline."]
+            "driftNotes": ["Rulesets applied from the hub canonical repo-config/, not committed in-repo (no repo-config/ directory), as with NxWitness.", "No WORKFLOW.md sibling doc (pending fleet-wide ratification, ptr727/ProjectTemplate#223); workflow comments carry the rationale inline."]
         },
         {
             "name": "AudioCleaner",
