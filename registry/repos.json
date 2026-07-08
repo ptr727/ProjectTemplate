@@ -234,7 +234,7 @@
             "types": ["csharp", "nuget"],
             "groundTruthBranch": "main",
             "hasDevelop": true,
-            "publish": [{"target": "nuget", "mechanism": "oidc"}],
+            "publish": [{ "target": "nuget", "mechanism": "oidc" }],
             "requiredSecrets": ["NUGET_USERNAME"],
             "consumerModel": "pull",
             "releaseTrigger": "two-phase",
