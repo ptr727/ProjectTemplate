@@ -28,7 +28,7 @@ Publish credentials required per mechanism are enumerated in [spec/secrets.json]
 
 ## Repo Settings
 
-The fleet-standard general settings live in [`settings.json`](./settings.json) and are applied idempotently by `configure.sh` alongside the rulesets (`gh api PATCH /repos`). The two settings that depend on per-repo state - `has_discussions` (visibility) and `default_branch` (main-must-exist) - are computed by the script, not stored in the file.
+The fleet-standard general settings live in [`settings.json`][settings-json] and are applied idempotently by `configure.sh` alongside the rulesets (`gh api PATCH /repos/{owner}/{repo}`). The two settings that depend on per-repo state - `has_discussions` (visibility) and `default_branch` (main-must-exist) - are computed by the script, not stored in the file.
 
 - **Default branch `main`** (the script sets it only when a `main` branch exists, never pointing the default at a missing branch).
 - **Merge methods**: `Allow merge commits` and `Allow squash merging` on, **rebase off** - each branch ruleset then picks its method (merge on `main`, squash on `develop`).
@@ -43,6 +43,7 @@ The fleet-standard general settings live in [`settings.json`](./settings.json) a
 
 <!-- Repo -->
 
+[settings-json]: ./settings.json
 [agents-branching-model]: ../AGENTS.md#branching-model
 [agents-git-and-commit-rules]: ../AGENTS.md#git-and-commit-rules
 [audit]: ../AUDIT.md

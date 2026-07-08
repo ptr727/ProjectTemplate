@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Apply the committed fleet configuration in this directory to the repository via the GitHub API:
-#   1. General repository settings from settings.json (PATCH /repos), plus the two settings that depend on
+#   1. General repository settings from settings.json (PATCH /repos/{owner}/{repo}), plus the two settings that depend on
 #      per-repo state - has_discussions (public repos only) and default_branch (main, only if it exists).
 #   2. The branch rulesets develop.json and main.json. Each <name>.json holds the writable ruleset subset
 #      {name, target, enforcement, bypass_actors, conditions, rules}. An existing ruleset (matched by name) is

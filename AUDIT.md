@@ -49,7 +49,7 @@ Run [`WORKFLOW.md`][workflow]'s methodology against the repo's **own** Actions: 
 
 ## 6. Validate Settings, Rulesets, and Secrets
 
-- **General settings** - diff the live repository settings against [`repo-config/settings.json`][repo-config], and confirm the two state-dependent settings: `has_discussions` follows visibility (public on / private off) and `default_branch` is `main`.
+- **General settings** - diff the live repository settings against [`repo-config/settings.json`][repo-config-settings], and confirm the two state-dependent settings: `has_discussions` follows visibility (public on / private off) and `default_branch` is `main`.
 
   ```sh
   live=$(gh api "repos/<owner>/<repo>" --jq '{has_wiki,has_projects,allow_merge_commit,allow_squash_merge,allow_rebase_merge,allow_auto_merge,allow_update_branch,delete_branch_on_merge}')
@@ -112,6 +112,7 @@ The convergence model: the hub audits and the agent **applies** the fixes via ta
 [project-types]: ./spec/project-types.json
 [readme-structure]: ./spec/readme-structure.md
 [repo-config]: ./repo-config/
+[repo-config-settings]: ./repo-config/settings.json
 [reports]: ./reports/
 [repos]: ./registry/repos.json
 [secrets]: ./spec/secrets.json
