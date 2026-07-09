@@ -245,7 +245,7 @@ Follow the scope hierarchy in [Analyzer Diagnostics and Suppressions][analyzer-d
 
 #### Error Handling and Logging
 
-1. **Structured logging**: use structured message templates - Serilog is the **application's** concrete backend; a library never references it (see item 2)
+1. **Structured logging**: Use structured message templates - Serilog is the **application's** concrete backend; a library never references it (see item 2)
 
    ```csharp
    logger.LogError(exception, "{Function}", function);
