@@ -199,6 +199,11 @@ Bring the user in when:
 
 Anti-pattern: don't keep flipping the code on the same style point. Flip the rule once and stick to the rule.
 
+## Communicating with the User
+
+- **Reference every pull request as a clickable link.** When you mention a PR - in chat, a summary, or a report - render it as a markdown link to the PR (`[#123](https://github.com/<owner>/<repo>/pull/123)`), never a bare `#123`. The same applies to issues and commits.
+- **Ask for input as a numbered list.** When you need the user to decide or answer, present the questions - and any options - as a numbered list so they can reply per number. A single inline question is fine; two or more are always numbered.
+
 ## Workflow YAML Conventions
 
 These conventions describe the target state. New and modified workflows must respect them; the rest of the repo is expected to be brought up to the same standard. Sweep PRs that apply a rule everywhere are welcome when a rule changes.
@@ -239,6 +244,12 @@ The CI lint job runs these tools (workflow YAML and Markdown), but run them loca
   In a configured editor the davidanson extension is enough; use the Docker CLI when there's no IDE (agent/headless) or to confirm a clean run before pushing.
 
 When pulling a public image fails on a Docker-Desktop/WSL credential-helper error (`docker-credential-desktop.exe: exec format error`), retry with an empty Docker config: `DOCKER_CONFIG=$(mktemp -d) docker run ...` after writing `{}` to `$DOCKER_CONFIG/config.json`.
+
+## Supported Development Platforms
+
+- **Cross-platform by default - Windows + macOS + Linux.** Linux runs natively (a Linux desktop, or SSH/remote into a Linux host), through a devcontainer on Windows or macOS, or through WSL2 on Windows - the devcontainer and WSL routes carry their own nuances (mounts, path translation, SSH-agent forwarding) but deliver the same toolchain. Editing is cross-platform through the GUI regardless of where code runs. Assume this default.
+- **A repo's platform ceiling is set by its dependencies, not tooling effort; decide it per repo before writing dev tooling.** Narrow below the default only for a hard runtime ceiling - the code can only execute or test on one platform (e.g. a Home Assistant integration is Linux-only: HA Core has POSIX-only dependencies and will not run natively on Windows, so even maximal tooling yields only lint-only there). The narrowing axis is where code *executes* for dev and testing - native, SSH-remote, container, or CI - never where editing happens.
+- **Record a narrowed platform and its reason in the repo** (README/AGENTS) so the restriction reads as a deliberate dependency ceiling, not an omission.
 
 ## Devcontainer
 

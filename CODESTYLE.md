@@ -156,7 +156,7 @@ Note: Code snippets are illustrative examples only. Replace namespaces/types to 
    global using System;
    global using System.Net.Http;
    global using System.Threading.Tasks;
-   global using Serilog;
+   global using Microsoft.Extensions.Logging;
    ```
 
 2. **Usings placement**: Outside namespace, sorted with `System` directives first
@@ -245,15 +245,13 @@ Follow the scope hierarchy in [Analyzer Diagnostics and Suppressions][analyzer-d
 
 #### Error Handling and Logging
 
-1. **Serilog logging**: Use structured logging
+1. **Structured logging**: Use structured message templates - Serilog is the **application's** concrete backend; a library never references it (see item 2)
 
    ```csharp
-   logger.Error(exception, "{Function}", function);
+   logger.LogError(exception, "{Function}", function);
    ```
 
-2. **Library log configuration**: Libraries must expose logging configuration
-   - Provide options or settings to supply an `ILoggerFactory` and/or `ILogger`
-   - Offer a global fallback logger for static usage when needed
+2. **Libraries log through abstractions, never a concrete backend.** A NuGet **library** depends only on `Microsoft.Extensions.Logging.Abstractions` and exposes an `ILoggerFactory` seam - a settable global factory defaulting to `NullLoggerFactory` (fallback `NullLogger.Instance`) with `SetFactory`/`TrySetFactory`, and/or an `ILoggerFactory`/`ILogger` parameter in its API. It must **not** reference Serilog or any sink - that forces a logging framework on every consumer and drags in AOT-incompatible dependencies. The consuming **application** owns the concrete logger (Serilog is fine there), bridges it to `ILoggerFactory` (e.g. `SerilogLoggerFactory` from `Serilog.Extensions.Logging`), and injects it. Reference: `LanguageTags` - `LogOptions` in the library; the CLI's `LoggerFactory` builds the Serilog-backed factory and injects it via `LogOptions.SetFactory`.
 
 3. **CallerMemberName**: Use for automatic function name tracking
 
@@ -294,7 +292,7 @@ Follow the scope hierarchy in [Analyzer Diagnostics and Suppressions][analyzer-d
 
 #### Testing Conventions
 
-1. **Framework**: xUnit with AwesomeAssertions
+1. **Framework**: **xUnit v3 or later** (the `xunit.v3` package, never the legacy v2 `xunit` package) with **AwesomeAssertions** for every assertion; native xUnit asserts (`Assert.Equal`, `Assert.True`, ...) are not allowed - use the fluent `.Should()` API
 
    ```csharp
    [Fact]
