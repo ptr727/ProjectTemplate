@@ -199,6 +199,11 @@ Bring the user in when:
 
 Anti-pattern: don't keep flipping the code on the same style point. Flip the rule once and stick to the rule.
 
+## Communicating with the User
+
+- **Reference every pull request as a clickable link.** When you mention a PR - in chat, a summary, or a report - render it as a markdown link to the PR (`[#123](https://github.com/<owner>/<repo>/pull/123)`), never a bare `#123`. The same applies to issues and commits.
+- **Ask for input as a numbered list.** When you need the user to decide or answer, present the questions - and any options - as a numbered list so they can reply per number. A single inline question is fine; two or more are always numbered.
+
 ## Workflow YAML Conventions
 
 These conventions describe the target state. New and modified workflows must respect them; the rest of the repo is expected to be brought up to the same standard. Sweep PRs that apply a rule everywhere are welcome when a rule changes.
