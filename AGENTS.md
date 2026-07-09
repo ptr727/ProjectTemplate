@@ -245,6 +245,12 @@ The CI lint job runs these tools (workflow YAML and Markdown), but run them loca
 
 When pulling a public image fails on a Docker-Desktop/WSL credential-helper error (`docker-credential-desktop.exe: exec format error`), retry with an empty Docker config: `DOCKER_CONFIG=$(mktemp -d) docker run ...` after writing `{}` to `$DOCKER_CONFIG/config.json`.
 
+## Supported Development Platforms
+
+- **Cross-platform by default - Windows + macOS + Linux.** The devcontainer (WSL2 on Windows) gives every contributor the same Linux toolchain, and editing is cross-platform through the GUI regardless of where code runs. Assume this default.
+- **A repo's platform ceiling is set by its dependencies, not tooling effort; decide it per repo before writing dev tooling.** Narrow below the default only for a hard runtime ceiling - the code can only execute or test on one platform (e.g. a Home Assistant integration is Linux-only: HA Core has POSIX-only dependencies and will not run natively on Windows, so even maximal tooling yields only lint-only there). The narrowing axis is where code *executes* for dev/testing (where the VS Code Server engine runs), never where editing happens.
+- **Record a narrowed platform and its reason in the repo** (README/AGENTS) so the restriction reads as a deliberate dependency ceiling, not an omission.
+
 ## Devcontainer
 
 Contributors commit to this repo with signed commits; the SSH-signing setup lives in [docs/ssh-signing.md](./docs/ssh-signing.md), host prerequisites in [docs/host-setup.md](./docs/host-setup.md), and devcontainer SSH-agent forwarding in [docs/devcontainer.md](./docs/devcontainer.md). This repo ships no application toolchain; the per-language devcontainer definitions it once used are kept as reference under [`catalog/snippets/devcontainer/`](./catalog/snippets/devcontainer/).
