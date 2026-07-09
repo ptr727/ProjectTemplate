@@ -181,7 +181,7 @@ The required behaviors, organized by domain. Each is a **MUST**, stated as input
 
 ### D8 - Bots / Automation
 
-- **D8.1 Merge-bot.** Output: enables auto-merge on `opened`/`reopened`; dispatches `--squash`/`--merge` by the PR's base ref; disables on a maintainer-pushed `synchronize`; concurrency keyed on the **PR number**, not `github.ref`. *Prevents: two PRs colliding in auto-merge.*
+- **D8.1 Merge-bot.** Output: enables auto-merge on `opened`/`reopened` for **every** Dependabot tier including semver-major (the required checks are the gate, not the bump magnitude); dispatches `--squash`/`--merge` by the PR's base ref; disables on a maintainer-pushed `synchronize`; concurrency keyed on the **PR number**, not `github.ref`. *Prevents: two PRs colliding in auto-merge.*
 - **D8.2 CodeGen and Dependabot.** Output: codegen runs as a matrix over both branches and is deterministic from an external source; Dependabot targets both branches, security PRs to default.
 - **D8.3 Upstream-version tracker.** Output: a scheduled resolver prints a JSON `name -> version` object to a committed state file, opens a rolling per-branch bump PR naming only the moved keys, the merge-bot auto-merges it, and the bump ships on the **next** publish. The tracker's `bump-branch-prefix` + `branches` MUST match the merge-bot's hard-coded `<prefix>-<base>` head/base pairs, or auto-merge silently never fires.
 
