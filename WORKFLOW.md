@@ -38,7 +38,7 @@ Prescriptive style/legibility rules. Cheap to check, necessary but not sufficien
 - **Reusable-workflow permissions.** Job-level `permissions:` are validated **before** `if:`, so even a skipped job needs valid permissions. Grant least privilege; a reusable callee's extra scope (e.g. `actions: write` for cleanup) is granted by the **caller**.
 - **Allowlist `success` and `skipped` explicitly** across optional dependencies (`!= 'failure'` lets `cancelled` through).
 - **Docker layer cache.** Cache to/from a registry tag (`type=registry`), never `type=gha`.
-- **Line endings.** Workflow YAML follows `.editorconfig` (CRLF here); committed JSON state files follow the repo's JSON rule. Preserve endings on every edit.
+- **Line endings.** Workflow YAML is LF (Actions and Dependabot rewrite it that way); other files follow `.editorconfig`, and committed JSON state files follow the repo's JSON rule. Preserve endings on every edit.
 
 ## 3. Architecture
 
