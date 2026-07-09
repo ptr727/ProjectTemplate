@@ -18,7 +18,7 @@ for name in develop main; do
   id=$(gh api repos/ptr727/ProjectTemplate/rulesets --jq ".[] | select(.name==\"$name\") | .id")
   gh api "repos/ptr727/ProjectTemplate/rulesets/$id" \
     --jq '{name, target, enforcement, bypass_actors, conditions, rules}' \
-    | jq -S '.' > "repo-config/$name.json"
+    | jq -S --indent 4 '.' > "repo-config/$name.json"
 done
 ```
 
@@ -28,8 +28,14 @@ Publish credentials required per mechanism are enumerated in [spec/secrets.json]
 
 ## Repo Settings
 
-- Default branch `main`. Enable both `Allow merge commits` and `Allow squash merging` at the repo level so each branch ruleset can pick its method; leave rebase disabled. Enable auto-merge.
-- Actions / General: allow GitHub Actions to create and approve pull requests (for the bots).
+The fleet-standard general settings live in [`settings.json`][settings-json] and are applied idempotently by `configure.sh` alongside the rulesets (`gh api PATCH /repos/{owner}/{repo}`). The two settings that depend on per-repo state - `has_discussions` (visibility) and `default_branch` (main-must-exist) - are computed by the script, not stored in the file.
+
+- **Default branch `main`** (the script sets it only when a `main` branch exists, never pointing the default at a missing branch).
+- **Merge methods**: `Allow merge commits` and `Allow squash merging` on, **rebase off** - each branch ruleset then picks its method (merge on `main`, squash on `develop`).
+- **Auto-merge on** (the merge-bot needs it) and **`Always suggest updating pull request branches` on**.
+- **`Automatically delete head branches` OFF - deliberately.** With it on, a `develop -> main` promotion (whose PR head is `develop`) would delete `develop`. There is no per-branch exemption, so the repo-wide toggle stays off to protect `develop`. **The CLI has the same trap: never `gh pr merge --delete-branch` a promotion PR whose head is `develop`** - the explicit flag deletes `develop` regardless of this setting (see [AGENTS.md "Branching Model"][agents-branching-model]).
+- **Wikis and Projects off. Discussions on public repos only** (off on private). **Sponsorships off** - the button is driven by `.github/FUNDING.yml`, not a REST toggle, and the fleet ships none.
+- **Actions / General**: allow GitHub Actions to create and approve pull requests (for the bots).
 
 ## Brownfield Migration (Maintainer Only)
 
@@ -37,6 +43,7 @@ Publish credentials required per mechanism are enumerated in [spec/secrets.json]
 
 <!-- Repo -->
 
+[settings-json]: ./settings.json
 [agents-branching-model]: ../AGENTS.md#branching-model
 [agents-git-and-commit-rules]: ../AGENTS.md#git-and-commit-rules
 [audit]: ../AUDIT.md
