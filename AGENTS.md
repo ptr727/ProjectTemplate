@@ -201,7 +201,7 @@ Anti-pattern: don't keep flipping the code on the same style point. Flip the rul
 
 ## Communicating with the User
 
-- **Reference every pull request as a clickable link.** When you mention a PR - in chat, a summary, or a report - render it as a markdown link to the PR (`[#123](https://github.com/<owner>/<repo>/pull/123)`), never a bare `#123`. The same applies to issues and commits.
+- **Reference every pull request as a clickable link.** When you mention a PR - in chat, a summary, or a report - render it as a markdown link to the PR (`[#123](https://github.com/OWNER/REPO/pull/123)`), never a bare `#123`. The same applies to issues and commits.
 - **Ask for input as a numbered list.** When you need the user to decide or answer, present the questions - and any options - as a numbered list so they can reply per number. A single inline question is fine; two or more are always numbered.
 
 ## Workflow YAML Conventions
