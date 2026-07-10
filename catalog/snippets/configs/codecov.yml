@@ -2,7 +2,7 @@
 # informational: true keeps Codecov's project and patch commit statuses
 # advisory (always pass) so a coverage delta can never block a PR - a distinct
 # knob from the upload step's fail_ci_if_error: false, which only guards upload
-# errors. HA-integration repos override this to enforce a coverage threshold.
+# errors. A repo may override this to enforce a coverage threshold.
 coverage:
   status:
     project:
