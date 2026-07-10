@@ -6,6 +6,7 @@ The reusable build/publish workflow tasks a code-shipping repo runs. They are **
 | --- | --- | --- |
 | `build-release-task.yml` | Multi-target release orchestrator: get-version, validate-release, github-release plus per-target build jobs | D3, D4, D5, D6 |
 | `get-version-task.yml` | NBGV version/tag computation (reusable) | D3 |
+| `publish-plan-task.yml` | Single-source release-gate decision (publish? stable?) reused by every publish-release job | D4 |
 | `build-executable-task.yml` | Console/executable per-runtime publish, aggregate to one release asset | D5, D6; section 6 Console walkthrough |
 | `build-nugetlibrary-task.yml` | Build + `dotnet nuget push` (OIDC), upload release asset | D3.4, D4.4, D6; section 6 NuGet walkthrough |
 | `build-pypilibrary-task.yml` | Build PyPI package; publish split to an OIDC job | D3.4, D4, D7.2; section 6 PyPI walkthrough |
