@@ -225,7 +225,15 @@ These conventions describe the target state. New and modified workflows must res
 
 ### Running the Linters Locally (Known-Working Invocations)
 
-The CI lint job runs these tools (workflow YAML and Markdown), but run them locally before pushing to catch issues early, so an agent must know how to actually run them. Some linters are not obvious to invoke and their non-Docker install paths (curl-pipe installers, global npm) are frequently blocked in sandboxes or fail on WSL. **Prefer the Docker invocations below; they are the known-working path and need no local toolchain.** Both tools auto-discover their targets from the working directory.
+The CI lint job runs these tools (workflow YAML and Markdown), but run them locally before pushing to catch issues early, so an agent must know how to actually run them. Some linters are not obvious to invoke and their non-Docker install paths (curl-pipe installers, global npm) are frequently blocked in sandboxes or fail on WSL. **Prefer the Docker invocations below; they are the known-working path and need no local toolchain.** These tools auto-discover their targets from the working directory.
+
+**The same lint set runs on three surfaces that stay in lockstep** - the CI lint job (authoritative), the [`.husky/pre-commit`](./catalog/snippets/husky/pre-commit) hook (runs the Docker linters already present locally and skips any that are not, so it never false-blocks - CI enforces regardless), and the VS Code **Lint** tasks (which also warm the hook's images). The set is **editorconfig-checker** (line endings/charset), **actionlint** (workflow YAML), **markdownlint-cli2**, and **cspell**; when a repo adds or drops a linter, update all three surfaces. Snippets: [`catalog/snippets/husky/pre-commit`](./catalog/snippets/husky/pre-commit), [`catalog/snippets/configs/vscode-tasks.json`](./catalog/snippets/configs/vscode-tasks.json).
+
+- **editorconfig-checker** (line endings + charset across the tree - the check a mis-ended file like a new `codecov.yml` trips):
+
+  ```sh
+  docker run --rm -v "$PWD":/check --workdir /check mstruebing/editorconfig-checker:latest
+  ```
 
 - **actionlint** (GitHub Actions workflow YAML - run after any `.github/workflows/` edit, since workflow-only changes are not smoke-built):
 
@@ -239,6 +247,12 @@ The CI lint job runs these tools (workflow YAML and Markdown), but run them loca
 
   ```sh
   docker run --rm -v "$PWD":/workdir davidanson/markdownlint-cli2:latest "**/*.md"
+  ```
+
+- **cspell** (spelling in user-facing docs; word list + exclusions in [`cspell.json`](./cspell.json)):
+
+  ```sh
+  docker run --rm -v "$PWD":/workdir --workdir /workdir ghcr.io/streetsidesoftware/cspell:latest --no-progress "**/*.md"
   ```
 
   In a configured editor the davidanson extension is enough; use the Docker CLI when there's no IDE (agent/headless) or to confirm a clean run before pushing.
