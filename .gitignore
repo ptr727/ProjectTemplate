@@ -18,3 +18,13 @@ dist/
 .pytest_cache/
 .ruff_cache/
 .pyright/
+
+# Coverage output (dotnet XPlat/coverlet, Python coverage.py)
+coverage/
+[Tt]est[Rr]esults/
+*.cobertura.xml
+*.coverage
+coverage.xml
+.coverage
+.coverage.*
+htmlcov/
