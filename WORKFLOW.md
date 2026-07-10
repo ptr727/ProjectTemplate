@@ -183,7 +183,7 @@ The required behaviors, organized by domain. Each is a **MUST**, stated as input
 
 - **D8.1 Merge-bot.** Output: enables auto-merge on `opened`/`reopened` for **every** Dependabot tier including semver-major (the required checks are the gate, not the bump magnitude); dispatches `--squash`/`--merge` by the PR's base ref; disables on a maintainer-pushed `synchronize`; concurrency keyed on the **PR number**, not `github.ref`. *Prevents: two PRs colliding in auto-merge.*
 - **D8.2 CodeGen and Dependabot.** Output: codegen runs as a matrix over both branches and is deterministic from an external source; Dependabot targets both branches, security PRs to default.
-- **D8.3 Upstream-version tracker.** Output: a scheduled resolver prints a JSON `name -> version` object to a committed state file, opens a rolling per-branch bump PR naming only the moved keys, the merge-bot auto-merges it; the `main` pin push publishes via the release gate, while a `develop` pin ships at the next `main` release. The tracker's `bump-branch-prefix` + `branches` MUST match the merge-bot's hard-coded `<prefix>-<base>` head/base pairs, or auto-merge silently never fires.
+- **D8.3 Upstream-version tracker.** Output: a scheduled resolver prints a JSON `name -> version` object to a committed state file, opens a rolling per-branch bump PR naming only the moved keys, the merge-bot auto-merges it; the `main` pin push publishes via the release gate, while a `develop` pin does not auto-publish - it ships via a `develop` dispatch (prerelease) or the next promotion to `main`. The tracker's `bump-branch-prefix` + `branches` MUST match the merge-bot's hard-coded `<prefix>-<base>` head/base pairs, or auto-merge silently never fires.
 
 ### D9 - Style / Static (See Section 2)
 
@@ -235,7 +235,7 @@ For each *applicable* scenario, evaluate every job's `if:`/`needs:` against the 
 | S8 | dispatch from a ref other than `main` or `develop` | **fails fast** | D2.3 |
 | S9 | re-run publish, version unchanged | release-create **skipped**, `release-asset-*` delete **skipped**; NuGet/PyPI pushes no-op (server dedupe); **PyPI build-artifact still deleted** (its publish ran); **Docker still re-pushes** the image; no duplicate release | D4.4, D5.2 |
 | S10 | branch/version classification disagree | validate-release **fails loud**; build/publish skip | D2.2 |
-| S11 | scheduled upstream-version bump (wrapper) | resolver detects a change -> commits the state file -> opens a `<prefix>-<branch>` PR -> merge-bot auto-merges -> the `main` pin publishes via the gate (a develop pin ships at the next main release) | D8.3, D3.5 |
+| S11 | scheduled upstream-version bump (wrapper) | resolver detects a change -> commits the state file -> opens a `<prefix>-<branch>` PR -> merge-bot auto-merges -> the `main` pin publishes via the gate (a develop pin does not auto-publish; it ships via a develop dispatch or promotion) | D8.3, D3.5 |
 
 ### 5C. Live Probe (Where Warranted)
 
