@@ -17,7 +17,7 @@ lint() {
     if command -v docker >/dev/null 2>&1 && docker image inspect "$image" >/dev/null 2>&1; then
         MSYS_NO_PATHCONV=1 docker run --rm -v "$(pwd):/check" -w /check "$image" "$@" || exit 1
     else
-        echo "husky: $image not present locally, skipping (run the VS Code Lint tasks or rely on CI)"
+        echo "husky: $image not available (Docker not running or image absent), skipping - CI enforces it"
     fi
 }
 
@@ -28,7 +28,7 @@ staged=$(git diff --cached --name-only --diff-filter=ACMR)
 lint mstruebing/editorconfig-checker:latest
 
 # Workflow YAML (plus embedded run: shell via bundled shellcheck) when a workflow file is staged.
-if printf '%s\n' "$staged" | grep -q '^\.github/workflows/.*\.ya\?ml$'; then
+if printf '%s\n' "$staged" | grep -Eq '^\.github/workflows/.*\.ya?ml$'; then
     lint rhysd/actionlint:latest -color
 fi
 
