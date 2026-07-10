@@ -3,8 +3,8 @@ name: Publish project release action
 on:
   workflow_dispatch:
 
-# A publish is a deliberate dispatch, so runs serialize on one group; queue rather than cancel so a run is never
-# left with a half-created GitHub release.
+# A publish is a deliberate dispatch, so runs serialize on one group and queue rather than cancel, so a run is
+# never left with a half-created GitHub release.
 concurrency:
   group: ${{ github.workflow }}
   cancel-in-progress: false
@@ -46,7 +46,7 @@ jobs:
         id: nbgv
         uses: dotnet/nbgv@master
 
-      # Skip create on an existing tag (no-op republish); a re-dispatch refreshes it.
+      # Skip create on an existing tag (no-op republish). A re-dispatch refreshes it.
       - name: Check for existing release step
         id: release-exists
         env:
