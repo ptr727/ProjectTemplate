@@ -145,7 +145,7 @@
         {
             "label": "Lint: Markdown",
             "type": "shell",
-            "command": "docker run --rm -v \"${workspaceFolder}:/workdir\" davidanson/markdownlint-cli2:latest \"**/*.md\"",
+            "command": "docker run --rm -v \"${workspaceFolder}:/workdir\" -w /workdir davidanson/markdownlint-cli2:latest \"**/*.md\"",
             "problemMatcher": [],
             "presentation": {
                 "showReuseMessage": false,
