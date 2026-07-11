@@ -229,7 +229,7 @@ CI runs the full lint set, but run the linters locally before pushing to catch i
 
 **Each surface runs the lint with the tool that fits it, all from the same config files** (`.markdownlint-cli2.jsonc`, `cspell.json`, `.editorconfig`):
 
-- **CI (authoritative)** runs the full set - **markdownlint-cli2**, **cspell**, **actionlint**, and **editorconfig-checker** - as pinned action wrappers, which Dependabot bumps.
+- **CI (authoritative)** runs **markdownlint-cli2**, **cspell**, and **actionlint** as pinned action wrappers (Dependabot bumps them), plus **editorconfig-checker** via Docker `:latest` (its action only installs the CLI, so the Docker one-liner is what actually runs the check).
 - **The [`.husky/pre-commit`](./catalog/snippets/husky/pre-commit) hook** runs **language formatting only** - CSharpier + `dotnet format` (or ruff) via native tooling, no Docker and no doc linters, so it stays fast.
 - **The VS Code [Lint tasks](./catalog/snippets/configs/vscode-tasks.json)** run the full doc-lint set via Docker `:latest` on demand, the local surface for Markdown, spelling, workflow, and line-ending checks.
 
