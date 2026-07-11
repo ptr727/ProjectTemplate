@@ -229,7 +229,7 @@ CI runs the full lint set, but run the linters locally before pushing to catch i
 
 **Each surface runs the lint with the tool that fits it, all from the same config files** (`.markdownlint-cli2.jsonc`, `cspell.json`, `.editorconfig`):
 
-- **CI (authoritative)** runs the full set: **markdownlint-cli2**, **cspell**, and **actionlint** as pinned action wrappers (Dependabot bumps the SHA), plus **editorconfig-checker** via Docker `:latest` (no action exists for it).
+- **CI (authoritative)** runs the full set - **markdownlint-cli2**, **cspell**, **actionlint**, and **editorconfig-checker** - as pinned action wrappers, which Dependabot bumps.
 - **The [`.husky/pre-commit`](./catalog/snippets/husky/pre-commit) hook** runs **language formatting only** - CSharpier + `dotnet format` (or ruff) via native tooling, no Docker and no doc linters, so it stays fast.
 - **The VS Code [Lint tasks](./catalog/snippets/configs/vscode-tasks.json)** run the full doc-lint set via Docker `:latest` on demand, the local surface for Markdown, spelling, workflow, and line-ending checks.
 
@@ -252,7 +252,7 @@ The Docker invocations below are the same ones the VS Code tasks use, for ad-hoc
 - **markdownlint-cli2** (Markdown - mirrors the davidanson VS Code extension via the shared [`.markdownlint-cli2.jsonc`](./.markdownlint-cli2.jsonc), so the CLI and IDE agree):
 
   ```sh
-  docker run --rm -v "$PWD":/workdir davidanson/markdownlint-cli2:latest "**/*.md"
+  docker run --rm -v "$PWD":/workdir --workdir /workdir davidanson/markdownlint-cli2:latest "**/*.md"
   ```
 
 - **cspell** (spelling in user-facing docs; word list + exclusions in [`cspell.json`](./cspell.json)):
