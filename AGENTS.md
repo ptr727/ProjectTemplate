@@ -231,7 +231,7 @@ CI runs the full lint set, but run the linters locally before pushing to catch i
 
 - **CI (authoritative)** runs **markdownlint-cli2**, **cspell**, and **actionlint** as pinned action wrappers (Dependabot bumps them), plus **editorconfig-checker** via Docker `:latest` (its action only installs the CLI, so the Docker one-liner is what actually runs the check).
 - **The [`.husky/pre-commit`](./catalog/snippets/husky/pre-commit) hook** runs **language formatting only** - CSharpier + `dotnet format` (or ruff) via native tooling, no Docker and no doc linters, so it stays fast.
-- **The VS Code [Lint tasks](./catalog/snippets/configs/vscode-tasks.json)** run the full doc-lint set via Docker `:latest` on demand, the local surface for Markdown, spelling, workflow, and line-ending checks.
+- **The VS Code [Lint tasks](./catalog/snippets/configs/vscode-tasks.json)** run the full doc-lint set via Docker `:latest` on demand, the local surface for Markdown, spelling, workflow, and EditorConfig checks.
 
 The Docker invocations below are the same ones the VS Code tasks use, for ad-hoc or headless (agent) runs.
 
@@ -278,7 +278,7 @@ Contributors commit to this repo with signed commits; the SSH-signing setup live
 ## Editor and Tasks
 
 - **VS Code is the primary IDE, and the experience favors it.** Prefer VS Code tasks and launch configurations for building, running, and testing over ad-hoc shell scripts; a script is the fallback, not the default.
-- The `.code-workspace` file carries the shared editor settings and the recommended-extension set. A **standard set** of extensions applies to every repo (markdownlint, cspell, editorconfig, markdown-all-in-one, better-todo-tree, github-actions, actionlint, shellcheck, claude-code); **language-specific** extensions are added per project (.NET: csdevkit, csharpier; Python: python, pylance, ruff, mypy; Docker: the Docker extension). The catalog holds the full set and per-language additions: [`catalog/snippets/vscode/`](./catalog/snippets/vscode/).
+- The `.code-workspace` file carries the shared editor settings and the recommended-extension set. **All VS Code settings and extension recommendations live only here, never in a standalone `.vscode/settings.json` or `.vscode/extensions.json`** (`.vscode/` holds only `tasks.json` and `launch.json`). A **standard set** of extensions applies to every repo (markdownlint, cspell, editorconfig, markdown-all-in-one, better-todo-tree, github-actions, actionlint, shellcheck, claude-code); **language-specific** extensions are added per project (.NET: csdevkit, csharpier; Python: python, pylance, ruff, mypy; Docker: the Docker extension). The catalog holds the full set and per-language additions: [`catalog/snippets/vscode/`](./catalog/snippets/vscode/).
 - The Table of Contents is maintained by the Markdown All in One extension; `markdown.extension.toc.levels` in the workspace sets which heading levels it includes (see the Markdown rules for the authoring convention and the `<!-- omit from toc -->` exclusion marker).
 - **Agents: editing the active `.code-workspace` can reload the VS Code window and drop the agent's session.** Commit all state first, prefer opening the folder rather than the workspace while editing it, or leave workspace edits to the maintainer (a maintainer edit does not reload).
 
