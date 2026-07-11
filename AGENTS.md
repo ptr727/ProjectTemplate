@@ -225,11 +225,17 @@ These conventions describe the target state. New and modified workflows must res
 
 ### Running the Linters Locally (Known-Working Invocations)
 
-The CI lint job runs these tools (workflow YAML and Markdown), but run them locally before pushing to catch issues early, so an agent must know how to actually run them. Some linters are not obvious to invoke and their non-Docker install paths (curl-pipe installers, global npm) are frequently blocked in sandboxes or fail on WSL. **Prefer the Docker invocations below; they are the known-working path and need no local toolchain.** These tools auto-discover their targets from the working directory.
+CI runs the full lint set, but run the linters locally before pushing to catch issues early, so an agent must know how to invoke them. Their non-Docker install paths (curl-pipe installers, global npm) are frequently blocked in sandboxes or fail on WSL, so **prefer the Docker invocations below, the known-working path that needs no local toolchain.** These tools auto-discover their targets from the working directory.
 
-**The same lint set runs on three surfaces that stay in lockstep** - the CI lint job (authoritative), the [`.husky/pre-commit`](./catalog/snippets/husky/pre-commit) hook (runs the Docker linters already present locally and skips any that are not, so it never false-blocks - CI enforces regardless), and the VS Code **Lint** tasks (which also warm the hook's images). The set is **editorconfig-checker** (line endings/charset), **actionlint** (workflow YAML), **markdownlint-cli2**, and **cspell**; when a repo adds or drops a linter, update all three surfaces. Snippets: [`catalog/snippets/husky/pre-commit`](./catalog/snippets/husky/pre-commit), [`catalog/snippets/configs/vscode-tasks.json`](./catalog/snippets/configs/vscode-tasks.json).
+**Each surface runs the lint with the tool that fits it, all from the same config files** (`.markdownlint-cli2.jsonc`, `cspell.json`, `.editorconfig`):
 
-- **editorconfig-checker** (line endings + charset across the tree - the check a mis-ended file like a new `codecov.yml` trips):
+- **CI (authoritative)** runs the full set: **markdownlint-cli2**, **cspell**, and **actionlint** as pinned action wrappers (Dependabot bumps the SHA), plus **editorconfig-checker** via Docker `:latest` (no action exists for it).
+- **The [`.husky/pre-commit`](./catalog/snippets/husky/pre-commit) hook** runs **language formatting only** - CSharpier + `dotnet format` (or ruff) via native tooling, no Docker and no doc linters, so it stays fast.
+- **The VS Code [Lint tasks](./catalog/snippets/configs/vscode-tasks.json)** run the full doc-lint set via Docker `:latest` on demand, the local surface for Markdown, spelling, workflow, and line-ending checks.
+
+The Docker invocations below are the same ones the VS Code tasks use, for ad-hoc or headless (agent) runs.
+
+- **editorconfig-checker** (line endings + charset across the tree):
 
   ```sh
   docker run --rm -v "$PWD":/check --workdir /check mstruebing/editorconfig-checker:latest

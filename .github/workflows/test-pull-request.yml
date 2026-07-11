@@ -24,15 +24,21 @@ jobs:
       - name: Checkout code step
         uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
 
-      # Docker linters run at :latest, not pinned: Dependabot cannot bump run-step image digests, so a pin only bitrots.
+      # Doc linters run as pinned action wrappers (Dependabot bumps the SHA). editorconfig-checker has no action, so
+      # it runs via Docker at :latest (Dependabot cannot bump a run-step digest, and a pin would only bitrot).
       - name: Lint Markdown step
-        run: docker run --rm -v "$PWD":/workdir davidanson/markdownlint-cli2:latest "**/*.md"
+        uses: DavidAnson/markdownlint-cli2-action@8de2aa07cae85fd17c0b35642db70cf5495f1d25 # v24.0.0
+        with:
+          globs: '**/*.md'
 
       - name: Spell check step
-        run: docker run --rm -v "$PWD":/workdir --workdir /workdir ghcr.io/streetsidesoftware/cspell:latest "**/*.md"
+        uses: streetsidesoftware/cspell-action@de2a73e963e7443969755b648a1008f77033c5b2 # v8.4.0
+        with:
+          files: '**/*.md'
+          incremental_files_only: false
 
       - name: Lint workflows step
-        run: docker run --rm -v "$PWD":/repo --workdir /repo rhysd/actionlint:latest -color
+        uses: raven-actions/actionlint@3d39aea434753780c3b3d4a1a31c854b4dbf49d7 # v2.2.0
 
       - name: Check line endings step
         run: docker run --rm -v "$PWD":/check --workdir /check mstruebing/editorconfig-checker:latest
