@@ -201,7 +201,7 @@ Anti-pattern: don't keep flipping the code on the same style point. Flip the rul
 
 ## Communicating with the User
 
-- **Reference every pull request as a clickable link.** When you mention a PR - in chat, a summary, or a report - render it as a markdown link to the PR (`[#123](https://github.com/<owner>/<repo>/pull/123)`), never a bare `#123`. The same applies to issues and commits.
+- **Reference every pull request as a clickable link.** When you mention a PR - in chat, a summary, or a report - render it as a markdown link to the PR (`[#123](https://github.com/OWNER/REPO/pull/123)`), never a bare `#123`. The same applies to issues and commits.
 - **Ask for input as a numbered list.** When you need the user to decide or answer, present the questions - and any options - as a numbered list so they can reply per number. A single inline question is fine; two or more are always numbered.
 
 ## Workflow YAML Conventions
@@ -225,7 +225,21 @@ These conventions describe the target state. New and modified workflows must res
 
 ### Running the Linters Locally (Known-Working Invocations)
 
-The CI lint job runs these tools (workflow YAML and Markdown), but run them locally before pushing to catch issues early, so an agent must know how to actually run them. Some linters are not obvious to invoke and their non-Docker install paths (curl-pipe installers, global npm) are frequently blocked in sandboxes or fail on WSL. **Prefer the Docker invocations below; they are the known-working path and need no local toolchain.** Both tools auto-discover their targets from the working directory.
+CI runs the full lint set, but run the linters locally before pushing to catch issues early, so an agent must know how to invoke them. Their non-Docker install paths (curl-pipe installers, global npm) are frequently blocked in sandboxes or fail on WSL, so **prefer the Docker invocations below, the known-working path that needs no local toolchain.** These tools auto-discover their targets from the working directory.
+
+**Each surface runs the lint with the tool that fits it, all from the same config files** (`.markdownlint-cli2.jsonc`, `cspell.json`, `.editorconfig`):
+
+- **CI (authoritative)** runs **markdownlint-cli2**, **cspell**, and **actionlint** as pinned action wrappers (Dependabot bumps them), plus **editorconfig-checker** via Docker `:latest` (its action only installs the CLI, so the Docker one-liner is what actually runs the check).
+- **The [`.husky/pre-commit`](./catalog/snippets/husky/pre-commit) hook** runs **language formatting only** - CSharpier + `dotnet format` (or ruff) via native tooling, no Docker and no doc linters, so it stays fast.
+- **The VS Code [Lint tasks](./catalog/snippets/configs/vscode-tasks.json)** run the full doc-lint set via Docker `:latest` on demand, the local surface for Markdown, spelling, workflow, and EditorConfig checks.
+
+The Docker invocations below are the same ones the VS Code tasks use, for ad-hoc or headless (agent) runs.
+
+- **editorconfig-checker** (line endings + charset across the tree):
+
+  ```sh
+  docker run --rm -v "$PWD":/check --workdir /check mstruebing/editorconfig-checker:latest
+  ```
 
 - **actionlint** (GitHub Actions workflow YAML - run after any `.github/workflows/` edit, since workflow-only changes are not smoke-built):
 
@@ -238,7 +252,13 @@ The CI lint job runs these tools (workflow YAML and Markdown), but run them loca
 - **markdownlint-cli2** (Markdown - mirrors the davidanson VS Code extension via the shared [`.markdownlint-cli2.jsonc`](./.markdownlint-cli2.jsonc), so the CLI and IDE agree):
 
   ```sh
-  docker run --rm -v "$PWD":/workdir davidanson/markdownlint-cli2:latest "**/*.md"
+  docker run --rm -v "$PWD":/workdir --workdir /workdir davidanson/markdownlint-cli2:latest "**/*.md"
+  ```
+
+- **cspell** (spelling in user-facing docs; word list + exclusions in [`cspell.json`](./cspell.json)):
+
+  ```sh
+  docker run --rm -v "$PWD":/workdir --workdir /workdir ghcr.io/streetsidesoftware/cspell:latest --no-progress "**/*.md"
   ```
 
   In a configured editor the davidanson extension is enough; use the Docker CLI when there's no IDE (agent/headless) or to confirm a clean run before pushing.
@@ -258,7 +278,7 @@ Contributors commit to this repo with signed commits; the SSH-signing setup live
 ## Editor and Tasks
 
 - **VS Code is the primary IDE, and the experience favors it.** Prefer VS Code tasks and launch configurations for building, running, and testing over ad-hoc shell scripts; a script is the fallback, not the default.
-- The `.code-workspace` file carries the shared editor settings and the recommended-extension set. A **standard set** of extensions applies to every repo (markdownlint, cspell, editorconfig, markdown-all-in-one, better-todo-tree, github-actions, actionlint, shellcheck, claude-code); **language-specific** extensions are added per project (.NET: csdevkit, csharpier; Python: python, pylance, ruff, mypy; Docker: the Docker extension). The catalog holds the full set and per-language additions: [`catalog/snippets/vscode/`](./catalog/snippets/vscode/).
+- The `.code-workspace` file carries the shared editor settings and the recommended-extension set. **All VS Code settings and extension recommendations live only here, never in a standalone `.vscode/settings.json` or `.vscode/extensions.json`** (`.vscode/` holds only `tasks.json` and `launch.json`). A **standard set** of extensions applies to every repo (markdownlint, cspell, editorconfig, markdown-all-in-one, better-todo-tree, github-actions, actionlint, shellcheck, claude-code); **language-specific** extensions are added per project (.NET: csdevkit, csharpier; Python: python, pylance, ruff, mypy; Docker: the Docker extension). The catalog holds the full set and per-language additions: [`catalog/snippets/vscode/`](./catalog/snippets/vscode/).
 - The Table of Contents is maintained by the Markdown All in One extension; `markdown.extension.toc.levels` in the workspace sets which heading levels it includes (see the Markdown rules for the authoring convention and the `<!-- omit from toc -->` exclusion marker).
 - **Agents: editing the active `.code-workspace` can reload the VS Code window and drop the agent's session.** Commit all state first, prefer opening the folder rather than the workspace while editing it, or leave workspace edits to the maintainer (a maintainer edit does not reload).
 

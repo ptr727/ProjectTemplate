@@ -47,6 +47,10 @@ end_of_line = lf
 [catalog/snippets/workflows/*.{yml,yaml}]
 end_of_line = lf
 
+# The husky pre-commit snippet is a shebang script; keep it LF so a copied snippet runs (a CRLF shebang breaks).
+[catalog/snippets/husky/pre-commit]
+end_of_line = lf
+
 # Linux scripts
 [*.sh]
 end_of_line = lf
