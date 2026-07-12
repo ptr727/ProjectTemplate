@@ -120,13 +120,13 @@
                 "clear": false
             }
         },
-        // Lint group - the local full doc-lint surface (Docker at :latest), matching the CI lint set.
-        // Run on demand. The pre-commit hook does language formatting only. Every repo carries these.
+        // Lint group - run on demand via Docker (--pull=always pins each to the current :latest); mirrors the CI
+        // lint gate. Broad live spell-checking is the cspell extension's job. Pre-commit does formatting only.
         {
             "label": "Lint: EditorConfig",
             "type": "process",
             "command": "docker",
-            "args": [ "run", "--rm", "-v", "${workspaceFolder}:/check", "-w", "/check", "mstruebing/editorconfig-checker:latest" ],
+            "args": [ "run", "--rm", "--pull=always", "-v", "${workspaceFolder}:/check", "-w", "/check", "mstruebing/editorconfig-checker:latest" ],
             "problemMatcher": [],
             "presentation": {
                 "showReuseMessage": false,
@@ -137,7 +137,7 @@
             "label": "Lint: Workflows",
             "type": "process",
             "command": "docker",
-            "args": [ "run", "--rm", "-v", "${workspaceFolder}:/repo", "-w", "/repo", "rhysd/actionlint:latest", "-color" ],
+            "args": [ "run", "--rm", "--pull=always", "-v", "${workspaceFolder}:/repo", "-w", "/repo", "rhysd/actionlint:latest", "-color" ],
             "problemMatcher": [],
             "presentation": {
                 "showReuseMessage": false,
@@ -148,7 +148,7 @@
             "label": "Lint: Markdown",
             "type": "process",
             "command": "docker",
-            "args": [ "run", "--rm", "-v", "${workspaceFolder}:/workdir", "-w", "/workdir", "davidanson/markdownlint-cli2:latest", "**/*.md" ],
+            "args": [ "run", "--rm", "--pull=always", "-v", "${workspaceFolder}:/workdir", "-w", "/workdir", "davidanson/markdownlint-cli2:latest", "**/*.md" ],
             "problemMatcher": [],
             "presentation": {
                 "showReuseMessage": false,
@@ -159,7 +159,7 @@
             "label": "Lint: Spelling",
             "type": "process",
             "command": "docker",
-            "args": [ "run", "--rm", "-v", "${workspaceFolder}:/workdir", "-w", "/workdir", "ghcr.io/streetsidesoftware/cspell:latest", "--no-progress", "**/*.md" ],
+            "args": [ "run", "--rm", "--pull=always", "-v", "${workspaceFolder}:/workdir", "-w", "/workdir", "ghcr.io/streetsidesoftware/cspell:latest", "--no-progress", "README.md", "HISTORY.md" ],
             "problemMatcher": [],
             "presentation": {
                 "showReuseMessage": false,
