@@ -120,10 +120,8 @@
                 "clear": false
             }
         },
-        // Lint group - the local doc-lint surface, run on demand via Docker (--pull=always keeps each image at
-        // the current :latest). These mirror the CI lint gate, so Spelling checks README + HISTORY; the cspell
-        // extension provides broad live spell-checking across all files. The pre-commit hook does language
-        // formatting only. Every repo carries these.
+        // Lint group - run on demand via Docker (--pull=always pins each to the current :latest); mirrors the CI
+        // lint gate. Broad live spell-checking is the cspell extension's job. Pre-commit does formatting only.
         {
             "label": "Lint: EditorConfig",
             "type": "process",
