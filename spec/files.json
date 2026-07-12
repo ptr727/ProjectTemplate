@@ -5,6 +5,8 @@
         { "path": "AGENTS.md", "sections": ["Git and Commit Rules", "Branching Model", "Release Model", "Pull Request Title and Commit Message Conventions", "Documentation Style Conventions", "PR Review Etiquette", "Workflow YAML Conventions"], "intentRef": "AGENTS.md", "appliesTo": "*" },
         { "path": "CODESTYLE.md", "whole": true, "placeholders": ["InternalsVisibleTo project names"], "intentRef": "CODESTYLE.md", "appliesTo": "*" },
         { "path": "WORKFLOW.md", "whole": true, "intentRef": "WORKFLOW.md", "appliesTo": "*" },
+        { "path": "README.md", "appliesTo": "*" },
+        { "path": "HISTORY.md", "appliesTo": "*" },
         { "path": ".github/copilot-instructions.md", "whole": true, "placeholders": ["<owner>", "<repo>", "<N>"], "appliesTo": "*" },
         { "path": ".editorconfig", "whole": true, "intentRef": "AGENTS.md#line-endings", "appliesTo": "*" },
         { "path": ".gitattributes", "whole": true, "intentRef": "AGENTS.md#line-endings", "appliesTo": "*" },
