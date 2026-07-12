@@ -119,6 +119,63 @@
                 "showReuseMessage": false,
                 "clear": false
             }
+        },
+        // Lint group - run on demand via Docker (--pull=always pins each to the current :latest); mirrors the CI
+        // lint gate. Broad live spell-checking is the cspell extension's job. Pre-commit does formatting only.
+        {
+            "label": "Lint: EditorConfig",
+            "type": "process",
+            "command": "docker",
+            "args": [ "run", "--rm", "--pull=always", "-v", "${workspaceFolder}:/check", "-w", "/check", "mstruebing/editorconfig-checker:latest" ],
+            "problemMatcher": [],
+            "presentation": {
+                "showReuseMessage": false,
+                "clear": false
+            }
+        },
+        {
+            "label": "Lint: Workflows",
+            "type": "process",
+            "command": "docker",
+            "args": [ "run", "--rm", "--pull=always", "-v", "${workspaceFolder}:/repo", "-w", "/repo", "rhysd/actionlint:latest", "-color" ],
+            "problemMatcher": [],
+            "presentation": {
+                "showReuseMessage": false,
+                "clear": false
+            }
+        },
+        {
+            "label": "Lint: Markdown",
+            "type": "process",
+            "command": "docker",
+            "args": [ "run", "--rm", "--pull=always", "-v", "${workspaceFolder}:/workdir", "-w", "/workdir", "davidanson/markdownlint-cli2:latest", "**/*.md" ],
+            "problemMatcher": [],
+            "presentation": {
+                "showReuseMessage": false,
+                "clear": false
+            }
+        },
+        {
+            "label": "Lint: Spelling",
+            "type": "process",
+            "command": "docker",
+            "args": [ "run", "--rm", "--pull=always", "-v", "${workspaceFolder}:/workdir", "-w", "/workdir", "ghcr.io/streetsidesoftware/cspell:latest", "--no-progress", "README.md", "HISTORY.md" ],
+            "problemMatcher": [],
+            "presentation": {
+                "showReuseMessage": false,
+                "clear": false
+            }
+        },
+        {
+            "label": "Lint: All",
+            "dependsOrder": "sequence",
+            "dependsOn": [
+                "Lint: EditorConfig",
+                "Lint: Workflows",
+                "Lint: Markdown",
+                "Lint: Spelling"
+            ],
+            "problemMatcher": []
         }
     ]
 }
