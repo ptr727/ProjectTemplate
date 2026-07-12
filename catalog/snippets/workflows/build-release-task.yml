@@ -23,8 +23,8 @@ on:
         required: false
         type: string
         default: ''
-      # Logical branch driving config / tags / prerelease for every target. Required (no fallback) because the
-      # publisher builds both `main` and `develop` in one run, so a silent fallback would mislabel the develop leg.
+      # Logical branch driving config / tags / prerelease for every target. Required (no fallback) because each
+      # publish run builds a single branch (the trigger ref), so a silent fallback would mislabel the build.
       branch:
         required: true
         type: string
