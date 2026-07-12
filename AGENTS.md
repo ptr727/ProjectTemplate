@@ -238,13 +238,13 @@ The Docker invocations below are the same ones the VS Code tasks use, for ad-hoc
 - **editorconfig-checker** (line endings + charset across the tree):
 
   ```sh
-  docker run --rm -v "$PWD":/check --workdir /check mstruebing/editorconfig-checker:latest
+  docker run --rm --pull=always -v "$PWD":/check --workdir /check mstruebing/editorconfig-checker:latest
   ```
 
 - **actionlint** (GitHub Actions workflow YAML - run after any `.github/workflows/` edit, since workflow-only changes are not smoke-built):
 
   ```sh
-  docker run --rm -v "$PWD":/repo --workdir /repo rhysd/actionlint:latest -color
+  docker run --rm --pull=always -v "$PWD":/repo --workdir /repo rhysd/actionlint:latest -color
   ```
 
   The `rhysd/actionlint` image bundles `shellcheck`, so it also validates `run:` shell blocks. The direct-binary/curl-installer path is often sandbox-blocked - use Docker.
@@ -252,13 +252,13 @@ The Docker invocations below are the same ones the VS Code tasks use, for ad-hoc
 - **markdownlint-cli2** (Markdown - mirrors the davidanson VS Code extension via the shared [`.markdownlint-cli2.jsonc`](./.markdownlint-cli2.jsonc), so the CLI and IDE agree):
 
   ```sh
-  docker run --rm -v "$PWD":/workdir --workdir /workdir davidanson/markdownlint-cli2:latest "**/*.md"
+  docker run --rm --pull=always -v "$PWD":/workdir --workdir /workdir davidanson/markdownlint-cli2:latest "**/*.md"
   ```
 
 - **cspell** (spelling in user-facing docs; word list + exclusions in [`cspell.json`](./cspell.json)):
 
   ```sh
-  docker run --rm -v "$PWD":/workdir --workdir /workdir ghcr.io/streetsidesoftware/cspell:latest --no-progress "**/*.md"
+  docker run --rm --pull=always -v "$PWD":/workdir --workdir /workdir ghcr.io/streetsidesoftware/cspell:latest --no-progress README.md HISTORY.md
   ```
 
   In a configured editor the davidanson extension is enough; use the Docker CLI when there's no IDE (agent/headless) or to confirm a clean run before pushing.
