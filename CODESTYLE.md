@@ -187,9 +187,7 @@ Note: Code snippets are illustrative examples only. Replace namespaces/types to 
    - YAML files: 2 spaces
    - JSON files: 4 spaces
 
-5. **Line endings**
-   - C#, XML, YAML, JSON, Windows scripts: CRLF
-   - Linux scripts (`.sh`): LF
+5. **Line endings**: not fixed here - governed per repo by `.editorconfig` / `.gitattributes` per the [AGENTS.md][agents] "Line Endings" section. The global default is CRLF for most repos and LF for operational (Linux-consumed config) repos, with execution-sensitive files (shell, Dockerfiles, workflow YAML) pinned LF.
 
 6. **`#region`**: Do not use regions. Prefer logical file/folder/namespace organization.
 7. **Member ordering (StyleCop SA1201)**: const -> static readonly -> static fields -> instance readonly fields -> instance fields -> constructors -> public (events -> properties -> indexers -> methods -> operators) -> non-public in same order -> nested types
