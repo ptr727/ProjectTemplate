@@ -280,6 +280,21 @@
             "driftNotes": ["Work-in-progress: pre-CI (no .github/workflows, no version.json, no repo-config). main+develop both exist."]
         },
         {
+            "name": "Vantage-Config",
+            "url": "https://github.com/ptr727/Vantage-Config",
+            "status": "cataloged",
+            "types": ["source-only"],
+            "groundTruthBranch": "develop",
+            "workflowModel": "operational",
+            "lineEndings": "crlf",
+            "hasDevelop": true,
+            "publish": [{ "target": "github-release", "mechanism": "none" }],
+            "requiredSecrets": [],
+            "consumerModel": "pull",
+            "releaseTrigger": "dispatch-only",
+            "driftNotes": ["Vantage InFusion / Design Center controller config edited on Windows (UTF-8 CRLF .dc XML, really special XML), so lineEndings crlf.", "Recreated lean and single-platform: Design Center is freely available, so no installer archives are kept; split out of HomeAutomation-Config. Being repopulated from the Windows editing host - operational onboarding (baseline, lint CI, dispatch-only publisher, rulesets, develop/main) pending once content lands."]
+        },
+        {
             "name": "HolidayLights",
             "url": "https://github.com/ptr727/HolidayLights",
             "status": "cataloged",
