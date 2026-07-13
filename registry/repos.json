@@ -3,7 +3,8 @@
     "owner": "ptr727",
     "defaults": {
         "groundTruthBranch": "main",
-        "releaseTrigger": "two-phase"
+        "releaseTrigger": "two-phase",
+        "workflowModel": "release"
     },
     "repos": [
         {
@@ -160,13 +161,14 @@
             "url": "https://github.com/ptr727/HomeAutomation",
             "status": "cataloged",
             "types": ["source-only"],
-            "groundTruthBranch": "main",
+            "groundTruthBranch": "develop",
+            "workflowModel": "operational",
             "hasDevelop": true,
-            "publish": [],
+            "publish": [{ "target": "github-release", "mechanism": "none" }],
             "requiredSecrets": [],
             "consumerModel": "pull",
-            "releaseTrigger": "none",
-            "driftNotes": ["Maintainer config/ops repo (docker-compose stacks, lifecycle scripts, Firewalla configs); in scope, file-version-history only.", "Private; README self-flags previously-committed secrets - secrets-hygiene concern."]
+            "releaseTrigger": "dispatch-only",
+            "driftNotes": ["Maintainer config/ops repo (docker-compose stacks, lifecycle scripts, Firewalla configs).", "Private; README self-flags previously-committed secrets - secrets-hygiene concern.", "Operational rollout pending: lint CI feeding the required check, dispatch-only source-release scaffolding (version.json + NBGV get-version + publish-release.yml, tag + source zip), and develop-as-ground-truth adoption."]
         },
         {
             "name": "KiCadLibrary",
@@ -199,26 +201,28 @@
             "url": "https://github.com/ptr727/ESPHome-Config",
             "status": "cataloged",
             "types": ["source-only"],
-            "groundTruthBranch": "main",
+            "groundTruthBranch": "develop",
+            "workflowModel": "operational",
             "hasDevelop": true,
-            "publish": [],
+            "publish": [{ "target": "github-release", "mechanism": "none" }],
             "requiredSecrets": [],
             "consumerModel": "pull",
-            "releaseTrigger": "none",
-            "driftNotes": ["ESPHome device config YAML consumed by the cataloged ESPHome-NonRoot image at runtime; distinct from that Docker repo.", "No CI/publish; dependabot covers only the devcontainers ecosystem."]
+            "releaseTrigger": "dispatch-only",
+            "driftNotes": ["ESPHome device config YAML consumed by the cataloged ESPHome-NonRoot image at runtime; distinct from that Docker repo.", "Operational rollout pending: an esphome-config validation job feeding the required check, dispatch-only source-release scaffolding (version.json + NBGV get-version + publish-release.yml, tag + source zip), and develop-as-ground-truth adoption. Dependabot currently covers only the devcontainers ecosystem."]
         },
         {
             "name": "HomeAssistant-Config",
             "url": "https://github.com/ptr727/HomeAssistant-Config",
             "status": "cataloged",
             "types": ["source-only"],
-            "groundTruthBranch": "master",
+            "groundTruthBranch": "main",
+            "workflowModel": "operational",
             "hasDevelop": true,
-            "publish": [],
+            "publish": [{ "target": "github-release", "mechanism": "none" }],
             "requiredSecrets": [],
             "consumerModel": "pull",
-            "releaseTrigger": "none",
-            "driftNotes": ["Home Assistant CONFIGURATION (configuration.yaml + automations/blueprints), NOT a HACS integration (no custom_components/manifest.json, no hacs.json).", "Non-conformant: ground-truth branch is 'master', not 'main' - rename to converge.", "Private; deployed by git pull into the HA config dir."]
+            "releaseTrigger": "dispatch-only",
+            "driftNotes": ["Home Assistant CONFIGURATION (configuration.yaml + automations/blueprints), NOT a HACS integration (no custom_components/manifest.json, no hacs.json).", "Operational rollout pending: 'master' renamed to 'main' and 'develop' created (done); develop is behind main by 2 commits - fast-forward develop up to main so it holds the live content, then flip groundTruthBranch to develop. Also pending: lint CI (a Home Assistant config-check feeding the required check) and dispatch-only source-release scaffolding (version.json + NBGV get-version + publish-release.yml, tag + source zip).", "Private; deployed by git pull into the HA config dir."]
         },
         {
             "name": "DevKitCIoT",
@@ -278,12 +282,13 @@
             "status": "cataloged",
             "types": ["source-only"],
             "groundTruthBranch": "develop",
+            "workflowModel": "operational",
             "hasDevelop": true,
-            "publish": [],
+            "publish": [{ "target": "github-release", "mechanism": "none" }],
             "requiredSecrets": [],
             "consumerModel": "pull",
-            "releaseTrigger": "none",
-            "driftNotes": ["Maintainer config/asset archive (Vantage InFusion) with vendored binaries (MSI/7z/PDF) and versioned project snapshots; in scope as a config repo.", "The lone FindInFile C# helper is incidental, not a governed artifact.", "The develop branch now holds the ground truth (README/tagline edits) while main is stale - converge. No CI/governance scaffolding (no .github/workflows)."]
+            "releaseTrigger": "dispatch-only",
+            "driftNotes": ["Maintainer config/asset archive (Vantage InFusion) with vendored binaries (MSI/7z/PDF) and versioned project snapshots.", "The lone FindInFile C# helper is incidental, not a governed artifact.", "Operational model: develop holds the ground truth; main is the last promoted snapshot. Rollout pending - no .github/workflows yet: lint CI feeding the required check plus dispatch-only source-release scaffolding (version.json + NBGV get-version + publish-release.yml, tag + source zip)."]
         },
         {
             "name": "HolidayLights",
