@@ -35,6 +35,7 @@
     "debuglevel",
     "devcontainer",
     "distros",
+    "dnsmasq",
     "dockerbuild",
     "Dockerfiles",
     "dockerhub",

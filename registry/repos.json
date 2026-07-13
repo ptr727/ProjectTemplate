@@ -169,7 +169,7 @@
             "requiredSecrets": [],
             "consumerModel": "pull",
             "releaseTrigger": "dispatch-only",
-            "driftNotes": ["Maintainer config/ops repo (docker-compose stacks, lifecycle scripts, Firewalla configs).", "Private; README self-flags previously-committed secrets - secrets-hygiene concern.", "Operational rollout pending: lint CI feeding the required check, dispatch-only source-release scaffolding (version.json + NBGV get-version + publish-release.yml, tag + source zip), and develop-as-ground-truth adoption."]
+            "driftNotes": ["Maintainer config/ops repo (docker-compose stacks, lifecycle scripts, Firewalla configs).", "Dual-platform EOL: lf global (Linux Proxmox host - docker/shell/dnsmasq/unbound) with the Windows-edited Vantage/** Design Center subtree (UTF-8 CRLF .dc XML) pinned crlf. Consolidates the former standalone Vantage-Config repo (removed from the registry; Design Center is now freely available, so its installer archives were discarded).", "Private; README self-flags previously-committed secrets - secrets-hygiene concern.", "Operational rollout pending: lint CI feeding the required check, dispatch-only source-release scaffolding (version.json + NBGV get-version + publish-release.yml, tag + source zip), and develop-as-ground-truth adoption."]
         },
         {
             "name": "KiCadLibrary",
@@ -278,21 +278,6 @@
             "consumerModel": "pull",
             "releaseTrigger": "none",
             "driftNotes": ["Work-in-progress: pre-CI (no .github/workflows, no version.json, no repo-config). main+develop both exist."]
-        },
-        {
-            "name": "Vantage-Config",
-            "url": "https://github.com/ptr727/Vantage-Config",
-            "status": "cataloged",
-            "types": ["source-only"],
-            "groundTruthBranch": "develop",
-            "workflowModel": "operational",
-            "lineEndings": "crlf",
-            "hasDevelop": true,
-            "publish": [{ "target": "github-release", "mechanism": "none" }],
-            "requiredSecrets": [],
-            "consumerModel": "pull",
-            "releaseTrigger": "dispatch-only",
-            "driftNotes": ["Maintainer config/asset archive (Vantage InFusion) with vendored binaries (MSI/7z/PDF) and versioned project snapshots.", "The lone FindInFile C# helper is incidental, not a governed artifact.", "Operational model: develop holds the ground truth; main is the last promoted snapshot. Rollout pending - no .github/workflows yet: lint CI feeding the required check plus dispatch-only source-release scaffolding (version.json + NBGV get-version + publish-release.yml, tag + source zip)."]
         },
         {
             "name": "HolidayLights",
