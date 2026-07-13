@@ -110,8 +110,9 @@
             "appliesTo": "*",
             "checks": [
                 { "id": "branch.both-protected", "verdict": "letter", "assert": "main and develop both exist and are protected.", "intentRef": "AGENTS.md#branching-model" },
-                { "id": "branch.ruleset.develop", "verdict": "letter", "assert": "The live develop ruleset matches repo-config/develop.json (normalized diff).", "intentRef": "repo-config/README.md" },
-                { "id": "branch.ruleset.main", "verdict": "letter", "assert": "The live main ruleset matches repo-config/main.json (normalized diff).", "intentRef": "repo-config/README.md" }
+                { "id": "branch.ruleset.develop", "verdict": "letter", "assert": "The live develop ruleset matches the expected payload for the repo's workflowModel (normalized diff): release -> repo-config/develop.json (PR-gated), operational -> repo-config/operational/develop.json (direct signed pushes; deletion + non_fast_forward + required_signatures only).", "intentRef": "repo-config/README.md" },
+                { "id": "branch.ruleset.main", "verdict": "letter", "assert": "The live main ruleset matches repo-config/main.json (normalized diff); this ruleset is shared by both workflow models.", "intentRef": "repo-config/README.md" },
+                { "id": "branch.operational.lintci", "verdict": "intent", "assert": "An operational (workflowModel) repo runs a lint/validation CI (editorconfig/EOL plus domain linters, e.g. Home Assistant or ESPHome config validation or a firmware build; no unit testing) feeding the required Check pull request workflow status job, so the develop -> main promotion PR is gated even though develop takes direct commits. N/A for release repos.", "intentRef": "AGENTS.md#branching-model" }
             ]
         },
         "repo-setup": {

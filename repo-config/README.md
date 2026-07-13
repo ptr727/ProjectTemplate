@@ -3,13 +3,19 @@
 Repository and branch configuration held as committed files, kept out of `.github/` (which is reserved for GitHub-Actions-owned content). This mirrors the layout the fleet repos use.
 
 - `main.json`, `develop.json` - the branch rulesets as the writable API subset (`name`, `target`, `enforcement`, `bypass_actors`, `conditions`, `rules`). These are the canonical expected payload the audit ([AUDIT.md][audit]) diffs each repo's live rulesets against.
-- `configure.sh` - applies the rulesets to a repository via the GitHub API (create or full-payload update, idempotent). Run `repo-config/configure.sh [owner/repo]`.
+- `operational/develop.json` - the `develop` ruleset for **operational** repos (registry `workflowModel: operational`): direct signed pushes, no PR gate. `main.json` is shared by both models. See "Rulesets" below.
+- `configure.sh` - applies the rulesets to a repository via the GitHub API (create or full-payload update, idempotent). Run `repo-config/configure.sh [owner/repo] [release|operational]`; the model defaults to the registry `workflowModel` lookup.
 
 ## Rulesets
 
-`main` requires merge-commit merges (no linear-history rule); `develop` requires squash merges with linear history. Both require signed commits, a passing `Check pull request workflow status job`, resolved review threads, and Copilot review, and block force-pushes and deletion. Both intentionally leave "Require branches to be up to date before merging" **off** - see [AGENTS.md "Branching Model"][agents-branching-model].
+Two workflow models share `main.json` but differ on `develop` (registry `workflowModel`, default `release`):
 
-**Configure by importing these JSON files, never by hand-building the rules** (hand reconstruction has gone wrong on past setups). The result must be **exactly two rulesets named `develop` and `main`** - the names are load-bearing (`AGENTS.md` and the workflows reference them). First remove all legacy classic branch-protection rules and any stray rulesets, then run `configure.sh` (or `gh api -X POST repos/<owner>/<repo>/rulesets --input repo-config/<name>.json` per file). `gh ruleset` is read-only; creation goes through `gh api`. The required check binds by name and only turns green after `test-pull-request.yml` runs once. To edit a ruleset, GET it, change the field, and PUT the whole writable subset back (a partial PUT `422`s).
+- **`release`** (`develop.json`): `develop` requires squash merges with linear history and a PR - the feature-branch pipeline.
+- **`operational`** (`operational/develop.json`): `develop` takes **direct signed pushes** - only `deletion`, `non_fast_forward`, and `required_signatures`; no PR, no status-check, no Copilot-on-push. CI runs on the push as advisory feedback. This is for live-service config repos that edit `develop` directly and promote a known-good snapshot to `main` via an occasional PR (see [AGENTS.md "Branching Model"][agents-branching-model]).
+
+`main` (both models) requires merge-commit merges (no linear-history rule), signed commits, a passing `Check pull request workflow status job`, resolved review threads, and Copilot review, and blocks force-pushes and deletion - so a `develop -> main` promotion is always gated even when `develop` takes direct commits. Every ruleset intentionally leaves "Require branches to be up to date before merging" **off** - see [AGENTS.md "Branching Model"][agents-branching-model].
+
+**Configure by importing these JSON files, never by hand-building the rules** (hand reconstruction has gone wrong on past setups). The result must be **exactly two rulesets named `develop` and `main`** - the names are load-bearing (`AGENTS.md` and the workflows reference them); only the `develop` *content* varies by model. First remove all legacy classic branch-protection rules and any stray rulesets, then run `configure.sh` (which picks the `develop` payload from the repo's `workflowModel`), or `gh api -X POST repos/<owner>/<repo>/rulesets --input repo-config/<name>.json` per file (operational repos use `operational/develop.json` for `develop`). `gh ruleset` is read-only; creation goes through `gh api`. The required check binds by name and only turns green after the repo's PR workflow runs once. To edit a ruleset, GET it, change the field, and PUT the whole writable subset back (a partial PUT `422`s).
 
 To change the canonical rulesets, edit the live rulesets here, then regenerate the committed files:
 

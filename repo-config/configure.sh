@@ -2,16 +2,34 @@
 # Apply the committed fleet configuration in this directory to the repository via the GitHub API:
 #   1. General repository settings from settings.json (PATCH /repos/{owner}/{repo}), plus the two settings that depend on
 #      per-repo state - has_discussions (public repos only) and default_branch (main, only if it exists).
-#   2. The branch rulesets develop.json and main.json. Each <name>.json holds the writable ruleset subset
-#      {name, target, enforcement, bypass_actors, conditions, rules}. An existing ruleset (matched by name) is
-#      updated with a full-payload PUT (partial PUTs 422); a missing one is created with POST.
+#   2. The branch rulesets. main.json is shared by both workflow models; the develop ruleset is model-specific -
+#      release repos use develop.json (PR-gated), operational repos use operational/develop.json (direct signed
+#      pushes). The model is read from ../registry/repos.json (per-repo workflowModel, else defaults.workflowModel,
+#      else release) and can be overridden with the second argument. Each <name>.json holds the writable ruleset
+#      subset {name, target, enforcement, bypass_actors, conditions, rules}. An existing ruleset (matched by name)
+#      is updated with a full-payload PUT (partial PUTs 422); a missing one is created with POST.
 # Rerunning is idempotent.
 #
-# Usage: repo-config/configure.sh [owner/repo]   (defaults to the current repo via gh)
+# Usage: repo-config/configure.sh [owner/repo] [release|operational]   (repo defaults to the current repo via gh;
+#        model defaults to the registry lookup)
 set -euo pipefail
 
 repo="${1:-$(gh repo view --json nameWithOwner --jq '.nameWithOwner')}"
 script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+
+# ----- Resolve the workflow model (selects the develop ruleset) -----
+registry="$script_dir/../registry/repos.json"
+name="${repo##*/}"
+model="${2:-}"
+if [ -z "$model" ]; then
+    model="$(jq -r --arg n "$name" '(.repos[] | select(.name==$n) | .workflowModel) // .defaults.workflowModel // "release"' "$registry" 2>/dev/null || echo release)"
+fi
+case "$model" in
+    release) develop_ruleset="$script_dir/develop.json" ;;
+    operational) develop_ruleset="$script_dir/operational/develop.json" ;;
+    *) echo "Unknown workflow model '$model' (expected release or operational)." >&2; exit 1 ;;
+esac
+echo "Workflow model for $repo: $model"
 
 # ----- General repository settings -----
 settings_file="$script_dir/settings.json"
@@ -32,14 +50,14 @@ if [ -e "$settings_file" ]; then
 fi
 
 # ----- Branch rulesets -----
-for file in "$script_dir"/*.json; do
+# main.json is shared; the develop ruleset was selected by workflow model above.
+for file in "$develop_ruleset" "$script_dir/main.json"; do
     [ -e "$file" ] || continue
-    # settings.json is not a ruleset - it has no .name; skip it here (applied above).
-    name="$(jq -r '.name // empty' "$file")"
-    [ -n "$name" ] || continue
+    ruleset_name="$(jq -r '.name // empty' "$file")"
+    [ -n "$ruleset_name" ] || continue
     # Paginate so a name match on a later page is never missed (which would create a duplicate ruleset), and
     # fail loudly if the API call itself fails (auth/404/network) rather than treating it as "not found".
-    if ! ids="$(gh api --paginate "repos/$repo/rulesets" --jq ".[] | select(.name==\"$name\") | .id")"; then
+    if ! ids="$(gh api --paginate "repos/$repo/rulesets" --jq ".[] | select(.name==\"$ruleset_name\") | .id")"; then
         echo "Failed to list rulesets for $repo (check auth and repo access)." >&2
         exit 1
     fi
@@ -49,15 +67,15 @@ for file in "$script_dir"/*.json; do
     if [ -n "$ids" ]; then
         count="$(printf '%s\n' "$ids" | grep -c .)"
         if [ "$count" -gt 1 ]; then
-            echo "Warning: $count rulesets named '$name' on $repo; updating the first (resolve the duplicates)." >&2
+            echo "Warning: $count rulesets named '$ruleset_name' on $repo; updating the first (resolve the duplicates)." >&2
         fi
         id="$(printf '%s\n' "$ids" | sed -n '1p')"
     fi
     if [ -n "$id" ]; then
-        echo "Updating ruleset '$name' (id $id) on $repo"
+        echo "Updating ruleset '$ruleset_name' (id $id) on $repo"
         gh api --method PUT "repos/$repo/rulesets/$id" --input "$file" >/dev/null
     else
-        echo "Creating ruleset '$name' on $repo"
+        echo "Creating ruleset '$ruleset_name' on $repo"
         gh api --method POST "repos/$repo/rulesets" --input "$file" >/dev/null
     fi
 done

@@ -114,6 +114,10 @@ def main():
             if t not in known_types:
                 errors.append(f"{name}: type '{t}' not defined in project-types.json")
 
+        model = repo.get("workflowModel")
+        if model is not None and model not in ("release", "operational"):
+            errors.append(f"{name}: workflowModel '{model}' invalid (expected release or operational)")
+
         required = set(repo.get("requiredSecrets", []))
         for pub in repo.get("publish", []):
             if not isinstance(pub, dict) or "target" not in pub or "mechanism" not in pub:
