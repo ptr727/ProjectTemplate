@@ -33,7 +33,7 @@
             "required": ["name", "url", "status"],
             "allOf": [
                 {
-                    "comment": "An operational repo must declare its line endings (release repos use the fleet CRLF default).",
+                    "$comment": "An operational repo must declare its line endings (release repos use the fleet CRLF default).",
                     "if": { "properties": { "workflowModel": { "const": "operational" } }, "required": ["workflowModel"] },
                     "then": { "required": ["lineEndings"] }
                 }

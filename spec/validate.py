@@ -128,8 +128,11 @@ def main():
         if eol is not None and eol not in ("lf", "crlf"):
             errors.append(f"{name}: lineEndings '{eol}' invalid (expected lf or crlf)")
         # An operational repo's endings follow the consuming app's platform, so they must be declared; a release
-        # repo omits the field and uses the fleet CRLF default.
-        if model == "operational" and eol is None:
+        # repo omits the field and uses the fleet CRLF default. Resolve the effective model the same way
+        # configure.sh does (repo -> defaults -> release) so the requirement holds even if a repo relies on an
+        # operational defaults.workflowModel rather than setting it explicitly.
+        effective_model = model or default_model or "release"
+        if effective_model == "operational" and eol is None:
             errors.append(f"{name}: operational repo must declare lineEndings (lf or crlf)")
 
         required = set(repo.get("requiredSecrets", []))
