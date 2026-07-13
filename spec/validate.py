@@ -90,6 +90,12 @@ def main():
             print(f"  - {e}")
         return 1
 
+    # defaults.workflowModel feeds configure.sh's fallback, so an invalid value here breaks the apply while every
+    # per-repo entry still validates - check it once.
+    default_model = repos.get("defaults", {}).get("workflowModel")
+    if default_model is not None and default_model not in ("release", "operational"):
+        errors.append(f"defaults.workflowModel '{default_model}' invalid (expected release or operational)")
+
     for i, repo in enumerate(repos["repos"]):
         if not isinstance(repo, dict):
             errors.append(f"repo #{i} is not an object")

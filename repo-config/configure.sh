@@ -22,7 +22,10 @@ registry="$script_dir/../registry/repos.json"
 name="${repo##*/}"
 model="${2:-}"
 if [ -z "$model" ]; then
+    # Unregistered repo -> empty per-repo stream -> defaults.workflowModel -> "release"; the trailing shell
+    # default covers a jq failure (missing/unreadable registry) so $model is never empty at the case below.
     model="$(jq -r --arg n "$name" '(.repos[] | select(.name==$n) | .workflowModel) // .defaults.workflowModel // "release"' "$registry" 2>/dev/null || echo release)"
+    model="${model:-release}"
 fi
 case "$model" in
     release) develop_ruleset="$script_dir/develop.json" ;;
