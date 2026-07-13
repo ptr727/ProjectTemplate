@@ -127,6 +127,10 @@ def main():
         eol = repo.get("lineEndings")
         if eol is not None and eol not in ("lf", "crlf"):
             errors.append(f"{name}: lineEndings '{eol}' invalid (expected lf or crlf)")
+        # An operational repo's endings follow the consuming app's platform, so they must be declared; a release
+        # repo omits the field and uses the fleet CRLF default.
+        if model == "operational" and eol is None:
+            errors.append(f"{name}: operational repo must declare lineEndings (lf or crlf)")
 
         required = set(repo.get("requiredSecrets", []))
         for pub in repo.get("publish", []):
