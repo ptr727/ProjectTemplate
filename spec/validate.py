@@ -124,6 +124,10 @@ def main():
         if model is not None and model not in ("release", "operational"):
             errors.append(f"{name}: workflowModel '{model}' invalid (expected release or operational)")
 
+        eol = repo.get("lineEndings")
+        if eol is not None and eol not in ("lf", "crlf"):
+            errors.append(f"{name}: lineEndings '{eol}' invalid (expected lf or crlf)")
+
         required = set(repo.get("requiredSecrets", []))
         for pub in repo.get("publish", []):
             if not isinstance(pub, dict) or "target" not in pub or "mechanism" not in pub:

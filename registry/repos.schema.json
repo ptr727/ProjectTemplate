@@ -25,6 +25,7 @@
     "$defs": {
         "releaseTrigger": { "enum": ["two-phase", "publish-on-merge", "dispatch-only", "none"] },
         "workflowModel": { "enum": ["release", "operational"] },
+        "lineEndings": { "enum": ["lf", "crlf"] },
         "mechanism": { "enum": ["oidc", "static-secret", "none"] },
         "target": { "enum": ["nuget", "pypi", "docker", "github-release"] },
         "repo": {
@@ -39,6 +40,7 @@
                 "classificationPending": { "type": "boolean" },
                 "groundTruthBranch": { "type": "string" },
                 "workflowModel": { "$ref": "#/$defs/workflowModel" },
+                "lineEndings": { "$ref": "#/$defs/lineEndings" },
                 "hasDevelop": { "type": "boolean" },
                 "publish": {
                     "type": "array",
