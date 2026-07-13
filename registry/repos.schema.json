@@ -25,11 +25,19 @@
     "$defs": {
         "releaseTrigger": { "enum": ["two-phase", "publish-on-merge", "dispatch-only", "none"] },
         "workflowModel": { "enum": ["release", "operational"] },
+        "lineEndings": { "enum": ["lf", "crlf"] },
         "mechanism": { "enum": ["oidc", "static-secret", "none"] },
         "target": { "enum": ["nuget", "pypi", "docker", "github-release"] },
         "repo": {
             "type": "object",
             "required": ["name", "url", "status"],
+            "allOf": [
+                {
+                    "comment": "An operational repo must declare its line endings (release repos use the fleet CRLF default).",
+                    "if": { "properties": { "workflowModel": { "const": "operational" } }, "required": ["workflowModel"] },
+                    "then": { "required": ["lineEndings"] }
+                }
+            ],
             "additionalProperties": false,
             "properties": {
                 "name": { "type": "string" },
@@ -39,6 +47,7 @@
                 "classificationPending": { "type": "boolean" },
                 "groundTruthBranch": { "type": "string" },
                 "workflowModel": { "$ref": "#/$defs/workflowModel" },
+                "lineEndings": { "$ref": "#/$defs/lineEndings" },
                 "hasDevelop": { "type": "boolean" },
                 "publish": {
                     "type": "array",
