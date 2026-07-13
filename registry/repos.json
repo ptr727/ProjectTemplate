@@ -3,7 +3,8 @@
     "owner": "ptr727",
     "defaults": {
         "groundTruthBranch": "main",
-        "releaseTrigger": "two-phase"
+        "releaseTrigger": "two-phase",
+        "workflowModel": "release"
     },
     "repos": [
         {
@@ -156,17 +157,19 @@
             "driftNotes": ["Docker image wrapping upstream Nx products; C# (CreateMatrix) is the codegen generator, not a shipped package (IsPackable=false, no nuget push).", "Release is the two-phase model (weekly schedule + workflow_dispatch publish; ordinary merges do not) plus an extra Make/Matrix.json path-scoped push that republishes when the codegen version pin bumps.", "Docker Hub README published per-image via a Matrix.json-derived matrix.", "Branch hygiene: 3 stale Dependabot nuget branches (PRs closed/superseded) linger, safe to delete; main+develop otherwise clean after the 2026-07 sweep."]
         },
         {
-            "name": "HomeAutomation",
-            "url": "https://github.com/ptr727/HomeAutomation",
+            "name": "HomeAutomation-Config",
+            "url": "https://github.com/ptr727/HomeAutomation-Config",
             "status": "cataloged",
             "types": ["source-only"],
-            "groundTruthBranch": "main",
+            "groundTruthBranch": "develop",
+            "workflowModel": "operational",
+            "lineEndings": "lf",
             "hasDevelop": true,
-            "publish": [],
+            "publish": [{ "target": "github-release", "mechanism": "none" }],
             "requiredSecrets": [],
             "consumerModel": "pull",
-            "releaseTrigger": "none",
-            "driftNotes": ["Maintainer config/ops repo (docker-compose stacks, lifecycle scripts, Firewalla configs); in scope, file-version-history only.", "Private; README self-flags previously-committed secrets - secrets-hygiene concern."]
+            "releaseTrigger": "dispatch-only",
+            "driftNotes": ["Maintainer config/ops repo (docker-compose stacks, lifecycle scripts, Firewalla configs); Linux-consumed on the Proxmox host, so lineEndings lf.", "Renamed from HomeAutomation for fleet naming consistency (config repos are *-Config). The Vantage controller config is split out to its own Windows/CRLF Vantage-Config repo, not carried here - strip the legacy Vantage/ subtree during onboarding.", "Private; README self-flags previously-committed secrets - secrets-hygiene concern.", "Operational rollout pending: lint CI feeding the required check, dispatch-only source-release scaffolding (version.json + NBGV get-version + publish-release.yml, tag + source zip), and develop-as-ground-truth adoption."]
         },
         {
             "name": "KiCadLibrary",
@@ -199,26 +202,30 @@
             "url": "https://github.com/ptr727/ESPHome-Config",
             "status": "cataloged",
             "types": ["source-only"],
-            "groundTruthBranch": "main",
+            "groundTruthBranch": "develop",
+            "workflowModel": "operational",
+            "lineEndings": "lf",
             "hasDevelop": true,
-            "publish": [],
+            "publish": [{ "target": "github-release", "mechanism": "none" }],
             "requiredSecrets": [],
             "consumerModel": "pull",
-            "releaseTrigger": "none",
-            "driftNotes": ["ESPHome device config YAML consumed by the cataloged ESPHome-NonRoot image at runtime; distinct from that Docker repo.", "No CI/publish; dependabot covers only the devcontainers ecosystem."]
+            "releaseTrigger": "dispatch-only",
+            "driftNotes": ["ESPHome device config YAML consumed by the cataloged ESPHome-NonRoot image at runtime; distinct from that Docker repo.", "Operational rollout pending: an esphome-config validation job feeding the required check, dispatch-only source-release scaffolding (version.json + NBGV get-version + publish-release.yml, tag + source zip), and develop-as-ground-truth adoption. Dependabot currently covers only the devcontainers ecosystem."]
         },
         {
             "name": "HomeAssistant-Config",
             "url": "https://github.com/ptr727/HomeAssistant-Config",
             "status": "cataloged",
             "types": ["source-only"],
-            "groundTruthBranch": "master",
+            "groundTruthBranch": "main",
+            "workflowModel": "operational",
+            "lineEndings": "lf",
             "hasDevelop": true,
-            "publish": [],
+            "publish": [{ "target": "github-release", "mechanism": "none" }],
             "requiredSecrets": [],
             "consumerModel": "pull",
-            "releaseTrigger": "none",
-            "driftNotes": ["Home Assistant CONFIGURATION (configuration.yaml + automations/blueprints), NOT a HACS integration (no custom_components/manifest.json, no hacs.json).", "Non-conformant: ground-truth branch is 'master', not 'main' - rename to converge.", "Private; deployed by git pull into the HA config dir."]
+            "releaseTrigger": "dispatch-only",
+            "driftNotes": ["Home Assistant CONFIGURATION (configuration.yaml + automations/blueprints), NOT a HACS integration (no custom_components/manifest.json, no hacs.json).", "Operational rollout pending: 'master' renamed to 'main' and 'develop' created (done); develop is behind main by 2 commits - fast-forward develop up to main so it holds the live content, then flip groundTruthBranch to develop. Also pending: lint CI (a Home Assistant config-check feeding the required check) and dispatch-only source-release scaffolding (version.json + NBGV get-version + publish-release.yml, tag + source zip).", "Private; deployed by git pull into the HA config dir."]
         },
         {
             "name": "DevKitCIoT",
@@ -278,12 +285,14 @@
             "status": "cataloged",
             "types": ["source-only"],
             "groundTruthBranch": "develop",
+            "workflowModel": "operational",
+            "lineEndings": "crlf",
             "hasDevelop": true,
-            "publish": [],
+            "publish": [{ "target": "github-release", "mechanism": "none" }],
             "requiredSecrets": [],
             "consumerModel": "pull",
-            "releaseTrigger": "none",
-            "driftNotes": ["Maintainer config/asset archive (Vantage InFusion) with vendored binaries (MSI/7z/PDF) and versioned project snapshots; in scope as a config repo.", "The lone FindInFile C# helper is incidental, not a governed artifact.", "The develop branch now holds the ground truth (README/tagline edits) while main is stale - converge. No CI/governance scaffolding (no .github/workflows)."]
+            "releaseTrigger": "dispatch-only",
+            "driftNotes": ["Vantage InFusion / Design Center controller config edited on Windows (UTF-8 CRLF .dc XML, really special XML), so lineEndings crlf.", "Recreated lean and single-platform: Design Center is freely available, so no installer archives are kept; split out of HomeAutomation-Config. Being repopulated from the Windows editing host - operational onboarding (baseline, lint CI, dispatch-only publisher, rulesets, develop/main) pending once content lands."]
         },
         {
             "name": "HolidayLights",

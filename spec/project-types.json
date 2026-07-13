@@ -110,8 +110,9 @@
             "appliesTo": "*",
             "checks": [
                 { "id": "branch.both-protected", "verdict": "letter", "assert": "main and develop both exist and are protected.", "intentRef": "AGENTS.md#branching-model" },
-                { "id": "branch.ruleset.develop", "verdict": "letter", "assert": "The live develop ruleset matches repo-config/develop.json (normalized diff).", "intentRef": "repo-config/README.md" },
-                { "id": "branch.ruleset.main", "verdict": "letter", "assert": "The live main ruleset matches repo-config/main.json (normalized diff).", "intentRef": "repo-config/README.md" }
+                { "id": "branch.ruleset.develop", "verdict": "letter", "assert": "The live develop ruleset matches the expected payload for the repo's workflowModel (normalized diff): release -> repo-config/develop.json (PR-gated), operational -> repo-config/operational/develop.json (direct signed pushes; deletion + non_fast_forward + required_signatures only).", "intentRef": "repo-config/README.md" },
+                { "id": "branch.ruleset.main", "verdict": "letter", "assert": "The live main ruleset matches repo-config/main.json (normalized diff); this ruleset is shared by both workflow models.", "intentRef": "repo-config/README.md" },
+                { "id": "branch.operational.lintci", "verdict": "intent", "assert": "An operational (workflowModel) repo runs a lint/validation CI (editorconfig/EOL plus domain linters, e.g. Home Assistant or ESPHome config validation or a firmware build; no unit testing) feeding the required Check pull request workflow status job, so the develop -> main promotion PR is gated even though develop takes direct commits. N/A for release repos.", "intentRef": "AGENTS.md#branching-model" }
             ]
         },
         "repo-setup": {
@@ -136,7 +137,7 @@
                 { "id": "recurring.comments", "verdict": "letter", "assert": "Comments are concise, only the non-obvious, no prose narration, and do not grow on re-edit.", "intentRef": "AGENTS.md#comments" },
                 { "id": "recurring.charset", "verdict": "letter", "assert": "ASCII only in agent-authored text: no em-dash (use a spaced hyphen), no smart quotes, no stray non-ASCII.", "intentRef": "AGENTS.md#character-set" },
                 { "id": "recurring.spelling", "verdict": "letter", "assert": "US English spelling; the shared cspell.json sets language en-US (a bare en accepts British spellings too).", "intentRef": "CODESTYLE.md#markdown-and-spelling" },
-                { "id": "recurring.eol", "verdict": "letter", "assert": "Line endings follow .editorconfig, which carries a global [*] end_of_line = crlf default plus LF pins for execution-sensitive files (shell, Dockerfiles, shebang-executable .py by path), plus workflow YAML in .github/workflows/* enforced by editorconfig-checker in CI; a per-extension-only form lacking the global [*] default is a drift finding. Edits preserve the file's endings.", "intentRef": "AGENTS.md#line-endings" }
+                { "id": "recurring.eol", "verdict": "letter", "assert": "Line endings follow .editorconfig, which carries a global [*] end_of_line default plus LF pins for execution-sensitive files (shell, Dockerfiles, shebang-executable .py by path), plus workflow YAML in .github/workflows/* enforced by editorconfig-checker in CI; a per-extension-only form lacking the global [*] default is a drift finding. The global default is CRLF for release repos, or the consuming application's native platform for an operational (config) repo as recorded in the registry lineEndings field (LF for Linux-native/container config e.g. ESPHome/Home Assistant, CRLF for a Windows-native editor e.g. Vantage/Design Center) - do not re-normalize such a repo to CRLF. Edits preserve the file's endings.", "intentRef": "AGENTS.md#line-endings" }
             ]
         },
         "readme-structure": {

@@ -90,6 +90,12 @@ def main():
             print(f"  - {e}")
         return 1
 
+    # defaults.workflowModel feeds configure.sh's fallback, so an invalid value here breaks the apply while every
+    # per-repo entry still validates - check it once.
+    default_model = repos.get("defaults", {}).get("workflowModel")
+    if default_model is not None and default_model not in ("release", "operational"):
+        errors.append(f"defaults.workflowModel '{default_model}' invalid (expected release or operational)")
+
     for i, repo in enumerate(repos["repos"]):
         if not isinstance(repo, dict):
             errors.append(f"repo #{i} is not an object")
@@ -113,6 +119,21 @@ def main():
         for t in repo_types:
             if t not in known_types:
                 errors.append(f"{name}: type '{t}' not defined in project-types.json")
+
+        model = repo.get("workflowModel")
+        if model is not None and model not in ("release", "operational"):
+            errors.append(f"{name}: workflowModel '{model}' invalid (expected release or operational)")
+
+        eol = repo.get("lineEndings")
+        if eol is not None and eol not in ("lf", "crlf"):
+            errors.append(f"{name}: lineEndings '{eol}' invalid (expected lf or crlf)")
+        # An operational repo's endings follow the consuming app's platform, so they must be declared; a release
+        # repo omits the field and uses the fleet CRLF default. Resolve the effective model the same way
+        # configure.sh does (repo -> defaults -> release) so the requirement holds even if a repo relies on an
+        # operational defaults.workflowModel rather than setting it explicitly.
+        effective_model = model or default_model or "release"
+        if effective_model == "operational" and eol is None:
+            errors.append(f"{name}: operational repo must declare lineEndings (lf or crlf)")
 
         required = set(repo.get("requiredSecrets", []))
         for pub in repo.get("publish", []):
