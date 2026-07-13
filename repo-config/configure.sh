@@ -22,10 +22,19 @@ registry="$script_dir/../registry/repos.json"
 name="${repo##*/}"
 model="${2:-}"
 if [ -z "$model" ]; then
-    # Unregistered repo -> empty per-repo stream -> defaults.workflowModel -> "release"; the trailing shell
-    # default covers a jq failure (missing/unreadable registry) so $model is never empty at the case below.
-    model="$(jq -r --arg n "$name" '(.repos[] | select(.name==$n) | .workflowModel) // .defaults.workflowModel // "release"' "$registry" 2>/dev/null || echo release)"
-    model="${model:-release}"
+    if [ -f "$registry" ]; then
+        # Fail fast on a jq/parse error (malformed registry) instead of silently applying the release default
+        # to a repo whose lookup actually broke. A repo simply absent from the registry is not an error: the
+        # expression falls back through defaults.workflowModel to "release", so jq still exits 0 with a value.
+        if ! model="$(jq -r --arg n "$name" '(.repos[] | select(.name==$n) | .workflowModel) // .defaults.workflowModel // "release"' "$registry")"; then
+            echo "Failed to read workflowModel from $registry (invalid JSON?). Pass the model explicitly as arg 2." >&2
+            exit 1
+        fi
+    else
+        # No registry to consult (e.g. running the script standalone) - default, but say so.
+        echo "Registry $registry not found; defaulting workflow model to release." >&2
+        model="release"
+    fi
 fi
 case "$model" in
     release) develop_ruleset="$script_dir/develop.json" ;;
