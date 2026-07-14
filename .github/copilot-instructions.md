@@ -72,7 +72,7 @@ BOT_ID=$(gh api graphql -f query='
           | select(.author.login == "copilot-pull-request-reviewer")
           | .author.id] | first // empty')
 if [ -z "$BOT_ID" ]; then
-  echo "no Copilot review in the last 20 PRs - widen the window, else fall back to UI seeding" >&2
+  echo "no Copilot review in the 20 most recent PRs - widen the window, else fall back to UI seeding" >&2
   return 1 2>/dev/null || exit 1   # stop; do NOT call requestReviews with an empty id
 fi
 ```
