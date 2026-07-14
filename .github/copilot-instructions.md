@@ -58,19 +58,20 @@ mutation($pr: ID!, $bot: ID!) {
 
 The bot node id is read from an existing Copilot **formal** review (`pullRequest.reviews`), so step 1 needs at least one prior formal review on the PR - the auto-review-on-open normally supplies the first one (it may have **no inline comments**; that still counts, and its bot node id is still readable). Poll for it (give auto-review-on-open a few minutes) before deciding it is missing.
 
-**Cold start (round 1 not yet landed): read the id repo-wide, not from this PR.** The Copilot reviewer's bot node id is the reviewer bot *account's* node id and is **stable across every PR in the repo** (same value repo-wide, and in practice org/global). So a freshly opened PR that has neither a formal review nor an issue comment yet does **not** need UI seeding to bootstrap the id - read it from any prior Copilot review anywhere in the repo, then feed it straight into the `requestReviews` mutation to drive round 1:
+**Cold start (round 1 not yet landed): read the id repo-wide, not from this PR.** The Copilot reviewer's bot node id is the reviewer bot *account's* node id and is **stable across every PR in the repo**. So a freshly opened PR that has neither a formal review nor an issue comment yet does **not** need UI seeding to bootstrap the id - read it from any prior Copilot review anywhere in the repo, then feed it into the `requestReviews` mutation to drive round 1. Query the **most recent** PRs (`first: 20` with an explicit newest-first order; plain `last: 20` returns the *oldest* PRs, which may predate Copilot on the repo), and **guard for an empty result** - an empty `$BOT_ID` means no prior Copilot review exists anywhere, i.e. the UI-seeding last resort below:
 
 ```sh
 BOT_ID=$(gh api graphql -f query='
 {
   repository(owner: "<owner>", name: "<repo>") {
-    pullRequests(last: 20) {
+    pullRequests(first: 20, orderBy: { field: CREATED_AT, direction: DESC }) {
       nodes { reviews(first: 20) { nodes { author { __typename login ... on Bot { id } } } } }
     }
   }
 }' --jq '[.data.repository.pullRequests.nodes[].reviews.nodes[]
           | select(.author.login == "copilot-pull-request-reviewer")
-          | .author.id] | first')
+          | .author.id] | first // empty')
+[ -n "$BOT_ID" ] || echo "no prior Copilot review in repo - fall to UI seeding"
 ```
 
 If Copilot posted **only an issue comment** on this PR and no formal review, you can instead read the id from that comment's author (`pullRequest.comments` -> author `... on Bot { id }`). Manual UI seeding is the last resort - needed only for a repo that has **never** had a Copilot review, so no prior id exists anywhere to read; then use the mutation for every subsequent re-request.
