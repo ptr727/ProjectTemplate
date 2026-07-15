@@ -30,9 +30,8 @@ jobs:
         with:
           globs: '**/*.md'
 
-      # Spelling gate is scoped to the two files every repo visitor sees. Broad spell-checking across all markdown is
-      # the cspell editor extension's job (live, any file); forcing all *.md through CI would mean endlessly padding
-      # cspell.json for every technical term. A repo may widen this list, but README + HISTORY is the shipped default.
+      # cspell gate = README + HISTORY only; all-*.md would mean endlessly padding cspell.json for technical terms
+      # (broad live spell-check is the editor extension's job). See CODESTYLE.md "Markdown and Spelling".
       - name: Spell check step
         uses: streetsidesoftware/cspell-action@de2a73e963e7443969755b648a1008f77033c5b2 # v8.4.0
         with:
