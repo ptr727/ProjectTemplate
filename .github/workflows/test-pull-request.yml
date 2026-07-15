@@ -30,10 +30,14 @@ jobs:
         with:
           globs: '**/*.md'
 
+      # cspell gate = README + HISTORY only; all-*.md would mean endlessly padding cspell.json for technical terms
+      # (broad live spell-check is the editor extension's job). See CODESTYLE.md "Markdown and Spelling".
       - name: Spell check step
         uses: streetsidesoftware/cspell-action@de2a73e963e7443969755b648a1008f77033c5b2 # v8.4.0
         with:
-          files: '**/*.md'
+          files: |
+            README.md
+            HISTORY.md
           incremental_files_only: false
 
       - name: Lint workflows step
