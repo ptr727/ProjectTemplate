@@ -1,8 +1,8 @@
 # repo-config
 
-Repository and branch configuration held as committed files, kept out of `.github/` (which is reserved for GitHub-Actions-owned content). This mirrors the layout the fleet repos use.
+Repository and branch configuration held as committed files, kept out of `.github/` (which holds the GitHub-consumed configuration - workflows, Dependabot). This mirrors the layout the fleet repos use.
 
-- `main.json` plus one `develop` variant - the branch rulesets as the writable API subset (`name`, `target`, `enforcement`, `bypass_actors`, `conditions`, `rules`). The `develop` payload is `develop.json` (`release` repos) or `operational/develop.json` (`operational` repos); the hub keeps both, a carried copy only its own model's (see "Downstream Carry"). These are the canonical expected payload the hub's audit (`AUDIT.md`, hub-only) diffs each repo's live rulesets against.
+- `main.json` plus one `develop` variant - the branch rulesets as the writable API subset (`name`, `target`, `enforcement`, `bypass_actors`, `conditions`, `rules`). The `develop` payload is `develop.json` (`release` repos) or `operational/develop.json` (`operational` repos); the hub keeps both, a carried copy only its own model's (see "Downstream Carry"). These are the canonical expected payloads that the audit (the hub's fleet-wide `AUDIT.md`, or a carried repo-scoped adaptation - see "Downstream Carry") diffs the live rulesets against.
 - `operational/develop.json` - the `develop` ruleset for **operational** repos (registry `workflowModel: operational`): direct signed pushes, no PR gate. Present at the hub and in operational carries only - a carried `release` repo does not have it. See "Rulesets" below.
 - `configure.sh` - applies the rulesets to a repository via the GitHub API (create or full-payload update, idempotent). Run `repo-config/configure.sh [owner/repo] [release|operational]`; the model defaults to the registry `workflowModel` lookup.
 
@@ -11,7 +11,8 @@ Repository and branch configuration held as committed files, kept out of `.githu
 Every fleet repo carries this directory; the hub keeps the canonical copy. Rules for the carried copy:
 
 - **Carry only your model's `develop` variant.** A `release` repo carries `develop.json`; an `operational` repo carries `operational/develop.json` instead. `main.json` and `settings.json` are shared by both models. `configure.sh` aborts when the payload its model needs is missing rather than applying a partial configuration.
-- **Hub-only references stay plain text.** The hub is a private repo: never URL-link it from a downstream repo - the link 404s for anyone without hub access. Files that exist only at the hub (`AUDIT.md`, `spec/`) are mentioned by name, not linked; links into files every repo carries (`AGENTS.md`) resolve everywhere and are fine.
+- **Hub-only references stay plain text.** The hub is a private repo: never URL-link it from a downstream repo - the link 404s for anyone without hub access. Files whose canonical fleet-wide form lives only at the hub are mentioned by name, not linked; links into files every repo carries (`AGENTS.md`) resolve everywhere and are fine.
+- **Adapted self-audit carry.** A downstream repo carries **locally adapted** `AUDIT.md` and `spec/secrets.json`, scoped to self-auditing its own rulesets, settings, and secrets against the committed `repo-config/` baseline - the standard shape, so the carried tooling is self-contained. The hub's fleet-wide audit remains authoritative, and the local copies never link the hub.
 - **The regen snippet targets the current repo**, so it works unchanged in a carried copy.
 
 ## Rulesets
@@ -42,7 +43,7 @@ done
 
 ## Secrets
 
-Publish credentials required per mechanism are enumerated in the hub's `spec/secrets.json` (hub-only). A repo needs only the mechanisms its own publish targets use - a source-only repo needs none of the publish credentials below. NuGet and PyPI use keyless OIDC Trusted Publishing (no stored key; the publish job needs `id-token: write`, and PyPI additionally an `environment: pypi` gate). Docker Hub has no OIDC equivalent and uses a stored `DOCKER_HUB_USERNAME` + `DOCKER_HUB_ACCESS_TOKEN` in both the Actions and Dependabot secret stores. Codegen and merge-bot repos add a GitHub App (`CODEGEN_APP_CLIENT_ID` + `CODEGEN_APP_PRIVATE_KEY` in both stores; the app must be installed, not just created). App-token call sites use `client-id`, never the deprecated `app-id`.
+Publish credentials required per mechanism are enumerated in `spec/secrets.json` (canonical at the hub; a downstream repo carries a repo-scoped adaptation - see "Downstream Carry"). A repo needs only the mechanisms its own publish targets use - a source-only repo needs none of the publish credentials below. NuGet and PyPI use keyless OIDC Trusted Publishing (no stored key; the publish job needs `id-token: write`, and PyPI additionally an `environment: pypi` gate). Docker Hub has no OIDC equivalent and uses a stored `DOCKER_HUB_USERNAME` + `DOCKER_HUB_ACCESS_TOKEN` in both the Actions and Dependabot secret stores. Codegen and merge-bot repos add a GitHub App (`CODEGEN_APP_CLIENT_ID` + `CODEGEN_APP_PRIVATE_KEY` in both stores; the app must be installed, not just created). App-token call sites use `client-id`, never the deprecated `app-id`.
 
 ## Repo Settings
 

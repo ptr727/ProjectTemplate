@@ -1,7 +1,8 @@
 {
     "version": "2.0.0",
     "tasks": [
-        // Python language group. Every task is `type: process` (like the .NET snippet) so the command is
+        // Python language group. Every command-executing task is `type: process` (like the .NET snippet; the
+        // aggregators are dependsOn-only) so the command is
         // executed directly, never through a shell - it avoids `&&`/`;` chaining, which is not portable
         // (Windows PowerShell 5.1, still the default VS Code task shell on many setups, rejects `&&`).
         // Sequencing is expressed with `dependsOrder: sequence` + `dependsOn`, not shell operators.
@@ -64,7 +65,7 @@
                 "Ruff Check",
                 "Python Types"
             ],
-            "group": "build",
+            "group": { "kind": "build", "isDefault": true },
             "problemMatcher": []
         },
         {
@@ -75,7 +76,7 @@
                 "run",
                 "pytest"
             ],
-            "group": "test",
+            "group": { "kind": "test", "isDefault": true },
             "problemMatcher": [],
             "presentation": {
                 "showReuseMessage": false,
