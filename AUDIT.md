@@ -10,7 +10,7 @@ The verdict vocabulary is [`WORKFLOW.md`][workflow]'s: **operational / not opera
 This audit is not occasional. Run it whenever you **create, adopt, or materially change** a fleet repo, and on demand for any known repo:
 
 - **Onboarding a repo is complete only when it either passes this audit** (operational - every applicable check) **or carries a committed `reports/<repo>/audit.md` plus a tracking issue** enumerating every residual delta. A repo that is partially set up but never audited is itself a **defect** - the exact state this process prevents. The create-to-conformance counterpart is [`STANDUP.md`][standup]; because both read the same manifests, a repo stood up by that file passes this audit by construction.
-- **Touching a repo** (any conformance-affecting change) ends by re-running the applicable checks and **reconciling the registry entry to reality** - `status`, `types`, `releaseTrigger`, `workflowModel`, `driftNotes`. The registry records what *is*, not what was intended; [`spec/validate.py`][validate] proves the catalog is self-consistent, not that it matches the live repo - closing that gap is this audit's job.
+- **Touching a repo** (any conformance-affecting change) ends by re-running the applicable checks and **reconciling the registry entry to reality** - `status`, `types`, `releaseTrigger`, `workflowModel`, `driftNotes`. The registry records reality, not intent; [`spec/validate.py`][validate] proves the catalog is self-consistent, not that it matches the live repo - closing that gap is this audit's job.
 
 ## 1. Scope and Ground-Truth Branch
 
