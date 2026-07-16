@@ -63,8 +63,7 @@ fi
 
 # ----- Branch rulesets -----
 # main.json is shared; the develop ruleset was selected by workflow model above. A missing or nameless
-# payload aborts the run: silently skipping it leaves a partially-applied configuration that reports
-# success (a downstream repo carries only its own model's develop variant, so the mismatch is easy to hit).
+# payload aborts - silently skipping it would report success on a partially-applied configuration.
 for file in "$develop_ruleset" "$script_dir/main.json"; do
     if [ ! -e "$file" ]; then
         echo "Ruleset payload $file not found; aborting to avoid a partially-applied configuration." >&2
