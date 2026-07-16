@@ -1,0 +1,53 @@
+name: Validate task
+
+# The single validation gate, reused by test-pull-request (the PR gate feeding the required
+# Check pull request workflow status job) and publish-release (so a dispatch cannot cut a
+# release from a ref that fails validation).
+
+on:
+  workflow_call:
+
+jobs:
+
+  # Source-only repo: validation is lint-only. Markdown, spelling, workflow YAML, and the registry/spec JSON are
+  # validated with the same configs the editor extensions and CLI use (linter parity). There is no build or unit test.
+  lint:
+    name: Lint sources job
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+
+    steps:
+
+      - name: Checkout code step
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+
+      # Doc linters run as pinned action wrappers. editorconfig-checker's action is install-only, so it runs via Docker.
+      - name: Lint Markdown step
+        uses: DavidAnson/markdownlint-cli2-action@8de2aa07cae85fd17c0b35642db70cf5495f1d25 # v24.0.0
+        with:
+          globs: '**/*.md'
+
+      # cspell gate = README + HISTORY only; all-*.md would mean endlessly padding cspell.json for technical terms
+      # (broad live spell-check is the editor extension's job). See CODESTYLE.md "Markdown and Spelling".
+      - name: Spell check step
+        uses: streetsidesoftware/cspell-action@de2a73e963e7443969755b648a1008f77033c5b2 # v8.4.0
+        with:
+          files: |
+            README.md
+            HISTORY.md
+          incremental_files_only: false
+
+      - name: Lint workflows step
+        uses: raven-actions/actionlint@3d39aea434753780c3b3d4a1a31c854b4dbf49d7 # v2.2.0
+
+      - name: Check EditorConfig step
+        run: docker run --rm -v "$PWD":/check --workdir /check mstruebing/editorconfig-checker:latest
+
+      - name: Validate registry and spec step
+        run: |
+          set -euo pipefail
+          for f in registry/*.json spec/*.json repo-config/*.json; do
+            jq empty "$f"
+          done
+          python3 spec/validate.py
