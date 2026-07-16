@@ -46,24 +46,11 @@ jobs:
         id: nbgv
         uses: dotnet/nbgv@master
 
-      # Skip create on an existing tag (no-op republish). A re-dispatch refreshes it.
-      - name: Check for existing release step
-        id: release-exists
-        env:
-          GH_TOKEN: ${{ github.token }}
-          TAG: ${{ steps.nbgv.outputs.SemVer2 }}
-        run: |
-          set -euo pipefail
-          if gh release view "$TAG" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
-            echo "exists=true" >> "$GITHUB_OUTPUT"
-          else
-            echo "exists=false" >> "$GITHUB_OUTPUT"
-          fi
-
+      # Create-or-refresh: every trigger here is a dispatch, so an existing tag is refreshed, never skipped
+      # (the exists-gate belongs to the multi-trigger reusable form, where a scheduled re-run must no-op).
       # target_commitish pins the tag to the exact built commit (GitCommitId), not the default branch. The release is
       # the tag plus GitHub's auto source archive, README, and LICENSE - no build assets (source-only).
       - name: Create GitHub release step
-        if: ${{ steps.release-exists.outputs.exists == 'false' || github.event_name == 'workflow_dispatch' }}
         uses: softprops/action-gh-release@718ea10b132b3b2eba29c1007bb80653f286566b # v3.0.1
         with:
           generate_release_notes: true
