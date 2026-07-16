@@ -128,8 +128,11 @@ def audit_repo(entry, spec):
     mechanisms += [secrets.get("typeMechanisms", {}).get(t) for t in types]
     claimed = [secrets["mechanisms"][m] for m in mechanisms if m and m in secrets["mechanisms"]]
     required_by_store = {"actions": set(), "dependabot": set()}
-    for store in secrets["baseline"].get("stores", []):
-        required_by_store[store] |= set(secrets["baseline"].get("requires", []))
+    # Operational repos run no merge-bot or codegen (their Dependabot PRs are maintainer-merged), so the
+    # baseline App pair is N/A there; baseline forbids still apply everywhere.
+    if model != "operational":
+        for store in secrets["baseline"].get("stores", []):
+            required_by_store[store] |= set(secrets["baseline"].get("requires", []))
     for mech in claimed:
         for store in mech.get("stores", []):
             required_by_store[store] |= set(mech.get("requires", []))
