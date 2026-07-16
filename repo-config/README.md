@@ -3,7 +3,7 @@
 Repository and branch configuration held as committed files, kept out of `.github/` (which is reserved for GitHub-Actions-owned content). This mirrors the layout the fleet repos use.
 
 - `main.json` plus one `develop` variant - the branch rulesets as the writable API subset (`name`, `target`, `enforcement`, `bypass_actors`, `conditions`, `rules`). The `develop` payload is `develop.json` (`release` repos) or `operational/develop.json` (`operational` repos); the hub keeps both, a carried copy only its own model's (see "Downstream Carry"). These are the canonical expected payload the hub's audit (`AUDIT.md`, hub-only) diffs each repo's live rulesets against.
-- `operational/develop.json` - the `develop` ruleset for **operational** repos (registry `workflowModel: operational`): direct signed pushes, no PR gate. `main.json` is shared by both models. See "Rulesets" below.
+- `operational/develop.json` - the `develop` ruleset for **operational** repos (registry `workflowModel: operational`): direct signed pushes, no PR gate. Present at the hub and in operational carries only - a carried `release` repo does not have it. See "Rulesets" below.
 - `configure.sh` - applies the rulesets to a repository via the GitHub API (create or full-payload update, idempotent). Run `repo-config/configure.sh [owner/repo] [release|operational]`; the model defaults to the registry `workflowModel` lookup.
 
 ## Downstream Carry
@@ -30,10 +30,13 @@ To change the canonical rulesets, edit the live rulesets (fleet-wide changes hap
 ```sh
 repo="$(gh repo view --json nameWithOwner --jq '.nameWithOwner')"
 for name in develop main; do
+  out="repo-config/$name.json"
+  # An operational carry keeps its develop payload at operational/develop.json (develop.json is absent).
+  [ "$name" = "develop" ] && [ ! -e "$out" ] && out="repo-config/operational/develop.json"
   id=$(gh api "repos/$repo/rulesets" --jq ".[] | select(.name==\"$name\") | .id")
   gh api "repos/$repo/rulesets/$id" \
     --jq '{name, target, enforcement, bypass_actors, conditions, rules}' \
-    | jq -S --indent 4 '.' > "repo-config/$name.json"
+    | jq -S --indent 4 '.' > "$out"
 done
 ```
 
