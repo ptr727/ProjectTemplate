@@ -14,7 +14,7 @@
 root = true
 
 # Defaults - CRLF is the default; only the LF exceptions below are declared. Most LF pins are shared with
-# `.gitattributes` (git-enforced): `*.sh`, the husky pre-commit shebang, `spec/validate.py`, and Dockerfiles.
+# `.gitattributes` (git-enforced): `*.sh`, the husky pre-commit shebang, `spec/validate.py`, `uv.lock`, and Dockerfiles.
 # The workflow-YAML pins (`.github/workflows/*` and the catalog snippet workflows) are `.editorconfig`-only -
 # git stays passive on them (`* -text`) and CI (editorconfig-checker) enforces LF. Keep the `[*]`
 # `end_of_line = crlf` default - it is required for the Windows-GUI/WSL-engine

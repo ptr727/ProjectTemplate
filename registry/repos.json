@@ -94,7 +94,7 @@
             "configLayout": { "pythonConfig": "pyproject.toml" },
             "driftNotes": [
                 "Personal Python toolkit (uv/pyproject, src/ + tests/ + analysis/data/docs); private.",
-                "Source-release repo: source-only, no PyPI - publishes a tag + source zip on manual dispatch (releaseTrigger dispatch-only).",
+                "Source-release repo: source-only, no PyPI - target model is a tag + source zip on manual dispatch (releaseTrigger dispatch-only), pending the standup below.",
                 "PR CI established (test-pull-request.yml -> validate-task.yml: ruff + mypy + pytest/coverage). Python profile: mypy is the CI type checker (pyright editor-only via Pylance), deps via PEP 621 [project.optional-dependencies], static version (no _version.py).",
                 "Release standup owed downstream: WORKFLOW.md, version.json + NBGV, source-only dispatch publisher, dependabot.yml, uv.lock LF pin.",
                 "Already carries .markdownlint-cli2.jsonc, AGENTS.md, CODESTYLE.md, .editorconfig, .gitattributes."
