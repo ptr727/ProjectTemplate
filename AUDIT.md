@@ -5,6 +5,13 @@ How an agent audits a repository against the fleet ground truth in this repo and
 The verdict vocabulary is [`WORKFLOW.md`][workflow]'s: **operational / not operational**, **N/A**,
 **defect**, and the applicable/absent rule. Do not invent a parallel scheme.
 
+## 0. When to Run and What "Done" Means
+
+This audit is not occasional. Run it whenever you **create, adopt, or materially change** a fleet repo, and on demand for any known repo:
+
+- **Onboarding a repo is complete only when it either passes this audit** (operational - every applicable check) **or carries a committed `reports/<repo>/audit.md` plus a tracking issue** enumerating every residual delta. A repo that was partially set up but never audited is itself a **defect** - the exact state this process prevents. The create-to-conformance counterpart is [`STANDUP.md`][standup]; because both read the same manifests, a repo stood up by that file passes this audit by construction.
+- **Touching a repo** (any conformance-affecting change) ends by re-running the applicable checks and **reconciling the registry entry to reality** - `status`, `types`, `releaseTrigger`, `workflowModel`, `driftNotes`. The registry records what *is*, not what was intended; [`spec/validate.py`][validate] proves the catalog is self-consistent, not that it matches the live repo - closing that gap is this audit's job.
+
 ## 1. Scope and Ground-Truth Branch
 
 Audit one repository at a time. Read the target's **`main` branch** as ground truth: `main` is the released, authoritative state. Read `develop` only to detect divergence - a stale or diverged `develop` (behind `main`, or diverged) is reported as a **drift finding**, never audited as the truth. Do not treat a `develop`-only file as present if it is absent on `main`.
@@ -117,5 +124,7 @@ The convergence model: the hub audits and the agent **applies** the fixes via ta
 [repos]: ./registry/repos.json
 [secrets]: ./spec/secrets.json
 [spec]: ./spec/
+[standup]: ./STANDUP.md
 [template]: ./reports/_template.md
+[validate]: ./spec/validate.py
 [workflow]: ./WORKFLOW.md
