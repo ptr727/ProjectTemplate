@@ -11,8 +11,7 @@ concurrency:
 
 jobs:
 
-  # The same reusable validation gate the PR workflow runs - a dispatch cannot cut a release from a ref that
-  # fails validation.
+  # The same reusable gate the PR runs - a dispatch cannot release a ref that fails validation.
   validate:
     name: Validate sources job
     uses: ./.github/workflows/validate-task.yml

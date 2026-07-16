@@ -1,16 +1,13 @@
 name: Validate task
 
-# The single validation gate, reused by test-pull-request (the PR gate feeding the required
-# Check pull request workflow status job) and publish-release (so a dispatch cannot cut a
-# release from a ref that fails validation).
+# The single validation gate - reused by test-pull-request (feeding the required check) and publish-release.
 
 on:
   workflow_call:
 
 jobs:
 
-  # Source-only repo: validation is lint-only. Markdown, spelling, workflow YAML, and the registry/spec JSON are
-  # validated with the same configs the editor extensions and CLI use (linter parity). There is no build or unit test.
+  # Source-only repo: lint-only validation, using the same configs the editor and CLI use (linter parity); no build or tests.
   lint:
     name: Lint sources job
     runs-on: ubuntu-latest
@@ -42,7 +39,7 @@ jobs:
         uses: raven-actions/actionlint@3d39aea434753780c3b3d4a1a31c854b4dbf49d7 # v2.2.0
 
       - name: Check EditorConfig step
-        run: docker run --rm -v "$PWD":/check --workdir /check mstruebing/editorconfig-checker:latest
+        run: docker run --rm --pull=always -v "$PWD":/check --workdir /check mstruebing/editorconfig-checker:latest
 
       - name: Validate registry and spec step
         run: |
