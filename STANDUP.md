@@ -10,7 +10,7 @@ Resolve the repo's type(s) with the [`AUDIT.md`][audit] section 2 detection rule
 
 ## 2. Carry the Baseline Files
 
-Copy every [`spec/files.json`][files] entry that applies to the repo's types - the `appliesTo: "*"` baseline plus the per-type additions - **adapted, not cloned**. The prose files (`CODESTYLE.md`, `README.md`, and the like) describe the repo's own toolchain, so adapt them to reality rather than propagating template specifics verbatim (see the "adapt before propagating" rule; a verbatim copy that misdescribes the repo is rejected in review). The baseline covers `WORKFLOW.md`, `version.json`, `repo-config/develop.json` + `main.json`, `.github/dependabot.yml`, `.editorconfig`, `.gitattributes`, the linter configs, and the per-type files (`.vscode/tasks.json` from the language's snippet, `codecov.yml`, `.dockerignore`, `Docker/README.md`).
+Copy every [`spec/files.json`][files] entry that applies to the repo's types - the `appliesTo: "*"` baseline plus the per-type additions - **adapted, not cloned**. The prose files (`CODESTYLE.md`, `README.md`, and the like) describe the repo's own toolchain, so adapt them to reality rather than propagating template specifics verbatim (see the "Adapt before propagating" callout in [`CODESTYLE.md`][codestyle]; a verbatim copy that misdescribes the repo is rejected in review). The baseline covers `WORKFLOW.md`, `version.json`, `repo-config/develop.json` + `main.json`, `.github/dependabot.yml`, `.editorconfig`, `.gitattributes`, the linter configs, and the per-type files (`.vscode/tasks.json` from the language's snippet, `codecov.yml`, `.dockerignore`, `Docker/README.md`).
 
 ## 3. Stand Up the Workflows
 

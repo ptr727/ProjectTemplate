@@ -1,6 +1,6 @@
 # Conformance Matrix
 
-Tracks, per supported repo type, whether a **context-free agent stands it up cold** from the hub docs to an audit-passing state ([`STANDUP.md`][standup] "Self-Test"), and the date of the type's most recent audit ([`AUDIT.md`][audit]). A type that cannot be stood up cold is a documentation defect, not an agent failure - iterate the docs until it can.
+Tracks, per supported repo type, whether a **context-free agent stands it up cold** from the hub docs to an audit-passing state ([`STANDUP.md`][standup] "Self-Test"), and the date (`YYYY-MM-DD`) of the type's most recent audit ([`AUDIT.md`][audit]). A type that cannot be stood up cold is a documentation defect, not an agent failure - iterate the docs until it can.
 
 `Cold-standup` values: `passing` (a fresh agent reaches operational), `gaps` (reaches partial; the note records the first doc gap), `not-tested` (self-test not yet run for this type).
 
