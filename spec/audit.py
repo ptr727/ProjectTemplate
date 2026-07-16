@@ -9,9 +9,10 @@ behind main). Owner-initiated: run it when onboarding a repo, when drift is susp
 fleet-wide changes. Read-only - it never modifies a target.
 
 Findings: DEFECT (an applicable check fails outright), LETTER (a required file is absent - intent
-unverified, judge per AUDIT.md section 7), DRIFT (non-breaking divergence, e.g. develop behind
-main, a stale secret, a registry field contradicting reality). Exits non-zero when any repo has a
-DEFECT or LETTER finding.
+unverified, judge per AUDIT.md section 7), DRIFT (non-breaking divergence, e.g. main carrying
+content develop lacks, a stale secret, a registry field contradicting reality), ERROR (a gh call
+failed, so the repo could not be fully audited). Exits non-zero when any repo has a DEFECT,
+LETTER, or ERROR finding.
 
 Usage: python3 spec/audit.py [RepoName ...]   (default: every cataloged repo)
 """
@@ -185,12 +186,12 @@ def main():
         print(f"== {entry['name']} ({', '.join(entry.get('types', []))}; {model}) ==")
         findings = audit_repo(entry, spec)
         if not findings:
-            print("  operational (no findings)")
+            print("  clean (deterministic checks; the full operational verdict is AUDIT.md's)")
         for kind, text in findings:
             print(f"  {kind:6} {text}")
             if kind in ("DEFECT", "LETTER", "ERROR"):
                 hard += 1
-    print(f"\n{len(repos)} repo(s) audited; {hard} defect/letter finding(s).")
+    print(f"\n{len(repos)} repo(s) audited; {hard} defect/letter/error finding(s).")
     return 1 if hard else 0
 
 
