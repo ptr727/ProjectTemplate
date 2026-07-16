@@ -30,10 +30,13 @@ To change the canonical rulesets, edit the live rulesets (fleet-wide changes hap
 ```sh
 repo="$(gh repo view --json nameWithOwner --jq '.nameWithOwner')"
 for name in develop main; do
+  out="repo-config/$name.json"
+  # An operational carry keeps its develop payload at operational/develop.json (develop.json is absent).
+  [ "$name" = "develop" ] && [ ! -e "$out" ] && out="repo-config/operational/develop.json"
   id=$(gh api "repos/$repo/rulesets" --jq ".[] | select(.name==\"$name\") | .id")
   gh api "repos/$repo/rulesets/$id" \
     --jq '{name, target, enforcement, bypass_actors, conditions, rules}' \
-    | jq -S --indent 4 '.' > "repo-config/$name.json"
+    | jq -S --indent 4 '.' > "$out"
 done
 ```
 
