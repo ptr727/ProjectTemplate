@@ -34,11 +34,11 @@ When a repo matches no existing type, the work is onboarding a **type**, not jus
 
 ## Self-Test - Cold-Start Conformance
 
-The onboarding docs are sufficient only if a **context-free agent stands up each supported type from them alone**. Run this whenever the onboarding docs or manifests change, and periodically as a fleet health check:
+The onboarding docs are sufficient only if a **context-free agent stands up each supported repo shape from them alone** - a shape being the project type(s) plus the workflow model (`operational` is a `workflowModel` overlay, not a `spec/project-types.json` type). Run this whenever the onboarding docs or manifests change, and periodically as a fleet health check:
 
-- For each supported type, task a fresh agent (no prior context) with "Using only this repo's docs, stand up a `<type>` repo," pointing it at this file.
+- For each shape in the [conformance matrix][matrix], task a fresh agent (no prior context) with "Using only this repo's docs, stand up a `<shape>` repo," pointing it at this file.
 - Run [`AUDIT.md`][audit] against the result. Record pass or fail, and the first doc gap that tripped the agent, in the [conformance matrix][matrix].
-- Iterate the **docs and tooling** (not the agent's memory) until every supported type stands up cold to operational. A type that cannot be stood up cold is a documentation defect, tracked like any other.
+- Iterate the **docs and tooling** (not the agent's memory) until every supported shape stands up cold to operational. A shape that cannot be stood up cold is a documentation defect, tracked like any other.
 
 The same [`AUDIT.md`][audit] run is the on-demand audit for any known repo; its report lists deviations and repo-specific deltas. The self-test and the fleet audit are one procedure, pointed at a new repo or an existing one.
 
