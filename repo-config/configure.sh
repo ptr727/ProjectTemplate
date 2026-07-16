@@ -62,11 +62,18 @@ if [ -e "$settings_file" ]; then
 fi
 
 # ----- Branch rulesets -----
-# main.json is shared; the develop ruleset was selected by workflow model above.
+# main.json is shared; the develop ruleset was selected by workflow model above. A missing or nameless
+# payload aborts - silently skipping it would report success on a partially-applied configuration.
 for file in "$develop_ruleset" "$script_dir/main.json"; do
-    [ -e "$file" ] || continue
+    if [ ! -e "$file" ]; then
+        echo "Ruleset payload $file not found; aborting to avoid a partially-applied configuration." >&2
+        exit 1
+    fi
     ruleset_name="$(jq -r '.name // empty' "$file")"
-    [ -n "$ruleset_name" ] || continue
+    if [ -z "$ruleset_name" ]; then
+        echo "Ruleset payload $file has no name; aborting to avoid a partially-applied configuration." >&2
+        exit 1
+    fi
     # Paginate so a name match on a later page is never missed (which would create a duplicate ruleset), and
     # fail loudly if the API call itself fails (auth/404/network) rather than treating it as "not found".
     if ! ids="$(gh api --paginate "repos/$repo/rulesets" --jq ".[] | select(.name==\"$ruleset_name\") | .id")"; then

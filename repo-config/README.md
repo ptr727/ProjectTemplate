@@ -2,9 +2,17 @@
 
 Repository and branch configuration held as committed files, kept out of `.github/` (which is reserved for GitHub-Actions-owned content). This mirrors the layout the fleet repos use.
 
-- `main.json`, `develop.json` - the branch rulesets as the writable API subset (`name`, `target`, `enforcement`, `bypass_actors`, `conditions`, `rules`). These are the canonical expected payload the audit ([AUDIT.md][audit]) diffs each repo's live rulesets against.
-- `operational/develop.json` - the `develop` ruleset for **operational** repos (registry `workflowModel: operational`): direct signed pushes, no PR gate. `main.json` is shared by both models. See "Rulesets" below.
+- `main.json` plus one `develop` variant - the branch rulesets as the writable API subset (`name`, `target`, `enforcement`, `bypass_actors`, `conditions`, `rules`). The `develop` payload is `develop.json` (`release` repos) or `operational/develop.json` (`operational` repos); the hub keeps both, a carried copy only its own model's (see "Downstream Carry"). These are the canonical expected payload the hub's audit (`AUDIT.md`, hub-only) diffs each repo's live rulesets against.
+- `operational/develop.json` - the `develop` ruleset for **operational** repos (registry `workflowModel: operational`): direct signed pushes, no PR gate. Present at the hub and in operational carries only - a carried `release` repo does not have it. See "Rulesets" below.
 - `configure.sh` - applies the rulesets to a repository via the GitHub API (create or full-payload update, idempotent). Run `repo-config/configure.sh [owner/repo] [release|operational]`; the model defaults to the registry `workflowModel` lookup.
+
+## Downstream Carry
+
+Every fleet repo carries this directory; the hub keeps the canonical copy. Rules for the carried copy:
+
+- **Carry only your model's `develop` variant.** A `release` repo carries `develop.json`; an `operational` repo carries `operational/develop.json` instead. `main.json` and `settings.json` are shared by both models. `configure.sh` aborts when the payload its model needs is missing rather than applying a partial configuration.
+- **Hub-only references stay plain text.** The hub is a private repo: never URL-link it from a downstream repo - the link 404s for anyone without hub access. Files that exist only at the hub (`AUDIT.md`, `spec/`) are mentioned by name, not linked; links into files every repo carries (`AGENTS.md`) resolve everywhere and are fine.
+- **The regen snippet targets the current repo**, so it works unchanged in a carried copy.
 
 ## Rulesets
 
@@ -17,20 +25,24 @@ Two workflow models share `main.json` but differ on `develop` (registry `workflo
 
 **Configure by importing these JSON files, never by hand-building the rules** (hand reconstruction has gone wrong on past setups). The result must be **exactly two rulesets named `develop` and `main`** - the names are load-bearing (`AGENTS.md` and the workflows reference them); only the `develop` *content* varies by model. First remove all legacy classic branch-protection rules and any stray rulesets, then run `configure.sh` (which picks the `develop` payload from the repo's `workflowModel`), or `gh api -X POST repos/<owner>/<repo>/rulesets --input repo-config/<name>.json` per file (operational repos use `operational/develop.json` for `develop`). `gh ruleset` is read-only; creation goes through `gh api`. The required check binds by name and only turns green after the repo's PR workflow runs once. To edit a ruleset, GET it, change the field, and PUT the whole writable subset back (a partial PUT `422`s).
 
-To change the canonical rulesets, edit the live rulesets here, then regenerate the committed files:
+To change the canonical rulesets, edit the live rulesets (fleet-wide changes happen at the hub), then regenerate the committed files from the current repo:
 
 ```sh
+repo="$(gh repo view --json nameWithOwner --jq '.nameWithOwner')"
 for name in develop main; do
-  id=$(gh api repos/ptr727/ProjectTemplate/rulesets --jq ".[] | select(.name==\"$name\") | .id")
-  gh api "repos/ptr727/ProjectTemplate/rulesets/$id" \
+  out="repo-config/$name.json"
+  # An operational carry keeps its develop payload at operational/develop.json (develop.json is absent).
+  [ "$name" = "develop" ] && [ ! -e "$out" ] && out="repo-config/operational/develop.json"
+  id=$(gh api "repos/$repo/rulesets" --jq ".[] | select(.name==\"$name\") | .id")
+  gh api "repos/$repo/rulesets/$id" \
     --jq '{name, target, enforcement, bypass_actors, conditions, rules}' \
-    | jq -S --indent 4 '.' > "repo-config/$name.json"
+    | jq -S --indent 4 '.' > "$out"
 done
 ```
 
 ## Secrets
 
-Publish credentials required per mechanism are enumerated in [spec/secrets.json][secrets]. NuGet and PyPI use keyless OIDC Trusted Publishing (no stored key; the publish job needs `id-token: write`, and PyPI additionally an `environment: pypi` gate). Docker Hub has no OIDC equivalent and uses a stored `DOCKER_HUB_USERNAME` + `DOCKER_HUB_ACCESS_TOKEN` in both the Actions and Dependabot secret stores. Codegen and merge-bot repos add a GitHub App (`CODEGEN_APP_CLIENT_ID` + `CODEGEN_APP_PRIVATE_KEY` in both stores; the app must be installed, not just created). App-token call sites use `client-id`, never the deprecated `app-id`.
+Publish credentials required per mechanism are enumerated in the hub's `spec/secrets.json` (hub-only). A repo needs only the mechanisms its own publish targets use - a source-only repo needs none of the publish credentials below. NuGet and PyPI use keyless OIDC Trusted Publishing (no stored key; the publish job needs `id-token: write`, and PyPI additionally an `environment: pypi` gate). Docker Hub has no OIDC equivalent and uses a stored `DOCKER_HUB_USERNAME` + `DOCKER_HUB_ACCESS_TOKEN` in both the Actions and Dependabot secret stores. Codegen and merge-bot repos add a GitHub App (`CODEGEN_APP_CLIENT_ID` + `CODEGEN_APP_PRIVATE_KEY` in both stores; the app must be installed, not just created). App-token call sites use `client-id`, never the deprecated `app-id`.
 
 ## Repo Settings
 
@@ -49,8 +61,6 @@ The fleet-standard general settings live in [`settings.json`][settings-json] and
 
 <!-- Repo -->
 
-[settings-json]: ./settings.json
 [agents-branching-model]: ../AGENTS.md#branching-model
 [agents-git-and-commit-rules]: ../AGENTS.md#git-and-commit-rules
-[audit]: ../AUDIT.md
-[secrets]: ../spec/secrets.json
+[settings-json]: ./settings.json
