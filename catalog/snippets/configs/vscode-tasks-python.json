@@ -109,7 +109,7 @@
                 "clear": false
             }
         },
-        // Lint group - run on demand via Docker (--pull=always pins each to the current :latest); mirrors the CI
+        // Lint group - run on demand via Docker (--pull=always forces each to re-pull the current :latest); mirrors the CI
         // lint gate. Broad live spell-checking is the cspell extension's job. Pre-commit does formatting only.
         // These tasks are language-agnostic - identical to the .NET snippet's Lint group.
         {

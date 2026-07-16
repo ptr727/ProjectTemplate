@@ -348,7 +348,7 @@ This is the style guide for any **Python project(s)** in this repo.
 
 - **Type checker in CI** - `pyright` strict, **`mypy` in CI with `pyright` editor-only** (Pylance), or both. Whichever runs in CI is the one the clean-compile and the CI gate invoke.
 - **Dependency declaration** - `[dependency-groups]`, or PEP 621 `[project.optional-dependencies]` (dev tools installed with `uv sync --extra <group>`).
-- **Versioning / publishing** - a published package (`_version.py` + a version source + `uv build` + a PyPI publish step), or a **source-only** repo with a static `version` and no publish step (see [Versioning](#versioning)).
+- **Versioning / publishing** - a published package (`_version.py` + a version source + `uv build` + a PyPI publish step), or a **source-only** repo with a static `version` and no publish step (see [Versioning][versioning-section]).
 - **Disabled markdownlint rules** - repo-specific; `.markdownlint-cli2.jsonc` at the repo root is the source of truth, not any example rule named here.
 - **VS Code config home** - editor **settings/extensions** may live in `.vscode/*.json` **or** the `<Repo>.code-workspace`; **tasks / launch / debug** configs can only be external `.vscode/*.json` (they cannot live in the workspace file). A `[vscode-tasks]` reference must point wherever the repo actually keeps `tasks.json`.
 
@@ -484,6 +484,7 @@ Before pushing or opening a PR:
 [root]: ./.editorconfig
 [vscode-tasks]: ./catalog/snippets/configs/vscode-tasks.json
 [vscode-tasks-python]: ./catalog/snippets/configs/vscode-tasks-python.json
+[versioning-section]: #versioning
 
 <!-- External -->
 
