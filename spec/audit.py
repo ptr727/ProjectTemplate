@@ -133,6 +133,10 @@ def audit_repo(entry, spec):
     for mech in claimed:
         for store in mech.get("stores", []):
             required_by_store[store] |= set(mech.get("requires", []))
+    # Registry requiredSecrets[] are the domain-specific additions (STANDUP.md: requiredSecrets plus the
+    # implicit baseline). Mechanism-mapped names already carry their stores above; unmapped ones are
+    # expected in the actions store and count as claimed (never stale).
+    required_by_store["actions"] |= set(entry.get("requiredSecrets", []))
     forbidden = set(secrets["baseline"].get("forbids", []))
     for mech in claimed:
         forbidden |= set(mech.get("forbids", []))
@@ -184,7 +188,10 @@ def main():
     for entry in repos:
         model = entry.get("workflowModel") or spec["registry"].get("defaults", {}).get("workflowModel") or "release"
         print(f"== {entry['name']} ({', '.join(entry.get('types', []))}; {model}) ==")
-        findings = audit_repo(entry, spec)
+        try:
+            findings = audit_repo(entry, spec)
+        except Exception as e:  # a gh/JSON failure mid-audit must not abort the sweep
+            findings = [("ERROR", str(e))]
         if not findings:
             print("  clean (deterministic checks; the full operational verdict is AUDIT.md's)")
         for kind, text in findings:
