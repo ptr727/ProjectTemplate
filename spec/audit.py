@@ -103,7 +103,9 @@ def audit_repo(entry, spec):
     # --- Rulesets ---
     dev_payload = "repo-config/operational/develop.json" if model == "operational" else "repo-config/develop.json"
     expect_rulesets = {"develop": load(dev_payload), "main": load("repo-config/main.json")}
-    live_list = gh(f"repos/{slug}/rulesets?per_page=100", ok404=True) or []
+    # No ok404: a repo with no rulesets returns an empty list, so a 404 means the call failed
+    # (access/rename) and must surface as ERROR, not read as "no rulesets".
+    live_list = gh(f"repos/{slug}/rulesets?per_page=100") or []
     live_names = [r["name"] for r in live_list]
     for name, payload in expect_rulesets.items():
         ids = [r["id"] for r in live_list if r["name"] == name]
@@ -121,8 +123,10 @@ def audit_repo(entry, spec):
     # --- Secrets (names only) ---
     secrets = spec["secrets"]
     stores = {}
+    # No ok404: an empty store returns {"secrets": []}, so a 404/403 (permissions, rename) must
+    # surface as ERROR rather than cascade into false missing-secret DEFECTs.
     for store, path in [("actions", f"repos/{slug}/actions/secrets?per_page=100"), ("dependabot", f"repos/{slug}/dependabot/secrets?per_page=100")]:
-        data = gh(path, ok404=True)
+        data = gh(path)
         stores[store] = {s["name"] for s in (data or {}).get("secrets", [])}
     mechanisms = [secrets["targetMechanisms"].get(p.get("target")) for p in entry.get("publish", [])]
     mechanisms += [secrets.get("typeMechanisms", {}).get(t) for t in types]
