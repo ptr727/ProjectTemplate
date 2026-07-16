@@ -58,8 +58,9 @@ end_of_line = lf
 end_of_line = lf
 
 # Python is CRLF by the `[*]` default (universal newlines; commonly edited on Windows). Pin LF
-# only for a `.py` executed directly via its shebang, by path - here the CI validation entry point.
-[spec/validate.py]
+# only for a `.py` executed directly via its shebang, by path - here the CI validation entry point
+# and the fleet-audit runner.
+[spec/{validate,audit}.py]
 end_of_line = lf
 
 # uv regenerates uv.lock with LF on every platform, so pin it or an EOL check (editorconfig-checker/CI)
