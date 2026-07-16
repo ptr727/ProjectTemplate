@@ -16,6 +16,8 @@
         { "path": "version.json", "intentRef": "WORKFLOW.md#d3---versioning-and-classification", "appliesTo": "*" },
         { "path": "repo-config/develop.json", "intentRef": "repo-config/README.md", "appliesTo": "*" },
         { "path": "repo-config/main.json", "intentRef": "repo-config/README.md", "appliesTo": "*" },
+        { "path": "AUDIT.md", "intentRef": "repo-config/README.md", "appliesTo": "*" },
+        { "path": "spec/secrets.json", "intentRef": "repo-config/README.md", "appliesTo": "*" },
         { "path": ".github/dependabot.yml", "appliesTo": "*" },
         { "path": ".vscode/tasks.json", "sections": ["clean-compile task group"], "reference": "catalog/snippets/configs/vscode-tasks.json", "appliesTo": ["csharp"] },
         { "path": ".vscode/tasks.json", "sections": ["clean-compile task group"], "reference": "catalog/snippets/configs/vscode-tasks-python.json", "appliesTo": ["python"] },
