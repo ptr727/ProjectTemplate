@@ -13,8 +13,10 @@
 # Root config
 root = true
 
-# Defaults - CRLF is the default; only the LF exceptions below are declared,
-# mirroring `.gitattributes` (`* -text` plus the same LF pins). Keep the `[*]`
+# Defaults - CRLF is the default; only the LF exceptions below are declared. Most LF pins are shared with
+# `.gitattributes` (git-enforced): `*.sh`, the husky pre-commit shebang, `spec/validate.py`, and Dockerfiles.
+# The workflow-YAML pins (`.github/workflows/*` and the catalog snippet workflows) are `.editorconfig`-only -
+# git stays passive on them (`* -text`) and CI (editorconfig-checker) enforces LF. Keep the `[*]`
 # `end_of_line = crlf` default - it is required for the Windows-GUI/WSL-engine
 # workflow (Windows tooling misbehaves on LF) and every uncovered file type relies on it.
 [*]
@@ -58,6 +60,13 @@ end_of_line = lf
 # Python is CRLF by the `[*]` default (universal newlines; commonly edited on Windows). Pin LF
 # only for a `.py` executed directly via its shebang, by path - here the CI validation entry point.
 [spec/validate.py]
+end_of_line = lf
+
+# uv regenerates uv.lock with LF on every platform, so pin it or an EOL check (editorconfig-checker/CI)
+# reds on every `uv lock`/`uv sync` until the file is manually reconverted - same rationale as the
+# shebang/Dockerfile pins (a tool owns the ending). A Python repo on the CRLF default carries this; a repo
+# with no lockfile is unaffected.
+[uv.lock]
 end_of_line = lf
 
 # Dockerfiles - CRLF breaks RUN heredocs and line continuations
