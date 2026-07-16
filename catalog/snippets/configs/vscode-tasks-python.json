@@ -55,8 +55,9 @@
             }
         },
         {
-            // The clean-compile aggregator: format, then lint, then types - in order, no shell chaining.
-            "label": "Python Verify",
+            // The clean-compile aggregator - formats in place, then lints, then type-checks, in order (no shell
+            // chaining). Named "Format" (it mutates, like the sibling ".NET Format" task), not "Verify".
+            "label": "Python Format",
             "dependsOrder": "sequence",
             "dependsOn": [
                 "Ruff Format",
