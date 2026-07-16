@@ -73,7 +73,7 @@ The template uses a **two-phase model by default**: PRs build fast, publishing i
 
 ## Repository Onboarding and Conformance
 
-Every fleet repo is a standard-style repo the hub audits **downward** against its declared type - the model chosen because downstream divergence proved too costly to manage. Two obligations follow, and they are not optional:
+Every fleet repo is a standard-style repo the hub audits **downward** against its declared type - the model the fleet uses because managing downstream divergence is too costly. Two obligations follow, and they are not optional:
 
 - **Definition of done is the audit.** Onboarding or materially changing a repo is complete only when it passes [`AUDIT.md`](./AUDIT.md) for its type, **or** carries a committed `reports/<repo>/audit.md` plus a tracking issue for the residual deltas. Do not leave a repo partially stood up and unrecorded - that is itself a defect. Stand a repo (or a new type) up with [`STANDUP.md`](./STANDUP.md); verify it with [`AUDIT.md`](./AUDIT.md); the two share the same manifests, so a repo stood up correctly passes the audit by construction.
 - **The registry is ground truth about reality, not intent.** After any conformance change, reconcile the repo's [`registry/repos.json`](./registry/repos.json) entry - `status`, `types`, `releaseTrigger`, `workflowModel`, `driftNotes` - to what the repo actually is. [`spec/validate.py`](./spec/validate.py) proves the catalog is self-consistent; it does **not** prove the catalog matches the live repo. A `validate.py`-clean entry can still be false, and a stale entry is a finding.

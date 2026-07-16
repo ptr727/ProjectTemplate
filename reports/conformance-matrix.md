@@ -10,7 +10,7 @@ The primary types are stood up as whole repos; the **composable targets** (`nuge
 
 | Type | Reference repo | Cold-standup | Last audited | First gap / notes |
 |---|---|---|---|---|
-| `python` + `source-only` | Financial-Modeling | not-tested | - | Onboarding drove this roadmap; source-release (dispatch-only) standup tracked downstream. |
+| `python` + `source-only` | Financial-Modeling | not-tested | - | Reference for the source-release (dispatch-only) profile; the downstream standup issue is open. |
 | `csharp` + `console` | - | not-tested | - | |
 | `csharp` + `docker` | - | not-tested | - | |
 | `homeassistant` | - | not-tested | - | Standalone-config conventions (home-assistant/core); scored by the `ha.*` checks. |

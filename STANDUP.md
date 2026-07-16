@@ -2,7 +2,7 @@
 
 How an agent takes a repository from nothing (or a partial state) to **operational** against the fleet ground truth. This is the create-to-conformance procedure; [`AUDIT.md`][audit] is its read-only verifier and owns the definition of done. Both read the same ground truth - [`registry/repos.json`][repos], the [`spec/`][spec] manifests, [`repo-config/`][repo-config], and the prose authorities ([`AGENTS.md`][agents], [`CODESTYLE.md`][codestyle], [`WORKFLOW.md`][workflow]) - so a repo stood up by this file passes the audit by construction.
 
-Standing up a repo is **applying the manifests until the audit passes**, nothing more invented. If a repo needs a construct no manifest covers, that is a spec gap: raise it ([`AUDIT.md`][audit] section 9), never improvise a per-repo answer. This is the downward-audit model - standard-style repos the hub audits against their declared type - which the fleet chose because downstream divergence is too costly to manage.
+Standing up a repo is **applying the manifests until the audit passes**, nothing more invented. If a repo needs a construct no manifest covers, that is a spec gap: raise it ([`AUDIT.md`][audit] section 9), never improvise a per-repo answer. This is the downward-audit model - standard-style repos the hub audits against their declared type - which the fleet uses because managing downstream divergence is too costly.
 
 ## 1. Classify and Catalog
 
