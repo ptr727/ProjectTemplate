@@ -18,6 +18,10 @@ catalog/snippets/husky/pre-commit text eol=lf
 # here the CI validation entry point; do not re-add a blanket `*.py text eol=lf`.
 spec/validate.py text eol=lf
 
+# uv regenerates uv.lock with LF on every platform; pin it so git enforces LF on checkout/renormalize and a
+# CRLF-default repo does not fight the tool on every `uv lock`/`uv sync`. A repo with no lockfile is unaffected.
+uv.lock text eol=lf
+
 # Dockerfiles must be LF - a CRLF breaks RUN heredocs and line continuations.
 Dockerfile text eol=lf
 *.Dockerfile text eol=lf

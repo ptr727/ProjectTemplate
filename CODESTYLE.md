@@ -344,18 +344,26 @@ Follow the scope hierarchy in [Analyzer Diagnostics and Suppressions][analyzer-d
 
 This is the style guide for any **Python project(s)** in this repo.
 
+**Adapt before propagating.** The rules below describe the template's default Python profile - a package that publishes to PyPI, type-checked by `pyright` in strict mode, dependencies in `[dependency-groups]`. A derived repo often differs; when it does, **adapt these fields to match the repo's actual toolchain rather than copying verbatim** (a verbatim copy that misdescribes the repo is inaccurate and gets rejected in review). The axes that commonly vary per repo:
+
+- **Type checker in CI** - `pyright` strict, **`mypy` in CI with `pyright` editor-only** (Pylance), or both. Whichever runs in CI is the one the clean-compile and the CI gate invoke.
+- **Dependency declaration** - `[dependency-groups]`, or PEP 621 `[project.optional-dependencies]` (dev tools installed with `uv sync --extra <group>`).
+- **Versioning / publishing** - a published package (`_version.py` + a version source + `uv build` + a PyPI publish step), or a **source-only** repo with a static `version` and no publish step (see [Versioning][versioning-section]).
+- **Disabled markdownlint rules** - repo-specific; `.markdownlint-cli2.jsonc` at the repo root is the source of truth, not any example rule named here.
+- **VS Code config home** - editor **settings/extensions** may live in `.vscode/*.json` **or** the `<Repo>.code-workspace`; **tasks / launch / debug** configs can only be external `.vscode/*.json` (they cannot live in the workspace file). A `[vscode-tasks]` reference must point wherever the repo actually keeps `tasks.json`.
+
 ### Toolchain
 
 | Tool | Role | Config |
 |---|---|---|
-| [uv][uv-link] | env, deps, build, publish | `pyproject.toml` `[dependency-groups]`, `uv.lock` |
-| [hatchling][latest-link] | build backend | `pyproject.toml` `[build-system]` |
+| [uv][uv-link] | env, deps, build, publish (build/publish only where the repo ships a package) | `pyproject.toml` `[dependency-groups]` or `[project.optional-dependencies]`, `uv.lock` |
+| [hatchling][latest-link] | build backend (published packages) | `pyproject.toml` `[build-system]` |
 | [ruff][ruff-link] | lint + format + import sort | `pyproject.toml` `[tool.ruff]` |
-| [pyright][pyright-link] | type checker (strict baseline) | `pyproject.toml` `[tool.pyright]` |
-| [mypy][mypy-link] | additional type checker (optional; required for Home Assistant) | `pyproject.toml` `[tool.mypy]` (or per home-assistant/core) |
+| [pyright][pyright-link] | type checker (default; strict baseline) | `pyproject.toml` `[tool.pyright]` |
+| [mypy][mypy-link] | additional/alternate type checker (optional; the CI checker in a mypy-in-CI repo; required for Home Assistant) | `pyproject.toml` `[tool.mypy]` (or per home-assistant/core) |
 | [pytest][docs-link] | test runner | `pyproject.toml` `[tool.pytest.ini_options]` |
 
-**Type checking targets strongly typed, deterministic code.** `pyright` in **strict** mode is the required baseline on first-party code (`[tool.pyright]` `strict = ["src"]`, or the integration package for a Home Assistant repo; tests run standard mode). pyright is the anchor because **Pylance embeds it**, so the editor and the CLI/CI (`uv run pyright`) run the *same* engine and never disagree; the standalone `ms-pyright.pyright` extension stays in `unwantedRecommendations` because Pylance covers it. Relax strictness on **third-party** code only when a dependency has no usable types and no alternative (e.g. `pandas`): a targeted, commented `# pyright: ignore[...]` or a scoped `[tool.pyright]` override, never a blanket relaxation.
+**Type checking targets strongly typed, deterministic code.** `pyright` in **strict** mode is the default baseline on first-party code (a repo may instead run `mypy` in CI and keep `pyright` editor-only via Pylance - see the next paragraph) (`[tool.pyright]` `strict = ["src"]`, or the integration package for a Home Assistant repo; tests run standard mode). pyright is the anchor because **Pylance embeds it**, so the editor and the CLI/CI (`uv run pyright`) run the *same* engine and never disagree; the standalone `ms-pyright.pyright` extension stays in `unwantedRecommendations` because Pylance covers it. Relax strictness on **third-party** code only when a dependency has no usable types and no alternative (e.g. `pandas`): a targeted, commented `# pyright: ignore[...]` or a scoped `[tool.pyright]` override, never a blanket relaxation.
 
 **`mypy` is allowed, and required where the ecosystem demands it - it is not banned.** Running more than one checker is normal when each serves a purpose - the .NET side pairs `CSharpier` and `dotnet format` the same way - and pyright's inference and mypy's plugin ecosystem (e.g. `pydantic.mypy`) catch different classes of error. A **Home Assistant** integration runs `mypy --strict` because the platinum `strict-typing` quality-scale tier requires it; a pydantic-heavy library may opt in for the plugin. When a repo uses mypy it runs in **CI and the editor** (the `ms-python.mypy-type-checker` extension) so the two stay consistent, and its mypy command joins the clean-compile; a repo with no such need stays pyright-only, which is lighter and inherently consistent.
 
@@ -371,10 +379,10 @@ uv run ruff check                # verify lint clean
 uv run ruff format --check       # verify format clean
 uv run pyright                   # verify types
 uv run pytest                    # run tests
-uv build                         # produce wheel + sdist in ./dist
+uv build                         # produce wheel + sdist in ./dist (published packages only)
 ```
 
-The Python clean-compile (see [Clean-Compile Verification][clean-compile-verification]) is `uv run ruff format` + `uv run ruff check` + `uv run pyright` (plus the repo's mypy command, e.g. `uv run mypy src`, where mypy is used - see Type checking above); run it (plus `uv run pytest`) before committing. These are documented commands, not VS Code tasks. CI runs the same clean-compile commands as the authoritative backstop. Git hooks are opt-in; wire `pre-commit` for `ruff` and `pyright` yourself if you want local enforcement.
+The Python clean-compile (see [Clean-Compile Verification][clean-compile-verification]) is `uv run ruff format` + `uv run ruff check` + the repo's type checker - `uv run pyright`, or `uv run mypy src` where mypy is the CI checker, or both where the repo runs both (see Type checking above); run it (plus `uv run pytest`) before committing. These are documented commands; an optional VS Code tasks mirror (all `type: process`, no `&&` shell chaining, so it runs the same on any task shell) is in [`vscode-tasks-python.json`][vscode-tasks-python]. CI runs the same clean-compile commands as the authoritative backstop. Git hooks are opt-in; wire `pre-commit` for `ruff` and the type checker yourself if you want local enforcement.
 
 ### Layout
 
@@ -388,7 +396,7 @@ The Python clean-compile (see [Clean-Compile Verification][clean-compile-verific
     src/
         <package_name>/
             __init__.py
-            _version.py
+            _version.py        # published packages; a source-only repo uses a static version instead
             <modules>.py
     tests/
         __init__.py
@@ -417,7 +425,7 @@ The Python clean-compile (see [Clean-Compile Verification][clean-compile-verific
 
 #### Type Hints
 
-- **All public APIs are typed.** Pyright runs on `src/` in strict mode (`[tool.pyright]` `strict = ["src"]`); tests run in standard mode.
+- **All public APIs are typed.** The repo's configured type checker runs on `src/` (pyright strict via `[tool.pyright]` `strict = ["src"]`, or `mypy` where that is the CI checker); tests run in the checker's looser/standard mode.
 - **Use modern syntax**: `list[int]` not `List[int]`, `dict[str, X]` not `Dict[str, X]`, `X | None` not `Optional[X]`, `from __future__ import annotations` only when needed for forward references.
 - **Don't add `# type: ignore` to silence pyright errors without a comment** explaining the constraint. If a recurring false positive needs suppression, configure it project-wide in `[tool.pyright]`. A new port doesn't change this - fix freshly surfaced type errors rather than muting them (see [Analyzer Diagnostics and Suppressions][analyzer-diagnostics-and-suppressions]).
 
@@ -452,14 +460,16 @@ The Python clean-compile (see [Clean-Compile Verification][clean-compile-verific
 
 ### Versioning
 
-`_version.py` ships with `__version__ = "0.0.0"` as a placeholder. Until you wire `_version.py` to something that increments (the usual options are `hatch-vcs`, a version.json bridge, or manual bumps), no new PyPI versions will land - publishing with `skip-existing: true` keeps a stuck placeholder version from failing the run.
+**Published packages.** `_version.py` ships with `__version__ = "0.0.0"` as a placeholder. Until you wire `_version.py` to something that increments (the usual options are `hatch-vcs`, a version.json bridge, or manual bumps), no new PyPI versions will land - publishing with `skip-existing: true` keeps a stuck placeholder version from failing the run.
+
+**Source-only repos** (no PyPI publish; source-release on dispatch, or no release at all) do not need `_version.py`: keep a static `version` in `pyproject.toml` `[project]`, or let the release pipeline's version source (e.g. NBGV + `version.json`) own the tag. There is no publish step to guard, so `skip-existing` does not apply.
 
 ### Linter Cleanliness
 
 Before pushing or opening a PR:
 
 - VS Code's **Problems** pane should be quiet for the files you touched. The relevant linters are ruff (via the `charliermarsh.ruff` extension) and pyright (via the `ms-python.python` extension's bundled Pylance).
-- The CI gate is `uv run ruff check && uv run ruff format --check && uv run pyright && uv run pytest` - same as the local commands above, run from the Python project directory.
+- The CI gate is `uv run ruff check`, `uv run ruff format --check`, the repo's type checker (`uv run pyright` or `uv run mypy src`), and `uv run pytest` - the same commands as the local loop above, run from the Python project directory. (Invoke them as separate steps, not `&&`-chained, so the runner shell is irrelevant.)
 - Markdown in this directory follows the repo-wide [Markdown and Spelling][markdown-and-spelling] rules.
 
 <!-- Repo -->
@@ -472,7 +482,9 @@ Before pushing or opening a PR:
 [markdownlint-cli2]: ./.markdownlint-cli2.jsonc
 [readme]: ./README.md
 [root]: ./.editorconfig
+[versioning-section]: #versioning
 [vscode-tasks]: ./catalog/snippets/configs/vscode-tasks.json
+[vscode-tasks-python]: ./catalog/snippets/configs/vscode-tasks-python.json
 
 <!-- External -->
 
