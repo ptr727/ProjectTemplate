@@ -42,11 +42,12 @@ jobs:
         with:
           dotnet-version: 10.x
 
-      # Full history so NBGV can compute the git height for the branch.
+      # Full history for NBGV; pin the dispatch-time commit (the branch name is a moving pointer, so a commit
+      # landing after dispatch would be released unvalidated). GITHUB_REF still names the branch for NBGV.
       - name: Checkout code step
         uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
         with:
-          ref: ${{ github.ref_name }}
+          ref: ${{ github.sha }}
           fetch-depth: 0
 
       # NBGV versions the dispatched ref: main is the public-release ref (clean X.Y.Z), develop a prerelease.
