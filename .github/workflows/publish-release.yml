@@ -42,8 +42,7 @@ jobs:
         with:
           dotnet-version: 10.x
 
-      # Full history for NBGV; pin the dispatch-time commit (the branch name is a moving pointer, so a commit
-      # landing after dispatch would be released unvalidated). GITHUB_REF still names the branch for NBGV.
+      # Full history for NBGV; pin the dispatch-time commit - a push landing after dispatch must not release unvalidated.
       - name: Checkout code step
         uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
         with:
