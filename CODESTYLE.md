@@ -482,9 +482,9 @@ Before pushing or opening a PR:
 [markdownlint-cli2]: ./.markdownlint-cli2.jsonc
 [readme]: ./README.md
 [root]: ./.editorconfig
+[versioning-section]: #versioning
 [vscode-tasks]: ./catalog/snippets/configs/vscode-tasks.json
 [vscode-tasks-python]: ./catalog/snippets/configs/vscode-tasks-python.json
-[versioning-section]: #versioning
 
 <!-- External -->
 
