@@ -68,8 +68,12 @@ Run [`WORKFLOW.md`][workflow]'s methodology against the repo's **own** Actions: 
 
   ```sh
   norm='{name,target,enforcement,bypass_actors,conditions,rules} | .rules|=sort_by(.type) | .bypass_actors|=sort_by(.actor_id)'
+  rulesets=$(gh api "repos/<owner>/<repo>/rulesets")
   for b in develop main; do
-    id=$(gh api "repos/<owner>/<repo>/rulesets" --jq ".[]|select(.name==\"$b\").id")
+    # Exactly one ruleset per name: zero or duplicates is itself a finding - report it, never diff a guess.
+    count=$(jq --arg n "$b" '[.[] | select(.name==$n)] | length' <<<"$rulesets")
+    [ "$count" -eq 1 ] || { echo "$b: expected exactly 1 ruleset, found $count (defect/drift)"; continue; }
+    id=$(jq --arg n "$b" '.[] | select(.name==$n) | .id' <<<"$rulesets")
     diff <(jq -S "$norm" "repo-config/$b.json") \
          <(gh api "repos/<owner>/<repo>/rulesets/$id" --jq '{name,target,enforcement,bypass_actors,conditions,rules}' | jq -S "$norm") \
       && echo "$b: in sync" || echo "$b: DRIFT"
