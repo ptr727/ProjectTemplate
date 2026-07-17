@@ -84,27 +84,27 @@ def audit_repo(entry, spec):
         findings.append(("DRIFT", f"registry: hasDevelop={entry.get('hasDevelop')} but develop {'exists' if dev_exists else 'is absent'}"))
     if main_exists and dev_exists:
         # Commit counts mislead here: merge-commit promotions leave main permanently "ahead" while the
-        # trees are identical. Content is the signal - a develop...main compare with changed files means
-        # main carries content develop lacks (forward-sync needed); develop merely ahead is normal.
+        # head trees are identical, so tree equality is the no-drift fast path. When the head trees
+        # differ, empty compare files[] means develop is merely ahead (no main-side changes since the
+        # merge-base) - normal, no finding, no further API calls.
         if branch_main["commit"]["commit"]["tree"]["sha"] != branch_dev["commit"]["commit"]["tree"]["sha"]:
             cmp = gh(f"repos/{slug}/compare/develop...main", ok404=True)
-            if cmp:
-                # The three-dot compare's files[] is blind to cherry-picked promotions (develop may
-                # already hold identical content under different commit SHAs, e.g. promote/* branches)
-                # AND capped at 300 entries - so neither raw files[] nor a filter over it is reliable
-                # (#336). Instead, derive the main-side change set from the merge-base tree (paths
-                # whose blob differs base->main, additions and deletions included - no cap), then drop
-                # paths whose blobs already match at develop: content develop already has is not
-                # "content develop lacks". Three recursive trees calls; if any tree is truncated the
-                # filter is skipped and the compare's unfiltered count kept (conservative, marked).
+            if cmp and cmp.get("files"):
+                # Non-empty files[] signals main-side changes, but is not usable directly: it is blind
+                # to cherry-picked promotions (develop may already hold identical content under
+                # different commit SHAs, e.g. promote/* branches) AND capped at 300 entries (#336).
+                # Instead, derive the main-side change set from the merge-base tree (paths whose blob
+                # differs base->main, additions and deletions included - no cap), then drop paths
+                # whose blobs already match at develop: content develop already has is not "content
+                # develop lacks". Three recursive trees calls; if any tree is truncated the filter is
+                # skipped and the compare's unfiltered count kept (conservative, marked).
                 trees = {
                     "base": gh(f"repos/{slug}/git/trees/{cmp['merge_base_commit']['commit']['tree']['sha']}?recursive=1"),
                     "develop": gh(f"repos/{slug}/git/trees/{branch_dev['commit']['commit']['tree']['sha']}?recursive=1"),
                     "main": gh(f"repos/{slug}/git/trees/{branch_main['commit']['commit']['tree']['sha']}?recursive=1"),
                 }
                 if any(t.get("truncated") for t in trees.values()):
-                    if cmp.get("files"):
-                        findings.append(("DRIFT", f"branch: {len(cmp['files'])}+ main-side path change(s) develop lacks (forward-sync needed; tree too large to blob-filter cherry-pick noise)"))
+                    findings.append(("DRIFT", f"branch: {len(cmp['files'])}+ main-side path change(s) develop lacks (forward-sync needed; tree too large to blob-filter cherry-pick noise)"))
                 else:
                     blobs = {name: {e["path"]: e["sha"] for e in t["tree"] if e["type"] == "blob"} for name, t in trees.items()}
                     changed_on_main = {p for p in set(blobs["base"]) | set(blobs["main"]) if blobs["base"].get(p) != blobs["main"].get(p)}
