@@ -9,8 +9,8 @@ behind main). Owner-initiated: run it when onboarding a repo, when drift is susp
 fleet-wide changes. Read-only - it never modifies a target.
 
 Findings: DEFECT (an applicable check fails outright), LETTER (a required file is absent - intent
-unverified, judge per AUDIT.md section 7), DRIFT (non-breaking divergence, e.g. main carrying
-content develop lacks, a stale secret, a registry field contradicting reality), ERROR (a gh call
+unverified, judge per AUDIT.md section 7), DRIFT (non-breaking divergence, e.g. main-side
+changes develop lacks, a stale secret, a registry field contradicting reality), ERROR (a gh call
 failed, so the repo could not be fully audited). Exits non-zero when any repo has a DEFECT,
 LETTER, or ERROR finding.
 
@@ -104,14 +104,14 @@ def audit_repo(entry, spec):
                 }
                 if any(t.get("truncated") for t in trees.values()):
                     if cmp.get("files"):
-                        findings.append(("DRIFT", f"branch: main carries {len(cmp['files'])}+ changed file(s) develop lacks (forward-sync needed; tree too large to blob-filter cherry-pick noise)"))
+                        findings.append(("DRIFT", f"branch: {len(cmp['files'])}+ main-side path change(s) develop lacks (forward-sync needed; tree too large to blob-filter cherry-pick noise)"))
                 else:
                     blobs = {name: {e["path"]: e["sha"] for e in t["tree"] if e["type"] == "blob"} for name, t in trees.items()}
                     changed_on_main = {p for p in set(blobs["base"]) | set(blobs["main"]) if blobs["base"].get(p) != blobs["main"].get(p)}
                     lacking = sorted(p for p in changed_on_main if blobs["main"].get(p) != blobs["develop"].get(p))
                     if lacking:
                         shown = ", ".join(lacking[:8]) + (" ..." if len(lacking) > 8 else "")
-                        findings.append(("DRIFT", f"branch: main carries {len(lacking)} file(s) develop lacks (forward-sync needed): {shown}"))
+                        findings.append(("DRIFT", f"branch: {len(lacking)} main-side path change(s) develop lacks (forward-sync needed): {shown}"))
 
     # --- General settings ---
     expected = dict(spec["settings"])
