@@ -19,7 +19,7 @@ set -euo pipefail
 
 repo_arg="${1:-}"
 model="${2:-}"
-# Allow the model as the sole argument (`configure.sh operational`): a model name in arg 1 is not a repo.
+# Allow the model as the sole argument (`repo-config/configure.sh operational`): a model name in arg 1 is not a repo.
 case "$repo_arg" in
     release|operational) model="$repo_arg"; repo_arg="" ;;
 esac
@@ -42,9 +42,9 @@ if [ -z "$model" ]; then
         # No registry to consult (a downstream carry): infer the model from which develop payload is carried -
         # a carry holds exactly its own model's payload. Ambiguous layouts (both or neither, e.g. a partial
         # copy) abort rather than guess; a wrong guess would apply the wrong develop ruleset.
-        if [ -e "$script_dir/develop.json" ] && [ ! -e "$script_dir/operational/develop.json" ]; then
+        if [ -f "$script_dir/develop.json" ] && [ ! -f "$script_dir/operational/develop.json" ]; then
             model="release"
-        elif [ -e "$script_dir/operational/develop.json" ] && [ ! -e "$script_dir/develop.json" ]; then
+        elif [ -f "$script_dir/operational/develop.json" ] && [ ! -f "$script_dir/develop.json" ]; then
             model="operational"
         else
             echo "Registry $registry not found and the carried develop payloads are ambiguous (expected exactly one of develop.json or operational/develop.json). Pass the model explicitly (release|operational)." >&2
