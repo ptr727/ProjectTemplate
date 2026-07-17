@@ -37,7 +37,7 @@ rulesets=$(gh api --paginate "repos/$repo/rulesets" --jq '.[]' | jq -s '.')
 for name in develop main; do
   out="repo-config/$name.json"
   # An operational carry keeps its develop payload at operational/develop.json (develop.json is absent).
-  [ "$name" = "develop" ] && [ ! -e "$out" ] && out="repo-config/operational/develop.json"
+  [ "$name" = "develop" ] && [ ! -f "$out" ] && out="repo-config/operational/develop.json"
   # Exactly one ruleset per name: zero or duplicates is declared drift - fail loudly, never regen from a guess.
   count=$(jq --arg n "$name" '[.[] | select(.name==$n)] | length' <<<"$rulesets")
   [ "$count" -eq 1 ] || { echo "expected exactly 1 ruleset named $name, found $count (drift)" >&2; exit 1; }
