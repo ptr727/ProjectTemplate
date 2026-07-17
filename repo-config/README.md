@@ -4,7 +4,7 @@ Repository and branch configuration held as committed files, kept out of `.githu
 
 - `main.json` plus one `develop` variant - the branch rulesets as the writable API subset (`name`, `target`, `enforcement`, `bypass_actors`, `conditions`, `rules`). The `develop` payload is `develop.json` (`release` repos) or `operational/develop.json` (`operational` repos); the hub keeps both, a carried copy only its own model's (see "Downstream Carry"). These are the canonical expected payloads that the audit (the hub's fleet-wide `AUDIT.md`, or a carried repo-scoped adaptation - see "Downstream Carry") diffs the live rulesets against.
 - `operational/develop.json` - the `develop` ruleset for **operational** repos (registry `workflowModel: operational`): direct signed pushes, no PR gate. Present at the hub and in operational carries only - a carried `release` repo does not have it. See "Rulesets" below.
-- `configure.sh` - applies the rulesets to a repository via the GitHub API (create or full-payload update, idempotent). Run `repo-config/configure.sh [owner/repo] [release|operational]`; the model defaults to the registry `workflowModel` lookup.
+- `configure.sh` - applies the rulesets to a repository via the GitHub API (create or full-payload update, idempotent). Run `repo-config/configure.sh [owner/repo] [release|operational]`; the model may also be passed as the sole argument (`repo-config/configure.sh operational`). The model defaults to the registry `workflowModel` lookup at the hub; in a downstream carry (no registry) it is inferred from which `develop` payload is carried, and an ambiguous layout (both or neither payload) aborts rather than guesses.
 
 ## Downstream Carry
 
@@ -30,11 +30,18 @@ To change the canonical rulesets, edit the live rulesets (fleet-wide changes hap
 
 ```sh
 repo="$(gh repo view --json nameWithOwner --jq '.nameWithOwner')"
+# Paginate so a name match on a later page is never missed - the same trap configure.sh guards against.
+# --paginate with --jq '.[]' emits one JSON object per ruleset across all pages; jq -s re-assembles them
+# into the single array the selections below expect.
+rulesets=$(gh api --paginate "repos/$repo/rulesets" --jq '.[]' | jq -s '.')
 for name in develop main; do
   out="repo-config/$name.json"
   # An operational carry keeps its develop payload at operational/develop.json (develop.json is absent).
-  [ "$name" = "develop" ] && [ ! -e "$out" ] && out="repo-config/operational/develop.json"
-  id=$(gh api "repos/$repo/rulesets" --jq ".[] | select(.name==\"$name\") | .id")
+  [ "$name" = "develop" ] && [ ! -f "$out" ] && out="repo-config/operational/develop.json"
+  # Exactly one ruleset per name: zero or duplicates is declared drift - fail loudly, never regen from a guess.
+  count=$(jq --arg n "$name" '[.[] | select(.name==$n)] | length' <<<"$rulesets")
+  [ "$count" -eq 1 ] || { echo "expected exactly 1 ruleset named $name, found $count (drift)" >&2; exit 1; }
+  id=$(jq --arg n "$name" '.[] | select(.name==$n) | .id' <<<"$rulesets")
   gh api "repos/$repo/rulesets/$id" \
     --jq '{name, target, enforcement, bypass_actors, conditions, rules}' \
     | jq -S --indent 4 '.' > "$out"

@@ -68,9 +68,20 @@ Run [`WORKFLOW.md`][workflow]'s methodology against the repo's **own** Actions: 
 
   ```sh
   norm='{name,target,enforcement,bypass_actors,conditions,rules} | .rules|=sort_by(.type) | .bypass_actors|=sort_by(.actor_id)'
+  # Model-aware expected payload: an operational repo's develop ruleset diffs against
+  # operational/develop.json (registry workflowModel; the same selection audit.py makes).
+  model=$(jq -r --arg n "<repo>" '(.repos[] | select(.name==$n) | .workflowModel) // .defaults.workflowModel // "release"' registry/repos.json)
+  # Paginate so later-page rulesets count: --paginate with --jq '.[]' emits one JSON object per ruleset
+  # across all pages; jq -s re-assembles them into the single array the selections below expect.
+  rulesets=$(gh api --paginate "repos/<owner>/<repo>/rulesets" --jq '.[]' | jq -s '.')
   for b in develop main; do
-    id=$(gh api "repos/<owner>/<repo>/rulesets" --jq ".[]|select(.name==\"$b\").id")
-    diff <(jq -S "$norm" "repo-config/$b.json") \
+    file="repo-config/$b.json"
+    [ "$b" = "develop" ] && [ "$model" = "operational" ] && file="repo-config/operational/develop.json"
+    # Exactly one ruleset per name: zero or duplicates is itself a finding - report it, never diff a guess.
+    count=$(jq --arg n "$b" '[.[] | select(.name==$n)] | length' <<<"$rulesets")
+    [ "$count" -eq 1 ] || { echo "$b: expected exactly 1 ruleset, found $count (defect/drift)"; continue; }
+    id=$(jq --arg n "$b" '.[] | select(.name==$n) | .id' <<<"$rulesets")
+    diff <(jq -S "$norm" "$file") \
          <(gh api "repos/<owner>/<repo>/rulesets/$id" --jq '{name,target,enforcement,bypass_actors,conditions,rules}' | jq -S "$norm") \
       && echo "$b: in sync" || echo "$b: DRIFT"
   done
