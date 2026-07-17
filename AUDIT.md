@@ -68,7 +68,8 @@ Run [`WORKFLOW.md`][workflow]'s methodology against the repo's **own** Actions: 
 
   ```sh
   norm='{name,target,enforcement,bypass_actors,conditions,rules} | .rules|=sort_by(.type) | .bypass_actors|=sort_by(.actor_id)'
-  # Paginate, then re-assemble into one array (each page is a separate JSON doc) so later-page rulesets count.
+  # Paginate so later-page rulesets count: --paginate with --jq '.[]' emits one JSON object per ruleset
+  # across all pages; jq -s re-assembles them into the single array the selections below expect.
   rulesets=$(gh api --paginate "repos/<owner>/<repo>/rulesets" --jq '.[]' | jq -s '.')
   for b in develop main; do
     # Exactly one ruleset per name: zero or duplicates is itself a finding - report it, never diff a guess.

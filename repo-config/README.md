@@ -30,8 +30,9 @@ To change the canonical rulesets, edit the live rulesets (fleet-wide changes hap
 
 ```sh
 repo="$(gh repo view --json nameWithOwner --jq '.nameWithOwner')"
-# Paginate, then re-assemble into one array (each page is a separate JSON doc) so a name match on a later
-# page is never missed - the same trap configure.sh guards against.
+# Paginate so a name match on a later page is never missed - the same trap configure.sh guards against.
+# --paginate with --jq '.[]' emits one JSON object per ruleset across all pages; jq -s re-assembles them
+# into the single array the selections below expect.
 rulesets=$(gh api --paginate "repos/$repo/rulesets" --jq '.[]' | jq -s '.')
 for name in develop main; do
   out="repo-config/$name.json"
