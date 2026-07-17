@@ -93,22 +93,23 @@ def audit_repo(entry, spec):
                 # Non-empty files[] signals main-side changes, but is not usable directly: it is blind
                 # to cherry-picked promotions (develop may already hold identical content under
                 # different commit SHAs, e.g. promote/* branches) AND capped at 300 entries (#336).
-                # Instead, derive the main-side change set from the merge-base tree (paths whose blob
-                # differs base->main, additions and deletions included - no cap), then drop paths
-                # whose blobs already match at develop: content develop already has is not "content
-                # develop lacks". Three recursive trees calls; if any tree is truncated the filter is
-                # skipped and the compare's unfiltered count kept (conservative, marked).
+                # Instead, derive the main-side change set from the merge-base tree - paths whose
+                # object SHA (blob, or submodule pointer) differs base->main, additions and deletions
+                # included, no cap - then drop paths whose objects already match at develop: content
+                # develop already has is not "content develop lacks". Three recursive trees calls; if
+                # any tree is truncated (or unexpectedly not a dict) the filter is skipped and the
+                # compare's unfiltered count kept (conservative, marked).
                 trees = {
                     "base": gh(f"repos/{slug}/git/trees/{cmp['merge_base_commit']['commit']['tree']['sha']}?recursive=1"),
                     "develop": gh(f"repos/{slug}/git/trees/{branch_dev['commit']['commit']['tree']['sha']}?recursive=1"),
                     "main": gh(f"repos/{slug}/git/trees/{branch_main['commit']['commit']['tree']['sha']}?recursive=1"),
                 }
-                if any(t.get("truncated") for t in trees.values()):
-                    findings.append(("DRIFT", f"branch: {len(cmp['files'])}+ main-side path change(s) develop lacks (forward-sync needed; tree too large to blob-filter cherry-pick noise)"))
+                if not all(isinstance(t, dict) for t in trees.values()) or any(t.get("truncated") for t in trees.values()):
+                    findings.append(("DRIFT", f"branch: {len(cmp['files'])}+ main-side path change(s) develop lacks (forward-sync needed; tree unavailable or too large to filter cherry-pick noise)"))
                 else:
-                    blobs = {name: {e["path"]: e["sha"] for e in t["tree"] if e["type"] == "blob"} for name, t in trees.items()}
-                    changed_on_main = {p for p in set(blobs["base"]) | set(blobs["main"]) if blobs["base"].get(p) != blobs["main"].get(p)}
-                    lacking = sorted(p for p in changed_on_main if blobs["main"].get(p) != blobs["develop"].get(p))
+                    objs = {name: {e["path"]: e["sha"] for e in t["tree"] if e["type"] in ("blob", "commit")} for name, t in trees.items()}
+                    changed_on_main = {p for p in set(objs["base"]) | set(objs["main"]) if objs["base"].get(p) != objs["main"].get(p)}
+                    lacking = sorted(p for p in changed_on_main if objs["main"].get(p) != objs["develop"].get(p))
                     if lacking:
                         shown = ", ".join(lacking[:8]) + (" ..." if len(lacking) > 8 else "")
                         findings.append(("DRIFT", f"branch: {len(lacking)} main-side path change(s) develop lacks (forward-sync needed): {shown}"))
