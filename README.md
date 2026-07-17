@@ -99,7 +99,11 @@ A human-readable index of the rules agents enforce, implement, and audit. The au
 
 ### If a Python Project
 
-- Configure ruff and pyright in `pyproject.toml`.
+- Configure ruff and a type checker in `pyproject.toml` - pyright strict, or mypy in CI with pyright editor-only; whichever runs in CI is the gate.
+
+### If Both C# and Python
+
+- Both sections above apply; a repo can be both (a C# app plus a Python subtree). The Python is either a full uv project (`uv.lock`, `uv run`) or a stdlib-only `uvx` scripts subtree (no `uv.lock`, `pyproject.toml` carries lint/type config only). See [CODESTYLE.md][codestyle] "Two profiles".
 
 ### If Publishing a Package (NuGet or PyPI)
 

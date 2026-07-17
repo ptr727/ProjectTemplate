@@ -352,6 +352,11 @@ This is the style guide for any **Python project(s)** in this repo.
 - **Disabled markdownlint rules** - repo-specific; `.markdownlint-cli2.jsonc` at the repo root is the source of truth, not any example rule named here.
 - **VS Code config home** - editor **settings/extensions** may live in `.vscode/*.json` **or** the `<Repo>.code-workspace`; **tasks / launch / debug** configs can only be external `.vscode/*.json` (they cannot live in the workspace file). A `[vscode-tasks]` reference must point wherever the repo actually keeps `tasks.json`.
 
+**Two profiles.** A repo's Python is one of two shapes, and the rest of this section (uv project, `uv.lock`, `uv run`, `src` layout, pytest coverage) describes the **project** profile. The two differ by whether the Python has **third-party runtime dependencies**, which shows up structurally in `pyproject.toml`, so the audit detects the profile there (`python.profile.detect`):
+
+- **Project** - the Python has third-party runtime dependencies, or is the repo's deliverable. It is a PEP 621 uv project: `[project]` with `dependencies` (dev tools in `[project.optional-dependencies]` or `[dependency-groups]`), a `[build-system]`, and a committed `uv.lock` (pinned LF - see [Line Endings][line-endings]); CI runs `uv sync --frozen` + `uv run <tool>`, so the lockfile pins tool versions. Financial-Modeling is the reference.
+- **Scripts** - stdlib-only utility scripts embedded in a **non-Python** repo (e.g. the Python tooling subtree of a `csharp` app - PlexCleaner's `RegressionTests/`). Run the tools with **`uvx`** (no project install, no lockfile): the `pyproject.toml` carries **only** `[tool.ruff]` / `[tool.mypy]` config - no `[project]`, no `[build-system]`, no `uv.lock` (that metadata would misrepresent it as a shippable package). **mypy** is the type checker (there is no first-party package for pyright strict to anchor on). Because there is no lockfile to pin versions, **CI pins the exact tool versions in the `uvx` command** (`uvx ruff@<ver>`, `uvx mypy@<ver>`, bumpable there) while the VS Code tasks and README run the unpinned latest - a deliberate CI-vs-local gap so local tooling never silently falls behind. `.py` files follow the repo's line-ending default (CRLF in a CRLF-default repo; a shebang-executed script is LF-pinned by path - see [Line Endings][line-endings]). There is no pytest suite, so the coverage expectation is N/A; a co-present `csharp` type still carries `codecov.yml` for its own tests.
+
 ### Toolchain
 
 | Tool | Role | Config |
@@ -478,6 +483,7 @@ Before pushing or opening a PR:
 [analyzer-diagnostics-and-suppressions]: #analyzer-diagnostics-and-suppressions
 [clean-compile-verification]: #clean-compile-verification
 [history]: ./HISTORY.md
+[line-endings]: ./AGENTS.md#line-endings
 [markdown-and-spelling]: #markdown-and-spelling
 [markdownlint-cli2]: ./.markdownlint-cli2.jsonc
 [readme]: ./README.md
