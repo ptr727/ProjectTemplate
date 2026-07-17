@@ -9,8 +9,8 @@ behind main). Owner-initiated: run it when onboarding a repo, when drift is susp
 fleet-wide changes. Read-only - it never modifies a target.
 
 Findings: DEFECT (an applicable check fails outright), LETTER (a required file is absent - intent
-unverified, judge per AUDIT.md section 7), DRIFT (non-breaking divergence, e.g. main carrying
-content develop lacks, a stale secret, a registry field contradicting reality), ERROR (a gh call
+unverified, judge per AUDIT.md section 7), DRIFT (non-breaking divergence, e.g. main-side
+changes develop lacks, a stale secret, a registry field contradicting reality), ERROR (a gh call
 failed, so the repo could not be fully audited). Exits non-zero when any repo has a DEFECT,
 LETTER, or ERROR finding.
 
@@ -84,12 +84,35 @@ def audit_repo(entry, spec):
         findings.append(("DRIFT", f"registry: hasDevelop={entry.get('hasDevelop')} but develop {'exists' if dev_exists else 'is absent'}"))
     if main_exists and dev_exists:
         # Commit counts mislead here: merge-commit promotions leave main permanently "ahead" while the
-        # trees are identical. Content is the signal - a develop...main compare with changed files means
-        # main carries content develop lacks (forward-sync needed); develop merely ahead is normal.
+        # head trees are identical, so tree equality is the no-drift fast path. When the head trees
+        # differ, empty compare files[] means develop is merely ahead (no main-side changes since the
+        # merge-base) - normal, no finding, no further API calls.
         if branch_main["commit"]["commit"]["tree"]["sha"] != branch_dev["commit"]["commit"]["tree"]["sha"]:
             cmp = gh(f"repos/{slug}/compare/develop...main", ok404=True)
             if cmp and cmp.get("files"):
-                findings.append(("DRIFT", f"branch: main carries {len(cmp['files'])}+ changed file(s) develop lacks (forward-sync needed)"))
+                # Non-empty files[] signals main-side changes, but is not usable directly: it is blind
+                # to cherry-picked promotions (develop may already hold identical content under
+                # different commit SHAs, e.g. promote/* branches) AND capped at 300 entries (#336).
+                # Instead, derive the main-side change set from the merge-base tree - paths whose
+                # object SHA (blob, or submodule pointer) differs base->main, additions and deletions
+                # included, no cap - then drop paths whose objects already match at develop: content
+                # develop already has is not "content develop lacks". Three recursive trees calls; if
+                # any tree is truncated (or unexpectedly not a dict) the filter is skipped and the
+                # compare's unfiltered count kept (conservative, marked).
+                trees = {
+                    "base": gh(f"repos/{slug}/git/trees/{cmp['merge_base_commit']['commit']['tree']['sha']}?recursive=1"),
+                    "develop": gh(f"repos/{slug}/git/trees/{branch_dev['commit']['commit']['tree']['sha']}?recursive=1"),
+                    "main": gh(f"repos/{slug}/git/trees/{branch_main['commit']['commit']['tree']['sha']}?recursive=1"),
+                }
+                if not all(isinstance(t, dict) for t in trees.values()) or any(t.get("truncated") for t in trees.values()):
+                    findings.append(("DRIFT", f"branch: {len(cmp['files'])}+ main-side path change(s) develop lacks (forward-sync needed; tree unavailable or too large to filter cherry-pick noise)"))
+                else:
+                    objs = {name: {e["path"]: e["sha"] for e in t["tree"] if e["type"] in ("blob", "commit")} for name, t in trees.items()}
+                    changed_on_main = {p for p in set(objs["base"]) | set(objs["main"]) if objs["base"].get(p) != objs["main"].get(p)}
+                    lacking = sorted(p for p in changed_on_main if objs["main"].get(p) != objs["develop"].get(p))
+                    if lacking:
+                        shown = ", ".join(lacking[:8]) + (" ..." if len(lacking) > 8 else "")
+                        findings.append(("DRIFT", f"branch: {len(lacking)} main-side path change(s) develop lacks (forward-sync needed): {shown}"))
 
     # --- General settings ---
     expected = dict(spec["settings"])
