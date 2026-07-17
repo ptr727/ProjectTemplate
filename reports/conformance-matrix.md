@@ -13,6 +13,7 @@ The primary shapes are stood up as whole repos; the **composable targets** (`nug
 | `python` + `source-only` | Financial-Modeling | not-tested | - | Reference for the source-release (dispatch-only) profile; the downstream standup issue is open. |
 | `csharp` + `console` | - | not-tested | - | |
 | `csharp` + `docker` | - | not-tested | - | |
+| `csharp` + `python` | PlexCleaner | not-tested | - | First mixed-language shape (#339). Python is a stdlib-only `uvx` **scripts** profile subtree (`RegressionTests/`): no `uv.lock`, `pyproject.toml` lint/type config only, mypy checker, `python.uvlock.pinned` + `python.coverage.codecov` N/A; `codecov.yml` stays required for the C# side. Both language rule-sets apply (CODESTYLE.md "Two profiles"). |
 | `homeassistant` | - | not-tested | - | Standalone-config conventions (home-assistant/core); scored by the `ha.*` checks. |
 | `eda` | - | not-tested | - | Data-zip release, pull consumer. |
 | `upstream-wrapper` | - | not-tested | - | Tag from a committed state file, not SemVer2. |
