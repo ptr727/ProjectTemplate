@@ -16,8 +16,10 @@ LETTER, or ERROR finding.
 
 Usage: python3 spec/audit.py [RepoName ...]   (default: every cataloged repo)
 """
+import base64
 import json
 import pathlib
+import re
 import subprocess
 import sys
 
@@ -176,6 +178,28 @@ def audit_repo(entry, spec):
         claimed_names = required_by_store["actions"] | required_by_store["dependabot"]
         for name in sorted(present - claimed_names):
             findings.append(("DRIFT", f"secrets: {name} in the {store} store is claimed by no applicable mechanism (stale?)"))
+
+    # --- Dependabot ecosystem coverage ---
+    # A repo's tree implies Dependabot ecosystems it must track: github-actions when it ships workflows
+    # (the action versions they reference otherwise go stale, and a merge-bot then has no PRs to auto-merge),
+    # devcontainers when it ships a .devcontainer. dependabot.yml is YAML (no stdlib parser), so scan the
+    # declared package-ecosystem values by regex - anchored to the line start so a commented-out entry
+    # (# package-ecosystem: ...) is not read as declared. This asserts an implied ecosystem's *presence*
+    # only; that each declared ecosystem dual-targets main+develop (the fleet norm) is verified by
+    # inspection, not here. Only runs when dependabot.yml exists; its absence is already a file-presence
+    # LETTER below. Language ecosystems (nuget/uv/npm) are directory-scoped and not yet cross-checked here.
+    db = gh(f"repos/{slug}/contents/.github/dependabot.yml?ref={ground}", ok404=True)
+    if db and db.get("content"):
+        declared = set(re.findall(r'^[ \t]*-?[ \t]*package-ecosystem:[ \t]*["\']?([\w-]+)', base64.b64decode(db["content"]).decode("utf-8", "replace"), re.M))
+        implied = {}
+        workflows = gh(f"repos/{slug}/contents/.github/workflows?ref={ground}", ok404=True)
+        if isinstance(workflows, list) and any(e["name"].endswith((".yml", ".yaml")) for e in workflows):
+            implied["github-actions"] = ".github/workflows/ is present"
+        if gh(f"repos/{slug}/contents/.devcontainer?ref={ground}", ok404=True) is not None:
+            implied["devcontainers"] = ".devcontainer/ is present"
+        for eco, why in sorted(implied.items()):
+            if eco not in declared:
+                findings.append(("DRIFT", f"dependabot: {eco} ecosystem not declared though {why}; add it for both main and develop per the fleet norm"))
 
     # --- File presence on the ground-truth branch ---
     seen_paths = set()
