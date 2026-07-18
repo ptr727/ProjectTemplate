@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-set -euo pipefail
+set -Eeuo pipefail
 
 # Restore the .NET local-tool manifest (csharpier, dotnet-outdated).
 dotnet tool restore

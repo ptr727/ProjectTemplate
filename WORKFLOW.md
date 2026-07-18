@@ -32,7 +32,7 @@ Prescriptive style/legibility rules. Cheap to check, necessary but not sufficien
 - **Workflow `name:`.** Reusable names end in **"task"**; entry-point names end in **"action"**.
 - **Job and step `name:`.** Every job ends in **"job"**, every step in **"step"** - including a ruleset-bound required-check job, whose `name:` and the ruleset `context:` are one string renamed together (never independently).
 - **Concurrency.** Top-level workflows declare `concurrency: { group: '${{ github.workflow }}-${{ github.ref }}', cancel-in-progress: true }`. Document exceptions inline (D7).
-- **Shells.** Every multi-line bash `run:` starts `set -euo pipefail`.
+- **Shells.** Every multi-line bash `run:` - and every committed `.sh` script - starts `set -Eeuo pipefail`.
 - **Conditionals.** Multi-line `if:` uses the folded scalar `if: >-`.
 - **Boolean inputs.** A boolean used by both `workflow_call` and `workflow_dispatch` is declared in **both** trigger blocks; `workflow_dispatch` delivers the **string** `"true"`/`"false"`, so any `if:` compares both forms: `${{ inputs.foo == true || inputs.foo == 'true' }}`.
 - **Reusable-workflow permissions.** Job-level `permissions:` are validated **before** `if:`, so even a skipped job needs valid permissions. Grant least privilege; a reusable callee's extra scope (e.g. `actions: write` for cleanup) is granted by the **caller**.
@@ -201,7 +201,7 @@ The required behaviors, organized by domain. Each is a **MUST**, stated as input
 
 - **D9.1** Every action SHA-pinned with a version comment (sole exception: the documented lagging-tag tool).
 - **D9.2** File/workflow/job/step names follow the suffix rules; a ruleset-bound job's `name:` equals its ruleset `context:` (renamed together).
-- **D9.3** Bash `run:` blocks start `set -euo pipefail`; multi-line `if:` uses `>-`.
+- **D9.3** Bash `run:` blocks start `set -Eeuo pipefail`; multi-line `if:` uses `>-`.
 - **D9.4** Docker layer cache targets a registry tag, not `type=gha`; `cache-to` writes only the built branch's `buildcache-<branch>` and only on push, while `cache-from` reads both branches; multi-image repos use a per-image cache tag.
 - **D9.5** Line endings follow `.editorconfig`.
 

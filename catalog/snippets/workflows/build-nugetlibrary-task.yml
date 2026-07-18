@@ -52,7 +52,7 @@ jobs:
 
       - name: Build NuGet library project step
         run: |
-          set -euo pipefail
+          set -Eeuo pipefail
           dotnet build ./NuGetLibrary/NuGetLibrary.csproj \
             -property:OutputPath=${{ runner.temp }}/publish/ \
             -property:PackageOutputPath=${{ runner.temp }}/publish/ \
@@ -66,7 +66,7 @@ jobs:
       - name: Publish to NuGet.org step
         if: ${{ inputs.push }}
         run: |
-          set -euo pipefail
+          set -Eeuo pipefail
           dotnet nuget push ${{ runner.temp }}/publish/*.nupkg \
             --source https://api.nuget.org/v3/index.json \
             --api-key ${{ secrets.NUGET_API_KEY }} \
