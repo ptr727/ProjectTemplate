@@ -124,7 +124,7 @@
             "checks": [
                 { "id": "setup.secrets.present", "verdict": "letter", "assert": "Every requiredSecret for the repo's publish mechanisms is configured (per spec/secrets.json).", "intentRef": "repo-config/README.md" },
                 { "id": "setup.secrets.noforbidden", "verdict": "letter", "assert": "No forbidden secret is present (e.g. a static NUGET_API_KEY on an OIDC repo).", "intentRef": "spec/secrets.json" },
-                { "id": "setup.dependabot.ecosystems", "verdict": "intent", "assert": "For each ecosystem the repo's tree implies, .github/dependabot.yml declares it (dual-target main+develop per the fleet norm): github-actions when .github/workflows/ ships SHA-pinned actions (else the pins go stale and a stood-up merge-bot has no PRs to auto-merge), devcontainers when a .devcontainer is present. A missing implied ecosystem is a drift finding. Language ecosystems (nuget/uv/npm) are directory-scoped, audited by inspection.", "intentRef": "AGENTS.md#branching-model" }
+                { "id": "setup.dependabot.ecosystems", "verdict": "intent", "assert": "For each ecosystem the repo's tree implies, .github/dependabot.yml declares it (dual-target main+develop per the fleet norm): github-actions when .github/workflows/ uses actions (else their versions go stale and a stood-up merge-bot has no PRs to auto-merge), devcontainers when a .devcontainer is present. A missing implied ecosystem is a drift finding. Language ecosystems (nuget/uv/npm) are directory-scoped, audited by inspection.", "intentRef": "AGENTS.md#branching-model" }
             ]
         },
         "linter-parity": {
