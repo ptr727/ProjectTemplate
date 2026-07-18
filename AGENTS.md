@@ -114,6 +114,7 @@ Clarify devcontainer setup steps in README
 - One logical paragraph per line; no hard-wrap line-length limit. For an intentional hard line break within a block - stacked badges, status, or license lines - end the line with a trailing backslash (`\`); this explicit form is preferred over trailing whitespace and is not treated as a paragraph split.
 - Headings follow the title-case-with-short-bind-words rule from the PR-title section.
 - **Write in the present tense, describing only the current state.** The reader has no knowledge beyond what they are reading, so state what *is* - what to know, do, follow, or avoid - never a change from a prior state. Write "X does Y", never "X *now* does Y", "X *no longer* does Z", "X *still* does W", or "changed/switched/restored to Y". This applies to docs and code/workflow comments alike; before/after framing belongs in changelogs, commit messages, and PR descriptions - where the prior state is the point - not in `README.md`, `AGENTS.md`, or other living docs.
+- **When you change a behavior, search for prose that asserts the old one.** Updating the guarantee or rule you are consciously editing is not enough: comments, diagram labels, reusable-workflow input descriptions, and audit statements elsewhere may still describe the prior behavior, and each was accurate when written. Grep for the old behavior's distinctive phrasing and fix every instance. No linter catches this - markdownlint, cspell, actionlint, and editorconfig-checker all pass on a claim that is merely untrue - so the sweep is the only mechanism that will. This is the maintenance counterpart to the present-tense rule above: that one governs how to phrase a doc, this one how to keep it true when the behavior underneath it moves.
 
 ### Comments
 
@@ -153,6 +154,18 @@ Applies to code and workflow (`#`) comments alike.
 ### Quantitative Claims
 
 - Any quantitative claim in `README.md` (counts, sizes, version floors, supported platforms) must be verified against current code. If a doc number is derived from a code constant, mark the dependency in a source-code comment so the next editor knows to update both.
+
+## Verification Discipline
+
+The checks that separate work actually done from work that merely reports success. Their unifying property: **every failure below is green.** A skipped job and a passing job are indistinguishable in the aggregated required check; a pattern that matches less still exits zero; a gate that stops gating still reports success. No linter, status check, or review layer catches any of them.
+
+- **A test must assert the mechanism it names.** Label each case by the behavior it proves, and satisfy yourself it would fail if that mechanism broke. A case that passes for an incidental reason - the right answer reached by the wrong path - is worse than no case, because it is later cited as evidence.
+- **Gates, filters, and gate-like watchers fail loud, never narrow quietly.** A pattern that silently matches less, an allowlist that silently stops matching, or a gate that silently stops gating all report success while doing nothing. When a construct exists to notice something, make the not-noticing case produce an error or an annotation. The workflow instance of this is [`WORKFLOW.md`](./WORKFLOW.md) D8.4 (an identity allowlist used as a gate).
+- **Run the repo's whole lint gate before every push, not the parts that look relevant.** CI runs all of them, so a partial local run only defers the failure - and the tool most likely to catch a given change is often the one it seems least about (an edit that manipulates line endings is exactly when `editorconfig-checker` matters). The invocations are in "Running the Linters Locally"; that section documents *how* to run each, this rule is that **all** of them run.
+- **Editing CRLF files programmatically: `.` matches `\r` in a regex**, so a captured line keeps its carriage return and rejoining with `\r\n` yields `CRCRLF`. A text-mode rewrite has the mirror failure, silently flattening CRLF to LF. Prefer line-based edits (`splitlines(keepends=True)`) or literal replacement over regex reassembly. This is the mechanism behind the Line Endings warning above, and it is worth naming because the corruption is invisible in a rendered diff.
+- **A green check is not evidence the work happened.** A skipped job and a passing job are indistinguishable in the aggregated required check. When a job exists to exercise something, confirm from its log that it ran and produced the output it promises. (The `changes`-job rule under "Branching Model" is this rule's instance for that one job.)
+- **A workflow change is only fully exercised by CI.** Extracting a `run:` block and executing it locally validates the script and nothing else - `secrets: inherit`, `permissions:`, `needs:` wiring, and reusable-workflow inputs resolve only in a real run.
+- **A review flags an instance; fix the class.** When a reviewer cites one stale claim, one silent-narrowing pattern, or one mis-worded contract, sweep for its siblings before replying. Reviewers sample; they do not enumerate.
 
 ## PR Review Etiquette
 
