@@ -40,6 +40,21 @@ def load(rel):
     return json.loads((ROOT / rel).read_text(encoding="utf-8"))
 
 
+def hub_name():
+    """This repo's name on the remote - what a carried file must never reference.
+
+    Read from origin rather than the checkout directory, which a differently-named clone would
+    silently break; a silent miss here is the fail-open case the check exists to prevent.
+    """
+    r = subprocess.run(["git", "config", "--get", "remote.origin.url"], capture_output=True, text=True, cwd=ROOT)
+    if r.returncode == 0 and r.stdout.strip():
+        return r.stdout.strip().rstrip("/").removesuffix(".git").split("/")[-1]
+    return ROOT.name
+
+
+HUB_NAME = hub_name()
+
+
 def gh(path, ok404=False):
     """GET a REST path via gh; parsed JSON, or None on 404 when ok404.
 
@@ -182,6 +197,14 @@ def audit_repo(entry, spec):
         claimed_names = required_by_store["actions"] | required_by_store["dependabot"]
         for name in sorted(present - claimed_names):
             findings.append(("DRIFT", f"secrets: {name} in the {store} store is claimed by no applicable mechanism (stale?)"))
+
+    # --- Carried files must not reference the template repo ---
+    # The template is private, so a reference 404s for this repo's users and exposes machinery they cannot
+    # follow. Checks the agent-instruction files, where a stale "report drift upstream" paragraph spread.
+    for path in ("AGENTS.md", ".github/copilot-instructions.md"):
+        doc = gh(f"repos/{slug}/contents/{path}?ref={ground}", ok404=True)
+        if doc and doc.get("content") and HUB_NAME in base64.b64decode(doc["content"]).decode("utf-8", "replace"):
+            findings.append(("DRIFT", f"carried: {path} references the template repo by name or link (private - 404s for this repo's readers; state the behavior, not the destination)"))
 
     # --- Dependabot ecosystem coverage ---
     # A repo's tree implies Dependabot ecosystems it must track: github-actions when it ships workflows
