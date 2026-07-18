@@ -69,7 +69,7 @@ jobs:
           RESOLVER_COMMAND: ${{ inputs.resolver-command }}
           STATE_FILE: ${{ inputs.state-file }}
         run: |
-          set -euo pipefail
+          set -Eeuo pipefail
 
           # Require a non-empty JSON object of single-line name -> version strings; a CR/LF would corrupt the
           # single-line GITHUB_OUTPUT, so reject it here instead of committing unconsumable state.

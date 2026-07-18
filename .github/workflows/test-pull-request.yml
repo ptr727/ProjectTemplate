@@ -28,7 +28,7 @@ jobs:
     steps:
       - name: Check workflow results step
         run: |
-          set -euo pipefail
+          set -Eeuo pipefail
           if [[ "${{ needs.validate.result }}" != "success" ]]; then
             echo "Job 'validate' did not succeed (${{ needs.validate.result }}); refusing to pass."
             exit 1

@@ -43,7 +43,7 @@ jobs:
 
       - name: Validate registry and spec step
         run: |
-          set -euo pipefail
+          set -Eeuo pipefail
           for f in registry/*.json spec/*.json repo-config/*.json; do
             jq empty "$f"
           done

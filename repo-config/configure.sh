@@ -15,7 +15,7 @@
 # Usage: repo-config/configure.sh [owner/repo] [release|operational]   (repo defaults to the current repo via gh;
 #        model defaults to the registry lookup, else payload inference). The model may also be passed as the sole
 #        argument: repo-config/configure.sh operational
-set -euo pipefail
+set -Eeuo pipefail
 
 repo_arg="${1:-}"
 model="${2:-}"
