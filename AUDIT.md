@@ -16,6 +16,8 @@ This audit is not occasional. Run it whenever you **create, adopt, or materially
 
 Audit one repository at a time. Read the target's **`main` branch** as ground truth: `main` is the released, authoritative state. Read `develop` only to detect divergence - a stale or diverged `develop` (behind `main`, or diverged) is reported as a **drift finding**, never audited as the truth. Do not treat a `develop`-only file as present if it is absent on `main`.
 
+This holds for **both workflow models**. An `operational` repo commits directly to `develop`, but its ground truth is still `main` - the promoted, gated snapshot the promotion PR blesses. `develop` there is mid-flight by design (ungated direct pushes), so auditing it would measure work in progress: conformance scaffolding that has landed on `develop` but is not yet promoted is *un-promoted work*, not a conformance defect, and it counts when it reaches `main`. Every repo's registry `groundTruthBranch` is therefore `main`; an entry naming `develop` contradicts this section.
+
 ## 2. Resolve the Repo's Type(s)
 
 Look up the repo in [`registry/repos.json`][repos] and read its `types[]`. If the entry is `classificationPending` (a backlog repo), classify it from the tree and propose a registry update:
