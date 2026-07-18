@@ -89,6 +89,14 @@ Run [`WORKFLOW.md`][workflow]'s methodology against the repo's **own** Actions: 
 
 - **Secrets** - confirm each required secret exists (name only; values are not readable). Check the Actions store and, where the mechanism needs it (Docker Hub, codegen App), the Dependabot store too.
 
+- **Dependabot ecosystem coverage** - for each ecosystem the repo's tree implies, confirm `.github/dependabot.yml` declares it (dual-target `main` + `develop` per the [Branching Model][agents-branching-model]): `github-actions` when `.github/workflows/` ships SHA-pinned actions - otherwise the pins go stale and a stood-up merge-bot has no action-update PRs to auto-merge - and `devcontainers` when a `.devcontainer` is present. A missing implied ecosystem is a **drift finding** (the file exists; its absence would instead be a file-presence letter). Language ecosystems (`nuget`/`uv`/`npm`) are directory-scoped and audited by inspection, not yet mechanically.
+
+  ```sh
+  decl=$(gh api "repos/<owner>/<repo>/contents/.github/dependabot.yml?ref=<ground>" --jq '.content' | base64 -d | grep -oE 'package-ecosystem:[[:space:]]*"?[a-z-]+' | grep -oE '[a-z-]+$' | sort -u)
+  gh api "repos/<owner>/<repo>/contents/.github/workflows?ref=<ground>" --jq '.[].name' 2>/dev/null | grep -q '\.ya\?ml$' \
+    && { grep -qx github-actions <<<"$decl" && echo "github-actions: covered" || echo "github-actions: MISSING (workflows present)"; }
+  ```
+
 ## 7. Verdict Model
 
 Per dimension, record `operational | not-operational | N/A`, each with a letter verdict and an intent verdict:
@@ -125,6 +133,7 @@ The convergence model: the hub audits and the agent **applies** the fixes via ta
 <!-- Repo -->
 
 [agents]: ./AGENTS.md
+[agents-branching-model]: ./AGENTS.md#branching-model
 [audit-runner]: ./spec/audit.py
 [codestyle]: ./CODESTYLE.md
 [copilot-runbook]: ./.github/copilot-instructions.md
