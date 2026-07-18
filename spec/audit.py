@@ -221,12 +221,8 @@ def audit_repo(entry, spec):
             findings.append(("LETTER", f"file: {path} absent on {ground} (verify intent per AUDIT.md section 7)"))
 
     # --- Registry driftNotes freshness ---
-    # driftNotes are hand-maintained prose and nothing checks them against reality, so a note describing
-    # work that has since completed lingers (reconciled reactively on three repos before this check).
-    # Heuristic, deliberately narrow to stay low-noise: a note asserting *outstanding* work is suspect
-    # only when every other check above passed - a repo that audits clean has no outstanding work for
-    # such a note to describe. A note recording a permanent deviation ("relies on validate-task") uses
-    # no pending-marker and never trips this.
+    # Gated on everything else passing: a clean repo has no outstanding work for a pending-marker note to
+    # describe. Narrow markers keep a permanent-deviation note ("relies on validate-task") from tripping.
     if not findings:
         for note in entry.get("driftNotes", []):
             marker = next((w for w in PENDING_MARKERS if re.search(rf"\b{re.escape(w)}\b", note, re.I)), None)
@@ -274,7 +270,7 @@ def main():
         stamp = f" @ {ground}@{audited_sha[:7]}" if audited_sha else ""
         print(f"== {entry['name']} ({', '.join(entry.get('types', []))}; {model}){stamp} ==")
         if not findings:
-            print("  clean (deterministic checks; the full operational verdict is AUDIT.md's)")
+            print("  clean (deterministic checks; the full letter+intent verdict is AUDIT.md's)")
         for kind, text in findings:
             print(f"  {kind:6} {text}")
             if kind in ("DEFECT", "LETTER", "ERROR"):
