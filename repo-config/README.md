@@ -12,7 +12,7 @@ Every fleet repo carries this directory; the hub keeps the canonical copy. Rules
 
 - **Carry only your model's `develop` variant.** A `release` repo carries `develop.json`; an `operational` repo carries `operational/develop.json` instead. `main.json` and `settings.json` are shared by both models. `configure.sh` aborts when the payload its model needs is missing rather than applying a partial configuration.
 - **Hub-only references stay plain text.** The hub is a private repo: never URL-link it from a downstream repo - the link 404s for anyone without hub access. Files whose canonical fleet-wide form lives only at the hub are mentioned by name, not linked; links into files every repo carries (`AGENTS.md`) resolve everywhere and are fine.
-- **Adapted self-audit carry.** A downstream repo carries **locally adapted** `AUDIT.md` and `spec/secrets.json`, scoped to self-auditing its own rulesets, settings, and secrets against the committed `repo-config/` baseline - the standard shape, so the carried tooling is self-contained. The hub's fleet-wide audit remains authoritative, and the local copies never link the hub. The reference adaptation is the [Vantage-Config carry][vantage-config] (`AUDIT.md` + `spec/secrets.json`, operational model): a settings diff, a normalized ruleset diff against the carried payloads, and a names-only secrets check, all targeting the current repo - adapt it, don't invent. A `release` repo adapts the same shape: its `develop` payload stays at `repo-config/develop.json`, and its `spec/secrets.json` keeps the baseline App pair plus the secret names for its own publish mechanisms (from the hub's canonical `spec/secrets.json`). The fleet audit letter-checks both carried files (`spec/files.json`).
+- **Adapted self-audit carry.** A downstream repo carries **locally adapted** `AUDIT.md` and `spec/secrets.json`, scoped to self-auditing its own rulesets, settings, and secrets against the committed `repo-config/` baseline - the standard shape, so the carried tooling is self-contained. The hub's fleet-wide audit remains authoritative, and the local copies link no other repo. The adapted `AUDIT.md` is a settings diff, a normalized ruleset diff against the carried payloads (an operational carry swaps in `operational/develop.json`), and a names-only secrets check, all targeting the current repo - adapt this shape, don't invent. A `release` repo keeps its `develop` payload at `repo-config/develop.json`, and its `spec/secrets.json` keeps the baseline App pair plus the secret names for its own publish mechanisms (from the hub's canonical `spec/secrets.json`). The fleet audit letter-checks both carried files (`spec/files.json`). A current well-formed example is named in the onboarding/conformance issue, not linked here.
 - **The regen snippet targets the current repo**, so it works unchanged in a carried copy.
 
 ## Rulesets
@@ -72,7 +72,3 @@ The fleet-standard general settings live in [`settings.json`][settings-json] and
 [agents-branching-model]: ../AGENTS.md#branching-model
 [agents-git-and-commit-rules]: ../AGENTS.md#git-and-commit-rules
 [settings-json]: ./settings.json
-
-<!-- External -->
-
-[vantage-config]: https://github.com/ptr727/Vantage-Config
