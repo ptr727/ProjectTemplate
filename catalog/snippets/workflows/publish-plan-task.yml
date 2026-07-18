@@ -74,6 +74,11 @@ jobs:
               # ref==main guard keeps the task self-contained even if a caller's push trigger is not main-only.
               if [[ "$REF" == "main" ]] && { [[ "$ACTOR" == "ptr727-codegen[bot]" ]] || [[ "$ACTOR" == "dependabot[bot]" ]]; }; then
                 publish=true
+              elif [[ "$REF" == "main" ]]; then
+                # Fail loud: an unrecognized actor on a main pin push is either a hand edit (rare, worth seeing)
+                # or the App under a new identity, which would otherwise stop publishing silently - the weekly
+                # schedule keeps releasing, so the only symptom would be lost timeliness.
+                echo "::warning::Pin push on main by unrecognized actor '$ACTOR'; not publishing. If this is the codegen App under a new identity, update the allowlist in publish-plan-task.yml."
               fi
               ;;
           esac
