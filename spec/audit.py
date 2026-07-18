@@ -22,6 +22,7 @@ import pathlib
 import re
 import subprocess
 import sys
+from datetime import datetime, timezone
 
 ROOT = pathlib.Path(__file__).resolve().parent.parent
 
@@ -30,6 +31,9 @@ SETTINGS_KEYS = [
     "allow_rebase_merge", "allow_auto_merge", "allow_update_branch", "delete_branch_on_merge",
 ]
 RULESET_SUBSET = ["name", "target", "enforcement", "bypass_actors", "conditions", "rules"]
+# Phrases in a registry driftNote that assert work still outstanding. Deliberately specific: a note
+# recording a permanent deviation ("no get-version-task; relies on validate-task") must not match.
+PENDING_MARKERS = ["pending", "not yet", "owed", "todo", "still ", "behind", "missing", "absent"]
 
 
 def load(rel):
@@ -216,7 +220,23 @@ def audit_repo(entry, spec):
         if gh(f"repos/{slug}/contents/{path}?ref={ground}", ok404=True) is None:
             findings.append(("LETTER", f"file: {path} absent on {ground} (verify intent per AUDIT.md section 7)"))
 
-    return findings
+    # --- Registry driftNotes freshness ---
+    # driftNotes are hand-maintained prose and nothing checks them against reality, so a note describing
+    # work that has since completed lingers (reconciled reactively on three repos before this check).
+    # Heuristic, deliberately narrow to stay low-noise: a note asserting *outstanding* work is suspect
+    # only when every other check above passed - a repo that audits clean has no outstanding work for
+    # such a note to describe. A note recording a permanent deviation ("relies on validate-task") uses
+    # no pending-marker and never trips this.
+    if not findings:
+        for note in entry.get("driftNotes", []):
+            marker = next((w for w in PENDING_MARKERS if w in note.lower()), None)
+            if marker:
+                findings.append(("DRIFT", f"registry: driftNote says '{marker}' but the audit is clean - verify and reconcile: \"{note[:70]}{'...' if len(note) > 70 else ''}\""))
+
+    audited_sha = (branch_main or branch_dev or {}).get("commit", {}).get("sha", "")
+    if ground == "develop" and branch_dev:
+        audited_sha = branch_dev["commit"]["sha"]
+    return findings, audited_sha
 
 
 def main():
@@ -235,14 +255,23 @@ def main():
             print(f"Not cataloged: {', '.join(sorted(missing))}", file=sys.stderr)
             return 2
 
+    # Findings are a point-in-time snapshot. Stamp the run so anything derived from it (an onboarding
+    # issue, a report) carries its own freshness signal and a reader can tell whether it still applies.
+    run_utc = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+    hub = subprocess.run(["git", "rev-parse", "--short", "HEAD"], capture_output=True, text=True, cwd=ROOT)
+    hub_sha = hub.stdout.strip() if hub.returncode == 0 else "unknown"
+    print(f"audit run {run_utc} | hub {hub_sha}\n")
+
     hard = 0
     for entry in repos:
         model = entry.get("workflowModel") or spec["registry"].get("defaults", {}).get("workflowModel") or "release"
-        print(f"== {entry['name']} ({', '.join(entry.get('types', []))}; {model}) ==")
+        ground = entry.get("groundTruthBranch", "main")
         try:
-            findings = audit_repo(entry, spec)
+            findings, audited_sha = audit_repo(entry, spec)
         except Exception as e:  # a gh/JSON failure mid-audit must not abort the sweep
-            findings = [("ERROR", str(e))]
+            findings, audited_sha = [("ERROR", str(e))], ""
+        stamp = f" @ {ground}@{audited_sha[:7]}" if audited_sha else ""
+        print(f"== {entry['name']} ({', '.join(entry.get('types', []))}; {model}){stamp} ==")
         if not findings:
             print("  clean (deterministic checks; the full operational verdict is AUDIT.md's)")
         for kind, text in findings:
@@ -250,6 +279,8 @@ def main():
             if kind in ("DEFECT", "LETTER", "ERROR"):
                 hard += 1
     print(f"\n{len(repos)} repo(s) audited; {hard} defect/letter/error finding(s).")
+    print("Findings are a point-in-time snapshot: re-run this audit before acting on them, and quote the")
+    print("run stamp above in any issue derived from it (AUDIT.md section 8).")
     return 1 if hard else 0
 
 
