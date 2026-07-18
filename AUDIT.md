@@ -115,6 +115,10 @@ A repo is **operational** only if every applicable check passes. A single applic
 
 Write `reports/<repo>/audit.md` from [`reports/_template.md`][template]: a dimension x {letter, intent, verdict, evidence} table with `file:line` citations (WORKFLOW.md 5A style), a drift section, and a list of proposed registry/spec updates (e.g. a resolved `classificationPending`). Rank findings most severe first.
 
+**Findings are a point-in-time snapshot - stamp them and re-verify before acting.** [`spec/audit.py`][audit-runner] prints a run stamp (`audit run <UTC> | hub <sha>`) and, per repo, the exact commit it read (`@ <branch>@<sha>`). Anything derived from a run - a report, and especially an **onboarding or conformance issue** - quotes that stamp, so a reader can tell whether it still applies. An agent picking up such an issue **re-runs the audit first and acts on the live result, not the pasted findings**: a repo moves between filing and pickup, so a stale block leads an agent to "fix" what is already fixed (re-requesting secrets that exist, attempting a no-op forward-sync). State the findings as evidence for *why* the issue was filed, never as the current state.
+
+**Reconcile `driftNotes` in the same pass.** A registry `driftNote` records a *current* deviation from the baseline. Once the deviation is resolved the note is deleted, not left describing finished work - hand-maintained prose drifts silently otherwise. `spec/audit.py` flags this: when a repo audits clean but a note still asserts outstanding work ("pending", "not yet", "missing", "behind", ...), it raises a drift finding naming the note.
+
 ## 9. Escalate
 
 Surface spec questions rather than resolving them silently - e.g. the Python config-placement canonicalization, or a new construct no type covers. A repeated letter miss that many repos share is a signal the spec (not each repo) needs adjusting; raise it.
