@@ -33,7 +33,7 @@ SETTINGS_KEYS = [
 RULESET_SUBSET = ["name", "target", "enforcement", "bypass_actors", "conditions", "rules"]
 # Phrases in a registry driftNote that assert work still outstanding. Deliberately specific: a note
 # recording a permanent deviation ("no get-version-task; relies on validate-task") must not match.
-PENDING_MARKERS = ["pending", "not yet", "owed", "todo", "still ", "behind", "missing", "absent"]
+PENDING_MARKERS = ["pending", "not yet", "owed", "todo", "still", "behind", "missing", "absent"]
 
 
 def load(rel):
@@ -78,7 +78,7 @@ def audit_repo(entry, spec):
     try:
         live = gh(f"repos/{slug}")
     except RuntimeError as e:
-        return [("ERROR", str(e))]
+        return [("ERROR", str(e))], ""
 
     # --- Branch facts ---
     branch_main = gh(f"repos/{slug}/branches/main", ok404=True)
@@ -229,13 +229,14 @@ def audit_repo(entry, spec):
     # no pending-marker and never trips this.
     if not findings:
         for note in entry.get("driftNotes", []):
-            marker = next((w for w in PENDING_MARKERS if w in note.lower()), None)
+            marker = next((w for w in PENDING_MARKERS if re.search(rf"\b{re.escape(w)}\b", note, re.I)), None)
             if marker:
                 findings.append(("DRIFT", f"registry: driftNote says '{marker}' but the audit is clean - verify and reconcile: \"{note[:70]}{'...' if len(note) > 70 else ''}\""))
 
-    audited_sha = (branch_main or branch_dev or {}).get("commit", {}).get("sha", "")
-    if ground == "develop" and branch_dev:
-        audited_sha = branch_dev["commit"]["sha"]
+    # Stamp the commit actually read for the ground-truth branch. Never fall back to the other branch:
+    # a stamp naming develop while carrying main's sha would misattribute every finding.
+    ground_branch = branch_dev if ground == "develop" else branch_main
+    audited_sha = (ground_branch or {}).get("commit", {}).get("sha", "")
     return findings, audited_sha
 
 
