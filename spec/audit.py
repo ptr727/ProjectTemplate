@@ -183,9 +183,10 @@ def audit_repo(entry, spec):
     # A repo's tree implies Dependabot ecosystems it must track: github-actions when it ships workflows
     # (their SHA-pinned actions otherwise go stale, and a merge-bot then has no PRs to auto-merge),
     # devcontainers when it ships a .devcontainer. dependabot.yml is YAML (no stdlib parser), so scan the
-    # declared package-ecosystem values by regex - enough to assert an ecosystem's presence. Only runs
-    # when dependabot.yml exists; its absence is already a file-presence LETTER below. Language ecosystems
-    # (nuget/uv/npm) are directory-scoped and not yet cross-checked here.
+    # declared package-ecosystem values by regex. This asserts an implied ecosystem's *presence* only; that
+    # each declared ecosystem dual-targets main+develop (the fleet norm) is verified by inspection, not here.
+    # Only runs when dependabot.yml exists; its absence is already a file-presence LETTER below. Language
+    # ecosystems (nuget/uv/npm) are directory-scoped and not yet cross-checked here.
     db = gh(f"repos/{slug}/contents/.github/dependabot.yml?ref={ground}", ok404=True)
     if db and db.get("content"):
         declared = set(re.findall(r'package-ecosystem:\s*["\']?([\w-]+)', base64.b64decode(db["content"]).decode("utf-8", "replace")))
@@ -197,7 +198,7 @@ def audit_repo(entry, spec):
             implied["devcontainers"] = ".devcontainer/ is present"
         for eco, why in sorted(implied.items()):
             if eco not in declared:
-                findings.append(("DRIFT", f"dependabot: {eco} ecosystem not declared though {why} (dual-target main+develop per the fleet norm)"))
+                findings.append(("DRIFT", f"dependabot: {eco} ecosystem not declared though {why}; add it for both main and develop per the fleet norm"))
 
     # --- File presence on the ground-truth branch ---
     seen_paths = set()

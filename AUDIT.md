@@ -89,12 +89,14 @@ Run [`WORKFLOW.md`][workflow]'s methodology against the repo's **own** Actions: 
 
 - **Secrets** - confirm each required secret exists (name only; values are not readable). Check the Actions store and, where the mechanism needs it (Docker Hub, codegen App), the Dependabot store too.
 
-- **Dependabot ecosystem coverage** - for each ecosystem the repo's tree implies, confirm `.github/dependabot.yml` declares it (dual-target `main` + `develop` per the [Branching Model][agents-branching-model]): `github-actions` when `.github/workflows/` ships SHA-pinned actions - otherwise the pins go stale and a stood-up merge-bot has no action-update PRs to auto-merge - and `devcontainers` when a `.devcontainer` is present. A missing implied ecosystem is a **drift finding** (the file exists; its absence would instead be a file-presence letter). Language ecosystems (`nuget`/`uv`/`npm`) are directory-scoped and audited by inspection, not yet mechanically.
+- **Dependabot ecosystem coverage** - for each ecosystem the repo's tree implies, `.github/dependabot.yml` must declare it: `github-actions` when `.github/workflows/` ships SHA-pinned actions - otherwise the pins go stale and a stood-up merge-bot has no action-update PRs to auto-merge - and `devcontainers` when a `.devcontainer` is present. The mechanical check (`spec/audit.py`) asserts each implied ecosystem's **presence**; a tree-implied ecosystem declared nowhere is a **drift finding** (the file exists; its absence would instead be a file-presence letter). Then confirm **by inspection** that each declared ecosystem **dual-targets `main` + `develop`** per the [Branching Model][agents-branching-model] - the regex below cannot pair an ecosystem with its `target-branch`. Language ecosystems (`nuget`/`uv`/`npm`) are directory-scoped and audited by inspection too.
 
   ```sh
   decl=$(gh api "repos/<owner>/<repo>/contents/.github/dependabot.yml?ref=<ground>" --jq '.content' | base64 -d | grep -oE 'package-ecosystem:[[:space:]]*"?[a-z-]+' | grep -oE '[a-z-]+$' | sort -u)
-  gh api "repos/<owner>/<repo>/contents/.github/workflows?ref=<ground>" --jq '.[].name' 2>/dev/null | grep -q '\.ya\?ml$' \
-    && { grep -qx github-actions <<<"$decl" && echo "github-actions: covered" || echo "github-actions: MISSING (workflows present)"; }
+  has() { gh api "repos/<owner>/<repo>/contents/$1?ref=<ground>" >/dev/null 2>&1; }
+  has .github/workflows && { grep -qx github-actions <<<"$decl" && echo "github-actions: present" || echo "github-actions: MISSING (workflows present)"; }
+  has .devcontainer     && { grep -qx devcontainers  <<<"$decl" && echo "devcontainers: present"  || echo "devcontainers: MISSING (.devcontainer present)"; }
+  # then read dependabot.yml and confirm each present ecosystem has both a main and a develop target-branch entry
   ```
 
 ## 7. Verdict Model
