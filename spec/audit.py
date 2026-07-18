@@ -40,6 +40,22 @@ def load(rel):
     return json.loads((ROOT / rel).read_text(encoding="utf-8"))
 
 
+def hub_name():
+    """This repo's name on the remote, and whether it came from the remote.
+
+    Read from origin rather than the checkout directory, which a differently-named clone, a fork, or a
+    worktree without an origin would silently break. The caller announces the directory-name fallback:
+    a silently degraded match is the fail-open case this check exists to prevent.
+    """
+    r = subprocess.run(["git", "config", "--get", "remote.origin.url"], capture_output=True, text=True, cwd=ROOT)
+    if r.returncode == 0 and r.stdout.strip():
+        return r.stdout.strip().rstrip("/").removesuffix(".git").split("/")[-1], True
+    return ROOT.name, False
+
+
+HUB_NAME, HUB_NAME_FROM_REMOTE = hub_name()
+
+
 def gh(path, ok404=False):
     """GET a REST path via gh; parsed JSON, or None on 404 when ok404.
 
@@ -183,6 +199,14 @@ def audit_repo(entry, spec):
         for name in sorted(present - claimed_names):
             findings.append(("DRIFT", f"secrets: {name} in the {store} store is claimed by no applicable mechanism (stale?)"))
 
+    # --- Carried files must not reference the template repo ---
+    # The template is private, so a reference 404s for this repo's users and exposes machinery they cannot
+    # follow. Checks the agent-instruction files, where a stale "report drift upstream" paragraph spread.
+    for path in ("AGENTS.md", ".github/copilot-instructions.md"):
+        doc = gh(f"repos/{slug}/contents/{path}?ref={ground}", ok404=True)
+        if doc and doc.get("content") and HUB_NAME.lower() in base64.b64decode(doc["content"]).decode("utf-8", "replace").lower():
+            findings.append(("DRIFT", f"carried: {path} references the template repo by name or link (private - 404s for this repo's readers; state the behavior, not the destination)"))
+
     # --- Dependabot ecosystem coverage ---
     # A repo's tree implies Dependabot ecosystems it must track: github-actions when it ships workflows
     # (the action versions they reference otherwise go stale, and a merge-bot then has no PRs to auto-merge),
@@ -257,7 +281,10 @@ def main():
     run_utc = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
     hub = subprocess.run(["git", "rev-parse", "--short", "HEAD"], capture_output=True, text=True, cwd=ROOT)
     hub_sha = hub.stdout.strip() if hub.returncode == 0 else "unknown"
-    print(f"audit run {run_utc} | hub {hub_sha}\n")
+    print(f"audit run {run_utc} | hub {hub_sha}")
+    if not HUB_NAME_FROM_REMOTE:
+        print(f"warning: no git remote; template-reference check falls back to the directory name '{HUB_NAME}' and may miss", file=sys.stderr)
+    print()
 
     hard = 0
     for entry in repos:
