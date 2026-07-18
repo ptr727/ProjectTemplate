@@ -194,7 +194,7 @@ def audit_repo(entry, spec):
         implied = {}
         workflows = gh(f"repos/{slug}/contents/.github/workflows?ref={ground}", ok404=True)
         if isinstance(workflows, list) and any(e["name"].endswith((".yml", ".yaml")) for e in workflows):
-            implied["github-actions"] = ".github/workflows/ uses actions"
+            implied["github-actions"] = ".github/workflows/ is present"
         if gh(f"repos/{slug}/contents/.devcontainer?ref={ground}", ok404=True) is not None:
             implied["devcontainers"] = ".devcontainer/ is present"
         for eco, why in sorted(implied.items()):
