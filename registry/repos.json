@@ -212,7 +212,7 @@
             "requiredSecrets": [],
             "consumerModel": "pull",
             "releaseTrigger": "dispatch-only",
-            "driftNotes": ["ESPHome device config YAML consumed by the cataloged ESPHome-NonRoot image at runtime; distinct from that Docker repo.", "Operational rollout pending: an esphome-config validation job feeding the required check, dispatch-only source-release scaffolding (version.json + NBGV get-version + publish-release.yml, tag + source zip), and develop-as-ground-truth adoption. Dependabot currently covers only the devcontainers ecosystem."]
+            "driftNotes": ["ESPHome device config YAML consumed by the cataloged ESPHome-NonRoot image at runtime; distinct from that Docker repo."]
         },
         {
             "name": "HomeAssistant-Config",
