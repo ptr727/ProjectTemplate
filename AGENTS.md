@@ -123,6 +123,7 @@ Applies to code and workflow (`#`) comments alike.
 - Comment only when the code does not explain itself or the logic is genuinely complex. Self-evident code needs no comment.
 - Write for the human reading *this* project's code now: state only the non-obvious *why*. No cross-project references (do not name other repos), no historic or design narrative, no rule citations - governance lives in this file, not echoed inline.
 - **Keep it short. One line is the default; a comment earns a second line only by carrying a constraint the code cannot.** Most comments are one sentence. Don't restate *what* the code does - a well-named symbol already says it.
+- **No class-, type-, or file-header summary comment blocks.** A type or file gets a comment only for a specific non-obvious point, kept terse - never a block summarizing what the file contains or what the class is for. A summary restates the declaration below it, goes stale as the file grows, and is the file-scope form of the design narrative and verbosity creep this section already bans. A licence or provenance header a tool or policy requires is not a summary and is unaffected.
 - **Do not grow a comment across edits.** When you touch code near an existing comment, the comment must come out **same length or shorter** - never append "one more clause" of rationale. If a block comment has crept to multiple sentences of prose, cut it back to its single load-bearing point as part of your change. Verbosity creep is the specific regression to prevent: every iteration that adds a clause is a regression, not an improvement.
 - Match the surrounding code's line length (typically ~120), not an 80-column wrap.
 
@@ -133,6 +134,7 @@ Applies to code and workflow (`#`) comments alike.
   - right arrow (U+2192) -> `->`; double arrow (U+21D2) -> `=>`
   - less-than-or-equal (U+2264) -> `<=`; greater-than-or-equal (U+2265) -> `>=`
   - curly quotes (U+2018/U+2019/U+201C/U+201D) -> straight `'` and `"`; ellipsis (U+2026) -> `...`
+- **No semicolon joining two independent clauses in agent-authored prose** - documentation, comments, commit messages, and PR descriptions. Recast as a comma or as two sentences: "the check runs on push; it gates the merge" becomes "the check runs on push and gates the merge", or two sentences. A semicolon separating items in a list that already contains commas keeps its standard use, and a statement terminator in **code** is untouched by this rule. Existing prose is corrected as each file is next edited, not swept.
 - **Allowed non-ASCII (two narrow exceptions):**
   - **Scientific or technical symbols with no clean ASCII equivalent** - e.g. ohm, micro, degree, pi. Keep the symbol; do not approximate it away.
   - **Unicode the developer deliberately typed** - emoji used for emphasis or as callout markers (for example the warning/info markers a maintainer placed in `README.md`). Preserve it; never strip the developer's own characters. This carve-out is for developer-authored text, not a license for the agent to add emoji.
