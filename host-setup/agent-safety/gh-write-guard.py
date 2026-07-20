@@ -9,7 +9,8 @@ Precision over recall by design: it denies the specific shapes that caused the i
 it cannot parse. A false deny would break the agent, while a missed case still falls under the AGENTS.md
 "Repository Boundaries and Write Safety" prose rules. The three denied shapes:
 
-  1. a state-changing gh call whose output is discarded (>/dev/null, &>/dev/null, 2>/dev/null, || true)
+  1. a state-changing gh call whose output is discarded or forced to success
+     (>/dev/null, 2>/dev/null, &>/dev/null, || true, || :, || echo)
   2. a GraphQL mutation passing a literal GitHub node id (PRRT_/PR_/BOT_/...) instead of a $variable
   3. a gh write with an explicit -R/--repo/repos/<owner>/<repo> target outside the checkout's origin
 
@@ -45,7 +46,7 @@ _GIT_PUSH = re.compile(r"\bgit\s+push\b")
 # --- Risk-pattern detectors --------------------------------------------------------------------------
 # Output-discard / force-success tails. Bare `2>&1` is NOT here: it merges stderr into stdout, leaving
 # the output visible, so it is not suppression (and denying it would break `... 2>&1 | tee log`).
-_SUPPRESS = re.compile(r">\s*/dev/null|&>\s*/dev/null|2>\s*/dev/null|\|\|\s*(?:true|:|echo)\b")
+_SUPPRESS = re.compile(r">\s*/dev/null|&>\s*/dev/null|2>\s*/dev/null|\|\|\s*(?:true\b|echo\b|:)")
 # A GitHub global node id literal: an UPPERCASE prefix (PR_, PRRT_, IC_, BOT_, ...) + a long base64url
 # body, or a legacy MD... base64 id. The uppercase prefix plus a >=12-char body keeps it from matching
 # an ordinary underscored word in a reply body (e.g. body="fixed_the_thing_now", lowercase prefix).
@@ -93,7 +94,8 @@ def classify(cmd, cwd=None, origin=None):
     # 1. suppressed output on a write
     if _SUPPRESS.search(cmd):
         return "deny", (
-            "This is a GitHub write with its output discarded (>/dev/null, &>/dev/null, || true). "
+            "This is a GitHub write with its output discarded or forced to success "
+            "(>/dev/null, 2>/dev/null, &>/dev/null, || true, || :, || echo). "
             "A write's result is exactly what must be read: a mutation can succeed on the server "
             "while the client reports an error. Run it without the output-discarding tail and read "
             "the response. See AGENTS.md 'Repository Boundaries and Write Safety'."
@@ -158,6 +160,8 @@ _CASES = [
     ("gh issue comment 5 --body x 2>&1 | tee out.log", "allow", "bare 2>&1 piped to tee is not suppression"),
     ("gh pr comment 5 --body ok 2>&1", "allow", "bare 2>&1 leaves output visible"),
     ("gh api repos/ptr727/PlexCleaner/issues/1/comments -f body=x 2>/dev/null", "deny", "stderr discarded on a write"),
+    ("gh pr close 5 || :", "deny", "force-success no-op tail on a write"),
+    ("gh pr comment 5 --body x || echo done", "deny", "force-success echo tail on a write"),
     ("gh api graphql -f query='mutation{addPullRequestReviewThreadReply(input:{pullRequestReviewThreadId:$t,body:$b}){comment{id}}}' -F t=\"$TID\" -F b=\"fixed_the_underscore_bug_here\"", "allow", "underscored reply body is not a node id"),
     ("gh api graphql -f query='mutation{resolveReviewThread(input:{threadId:$t}){thread{isResolved}}}' -F t=\"TODO_fixit\"", "allow", "short all-caps token is not a node id"),
 ]

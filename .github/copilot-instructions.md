@@ -164,7 +164,8 @@ TID=$(gh api graphql -f query='
   | .id' | head -n 1)
 [ -n "$TID" ] || { echo "no matching unresolved thread on <PATH> - do not guess an id" >&2; return 1 2>/dev/null || exit 1; }
 
-# Show the mutation's output. Never append >/dev/null, &>/dev/null, or || true to a write.
+# Show the mutation's output. Never append an output-discard or force-success tail
+# (>/dev/null, 2>/dev/null, &>/dev/null, || true, || :, || echo) to a write.
 gh api graphql -f query='
 mutation($threadId: ID!, $body: String!) {
   addPullRequestReviewThreadReply(input: { pullRequestReviewThreadId: $threadId, body: $body }) {
