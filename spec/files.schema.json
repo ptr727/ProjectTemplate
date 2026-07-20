@@ -27,7 +27,7 @@
                                     "additionalProperties": false,
                                     "properties": {
                                         "name": { "type": "string" },
-                                        "appliesTo": { "type": ["string", "array"], "items": { "type": "string" } }
+                                        "appliesTo": { "type": ["string", "array"], "items": { "type": "string" }, "minItems": 1 }
                                     }
                                 }
                             ]
@@ -36,7 +36,7 @@
                     "placeholders": { "type": "array", "items": { "type": "string" } },
                     "reference": { "type": "string" },
                     "intentRef": { "type": "string" },
-                    "appliesTo": { "type": ["string", "array"], "items": { "type": "string" } }
+                    "appliesTo": { "type": ["string", "array"], "items": { "type": "string" }, "minItems": 1 }
                 }
             }
         }

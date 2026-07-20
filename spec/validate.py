@@ -190,6 +190,9 @@ def main():
     universe = known_types | reserved
 
     def check_selector(where, applies_to):
+        if isinstance(applies_to, list) and not applies_to:
+            errors.append(f"files.json: {where} appliesTo is an empty list (use \"*\" for all repos, or list selectors) - it would apply nowhere")
+            return
         tokens = [] if applies_to == "*" else (applies_to if isinstance(applies_to, list) else [applies_to])
         for tok in tokens:
             # CI runs no JSON-schema validation, so guard the type here rather than crash on an unhashable
