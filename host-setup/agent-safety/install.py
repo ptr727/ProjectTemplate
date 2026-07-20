@@ -57,7 +57,7 @@ def main():
         return 1
     print("  hook self-test: PASS")
 
-    # 2. Register in settings.json: exactly one PreToolUse/Bash group carrying our hook command.
+    # 2. Register our hook command in settings.json so exactly one PreToolUse/Bash group carries it.
     launcher = hook_launcher()
     # Quote the launcher too: the sys.executable fallback can contain spaces (e.g. C:\Program Files\...).
     hook_cmd = f'"{launcher}" "{hook_dst}"'
@@ -71,13 +71,17 @@ def main():
             )
             return 1
     pre = data.setdefault("hooks", {}).setdefault("PreToolUse", [])
+    # Strip our hook from every existing group first, so a re-run never leaves a duplicate behind even
+    # when settings.json already has more than one Bash group. Then register it in a single Bash group.
+    for g in pre:
+        hooks_list = g.get("hooks")
+        if isinstance(hooks_list, list):
+            hooks_list[:] = [h for h in hooks_list if "gh-write-guard" not in str(h.get("command", ""))]
     group = next((g for g in pre if g.get("matcher") == "Bash"), None)
     if group is None:
         group = {"matcher": "Bash", "hooks": []}
         pre.append(group)
-    entries = group.setdefault("hooks", [])
-    entries[:] = [h for h in entries if "gh-write-guard" not in str(h.get("command", ""))]
-    entries.append({"type": "command", "command": hook_cmd})
+    group.setdefault("hooks", []).append({"type": "command", "command": hook_cmd})
     settings.write_text(json.dumps(data, indent=2) + "\n", encoding="utf-8")
     print(f"  settings -> {settings} (PreToolUse/Bash hook registered)")
 
