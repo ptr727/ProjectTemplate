@@ -147,7 +147,7 @@ gh api graphql -f query='
 '
 ```
 
-Reply on a thread, then resolve it. Capture the target thread's id into `$TID` from the listing query above - filter to the thread being answered by its `path` (and, when a file carries more than one thread, its first-comment body), and guard for an empty result so a mutation never runs on a guessed id:
+Reply on a thread, then resolve it. Capture the target thread's id into `$TID` from the listing query above - filter to the thread being answered by its `path`, and guard for an empty result so a mutation never runs on a guessed id. When a file carries more than one unresolved thread, `path` alone is ambiguous and `head -n 1` would pick the wrong one, so narrow by first-comment body - the query already fetches `comments(first: 1)` for this - by adding `and (.comments.nodes[0].body | contains("<SNIPPET>"))` to the `select`:
 
 ```sh
 TID=$(gh api graphql -f query='

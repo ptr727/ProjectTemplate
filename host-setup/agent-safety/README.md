@@ -48,7 +48,7 @@ The installer writes this. It is here so you can inspect or hand-place it:
 {
   "hooks": {
     "PreToolUse": [
-      { "matcher": "Bash", "hooks": [ { "type": "command", "command": "python3 \"<home>/.claude/hooks/gh-write-guard.py\"" } ] }
+      { "matcher": "Bash", "hooks": [ { "type": "command", "command": "\"python3\" \"<home>/.claude/hooks/gh-write-guard.py\"" } ] }
     ]
   }
 }
