@@ -2,7 +2,7 @@
 
 How every governance rule is scoped, so the carried docs are granular single-scope pieces composed per repo, not large pieces with internal carve-outs a reader must piece out. This is a hub-only doc: it governs the carrying machinery ([`spec/files.json`][files], [`spec/files.schema.json`][files-schema], [`spec/audit.py`][audit]) and is not itself carried to the fleet.
 
-## Two axes
+## Two Axes
 
 A rule has a physical home, and - if it is a repo rule - a reach.
 
@@ -22,7 +22,7 @@ A selector is one token from one of four **disjoint** namespaces. Because the na
 
 A repo's **selector set** is its `types` plus its `workflowModel`, `releaseTrigger`, and `consumerModel`. `workflowModel` and `releaseTrigger` resolve as the repo value, then `defaults`, then the fleet default (`release`, `two-phase`). `consumerModel` has no fleet default - [`spec/validate.py`][validate] requires it on every cataloged repo, so a cataloged repo always contributes one. `validate.py` also enforces that every `appliesTo` token resolves to a known selector and that no project type collides with a reserved token, and [`spec/audit.py`][audit] resolves the set in `repo_selectors`.
 
-## appliesTo semantics
+## appliesTo Semantics
 
 `appliesTo` appears on a [`spec/files.json`][files] entry (which files a repo carries) and, per the section-object form in [`spec/files.schema.json`][files-schema], on an individual `sections` element (which sections within a carried file apply).
 
@@ -30,11 +30,11 @@ A repo's **selector set** is its `types` plus its `workflowModel`, `releaseTrigg
 - A list is **disjunctive (any-of)**: `["csharp", "operational"]` reads "csharp OR operational". Cross-axis **AND is not expressible**, and that is deliberate - a single-scope piece carries one selector, so the need for AND is the signal to split the piece further, not to write a two-token entry.
 - Entry-level and section-level `appliesTo` compose with **AND**: a section applies only if its file is carried by the repo *and* the section's own selector matches.
 
-## Documenting a whole-carried file's section scopes
+## Documenting a Whole-Carried File's Section Scopes
 
 A file carried `whole` (no `sections` allowlist) still has single-scope sections, and the applicability gate resolves an inapplicable section to N/A at read time, so no split is needed. Record the mapping here rather than mechanizing it.
 
-- [`CODESTYLE.md`][codestyle]: **General** = all-downstream; **.NET** = `csharp`; **Python** = `python`. A non-`csharp` repo reads the .NET section as N/A, a non-`python` repo the Python section.
+- [`CODESTYLE.md`][codestyle]: **General** is all-downstream, **.NET** is `csharp`, **Python** is `python`. A non-`csharp` repo reads the .NET section as N/A, a non-`python` repo the Python section.
 
 <!-- Repo -->
 [audit]: ./audit.py
