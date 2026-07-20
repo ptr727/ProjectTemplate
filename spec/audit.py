@@ -307,9 +307,10 @@ def audit_repo(entry, spec):
         if needed and path.endswith(".md"):
             body = content.get("content")
             if not body:
-                # Fail loud rather than skip silently: the contents API omits inline content for an oversized
-                # file (>1MB), so the section check could not run - surface that instead of a false clean.
-                findings.append(("DRIFT", f"section: could not read {path} content on {ground} to verify sections (no inline content - oversized?); verify by hand"))
+                # Fail loud rather than skip silently: the contents API returned no inline content (an
+                # oversized file, a symlink, a submodule), so the section check could not run - surface that
+                # instead of a false clean.
+                findings.append(("DRIFT", f"section: could not read {path} content on {ground} to verify sections (no inline content returned); verify by hand"))
             else:
                 present = heading_texts(base64.b64decode(body).decode("utf-8", "replace"))
                 for name in sorted(needed):
