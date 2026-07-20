@@ -119,6 +119,8 @@ If a review did not run on the current head, retry:
 
 ### Reply and Thread Resolution Workflow
 
+Every id below is captured from a live query into a variable and passed from there - never hand-typed, guessed, or pasted as a `PRRT_...` literal. A node id resolves globally, so a fabricated or stale id does not fail, it writes to a real thread on an unrelated repository. This runbook implements [AGENTS.md "Repository Boundaries and Write Safety"](../AGENTS.md#repository-boundaries-and-write-safety): write only to this repo, capture every id from a live query, and never suppress a mutation's output.
+
 List unresolved threads. Use `first: 100` with cursor-based pagination; if `hasNextPage` is true, re-run with `after: "<endCursor>"` to retrieve the next page:
 
 ```sh
@@ -142,20 +144,37 @@ gh api graphql -f query='
 '
 ```
 
-Reply on a thread, then resolve it:
+Reply on a thread, then resolve it. Capture the target thread's id into `$TID` from the listing query above - filter to the thread being answered by its `path` (and, when a file carries more than one thread, its first-comment body), and guard for an empty result so a mutation never runs on a guessed id:
 
 ```sh
+TID=$(gh api graphql -f query='
+{
+  repository(owner: "<owner>", name: "<repo>") {
+    pullRequest(number: <N>) {
+      reviewThreads(first: 100) {
+        nodes { id isResolved path comments(first: 1) { nodes { body } } }
+      }
+    }
+  }
+}' --jq '.data.repository.pullRequest.reviewThreads.nodes[]
+  | select(.isResolved == false and .path == "<PATH>")
+  | .id' | head -n 1)
+[ -n "$TID" ] || { echo "no matching unresolved thread on <PATH> - do not guess an id" >&2; return 1 2>/dev/null || exit 1; }
+
+# Show the mutation's output; never append >/dev/null, 2>&1, or || true to a write.
 gh api graphql -f query='
 mutation($threadId: ID!, $body: String!) {
   addPullRequestReviewThreadReply(input: { pullRequestReviewThreadId: $threadId, body: $body }) {
-    comment { id }
+    comment { id url }
   }
-}' -F threadId="PRRT_..." -F body="Fixed in <SHA>: <one-line summary>."
+}' -F threadId="$TID" -F body="Fixed in <SHA>: <one-line summary>."
 
+# Confirm isResolved: true in this response before treating the thread as closed - a write that
+# appears to fail may have taken on the server.
 gh api graphql -f query='
 mutation($threadId: ID!) {
   resolveReviewThread(input: { threadId: $threadId }) { thread { id isResolved } }
-}' -F threadId="PRRT_..."
+}' -F threadId="$TID"
 ```
 
 Issue-level Copilot comments (those in `issues/<N>/comments`) have no resolution action - GitHub provides no API or UI to resolve them. Reply if the finding warrants it; no resolution step is needed or possible.
