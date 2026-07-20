@@ -31,7 +31,7 @@ def hook_launcher():
 
 def main():
     if sys.version_info < (3, 7):
-        sys.stderr.write("This installer and the hook require Python 3.7+; run it with python3.\n")
+        sys.stderr.write("This installer and the hook require Python 3.7+. Run it with python3.\n")
         return 1
     claude_home = pathlib.Path(os.environ.get("CLAUDE_HOME", pathlib.Path.home() / ".claude"))
     hooks_dir = claude_home / "hooks"
