@@ -88,8 +88,9 @@ def repo_selectors(entry, defaults):
     """The scope-selector set a files.json appliesTo is matched against (see spec/scope-model.md).
 
     The four namespaces - project types, workflowModel, releaseTrigger, consumerModel - are disjoint, so
-    a flat token set is unambiguous. Defaults resolve the same way configure.sh does (repo -> defaults ->
-    fleet default), so a repo relying on a defaults value scopes the same as one setting it explicitly.
+    a flat token set is unambiguous. workflowModel and releaseTrigger resolve repo -> defaults -> fleet
+    default (as configure.sh does). consumerModel has no fleet default - validate.py requires it on every
+    cataloged repo, so a cataloged repo always contributes one.
     """
     sel = set(entry.get("types", []))
     sel.add(entry.get("workflowModel") or defaults.get("workflowModel") or "release")

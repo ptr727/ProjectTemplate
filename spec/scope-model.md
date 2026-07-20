@@ -20,7 +20,7 @@ A selector is one token from one of four **disjoint** namespaces. Because the na
 | release trigger | `two-phase` `publish-on-merge` `dispatch-only` `none` | [`registry/repos.schema.json`][repos-schema] |
 | consumer model | `push` `pull` | [`registry/repos.schema.json`][repos-schema] |
 
-A repo's **selector set** is its `types` plus its `workflowModel`, `releaseTrigger`, and `consumerModel` (each resolved repo value, then `defaults`, then the fleet default). [`spec/validate.py`][validate] enforces that every `appliesTo` token resolves to a known selector and that no project type collides with a reserved token. [`spec/audit.py`][audit] resolves the set in `repo_selectors`.
+A repo's **selector set** is its `types` plus its `workflowModel`, `releaseTrigger`, and `consumerModel`. `workflowModel` and `releaseTrigger` resolve as the repo value, then `defaults`, then the fleet default (`release`, `two-phase`). `consumerModel` has no fleet default - [`spec/validate.py`][validate] requires it on every cataloged repo, so a cataloged repo always contributes one. `validate.py` also enforces that every `appliesTo` token resolves to a known selector and that no project type collides with a reserved token, and [`spec/audit.py`][audit] resolves the set in `repo_selectors`.
 
 ## appliesTo semantics
 
