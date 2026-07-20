@@ -1,6 +1,6 @@
 # Scope Model
 
-How every governance rule is scoped, so the carried docs are granular single-scope pieces composed per repo, not large pieces with internal carve-outs a reader must piece out. This is a hub-only doc: it governs the carrying machinery (`spec/files.json`, `spec/files.schema.json`, `spec/audit.py`) and is not itself carried to the fleet.
+How every governance rule is scoped, so the carried docs are granular single-scope pieces composed per repo, not large pieces with internal carve-outs a reader must piece out. This is a hub-only doc: it governs the carrying machinery ([`spec/files.json`][files], [`spec/files.schema.json`][files-schema], [`spec/audit.py`][audit]) and is not itself carried to the fleet.
 
 ## Two axes
 
@@ -15,16 +15,16 @@ A selector is one token from one of four **disjoint** namespaces. Because the na
 
 | Namespace | Tokens | Source of truth |
 | --- | --- | --- |
-| project type | `csharp` `nuget` `pypi` `python` `console` `docker` `homeassistant` `eda` `codegen` `upstream-wrapper` `source-only` `docs` | [`spec/project-types.json`](./project-types.json) |
-| workflow model | `release` `operational` | [`registry/repos.schema.json`](../registry/repos.schema.json) |
-| release trigger | `two-phase` `publish-on-merge` `dispatch-only` `none` | [`registry/repos.schema.json`](../registry/repos.schema.json) |
-| consumer model | `push` `pull` | [`registry/repos.schema.json`](../registry/repos.schema.json) |
+| project type | `csharp` `nuget` `pypi` `python` `console` `docker` `homeassistant` `eda` `codegen` `upstream-wrapper` `source-only` `docs` | [`spec/project-types.json`][project-types] |
+| workflow model | `release` `operational` | [`registry/repos.schema.json`][repos-schema] |
+| release trigger | `two-phase` `publish-on-merge` `dispatch-only` `none` | [`registry/repos.schema.json`][repos-schema] |
+| consumer model | `push` `pull` | [`registry/repos.schema.json`][repos-schema] |
 
-A repo's **selector set** is its `types` plus its `workflowModel`, `releaseTrigger`, and `consumerModel` (each resolved repo value, then `defaults`, then the fleet default). [`spec/validate.py`](./validate.py) enforces that every `appliesTo` token resolves to a known selector and that no project type collides with a reserved token; [`spec/audit.py`](./audit.py) resolves the set in `repo_selectors`.
+A repo's **selector set** is its `types` plus its `workflowModel`, `releaseTrigger`, and `consumerModel` (each resolved repo value, then `defaults`, then the fleet default). [`spec/validate.py`][validate] enforces that every `appliesTo` token resolves to a known selector and that no project type collides with a reserved token; [`spec/audit.py`][audit] resolves the set in `repo_selectors`.
 
 ## appliesTo semantics
 
-`appliesTo` appears on a [`spec/files.json`](./files.json) entry (which files a repo carries) and, per the section-object form in [`files.schema.json`](./files.schema.json), on an individual `sections` element (which sections within a carried file apply).
+`appliesTo` appears on a [`spec/files.json`][files] entry (which files a repo carries) and, per the section-object form in [`spec/files.schema.json`][files-schema], on an individual `sections` element (which sections within a carried file apply).
 
 - **`*`** means all repos.
 - A list is **disjunctive (any-of)**: `["csharp", "operational"]` reads "csharp OR operational". Cross-axis **AND is not expressible**, and that is deliberate - a single-scope piece carries one selector, so the need for AND is the signal to split the piece further, not to write a two-token entry.
@@ -34,4 +34,13 @@ A repo's **selector set** is its `types` plus its `workflowModel`, `releaseTrigg
 
 A file carried `whole` (no `sections` allowlist) still has single-scope sections; the applicability gate resolves an inapplicable section to N/A at read time, so no split is needed. Record the mapping here rather than mechanizing it.
 
-- [`CODESTYLE.md`](../CODESTYLE.md): **General** = all-downstream; **.NET** = `csharp`; **Python** = `python`. A non-`csharp` repo reads the .NET section as N/A, a non-`python` repo the Python section.
+- [`CODESTYLE.md`][codestyle]: **General** = all-downstream; **.NET** = `csharp`; **Python** = `python`. A non-`csharp` repo reads the .NET section as N/A, a non-`python` repo the Python section.
+
+<!-- Repo -->
+[audit]: ./audit.py
+[codestyle]: ../CODESTYLE.md
+[files]: ./files.json
+[files-schema]: ./files.schema.json
+[project-types]: ./project-types.json
+[repos-schema]: ../registry/repos.schema.json
+[validate]: ./validate.py
