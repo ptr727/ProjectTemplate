@@ -95,7 +95,9 @@ def repo_selectors(entry, defaults):
     sel = set(entry.get("types", []))
     sel.add(entry.get("workflowModel") or defaults.get("workflowModel") or "release")
     sel.add(entry.get("releaseTrigger") or defaults.get("releaseTrigger") or "two-phase")
-    cm = entry.get("consumerModel") or defaults.get("consumerModel")
+    # consumerModel has no defaults fallback - the registry schema does not allow defaults.consumerModel, and
+    # validate.py requires it on every cataloged repo. The guard only shields a malformed non-cataloged entry.
+    cm = entry.get("consumerModel")
     if cm:
         sel.add(cm)
     return sel
