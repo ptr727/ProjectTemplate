@@ -213,13 +213,28 @@ def main():
             elif tok not in universe:
                 errors.append(f"files.json: {where} appliesTo '{tok}' is not a known selector")
 
+    # CI runs no JSON-schema validation, so shape-check files.json here rather than crash on a malformed
+    # entry (a non-object baseline item, a non-array sections, a section that is neither string nor object).
     files = load("spec/files.json")
-    for item in files.get("baseline", []):
+    baseline = files.get("baseline", [])
+    if not isinstance(baseline, list):
+        errors.append("files.json: 'baseline' must be an array")
+        baseline = []
+    for item in baseline:
+        if not isinstance(item, dict):
+            errors.append(f"files.json: baseline entry {item!r} is not an object")
+            continue
         path = item.get("path", "?")
         check_selector(path, item.get("appliesTo", "*"))
-        for elt in item.get("sections", []):
+        sections = item.get("sections", [])
+        if not isinstance(sections, list):
+            errors.append(f"files.json: {path} sections must be an array")
+            continue
+        for elt in sections:
             if isinstance(elt, dict):
                 check_selector(f"{path} section '{elt.get('name', '?')}'", elt.get("appliesTo", "*"))
+            elif not isinstance(elt, str):
+                errors.append(f"files.json: {path} section entry {elt!r} must be a string or object")
 
     if errors:
         print("Spec validation FAILED:")
