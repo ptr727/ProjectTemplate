@@ -3,10 +3,11 @@
 
 Compares each cataloged registry repo against the ground truth in this repo - general settings
 (repo-config/settings.json), branch rulesets (normalized diff vs the model's payloads), secret
-names (spec/secrets.json; values are never read), baseline/per-type file presence on the
-ground-truth branch (spec/files.json), and branch-model facts (main/develop existence, develop
-behind main). Owner-initiated: run it when onboarding a repo, when drift is suspected, or before
-fleet-wide changes. Read-only - it never modifies a target.
+names (spec/secrets.json; values are never read), baseline/per-type file presence and per-scope
+markdown section presence on the ground-truth branch (spec/files.json, spec/scope-model.md), and
+branch-model facts (main/develop existence, develop behind main). Owner-initiated: run it when
+onboarding a repo, when drift is suspected, or before fleet-wide changes. Read-only - it never
+modifies a target.
 
 Findings: DEFECT (an applicable check fails outright), LETTER (a required file is absent - intent
 unverified, judge per AUDIT.md section 7), DRIFT (non-breaking divergence, e.g. main-side
@@ -109,6 +110,28 @@ def applies(applies_to, sel):
         return True
     tokens = applies_to if isinstance(applies_to, list) else [applies_to]
     return bool(set(tokens) & sel)
+
+
+_HEADING = re.compile(r"^#{1,6}\s+(.*?)\s*$")
+
+
+def required_sections(item, sel):
+    """Section names this repo must carry from a baseline entry, filtered by each section's own appliesTo.
+
+    A bare-string section is appliesTo `*`; an object section carries its own selector. The entry's own
+    appliesTo is assumed already matched by the caller (the file is carried at all).
+    """
+    out = []
+    for elt in item.get("sections", []):
+        name, sec = (elt, "*") if isinstance(elt, str) else (elt.get("name", ""), elt.get("appliesTo", "*"))
+        if name and applies(sec, sel):
+            out.append(name)
+    return out
+
+
+def heading_texts(markdown):
+    """Lowercased heading texts in a markdown document, for case-insensitive section-presence matching."""
+    return {m.group(1).strip().lower() for line in markdown.splitlines() for m in (_HEADING.match(line),) if m}
 
 
 def audit_repo(entry, spec):
@@ -256,20 +279,43 @@ def audit_repo(entry, spec):
             if eco not in declared:
                 findings.append(("DRIFT", f"dependabot: {eco} ecosystem not declared though {why}; add it for both main and develop per the fleet norm"))
 
-    # --- File presence on the ground-truth branch ---
+    # --- File and section presence on the ground-truth branch ---
     # appliesTo is matched against the repo's full selector set (types + workflowModel + releaseTrigger +
     # consumerModel), so the release/operational develop ruleset is two data entries, not a code swap.
+    # Required sections union across same-path entries. A carried markdown file must contain each heading
+    # scoped to this repo; a rename reads as missing and equivalence is judged by hand, so a missing section
+    # is DRIFT (a hint to verify), never a LETTER.
     sel = repo_selectors(entry, spec["registry"].get("defaults", {}))
-    seen_paths = set()
+    wanted_sections = {}  # path -> set of required section names, unioned across applicable entries
+    path_order = []
     for item in spec["files"]["baseline"]:
         if not applies(item.get("appliesTo", "*"), sel):
             continue
         path = item["path"]
-        if path in seen_paths:
-            continue
-        seen_paths.add(path)
-        if gh(f"repos/{slug}/contents/{path}?ref={ground}", ok404=True) is None:
+        if path not in wanted_sections:
+            wanted_sections[path] = set()
+            path_order.append(path)
+        wanted_sections[path].update(required_sections(item, sel))
+    for path in path_order:
+        content = gh(f"repos/{slug}/contents/{path}?ref={ground}", ok404=True)
+        if content is None:
             findings.append(("LETTER", f"file: {path} absent on {ground} (verify intent per AUDIT.md section 7)"))
+            continue
+        # Heading-based presence is only meaningful for markdown; a "section" named on a non-md file (e.g. a
+        # tasks.json task group) is an intent marker judged per AUDIT.md, not a heading grep.
+        needed = wanted_sections[path]
+        if needed and path.endswith(".md"):
+            body = content.get("content")
+            if not body:
+                # Fail loud rather than skip silently: the contents API returned no inline content (an
+                # oversized file, a symlink, a submodule), so the section check could not run - surface that
+                # instead of a false clean.
+                findings.append(("DRIFT", f"section: could not read {path} content on {ground} to verify sections (no inline content returned); verify by hand"))
+            else:
+                present = heading_texts(base64.b64decode(body).decode("utf-8", "replace"))
+                for name in sorted(needed):
+                    if name.strip().lower() not in present:
+                        findings.append(("DRIFT", f"section: '{name}' not found as a heading in {path} on {ground} (renamed or missing; verify intent per AUDIT.md section 7)"))
 
     # --- Registry driftNotes freshness ---
     # Gated on everything else passing: a clean repo has no outstanding work for a pending-marker note to
