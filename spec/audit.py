@@ -304,11 +304,17 @@ def audit_repo(entry, spec):
         # Heading-based presence is only meaningful for markdown; a "section" named on a non-md file (e.g. a
         # tasks.json task group) is an intent marker judged per AUDIT.md, not a heading grep.
         needed = wanted_sections[path]
-        if needed and path.endswith(".md") and content.get("content"):
-            present = heading_texts(base64.b64decode(content["content"]).decode("utf-8", "replace"))
-            for name in sorted(needed):
-                if name.strip().lower() not in present:
-                    findings.append(("DRIFT", f"section: '{name}' not found as a heading in {path} on {ground} (renamed or missing; verify intent per AUDIT.md section 7)"))
+        if needed and path.endswith(".md"):
+            body = content.get("content")
+            if not body:
+                # Fail loud rather than skip silently: the contents API omits inline content for an oversized
+                # file (>1MB), so the section check could not run - surface that instead of a false clean.
+                findings.append(("DRIFT", f"section: could not read {path} content on {ground} to verify sections (no inline content - oversized?); verify by hand"))
+            else:
+                present = heading_texts(base64.b64decode(body).decode("utf-8", "replace"))
+                for name in sorted(needed):
+                    if name.strip().lower() not in present:
+                        findings.append(("DRIFT", f"section: '{name}' not found as a heading in {path} on {ground} (renamed or missing; verify intent per AUDIT.md section 7)"))
 
     # --- Registry driftNotes freshness ---
     # Gated on everything else passing: a clean repo has no outstanding work for a pending-marker note to
