@@ -85,6 +85,9 @@ Known non-working request paths (don't rely on them - use the `requestReviews` m
 
 - `POST /requested_reviewers` with `reviewers=[Copilot]` can return 200 but no-op.
 - `copilot-pull-request-reviewer` as a requested reviewer slug returns 422.
+- `requestReviews` with the reviewer's bot node id in **`userIds`** fails with `Could not resolve to User node` - the Copilot reviewer is a **Bot**, so its node id goes in **`botIds`** (as in the mutation above), never `userIds`.
+- `suggestedActors(capabilities: [CAN_BE_ASSIGNED])` lists `copilot-swe-agent` (the coding agent), not `copilot-pull-request-reviewer` - do not source the reviewer's bot node id there. Read it from an existing review per step 1 above.
+- There is no `removePullRequestFromReviewRequest` mutation, and removing the reviewer to force a fresh pass is unnecessary anyway - `requestReviews` with `union: true` re-fires the review on the current head.
 
 ### Verify Review Covered Current Head
 
@@ -119,6 +122,8 @@ If a review did not run on the current head, retry:
 
 ### Reply and Thread Resolution Workflow
 
+Every id below is captured from a live query into a variable and passed from there - never hand-typed, guessed, or pasted as a `PRRT_...` literal. A node id resolves globally, so a fabricated or stale id does not fail, it writes to a real thread on an unrelated repository. This runbook implements [AGENTS.md "Repository Boundaries and Write Safety"](../AGENTS.md#repository-boundaries-and-write-safety): write only to this repo, capture every id from a live query, and never suppress a mutation's output.
+
 List unresolved threads. Use `first: 100` with cursor-based pagination; if `hasNextPage` is true, re-run with `after: "<endCursor>"` to retrieve the next page:
 
 ```sh
@@ -142,20 +147,38 @@ gh api graphql -f query='
 '
 ```
 
-Reply on a thread, then resolve it:
+Reply on a thread, then resolve it. Capture the target thread's id into `$TID` from the listing query above - filter to the thread being answered by its `path`, and guard for an empty result so a mutation never runs on a guessed id. When a file carries more than one unresolved thread, `path` alone is ambiguous and `head -n 1` would pick the wrong one, so narrow by first-comment body - the query already fetches `comments(first: 1)` for this - by adding `and (.comments.nodes[0].body | contains("<SNIPPET>"))` to the `select`:
 
 ```sh
+TID=$(gh api graphql -f query='
+{
+  repository(owner: "<owner>", name: "<repo>") {
+    pullRequest(number: <N>) {
+      reviewThreads(first: 100) {
+        nodes { id isResolved path comments(first: 1) { nodes { body } } }
+      }
+    }
+  }
+}' --jq '.data.repository.pullRequest.reviewThreads.nodes[]
+  | select(.isResolved == false and .path == "<PATH>")
+  | .id' | head -n 1)
+[ -n "$TID" ] || { echo "no matching unresolved thread on <PATH> - do not guess an id" >&2; return 1 2>/dev/null || exit 1; }
+
+# Show the mutation's output. Never append an output-discard or force-success tail
+# (>/dev/null, 2>/dev/null, &>/dev/null, || true, || :, || echo) to a write.
 gh api graphql -f query='
 mutation($threadId: ID!, $body: String!) {
   addPullRequestReviewThreadReply(input: { pullRequestReviewThreadId: $threadId, body: $body }) {
-    comment { id }
+    comment { id url }
   }
-}' -F threadId="PRRT_..." -F body="Fixed in <SHA>: <one-line summary>."
+}' -F threadId="$TID" -F body="Fixed in <SHA>: <one-line summary>."
 
+# Confirm isResolved: true in this response before treating the thread as closed - a write that
+# appears to fail may have taken on the server.
 gh api graphql -f query='
 mutation($threadId: ID!) {
   resolveReviewThread(input: { threadId: $threadId }) { thread { id isResolved } }
-}' -F threadId="PRRT_..."
+}' -F threadId="$TID"
 ```
 
 Issue-level Copilot comments (those in `issues/<N>/comments`) have no resolution action - GitHub provides no API or UI to resolve them. Reply if the finding warrants it; no resolution step is needed or possible.
