@@ -56,7 +56,10 @@ The installer writes this. It is here so you can inspect or hand-place it:
 
 ## Scope and Limits
 
-- **Per-machine.** `~/.claude/` does not travel, so run the installer on each box. This is the rollout that [#365](https://github.com/ptr727/ProjectTemplate/issues/365) tracks.
+- **Per-machine.** `~/.claude/` does not travel, so run the installer on each box. This is the rollout that [#365][issue-365] tracks.
 - **Precision over recall.** The hook denies the specific dangerous shapes with high confidence rather than gating every write, so it never blocks legitimate work. A shape it does not catch still falls under the behavioral rules.
 - **Opaque targets are unseen.** The hook cannot see the repository behind a GraphQL node id, which is exactly why rule 2 blocks a *literal* id at all - a captured `$variable` is trusted. Likewise, the cross-origin check only runs when an `origin` can be resolved and the write names an explicit `-R`/`repos/<owner>/<repo>` target. A write from a non-git directory, or one whose target is only a node id, is evaluated by rules 1 and 2 alone.
 - **Not a credential control.** A fine-grained PAT limited to owned repositories is a separate, stronger structural guard (a hard `403` on any non-owned repo) and is left to per-machine credential setup, out of this kit.
+
+<!-- Repo -->
+[issue-365]: https://github.com/ptr727/ProjectTemplate/issues/365
