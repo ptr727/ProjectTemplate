@@ -2,7 +2,7 @@
 
 Per-machine, user-account-scoped guards against an agent making a mis-targeted GitHub **write** under the maintainer's identity. Deploy it as the **first thing on any new system** where Claude Code runs with the `gh` credentials logged in (WSL, Linux, macOS, Proxmox, Windows).
 
-## What it installs
+## What It Installs
 
 Into `~/.claude/` (or `%USERPROFILE%\.claude\` on Windows):
 
@@ -11,7 +11,7 @@ Into `~/.claude/` (or `%USERPROFILE%\.claude\` on Windows):
 
 The hook is the mechanical backstop. The CLAUDE.md rules and the carried AGENTS.md rules are the behavioral layer. Prose alone is not enough - the incident happened under prose rules - so both ship.
 
-## Install (idempotent - safe to re-run to update)
+## Install (Idempotent - Safe to Re-Run to Update)
 
 ```sh
 # Linux / WSL / macOS / Proxmox
@@ -40,7 +40,7 @@ Live end-to-end (in any repo): attempt a discarded-output write and confirm the 
 gh api graphql -f query='mutation{noop}' -F t="PRRT_x" >/dev/null 2>&1 || true   # blocked by the hook
 ```
 
-## Manual settings.json shape (for reference)
+## Manual settings.json Shape (for Reference)
 
 The installer writes this. It is here so you can inspect or hand-place it:
 
@@ -54,7 +54,7 @@ The installer writes this. It is here so you can inspect or hand-place it:
 }
 ```
 
-## Scope and limits
+## Scope and Limits
 
 - **Per-machine.** `~/.claude/` does not travel, so run the installer on each box. This is the rollout that ptr727/ProjectTemplate#365 tracks.
 - **Precision over recall.** The hook denies the specific dangerous shapes with high confidence rather than gating every write, so it never blocks legitimate work. A shape it does not catch still falls under the behavioral rules.

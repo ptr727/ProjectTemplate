@@ -6,7 +6,7 @@ classifies the command, and DENIES (with a reason shown to the agent) when a com
 matching a known-dangerous pattern. Reads and everything that is not a clear write pass through.
 
 Precision over recall by design: it denies the specific shapes that caused the incident, not everything
-it cannot parse. A false deny would break the agent; a missed case still falls under the AGENTS.md
+it cannot parse. A false deny would break the agent, while a missed case still falls under the AGENTS.md
 "Repository Boundaries and Write Safety" prose rules. The three denied shapes:
 
   1. a state-changing gh call whose output is discarded (>/dev/null, &>/dev/null, 2>/dev/null, || true)
@@ -46,8 +46,10 @@ _GIT_PUSH = re.compile(r"\bgit\s+push\b")
 # Output-discard / force-success tails. Bare `2>&1` is NOT here: it merges stderr into stdout, leaving
 # the output visible, so it is not suppression (and denying it would break `... 2>&1 | tee log`).
 _SUPPRESS = re.compile(r">\s*/dev/null|&>\s*/dev/null|2>\s*/dev/null|\|\|\s*(?:true|:|echo)\b")
-# A GitHub global node id literal: an uppercase-ish prefix + underscore + base64url body, or legacy MDxx.
-_NODE_ID_LITERAL = re.compile(r'^(?:[A-Za-z]{1,6}_[A-Za-z0-9_\-]{6,}|MD[A-Za-z0-9]{6,})$')
+# A GitHub global node id literal: an UPPERCASE prefix (PR_, PRRT_, IC_, BOT_, ...) + a long base64url
+# body, or a legacy MD... base64 id. The uppercase prefix plus a >=12-char body keeps it from matching
+# an ordinary underscored word in a reply body (e.g. body="fixed_the_thing_now", lowercase prefix).
+_NODE_ID_LITERAL = re.compile(r'^(?:[A-Z]{1,5}_[A-Za-z0-9_\-]{12,}|MD[A-Za-z0-9]{12,})$')
 # -F/-f name=VALUE  (captures the value; handles "quoted" and bare)
 _FIELD_ASSIGN = re.compile(r"""(?:-F|-f|--field|--raw-field)\s+[A-Za-z_][\w]*=(?P<v>'[^']*'|"[^"]*"|\S+)""")
 _EXPLICIT_REPO = re.compile(r"(?:-R|--repo)\s+(?P<r>[^\s'\"]+)")
@@ -156,6 +158,8 @@ _CASES = [
     ("gh issue comment 5 --body x 2>&1 | tee out.log", "allow", "bare 2>&1 piped to tee is not suppression"),
     ("gh pr comment 5 --body ok 2>&1", "allow", "bare 2>&1 leaves output visible"),
     ("gh api repos/ptr727/PlexCleaner/issues/1/comments -f body=x 2>/dev/null", "deny", "stderr discarded on a write"),
+    ("gh api graphql -f query='mutation{addPullRequestReviewThreadReply(input:{pullRequestReviewThreadId:$t,body:$b}){comment{id}}}' -F t=\"$TID\" -F b=\"fixed_the_underscore_bug_here\"", "allow", "underscored reply body is not a node id"),
+    ("gh api graphql -f query='mutation{resolveReviewThread(input:{threadId:$t}){thread{isResolved}}}' -F t=\"TODO_fixit\"", "allow", "short all-caps token is not a node id"),
 ]
 
 

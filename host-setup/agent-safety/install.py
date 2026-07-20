@@ -20,15 +20,19 @@ HERE = pathlib.Path(__file__).resolve().parent
 
 
 def hook_launcher():
-    """A python invocation for the settings.json command. Prefer a bare name on PATH (portable across
-    machines), else this interpreter's absolute path."""
-    for name in ("python3", "python"):
-        if shutil.which(name):
-            return name
+    """A python invocation for the settings.json command. Prefer a bare `python3` (portable and
+    unambiguously Python 3), else this interpreter's absolute path (guaranteed the Python 3 running the
+    installer). Never a bare `python`, which is Python 2 on some systems and would fail the hook's
+    Python 3 syntax."""
+    if shutil.which("python3"):
+        return "python3"
     return sys.executable
 
 
 def main():
+    if sys.version_info < (3, 7):
+        sys.stderr.write("This installer and the hook require Python 3.7+; run it with python3.\n")
+        return 1
     claude_home = pathlib.Path(os.environ.get("CLAUDE_HOME", pathlib.Path.home() / ".claude"))
     hooks_dir = claude_home / "hooks"
     hook_dst = hooks_dir / "gh-write-guard.py"

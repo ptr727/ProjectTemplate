@@ -1,5 +1,5 @@
 <!-- agent-safety v1 start -->
-## GitHub write safety (any project, every session)
+## GitHub Write Safety (Any Project, Every Session)
 
 A `gh` / GitHub API write runs under the logged-in identity, so a mis-targeted write acts publicly as that account on someone else's repository - outward-facing and hard to reverse. These rules bound every write (a git push, an API mutation, a comment, a label, a merge) in every session on this machine, including ad-hoc work outside any project. Reads are unrestricted. A committed repo's `AGENTS.md` "Repository Boundaries and Write Safety" states the same rules for its fleet, and the two are kept in sync deliberately, because this file also covers sessions that `AGENTS.md` never reaches. The `gh-write-guard` PreToolUse hook enforces the mechanical half.
 
