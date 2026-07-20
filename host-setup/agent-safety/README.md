@@ -27,11 +27,18 @@ Both are thin wrappers around `install.py`, so every OS runs one tested code pat
 
 **Restart Claude Code sessions on the machine afterward** so the new hook and CLAUDE.md load.
 
-## Verify
+## Verify (POSIX Shell)
 
 ```sh
 python3 ~/.claude/hooks/gh-write-guard.py --selftest    # decision matrix: all cases pass
 grep -c 'agent-safety v' ~/.claude/CLAUDE.md            # expect 2 (start + end marker)
+```
+
+On Windows PowerShell:
+
+```powershell
+py -3 "$env:USERPROFILE\.claude\hooks\gh-write-guard.py" --selftest    # all cases pass
+(Select-String 'agent-safety v' "$env:USERPROFILE\.claude\CLAUDE.md").Count   # expect 2
 ```
 
 Live end-to-end (in any repo): attempt a discarded-output write and confirm the Bash tool is blocked:

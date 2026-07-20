@@ -49,8 +49,10 @@ _GIT_PUSH = re.compile(r"\bgit\s+push\b")
 _SUPPRESS = re.compile(r">\s*/dev/null|&>\s*/dev/null|2>\s*/dev/null|\|\|\s*(?:true\b|echo\b|:)")
 # A quoted argument value ("..." or '...'). Stripped before the suppression scan so a --body/--title
 # that merely mentions `|| true` or `>/dev/null` as text is not mistaken for a real command tail. Real
-# suppression tails are unquoted shell operators, so stripping quotes never hides an actual footgun.
-_QUOTED_SPAN = re.compile(r"\"[^\"]*\"|'[^']*'")
+# suppression tails are unquoted shell operators, so stripping quotes never hides an actual footgun. The
+# double-quoted form allows `\"` escapes so an embedded quote does not end the span early; shell single
+# quotes take no escapes, so their form is literal.
+_QUOTED_SPAN = re.compile(r'"(?:\\.|[^"\\])*"' r"|'[^']*'")
 # A GitHub global node id literal: an UPPERCASE prefix (PR_, PRRT_, IC_, BOT_, ...) + a long base64url
 # body, or a legacy MD... base64 id. The uppercase prefix plus a >=12-char body keeps it from matching
 # an ordinary underscored word in a reply body (e.g. body="fixed_the_thing_now", lowercase prefix).
@@ -169,6 +171,7 @@ _CASES = [
     ("gh issue comment 5 --body \"run make || true to skip errors\"", "allow", "|| true inside a quoted body is not a tail"),
     ("gh pr comment 5 --body \"pipe noisy output to >/dev/null\"", "allow", ">/dev/null inside a quoted body is not a redirect"),
     ("gh issue comment 5 --body \"see notes\" >/dev/null", "deny", "real redirect after a quoted body still denies"),
+    ("gh issue comment 5 --body \"he said \\\"pipe to >/dev/null\\\" today\"", "allow", "escaped quotes in a body do not end the span early"),
     ("gh pr close 5 || :", "deny", "force-success no-op tail on a write"),
     ("gh pr comment 5 --body x || echo done", "deny", "force-success echo tail on a write"),
     ("gh api graphql -f query='mutation{addPullRequestReviewThreadReply(input:{pullRequestReviewThreadId:$t,body:$b}){comment{id}}}' -F t=\"$TID\" -F b=\"fixed_the_underscore_bug_here\"", "allow", "underscored reply body is not a node id"),
