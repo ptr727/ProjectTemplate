@@ -1,4 +1,4 @@
-# Agent write-safety kit
+# Agent Write-Safety Kit
 
 Per-machine, user-account-scoped guards against an agent making a mis-targeted GitHub **write** under the maintainer's identity. Deploy it as the **first thing on any new system** where Claude Code runs with the `gh` credentials logged in (WSL, Linux, macOS, Proxmox, Windows).
 

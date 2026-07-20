@@ -13,6 +13,13 @@ if (Get-Command "py" -ErrorAction SilentlyContinue) {
 } elseif (Get-Command "python3" -ErrorAction SilentlyContinue) {
     & python3 $script @args
 } elseif (Get-Command "python" -ErrorAction SilentlyContinue) {
+    # Verify a bare `python` is Python 3 before handing it Python 3 syntax - it is Python 2 on some setups,
+    # which would fail to parse install.py. py -3 and python3 above are Python 3 by construction.
+    & python -c "import sys; sys.exit(0 if sys.version_info[0] == 3 else 1)" 2>$null
+    if ($LASTEXITCODE -ne 0) {
+        Write-Error "Found python on PATH but it is not Python 3 (tried py -3, python3, python). Install Python 3."
+        exit 1
+    }
     & python $script @args
 } else {
     Write-Error "Python 3 is required and was not found on PATH (tried py -3, python3, python)."

@@ -53,7 +53,7 @@ _SUPPRESS = re.compile(r">\s*/dev/null|&>\s*/dev/null|2>\s*/dev/null|\|\|\s*(?:t
 _NODE_ID_LITERAL = re.compile(r'^(?:[A-Z]{1,5}_[A-Za-z0-9_\-]{12,}|MD[A-Za-z0-9]{12,})$')
 # -F/-f name=VALUE, capturing the value - handles "quoted" and bare
 _FIELD_ASSIGN = re.compile(r"""(?:-F|-f|--field|--raw-field)\s+[A-Za-z_][\w]*=(?P<v>'[^']*'|"[^"]*"|\S+)""")
-_EXPLICIT_REPO = re.compile(r"(?:-R|--repo)\s+(?P<r>[^\s'\"]+)")
+_EXPLICIT_REPO = re.compile(r"(?:-R|--repo)\s+(?P<q>['\"]?)(?P<r>[^\s'\"]+)(?P=q)")
 _API_REPO_PATH = re.compile(r"\bgh\s+api\b[^\n|]*?\brepos/(?P<owner>[A-Za-z0-9_.\-]+)/(?P<repo>[A-Za-z0-9_.\-]+)")
 
 
@@ -150,6 +150,7 @@ _CASES = [
     ("gh api graphql -f query='mutation($t:ID!){resolveReviewThread(input:{threadId:$t}){thread{isResolved}}}' -F t=\"PRRT_kwDOabc123def\"", "deny", "literal node id in a mutation"),
     ("gh api graphql -f query='mutation($t:ID!){resolveReviewThread(input:{threadId:$t}){thread{isResolved}}}' -F t=\"$TID\"", "allow", "mutation with captured $TID"),
     ("gh issue comment 5 -R mankatcheung/job-finder --body \"hi\"", "deny", "cross-origin explicit -R"),
+    ("gh issue comment 5 -R \"mankatcheung/job-finder\" --body \"hi\"", "deny", "cross-origin quoted -R"),
     ("gh pr create --title x --body y >/dev/null 2>&1", "deny", "suppressed gh pr create"),
     ("gh api repos/ptr727/PlexCleaner/issues/1/comments -f body=\"ok\"", "allow", "gh api POST to origin"),
     ("gh api graphql -f query='{repository(owner:\"o\",name:\"r\"){pullRequest(number:1){reviewThreads(first:100){nodes{id}}}}}'", "allow", "graphql READ query"),
