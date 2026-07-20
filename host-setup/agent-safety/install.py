@@ -63,7 +63,13 @@ def main():
     hook_cmd = f'"{launcher}" "{hook_dst}"'
     data = {}
     if settings.exists() and settings.read_text(encoding="utf-8").strip():
-        data = json.loads(settings.read_text(encoding="utf-8"))
+        try:
+            data = json.loads(settings.read_text(encoding="utf-8"))
+        except json.JSONDecodeError as e:
+            sys.stderr.write(
+                f"{settings} exists but is not valid JSON ({e}). Fix or remove it, then re-run.\n"
+            )
+            return 1
     pre = data.setdefault("hooks", {}).setdefault("PreToolUse", [])
     group = next((g for g in pre if g.get("matcher") == "Bash"), None)
     if group is None:

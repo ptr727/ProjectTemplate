@@ -18,3 +18,6 @@ if (Get-Command "py" -ErrorAction SilentlyContinue) {
     Write-Error "Python 3 is required and was not found on PATH (tried py -3, python3, python)."
     exit 1
 }
+
+# Propagate the installer's exit code - a native command's non-zero exit does not stop the script.
+exit $LASTEXITCODE
