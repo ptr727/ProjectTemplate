@@ -1,24 +1,15 @@
 # Agent write-safety kit
 
-Per-machine, user-account-scoped guards against an agent making a mis-targeted GitHub **write** under the
-maintainer's identity. Deploy it as the **first thing on any new system** where Claude Code runs with the
-`gh` credentials logged in (WSL, Linux, macOS, Proxmox, Windows).
+Per-machine, user-account-scoped guards against an agent making a mis-targeted GitHub **write** under the maintainer's identity. Deploy it as the **first thing on any new system** where Claude Code runs with the `gh` credentials logged in (WSL, Linux, macOS, Proxmox, Windows).
 
 ## What it installs
 
 Into `~/.claude/` (or `%USERPROFILE%\.claude\` on Windows):
 
-- **`hooks/gh-write-guard.py`** - a PreToolUse hook that denies the three write footguns behind the
-  cross-repo comment incident: a state-changing `gh` call whose output is suppressed, a GraphQL mutation
-  passing a **literal** node id instead of a `$variable`, and a `gh` write whose explicit target is
-  outside the checkout's `origin`. Reads and everything else pass through. It fires even in autonomous /
-  bypass-permissions sessions - which is how the incident happened.
-- **A `## GitHub write safety` section in `CLAUDE.md`** - the same three rules as behavioral guidance,
-  loaded into every session on the machine (including ad-hoc work outside any project). It mirrors the
-  committed `AGENTS.md` "Repository Boundaries and Write Safety" rules, which only reach fleet repos.
+- **`hooks/gh-write-guard.py`** - a PreToolUse hook that denies the three write footguns behind the cross-repo comment incident: a state-changing `gh` call whose output is discarded, a GraphQL mutation passing a **literal** node id instead of a `$variable`, and a `gh` write whose explicit target is outside the checkout's `origin`. Reads and everything else pass through. It fires even in autonomous / bypass-permissions sessions, which is how the incident happened.
+- **A `## GitHub write safety` section in `CLAUDE.md`** - the same three rules as behavioral guidance, loaded into every session on the machine (including ad-hoc work outside any project). It mirrors the committed `AGENTS.md` "Repository Boundaries and Write Safety" rules, which only reach fleet repos.
 
-The hook is the mechanical backstop; the CLAUDE.md rules and the carried AGENTS.md rules are the
-behavioral layer. Prose alone is not enough - the incident happened under prose rules - so both ship.
+The hook is the mechanical backstop. The CLAUDE.md rules and the carried AGENTS.md rules are the behavioral layer. Prose alone is not enough - the incident happened under prose rules - so both ship.
 
 ## Install (idempotent - safe to re-run to update)
 
@@ -32,9 +23,7 @@ host-setup/agent-safety/install.sh
 host-setup\agent-safety\install.ps1
 ```
 
-Both are thin wrappers around `install.py`, so every OS runs one tested code path. The installer
-self-tests the hook before registering it, merges the settings.json entry without clobbering other keys,
-and updates the CLAUDE.md block in place (marker-delimited) rather than duplicating it.
+Both are thin wrappers around `install.py`, so every OS runs one tested code path. The installer self-tests the hook before registering it, merges the settings.json entry without clobbering other keys, and updates the CLAUDE.md block in place (marker-delimited) rather than duplicating it.
 
 **Restart Claude Code sessions on the machine afterward** so the new hook and CLAUDE.md load.
 
@@ -45,7 +34,7 @@ python3 ~/.claude/hooks/gh-write-guard.py --selftest    # decision matrix: all c
 grep -c 'agent-safety v' ~/.claude/CLAUDE.md            # expect 2 (start + end marker)
 ```
 
-Live end-to-end (in any repo): attempt a suppressed-output write and confirm the Bash tool is blocked:
+Live end-to-end (in any repo): attempt a discarded-output write and confirm the Bash tool is blocked:
 
 ```sh
 gh api graphql -f query='mutation{noop}' -F t="PRRT_x" >/dev/null 2>&1 || true   # blocked by the hook
@@ -53,7 +42,7 @@ gh api graphql -f query='mutation{noop}' -F t="PRRT_x" >/dev/null 2>&1 || true  
 
 ## Manual settings.json shape (for reference)
 
-The installer writes this; it is here so you can inspect or hand-place it:
+The installer writes this. It is here so you can inspect or hand-place it:
 
 ```json
 {
@@ -67,12 +56,7 @@ The installer writes this; it is here so you can inspect or hand-place it:
 
 ## Scope and limits
 
-- **Per-machine.** `~/.claude/` does not travel; run the installer on each box. This is the rollout that
-  ptr727/ProjectTemplate#365 tracks.
-- **Precision over recall.** The hook denies the specific dangerous shapes with high confidence rather
-  than gating every write, so it never blocks legitimate work. A shape it does not catch still falls
-  under the behavioral rules. It cannot see the target behind an opaque GraphQL node id (that is why
-  rule 2 blocks a *literal* id at all - a captured `$variable` is trusted).
-- **Not a credential control.** A fine-grained PAT limited to owned repositories is a separate,
-  stronger structural guard (a hard `403` on any non-owned repo) and is left to per-machine credential
-  setup, out of this kit.
+- **Per-machine.** `~/.claude/` does not travel, so run the installer on each box. This is the rollout that ptr727/ProjectTemplate#365 tracks.
+- **Precision over recall.** The hook denies the specific dangerous shapes with high confidence rather than gating every write, so it never blocks legitimate work. A shape it does not catch still falls under the behavioral rules.
+- **Opaque targets are unseen.** The hook cannot see the repository behind a GraphQL node id, which is exactly why rule 2 blocks a *literal* id at all - a captured `$variable` is trusted. Likewise, the cross-origin check only runs when an `origin` can be resolved and the write names an explicit `-R`/`repos/<owner>/<repo>` target. A write from a non-git directory, or one whose target is only a node id, is evaluated by rules 1 and 2 alone.
+- **Not a credential control.** A fine-grained PAT limited to owned repositories is a separate, stronger structural guard (a hard `403` on any non-owned repo) and is left to per-machine credential setup, out of this kit.

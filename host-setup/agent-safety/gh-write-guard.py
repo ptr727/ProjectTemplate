@@ -9,7 +9,7 @@ Precision over recall by design: it denies the specific shapes that caused the i
 it cannot parse. A false deny would break the agent; a missed case still falls under the AGENTS.md
 "Repository Boundaries and Write Safety" prose rules. The three denied shapes:
 
-  1. a state-changing gh call whose output is suppressed (>/dev/null, 2>&1, || true, || echo)
+  1. a state-changing gh call whose output is discarded (>/dev/null, &>/dev/null, 2>/dev/null, || true)
   2. a GraphQL mutation passing a literal GitHub node id (PRRT_/PR_/BOT_/...) instead of a $variable
   3. a gh write with an explicit -R/--repo/repos/<owner>/<repo> target outside the checkout's origin
 
@@ -43,7 +43,9 @@ _MUTATION = re.compile(r"\bmutation\b")
 _GIT_PUSH = re.compile(r"\bgit\s+push\b")
 
 # --- Risk-pattern detectors --------------------------------------------------------------------------
-_SUPPRESS = re.compile(r">\s*/dev/null|&>\s*/dev/null|2>&1|\|\|\s*(?:true|:|echo)\b")
+# Output-discard / force-success tails. Bare `2>&1` is NOT here: it merges stderr into stdout, leaving
+# the output visible, so it is not suppression (and denying it would break `... 2>&1 | tee log`).
+_SUPPRESS = re.compile(r">\s*/dev/null|&>\s*/dev/null|2>\s*/dev/null|\|\|\s*(?:true|:|echo)\b")
 # A GitHub global node id literal: an uppercase-ish prefix + underscore + base64url body, or legacy MDxx.
 _NODE_ID_LITERAL = re.compile(r'^(?:[A-Za-z]{1,6}_[A-Za-z0-9_\-]{6,}|MD[A-Za-z0-9]{6,})$')
 # -F/-f name=VALUE  (captures the value; handles "quoted" and bare)
@@ -89,7 +91,7 @@ def classify(cmd, cwd=None, origin=None):
     # 1. suppressed output on a write
     if _SUPPRESS.search(cmd):
         return "deny", (
-            "This is a GitHub write with its output discarded (>/dev/null, 2>&1, || true). "
+            "This is a GitHub write with its output discarded (>/dev/null, &>/dev/null, || true). "
             "A write's result is exactly what must be read: a mutation can succeed on the server "
             "while the client reports an error. Run it without the output-discarding tail and read "
             "the response. See AGENTS.md 'Repository Boundaries and Write Safety'."
@@ -121,6 +123,9 @@ def classify(cmd, cwd=None, origin=None):
     for m in _API_REPO_PATH.finditer(cmd):
         if "<" not in m.group("owner"):
             targets.append((m.group("owner").lower(), m.group("repo").lower()))
+    # Only runs when origin resolves (a git checkout): with no project context there is nothing to
+    # compare an explicit target against, so this check is skipped and rules 1-2 still apply. A node-id
+    # target is invisible here regardless - that is what rule 2 guards.
     if origin:
         for t in targets:
             if t != origin:
@@ -147,7 +152,10 @@ _CASES = [
     ("gh pr view 5 --json reviews", "allow", "gh pr view (read)"),
     ("return 1 2>/dev/null || exit 1", "allow", "shell guard, not a gh write"),
     ("git push origin develop", "allow", "normal push (no suppression, no cross-repo)"),
-    ("git commit -m 'x' && git push >/dev/null 2>&1", "deny", "push with suppressed output"),
+    ("git commit -m 'x' && git push >/dev/null 2>&1", "deny", "push with discarded output"),
+    ("gh issue comment 5 --body x 2>&1 | tee out.log", "allow", "bare 2>&1 piped to tee is not suppression"),
+    ("gh pr comment 5 --body ok 2>&1", "allow", "bare 2>&1 leaves output visible"),
+    ("gh api repos/ptr727/PlexCleaner/issues/1/comments -f body=x 2>/dev/null", "deny", "stderr discarded on a write"),
 ]
 
 

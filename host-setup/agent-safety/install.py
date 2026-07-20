@@ -53,7 +53,8 @@ def main():
 
     # 2. Register in settings.json: exactly one PreToolUse/Bash group carrying our hook command.
     launcher = hook_launcher()
-    hook_cmd = f'{launcher} "{hook_dst}"'
+    # Quote the launcher too: the sys.executable fallback can contain spaces (e.g. C:\Program Files\...).
+    hook_cmd = f'"{launcher}" "{hook_dst}"'
     data = {}
     if settings.exists() and settings.read_text(encoding="utf-8").strip():
         data = json.loads(settings.read_text(encoding="utf-8"))

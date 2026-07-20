@@ -1,23 +1,9 @@
 <!-- agent-safety v1 start -->
 ## GitHub write safety (any project, every session)
 
-A `gh` / GitHub API write runs under the logged-in identity, so a mis-targeted write acts publicly as
-that account on someone else's repository - outward-facing and hard to reverse. These rules bound every
-write (a git push, an API mutation, a comment, a label, a merge) in every session on this machine,
-including ad-hoc work outside any project. Reads are unrestricted. A committed repo's `AGENTS.md`
-"Repository Boundaries and Write Safety" states the same rules for its fleet; the two are kept in sync
-deliberately, because this file also covers sessions that `AGENTS.md` never reaches. The
-`gh-write-guard` PreToolUse hook enforces the mechanical half.
+A `gh` / GitHub API write runs under the logged-in identity, so a mis-targeted write acts publicly as that account on someone else's repository - outward-facing and hard to reverse. These rules bound every write (a git push, an API mutation, a comment, a label, a merge) in every session on this machine, including ad-hoc work outside any project. Reads are unrestricted. A committed repo's `AGENTS.md` "Repository Boundaries and Write Safety" states the same rules for its fleet, and the two are kept in sync deliberately, because this file also covers sessions that `AGENTS.md` never reaches. The `gh-write-guard` PreToolUse hook enforces the mechanical half.
 
-- **Write only to the current project's own repository.** Every state-changing call targets this
-  checkout's `origin` and nothing else. A broad or logged-in identity is capability, not permission.
-  Another repository needs explicit, per-session human permission for that specific repository, and a
-  "harmless test" write is still a write.
-- **Never fabricate, guess, or reuse an identifier passed to a write.** Every id a write consumes (a
-  node id, a numeric id, a thread or comment id) is captured from a live query in the same session into
-  a variable and passed from there. Ids resolve globally, so a wrong-but-valid id does not fail - it
-  writes to the wrong target in another repository. If a query returns no id, stop rather than invent one.
-- **A write is never a probe, and a write's output is never suppressed.** Never fire a state-changing
-  call to see whether it works, and never append `>/dev/null`, `2>&1`, or `|| true` to a mutation. A
-  write that appears to fail is verified, not assumed harmless - it may have succeeded on the server.
+- **Write only to the current project's own repository.** Every state-changing call targets this checkout's `origin` and nothing else. A broad or logged-in identity is capability, not permission. Another repository needs explicit, per-session human permission for that specific repository, and a "harmless test" write is still a write.
+- **Never fabricate, guess, or reuse an identifier passed to a write.** Every id a write consumes (a node id, a numeric id, a thread or comment id) is captured from a live query in the same session into a variable and passed from there. Ids resolve globally, so a wrong-but-valid id does not fail - it writes to the wrong target in another repository. If a query returns no id, stop rather than invent one.
+- **A write is never a probe, and a write's output is never suppressed.** Never fire a state-changing call to see whether it works, and never append `>/dev/null`, `&>/dev/null`, or `|| true` to a mutation. A write that appears to fail is verified, not assumed harmless - it may have succeeded on the server.
 <!-- agent-safety v1 end -->
