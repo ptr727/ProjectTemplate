@@ -101,7 +101,7 @@ def repo_selectors(entry, defaults):
 
 
 def applies(applies_to, sel):
-    """True if an appliesTo selector applies to a repo's selector set. Disjunctive (any-of); `*` is all."""
+    """True if an appliesTo selector applies to a repo's selector set. Disjunctive any-of, with `*` meaning all."""
     if applies_to == "*":
         return True
     tokens = applies_to if isinstance(applies_to, list) else [applies_to]

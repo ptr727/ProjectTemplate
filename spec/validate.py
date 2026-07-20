@@ -192,7 +192,11 @@ def main():
     def check_selector(where, applies_to):
         tokens = [] if applies_to == "*" else (applies_to if isinstance(applies_to, list) else [applies_to])
         for tok in tokens:
-            if tok not in universe:
+            # CI runs no JSON-schema validation, so guard the type here rather than crash on an unhashable
+            # token (e.g. a nested object) reaching the set-membership test below.
+            if not isinstance(tok, str):
+                errors.append(f"files.json: {where} appliesTo has a non-string token {tok!r}")
+            elif tok not in universe:
                 errors.append(f"files.json: {where} appliesTo '{tok}' is not a known selector")
 
     files = load("spec/files.json")

@@ -6,8 +6,8 @@ How every governance rule is scoped, so the carried docs are granular single-sco
 
 A rule has a physical home, and - if it is a repo rule - a reach.
 
-- **Axis A, home.** A rule lives on the **host** (per-machine, `~/.claude`, `host-setup/`; it loads in every session regardless of repo, and covers ad-hoc work outside any project) or in the **repo** (it travels with a repo and can assume repo context). A rule that must hold in both places is stated in both and kept in sync deliberately, because the populations differ - the write-safety rules are the worked example, living in the host `~/.claude/CLAUDE.md` and the carried `AGENTS.md` at once.
-- **Axis B, reach** (repo rules only). A repo rule is **hub-only** (meaningful only in this coordinator repo - the registry, the spec, the audit, fleet coordination), **all-downstream** (every derived repo), or **type-specific** (only repos matching a selector). Hub-only rules are simply absent from the carried baseline; all-downstream and type-specific rules are carried, gated by an `appliesTo` selector.
+- **Axis A, home.** A rule lives on the **host** (per-machine, `~/.claude`, `host-setup/` - it loads in every session regardless of repo and covers ad-hoc work outside any project) or in the **repo** (it travels with a repo and can assume repo context). A rule that must hold in both places is stated in both and kept in sync deliberately, because the populations differ - the write-safety rules are the worked example, living in the host `~/.claude/CLAUDE.md` and the carried `AGENTS.md` at once.
+- **Axis B, reach** (repo rules only). A repo rule is **hub-only** (meaningful only in this coordinator repo - the registry, the spec, the audit, fleet coordination), **all-downstream** (every derived repo), or **type-specific** (only repos matching a selector). Hub-only rules are simply absent from the carried baseline. All-downstream and type-specific rules are carried, gated by an `appliesTo` selector.
 
 ## Selectors
 
@@ -20,7 +20,7 @@ A selector is one token from one of four **disjoint** namespaces. Because the na
 | release trigger | `two-phase` `publish-on-merge` `dispatch-only` `none` | [`registry/repos.schema.json`][repos-schema] |
 | consumer model | `push` `pull` | [`registry/repos.schema.json`][repos-schema] |
 
-A repo's **selector set** is its `types` plus its `workflowModel`, `releaseTrigger`, and `consumerModel` (each resolved repo value, then `defaults`, then the fleet default). [`spec/validate.py`][validate] enforces that every `appliesTo` token resolves to a known selector and that no project type collides with a reserved token; [`spec/audit.py`][audit] resolves the set in `repo_selectors`.
+A repo's **selector set** is its `types` plus its `workflowModel`, `releaseTrigger`, and `consumerModel` (each resolved repo value, then `defaults`, then the fleet default). [`spec/validate.py`][validate] enforces that every `appliesTo` token resolves to a known selector and that no project type collides with a reserved token. [`spec/audit.py`][audit] resolves the set in `repo_selectors`.
 
 ## appliesTo semantics
 
@@ -32,7 +32,7 @@ A repo's **selector set** is its `types` plus its `workflowModel`, `releaseTrigg
 
 ## Documenting a whole-carried file's section scopes
 
-A file carried `whole` (no `sections` allowlist) still has single-scope sections; the applicability gate resolves an inapplicable section to N/A at read time, so no split is needed. Record the mapping here rather than mechanizing it.
+A file carried `whole` (no `sections` allowlist) still has single-scope sections, and the applicability gate resolves an inapplicable section to N/A at read time, so no split is needed. Record the mapping here rather than mechanizing it.
 
 - [`CODESTYLE.md`][codestyle]: **General** = all-downstream; **.NET** = `csharp`; **Python** = `python`. A non-`csharp` repo reads the .NET section as N/A, a non-`python` repo the Python section.
 
