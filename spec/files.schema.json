@@ -16,7 +16,23 @@
                 "properties": {
                     "path": { "type": "string" },
                     "whole": { "type": "boolean" },
-                    "sections": { "type": "array", "items": { "type": "string" } },
+                    "sections": {
+                        "type": "array",
+                        "items": {
+                            "oneOf": [
+                                { "type": "string" },
+                                {
+                                    "type": "object",
+                                    "required": ["name"],
+                                    "additionalProperties": false,
+                                    "properties": {
+                                        "name": { "type": "string" },
+                                        "appliesTo": { "type": ["string", "array"] }
+                                    }
+                                }
+                            ]
+                        }
+                    },
                     "placeholders": { "type": "array", "items": { "type": "string" } },
                     "reference": { "type": "string" },
                     "intentRef": { "type": "string" },

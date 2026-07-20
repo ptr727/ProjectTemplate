@@ -12,6 +12,13 @@ import sys
 
 ROOT = pathlib.Path(__file__).resolve().parent.parent
 
+# Scope-selector vocabularies (see spec/scope-model.md), kept in sync with registry/repos.schema.json
+# $defs. The four namespaces - project types plus these three - must stay disjoint, so a flat appliesTo
+# token set in spec/files.json is unambiguous.
+WORKFLOW_MODELS = ("release", "operational")
+RELEASE_TRIGGERS = ("two-phase", "publish-on-merge", "dispatch-only", "none")
+CONSUMER_MODELS = ("push", "pull")
+
 
 def load(rel):
     return json.loads((ROOT / rel).read_text(encoding="utf-8"))
@@ -124,6 +131,12 @@ def main():
         if model is not None and model not in ("release", "operational"):
             errors.append(f"{name}: workflowModel '{model}' invalid (expected release or operational)")
 
+        # consumerModel is a scope selector (spec/scope-model.md), so a cataloged repo must declare it or a
+        # push/pull-scoped section would fail open (never matched) on that repo.
+        cm = repo.get("consumerModel")
+        if cm not in CONSUMER_MODELS:
+            errors.append(f"{name}: consumerModel '{cm}' invalid or missing (expected push or pull)")
+
         eol = repo.get("lineEndings")
         if eol is not None and eol not in ("lf", "crlf"):
             errors.append(f"{name}: lineEndings '{eol}' invalid (expected lf or crlf)")
@@ -166,6 +179,29 @@ def main():
             kind = spec_mech.get("kind")
             if kind and mech != kind:
                 errors.append(f"{name}: {target} labeled '{mech}' but its mechanism is '{kind}'")
+
+    # files.json appliesTo selectors must resolve to a known token, and no project type may collide with a
+    # reserved selector - a flat token set is only unambiguous while the namespaces stay disjoint. An
+    # unknown token fails open (it never matches), so a required file/section would silently apply nowhere.
+    reserved = set(WORKFLOW_MODELS) | set(RELEASE_TRIGGERS) | set(CONSUMER_MODELS)
+    clash = known_types & reserved
+    if clash:
+        errors.append(f"files.json: project type(s) collide with a reserved scope selector: {', '.join(sorted(clash))}")
+    universe = known_types | reserved
+
+    def check_selector(where, applies_to):
+        tokens = [] if applies_to == "*" else (applies_to if isinstance(applies_to, list) else [applies_to])
+        for tok in tokens:
+            if tok not in universe:
+                errors.append(f"files.json: {where} appliesTo '{tok}' is not a known selector")
+
+    files = load("spec/files.json")
+    for item in files.get("baseline", []):
+        path = item.get("path", "?")
+        check_selector(path, item.get("appliesTo", "*"))
+        for elt in item.get("sections", []):
+            if isinstance(elt, dict):
+                check_selector(f"{path} section '{elt.get('name', '?')}'", elt.get("appliesTo", "*"))
 
     if errors:
         print("Spec validation FAILED:")

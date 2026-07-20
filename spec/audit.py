@@ -84,6 +84,30 @@ def repo_slug(entry):
     return "/".join(entry["url"].rstrip("/").split("/")[-2:])
 
 
+def repo_selectors(entry, defaults):
+    """The scope-selector set a files.json appliesTo is matched against (see spec/scope-model.md).
+
+    The four namespaces - project types, workflowModel, releaseTrigger, consumerModel - are disjoint, so
+    a flat token set is unambiguous. Defaults resolve the same way configure.sh does (repo -> defaults ->
+    fleet default), so a repo relying on a defaults value scopes the same as one setting it explicitly.
+    """
+    sel = set(entry.get("types", []))
+    sel.add(entry.get("workflowModel") or defaults.get("workflowModel") or "release")
+    sel.add(entry.get("releaseTrigger") or defaults.get("releaseTrigger") or "two-phase")
+    cm = entry.get("consumerModel") or defaults.get("consumerModel")
+    if cm:
+        sel.add(cm)
+    return sel
+
+
+def applies(applies_to, sel):
+    """True if an appliesTo selector applies to a repo's selector set. Disjunctive (any-of); `*` is all."""
+    if applies_to == "*":
+        return True
+    tokens = applies_to if isinstance(applies_to, list) else [applies_to]
+    return bool(set(tokens) & sel)
+
+
 def audit_repo(entry, spec):
     findings = []  # (kind, text)
     slug = repo_slug(entry)
@@ -230,14 +254,14 @@ def audit_repo(entry, spec):
                 findings.append(("DRIFT", f"dependabot: {eco} ecosystem not declared though {why}; add it for both main and develop per the fleet norm"))
 
     # --- File presence on the ground-truth branch ---
+    # appliesTo is matched against the repo's full selector set (types + workflowModel + releaseTrigger +
+    # consumerModel), so the release/operational develop ruleset is two data entries, not a code swap.
+    sel = repo_selectors(entry, spec["registry"].get("defaults", {}))
     seen_paths = set()
     for item in spec["files"]["baseline"]:
-        applies = item.get("appliesTo", "*")
-        if applies != "*" and not set(applies) & set(types):
+        if not applies(item.get("appliesTo", "*"), sel):
             continue
         path = item["path"]
-        if path == "repo-config/develop.json" and model == "operational":
-            path = "repo-config/operational/develop.json"
         if path in seen_paths:
             continue
         seen_paths.add(path)
