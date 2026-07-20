@@ -50,7 +50,7 @@ _SUPPRESS = re.compile(r">\s*/dev/null|&>\s*/dev/null|2>\s*/dev/null|\|\|\s*(?:t
 # body, or a legacy MD... base64 id. The uppercase prefix plus a >=12-char body keeps it from matching
 # an ordinary underscored word in a reply body (e.g. body="fixed_the_thing_now", lowercase prefix).
 _NODE_ID_LITERAL = re.compile(r'^(?:[A-Z]{1,5}_[A-Za-z0-9_\-]{12,}|MD[A-Za-z0-9]{12,})$')
-# -F/-f name=VALUE  (captures the value; handles "quoted" and bare)
+# -F/-f name=VALUE, capturing the value - handles "quoted" and bare
 _FIELD_ASSIGN = re.compile(r"""(?:-F|-f|--field|--raw-field)\s+[A-Za-z_][\w]*=(?P<v>'[^']*'|"[^"]*"|\S+)""")
 _EXPLICIT_REPO = re.compile(r"(?:-R|--repo)\s+(?P<r>[^\s'\"]+)")
 _API_REPO_PATH = re.compile(r"\bgh\s+api\b[^\n|]*?\brepos/(?P<owner>[A-Za-z0-9_.\-]+)/(?P<repo>[A-Za-z0-9_.\-]+)")
@@ -183,7 +183,7 @@ def _main():
     try:
         data = json.load(sys.stdin)
     except Exception:
-        sys.exit(0)  # not our event shape; do not interfere
+        sys.exit(0)  # not our event shape - do not interfere
     if data.get("tool_name") != "Bash":
         sys.exit(0)
     cmd = (data.get("tool_input") or {}).get("command", "")

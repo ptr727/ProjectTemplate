@@ -1,5 +1,5 @@
 # Thin wrapper: run the cross-platform installer with a Python 3 (Windows).
-# All logic lives in install.py so every OS runs one tested code path. Idempotent; safe to re-run.
+# All logic lives in install.py so every OS runs one tested code path. Idempotent, safe to re-run.
 #   .\install.ps1
 #   $env:CLAUDE_HOME = "C:\path"; .\install.ps1   # override the target (testing)
 $ErrorActionPreference = "Stop"

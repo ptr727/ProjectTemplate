@@ -15,7 +15,8 @@ catalog/snippets/husky/pre-commit text eol=lf
 
 # Vanilla `.py` follows the CRLF default - Python's universal newlines accept CRLF, and it is
 # commonly edited on Windows. Pin LF only for a `.py` executed directly via its shebang, by path -
-# here the CI validation entry point; do not re-add a blanket `*.py text eol=lf`.
+# here the CI validation entry point, the fleet-audit runner, and the agent-safety hook and its
+# installer. Do not re-add a blanket `*.py text eol=lf`.
 spec/validate.py text eol=lf
 spec/audit.py text eol=lf
 host-setup/agent-safety/gh-write-guard.py text eol=lf

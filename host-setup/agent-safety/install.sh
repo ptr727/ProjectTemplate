@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Thin wrapper: run the cross-platform installer with a Python 3 (Linux / WSL / macOS / Proxmox).
-# All logic lives in install.py so every OS runs one tested code path. Idempotent; safe to re-run.
+# All logic lives in install.py so every OS runs one tested code path. Idempotent, safe to re-run.
 #   ./install.sh            installs to ~/.claude
 #   CLAUDE_HOME=/x ./install.sh   overrides the target (testing)
 set -Eeuo pipefail
