@@ -47,6 +47,10 @@ _GIT_PUSH = re.compile(r"\bgit\s+push\b")
 # Output-discard / force-success tails. Bare `2>&1` is NOT here: it merges stderr into stdout, leaving
 # the output visible, so it is not suppression (and denying it would break `... 2>&1 | tee log`).
 _SUPPRESS = re.compile(r">\s*/dev/null|&>\s*/dev/null|2>\s*/dev/null|\|\|\s*(?:true\b|echo\b|:)")
+# A quoted argument value ("..." or '...'). Stripped before the suppression scan so a --body/--title
+# that merely mentions `|| true` or `>/dev/null` as text is not mistaken for a real command tail. Real
+# suppression tails are unquoted shell operators, so stripping quotes never hides an actual footgun.
+_QUOTED_SPAN = re.compile(r"\"[^\"]*\"|'[^']*'")
 # A GitHub global node id literal: an UPPERCASE prefix (PR_, PRRT_, IC_, BOT_, ...) + a long base64url
 # body, or a legacy MD... base64 id. The uppercase prefix plus a >=12-char body keeps it from matching
 # an ordinary underscored word in a reply body (e.g. body="fixed_the_thing_now", lowercase prefix).
@@ -91,8 +95,9 @@ def classify(cmd, cwd=None, origin=None):
     if not _is_gh_write(cmd):
         return "allow", ""
 
-    # 1. suppressed output on a write
-    if _SUPPRESS.search(cmd):
+    # 1. suppressed output on a write - scan with quoted argument values removed so a --body/--title
+    #    that only mentions a suppression token as text does not false-deny a legitimate write.
+    if _SUPPRESS.search(_QUOTED_SPAN.sub("", cmd)):
         return "deny", (
             "This is a GitHub write with its output discarded or forced to success "
             "(>/dev/null, 2>/dev/null, &>/dev/null, || true, || :, || echo). "
@@ -161,6 +166,9 @@ _CASES = [
     ("gh issue comment 5 --body x 2>&1 | tee out.log", "allow", "bare 2>&1 piped to tee is not suppression"),
     ("gh pr comment 5 --body ok 2>&1", "allow", "bare 2>&1 leaves output visible"),
     ("gh api repos/ptr727/PlexCleaner/issues/1/comments -f body=x 2>/dev/null", "deny", "stderr discarded on a write"),
+    ("gh issue comment 5 --body \"run make || true to skip errors\"", "allow", "|| true inside a quoted body is not a tail"),
+    ("gh pr comment 5 --body \"pipe noisy output to >/dev/null\"", "allow", ">/dev/null inside a quoted body is not a redirect"),
+    ("gh issue comment 5 --body \"see notes\" >/dev/null", "deny", "real redirect after a quoted body still denies"),
     ("gh pr close 5 || :", "deny", "force-success no-op tail on a write"),
     ("gh pr comment 5 --body x || echo done", "deny", "force-success echo tail on a write"),
     ("gh api graphql -f query='mutation{addPullRequestReviewThreadReply(input:{pullRequestReviewThreadId:$t,body:$b}){comment{id}}}' -F t=\"$TID\" -F b=\"fixed_the_underscore_bug_here\"", "allow", "underscored reply body is not a node id"),
