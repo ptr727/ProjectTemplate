@@ -97,11 +97,16 @@ def main():
             print(f"  - {e}")
         return 1
 
-    # defaults.workflowModel feeds configure.sh's fallback, so an invalid value here breaks the apply while every
-    # per-repo entry still validates - check it once.
-    default_model = repos.get("defaults", {}).get("workflowModel")
-    if default_model is not None and default_model not in ("release", "operational"):
-        errors.append(f"defaults.workflowModel '{default_model}' invalid (expected release or operational)")
+    # defaults.workflowModel/releaseTrigger feed configure.sh's fallback and selector resolution, so an
+    # invalid value here breaks the apply or scopes wrong while every per-repo entry still validates - check
+    # them once.
+    reg_defaults = repos.get("defaults", {})
+    default_model = reg_defaults.get("workflowModel")
+    if default_model is not None and default_model not in WORKFLOW_MODELS:
+        errors.append(f"defaults.workflowModel '{default_model}' invalid (expected {' or '.join(WORKFLOW_MODELS)})")
+    default_trigger = reg_defaults.get("releaseTrigger")
+    if default_trigger is not None and default_trigger not in RELEASE_TRIGGERS:
+        errors.append(f"defaults.releaseTrigger '{default_trigger}' invalid (expected one of {', '.join(RELEASE_TRIGGERS)})")
 
     for i, repo in enumerate(repos["repos"]):
         if not isinstance(repo, dict):
@@ -128,14 +133,20 @@ def main():
                 errors.append(f"{name}: type '{t}' not defined in project-types.json")
 
         model = repo.get("workflowModel")
-        if model is not None and model not in ("release", "operational"):
-            errors.append(f"{name}: workflowModel '{model}' invalid (expected release or operational)")
+        if model is not None and model not in WORKFLOW_MODELS:
+            errors.append(f"{name}: workflowModel '{model}' invalid (expected {' or '.join(WORKFLOW_MODELS)})")
+
+        # releaseTrigger is a scope selector (spec/scope-model.md), so an invalid value would silently fail
+        # to match any releaseTrigger-scoped section rather than error.
+        trigger = repo.get("releaseTrigger")
+        if trigger is not None and trigger not in RELEASE_TRIGGERS:
+            errors.append(f"{name}: releaseTrigger '{trigger}' invalid (expected one of {', '.join(RELEASE_TRIGGERS)})")
 
         # consumerModel is a scope selector (spec/scope-model.md), so a cataloged repo must declare it or a
         # push/pull-scoped section would fail open (never matched) on that repo.
         cm = repo.get("consumerModel")
         if cm not in CONSUMER_MODELS:
-            errors.append(f"{name}: consumerModel '{cm}' invalid or missing (expected push or pull)")
+            errors.append(f"{name}: consumerModel '{cm}' invalid or missing (expected {' or '.join(CONSUMER_MODELS)})")
 
         eol = repo.get("lineEndings")
         if eol is not None and eol not in ("lf", "crlf"):
