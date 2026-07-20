@@ -31,6 +31,8 @@ Look up the repo in [`registry/repos.json`][repos] and read its `types[]`. If th
 
 Reuse [`WORKFLOW.md`][workflow] section 1: a check that governs a construct the repo does not contain is **N/A** - record it as N/A and **exclude it from the verdict**. N/A is never a defect. A Docker check on a repo with no image, a NuGet check on a Python package, the artifact-lifecycle clauses on a source-only repo - all N/A.
 
+Which carried files and sections a repo is expected to have is decided by its scope selectors (its type(s) plus workflow model, release trigger, and consumer model). The scope model and the `appliesTo` selector vocabulary are defined in [`spec/scope-model.md`][scope-model].
+
 ## 4. Per-Dimension Checks (Letter and Intent)
 
 For each applicable type in [`spec/project-types.json`][project-types] and every cross-cutting dimension, evaluate each check at its stated verdict tier:
@@ -152,6 +154,7 @@ The convergence model: the hub audits and the agent **applies** the fixes via ta
 [repo-config-settings]: ./repo-config/settings.json
 [reports]: ./reports/
 [repos]: ./registry/repos.json
+[scope-model]: ./spec/scope-model.md
 [secrets]: ./spec/secrets.json
 [spec]: ./spec/
 [standup]: ./STANDUP.md

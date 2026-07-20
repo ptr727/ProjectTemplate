@@ -12,6 +12,13 @@ import sys
 
 ROOT = pathlib.Path(__file__).resolve().parent.parent
 
+# Scope-selector vocabularies (see spec/scope-model.md), kept in sync with registry/repos.schema.json
+# $defs. The four namespaces - project types plus these three - must stay disjoint, so a flat appliesTo
+# token set in spec/files.json is unambiguous.
+WORKFLOW_MODELS = ("release", "operational")
+RELEASE_TRIGGERS = ("two-phase", "publish-on-merge", "dispatch-only", "none")
+CONSUMER_MODELS = ("push", "pull")
+
 
 def load(rel):
     return json.loads((ROOT / rel).read_text(encoding="utf-8"))
@@ -90,11 +97,16 @@ def main():
             print(f"  - {e}")
         return 1
 
-    # defaults.workflowModel feeds configure.sh's fallback, so an invalid value here breaks the apply while every
-    # per-repo entry still validates - check it once.
-    default_model = repos.get("defaults", {}).get("workflowModel")
-    if default_model is not None and default_model not in ("release", "operational"):
-        errors.append(f"defaults.workflowModel '{default_model}' invalid (expected release or operational)")
+    # defaults.workflowModel/releaseTrigger feed configure.sh's fallback and selector resolution, so an
+    # invalid value here breaks the apply or scopes wrong while every per-repo entry still validates - check
+    # them once.
+    reg_defaults = repos.get("defaults", {})
+    default_model = reg_defaults.get("workflowModel")
+    if default_model is not None and default_model not in WORKFLOW_MODELS:
+        errors.append(f"defaults.workflowModel '{default_model}' invalid (expected {' or '.join(WORKFLOW_MODELS)})")
+    default_trigger = reg_defaults.get("releaseTrigger")
+    if default_trigger is not None and default_trigger not in RELEASE_TRIGGERS:
+        errors.append(f"defaults.releaseTrigger '{default_trigger}' invalid (expected one of {', '.join(RELEASE_TRIGGERS)})")
 
     for i, repo in enumerate(repos["repos"]):
         if not isinstance(repo, dict):
@@ -121,8 +133,20 @@ def main():
                 errors.append(f"{name}: type '{t}' not defined in project-types.json")
 
         model = repo.get("workflowModel")
-        if model is not None and model not in ("release", "operational"):
-            errors.append(f"{name}: workflowModel '{model}' invalid (expected release or operational)")
+        if model is not None and model not in WORKFLOW_MODELS:
+            errors.append(f"{name}: workflowModel '{model}' invalid (expected {' or '.join(WORKFLOW_MODELS)})")
+
+        # releaseTrigger is a scope selector (spec/scope-model.md), so an invalid value would silently fail
+        # to match any releaseTrigger-scoped section rather than error.
+        trigger = repo.get("releaseTrigger")
+        if trigger is not None and trigger not in RELEASE_TRIGGERS:
+            errors.append(f"{name}: releaseTrigger '{trigger}' invalid (expected one of {', '.join(RELEASE_TRIGGERS)})")
+
+        # consumerModel is a scope selector (spec/scope-model.md), so a cataloged repo must declare it or a
+        # push/pull-scoped section would fail open (never matched) on that repo.
+        cm = repo.get("consumerModel")
+        if cm not in CONSUMER_MODELS:
+            errors.append(f"{name}: consumerModel '{cm}' invalid or missing (expected {' or '.join(CONSUMER_MODELS)})")
 
         eol = repo.get("lineEndings")
         if eol is not None and eol not in ("lf", "crlf"):
@@ -166,6 +190,51 @@ def main():
             kind = spec_mech.get("kind")
             if kind and mech != kind:
                 errors.append(f"{name}: {target} labeled '{mech}' but its mechanism is '{kind}'")
+
+    # files.json appliesTo selectors must resolve to a known token, and no project type may collide with a
+    # reserved selector - a flat token set is only unambiguous while the namespaces stay disjoint. An
+    # unknown token fails open (it never matches), so a required file/section would silently apply nowhere.
+    reserved = set(WORKFLOW_MODELS) | set(RELEASE_TRIGGERS) | set(CONSUMER_MODELS)
+    clash = known_types & reserved
+    if clash:
+        errors.append(f"files.json: project type(s) collide with a reserved scope selector: {', '.join(sorted(clash))}")
+    universe = known_types | reserved
+
+    def check_selector(where, applies_to):
+        if isinstance(applies_to, list) and not applies_to:
+            errors.append(f"files.json: {where} appliesTo is an empty list (use \"*\" for all repos, or list selectors) - it would apply nowhere")
+            return
+        tokens = [] if applies_to == "*" else (applies_to if isinstance(applies_to, list) else [applies_to])
+        for tok in tokens:
+            # CI runs no JSON-schema validation, so guard the type here rather than crash on an unhashable
+            # token (e.g. a nested object) reaching the set-membership test below.
+            if not isinstance(tok, str):
+                errors.append(f"files.json: {where} appliesTo has a non-string token {tok!r}")
+            elif tok not in universe:
+                errors.append(f"files.json: {where} appliesTo '{tok}' is not a known selector")
+
+    # CI runs no JSON-schema validation, so shape-check files.json here rather than crash on a malformed
+    # entry (a non-object baseline item, a non-array sections, a section that is neither string nor object).
+    files = load("spec/files.json")
+    baseline = files.get("baseline", [])
+    if not isinstance(baseline, list):
+        errors.append("files.json: 'baseline' must be an array")
+        baseline = []
+    for item in baseline:
+        if not isinstance(item, dict):
+            errors.append(f"files.json: baseline entry {item!r} is not an object")
+            continue
+        path = item.get("path", "?")
+        check_selector(path, item.get("appliesTo", "*"))
+        sections = item.get("sections", [])
+        if not isinstance(sections, list):
+            errors.append(f"files.json: {path} sections must be an array")
+            continue
+        for elt in sections:
+            if isinstance(elt, dict):
+                check_selector(f"{path} section '{elt.get('name', '?')}'", elt.get("appliesTo", "*"))
+            elif not isinstance(elt, str):
+                errors.append(f"files.json: {path} section entry {elt!r} must be a string or object")
 
     if errors:
         print("Spec validation FAILED:")
