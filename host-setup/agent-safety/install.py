@@ -33,7 +33,9 @@ def main():
     if sys.version_info < (3, 7):
         sys.stderr.write("This installer and the hook require Python 3.7+. Run it with python3.\n")
         return 1
-    claude_home = pathlib.Path(os.environ.get("CLAUDE_HOME", pathlib.Path.home() / ".claude"))
+    # expanduser so a CLAUDE_HOME set to a `~/...` form resolves to the home dir, not a literal `~` dir.
+    claude_home_env = os.environ.get("CLAUDE_HOME")
+    claude_home = pathlib.Path(claude_home_env).expanduser() if claude_home_env else pathlib.Path.home() / ".claude"
     hooks_dir = claude_home / "hooks"
     hook_dst = hooks_dir / "gh-write-guard.py"
     settings = claude_home / "settings.json"

@@ -85,6 +85,9 @@ Known non-working request paths (don't rely on them - use the `requestReviews` m
 
 - `POST /requested_reviewers` with `reviewers=[Copilot]` can return 200 but no-op.
 - `copilot-pull-request-reviewer` as a requested reviewer slug returns 422.
+- `requestReviews` with the reviewer's bot node id in **`userIds`** fails with `Could not resolve to User node` - the Copilot reviewer is a **Bot**, so its node id goes in **`botIds`** (as in the mutation above), never `userIds`.
+- `suggestedActors(capabilities: [CAN_BE_ASSIGNED])` lists `copilot-swe-agent` (the coding agent), not `copilot-pull-request-reviewer` - do not source the reviewer's bot node id there. Read it from an existing review per step 1 above.
+- There is no `removePullRequestFromReviewRequest` mutation, and removing the reviewer to force a fresh pass is unnecessary anyway - `requestReviews` with `union: true` re-fires the review on the current head.
 
 ### Verify Review Covered Current Head
 
