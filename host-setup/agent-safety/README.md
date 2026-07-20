@@ -7,7 +7,7 @@ Per-machine, user-account-scoped guards against an agent making a mis-targeted G
 Into `~/.claude/` (or `%USERPROFILE%\.claude\` on Windows):
 
 - **`hooks/gh-write-guard.py`** - a PreToolUse hook that denies the three write footguns behind the cross-repo comment incident: a state-changing `gh` call whose output is discarded, a GraphQL mutation passing a **literal** node id instead of a `$variable`, and a `gh` write whose explicit target is outside the checkout's `origin`. Reads and everything else pass through. It fires even in autonomous / bypass-permissions sessions, which is how the incident happened.
-- **A `## GitHub write safety` section in `CLAUDE.md`** - the same three rules as behavioral guidance, loaded into every session on the machine (including ad-hoc work outside any project). It mirrors the committed `AGENTS.md` "Repository Boundaries and Write Safety" rules, which only reach fleet repos.
+- **A `## GitHub Write Safety (Any Project, Every Session)` section in `CLAUDE.md`** - the same three rules as behavioral guidance, loaded into every session on the machine (including ad-hoc work outside any project). It mirrors the committed `AGENTS.md` "Repository Boundaries and Write Safety" rules, which only reach fleet repos.
 
 The hook is the mechanical backstop. The CLAUDE.md rules and the carried AGENTS.md rules are the behavioral layer. Prose alone is not enough - the incident happened under prose rules - so both ship.
 
