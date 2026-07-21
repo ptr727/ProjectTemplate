@@ -20,6 +20,8 @@ RELEASE_TRIGGERS = ("two-phase", "publish-on-merge", "dispatch-only", "none")
 CONSUMER_MODELS = ("push", "pull")
 # How faithfully a carried unit is checked (spec/fidelity-model.md). Default presence.
 FIDELITIES = ("presence", "intent", "verbatim", "interface")
+# The keys an interface unit's `contract` may carry (kept in sync with files.schema.json).
+CONTRACT_KEYS = {"requiredJobKeys", "requiredCheckName", "artifactNameToken", "requireTokensInJob", "forbidTokensInJob", "verbatimJobs"}
 
 
 def load(rel):
@@ -229,8 +231,9 @@ def main():
         path = item.get("path", "?")
         check_selector(path, item.get("appliesTo", "*"))
 
-        # fidelity governs how faithfully the unit is checked (spec/fidelity-model.md). A contract belongs
-        # only to an interface unit; a verbatim unit must have a resolvable canonical source to hash against.
+        # fidelity governs how faithfully the unit is checked (spec/fidelity-model.md). CI runs no schema
+        # validation, so shape-check the fidelity fields here rather than let a malformed contract or an
+        # outside-root reference slip through and crash a later check.
         fid = item.get("fidelity", "presence")
         if fid not in FIDELITIES:
             errors.append(f"files.json: {path} fidelity '{fid}' invalid (expected one of {', '.join(FIDELITIES)})")
@@ -239,8 +242,19 @@ def main():
             errors.append(f"files.json: {path} has a contract but fidelity is '{fid}' (contract is only for fidelity 'interface')")
         if fid == "interface" and not has_contract:
             errors.append(f"files.json: {path} fidelity 'interface' requires a contract")
+        if has_contract:
+            contract = item["contract"]
+            if not isinstance(contract, dict):
+                errors.append(f"files.json: {path} contract must be an object")
+            else:
+                unknown = set(contract) - CONTRACT_KEYS
+                if unknown:
+                    errors.append(f"files.json: {path} contract has unknown key(s): {', '.join(sorted(unknown))}")
+        ref = item.get("reference")
+        if isinstance(ref, str) and (ref.startswith("/") or ".." in pathlib.PurePosixPath(ref).parts):
+            errors.append(f"files.json: {path} reference '{ref}' must be a repo-relative path (no leading / or ..)")
         if fid == "verbatim":
-            src = item.get("reference") or path
+            src = ref or path
             if not (ROOT / src).exists():
                 errors.append(f"files.json: {path} fidelity 'verbatim' but its canonical source {src} is missing")
 
