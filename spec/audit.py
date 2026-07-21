@@ -262,8 +262,8 @@ def content_hash(text):
 
 def classify_verbatim(down_text, canon_text, past_texts):
     """None if the downstream copy matches the current canonical, 'stale' if it matches a past hub revision
-    (the base advanced - re-vendor), or 'violated' if it matches no revision the base ever produced (the
-    repo modified fixed content). The discriminator is a content hash, never a version stamp - a stamp can
+    (the base advanced - re-vendor), or 'modified' if it matches no revision the base ever produced (the
+    repo changed fixed content). The discriminator is a content hash, never a version stamp - a stamp can
     claim to be current while the body was edited, so it is never trusted for integrity.
     """
     dh = content_hash(down_text)
@@ -272,26 +272,33 @@ def classify_verbatim(down_text, canon_text, past_texts):
     for past in past_texts:
         if content_hash(past) == dh:
             return "stale"
-    return "violated"
+    return "modified"
+
+
+_HISTORY_CACHE = {}  # rel_path -> [past revision content]; a canonical is compared against every audited repo
 
 
 def git_file_history(rel_path):
     """Each past revision's content of a hub-tracked file, so a stale copy (matches an old revision) can be
-    told from a modified one (matches none). Local and cheap - no gh calls."""
-    r = subprocess.run(["git", "log", "--format=%H", "--", rel_path], cwd=ROOT, capture_output=True, text=True)
-    if r.returncode != 0:
-        return []
+    told from a modified one (matches none). Local and cheap - no gh calls. Cached per rel_path for the run:
+    one canonical is compared against every audited repo, so recomputing its history each time would cost
+    O(repos * commits) subprocess calls for one unchanging result."""
+    if rel_path in _HISTORY_CACHE:
+        return _HISTORY_CACHE[rel_path]
     out = []
-    for sha in r.stdout.split():
-        s = subprocess.run(["git", "show", f"{sha}:{rel_path}"], cwd=ROOT, capture_output=True, text=True)
-        if s.returncode == 0:
-            out.append(s.stdout)
+    r = subprocess.run(["git", "log", "--format=%H", "--", rel_path], cwd=ROOT, capture_output=True, text=True)
+    if r.returncode == 0:
+        for sha in r.stdout.split():
+            s = subprocess.run(["git", "show", f"{sha}:{rel_path}"], cwd=ROOT, capture_output=True, text=True)
+            if s.returncode == 0:
+                out.append(s.stdout)
+    _HISTORY_CACHE[rel_path] = out
     return out
 
 
 def check_verbatim(label, down_text, canonical_rel, extract=None):
     """Compare a downstream copy against the hub's canonical (a region if `extract` is given), EOL-normalized,
-    and classify a mismatch as stale or violated via the canonical's git history. All findings are DRIFT: a
+    and classify a mismatch as stale or modified via the canonical's git history. All findings are DRIFT: a
     byte diff is a hint to review, never proof of breakage.
     """
     try:
@@ -588,7 +595,7 @@ def _selftest():
     else:
         print("  ok   split_jobs (inline-mapping job captured with its content)")
 
-    # Verbatim engine: EOL normalization, hashing, and the stale-vs-violated classification. Exercised here
+    # Verbatim engine: EOL normalization, hashing, and the stale-vs-modified classification. Exercised here
     # rather than only in production, because a latent bug in the comparison would otherwise surface as a
     # false clean on a real fleet run.
     canon = "line one\nline two\nline three\n"
@@ -597,10 +604,10 @@ def _selftest():
         ("identical -> match", canon, canon, [], None),
         ("EOL-only diff (CRLF) -> match", canon.replace("\n", "\r\n"), canon, [], None),
         ("EOL-only diff (bare CR) -> match", canon.replace("\n", "\r"), canon, [], None),
-        ("body edit -> violated", canon.replace("line two", "line TWO edited"), canon, [], "violated"),
+        ("body edit -> modified", canon.replace("line two", "line TWO edited"), canon, [], "modified"),
         ("matches a past revision -> stale", "old body\n", "current body\n", ["old body\n", "older\n"], "stale"),
         ("matches a past revision modulo EOL -> stale", "old body\r\n", "current body\n", ["old body\n"], "stale"),
-        ("edit in no revision -> violated", "never existed\n", "current body\n", ["old body\n"], "violated"),
+        ("edit in no revision -> modified", "never existed\n", "current body\n", ["old body\n"], "modified"),
     ]
     for label, down, canon_t, history, want in verbatim_cases:
         got = classify_verbatim(down, canon_t, history)
