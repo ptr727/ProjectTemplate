@@ -36,7 +36,20 @@
                     "placeholders": { "type": "array", "items": { "type": "string" } },
                     "reference": { "type": "string" },
                     "intentRef": { "type": "string" },
-                    "appliesTo": { "type": ["string", "array"], "items": { "type": "string" }, "minItems": 1 }
+                    "appliesTo": { "type": ["string", "array"], "items": { "type": "string" }, "minItems": 1 },
+                    "fidelity": { "enum": ["presence", "intent", "verbatim", "interface"] },
+                    "contract": {
+                        "type": "object",
+                        "additionalProperties": false,
+                        "properties": {
+                            "requiredJobKeys": { "type": "array", "items": { "type": "string" } },
+                            "requiredCheckName": { "type": "string" },
+                            "artifactNameToken": { "type": "string" },
+                            "requireTokensInJob": { "type": "object", "additionalProperties": { "type": "array", "items": { "type": "string" } } },
+                            "forbidTokensInJob": { "type": "object", "additionalProperties": { "type": "array", "items": { "type": "string" } } },
+                            "verbatimJobs": { "type": "array", "items": { "type": "string" } }
+                        }
+                    }
                 }
             }
         }

@@ -18,10 +18,18 @@ ROOT = pathlib.Path(__file__).resolve().parent.parent
 WORKFLOW_MODELS = ("release", "operational")
 RELEASE_TRIGGERS = ("two-phase", "publish-on-merge", "dispatch-only", "none")
 CONSUMER_MODELS = ("push", "pull")
+# How faithfully a carried unit is checked (spec/fidelity-model.md). Default presence.
+FIDELITIES = ("presence", "intent", "verbatim", "interface")
+# The keys an interface unit's `contract` may carry (kept in sync with files.schema.json).
+CONTRACT_KEYS = {"requiredJobKeys", "requiredCheckName", "artifactNameToken", "requireTokensInJob", "forbidTokensInJob", "verbatimJobs"}
 
 
 def load(rel):
     return json.loads((ROOT / rel).read_text(encoding="utf-8"))
+
+
+def is_str_list(v):
+    return isinstance(v, list) and all(isinstance(x, str) for x in v)
 
 
 def main():
@@ -224,8 +232,53 @@ def main():
         if not isinstance(item, dict):
             errors.append(f"files.json: baseline entry {item!r} is not an object")
             continue
-        path = item.get("path", "?")
+        path = item.get("path")
+        if not isinstance(path, str):
+            errors.append(f"files.json: baseline entry has a missing or non-string path: {item!r}")
+            continue
         check_selector(path, item.get("appliesTo", "*"))
+
+        # fidelity governs how faithfully the unit is checked (spec/fidelity-model.md). CI runs no schema
+        # validation, so shape-check the fidelity fields here rather than let a malformed contract or an
+        # outside-root reference slip through and crash a later check.
+        fid = item.get("fidelity", "presence")
+        if fid not in FIDELITIES:
+            errors.append(f"files.json: {path} fidelity '{fid}' invalid (expected one of {', '.join(FIDELITIES)})")
+        has_contract = "contract" in item
+        if has_contract and fid != "interface":
+            errors.append(f"files.json: {path} has a contract but fidelity is '{fid}' (contract is only for fidelity 'interface')")
+        if fid == "interface" and not has_contract:
+            errors.append(f"files.json: {path} fidelity 'interface' requires a contract")
+        if has_contract:
+            contract = item["contract"]
+            if not isinstance(contract, dict):
+                errors.append(f"files.json: {path} contract must be an object")
+            else:
+                unknown = set(contract) - CONTRACT_KEYS
+                if unknown:
+                    errors.append(f"files.json: {path} contract has unknown key(s): {', '.join(sorted(unknown))}")
+                # The engine trusts these value types (CI runs no schema validation), so verify them here.
+                for k in ("requiredJobKeys", "verbatimJobs"):
+                    if k in contract and not is_str_list(contract[k]):
+                        errors.append(f"files.json: {path} contract.{k} must be an array of strings")
+                for k in ("requiredCheckName", "artifactNameToken"):
+                    if k in contract and not isinstance(contract[k], str):
+                        errors.append(f"files.json: {path} contract.{k} must be a string")
+                for k in ("requireTokensInJob", "forbidTokensInJob"):
+                    v = contract.get(k)
+                    if k in contract and not (isinstance(v, dict) and all(isinstance(j, str) and is_str_list(t) for j, t in v.items())):
+                        errors.append(f"files.json: {path} contract.{k} must be an object of job name to array of strings")
+        ref = item.get("reference")
+        if ref is not None and not isinstance(ref, str):
+            errors.append(f"files.json: {path} reference must be a string")
+            ref = None
+        elif isinstance(ref, str) and (ref.startswith("/") or ".." in pathlib.PurePosixPath(ref).parts):
+            errors.append(f"files.json: {path} reference '{ref}' must be a repo-relative path (no leading / or ..)")
+        if fid == "verbatim":
+            src = ref if isinstance(ref, str) else path
+            if isinstance(src, str) and not (ROOT / src).exists():
+                errors.append(f"files.json: {path} fidelity 'verbatim' but its canonical source {src} is missing")
+
         sections = item.get("sections", [])
         if not isinstance(sections, list):
             errors.append(f"files.json: {path} sections must be an array")
