@@ -18,6 +18,8 @@ ROOT = pathlib.Path(__file__).resolve().parent.parent
 WORKFLOW_MODELS = ("release", "operational")
 RELEASE_TRIGGERS = ("two-phase", "publish-on-merge", "dispatch-only", "none")
 CONSUMER_MODELS = ("push", "pull")
+# How faithfully a carried unit is checked (spec/fidelity-model.md). Default presence.
+FIDELITIES = ("presence", "intent", "verbatim", "interface")
 
 
 def load(rel):
@@ -226,6 +228,22 @@ def main():
             continue
         path = item.get("path", "?")
         check_selector(path, item.get("appliesTo", "*"))
+
+        # fidelity governs how faithfully the unit is checked (spec/fidelity-model.md). A contract belongs
+        # only to an interface unit; a verbatim unit must have a resolvable canonical source to hash against.
+        fid = item.get("fidelity", "presence")
+        if fid not in FIDELITIES:
+            errors.append(f"files.json: {path} fidelity '{fid}' invalid (expected one of {', '.join(FIDELITIES)})")
+        has_contract = "contract" in item
+        if has_contract and fid != "interface":
+            errors.append(f"files.json: {path} has a contract but fidelity is '{fid}' (contract is only for fidelity 'interface')")
+        if fid == "interface" and not has_contract:
+            errors.append(f"files.json: {path} fidelity 'interface' requires a contract")
+        if fid == "verbatim":
+            canonical = ROOT / (item["reference"] if item.get("reference") else path)
+            if not canonical.exists():
+                errors.append(f"files.json: {path} fidelity 'verbatim' but its canonical source {canonical.relative_to(ROOT)} is missing")
+
         sections = item.get("sections", [])
         if not isinstance(sections, list):
             errors.append(f"files.json: {path} sections must be an array")
