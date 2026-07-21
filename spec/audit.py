@@ -251,7 +251,7 @@ def normalize(text):
     return text.replace("\r\n", "\n").replace("\r", "\n")
 
 
-@functools.lru_cache(maxsize=None)
+@functools.lru_cache(maxsize=1024)  # bounded; the keys that recur across repos are the canonical and its history
 def _hash_normalized(norm_text):
     return hashlib.sha256(norm_text.encode("utf-8")).hexdigest()
 
@@ -276,7 +276,7 @@ def classify_verbatim(down_text, canon_text, past_texts):
     return "modified"
 
 
-_HISTORY_CACHE = {}  # rel_path -> [past revision content]; a canonical is compared against every audited repo
+_HISTORY_CACHE = {}  # rel_path -> [past revision content], reused as a canonical is compared against every audited repo
 
 
 def git_file_history(rel_path):
@@ -284,7 +284,7 @@ def git_file_history(rel_path):
     if rel_path in _HISTORY_CACHE:
         return _HISTORY_CACHE[rel_path]
     out = []
-    # Decode as UTF-8/replace to match the downstream and canonical reads; a divergent decode would fabricate a mismatch.
+    # Decode as UTF-8/replace to match the downstream and canonical reads. A divergent decode would fabricate a mismatch.
     r = subprocess.run(["git", "log", "--format=%H", "--", rel_path], cwd=ROOT, capture_output=True,
                        encoding="utf-8", errors="replace")
     if r.returncode == 0:

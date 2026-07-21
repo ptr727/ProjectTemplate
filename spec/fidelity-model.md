@@ -30,7 +30,7 @@ The fixed interface of a workflow is stated in [`AGENTS.md`][agents] ("Orchestra
 
 ## Normalization
 
-A verbatim check compares content by hash after **line-ending normalization only** - EOL variance is governed by the line-ending rules, not a fidelity deviation. It does **not** mask placeholders: a verbatim unit carries none. The files that declare a `placeholders` list (for example `.github/copilot-instructions.md` with `<owner>`, `<repo>`, `<N>`) are fidelity `intent`, judged by hand and never hashed. Masking could not serve a hash anyway - a downstream copy holds the substituted value (`ptr727`), not the token (`<owner>`), so masking the token in the canonical alone would guarantee a mismatch. A verbatim unit that ever needed a per-repo substitution would require template-matching (the canonical as a pattern, the copy as an instance), not this content hash; none does today.
+A verbatim check compares content by hash after **line-ending normalization only** - EOL variance is governed by the line-ending rules, not a fidelity deviation. It does **not** mask placeholders: a verbatim unit carries none. The files that declare a `placeholders` list (for example `.github/copilot-instructions.md` with `<owner>`, `<repo>`, `<N>`) are fidelity `intent`, judged by hand and never hashed. Masking could not serve a hash anyway - a downstream copy holds the substituted value (`ptr727`), not the token (`<owner>`), so masking the token in the canonical alone would guarantee a mismatch. A verbatim unit that ever needed a per-repo substitution would require template-matching (the canonical as a pattern, the copy as an instance), not this content hash. None does today.
 
 ## Stale Versus Modified
 
