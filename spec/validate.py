@@ -28,6 +28,10 @@ def load(rel):
     return json.loads((ROOT / rel).read_text(encoding="utf-8"))
 
 
+def is_str_list(v):
+    return isinstance(v, list) and all(isinstance(x, str) for x in v)
+
+
 def main():
     errors = []
     repos = load("registry/repos.json")
@@ -250,6 +254,17 @@ def main():
                 unknown = set(contract) - CONTRACT_KEYS
                 if unknown:
                     errors.append(f"files.json: {path} contract has unknown key(s): {', '.join(sorted(unknown))}")
+                # The engine trusts these value types (CI runs no schema validation), so verify them here.
+                for k in ("requiredJobKeys", "verbatimJobs"):
+                    if k in contract and not is_str_list(contract[k]):
+                        errors.append(f"files.json: {path} contract.{k} must be an array of strings")
+                for k in ("requiredCheckName", "artifactNameToken"):
+                    if k in contract and not isinstance(contract[k], str):
+                        errors.append(f"files.json: {path} contract.{k} must be a string")
+                for k in ("requireTokensInJob", "forbidTokensInJob"):
+                    v = contract.get(k)
+                    if k in contract and not (isinstance(v, dict) and all(isinstance(j, str) and is_str_list(t) for j, t in v.items())):
+                        errors.append(f"files.json: {path} contract.{k} must be an object of job name to array of strings")
         ref = item.get("reference")
         if ref is not None and not isinstance(ref, str):
             errors.append(f"files.json: {path} reference must be a string")
