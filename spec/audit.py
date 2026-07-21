@@ -175,6 +175,16 @@ def split_jobs(text):
     return blocks
 
 
+def _code_view(text):
+    """Workflow text with comment-only lines dropped, so a token mentioned only in a comment is not signal.
+
+    A carried task file documents its own contract in comments (build-release-task.yml names
+    `release-asset-` and `artifact-ids:` in prose), so a raw substring search over the whole text would
+    both false-pass a missing handoff and false-flag a forbidden token that appears only in a comment.
+    """
+    return "\n".join(ln for ln in text.splitlines() if not ln.lstrip().startswith("#"))
+
+
 def check_interface(path, contract, text):
     """Verify a workflow honors its fixed contract by name and wiring, never its body (spec/fidelity-model.md).
 
@@ -183,26 +193,30 @@ def check_interface(path, contract, text):
     """
     findings = []
     jobs = split_jobs(text)
+    code = _code_view(text)
     for k in contract.get("requiredJobKeys", []):
         if k not in jobs:
             findings.append(("DRIFT", f"interface: {path} missing required job '{k}'"))
     name = contract.get("requiredCheckName")
-    if name and name not in text:
+    if name and name not in code:
         findings.append(("DRIFT", f"interface: {path} missing the ruleset-bound check name '{name}'"))
     tok = contract.get("artifactNameToken")
-    if tok and tok not in text:
+    if tok and tok not in code:
         findings.append(("DRIFT", f"interface: {path} missing the '{tok}<branch>-<target>' artifact handoff"))
     # Token checks only apply to a job that is present; an absent job is already reported by requiredJobKeys,
-    # so skip it rather than emit a redundant "missing token" for every token it cannot contain.
+    # so skip it rather than emit a redundant "missing token" for every token it cannot contain. Scan the
+    # job's code view so a token in a comment is not read as signal.
     for job, toks in contract.get("requireTokensInJob", {}).items():
         if job in jobs:
+            block = _code_view(jobs[job])
             for t in toks:
-                if t not in jobs[job]:
+                if t not in block:
                     findings.append(("DRIFT", f"interface: {path} job '{job}' missing required '{t}'"))
     for job, toks in contract.get("forbidTokensInJob", {}).items():
         if job in jobs:
+            block = _code_view(jobs[job])
             for t in toks:
-                if t in jobs[job]:
+                if t in block:
                     findings.append(("DRIFT", f"interface: {path} job '{job}' uses forbidden '{t}' (forks the verbatim github-release download - see AGENTS.md override seam)"))
     return findings
 
@@ -444,6 +458,8 @@ def _selftest():
         ("release task missing merge-multiple in github-release", rel_ok.replace("          merge-multiple: true\n", ""), rel_contract, 1),
         ("release task with an owned extra leaf job", rel_head + "  build-extra:\n    runs-on: ubuntu-latest\n    steps: []\n" + gh_rel, rel_contract, 0),
         ("absent job reports once, no redundant token findings", rel_head, {"requiredJobKeys": ["github-release"], "requireTokensInJob": {"github-release": ["pattern:", "merge-multiple:"]}}, 1),
+        ("a forbidden token only in a comment is ignored", rel_ok.replace("          merge-multiple: true\n", "          merge-multiple: true\n          # never an artifact-ids: fork here\n"), rel_contract, 0),
+        ("a required token only in a comment does not count", rel_ok.replace("          merge-multiple: true\n", "          # merge-multiple: true (was here)\n"), rel_contract, 1),
     ]
     ok = True
     for label, text, contract, want in cases:
