@@ -185,6 +185,27 @@ def _code_view(text):
     return "\n".join(ln for ln in text.splitlines() if not ln.lstrip().startswith("#"))
 
 
+def job_level_names(blocks):
+    """The job-level `name:` values - a job's own direct-child name key, not a step's name.
+
+    The ruleset-bound check is a job name, so a step happening to share the string must not satisfy it. A
+    job's direct children sit at the shallowest indent of its block (below the key line); a step name is
+    deeper or a `- name:` list item, so neither reaches that indent as a bare `name:`.
+    """
+    out = set()
+    for block in blocks.values():
+        body = [ln for ln in block.splitlines()[1:] if ln.strip() and not ln.lstrip().startswith("#")]
+        if not body:
+            continue
+        child = min(len(ln) - len(ln.lstrip()) for ln in body)
+        for ln in body:
+            if len(ln) - len(ln.lstrip()) == child:
+                m = re.match(r"name:\s*['\"]?(.*?)['\"]?\s*$", ln[child:])
+                if m:
+                    out.add(m.group(1))
+    return out
+
+
 def check_interface(path, contract, text):
     """Verify a workflow honors its fixed contract by name and wiring, never its body (spec/fidelity-model.md).
 
@@ -198,7 +219,7 @@ def check_interface(path, contract, text):
         if k not in jobs:
             findings.append(("DRIFT", f"interface: {path} missing required job '{k}'"))
     name = contract.get("requiredCheckName")
-    if name and not re.search(r"^\s*name:\s*['\"]?" + re.escape(name) + r"['\"]?\s*$", code, re.M):
+    if name and name not in job_level_names(jobs):
         findings.append(("DRIFT", f"interface: {path} missing the ruleset-bound check name '{name}' as a job name"))
     tok = contract.get("artifactNameToken")
     if tok and tok not in code:
@@ -454,6 +475,7 @@ def _selftest():
         ("PR workflow missing the required job and its check name", pr_head, pr_contract, 2),
         ("PR workflow with a renamed check", pr_head + pr_check.replace("Check pull request workflow status job", "Renamed"), pr_contract, 1),
         ("check name present only in a run step, not as a job name", pr_head + "  check-workflow-status:\n    runs-on: ubuntu-latest\n    steps:\n      - run: echo Check pull request workflow status job\n", pr_contract, 1),
+        ("check name present only as a step name, not the job name", pr_head + "  check-workflow-status:\n    runs-on: ubuntu-latest\n    steps:\n      - name: Check pull request workflow status job\n        run: true\n", pr_contract, 1),
         ("conformant release task", rel_ok, rel_contract, 0),
         ("release task with an artifact-ids fork in github-release", rel_ok.replace("          merge-multiple: true\n", "          merge-multiple: true\n          artifact-ids: 123\n"), rel_contract, 1),
         ("release task missing merge-multiple in github-release", rel_ok.replace("          merge-multiple: true\n", ""), rel_contract, 1),
