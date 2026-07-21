@@ -257,10 +257,7 @@ def _hash_normalized(norm_text):
 
 
 def content_hash(text):
-    # Memoize on the normalized form, not the raw text: one canonical and its (cached) git history are
-    # hashed against every audited repo, so the same content recurs across calls, and EOL-only variants
-    # (CRLF vs LF) must share one cache entry since they normalize equal. The input domain is bounded
-    # (a few units * a few repos), so caching every distinct normalized text is cheap.
+    # Cache on the normalized form, not raw text, so EOL-only variants (CRLF vs LF) share one entry.
     return _hash_normalized(normalize(text))
 
 
@@ -283,16 +280,11 @@ _HISTORY_CACHE = {}  # rel_path -> [past revision content]; a canonical is compa
 
 
 def git_file_history(rel_path):
-    """Each past revision's content of a hub-tracked file, so a stale copy (matches an old revision) can be
-    told from a modified one (matches none). Local and cheap - no gh calls. Cached per rel_path for the run:
-    one canonical is compared against every audited repo, so recomputing its history each time would cost
-    O(repos * commits) subprocess calls for one unchanging result."""
+    """Every past revision's content of a hub-tracked file (to tell a stale copy from a modified one), cached per rel_path."""
     if rel_path in _HISTORY_CACHE:
         return _HISTORY_CACHE[rel_path]
     out = []
-    # Decode explicitly as UTF-8 with replacement, matching how downstream and canonical content is read
-    # (base64 -> decode("utf-8", "replace")); a locale-default or strict decode here could hash a historical
-    # revision differently from the live copy and fabricate a mismatch.
+    # Decode as UTF-8/replace to match the downstream and canonical reads; a divergent decode would fabricate a mismatch.
     r = subprocess.run(["git", "log", "--format=%H", "--", rel_path], cwd=ROOT, capture_output=True,
                        encoding="utf-8", errors="replace")
     if r.returncode == 0:
