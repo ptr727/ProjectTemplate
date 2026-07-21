@@ -18,6 +18,8 @@ LETTER, or ERROR finding.
 Usage: python3 spec/audit.py [RepoName ...]   (default: every cataloged repo)
 """
 import base64
+import functools
+import hashlib
 import json
 import pathlib
 import re
@@ -242,6 +244,87 @@ def check_interface(path, contract, text):
     return findings
 
 
+def normalize(text):
+    """Reduce a carried unit to its comparable form: neutralize line endings, since EOL variance is governed
+    separately, not a fidelity deviation. No placeholder masking - see spec/fidelity-model.md "Normalization".
+    """
+    return text.replace("\r\n", "\n").replace("\r", "\n")
+
+
+@functools.lru_cache(maxsize=1024)  # bounded; the keys that recur across repos are the canonical and its history
+def _hash_normalized(norm_text):
+    return hashlib.sha256(norm_text.encode("utf-8")).hexdigest()
+
+
+def content_hash(text):
+    # Cache on the normalized form, not raw text, so EOL-only variants (CRLF vs LF) share one entry.
+    return _hash_normalized(normalize(text))
+
+
+def classify_verbatim(down_text, canon_text, past_texts):
+    """None if the downstream copy matches the current canonical, 'stale' if it matches a past hub revision
+    (the base advanced - re-vendor), or 'modified' if it matches no revision the base ever produced (the
+    repo changed fixed content). The discriminator is a content hash, never a version stamp - a stamp can
+    claim to be current while the body was edited, so it is never trusted for integrity.
+    """
+    dh = content_hash(down_text)
+    if dh == content_hash(canon_text):
+        return None
+    for past in past_texts:
+        if content_hash(past) == dh:
+            return "stale"
+    return "modified"
+
+
+_HISTORY_CACHE = {}  # rel_path -> [past revision content], reused as a canonical is compared against every audited repo
+
+
+def git_file_history(rel_path):
+    """Every past revision's content of a hub-tracked file (to tell a stale copy from a modified one), cached per rel_path."""
+    if rel_path in _HISTORY_CACHE:
+        return _HISTORY_CACHE[rel_path]
+    out = []
+    # Decode as UTF-8/replace to match the downstream and canonical reads. A divergent decode would fabricate a mismatch.
+    r = subprocess.run(["git", "log", "--format=%H", "--", rel_path], cwd=ROOT, capture_output=True,
+                       encoding="utf-8", errors="replace")
+    if r.returncode == 0:
+        for sha in r.stdout.split():
+            s = subprocess.run(["git", "show", f"{sha}:{rel_path}"], cwd=ROOT, capture_output=True,
+                               encoding="utf-8", errors="replace")
+            if s.returncode == 0:
+                out.append(s.stdout)
+    _HISTORY_CACHE[rel_path] = out
+    return out
+
+
+def check_verbatim(label, down_text, canonical_rel, extract=None):
+    """Compare a downstream copy against the hub's canonical (a region if `extract` is given), EOL-normalized,
+    and classify a mismatch as stale or modified via the canonical's git history. All findings are DRIFT: a
+    byte diff is a hint to review, never proof of breakage.
+    """
+    try:
+        # Same decode policy as the downstream copy and the git history, so a stray byte can never make
+        # otherwise-equal content hash differently across the three sources.
+        canon_text = (ROOT / canonical_rel).read_text(encoding="utf-8", errors="replace")
+    except OSError:
+        return [("DRIFT", f"verbatim: {label} canonical {canonical_rel} is unreadable from the hub (spec error?)")]
+    history = git_file_history(canonical_rel)
+    if extract is not None:
+        down_region, canon_region = extract(down_text), extract(canon_text)
+        if canon_region is None:
+            return [("DRIFT", f"verbatim: {label} region absent in the canonical (spec error?)")]
+        if down_region is None:
+            return [("DRIFT", f"verbatim: {label} region absent downstream, cannot compare")]
+        down_text, canon_text = down_region, canon_region
+        history = [h for h in (extract(t) for t in history) if h is not None]
+    verdict = classify_verbatim(down_text, canon_text, history)
+    if verdict is None:
+        return []
+    if verdict == "stale":
+        return [("DRIFT", f"verbatim: {label} matches a past hub revision, not the current canonical - the base advanced, re-vendor it")]
+    return [("DRIFT", f"verbatim: {label} differs from the canonical and matches no past hub revision - the repo modified fixed content, review it")]
+
+
 def audit_repo(entry, spec):
     findings = []  # (kind, text)
     slug = repo_slug(entry)
@@ -395,7 +478,7 @@ def audit_repo(entry, spec):
     # is DRIFT (a hint to verify), never a LETTER.
     sel = repo_selectors(entry, spec["registry"].get("defaults", {}))
     wanted_sections = {}  # path -> set of required section names, unioned across applicable entries
-    interface_contract = {}  # path -> contract, for fidelity:interface entries
+    check_item = {}  # path -> entry, for a fidelity interface/verbatim entry (last applicable wins per path)
     path_order = []
     for item in spec["files"]["baseline"]:
         if not applies(item.get("appliesTo", "*"), sel):
@@ -405,37 +488,51 @@ def audit_repo(entry, spec):
             wanted_sections[path] = set()
             path_order.append(path)
         wanted_sections[path].update(required_sections(item, sel))
-        if item.get("fidelity") == "interface":
-            interface_contract[path] = item.get("contract", {})
+        if item.get("fidelity") in ("interface", "verbatim"):
+            check_item[path] = item
     for path in path_order:
         content = gh(f"repos/{slug}/contents/{path}?ref={ground}", ok404=True)
+        item = check_item.get(path)
+        fid = item.get("fidelity") if item else "presence"
         if content is None:
             # An interface unit's presence is DRIFT, not LETTER - a workflow's naming is more variable than a
-            # carried config, so treat absence as a hint to verify rather than a hard defect.
-            if path in interface_contract:
+            # carried config, so absence is a hint to verify. Any other unit's absence is a file-presence LETTER.
+            if fid == "interface":
                 findings.append(("DRIFT", f"interface: {path} absent on {ground}, cannot verify its contract"))
             else:
                 findings.append(("LETTER", f"file: {path} absent on {ground} (verify intent per AUDIT.md section 7)"))
             continue
-        # Interface conformance: check the fixed contract by name and wiring, never the body.
-        if path in interface_contract:
-            body = content.get("content")
-            if not body:
+        # Guard on encoding, not truthiness: an empty file returns encoding "base64" with content "" (decode it
+        # to ""), whereas a too-large or non-inline payload returns encoding "none" (text stays None -> flagged).
+        text = base64.b64decode(content["content"]).decode("utf-8", "replace") if content.get("encoding") == "base64" else None
+        # Interface conformance (name + wiring) plus any verbatim job regions the contract pins.
+        if fid == "interface":
+            if text is None:
                 findings.append(("DRIFT", f"interface: could not read {path} content on {ground} to verify its contract (no inline content returned); verify by hand"))
             else:
-                findings.extend(check_interface(path, interface_contract[path], base64.b64decode(body).decode("utf-8", "replace")))
+                contract = item.get("contract", {})
+                findings.extend(check_interface(path, contract, text))
+                canonical_rel = item.get("reference") or path
+                for job in contract.get("verbatimJobs", []):
+                    findings.extend(check_verbatim(f"{path} job '{job}'", text, canonical_rel,
+                                                   extract=lambda t, j=job: split_jobs(t).get(j)))
+        # Whole-file verbatim: byte-identical to the hub's canonical after EOL normalization.
+        elif fid == "verbatim":
+            if text is None:
+                findings.append(("DRIFT", f"verbatim: could not read {path} content on {ground} to compare (no inline content returned); verify by hand"))
+            else:
+                findings.extend(check_verbatim(path, text, item.get("reference") or path))
         # Heading-based presence is only meaningful for markdown. A "section" named on a non-md file (e.g. a
         # tasks.json task group) is an intent marker judged per AUDIT.md, not a heading grep.
         needed = wanted_sections[path]
         if needed and path.endswith(".md"):
-            body = content.get("content")
-            if not body:
+            if text is None:
                 # Fail loud rather than skip silently: the contents API returned no inline content (an
                 # oversized file, a symlink, a submodule), so the section check could not run - surface that
                 # instead of a false clean.
                 findings.append(("DRIFT", f"section: could not read {path} content on {ground} to verify sections (no inline content returned); verify by hand"))
             else:
-                present = heading_texts(base64.b64decode(body).decode("utf-8", "replace"))
+                present = heading_texts(text)
                 for name in sorted(needed):
                     if name.strip().lower() not in present:
                         findings.append(("DRIFT", f"section: '{name}' not found as a heading in {path} on {ground} (renamed or missing; verify intent per AUDIT.md section 7)"))
@@ -502,6 +599,35 @@ def _selftest():
         print(f"  FAIL split_jobs (inline mapping) -> {sorted(inline)}")
     else:
         print("  ok   split_jobs (inline-mapping job captured with its content)")
+
+    # Verbatim engine: EOL normalization, hashing, and the stale-vs-modified classification. Exercised here
+    # rather than only in production, because a latent bug in the comparison would otherwise surface as a
+    # false clean on a real fleet run.
+    canon = "line one\nline two\nline three\n"
+    verbatim_cases = [
+        # (label, down_text, canon_text, history, want)
+        ("identical -> match", canon, canon, [], None),
+        ("EOL-only diff (CRLF) -> match", canon.replace("\n", "\r\n"), canon, [], None),
+        ("EOL-only diff (bare CR) -> match", canon.replace("\n", "\r"), canon, [], None),
+        ("body edit -> modified", canon.replace("line two", "line TWO edited"), canon, [], "modified"),
+        ("matches a past revision -> stale", "old body\n", "current body\n", ["old body\n", "older\n"], "stale"),
+        ("matches a past revision modulo EOL -> stale", "old body\r\n", "current body\n", ["old body\n"], "stale"),
+        ("edit in no revision -> modified", "never existed\n", "current body\n", ["old body\n"], "modified"),
+    ]
+    for label, down, canon_t, history, want in verbatim_cases:
+        got = classify_verbatim(down, canon_t, history)
+        if got != want:
+            ok = False
+        print(f"  {'ok  ' if got == want else 'FAIL'} want={str(want):>8} got={str(got):>8}  verbatim: {label}")
+    # Region extraction and hashing: a forked github-release block must hash differently from the canonical.
+    region = split_jobs(rel_ok).get("github-release")
+    forked_region = split_jobs(rel_ok.replace("          merge-multiple: true\n", "          artifact-ids: 1\n")).get("github-release")
+    if region is None or forked_region is None or content_hash(region) == content_hash(forked_region):
+        ok = False
+        print("  FAIL verbatim: forked github-release region should hash differently")
+    else:
+        print("  ok   verbatim: a forked github-release region hashes differently from the canonical")
+
     print("SELFTEST PASS" if ok else "SELFTEST FAIL")
     return 0 if ok else 1
 
