@@ -159,7 +159,9 @@ def split_jobs(text):
     blocks, key, cur = {}, None, []
     for ln in lines[ji + 1:]:
         indent = len(ln) - len(ln.lstrip())
-        if ln.strip() and not ln.lstrip().startswith("#") and indent < job_indent:
+        if ln.strip() and indent < job_indent:
+            if ln.lstrip().startswith("#"):
+                continue  # a dedented comment is not part of any job and does not end the mapping - skip it
             break  # a sibling top-level key ends the jobs region
         m = _JOB_KEY.match(ln[job_indent:]) if indent == job_indent else None
         if m:
@@ -190,16 +192,18 @@ def check_interface(path, contract, text):
     tok = contract.get("artifactNameToken")
     if tok and tok not in text:
         findings.append(("DRIFT", f"interface: {path} missing the '{tok}<branch>-<target>' artifact handoff"))
+    # Token checks only apply to a job that is present; an absent job is already reported by requiredJobKeys,
+    # so skip it rather than emit a redundant "missing token" for every token it cannot contain.
     for job, toks in contract.get("requireTokensInJob", {}).items():
-        block = jobs.get(job, "")
-        for t in toks:
-            if t not in block:
-                findings.append(("DRIFT", f"interface: {path} job '{job}' missing required '{t}'"))
+        if job in jobs:
+            for t in toks:
+                if t not in jobs[job]:
+                    findings.append(("DRIFT", f"interface: {path} job '{job}' missing required '{t}'"))
     for job, toks in contract.get("forbidTokensInJob", {}).items():
-        block = jobs.get(job, "")
-        for t in toks:
-            if t in block:
-                findings.append(("DRIFT", f"interface: {path} job '{job}' uses forbidden '{t}' (forks the verbatim github-release download - see AGENTS.md override seam)"))
+        if job in jobs:
+            for t in toks:
+                if t in jobs[job]:
+                    findings.append(("DRIFT", f"interface: {path} job '{job}' uses forbidden '{t}' (forks the verbatim github-release download - see AGENTS.md override seam)"))
     return findings
 
 
@@ -439,6 +443,7 @@ def _selftest():
         ("release task with an artifact-ids fork in github-release", rel_ok.replace("          merge-multiple: true\n", "          merge-multiple: true\n          artifact-ids: 123\n"), rel_contract, 1),
         ("release task missing merge-multiple in github-release", rel_ok.replace("          merge-multiple: true\n", ""), rel_contract, 1),
         ("release task with an owned extra leaf job", rel_head + "  build-extra:\n    runs-on: ubuntu-latest\n    steps: []\n" + gh_rel, rel_contract, 0),
+        ("absent job reports once, no redundant token findings", rel_head, {"requiredJobKeys": ["github-release"], "requireTokensInJob": {"github-release": ["pattern:", "merge-multiple:"]}}, 1),
     ]
     ok = True
     for label, text, contract, want in cases:
@@ -446,8 +451,8 @@ def _selftest():
         if got != want:
             ok = False
         print(f"  {'ok  ' if got == want else 'FAIL'} want={want} got={got}  {label}")
-    jobs = set(split_jobs(rel_ok))
-    if jobs != {"get-version", "build-widget", "github-release"}:
+    jobs = set(split_jobs(rel_ok + "# a trailing top-level comment\n"))
+    if jobs != {"get-version", "build-widget", "github-release"} or "trailing top-level comment" in split_jobs(rel_ok + "# a trailing top-level comment\n").get("github-release", ""):
         ok = False
         print(f"  FAIL split_jobs -> {sorted(jobs)}")
     else:
