@@ -58,7 +58,7 @@ HUB_NAME, HUB_NAME_FROM_REMOTE = hub_name()
 
 
 def gh(path, ok404=False):
-    """GET a REST path via gh; parsed JSON, or None on 404 when ok404.
+    """GET a REST path via gh, returning parsed JSON or None on 404 when ok404.
 
     No --paginate: on object endpoints it concatenates page documents into unparseable JSON. Every
     list read here fits one page; callers pass per_page=100 where a default page could truncate.
@@ -134,6 +134,114 @@ def heading_texts(markdown):
     return {m.group(1).strip().lower() for line in markdown.splitlines() for m in (_HEADING.match(line),) if m}
 
 
+_JOB_KEY = re.compile(r"^([A-Za-z0-9_.\-]+):(\s.*)?$")
+
+
+def split_jobs(text):
+    """Slice a workflow YAML into {job_key: block_text} by the jobs-level indent, without a YAML parser.
+
+    Structural, not semantic: find the top-level `jobs:` key, take the indent of its first child as the
+    job-key indent, and cut the region at each key line at exactly that indent. A line dedented below the
+    job-key indent (a sibling top-level key) ends the jobs region.
+    """
+    lines = text.splitlines(keepends=True)
+    ji = next((i for i, ln in enumerate(lines) if re.match(r"^jobs:\s*(#.*)?$", ln)), None)
+    if ji is None:
+        return {}
+    job_indent = None
+    for ln in lines[ji + 1:]:
+        if ln.strip() == "" or ln.lstrip().startswith("#"):
+            continue
+        job_indent = len(ln) - len(ln.lstrip())
+        break
+    if not job_indent:
+        return {}
+    blocks, key, cur = {}, None, []
+    for ln in lines[ji + 1:]:
+        indent = len(ln) - len(ln.lstrip())
+        if ln.strip() and indent < job_indent:
+            if ln.lstrip().startswith("#"):
+                continue  # a dedented comment is not part of any job and does not end the mapping - skip it
+            break  # a sibling top-level key ends the jobs region
+        m = _JOB_KEY.match(ln[job_indent:]) if indent == job_indent else None
+        if m:
+            if key is not None:
+                blocks[key] = "".join(cur)
+            key, cur = m.group(1), [ln]  # include the key line so an inline mapping on it is captured
+        elif key is not None:
+            cur.append(ln)
+    if key is not None:
+        blocks[key] = "".join(cur)
+    return blocks
+
+
+def _code_view(text):
+    """Workflow text with comment-only lines dropped, so a token mentioned only in a comment is not signal.
+
+    A carried task file documents its own contract in comments (build-release-task.yml names
+    `release-asset-` and `artifact-ids:` in prose), so a raw substring search over the whole text would
+    both false-pass a missing handoff and false-flag a forbidden token that appears only in a comment.
+    """
+    return "\n".join(ln for ln in text.splitlines() if not ln.lstrip().startswith("#"))
+
+
+def job_level_names(blocks):
+    """The job-level `name:` values - a job's own direct-child name key, not a step's name.
+
+    The ruleset-bound check is a job name, so a step happening to share the string must not satisfy it. A
+    job's direct children sit at the shallowest indent of its block (below the key line); a step name is
+    deeper or a `- name:` list item, so neither reaches that indent as a bare `name:`.
+    """
+    out = set()
+    for block in blocks.values():
+        body = [ln for ln in block.splitlines()[1:] if ln.strip() and not ln.lstrip().startswith("#")]
+        if not body:
+            continue
+        child = min(len(ln) - len(ln.lstrip()) for ln in body)
+        for ln in body:
+            if len(ln) - len(ln.lstrip()) == child:
+                m = re.match(r"name:\s*['\"]?(.*?)['\"]?\s*$", ln[child:])
+                if m:
+                    out.add(m.group(1))
+    return out
+
+
+def check_interface(path, contract, text):
+    """Verify a workflow honors its fixed contract by name and wiring, never its body (spec/fidelity-model.md).
+
+    All findings are DRIFT: the interface is what a repo must keep, the body is owned, and a rename or a
+    forked handoff is a hint to verify, not a hard failure. `verbatimJobs` is the verbatim engine's concern.
+    """
+    findings = []
+    jobs = split_jobs(text)
+    code = _code_view(text)
+    for k in contract.get("requiredJobKeys", []):
+        if k not in jobs:
+            findings.append(("DRIFT", f"interface: {path} missing required job '{k}'"))
+    name = contract.get("requiredCheckName")
+    if name and name not in job_level_names(jobs):
+        findings.append(("DRIFT", f"interface: {path} missing the ruleset-bound check name '{name}' as a job name"))
+    tok = contract.get("artifactNameToken")
+    if tok and tok not in code:
+        findings.append(("DRIFT", f"interface: {path} missing the '{tok}<branch>-<target>' artifact handoff"))
+    # Token checks only apply to a job that is present; an absent job is already reported by requiredJobKeys,
+    # so skip it rather than emit a redundant "missing token" for every token it cannot contain. Scan the
+    # job's code view so a token in a comment is not read as signal.
+    for job, toks in contract.get("requireTokensInJob", {}).items():
+        if job in jobs:
+            block = _code_view(jobs[job])
+            for t in toks:
+                if t not in block:
+                    findings.append(("DRIFT", f"interface: {path} job '{job}' missing required '{t}'"))
+    for job, toks in contract.get("forbidTokensInJob", {}).items():
+        if job in jobs:
+            block = _code_view(jobs[job])
+            for t in toks:
+                if t in block:
+                    findings.append(("DRIFT", f"interface: {path} job '{job}' uses forbidden '{t}' (forks the verbatim github-release download - see AGENTS.md override seam)"))
+    return findings
+
+
 def audit_repo(entry, spec):
     findings = []  # (kind, text)
     slug = repo_slug(entry)
@@ -168,7 +276,7 @@ def audit_repo(entry, spec):
                 # Instead, derive the main-side change set from the merge-base tree - paths whose
                 # object SHA (blob, or submodule pointer) differs base->main, additions and deletions
                 # included, no cap - then drop paths whose objects already match at develop: content
-                # develop already has is not "content develop lacks". Three recursive trees calls; if
+                # develop already has is not "content develop lacks". Three recursive tree calls, so if
                 # any tree is truncated (or unexpectedly not a dict) the filter is skipped and the
                 # compare's unfiltered count kept (conservative, marked).
                 trees = {
@@ -233,7 +341,7 @@ def audit_repo(entry, spec):
         for store in mech.get("stores", []):
             required_by_store[store] |= set(mech.get("requires", []))
     # Registry requiredSecrets[] are the domain-specific additions (STANDUP.md: requiredSecrets plus the
-    # implicit baseline). Mechanism-mapped names already carry their stores above; unmapped ones are
+    # implicit baseline). Mechanism-mapped names already carry their stores above, and unmapped ones are
     # expected in the actions store and count as claimed (never stale).
     required_by_store["actions"] |= set(entry.get("requiredSecrets", []))
     forbidden = set(secrets["baseline"].get("forbids", []))
@@ -263,8 +371,8 @@ def audit_repo(entry, spec):
     # devcontainers when it ships a .devcontainer. dependabot.yml is YAML (no stdlib parser), so scan the
     # declared package-ecosystem values by regex - anchored to the line start so a commented-out entry
     # (# package-ecosystem: ...) is not read as declared. This asserts an implied ecosystem's *presence*
-    # only; that each declared ecosystem dual-targets main+develop (the fleet norm) is verified by
-    # inspection, not here. Only runs when dependabot.yml exists; its absence is already a file-presence
+    # only. Whether each declared ecosystem dual-targets main+develop (the fleet norm) is verified by
+    # inspection, not here. Only runs when dependabot.yml exists, since its absence is already a file-presence
     # LETTER below. Language ecosystems (nuget/uv/npm) are directory-scoped and not yet cross-checked here.
     db = gh(f"repos/{slug}/contents/.github/dependabot.yml?ref={ground}", ok404=True)
     if db and db.get("content"):
@@ -283,10 +391,11 @@ def audit_repo(entry, spec):
     # appliesTo is matched against the repo's full selector set (types + workflowModel + releaseTrigger +
     # consumerModel), so the release/operational develop ruleset is two data entries, not a code swap.
     # Required sections union across same-path entries. A carried markdown file must contain each heading
-    # scoped to this repo; a rename reads as missing and equivalence is judged by hand, so a missing section
+    # scoped to this repo. A rename reads as missing and equivalence is judged by hand, so a missing section
     # is DRIFT (a hint to verify), never a LETTER.
     sel = repo_selectors(entry, spec["registry"].get("defaults", {}))
     wanted_sections = {}  # path -> set of required section names, unioned across applicable entries
+    interface_contract = {}  # path -> contract, for fidelity:interface entries
     path_order = []
     for item in spec["files"]["baseline"]:
         if not applies(item.get("appliesTo", "*"), sel):
@@ -296,12 +405,26 @@ def audit_repo(entry, spec):
             wanted_sections[path] = set()
             path_order.append(path)
         wanted_sections[path].update(required_sections(item, sel))
+        if item.get("fidelity") == "interface":
+            interface_contract[path] = item.get("contract", {})
     for path in path_order:
         content = gh(f"repos/{slug}/contents/{path}?ref={ground}", ok404=True)
         if content is None:
-            findings.append(("LETTER", f"file: {path} absent on {ground} (verify intent per AUDIT.md section 7)"))
+            # An interface unit's presence is DRIFT, not LETTER - a workflow's naming is more variable than a
+            # carried config, so treat absence as a hint to verify rather than a hard defect.
+            if path in interface_contract:
+                findings.append(("DRIFT", f"interface: {path} absent on {ground}, cannot verify its contract"))
+            else:
+                findings.append(("LETTER", f"file: {path} absent on {ground} (verify intent per AUDIT.md section 7)"))
             continue
-        # Heading-based presence is only meaningful for markdown; a "section" named on a non-md file (e.g. a
+        # Interface conformance: check the fixed contract by name and wiring, never the body.
+        if path in interface_contract:
+            body = content.get("content")
+            if not body:
+                findings.append(("DRIFT", f"interface: could not read {path} content on {ground} to verify its contract (no inline content returned); verify by hand"))
+            else:
+                findings.extend(check_interface(path, interface_contract[path], base64.b64decode(body).decode("utf-8", "replace")))
+        # Heading-based presence is only meaningful for markdown. A "section" named on a non-md file (e.g. a
         # tasks.json task group) is an intent marker judged per AUDIT.md, not a heading grep.
         needed = wanted_sections[path]
         if needed and path.endswith(".md"):
@@ -333,7 +456,59 @@ def audit_repo(entry, spec):
     return findings, audited_sha
 
 
+def _selftest():
+    """Exercise the interface engine on synthetic fixtures, no network - verify the mechanism, not the fleet."""
+    pr_check = "  check-workflow-status:\n    name: Check pull request workflow status job\n    needs: [changes]\n    runs-on: ubuntu-latest\n"
+    pr_head = "name: Test\non: pull_request\njobs:\n  changes:\n    runs-on: ubuntu-latest\n"
+    pr_contract = {"requiredJobKeys": ["check-workflow-status"], "requiredCheckName": "Check pull request workflow status job"}
+    gh_rel = ("  github-release:\n    needs: [get-version, build-widget]\n    runs-on: ubuntu-latest\n    steps:\n"
+              "      - uses: actions/download-artifact@v4\n        with:\n          pattern: release-asset-${{ inputs.branch }}-*\n          merge-multiple: true\n")
+    rel_head = ("name: Build Release\non:\n  workflow_call:\njobs:\n"
+                "  get-version:\n    runs-on: ubuntu-latest\n    steps: []\n"
+                "  build-widget:\n    runs-on: ubuntu-latest\n    steps: []\n")
+    rel_ok = rel_head + gh_rel
+    rel_contract = {"requiredJobKeys": ["get-version", "github-release"], "artifactNameToken": "release-asset-",
+                    "requireTokensInJob": {"github-release": ["pattern:", "merge-multiple:"]},
+                    "forbidTokensInJob": {"github-release": ["artifact-ids:"]}}
+    cases = [
+        ("conformant PR workflow", pr_head + pr_check, pr_contract, 0),
+        ("PR workflow missing the required job and its check name", pr_head, pr_contract, 2),
+        ("PR workflow with a renamed check", pr_head + pr_check.replace("Check pull request workflow status job", "Renamed"), pr_contract, 1),
+        ("check name present only in a run step, not as a job name", pr_head + "  check-workflow-status:\n    runs-on: ubuntu-latest\n    steps:\n      - run: echo Check pull request workflow status job\n", pr_contract, 1),
+        ("check name present only as a step name, not the job name", pr_head + "  check-workflow-status:\n    runs-on: ubuntu-latest\n    steps:\n      - name: Check pull request workflow status job\n        run: true\n", pr_contract, 1),
+        ("conformant release task", rel_ok, rel_contract, 0),
+        ("release task with an artifact-ids fork in github-release", rel_ok.replace("          merge-multiple: true\n", "          merge-multiple: true\n          artifact-ids: 123\n"), rel_contract, 1),
+        ("release task missing merge-multiple in github-release", rel_ok.replace("          merge-multiple: true\n", ""), rel_contract, 1),
+        ("release task with an owned extra leaf job", rel_head + "  build-extra:\n    runs-on: ubuntu-latest\n    steps: []\n" + gh_rel, rel_contract, 0),
+        ("absent job reports once, no redundant token findings", rel_head, {"requiredJobKeys": ["github-release"], "requireTokensInJob": {"github-release": ["pattern:", "merge-multiple:"]}}, 1),
+        ("a forbidden token only in a comment is ignored", rel_ok.replace("          merge-multiple: true\n", "          merge-multiple: true\n          # never an artifact-ids: fork here\n"), rel_contract, 0),
+        ("a required token only in a comment does not count", rel_ok.replace("          merge-multiple: true\n", "          # merge-multiple: true (was here)\n"), rel_contract, 1),
+    ]
+    ok = True
+    for label, text, contract, want in cases:
+        got = len(check_interface("wf", contract, text))
+        if got != want:
+            ok = False
+        print(f"  {'ok  ' if got == want else 'FAIL'} want={want} got={got}  {label}")
+    trailing = split_jobs(rel_ok + "# a trailing top-level comment\n")
+    if set(trailing) != {"get-version", "build-widget", "github-release"} or "trailing top-level comment" in trailing.get("github-release", ""):
+        ok = False
+        print(f"  FAIL split_jobs (trailing comment) -> {sorted(trailing)}")
+    else:
+        print(f"  ok   split_jobs (trailing comment) -> {sorted(trailing)}")
+    inline = split_jobs("name: X\non: push\njobs:\n  quick: {runs-on: ubuntu-latest}\n  full:\n    runs-on: ubuntu-latest\n")
+    if set(inline) != {"quick", "full"} or "runs-on" not in inline.get("quick", ""):
+        ok = False
+        print(f"  FAIL split_jobs (inline mapping) -> {sorted(inline)}")
+    else:
+        print("  ok   split_jobs (inline-mapping job captured with its content)")
+    print("SELFTEST PASS" if ok else "SELFTEST FAIL")
+    return 0 if ok else 1
+
+
 def main():
+    if "--selftest" in sys.argv:
+        return _selftest()
     spec = {
         "registry": load("registry/repos.json"),
         "settings": load("repo-config/settings.json"),
