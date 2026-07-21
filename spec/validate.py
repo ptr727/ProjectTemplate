@@ -251,11 +251,14 @@ def main():
                 if unknown:
                     errors.append(f"files.json: {path} contract has unknown key(s): {', '.join(sorted(unknown))}")
         ref = item.get("reference")
-        if isinstance(ref, str) and (ref.startswith("/") or ".." in pathlib.PurePosixPath(ref).parts):
+        if ref is not None and not isinstance(ref, str):
+            errors.append(f"files.json: {path} reference must be a string")
+            ref = None
+        elif isinstance(ref, str) and (ref.startswith("/") or ".." in pathlib.PurePosixPath(ref).parts):
             errors.append(f"files.json: {path} reference '{ref}' must be a repo-relative path (no leading / or ..)")
         if fid == "verbatim":
-            src = ref or path
-            if not (ROOT / src).exists():
+            src = ref if isinstance(ref, str) else path
+            if isinstance(src, str) and not (ROOT / src).exists():
                 errors.append(f"files.json: {path} fidelity 'verbatim' but its canonical source {src} is missing")
 
         sections = item.get("sections", [])

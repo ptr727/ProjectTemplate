@@ -15,7 +15,7 @@ Each [`spec/files.json`][files] entry declares one `fidelity`, defaulting to `pr
 - **verbatim** - byte-identical to the hub's canonical after declared-placeholder normalization. The audit content-hashes the downstream copy against canonical. It applies to a whole file or a stable-handle region (a markdown section by heading, a workflow job by key).
 - **interface** - an overridable body that must honor a named contract. The audit checks the contract by name and wiring, never the body.
 
-Fidelity is stated explicitly, never inferred from `whole`/`placeholders`. `.editorconfig` and `.markdownlint-cli2.jsonc` are both whole with no placeholders yet sit at opposite fidelity, because the discriminator is governance, not field shape.
+Fidelity is a declared field defaulting to `presence`, never inferred from `whole`/`placeholders`. `.editorconfig` and `.markdownlint-cli2.jsonc` are both whole with no placeholders yet sit at opposite fidelity, because the discriminator is governance, not field shape.
 
 ## Why Each Unit Sits Where It Does
 
