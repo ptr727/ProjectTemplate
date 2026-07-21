@@ -134,7 +134,7 @@ def heading_texts(markdown):
     return {m.group(1).strip().lower() for line in markdown.splitlines() for m in (_HEADING.match(line),) if m}
 
 
-_JOB_KEY = re.compile(r"^([A-Za-z0-9_.\-]+):\s*(#.*)?$")
+_JOB_KEY = re.compile(r"^([A-Za-z0-9_.\-]+):(\s.*)?$")
 
 
 def split_jobs(text):
@@ -167,7 +167,7 @@ def split_jobs(text):
         if m:
             if key is not None:
                 blocks[key] = "".join(cur)
-            key, cur = m.group(1), []
+            key, cur = m.group(1), [ln]  # include the key line so an inline mapping on it is captured
         elif key is not None:
             cur.append(ln)
     if key is not None:
@@ -198,8 +198,8 @@ def check_interface(path, contract, text):
         if k not in jobs:
             findings.append(("DRIFT", f"interface: {path} missing required job '{k}'"))
     name = contract.get("requiredCheckName")
-    if name and name not in code:
-        findings.append(("DRIFT", f"interface: {path} missing the ruleset-bound check name '{name}'"))
+    if name and not re.search(r"^\s*name:\s*['\"]?" + re.escape(name) + r"['\"]?\s*$", code, re.M):
+        findings.append(("DRIFT", f"interface: {path} missing the ruleset-bound check name '{name}' as a job name"))
     tok = contract.get("artifactNameToken")
     if tok and tok not in code:
         findings.append(("DRIFT", f"interface: {path} missing the '{tok}<branch>-<target>' artifact handoff"))
@@ -453,6 +453,7 @@ def _selftest():
         ("conformant PR workflow", pr_head + pr_check, pr_contract, 0),
         ("PR workflow missing the required job and its check name", pr_head, pr_contract, 2),
         ("PR workflow with a renamed check", pr_head + pr_check.replace("Check pull request workflow status job", "Renamed"), pr_contract, 1),
+        ("check name present only in a run step, not as a job name", pr_head + "  check-workflow-status:\n    runs-on: ubuntu-latest\n    steps:\n      - run: echo Check pull request workflow status job\n", pr_contract, 1),
         ("conformant release task", rel_ok, rel_contract, 0),
         ("release task with an artifact-ids fork in github-release", rel_ok.replace("          merge-multiple: true\n", "          merge-multiple: true\n          artifact-ids: 123\n"), rel_contract, 1),
         ("release task missing merge-multiple in github-release", rel_ok.replace("          merge-multiple: true\n", ""), rel_contract, 1),
@@ -467,12 +468,18 @@ def _selftest():
         if got != want:
             ok = False
         print(f"  {'ok  ' if got == want else 'FAIL'} want={want} got={got}  {label}")
-    jobs = set(split_jobs(rel_ok + "# a trailing top-level comment\n"))
-    if jobs != {"get-version", "build-widget", "github-release"} or "trailing top-level comment" in split_jobs(rel_ok + "# a trailing top-level comment\n").get("github-release", ""):
+    trailing = split_jobs(rel_ok + "# a trailing top-level comment\n")
+    if set(trailing) != {"get-version", "build-widget", "github-release"} or "trailing top-level comment" in trailing.get("github-release", ""):
         ok = False
-        print(f"  FAIL split_jobs -> {sorted(jobs)}")
+        print(f"  FAIL split_jobs (trailing comment) -> {sorted(trailing)}")
     else:
-        print(f"  ok   split_jobs -> {sorted(jobs)}")
+        print(f"  ok   split_jobs (trailing comment) -> {sorted(trailing)}")
+    inline = split_jobs("name: X\non: push\njobs:\n  quick: {runs-on: ubuntu-latest}\n  full:\n    runs-on: ubuntu-latest\n")
+    if set(inline) != {"quick", "full"} or "runs-on" not in inline.get("quick", ""):
+        ok = False
+        print(f"  FAIL split_jobs (inline mapping) -> {sorted(inline)}")
+    else:
+        print("  ok   split_jobs (inline-mapping job captured with its content)")
     print("SELFTEST PASS" if ok else "SELFTEST FAIL")
     return 0 if ok else 1
 
