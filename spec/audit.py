@@ -502,7 +502,9 @@ def audit_repo(entry, spec):
             else:
                 findings.append(("LETTER", f"file: {path} absent on {ground} (verify intent per AUDIT.md section 7)"))
             continue
-        text = base64.b64decode(content["content"]).decode("utf-8", "replace") if content.get("content") else None
+        # Guard on encoding, not truthiness: an empty file returns encoding "base64" with content "" (decode it
+        # to ""), whereas a too-large or non-inline payload returns encoding "none" (text stays None -> flagged).
+        text = base64.b64decode(content["content"]).decode("utf-8", "replace") if content.get("encoding") == "base64" else None
         # Interface conformance (name + wiring) plus any verbatim job regions the contract pins.
         if fid == "interface":
             if text is None:
