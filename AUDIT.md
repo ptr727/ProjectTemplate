@@ -51,7 +51,7 @@ A check with `intentRef`/`workflowRef` points at the prose section that owns the
 - **branch-model** - `main` and `develop` both exist and are protected, and the live rulesets match [`repo-config/*.json`][repo-config] by normalized diff (below).
 - **repo-setup** - every required secret for the repo's publish mechanisms is configured, and no forbidden secret is present (per [`spec/secrets.json`][secrets]).
 - **linter-parity** - one config per linter (`.markdownlint-cli2.jsonc`, `cspell.json`, ruff/pyright, editorconfig/csharpier, actionlint) drives the editor extension, the CLI, and CI, and CI runs each.
-- **recurring-violations** (high priority, always run) - comments concise and non-narrative; ASCII only (no em-dash, no smart quotes); US spelling; line endings per `.editorconfig`. These are frequent regressions, and each is a grep-able check (see below).
+- **recurring-violations** (high priority, always run) - comments concise and non-narrative, ASCII only (no em-dash, no smart quotes), US spelling, line endings per `.editorconfig`. These are frequent regressions, and each is a grep-able check (see below).
 - **readme-structure** - the README follows [`spec/readme-structure.md`][readme-structure] (applicable sections, in order).
 
 ## 5. Assert the Actions Implement WORKFLOW.md
