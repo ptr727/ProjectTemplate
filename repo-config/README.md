@@ -1,6 +1,6 @@
 # repo-config
 
-Repository and branch configuration held as committed files, kept out of `.github/` (which holds the GitHub-consumed configuration - workflows, Dependabot). This mirrors the layout the fleet repos use.
+Repository and branch configuration held as committed files, kept out of `.github/` (which holds the GitHub-consumed configuration - workflows, Dependabot).
 
 - `main.json` plus one `develop` variant - the branch rulesets as the writable API subset (`name`, `target`, `enforcement`, `bypass_actors`, `conditions`, `rules`). The `develop` payload is `develop.json` (`release` repos) or `operational/develop.json` (`operational` repos). These are the canonical expected payloads that the self-audit (`AUDIT.md`) diffs the live rulesets against.
 - `operational/develop.json` - the `develop` ruleset for **operational** repos (registry `workflowModel: operational`): direct signed pushes, no PR gate. Present in operational repos only - a `release` repo does not have it. See "Rulesets" below.
