@@ -244,14 +244,8 @@ def check_interface(path, contract, text):
 
 
 def normalize(text):
-    """A carried unit reduced to its comparable form - line endings neutralized, because EOL variance is
-    governed by the line-ending rules, not a fidelity deviation.
-
-    No placeholder masking: a verbatim unit carries no per-repo placeholders (the files that declare
-    `placeholders` are fidelity `intent`, judged by hand, never hashed). Masking would not work anyway - a
-    downstream copy holds the substituted value (`ptr727`), not the token (`<owner>`), so masking the token
-    touches only the canonical. A verbatim unit that ever needed a per-repo substitution would require
-    template-matching, not this hash. None does today.
+    """Reduce a carried unit to its comparable form: neutralize line endings, since EOL variance is governed
+    separately, not a fidelity deviation. No placeholder masking - see spec/fidelity-model.md "Normalization".
     """
     return text.replace("\r\n", "\n").replace("\r", "\n")
 

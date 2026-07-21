@@ -12,7 +12,7 @@ Each [`spec/files.json`][files] entry declares one `fidelity`, defaulting to `pr
 
 - **presence** - the unit exists (a file, or a markdown section heading). The audit's baseline check.
 - **intent** - carried faithfully but judged by meaning, not bytes. A downstream copy legitimately differs (a governed divergence or a paraphrase), and equivalence is a human call via `intentRef`. The audit asserts nothing beyond presence.
-- **verbatim** - byte-identical to the hub's canonical after line-ending normalization. The audit content-hashes the downstream copy against canonical. It applies to a whole file or a stable-handle region (a markdown section by heading, a workflow job by key).
+- **verbatim** - byte-identical to the hub's canonical after line-ending normalization. The audit content-hashes the downstream copy against canonical. It applies to a whole file or a workflow job region (a job selected by key).
 - **interface** - an overridable body that must honor a named contract. The audit checks the contract by name and wiring, never the body.
 
 Fidelity is a declared field defaulting to `presence`, never inferred from `whole`/`placeholders`. `.editorconfig` and `.markdownlint-cli2.jsonc` are both whole with no placeholders yet sit at opposite fidelity, because the discriminator is governance, not field shape.
@@ -32,7 +32,7 @@ The fixed interface of a workflow is stated in [`AGENTS.md`][agents] ("Orchestra
 
 A verbatim check compares content by hash after **line-ending normalization only** - EOL variance is governed by the line-ending rules, not a fidelity deviation. It does **not** mask placeholders: a verbatim unit carries none. The files that declare a `placeholders` list (for example `.github/copilot-instructions.md` with `<owner>`, `<repo>`, `<N>`) are fidelity `intent`, judged by hand and never hashed. Masking could not serve a hash anyway - a downstream copy holds the substituted value (`ptr727`), not the token (`<owner>`), so masking the token in the canonical alone would guarantee a mismatch. A verbatim unit that ever needed a per-repo substitution would require template-matching (the canonical as a pattern, the copy as an instance), not this content hash; none does today.
 
-## Stale Versus Violated
+## Stale Versus Modified
 
 A verbatim mismatch is one of two things, told apart **by hash, not by a version**. The audit hashes each past revision of the hub's canonical from its own git history. If the downstream copy matches a **past** canonical revision, the base advanced and the copy is **stale** - re-vendor it. If it matches **no** revision the base ever produced, the repo **modified fixed content** - review it. A version stamp could claim to be current while being neither, so it is demoted to a human-facing label and never consulted for integrity.
 
