@@ -237,7 +237,7 @@ def audit_repo(entry, spec):
                 # Instead, derive the main-side change set from the merge-base tree - paths whose
                 # object SHA (blob, or submodule pointer) differs base->main, additions and deletions
                 # included, no cap - then drop paths whose objects already match at develop: content
-                # develop already has is not "content develop lacks". Three recursive trees calls, so if
+                # develop already has is not "content develop lacks". Three recursive tree calls, so if
                 # any tree is truncated (or unexpectedly not a dict) the filter is skipped and the
                 # compare's unfiltered count kept (conservative, marked).
                 trees = {
