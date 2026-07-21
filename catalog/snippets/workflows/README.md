@@ -1,6 +1,6 @@
 # Workflow snippets
 
-The reusable build/publish workflow tasks a code-shipping repo runs. They are **inert reference here** - this repo is source-only and keeps just the orchestrator set (`test-pull-request`, `publish-release`, `build-release-task`, `get-version-task`, `merge-bot-pull-request`) in `.github/workflows/`. Each file below is the canonical implementation of one or more `WORKFLOW.md` guarantees; the audit asserts a downstream repo's own Actions satisfy those guarantees, not that they match these bytes.
+The reusable build/publish workflow tasks a code-shipping repo runs. They are **inert reference here** - this repo is source-only and keeps just the orchestrator set (`test-pull-request`, `publish-release`, `validate-task`, `merge-bot-pull-request`) in `.github/workflows/`. Each file below is the canonical implementation of one or more `WORKFLOW.md` guarantees; the audit asserts a downstream repo's own Actions satisfy those guarantees, not that they match these bytes.
 
 | File | Role | WORKFLOW.md guarantees |
 | --- | --- | --- |
