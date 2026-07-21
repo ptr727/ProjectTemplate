@@ -1,13 +1,13 @@
-# Audit: <repo>
+# Audit: `<repo>`
 
 - **Audited branch:** main (`<sha>`)
-- **Types:** <from registry, or resolved>
+- **Types:** `<from registry, or resolved>`
 - **Verdict:** operational | not operational
-- **Date:** <YYYY-MM-DD>
+- **Date:** `<YYYY-MM-DD>`
 
 ## Develop Drift
 
-`develop` vs `main`: ahead <n>, behind <n>. <in sync | stale | diverged - a drift finding if not in sync>
+`develop` vs `main`: ahead `<n>`, behind `<n>`. `<in sync | stale | diverged - a drift finding if not in sync>`
 
 ## Dimensions
 
@@ -30,12 +30,12 @@ Verdict values: pass | drift | defect | N/A. Remove rows that are N/A for the re
 
 ## Defects (most severe first)
 
-1. <defect> - input/condition -> observed vs expected; `file:line`.
+1. `<defect>` - input/condition -> observed vs expected, at `file:line`.
 
 ## Drift Findings
 
-- <letter miss, intent satisfied> - `file:line`.
+- `<letter miss, intent satisfied>` - `file:line`.
 
 ## Proposed Registry / Spec Updates
 
-- <e.g. resolve classificationPending: types = [...]>
+- `<e.g. resolve classificationPending: types = [...]>`
