@@ -232,7 +232,10 @@ def main():
         if not isinstance(item, dict):
             errors.append(f"files.json: baseline entry {item!r} is not an object")
             continue
-        path = item.get("path", "?")
+        path = item.get("path")
+        if not isinstance(path, str):
+            errors.append(f"files.json: baseline entry has a missing or non-string path: {item!r}")
+            continue
         check_selector(path, item.get("appliesTo", "*"))
 
         # fidelity governs how faithfully the unit is checked (spec/fidelity-model.md). CI runs no schema
