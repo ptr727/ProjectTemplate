@@ -18,6 +18,7 @@ LETTER, or ERROR finding.
 Usage: python3 spec/audit.py [RepoName ...]   (default: every cataloged repo)
 """
 import base64
+import functools
 import hashlib
 import json
 import pathlib
@@ -250,7 +251,11 @@ def normalize(text):
     return text.replace("\r\n", "\n").replace("\r", "\n")
 
 
+@functools.lru_cache(maxsize=None)
 def content_hash(text):
+    # Memoized: one canonical and its (cached) git history are hashed against every audited repo, so the
+    # same texts recur across calls. The input domain is bounded (a few units * a few repos), so caching
+    # every distinct text is cheap and keeps classify_verbatim's early-exit loop instead of a full set scan.
     return hashlib.sha256(normalize(text).encode("utf-8")).hexdigest()
 
 
