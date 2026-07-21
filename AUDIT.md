@@ -1,6 +1,6 @@
 # AUDIT.md
 
-How an agent audits a repository against the fleet ground truth in this repo and reports drift. This is the procedure; the ground truth it checks against is [`registry/repos.json`][repos], the [`spec/`][spec] manifests, [`repo-config/`][repo-config], and the prose authorities ([`AGENTS.md`][agents], [`CODESTYLE.md`][codestyle], [`WORKFLOW.md`][workflow]). The audit is read-only: it produces a report under [`reports/`][reports], never edits the target repo.
+How an agent audits a repository against the fleet ground truth in this repo and reports drift. This is the procedure. The ground truth it checks against is [`registry/repos.json`][repos], the [`spec/`][spec] manifests, [`repo-config/`][repo-config], and the prose authorities ([`AGENTS.md`][agents], [`CODESTYLE.md`][codestyle], [`WORKFLOW.md`][workflow]). The audit is read-only: it produces a report under [`reports/`][reports], never edits the target repo.
 
 The verdict vocabulary is [`WORKFLOW.md`][workflow]'s: **operational / not operational**, **N/A**,
 **defect**, and the applicable/absent rule. Do not invent a parallel scheme.
@@ -40,18 +40,18 @@ For each applicable type in [`spec/project-types.json`][project-types] and every
 - **letter** - the exact file, section, config, or construct is present.
 - **intent** - an equivalent outcome holds even if the form differs.
 
-A check with `intentRef`/`workflowRef` points at the prose section that owns the rationale; read it to judge intent. The dimensions:
+A check with `intentRef`/`workflowRef` points at the prose section that owns the rationale, so read it to judge intent. The dimensions:
 
-- **csharp** - `.editorconfig` carries the shared `[*.cs]` rule block (letter); analyzer severities are enforced, not relaxed (intent).
+- **csharp** - `.editorconfig` carries the shared `[*.cs]` rule block (letter), and analyzer severities are enforced, not relaxed (intent).
 - **nuget** - publish uses OIDC Trusted Publishing, no `NUGET_API_KEY` (letter+intent); `--skip-duplicate`.
 - **pypi** - OIDC publish job with `environment: pypi`, `id-token: write`, `skip-existing: true`; no stored token.
-- **python** - ruff and pyright present (intent), canonical in `pyproject.toml` (letter); standalone `.ruff.toml` / `pyrightconfig.json` is a drift finding.
-- **console** - smoke runtime matrix is a strict subset; per-runtime outputs aggregate to one `release-asset-*`, gated `!smoke`.
-- **docker** - registry layer cache (`buildcache-<branch>`, never `type=gha`); the size-limited Docker Hub README is published via the docker-readme task; the image always re-pushes on publish.
-- **branch-model** - `main` and `develop` both exist and are protected; the live rulesets match [`repo-config/*.json`][repo-config] by normalized diff (below).
+- **python** - ruff and pyright present (intent), canonical in `pyproject.toml` (letter), and a standalone `.ruff.toml` / `pyrightconfig.json` is a drift finding.
+- **console** - smoke runtime matrix is a strict subset, and per-runtime outputs aggregate to one `release-asset-*`, gated `!smoke`.
+- **docker** - registry layer cache (`buildcache-<branch>`, never `type=gha`), the size-limited Docker Hub README is published via the docker-readme task, and the image always re-pushes on publish.
+- **branch-model** - `main` and `develop` both exist and are protected, and the live rulesets match [`repo-config/*.json`][repo-config] by normalized diff (below).
 - **repo-setup** - every required secret for the repo's publish mechanisms is configured, and no forbidden secret is present (per [`spec/secrets.json`][secrets]).
 - **linter-parity** - one config per linter (`.markdownlint-cli2.jsonc`, `cspell.json`, ruff/pyright, editorconfig/csharpier, actionlint) drives the editor extension, the CLI, and CI, and CI runs each.
-- **recurring-violations** (high priority, always run) - comments concise and non-narrative; ASCII only (no em-dash, no smart quotes); US spelling; line endings per `.editorconfig`. These are frequent regressions; each is a grep-able check (see below).
+- **recurring-violations** (high priority, always run) - comments concise and non-narrative, ASCII only (no em-dash, no smart quotes), US spelling, line endings per `.editorconfig`. These are frequent regressions, and each is a grep-able check (see below).
 - **readme-structure** - the README follows [`spec/readme-structure.md`][readme-structure] (applicable sections, in order).
 
 ## 5. Assert the Actions Implement WORKFLOW.md
@@ -91,9 +91,9 @@ Run [`WORKFLOW.md`][workflow]'s methodology against the repo's **own** Actions: 
   done
   ```
 
-- **Secrets** - confirm each required secret exists (name only; values are not readable). Check the Actions store and, where the mechanism needs it (Docker Hub, codegen App), the Dependabot store too.
+- **Secrets** - confirm each required secret exists (name only, not the values). Check the Actions store and, where the mechanism needs it (Docker Hub, codegen App), the Dependabot store too.
 
-- **Dependabot ecosystem coverage** - for each ecosystem the repo's tree implies, `.github/dependabot.yml` must declare it: `github-actions` when `.github/workflows/` is present (its workflows reference actions) - otherwise those versions go stale and a stood-up merge-bot has no action-update PRs to auto-merge - and `devcontainers` when a `.devcontainer` is present. The mechanical check (`spec/audit.py`) asserts each implied ecosystem's **presence**; a tree-implied ecosystem declared nowhere is a **drift finding** (the file exists; its absence would instead be a file-presence letter). Then confirm **by inspection** that each declared ecosystem **dual-targets `main` + `develop`** per the [Branching Model][agents-branching-model] - the regex below cannot pair an ecosystem with its `target-branch`. Language ecosystems (`nuget`/`uv`/`npm`) are directory-scoped and audited by inspection too.
+- **Dependabot ecosystem coverage** - for each ecosystem the repo's tree implies, `.github/dependabot.yml` must declare it: `github-actions` when `.github/workflows/` is present (its workflows reference actions) - otherwise those versions go stale and a stood-up merge-bot has no action-update PRs to auto-merge - and `devcontainers` when a `.devcontainer` is present. The mechanical check (`spec/audit.py`) asserts each implied ecosystem's **presence**. A tree-implied ecosystem declared nowhere is a **drift finding** (the file exists, so its absence would instead be a file-presence letter). Then confirm **by inspection** that each declared ecosystem **dual-targets `main` + `develop`** per the [Branching Model][agents-branching-model] - the regex below cannot pair an ecosystem with its `target-branch`. Language ecosystems (`nuget`/`uv`/`npm`) are directory-scoped and audited by inspection too.
 
   ```sh
   # Anchor to the line start (optional list dash) so a commented-out '# package-ecosystem:' is not counted.
@@ -108,7 +108,7 @@ Run [`WORKFLOW.md`][workflow]'s methodology against the repo's **own** Actions: 
 
 Per dimension, record `operational | not-operational | N/A`, each with a letter verdict and an intent verdict:
 
-- letter miss but intent satisfied -> **drift finding** (equivalent outcome in a non-standard form; worth fixing, not a break).
+- letter miss but intent satisfied -> **drift finding** (equivalent outcome in a non-standard form, worth fixing, not a break).
 - letter and intent both miss -> **defect** (not operational).
 
 A repo is **operational** only if every applicable check passes. A single applicable defect makes it not operational, regardless of how clean the rest looks. N/A items are excluded, never counted as failures.
@@ -123,7 +123,7 @@ Write `reports/<repo>/audit.md` from [`reports/_template.md`][template]: a dimen
 
 ## 9. Escalate
 
-Surface spec questions rather than resolving them silently - e.g. the Python config-placement canonicalization, or a new construct no type covers. A repeated letter miss that many repos share is a signal the spec (not each repo) needs adjusting; raise it.
+Surface spec questions rather than resolving them silently - e.g. the Python config-placement canonicalization, or a new construct no type covers. A repeated letter miss that many repos share is a signal the spec (not each repo) needs adjusting, so raise it.
 
 ## 10. Converge - Apply the Fixes
 
@@ -131,7 +131,7 @@ Sections 1-9 (the audit and its report) are **read-only** - they never touch the
 
 - **Apply via a pull request on the target repo.** Branch from the target's `develop` (or `main` for a `main`-only repo), make the fix, and open a PR. Never push a fix directly to a protected branch, and never hand-edit a target outside a PR.
 - **Drive the PR's Copilot review to green** - the same loop this repo runs (see [AGENTS.md "PR Review Etiquette"][agents] and the [Copilot review runbook][copilot-runbook] in `.github/copilot-instructions.md`): request review on every push, address and resolve every thread, and confirm the review covers the head SHA.
-- **Merge only with explicit maintainer approval.** The agent drives to green and stops; the maintainer merges.
+- **Merge only with explicit maintainer approval.** The agent drives to green and stops. The maintainer merges.
 - **One focused PR per drift class**, cross-referencing the audit finding - a sprawling all-drifts PR draws many review rounds and never feels done.
 - **Fix systemic drift in the hub, not per repo.** When many repos share a drift, fix the spec/rule (or add a machine check) here and let a re-audit re-flag it, rather than hand-patching each repo for the shared cause.
 
