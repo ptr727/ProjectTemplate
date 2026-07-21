@@ -252,11 +252,16 @@ def normalize(text):
 
 
 @functools.lru_cache(maxsize=None)
+def _hash_normalized(norm_text):
+    return hashlib.sha256(norm_text.encode("utf-8")).hexdigest()
+
+
 def content_hash(text):
-    # Memoized: one canonical and its (cached) git history are hashed against every audited repo, so the
-    # same texts recur across calls. The input domain is bounded (a few units * a few repos), so caching
-    # every distinct text is cheap and keeps classify_verbatim's early-exit loop instead of a full set scan.
-    return hashlib.sha256(normalize(text).encode("utf-8")).hexdigest()
+    # Memoize on the normalized form, not the raw text: one canonical and its (cached) git history are
+    # hashed against every audited repo, so the same content recurs across calls, and EOL-only variants
+    # (CRLF vs LF) must share one cache entry since they normalize equal. The input domain is bounded
+    # (a few units * a few repos), so caching every distinct normalized text is cheap.
+    return _hash_normalized(normalize(text))
 
 
 def classify_verbatim(down_text, canon_text, past_texts):
@@ -285,10 +290,15 @@ def git_file_history(rel_path):
     if rel_path in _HISTORY_CACHE:
         return _HISTORY_CACHE[rel_path]
     out = []
-    r = subprocess.run(["git", "log", "--format=%H", "--", rel_path], cwd=ROOT, capture_output=True, text=True)
+    # Decode explicitly as UTF-8 with replacement, matching how downstream and canonical content is read
+    # (base64 -> decode("utf-8", "replace")); a locale-default or strict decode here could hash a historical
+    # revision differently from the live copy and fabricate a mismatch.
+    r = subprocess.run(["git", "log", "--format=%H", "--", rel_path], cwd=ROOT, capture_output=True,
+                       encoding="utf-8", errors="replace")
     if r.returncode == 0:
         for sha in r.stdout.split():
-            s = subprocess.run(["git", "show", f"{sha}:{rel_path}"], cwd=ROOT, capture_output=True, text=True)
+            s = subprocess.run(["git", "show", f"{sha}:{rel_path}"], cwd=ROOT, capture_output=True,
+                               encoding="utf-8", errors="replace")
             if s.returncode == 0:
                 out.append(s.stdout)
     _HISTORY_CACHE[rel_path] = out
@@ -301,7 +311,9 @@ def check_verbatim(label, down_text, canonical_rel, extract=None):
     byte diff is a hint to review, never proof of breakage.
     """
     try:
-        canon_text = (ROOT / canonical_rel).read_text(encoding="utf-8")
+        # Same decode policy as the downstream copy and the git history, so a stray byte can never make
+        # otherwise-equal content hash differently across the three sources.
+        canon_text = (ROOT / canonical_rel).read_text(encoding="utf-8", errors="replace")
     except OSError:
         return [("DRIFT", f"verbatim: {label} canonical {canonical_rel} is unreadable from the hub (spec error?)")]
     history = git_file_history(canonical_rel)
