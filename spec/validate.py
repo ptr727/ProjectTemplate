@@ -240,9 +240,9 @@ def main():
         if fid == "interface" and not has_contract:
             errors.append(f"files.json: {path} fidelity 'interface' requires a contract")
         if fid == "verbatim":
-            canonical = ROOT / (item["reference"] if item.get("reference") else path)
-            if not canonical.exists():
-                errors.append(f"files.json: {path} fidelity 'verbatim' but its canonical source {canonical.relative_to(ROOT)} is missing")
+            src = item.get("reference") or path
+            if not (ROOT / src).exists():
+                errors.append(f"files.json: {path} fidelity 'verbatim' but its canonical source {src} is missing")
 
         sections = item.get("sections", [])
         if not isinstance(sections, list):
