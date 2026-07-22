@@ -1,6 +1,6 @@
-# Lint and type-check configuration for the hub's stdlib-only utility scripts (spec/, host-setup/).
-# The hub ships no Python package, so there is no [project] or [build-system] - this is config only,
-# the "uvx scripts" profile from CODESTYLE.md (no uv.lock). It mirrors the fleet's Python style.
+# Lint and type-check config for the hub's stdlib-only utility scripts (spec/, host-setup/) - the
+# "Scripts" profile from CODESTYLE.md: config only, no [project]/[build-system]/uv.lock, with mypy the
+# type-check gate and pyright/pylance editor-only (standard mode). Mirrors the fleet's Python style.
 
 [tool.ruff]
 target-version = "py313"
@@ -8,6 +8,10 @@ line-length = 100
 
 [tool.ruff.lint]
 extend-select = ["I"]  # isort import ordering, on top of the default rules
+
+[tool.mypy]
+python_version = "3.13"
+files = ["spec", "host-setup"]
 
 [tool.pyright]
 pythonVersion = "3.13"

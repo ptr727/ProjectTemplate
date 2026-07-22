@@ -277,7 +277,7 @@ def classify_verbatim(down_text, canon_text, past_texts):
     return "modified"
 
 
-_HISTORY_CACHE: dict[str, list[str]] = {}  # rel_path -> past revision contents, reused as a canonical is compared against every audited repo
+_HISTORY_CACHE: dict[str, list[str]] = {}  # rel_path -> past revision contents, cached because one canonical is compared against every audited repo
 
 
 def git_file_history(rel_path):
