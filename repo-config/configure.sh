@@ -66,8 +66,8 @@ main_ruleset="$script_dir/main.json"
 settings_file="$script_dir/settings.json"
 
 # ----- Ruleset id lookup (shared by apply and check) -----
-ruleset_id() { # ruleset-name -> id of the first match (empty if none); aborts on an API error
-    local out
+ruleset_id() { # ruleset-name -> id of the first match (empty if none); warns on duplicates; aborts on API error
+    local out ids count
     # per_page=100 returns every ruleset in one array (a repo has only a handful), so the response is a single
     # JSON document - a paginated fetch would concatenate multiple arrays and break the single-array jq below.
     # Let gh print its own error on stderr; add a context line and return non-zero so the caller stops rather
@@ -77,9 +77,16 @@ ruleset_id() { # ruleset-name -> id of the first match (empty if none); aborts o
         return 1
     fi
     # shellcheck disable=SC2016  # $n is a jq --arg variable, not a shell expansion
-    # Select the first match inside jq (not `| head -1`): under pipefail, head closing the pipe early can
-    # SIGPIPE jq and fail the function.
-    jq -r --arg n "$1" '[.[] | select(.name==$n) | .id] | first // empty' <<<"$out"
+    ids="$(jq -r --arg n "$1" '.[] | select(.name==$n) | .id' <<<"$out")"
+    if [ -z "$ids" ]; then return 0; fi
+    # Pre-existing drift can leave more than one ruleset with the same name; use the first and warn so the
+    # duplicates are resolved rather than silently operating on the wrong one. grep -c and sed both read all
+    # input (no early pipe close), so neither SIGPIPEs jq under pipefail.
+    count="$(printf '%s\n' "$ids" | grep -c .)"
+    if [ "$count" -gt 1 ]; then
+        echo "Warning: $count rulesets named '$1' on $repo; using the first (resolve the duplicates)." >&2
+    fi
+    printf '%s\n' "$ids" | sed -n '1p'
 }
 
 # =============================== apply ===============================
