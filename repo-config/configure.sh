@@ -4,13 +4,13 @@
 #   repo-config/configure.sh apply [owner/repo] [release|operational]   # create-or-update settings + rulesets (writes)
 #   repo-config/configure.sh check [owner/repo] [release|operational]   # validate an existing repo, non-zero on drift (reads)
 #
-# Both modes need admin on the repo (the rulesets endpoints require it). Defaults: command apply; repo the
-# current gh repo; model the registry lookup, else inferred from the carried develop payload. The model may be
-# passed as the sole positional (e.g. `configure.sh check operational`), and the command may be omitted for the
-# apply default (`configure.sh owner/repo` still applies).
+# Both modes need admin on the repo (the rulesets endpoints require it). The command defaults to apply, the repo
+# to the current gh repo, and the model to the registry lookup (else inferred from the carried develop payload).
+# The model may be passed as the sole positional (e.g. `configure.sh check operational`), and the command may be
+# omitted for the apply default (`configure.sh owner/repo` still applies).
 #
-# apply: 1. settings.json via PATCH, plus has_discussions (public repos only) and default_branch (main, only if
-#           it exists); 2. Dependabot vulnerability alerts + automated security updates; 3. the branch rulesets -
+# apply: (1) settings.json via PATCH, plus has_discussions (public repos only) and default_branch (main, only if
+#           it exists). (2) Dependabot vulnerability alerts + automated security updates. (3) the branch rulesets -
 #           main.json (shared) and the model-specific develop ruleset (develop.json PR-gated, or operational/
 #           develop.json direct signed pushes), create-or-update by name. Idempotent.
 # check: the read-only inverse - every applied ruleset, setting, and security feature must match. The ruleset and
@@ -45,7 +45,7 @@ if [ -z "$model" ]; then
     else
         # No registry to consult (a downstream carry): infer the model from which develop payload is carried - a
         # carry holds exactly its own model's payload. Ambiguous layouts (both or neither, e.g. a partial copy)
-        # abort rather than guess; a wrong guess would apply or check the wrong develop ruleset.
+        # abort rather than guess - a wrong guess would apply or check the wrong develop ruleset.
         if [ -f "$script_dir/develop.json" ] && [ ! -f "$script_dir/operational/develop.json" ]; then
             model="release"
         elif [ -f "$script_dir/operational/develop.json" ] && [ ! -f "$script_dir/develop.json" ]; then
@@ -70,7 +70,7 @@ ruleset_id() { # ruleset-name -> id of the first match (empty if none); warns on
     local out ids count
     # per_page=100 returns every ruleset in one array (a repo has only a handful), so the response is a single
     # JSON document - a paginated fetch would concatenate multiple arrays and break the single-array jq below.
-    # Let gh print its own error on stderr; add a context line and return non-zero so the caller stops rather
+    # Let gh print its own error on stderr. Add a context line and return non-zero so the caller stops rather
     # than treat an API failure as "not found".
     if ! out="$(gh api "repos/$repo/rulesets?per_page=100")"; then
         echo "Failed to list rulesets for $repo (check auth and repo access)." >&2
@@ -79,7 +79,7 @@ ruleset_id() { # ruleset-name -> id of the first match (empty if none); warns on
     # shellcheck disable=SC2016  # $n is a jq --arg variable, not a shell expansion
     ids="$(jq -r --arg n "$1" '.[] | select(.name==$n) | .id' <<<"$out")"
     if [ -z "$ids" ]; then return 0; fi
-    # Pre-existing drift can leave more than one ruleset with the same name; use the first and warn so the
+    # Pre-existing drift can leave more than one ruleset with the same name. Use the first and warn so the
     # duplicates are resolved rather than silently operating on the wrong one. grep -c and sed both read all
     # input (no early pipe close), so neither SIGPIPEs jq under pipefail.
     count="$(printf '%s\n' "$ids" | grep -c .)"
@@ -116,7 +116,7 @@ cmd_apply() {
     # ----- General repository settings -----
     if [ -e "$settings_file" ]; then
         local private disc payload
-        # has_discussions: enabled on public repos only (fleet policy); never on private.
+        # has_discussions: enabled on public repos only (fleet policy), never on private.
         private="$(gh api "repos/$repo" --jq '.private')"
         disc=false; [ "$private" = "false" ] && disc=true
         # default_branch main, but only point it at main when main exists - never set the default to a missing
@@ -134,7 +134,7 @@ cmd_apply() {
     gh api --method PUT "repos/$repo/vulnerability-alerts" >/dev/null
     gh api --method PUT "repos/$repo/automated-security-fixes" >/dev/null
     echo "Enabled Dependabot vulnerability alerts + automated security updates"
-    # ----- Branch rulesets (main shared; develop selected by workflow model) -----
+    # ----- Branch rulesets (main shared, develop selected by workflow model) -----
     apply_ruleset "$develop_ruleset"
     apply_ruleset "$main_ruleset"
     echo "Configuration applied to $repo. Run '$0 check${repo_arg:+ $repo}' to validate."
@@ -146,16 +146,16 @@ note() { printf '  %s\n' "$*"; }
 pass() { printf '  ok   %s\n' "$*"; }
 fail() { printf '  FAIL %s\n' "$*"; FAILED=1; }
 
-# assert MESSAGE TEST... - run the test command; pass on success, fail on non-zero (a proper if/else, not the
+# assert MESSAGE TEST... - run the test command, pass on success, fail on non-zero (a proper if/else, not the
 # `A && B || C` footgun). Do not redirect the assert call's own stdout - that would swallow the pass/fail line;
 # a command that prints (jq) uses jq_has, which silences only itself.
 assert() { local msg="$1"; shift; if "$@"; then pass "$msg"; else fail "$msg"; fi; }
 
-# jq_has FILTER... - true iff the filter selects a truthy value; jq's output is discarded, not the caller's.
+# jq_has FILTER... - true iff the filter selects a truthy value. jq's output is discarded, not the caller's.
 # Reads JSON from stdin.
 jq_has() { jq -e "$@" >/dev/null 2>&1; }
 
-# gh_ok ENDPOINT... - true iff the gh api call succeeds (2xx, including 204); output and errors discarded, so it
+# gh_ok ENDPOINT... - true iff the gh api call succeeds (2xx, including 204). Output and errors discarded, so it
 # is safe to pass to assert (e.g. vulnerability-alerts returns 204 enabled / 404 disabled).
 gh_ok() { gh api "$@" >/dev/null 2>&1; }
 
@@ -209,7 +209,7 @@ check_settings() {
 check_security() {
     local sec
     # vulnerability-alerts: 204 enabled / 404 disabled, so probe with gh_ok. automated-security-fixes returns
-    # a JSON body { enabled, paused }; capture it under an explicit failure guard so a read error is a clean
+    # a JSON body { enabled, paused }, captured under an explicit failure guard so a read error is a clean
     # FAIL rather than a set -e abort.
     assert "Dependabot vulnerability alerts enabled" gh_ok "repos/$repo/vulnerability-alerts"
     if sec="$(gh api "repos/$repo/automated-security-fixes" 2>/dev/null)"; then
@@ -225,7 +225,7 @@ cmd_check() {
     check_ruleset "$main_ruleset"
     check_settings
     check_security
-    # Secrets are per-repo (spec/secrets.json) and not readable by value; a standalone carry has no registry to
+    # Secrets are per-repo (spec/secrets.json) and not readable by value. A standalone carry has no registry to
     # derive the required set from, so they are verified by hand rather than asserted here.
     note "verify manually: the repo's required secrets (see spec/secrets.json) are present with valid values"
     if [ "$FAILED" -ne 0 ]; then echo "Configuration drift detected on $repo."; exit 1; fi
