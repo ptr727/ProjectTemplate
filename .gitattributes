@@ -19,6 +19,7 @@ catalog/snippets/husky/pre-commit text eol=lf
 # installer. Do not re-add a blanket `*.py text eol=lf`.
 spec/validate.py text eol=lf
 spec/audit.py text eol=lf
+spec/fidelity_honesty.py text eol=lf
 host-setup/agent-safety/gh-write-guard.py text eol=lf
 host-setup/agent-safety/install.py text eol=lf
 
