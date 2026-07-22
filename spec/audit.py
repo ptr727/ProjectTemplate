@@ -61,7 +61,7 @@ HUB_NAME, HUB_NAME_FROM_REMOTE = hub_name()
 
 
 def gh(path, ok404=False) -> Any:
-    """GET a REST path via gh, returning parsed JSON or None on 404 when ok404.
+    """GET a REST path via gh, returning parsed JSON, or None on a 404 (when ok404) or an empty response body.
 
     No --paginate: on object endpoints it concatenates page documents into unparseable JSON. Every
     list read here fits one page; callers pass per_page=100 where a default page could truncate.
@@ -277,7 +277,7 @@ def classify_verbatim(down_text, canon_text, past_texts):
     return "modified"
 
 
-_HISTORY_CACHE: dict = {}  # rel_path -> [past revision content], reused as a canonical is compared against every audited repo
+_HISTORY_CACHE: dict[str, list[str]] = {}  # rel_path -> past revision contents, reused as a canonical is compared against every audited repo
 
 
 def git_file_history(rel_path):
