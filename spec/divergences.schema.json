@@ -1,0 +1,40 @@
+{
+    "$schema": "https://json-schema.org/draft/2020-12/schema",
+    "$id": "https://github.com/ptr727/ProjectTemplate/spec/divergences.schema.json",
+    "title": "Fleet divergence dispositions (burn-down ledger)",
+    "type": "object",
+    "additionalProperties": false,
+    "properties": {
+        "$schema": { "type": "string" },
+        "note": { "type": "string" },
+        "dispositions": {
+            "type": "array",
+            "items": {
+                "type": "object",
+                "required": ["path", "repos", "disposition", "reason"],
+                "additionalProperties": false,
+                "properties": {
+                    "path": { "type": "string" },
+                    "repos": { "type": "array", "items": { "type": "string" }, "minItems": 1 },
+                    "disposition": { "enum": ["re-vendor", "track", "accepted", "upstream-candidate", "investigate"] },
+                    "reason": { "type": "string" },
+                    "tracking": { "type": ["string", "null"] }
+                }
+            }
+        },
+        "gaps": {
+            "type": "array",
+            "items": {
+                "type": "object",
+                "required": ["path", "disposition", "reason"],
+                "additionalProperties": false,
+                "properties": {
+                    "path": { "type": "string" },
+                    "disposition": { "enum": ["re-vendor", "track", "accepted", "upstream-candidate", "investigate"] },
+                    "reason": { "type": "string" },
+                    "tracking": { "type": ["string", "null"] }
+                }
+            }
+        }
+    }
+}

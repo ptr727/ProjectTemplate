@@ -289,6 +289,64 @@ def main():
             elif not isinstance(elt, str):
                 errors.append(f"files.json: {path} section entry {elt!r} must be a string or object")
 
+    # Validate the divergence ledger (spec/divergences.json) when present, so a mistyped repo name or
+    # disposition fails CI instead of silently dropping a burn-down row.
+    dispositions = ("re-vendor", "track", "accepted", "upstream-candidate", "investigate")
+    if (ROOT / "spec/divergences.json").exists():
+        div = load("spec/divergences.json")
+        repo_names = {r.get("name") for r in repos["repos"] if isinstance(r, dict)}
+        manifest_paths = {i.get("path") for i in baseline if isinstance(i, dict)}
+        # Guard the root type: a non-object root (a list from a bad edit) would crash the .get() calls below.
+        if not isinstance(div, dict):
+            errors.append("divergences.json: root must be an object")
+            div = {}
+        div_dispositions = div.get("dispositions", [])
+        if not isinstance(div_dispositions, list):
+            errors.append("divergences.json: 'dispositions' must be an array")
+            div_dispositions = []
+        div_gaps = div.get("gaps", [])
+        if not isinstance(div_gaps, list):
+            errors.append("divergences.json: 'gaps' must be an array")
+            div_gaps = []
+        for d in div_dispositions:
+            if not isinstance(d, dict):
+                errors.append(f"divergences.json: disposition {d!r} is not an object")
+                continue
+            p = d.get("path")
+            # isinstance guard first: a non-string path is unhashable and would crash the membership test.
+            if not isinstance(p, str):
+                errors.append(f"divergences.json: disposition path {p!r} must be a string")
+            elif p not in manifest_paths:
+                errors.append(f"divergences.json: disposition path '{p}' is not a manifest unit")
+            if d.get("disposition") not in dispositions:
+                errors.append(f"divergences.json: '{p}' disposition '{d.get('disposition')}' invalid (expected one of {', '.join(dispositions)})")
+            if not is_str_list(d.get("repos")) or not d.get("repos"):
+                errors.append(f"divergences.json: '{p}' repos must be a non-empty array of strings")
+            else:
+                for rn in d["repos"]:
+                    if rn not in repo_names:
+                        errors.append(f"divergences.json: '{p}' repo '{rn}' not in the registry")
+            if not isinstance(d.get("reason"), str) or not d.get("reason"):
+                errors.append(f"divergences.json: '{p}' reason must be a non-empty string")
+            if not (d.get("tracking") is None or isinstance(d.get("tracking"), str)):
+                errors.append(f"divergences.json: '{p}' tracking must be a string or null")
+        for g in div_gaps:
+            if not isinstance(g, dict):
+                errors.append(f"divergences.json: gap {g!r} is not an object")
+                continue
+            gp = g.get("path")
+            # isinstance guard first: a non-string path is unhashable and would crash the membership test.
+            if not isinstance(gp, str):
+                errors.append(f"divergences.json: gap path {gp!r} must be a string")
+            elif gp in manifest_paths:
+                errors.append(f"divergences.json: gap '{gp}' is already a manifest unit (not a gap)")
+            if g.get("disposition") not in dispositions:
+                errors.append(f"divergences.json: gap '{gp}' disposition '{g.get('disposition')}' invalid (expected one of {', '.join(dispositions)})")
+            if not isinstance(g.get("reason"), str) or not g.get("reason"):
+                errors.append(f"divergences.json: gap '{gp}' reason must be a non-empty string")
+            if not (g.get("tracking") is None or isinstance(g.get("tracking"), str)):
+                errors.append(f"divergences.json: gap '{gp}' tracking must be a string or null")
+
     if errors:
         print("Spec validation FAILED:")
         for e in errors:
