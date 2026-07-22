@@ -296,6 +296,10 @@ def main():
         div = load("spec/divergences.json")
         repo_names = {r.get("name") for r in repos["repos"] if isinstance(r, dict)}
         manifest_paths = {i.get("path") for i in baseline if isinstance(i, dict)}
+        # Guard the root type: a non-object root (a list from a bad edit) would crash the .get() calls below.
+        if not isinstance(div, dict):
+            errors.append("divergences.json: root must be an object")
+            div = {}
         for d in div.get("dispositions", []):
             if not isinstance(d, dict):
                 errors.append(f"divergences.json: disposition {d!r} is not an object")
