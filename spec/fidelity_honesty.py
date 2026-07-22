@@ -282,9 +282,7 @@ def main():
         "registry": audit.load("registry/repos.json"),
         "files": audit.load("spec/files.json"),
     }
-    # Validate the reference adopter before the fleet sweep. In report mode an unresolvable name (a typo)
-    # would otherwise run the whole sweep and then write a report whose empty gap section reads as a false
-    # clean, so fail loud up front instead.
+    # Fail loud on an unresolvable reference adopter: its empty gap section would read as a false clean.
     if report_mode and not any(isinstance(r, dict) and r.get("name") == ref_repo
                                for r in spec["registry"].get("repos", [])):
         print(f"error: reference adopter '{ref_repo}' not found in the registry - "
