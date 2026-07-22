@@ -26,6 +26,7 @@ import re
 import subprocess
 import sys
 from datetime import datetime, timezone
+from typing import Any
 
 ROOT = pathlib.Path(__file__).resolve().parent.parent
 
@@ -59,8 +60,8 @@ def hub_name():
 HUB_NAME, HUB_NAME_FROM_REMOTE = hub_name()
 
 
-def gh(path, ok404=False):
-    """GET a REST path via gh, returning parsed JSON or None on 404 when ok404.
+def gh(path, ok404=False) -> Any:
+    """GET a REST path via gh, returning parsed JSON, or None on a 404 (when ok404) or an empty response body.
 
     No --paginate: on object endpoints it concatenates page documents into unparseable JSON. Every
     list read here fits one page; callers pass per_page=100 where a default page could truncate.
@@ -276,7 +277,7 @@ def classify_verbatim(down_text, canon_text, past_texts):
     return "modified"
 
 
-_HISTORY_CACHE = {}  # rel_path -> [past revision content], reused as a canonical is compared against every audited repo
+_HISTORY_CACHE: dict[str, list[str]] = {}  # rel_path -> past revision contents, cached because one canonical is compared against every audited repo
 
 
 def git_file_history(rel_path):
@@ -506,7 +507,7 @@ def audit_repo(entry, spec):
         # to ""), whereas a too-large or non-inline payload returns encoding "none" (text stays None -> flagged).
         text = base64.b64decode(content["content"]).decode("utf-8", "replace") if content.get("encoding") == "base64" else None
         # Interface conformance (name + wiring) plus any verbatim job regions the contract pins.
-        if fid == "interface":
+        if item is not None and fid == "interface":
             if text is None:
                 findings.append(("DRIFT", f"interface: could not read {path} content on {ground} to verify its contract (no inline content returned); verify by hand"))
             else:
@@ -517,7 +518,7 @@ def audit_repo(entry, spec):
                     findings.extend(check_verbatim(f"{path} job '{job}'", text, canonical_rel,
                                                    extract=lambda t, j=job: split_jobs(t).get(j)))
         # Whole-file verbatim: byte-identical to the hub's canonical after EOL normalization.
-        elif fid == "verbatim":
+        elif item is not None and fid == "verbatim":
             if text is None:
                 findings.append(("DRIFT", f"verbatim: could not read {path} content on {ground} to compare (no inline content returned); verify by hand"))
             else:

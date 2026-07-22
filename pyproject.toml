@@ -1,0 +1,18 @@
+# Config only (no [project]/[build-system]/uv.lock) - the Scripts profile, CODESTYLE.md "Two profiles".
+
+[tool.ruff]
+target-version = "py313"
+line-length = 100
+
+[tool.ruff.lint]
+extend-select = ["I"]  # isort import ordering, on top of the default rules
+
+[tool.mypy]
+python_version = "3.13"
+files = ["spec", "host-setup"]
+
+[tool.pyright]
+pythonVersion = "3.13"
+typeCheckingMode = "standard"
+include = ["spec", "host-setup"]
+exclude = ["**/__pycache__"]
