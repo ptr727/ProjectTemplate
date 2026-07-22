@@ -16,13 +16,13 @@ Every fleet repo carries the `repo-config/` directory. The hub keeps the canonic
 
 **Configure by importing the JSON payloads, never by hand-building the rules** (hand reconstruction has gone wrong on past setups). The result must be **exactly two rulesets named `develop` and `main`** - the names are load-bearing (`AGENTS.md` and the workflows reference them). Only the `develop` *content* varies by model.
 
-First remove all legacy classic branch-protection rules and any stray rulesets, then run `configure.sh` (which picks the `develop` payload from the repo's `workflowModel`, or infers it from the carried payload when no registry is present, and applies `settings.json` alongside the rulesets):
+First remove all legacy classic branch-protection rules and any stray rulesets, then run `configure.sh apply` (which picks the `develop` payload from the repo's `workflowModel`, or infers it from the carried payload when no registry is present, and applies `settings.json` and the Dependabot security features alongside the rulesets):
 
 ```sh
-repo-config/configure.sh [owner/repo] [release|operational]
+repo-config/configure.sh apply [owner/repo] [release|operational]
 ```
 
-Or import each ruleset by hand with `gh api -X POST repos/<owner>/<repo>/rulesets --input repo-config/<name>.json` (operational repos use `operational/develop.json` for `develop`). `gh ruleset` is read-only, so creation goes through `gh api`. The required check binds by name and only turns green after the repo's PR workflow runs once. To edit a live ruleset, GET it, change the field, and PUT the whole writable subset back (a partial PUT `422`s).
+Then validate the result with `repo-config/configure.sh check [owner/repo] [release|operational]`, which asserts every applied ruleset, setting, and security feature and exits non-zero on drift (the ruleset and settings checks are driven by the committed payloads, so they stay repo-agnostic). Or import each ruleset by hand with `gh api -X POST repos/<owner>/<repo>/rulesets --input repo-config/<name>.json` (operational repos use `operational/develop.json` for `develop`). `gh ruleset` is read-only, so creation goes through `gh api`. The required check binds by name and only turns green after the repo's PR workflow runs once. To edit a live ruleset, GET it, change the field, and PUT the whole writable subset back (a partial PUT `422`s).
 
 ## Regenerating the Payloads
 
@@ -50,7 +50,7 @@ done
 
 ## Brownfield Migration (Maintainer Only)
 
-`Require signed commits` rejects any pre-existing unsigned commit, so the first `develop -> main` release on a repo with unsigned history is blocked. Re-signing that history is a non-fast-forward that the `Block force pushes` rule rejects, **and the admin bypass does not cover `git push --force`**. Completing it requires temporarily disabling the ruleset and a maintainer force-push. This is a one-time, maintainer-performed migration that deliberately uses the force-push [AGENTS.md "Git and Commit Rules"][agents-git-and-commit-rules] forbids agents from running - **an agent must never execute it - surface it to the maintainer**. Greenfield repos where signing is live before the first commit never hit this.
+`Require signed commits` rejects any pre-existing unsigned commit, so the first `develop -> main` release on a repo with unsigned history is blocked. Re-signing that history is a non-fast-forward that the `Block force pushes` rule rejects, **and the admin bypass does not cover `git push --force`**. Completing it requires temporarily disabling the ruleset and a maintainer force-push. This is a one-time, maintainer-performed migration that deliberately uses the force-push [AGENTS.md "Git and Commit Rules"][agents-git-and-commit-rules] forbids agents from running - **an agent must never execute it - surface it to the maintainer**. Greenfield repos where signing is live before the first commit never hit this. When the rewrite touches commits committed under a bot or web-flow identity (`dependabot[bot]`, `github-actions[bot]`), set each commit's committer to the signing identity before re-signing so the committer GitHub verifies matches your key, rather than leaving your key over another identity's commit (see the history-rewrite rule in [AGENTS.md "Git and Commit Rules"][agents-git-and-commit-rules]).
 
 <!-- Repo -->
 
