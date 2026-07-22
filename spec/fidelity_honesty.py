@@ -61,13 +61,13 @@ def fidelity_pass(spec):
             continue
         canon_hash = audit.content_hash(canon)
         history = {audit.content_hash(t) for t in audit.git_file_history(e.get("reference") or path)}
-        spread = {"match": [], "stale": [], "differs": [], "absent": []}
+        spread = {"match": [], "stale": [], "differs": [], "unavailable": []}
         for r in repos:
             if not audit.applies(e.get("appliesTo", "*"), audit.repo_selectors(r, defaults)):
                 continue
             text = fetch(audit.repo_slug(r), path, r.get("groundTruthBranch", "main"))
-            if text is None:
-                spread["absent"].append(r["name"])
+            if text is None:  # missing (404) or present-but-non-inline (too large / encoding "none")
+                spread["unavailable"].append(r["name"])
                 continue
             dh = audit.content_hash(text)
             if dh == canon_hash:
@@ -77,8 +77,10 @@ def fidelity_pass(spec):
             else:
                 spread["differs"].append(r["name"])
         spreads.append((e, spread))
-        present = spread["match"] + spread["stale"] + spread["differs"]
-        if fid == "intent" and present and not spread["differs"]:
+        # A verbatim candidate has NO hand-modified copy ("differs") and at least one confirmed match with
+        # the current canonical. Stale copies do not disqualify it - verbatim would flag them "stale ->
+        # re-vendor", which is the point; a unit that is entirely stale/unavailable is not confirmed uniform.
+        if fid == "intent" and spread["match"] and not spread["differs"]:
             promote.append((e, spread))
         if fid == "verbatim" and spread["differs"]:
             mislabel.append((e, spread))
@@ -119,21 +121,22 @@ def main():
     spreads, promote, mislabel = fidelity_pass(spec)
 
     print("== Per-unit fleet spread (ground-truth branch per repo) ==")
-    print("   fidelity path :: match / stale / differs / absent")
+    print("   fidelity path :: match / stale / differs / unavailable (absent or non-inline)")
     for e, spread in spreads:
         if spread is None:
             print(f"   {e.get('fidelity'):8} {e['path']} :: canonical unreadable at hub - skipped")
             continue
         print(f"   {e['fidelity']:8} {e['path']} :: "
-              f"{len(spread['match'])} / {len(spread['stale'])} / {len(spread['differs'])} / {len(spread['absent'])}")
+              f"{len(spread['match'])} / {len(spread['stale'])} / {len(spread['differs'])} / {len(spread['unavailable'])}")
 
-    print("\n== INTENT units content-identical fleet-wide (after EOL normalization) -> candidates to promote to VERBATIM ==")
-    print("   (uniform today, but intent cannot catch a future stale-but-present copy; verbatim can)")
+    print("\n== INTENT units with no divergent copy (verbatim-appropriate) -> candidates to promote to VERBATIM ==")
+    print("   (>=1 confirmed match, 0 hand-modified; any stale/unavailable copy is shown per unit and would")
+    print("    re-vendor under verbatim - the drift intent cannot catch)")
     if not promote:
         print("   none")
     for e, spread in promote:
         print(f"   {e['path']}: {len(spread['match'])} match, {len(spread['stale'])} stale, "
-              f"{len(spread['absent'])} absent, 0 differ")
+              f"{len(spread['unavailable'])} unavailable, 0 differ")
 
     print("\n== VERBATIM units with NON-stale downstream divergence (mis-label or real drift) ==")
     if not mislabel:
