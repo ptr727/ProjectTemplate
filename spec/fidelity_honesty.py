@@ -143,15 +143,20 @@ def render_report(spreads, promote, gaps, ledger):
     """Join the live passes against the curated ledger into the checked-in burn-down markdown.
 
     A recorded disposition still matching a live divergence is a burn-down row. A live divergence (a
-    verbatim hand-modification, or a manifest gap) with no disposition reads UNTRIAGED. A disposition whose
-    divergence is no longer live reads resolved. Verbatim stale copies are the mechanical re-vendor list
-    (the audit already flags them), kept separate from the judgment items.
+    verbatim hand-modification, or a manifest gap) with no disposition reads UNTRIAGED. A disposition is
+    resolved only when every recorded repo now matches the canonical - a repo that went unavailable
+    (deleted, renamed, or too large to fetch inline) is unverified, not resolved, so it stays on the row.
+    Verbatim stale copies are the mechanical re-vendor list (the audit already flags them), kept separate.
     """
     spread_by_path = {e["path"]: sp for e, sp in spreads if sp is not None}
 
-    def divergent(path):  # repos whose copy is not the current canonical (hand-modified or a past revision)
+    def buckets(path):
+        # (still divergent, confirmed match, unavailable) repo sets for a unit. Unavailable is held apart
+        # from match: an absent copy cannot confirm a divergence was fixed.
         sp = spread_by_path.get(path)
-        return (set(sp["differs"]) | set(sp["stale"])) if sp else set()
+        if not sp:
+            return set(), set(), set()
+        return set(sp["differs"]) | set(sp["stale"]), set(sp["match"]), set(sp["unavailable"])
 
     dispositions = ledger.get("dispositions", [])
     gap_entries = ledger.get("gaps", [])
@@ -176,15 +181,18 @@ def render_report(spreads, promote, gaps, ledger):
     by_disp = {k: [] for k in order}
     resolved = []
     for d in dispositions:
-        live = sorted(set(d["repos"]) & divergent(d["path"]))
-        if not live:
+        dset = set(d["repos"])
+        div, matched, unavail = buckets(d["path"])
+        live = sorted(dset & div)
+        gone = sorted(dset & matched)
+        unk = sorted(dset & unavail)
+        if not live and not unk:  # every recorded repo now matches the canonical
             resolved.append(d)
             continue
-        gone = sorted(set(d["repos"]) - set(live))
-        by_disp.setdefault(d["disposition"], []).append((d, live, gone))
+        by_disp.setdefault(d["disposition"], []).append((d, live, gone, unk))
     for g in gap_entries:  # a gap disposition stays live while the file is still an untracked gap
         if g["path"] in gaps:
-            by_disp.setdefault(g["disposition"], []).append((g, None, None))
+            by_disp.setdefault(g["disposition"], []).append((g, None, None, None))
 
     out = []
     w = out.append
@@ -204,13 +212,14 @@ def render_report(spreads, promote, gaps, ledger):
             continue
         w(f"### {k}")
         w("")
-        for entry, live, gone in rows:
+        for entry, live, gone, unk in rows:
             trk = f" (tracking: {entry['tracking']})" if entry.get("tracking") else ""
             if live is None:  # a manifest-gap disposition (not repo-scoped)
                 w(f"- **{entry['path']}** (manifest gap){trk} - {entry['reason']}")
             else:
                 extra = f" _(recorded {_fmt(gone)} now resolved)_" if gone else ""
-                w(f"- **{entry['path']}** - {_fmt(live)}{trk}{extra} - {entry['reason']}")
+                extra += f" _(unavailable, unverified: {_fmt(unk)})_" if unk else ""
+                w(f"- **{entry['path']}** - {_fmt(live) if live else '(none live)'}{trk}{extra} - {entry['reason']}")
         w("")
 
     w("## Untriaged - add a disposition to `spec/divergences.json`")
