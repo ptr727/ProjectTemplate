@@ -98,12 +98,13 @@ def manifest_gap_pass(spec, ref_repo):
     ground = entry.get("groundTruthBranch", "main")
     # The git/trees endpoint takes a tree SHA, not a ref name, so resolve the branch to its tree SHA
     # first (as audit.py does) - passing the branch name can 404 and silently drop the whole check.
+    # Fail loud on an unreadable reference adopter: an empty gaps list would report "none" (a false clean).
     br = audit.gh(f"repos/{slug}/branches/{ground}", ok404=True)
     if not br or "commit" not in br:
-        return slug, []
+        raise RuntimeError(f"could not read {slug}@{ground} (missing branch?) - cannot run the manifest-gap pass")
     tree = audit.gh(f"repos/{slug}/git/trees/{br['commit']['commit']['tree']['sha']}?recursive=1", ok404=True)
     if not tree or "tree" not in tree:
-        return slug, []
+        raise RuntimeError(f"could not read the tree for {slug}@{ground} - cannot run the manifest-gap pass")
     # The hub's tracked files (git ls-files), not a filesystem walk: a walk pulls in untracked local cruft
     # (__pycache__, a local .venv) and would make the gap report depend on working-tree state.
     r = subprocess.run(["git", "ls-files"], cwd=audit.ROOT, capture_output=True, text=True)
