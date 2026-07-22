@@ -18,7 +18,7 @@ Implement the Actions that satisfy [`WORKFLOW.md`][workflow] for the repo's type
 
 ## 4. Apply Settings, Rulesets, and Secrets
 
-Run `repo-config/configure.sh [owner/repo] [release|operational]` (the repo defaults to the current one, the model to the registry lookup) to apply the fleet settings and the two rulesets idempotently (import the JSON, never hand-build - see [`docs/repo-config-carry.md`][repo-config-carry]). Configure every required secret per [`spec/secrets.json`][secrets] (the registry `requiredSecrets[]` list plus the implicit baseline) in the right store(s) - Actions, and Dependabot where the mechanism needs it - and confirm no forbidden secret is present. The required check binds by name (`Check pull request workflow status job`) and turns green only after the PR workflow has run once.
+Run `repo-config/configure.sh [owner/repo] [release|operational]` (the repo defaults to the current one, the model to the registry lookup or, absent a registry, to the carried payload) to apply the fleet settings and the two rulesets idempotently (import the JSON, never hand-build - see [`docs/repo-config-carry.md`][repo-config-carry]). Configure every required secret per [`spec/secrets.json`][secrets] (the registry `requiredSecrets[]` list plus the implicit baseline) in the right store(s) - Actions, and Dependabot where the mechanism needs it - and confirm no forbidden secret is present. The required check binds by name (`Check pull request workflow status job`) and turns green only after the PR workflow has run once.
 
 ## 5. Verify - Run the Audit
 
