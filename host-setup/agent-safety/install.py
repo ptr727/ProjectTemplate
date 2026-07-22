@@ -87,8 +87,7 @@ def main():
 
     # 3. CLAUDE.md: replace the agent-safety marker block if present, else append it.
     snippet = (HERE / "claude-md-safety.md").read_text(encoding="utf-8").strip()
-    # Preserve the existing file's line endings: work internally in \n, then write back with whatever
-    # ending CLAUDE.md already uses (CRLF if it has any), per the repo's preserve-endings-on-edit rule.
+    # Preserve CLAUDE.md's existing line endings: work in \n internally, write back with its own ending.
     if claude_md.exists():
         raw = claude_md.read_bytes()
         newline = "\r\n" if b"\r\n" in raw else "\n"
