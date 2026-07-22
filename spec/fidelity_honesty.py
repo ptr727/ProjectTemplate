@@ -8,7 +8,7 @@ The verbatim engine verifies a unit's *content* against the canonical (declared 
 verifies the *classifications themselves* (declared -> checked), the same declared-to-verified leap one
 level up. It answers two questions the audit cannot:
 
-  1. Which `intent` units are actually byte-uniform across the whole fleet? Those are candidates to
+  1. Which `intent` units are actually content-identical (after EOL normalization) across the whole fleet? Those are candidates to
      promote to `verbatim` - they would gain free drift-detection (a stale-but-present copy is invisible
      under intent, caught under verbatim). This is the class that hid the configure.sh drift.
   2. Which `verbatim` units have a downstream copy that diverges in a NON-stale way? That is either a
@@ -88,15 +88,17 @@ def fidelity_pass(spec):
 def manifest_gap_pass(spec, ref_repo):
     """Files present in BOTH the hub and the reference adopter but absent from the manifest."""
     listed = {e["path"] for e in spec["files"]["baseline"]}
-    slug = None
-    for r in spec["registry"]["repos"]:
-        if r["name"] == ref_repo:
-            slug = audit.repo_slug(r)
-            ground = r.get("groundTruthBranch", "main")
-            break
-    if slug is None:
+    entry = next((r for r in spec["registry"]["repos"] if r["name"] == ref_repo), None)
+    if entry is None:
         return None, []
-    tree = audit.gh(f"repos/{slug}/git/trees/{ground}?recursive=1", ok404=True)
+    slug = audit.repo_slug(entry)
+    ground = entry.get("groundTruthBranch", "main")
+    # The git/trees endpoint takes a tree SHA, not a ref name, so resolve the branch to its tree SHA
+    # first (as audit.py does) - passing the branch name can 404 and silently drop the whole check.
+    br = audit.gh(f"repos/{slug}/branches/{ground}", ok404=True)
+    if not br or "commit" not in br:
+        return slug, []
+    tree = audit.gh(f"repos/{slug}/git/trees/{br['commit']['commit']['tree']['sha']}?recursive=1", ok404=True)
     if not tree or "tree" not in tree:
         return slug, []
     hub_files = {str(p.relative_to(audit.ROOT)).replace("\\", "/")
@@ -128,7 +130,7 @@ def main():
         print(f"   {e['fidelity']:8} {e['path']} :: "
               f"{len(spread['match'])} / {len(spread['stale'])} / {len(spread['differs'])} / {len(spread['absent'])}")
 
-    print("\n== INTENT units byte-uniform fleet-wide -> candidates to promote to VERBATIM ==")
+    print("\n== INTENT units content-identical fleet-wide (after EOL normalization) -> candidates to promote to VERBATIM ==")
     print("   (uniform today, but intent cannot catch a future stale-but-present copy; verbatim can)")
     if not promote:
         print("   none")
