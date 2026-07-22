@@ -68,9 +68,11 @@ settings_file="$script_dir/settings.json"
 # ----- Ruleset id lookup (shared by apply and check) -----
 ruleset_id() { # ruleset-name -> id of the first match (empty if none); aborts on an API error
     local out
-    # Paginate so a name match on a later page is never missed. Let gh print its own error on stderr; add a
-    # context line and return non-zero so the caller stops rather than treat an API failure as "not found".
-    if ! out="$(gh api --paginate "repos/$repo/rulesets")"; then
+    # per_page=100 returns every ruleset in one array (a repo has only a handful), so the response is a single
+    # JSON document - a paginated fetch would concatenate multiple arrays and break the single-array jq below.
+    # Let gh print its own error on stderr; add a context line and return non-zero so the caller stops rather
+    # than treat an API failure as "not found".
+    if ! out="$(gh api "repos/$repo/rulesets?per_page=100")"; then
         echo "Failed to list rulesets for $repo (check auth and repo access)." >&2
         return 1
     fi
@@ -151,13 +153,14 @@ jq_has() { jq -e "$@" >/dev/null 2>&1; }
 gh_ok() { gh api "$@" >/dev/null 2>&1; }
 
 check_ruleset() { # payload-file - the live ruleset must match the committed policy, driven by the payload
-    local file="$1" rname id live t want got wantc gotc
+    local file="$1" rname id live t want got wantc gotc want_enf
     rname="$(jq -r '.name // empty' "$file")"
     if [ -z "$rname" ]; then fail "ruleset payload $file has no name"; return; fi
     id="$(ruleset_id "$rname")"
     if [ -z "$id" ]; then fail "ruleset '$rname' missing"; return; fi
     live="$(gh api "repos/$repo/rulesets/$id")"
-    assert "ruleset '$rname' active" test "$(jq -r '.enforcement' <<<"$live")" = active
+    want_enf="$(jq -r '.enforcement' "$file")"
+    assert "ruleset '$rname' enforcement = $want_enf" test "$(jq -r '.enforcement' <<<"$live")" = "$want_enf"
     # Every rule type the committed payload declares must be present live (payload-driven, so repo-agnostic).
     while IFS= read -r t; do
         # shellcheck disable=SC2016  # $t is a jq --arg variable, not a shell expansion
@@ -198,9 +201,15 @@ check_settings() {
 
 check_security() {
     local sec
+    # vulnerability-alerts: 204 enabled / 404 disabled, so probe with gh_ok. automated-security-fixes returns
+    # a JSON body { enabled, paused }; capture it under an explicit failure guard so a read error is a clean
+    # FAIL rather than a set -e abort.
     assert "Dependabot vulnerability alerts enabled" gh_ok "repos/$repo/vulnerability-alerts"
-    sec="$(gh api "repos/$repo/automated-security-fixes")"
-    assert "Dependabot automated security updates enabled" jq_has '.enabled == true' <<<"$sec"
+    if sec="$(gh api "repos/$repo/automated-security-fixes" 2>/dev/null)"; then
+        assert "Dependabot automated security updates enabled" jq_has '.enabled == true' <<<"$sec"
+    else
+        fail "Dependabot automated security updates - could not read the setting"
+    fi
 }
 
 cmd_check() {
