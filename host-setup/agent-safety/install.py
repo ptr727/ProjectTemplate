@@ -87,14 +87,20 @@ def main():
 
     # 3. CLAUDE.md: replace the agent-safety marker block if present, else append it.
     snippet = (HERE / "claude-md-safety.md").read_text(encoding="utf-8").strip()
-    existing = claude_md.read_text(encoding="utf-8") if claude_md.exists() else ""
+    # Preserve CLAUDE.md's existing line endings: work in \n internally, write back with its own ending.
+    if claude_md.exists():
+        raw = claude_md.read_bytes()
+        newline = "\r\n" if b"\r\n" in raw else "\n"
+        existing = raw.decode("utf-8").replace("\r\n", "\n").replace("\r", "\n")
+    else:
+        newline, existing = "\n", ""
     block_re = re.compile(r"<!-- agent-safety v\d+ start -->.*?<!-- agent-safety v\d+ end -->", re.S)
     if block_re.search(existing):
         updated, action = block_re.sub(lambda _: snippet, existing), "updated"
     else:
         sep = "" if existing == "" or existing.endswith("\n\n") else ("\n" if existing.endswith("\n") else "\n\n")
         updated, action = existing + sep + snippet + "\n", "appended"
-    claude_md.write_text(updated, encoding="utf-8")
+    claude_md.write_bytes(updated.replace("\n", newline).encode("utf-8"))
     print(f"  CLAUDE.md -> {claude_md} (safety block {action})")
 
     print("\nDone. Verify:")
