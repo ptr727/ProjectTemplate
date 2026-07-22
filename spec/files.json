@@ -18,6 +18,8 @@
         { "path": "repo-config/operational/develop.json", "fidelity": "intent", "intentRef": "repo-config/README.md", "appliesTo": ["operational"] },
         { "path": "repo-config/main.json", "fidelity": "intent", "intentRef": "repo-config/README.md", "appliesTo": "*" },
         { "path": "repo-config/README.md", "fidelity": "intent", "whole": true, "intentRef": "repo-config/README.md", "appliesTo": "*" },
+        { "path": "repo-config/configure.sh", "fidelity": "verbatim", "whole": true, "appliesTo": "*" },
+        { "path": "repo-config/settings.json", "fidelity": "intent", "whole": true, "intentRef": "repo-config/README.md", "appliesTo": "*" },
         { "path": "AUDIT.md", "fidelity": "intent", "intentRef": "docs/repo-config-carry.md", "appliesTo": "*" },
         { "path": "spec/secrets.json", "fidelity": "intent", "intentRef": "docs/repo-config-carry.md", "appliesTo": "*" },
         { "path": ".github/dependabot.yml", "appliesTo": "*" },
