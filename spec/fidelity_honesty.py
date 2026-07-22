@@ -118,11 +118,21 @@ def manifest_gap_pass(spec, ref_repo):
 
 
 def load_ledger():
-    """The curated disposition ledger, empty if absent (every live divergence then reads as untriaged)."""
+    """The curated disposition ledger, empty if absent (every live divergence then reads as untriaged).
+
+    Normalized so a malformed file (non-object root, or a non-array dispositions/gaps) degrades to an empty
+    section rather than crashing render_report. validate.py reports the malformation loudly in CI.
+    """
     try:
-        return audit.load("spec/divergences.json")
+        led = audit.load("spec/divergences.json")
     except FileNotFoundError:
-        return {"dispositions": [], "gaps": []}
+        led = {}
+    if not isinstance(led, dict):
+        led = {}
+    for key in ("dispositions", "gaps"):
+        if not isinstance(led.get(key), list):
+            led[key] = []
+    return led
 
 
 def _fmt(repos):

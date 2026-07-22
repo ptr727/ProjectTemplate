@@ -300,7 +300,15 @@ def main():
         if not isinstance(div, dict):
             errors.append("divergences.json: root must be an object")
             div = {}
-        for d in div.get("dispositions", []):
+        div_dispositions = div.get("dispositions", [])
+        if not isinstance(div_dispositions, list):
+            errors.append("divergences.json: 'dispositions' must be an array")
+            div_dispositions = []
+        div_gaps = div.get("gaps", [])
+        if not isinstance(div_gaps, list):
+            errors.append("divergences.json: 'gaps' must be an array")
+            div_gaps = []
+        for d in div_dispositions:
             if not isinstance(d, dict):
                 errors.append(f"divergences.json: disposition {d!r} is not an object")
                 continue
@@ -322,7 +330,7 @@ def main():
                 errors.append(f"divergences.json: '{p}' missing reason")
             if not (d.get("tracking") is None or isinstance(d.get("tracking"), str)):
                 errors.append(f"divergences.json: '{p}' tracking must be a string or null")
-        for g in div.get("gaps", []):
+        for g in div_gaps:
             if not isinstance(g, dict):
                 errors.append(f"divergences.json: gap {g!r} is not an object")
                 continue
