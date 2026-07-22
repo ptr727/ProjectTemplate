@@ -23,7 +23,7 @@ import base64
 import subprocess
 import sys
 
-import audit  # sibling; import-safe (its main is guarded)
+import audit  # sibling, import-safe (its main is guarded)
 
 REF_ADOPTER = "Financial-Modeling"  # a well-adopted repo, used only for the manifest-gap pass
 
@@ -80,7 +80,7 @@ def fidelity_pass(spec):
         spreads.append((e, spread))
         # A verbatim candidate has NO hand-modified copy ("differs") and at least one confirmed match with
         # the current canonical. Stale copies do not disqualify it - verbatim would flag them "stale ->
-        # re-vendor", which is the point; a unit that is entirely stale/unavailable is not confirmed uniform.
+        # re-vendor", which is the point. A unit that is entirely stale/unavailable is not confirmed uniform.
         if fid == "intent" and spread["match"] and not spread["differs"]:
             promote.append((e, spread))
         if fid == "verbatim" and spread["differs"]:
@@ -134,7 +134,7 @@ def main():
               f"{len(spread['match'])} / {len(spread['stale'])} / {len(spread['differs'])} / {len(spread['unavailable'])}")
 
     print("\n== INTENT units with no divergent copy (verbatim-appropriate) -> candidates to promote to VERBATIM ==")
-    print("   (>=1 confirmed match, 0 hand-modified; any stale/unavailable copy is shown per unit and would")
+    print("   (>=1 confirmed match, 0 hand-modified. Any stale/unavailable copy is shown per unit and would")
     print("    re-vendor under verbatim - the drift intent cannot catch)")
     if not promote:
         print("   none")
