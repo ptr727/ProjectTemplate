@@ -158,8 +158,15 @@ def render_report(spreads, promote, gaps, ledger):
             return set(), set(), set()
         return set(sp["differs"]) | set(sp["stale"]), set(sp["match"]), set(sp["unavailable"])
 
-    dispositions = ledger.get("dispositions", [])
-    gap_entries = ledger.get("gaps", [])
+    # Keep only well-formed entries so --report degrades cleanly on a hand-malformed ledger instead of
+    # raising KeyError/TypeError downstream. validate.py reports the malformation loudly in CI.
+    dispositions = [d for d in ledger.get("dispositions", [])
+                    if isinstance(d, dict) and isinstance(d.get("path"), str)
+                    and isinstance(d.get("repos"), list) and isinstance(d.get("disposition"), str)
+                    and isinstance(d.get("reason"), str)]
+    gap_entries = [g for g in ledger.get("gaps", [])
+                   if isinstance(g, dict) and isinstance(g.get("path"), str)
+                   and isinstance(g.get("disposition"), str) and isinstance(g.get("reason"), str)]
     gap_disp = {g["path"]: g for g in gap_entries}
     covered = {}  # path -> repos that carry a disposition (to find the untriaged remainder)
     for d in dispositions:
