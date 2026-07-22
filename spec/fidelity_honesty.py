@@ -20,6 +20,7 @@ the manifest is carried-but-untracked (exactly the configure.sh / settings.json 
 Usage: python3 spec/fidelity_honesty.py [reference-repo-for-manifest-gap]   (default: Financial-Modeling)
 """
 import base64
+import subprocess
 import sys
 
 import audit  # sibling; import-safe (its main is guarded)
@@ -103,10 +104,10 @@ def manifest_gap_pass(spec, ref_repo):
     tree = audit.gh(f"repos/{slug}/git/trees/{br['commit']['commit']['tree']['sha']}?recursive=1", ok404=True)
     if not tree or "tree" not in tree:
         return slug, []
-    # Exclude only the .git metadata directory (by path component, not a substring - a substring check
-    # is separator-dependent and also swallows .github/, .gitattributes, .gitignore).
-    hub_files = {str(p.relative_to(audit.ROOT)).replace("\\", "/")
-                 for p in audit.ROOT.rglob("*") if p.is_file() and ".git" not in p.parts}
+    # The hub's tracked files (git ls-files), not a filesystem walk: a walk pulls in untracked local cruft
+    # (__pycache__, a local .venv) and would make the gap report depend on working-tree state.
+    r = subprocess.run(["git", "ls-files"], cwd=audit.ROOT, capture_output=True, text=True)
+    hub_files = set(r.stdout.splitlines()) if r.returncode == 0 else set()
     gaps = sorted(n["path"] for n in tree["tree"]
                   if n.get("type") == "blob" and n["path"] in hub_files and n["path"] not in listed)
     return slug, gaps
