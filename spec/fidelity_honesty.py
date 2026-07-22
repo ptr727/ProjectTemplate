@@ -107,7 +107,9 @@ def manifest_gap_pass(spec, ref_repo):
     # The hub's tracked files (git ls-files), not a filesystem walk: a walk pulls in untracked local cruft
     # (__pycache__, a local .venv) and would make the gap report depend on working-tree state.
     r = subprocess.run(["git", "ls-files"], cwd=audit.ROOT, capture_output=True, text=True)
-    hub_files = set(r.stdout.splitlines()) if r.returncode == 0 else set()
+    if r.returncode != 0:  # fail loud: an empty set would masquerade as "no gaps" (a false clean)
+        raise RuntimeError(f"git ls-files failed in {audit.ROOT}: {r.stderr.strip() or 'non-zero exit'}")
+    hub_files = set(r.stdout.splitlines())
     gaps = sorted(n["path"] for n in tree["tree"]
                   if n.get("type") == "blob" and n["path"] in hub_files and n["path"] not in listed)
     return slug, gaps
