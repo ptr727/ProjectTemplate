@@ -1,6 +1,4 @@
-# Lint and type-check config for the hub's stdlib-only utility scripts (spec/, host-setup/) - the
-# "Scripts" profile from CODESTYLE.md: config only, no [project]/[build-system]/uv.lock, with mypy the
-# type-check gate and pyright/pylance editor-only (standard mode). Mirrors the fleet's Python style.
+# Config only (no [project]/[build-system]/uv.lock) - the Scripts profile, CODESTYLE.md "Two profiles".
 
 [tool.ruff]
 target-version = "py313"
