@@ -282,6 +282,12 @@ def main():
         "registry": audit.load("registry/repos.json"),
         "files": audit.load("spec/files.json"),
     }
+    # Fail loud on an unresolvable reference adopter: its empty gap section would read as a false clean.
+    if report_mode and not any(isinstance(r, dict) and r.get("name") == ref_repo
+                               for r in spec["registry"].get("repos", [])):
+        print(f"error: reference adopter '{ref_repo}' not found in the registry - "
+              f"cannot run the manifest-gap pass for the report", file=sys.stderr)
+        return 1
     spreads, promote, mislabel = fidelity_pass(spec)
     slug, gaps = manifest_gap_pass(spec, ref_repo)
 
