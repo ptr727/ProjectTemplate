@@ -326,8 +326,8 @@ def main():
                 for rn in d["repos"]:
                     if rn not in repo_names:
                         errors.append(f"divergences.json: '{p}' repo '{rn}' not in the registry")
-            if not d.get("reason"):
-                errors.append(f"divergences.json: '{p}' missing reason")
+            if not isinstance(d.get("reason"), str) or not d.get("reason"):
+                errors.append(f"divergences.json: '{p}' reason must be a non-empty string")
             if not (d.get("tracking") is None or isinstance(d.get("tracking"), str)):
                 errors.append(f"divergences.json: '{p}' tracking must be a string or null")
         for g in div_gaps:
@@ -342,8 +342,8 @@ def main():
                 errors.append(f"divergences.json: gap '{gp}' is already a manifest unit (not a gap)")
             if g.get("disposition") not in dispositions:
                 errors.append(f"divergences.json: gap '{gp}' disposition '{g.get('disposition')}' invalid (expected one of {', '.join(dispositions)})")
-            if not g.get("reason"):
-                errors.append(f"divergences.json: gap '{gp}' missing reason")
+            if not isinstance(g.get("reason"), str) or not g.get("reason"):
+                errors.append(f"divergences.json: gap '{gp}' reason must be a non-empty string")
             if not (g.get("tracking") is None or isinstance(g.get("tracking"), str)):
                 errors.append(f"divergences.json: gap '{gp}' tracking must be a string or null")
 

@@ -118,7 +118,7 @@ def manifest_gap_pass(spec, ref_repo):
 
 
 def load_ledger():
-    """The curated disposition ledger, empty if absent (every live divergence then reads as untriaged).
+    """The curated disposition ledger, empty if absent (each verbatim divergence and manifest gap then reads as untriaged).
 
     Normalized so a malformed file (non-object root, or a non-array dispositions/gaps) degrades to an empty
     section rather than crashing render_report. validate.py reports the malformation loudly in CI.
