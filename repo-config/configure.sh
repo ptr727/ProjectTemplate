@@ -54,7 +54,7 @@ if [ -z "$model" ]; then
             echo "Registry $registry not found and the carried develop payloads are ambiguous (expected exactly one of develop.json or operational/develop.json). Pass the model explicitly (release|operational)." >&2
             exit 1
         fi
-        echo "Registry $registry not found; inferred workflow model '$model' from the carried develop payload." >&2
+        echo "Registry $registry not found. Inferred workflow model '$model' from the carried develop payload." >&2
     fi
 fi
 case "$model" in
@@ -84,7 +84,7 @@ ruleset_id() { # ruleset-name -> id of the first match (empty if none); warns on
     # input (no early pipe close), so neither SIGPIPEs jq under pipefail.
     count="$(printf '%s\n' "$ids" | grep -c .)"
     if [ "$count" -gt 1 ]; then
-        echo "Warning: $count rulesets named '$1' on $repo; using the first (resolve the duplicates)." >&2
+        echo "Warning: $count rulesets named '$1' on $repo. Using the first (resolve the duplicates)." >&2
     fi
     printf '%s\n' "$ids" | sed -n '1p'
 }
@@ -93,12 +93,12 @@ ruleset_id() { # ruleset-name -> id of the first match (empty if none); warns on
 apply_ruleset() { # payload-file - create-or-update the ruleset by name
     local file="$1" rname id
     if [ ! -e "$file" ]; then
-        echo "Ruleset payload $file not found; aborting to avoid a partially-applied configuration." >&2
+        echo "Ruleset payload $file not found. Aborting to avoid a partially-applied configuration." >&2
         exit 1
     fi
     rname="$(jq -r '.name // empty' "$file")"
     if [ -z "$rname" ]; then
-        echo "Ruleset payload $file has no name; aborting to avoid a partially-applied configuration." >&2
+        echo "Ruleset payload $file has no name. Aborting to avoid a partially-applied configuration." >&2
         exit 1
     fi
     id="$(ruleset_id "$rname")"
@@ -112,24 +112,29 @@ apply_ruleset() { # payload-file - create-or-update the ruleset by name
 }
 
 cmd_apply() {
+    local f private disc payload
+    # Pre-flight every required payload before any write, so a partial carry aborts before it half-applies.
+    for f in "$settings_file" "$develop_ruleset" "$main_ruleset"; do
+        if [ ! -e "$f" ]; then
+            echo "Required payload $f not found. Aborting to avoid a partially-applied configuration." >&2
+            exit 1
+        fi
+    done
     echo "Applying configuration to $repo (model: $model)"
     # ----- General repository settings -----
-    if [ -e "$settings_file" ]; then
-        local private disc payload
-        # has_discussions: enabled on public repos only (fleet policy), never on private.
-        private="$(gh api "repos/$repo" --jq '.private')"
-        disc=false; [ "$private" = "false" ] && disc=true
-        # default_branch main, but only point it at main when main exists - never set the default to a missing
-        # branch (e.g. a repo still on a rework branch).
-        if gh api "repos/$repo/branches/main" --jq '.name' >/dev/null 2>&1; then
-            payload="$(jq --argjson d "$disc" '. + {has_discussions: $d, default_branch: "main"}' "$settings_file")"
-        else
-            payload="$(jq --argjson d "$disc" '. + {has_discussions: $d}' "$settings_file")"
-            echo "Warning: $repo has no 'main' branch; leaving default_branch unchanged." >&2
-        fi
-        echo "Applying general settings (has_discussions=$disc)"
-        printf '%s' "$payload" | gh api --method PATCH "repos/$repo" --input - >/dev/null
+    # has_discussions: enabled on public repos only (fleet policy), never on private.
+    private="$(gh api "repos/$repo" --jq '.private')"
+    disc=false; [ "$private" = "false" ] && disc=true
+    # default_branch main, but only point it at main when main exists - never set the default to a missing
+    # branch (e.g. a repo still on a rework branch).
+    if gh api "repos/$repo/branches/main" --jq '.name' >/dev/null 2>&1; then
+        payload="$(jq --argjson d "$disc" '. + {has_discussions: $d, default_branch: "main"}' "$settings_file")"
+    else
+        payload="$(jq --argjson d "$disc" '. + {has_discussions: $d}' "$settings_file")"
+        echo "Warning: $repo has no 'main' branch. Leaving default_branch unchanged." >&2
     fi
+    echo "Applying general settings (has_discussions=$disc)"
+    printf '%s' "$payload" | gh api --method PATCH "repos/$repo" --input - >/dev/null
     # ----- Dependabot alerts + automated security updates -----
     gh api --method PUT "repos/$repo/vulnerability-alerts" >/dev/null
     gh api --method PUT "repos/$repo/automated-security-fixes" >/dev/null
@@ -189,6 +194,7 @@ check_ruleset() { # payload-file - the live ruleset must match the committed pol
 
 check_settings() {
     local live key want got private wantdisc
+    if [ ! -e "$settings_file" ]; then fail "settings payload $settings_file missing"; return; fi
     live="$(gh api "repos/$repo")"
     # Static settings, driven from settings.json so the check never drifts from the file - add a key there and
     # it is audited here automatically.
