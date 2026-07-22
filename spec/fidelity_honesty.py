@@ -101,16 +101,13 @@ def manifest_gap_pass(spec, ref_repo):
     tree = audit.gh(f"repos/{slug}/git/trees/{br['commit']['commit']['tree']['sha']}?recursive=1", ok404=True)
     if not tree or "tree" not in tree:
         return slug, []
+    # Exclude only the .git metadata directory (by path component, not a substring - a substring check
+    # is separator-dependent and also swallows .github/, .gitattributes, .gitignore).
     hub_files = {str(p.relative_to(audit.ROOT)).replace("\\", "/")
-                 for p in audit.ROOT.rglob("*") if p.is_file() and ".git/" not in str(p)}
-    gaps = []
-    for node in tree["tree"]:
-        if node.get("type") != "blob":
-            continue
-        rel = node["path"]
-        if rel in hub_files and rel not in listed and not rel.startswith(".git"):
-            gaps.append(rel)
-    return slug, sorted(gaps)
+                 for p in audit.ROOT.rglob("*") if p.is_file() and ".git" not in p.parts}
+    gaps = sorted(n["path"] for n in tree["tree"]
+                  if n.get("type") == "blob" and n["path"] in hub_files and n["path"] not in listed)
+    return slug, gaps
 
 
 def main():
