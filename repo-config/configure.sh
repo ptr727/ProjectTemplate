@@ -5,35 +5,52 @@
 #   2. The branch rulesets. main.json is shared by both workflow models; the develop ruleset is model-specific -
 #      release repos use develop.json (PR-gated), operational repos use operational/develop.json (direct signed
 #      pushes). The model is read from ../registry/repos.json (per-repo workflowModel, else defaults.workflowModel,
-#      else release) and can be overridden with the second argument. Each <name>.json holds the writable ruleset
-#      subset {name, target, enforcement, bypass_actors, conditions, rules}. An existing ruleset (matched by name)
-#      is updated with a full-payload PUT (partial PUTs 422); a missing one is created with POST.
+#      else release) and can be overridden with the model argument. In a downstream carry the registry is absent;
+#      the model is then inferred from which develop payload is carried (a carry holds exactly its own model's).
+#      Each <name>.json holds the writable ruleset subset {name, target, enforcement, bypass_actors, conditions,
+#      rules}. An existing ruleset (matched by name) is updated with a full-payload PUT (partial PUTs 422); a
+#      missing one is created with POST.
 # Rerunning is idempotent.
 #
 # Usage: repo-config/configure.sh [owner/repo] [release|operational]   (repo defaults to the current repo via gh;
-#        model defaults to the registry lookup)
-set -euo pipefail
+#        model defaults to the registry lookup, else payload inference). The model may also be passed as the sole
+#        argument: repo-config/configure.sh operational
+set -Eeuo pipefail
 
-repo="${1:-$(gh repo view --json nameWithOwner --jq '.nameWithOwner')}"
+repo_arg="${1:-}"
+model="${2:-}"
+# Allow the model as the sole argument (`repo-config/configure.sh operational`): a model name in arg 1 is not a repo.
+case "$repo_arg" in
+    release|operational) model="$repo_arg"; repo_arg="" ;;
+esac
+repo="${repo_arg:-$(gh repo view --json nameWithOwner --jq '.nameWithOwner')}"
 script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
 # ----- Resolve the workflow model (selects the develop ruleset) -----
 registry="$script_dir/../registry/repos.json"
 name="${repo##*/}"
-model="${2:-}"
 if [ -z "$model" ]; then
     if [ -f "$registry" ]; then
         # Fail fast on a jq/parse error (malformed registry) instead of silently applying the release default
         # to a repo whose lookup actually broke. A repo simply absent from the registry is not an error: the
         # expression falls back through defaults.workflowModel to "release", so jq still exits 0 with a value.
         if ! model="$(jq -r --arg n "$name" '(.repos[] | select(.name==$n) | .workflowModel) // .defaults.workflowModel // "release"' "$registry")"; then
-            echo "Failed to read workflowModel from $registry (invalid JSON?). Pass the model explicitly as arg 2." >&2
+            echo "Failed to read workflowModel from $registry (invalid JSON?). Pass the model explicitly (release|operational)." >&2
             exit 1
         fi
     else
-        # No registry to consult (e.g. running the script standalone) - default, but say so.
-        echo "Registry $registry not found; defaulting workflow model to release." >&2
-        model="release"
+        # No registry to consult (a downstream carry): infer the model from which develop payload is carried -
+        # a carry holds exactly its own model's payload. Ambiguous layouts (both or neither, e.g. a partial
+        # copy) abort rather than guess; a wrong guess would apply the wrong develop ruleset.
+        if [ -f "$script_dir/develop.json" ] && [ ! -f "$script_dir/operational/develop.json" ]; then
+            model="release"
+        elif [ -f "$script_dir/operational/develop.json" ] && [ ! -f "$script_dir/develop.json" ]; then
+            model="operational"
+        else
+            echo "Registry $registry not found and the carried develop payloads are ambiguous (expected exactly one of develop.json or operational/develop.json). Pass the model explicitly (release|operational)." >&2
+            exit 1
+        fi
+        echo "Registry $registry not found; inferred workflow model '$model' from the carried develop payload." >&2
     fi
 fi
 case "$model" in

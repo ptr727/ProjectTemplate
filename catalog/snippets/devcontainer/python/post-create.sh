@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-set -euo pipefail
+set -Eeuo pipefail
 
 # Install uv (Astral) for the Python project. Idempotent - re-running
 # overwrites in place. The installer drops the binary in $HOME/.local/bin and

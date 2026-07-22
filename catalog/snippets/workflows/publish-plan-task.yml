@@ -57,7 +57,7 @@ jobs:
           ACTOR: ${{ inputs.actor }}
           REF: ${{ inputs.ref_name }}
         run: |
-          set -euo pipefail
+          set -Eeuo pipefail
           publish=false
           case "$EVENT" in
             workflow_dispatch)
@@ -74,6 +74,11 @@ jobs:
               # ref==main guard keeps the task self-contained even if a caller's push trigger is not main-only.
               if [[ "$REF" == "main" ]] && { [[ "$ACTOR" == "ptr727-codegen[bot]" ]] || [[ "$ACTOR" == "dependabot[bot]" ]]; }; then
                 publish=true
+              elif [[ "$REF" == "main" ]]; then
+                # Fail loud: an unrecognized actor pushing to main is either a human commit (legitimately not
+                # publishing, but worth seeing) or a release bot under a new identity, which would otherwise
+                # stop publishing silently while a schedule keeps releasing - lost timeliness, no error.
+                echo "::warning::Push to main by unrecognized actor '$ACTOR'; not publishing. If this is a release bot under a new identity, update the allowlist in publish-plan-task.yml."
               fi
               ;;
           esac

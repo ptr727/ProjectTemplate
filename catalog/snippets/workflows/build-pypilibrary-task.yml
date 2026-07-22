@@ -84,7 +84,7 @@ jobs:
       - name: Compute PyPI version step
         id: pypiver
         run: |
-          set -euo pipefail
+          set -Eeuo pipefail
           if [[ "$BRANCH" == "develop" ]]; then
             version="${AFV}.dev0"
           else
@@ -100,7 +100,7 @@ jobs:
       # Done after tests so the test asserting __version__ is non-empty isn't affected.
       - name: Write version into _version.py step
         run: |
-          set -euo pipefail
+          set -Eeuo pipefail
           sed -i 's/^__version__ = .*/__version__ = "'"$VERSION"'"/' src/ptr727_projecttemplate_library/_version.py
         env:
           VERSION: ${{ steps.pypiver.outputs.version }}

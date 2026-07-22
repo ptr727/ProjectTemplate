@@ -83,7 +83,7 @@ jobs:
           BRANCH: ${{ inputs.branch }}
           SMOKE: ${{ inputs.smoke }}
         run: |
-          set -euo pipefail
+          set -Eeuo pipefail
           # Smoke builds never publish and always version as prerelease (detached PR HEAD), which would trip the main arm.
           if [[ "$SMOKE" == "true" ]]; then
             echo "Smoke build; skipping release version validation."
@@ -193,7 +193,7 @@ jobs:
           GH_TOKEN: ${{ github.token }}
           TAG: ${{ needs.get-version.outputs.SemVer2 }}
         run: |
-          set -euo pipefail
+          set -Eeuo pipefail
           if gh release view "$TAG" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
             echo "exists=true" >> "$GITHUB_OUTPUT"
             if [[ "${{ github.event_name }}" == "workflow_dispatch" ]]; then
@@ -240,7 +240,7 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          set -euo pipefail
+          set -Eeuo pipefail
           if ! ids=$(gh api "repos/$GITHUB_REPOSITORY/actions/runs/${{ github.run_id }}/artifacts" --paginate \
             --jq ".artifacts[] | select(.name | startswith(\"release-asset-${{ inputs.branch }}-\")) | .id"); then
             echo "::warning::Could not list run artifacts; retention-days backstop will reap them."

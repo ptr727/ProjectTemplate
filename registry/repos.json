@@ -104,7 +104,7 @@
             "name": "PlexCleaner",
             "url": "https://github.com/ptr727/PlexCleaner",
             "status": "cataloged",
-            "types": ["csharp", "console", "docker"],
+            "types": ["csharp", "console", "docker", "python"],
             "groundTruthBranch": "main",
             "hasDevelop": true,
             "publish": [
@@ -115,7 +115,7 @@
             "consumerModel": "pull",
             "releaseTrigger": "two-phase",
             "configLayout": { "rulesetsDir": "repo-config", "pythonConfig": null },
-            "driftNotes": ["Carries ARCHITECTURE.md and codecov.yml beyond the baseline.", "Branch hygiene: 3 stale Dependabot nuget branches (PRs closed/superseded) and an unmerged feature/727-decouple-release-assets branch linger; main+develop otherwise clean after the 2026-07 sweep."]
+            "driftNotes": ["Carries ARCHITECTURE.md and codecov.yml beyond the baseline.", "First csharp+python repo: a C# console app at the root plus a stdlib-only Python tooling subtree (RegressionTests/, uvx scripts profile - no uv.lock, pyproject carries only ruff+mypy config; PlexCleaner#855). python.uvlock.pinned and python.coverage.codecov are N/A for that subtree (no uv project, no tests); codecov.yml stays required for the C# side. Reference for the csharp+python shape (issue #339).", "Branch hygiene: 3 stale Dependabot nuget branches (PRs closed/superseded) and an unmerged feature/727-decouple-release-assets branch linger; main+develop otherwise clean after the 2026-07 sweep."]
         },
         {
             "name": "ESPHome-NonRoot",
@@ -163,7 +163,7 @@
             "url": "https://github.com/ptr727/HomeAutomation-Config",
             "status": "cataloged",
             "types": ["source-only"],
-            "groundTruthBranch": "develop",
+            "groundTruthBranch": "main",
             "workflowModel": "operational",
             "lineEndings": "lf",
             "hasDevelop": true,
@@ -171,27 +171,25 @@
             "requiredSecrets": [],
             "consumerModel": "pull",
             "releaseTrigger": "dispatch-only",
-            "driftNotes": ["Maintainer config/ops repo (docker-compose stacks, lifecycle scripts, Firewalla configs); Linux-consumed on the Proxmox host, so lineEndings lf.", "Renamed from HomeAutomation for fleet naming consistency (config repos are *-Config). The Vantage controller config is split out to its own Windows/CRLF Vantage-Config repo, not carried here - strip the legacy Vantage/ subtree during onboarding.", "Private; README self-flags previously-committed secrets - secrets-hygiene concern.", "Operational rollout pending: lint CI feeding the required check, dispatch-only source-release scaffolding (version.json + NBGV get-version + publish-release.yml, tag + source zip), and develop-as-ground-truth adoption."]
+            "driftNotes": ["Maintainer config/ops repo (docker-compose stacks, lifecycle scripts, Firewalla configs); Linux-consumed on the Proxmox host, so lineEndings lf.", "Renamed from HomeAutomation for fleet naming consistency (config repos are *-Config). The Vantage controller config is split out to its own Windows/CRLF Vantage-Config repo, not carried here; the legacy Vantage/ subtree is stripped.", "Private; README self-flags previously-committed secrets - secrets-hygiene concern."]
         },
         {
             "name": "KiCadLibrary",
             "url": "https://github.com/ptr727/KiCadLibrary",
             "status": "cataloged",
             "types": ["eda"],
-            "groundTruthBranch": "develop",
             "hasDevelop": true,
             "publish": [{ "target": "github-release", "mechanism": "none" }],
             "requiredSecrets": [],
             "consumerModel": "pull",
             "releaseTrigger": "two-phase",
-            "driftNotes": ["EDA/KiCad part library; delivers a github-release data zip.", "main is stale (data + README only): the full fleet CI, NBGV version.json, and the Python build/verify pipeline live only on develop (the recorded ground-truth branch) - promote to main to converge.", "Python tooling uses requirements-dev.txt, not pyproject.toml; no repo-config/ rulesets."]
+            "driftNotes": ["EDA/KiCad part library; delivers a github-release data zip.", "main is stale (data + README only): the full fleet CI, NBGV version.json, and the Python build/verify pipeline live only on develop - promote to main to converge.", "Python tooling uses requirements-dev.txt, not pyproject.toml; no repo-config/ rulesets."]
         },
         {
             "name": "EspDinIoT",
             "url": "https://github.com/ptr727/EspDinIoT",
             "status": "cataloged",
             "types": ["eda"],
-            "groundTruthBranch": "develop",
             "hasDevelop": true,
             "publish": [],
             "requiredSecrets": [],
@@ -204,7 +202,7 @@
             "url": "https://github.com/ptr727/ESPHome-Config",
             "status": "cataloged",
             "types": ["source-only"],
-            "groundTruthBranch": "develop",
+            "groundTruthBranch": "main",
             "workflowModel": "operational",
             "lineEndings": "lf",
             "hasDevelop": true,
@@ -212,7 +210,7 @@
             "requiredSecrets": [],
             "consumerModel": "pull",
             "releaseTrigger": "dispatch-only",
-            "driftNotes": ["ESPHome device config YAML consumed by the cataloged ESPHome-NonRoot image at runtime; distinct from that Docker repo.", "Operational rollout pending: an esphome-config validation job feeding the required check, dispatch-only source-release scaffolding (version.json + NBGV get-version + publish-release.yml, tag + source zip), and develop-as-ground-truth adoption. Dependabot currently covers only the devcontainers ecosystem."]
+            "driftNotes": ["ESPHome device config YAML consumed by the cataloged ESPHome-NonRoot image at runtime; distinct from that Docker repo."]
         },
         {
             "name": "HomeAssistant-Config",
@@ -227,7 +225,7 @@
             "requiredSecrets": [],
             "consumerModel": "pull",
             "releaseTrigger": "dispatch-only",
-            "driftNotes": ["Home Assistant CONFIGURATION (configuration.yaml + automations/blueprints), NOT a HACS integration (no custom_components/manifest.json, no hacs.json).", "Operational rollout pending: 'master' renamed to 'main' and 'develop' created (done); develop is behind main by 2 commits - fast-forward develop up to main so it holds the live content, then flip groundTruthBranch to develop. Also pending: lint CI (a Home Assistant config-check feeding the required check) and dispatch-only source-release scaffolding (version.json + NBGV get-version + publish-release.yml, tag + source zip).", "Private; deployed by git pull into the HA config dir."]
+            "driftNotes": ["Home Assistant CONFIGURATION (configuration.yaml + automations/blueprints), NOT a HACS integration (no custom_components/manifest.json, no hacs.json).", "Operational onboarding completed 2026-07-17 (HomeAssistant-Config #16): master->main rename + develop created, advisory lint CI (Check pull request workflow status job required check), dispatch-only source release (version.json + NBGV + publish-release.yml), repo-config operational carry (rulesets/settings applied and verified in sync), Dependabot + App merge-bot with the CODEGEN_APP_* pair in both stores, adapted self-audit (AUDIT.md + spec/secrets.json); baseline promoted develop->main via HomeAssistant-Config #17.", "groundTruthBranch intentionally main: develop is the working branch (direct signed commits), main the promoted stable snapshot the audit targets - deliberately not flipped to develop (ptr727/ProjectTemplate#340).", "Private; deployed by git pull into the HA config dir."]
         },
         {
             "name": "DevKitCIoT",
@@ -247,13 +245,12 @@
             "url": "https://github.com/ptr727/PhotoCleaner",
             "status": "cataloged",
             "types": ["csharp", "console", "docker"],
-            "groundTruthBranch": "develop",
             "hasDevelop": true,
             "publish": [],
             "requiredSecrets": ["CODECOV_TOKEN"],
             "consumerModel": "pull",
             "releaseTrigger": "none",
-            "driftNotes": ["Work-in-progress: pre-CI (no .github/workflows, no version.json, no repo-config).", "Non-conformant: default/only branch is 'develop', no 'main' - must create main (should never be permanent).", "Dockerfile present but no docker build/push workflow, so no publish wired."]
+            "driftNotes": ["Work-in-progress: pre-CI (no .github/workflows, no version.json, no repo-config).", "Pre-conformance: main exists but the work-in-progress content lives on develop - promote to main to converge.", "Dockerfile present but no docker build/push workflow, so no publish wired."]
         },
         {
             "name": "MediaTools",
@@ -286,7 +283,7 @@
             "url": "https://github.com/ptr727/Vantage-Config",
             "status": "cataloged",
             "types": ["source-only"],
-            "groundTruthBranch": "develop",
+            "groundTruthBranch": "main",
             "workflowModel": "operational",
             "lineEndings": "crlf",
             "hasDevelop": true,
@@ -294,14 +291,13 @@
             "requiredSecrets": [],
             "consumerModel": "pull",
             "releaseTrigger": "dispatch-only",
-            "driftNotes": ["Vantage InFusion / Design Center controller config edited on Windows (UTF-8 CRLF .dc XML, really special XML), so lineEndings crlf.", "Recreated lean and single-platform: Design Center is freely available, so no installer archives are kept; split out of HomeAutomation-Config. Being repopulated from the Windows editing host - operational onboarding (baseline, lint CI, dispatch-only publisher, rulesets, develop/main) pending once content lands."]
+            "driftNotes": ["Vantage InFusion / Design Center controller config edited on Windows (UTF-8 CRLF .dc XML, really special XML), so lineEndings crlf.", "Recreated lean and single-platform: Design Center is freely available, so no installer archives are kept; split out of HomeAutomation-Config.", "Operational onboarding completed 2026-07-16 (Vantage-Config #9): baseline docs, advisory lint CI, dispatch-only publisher, repo-config operational carry (rulesets/settings applied and verified in sync), Dependabot + App merge-bot with the secret pair in both stores, adapted self-audit (AUDIT.md + spec/secrets.json)."]
         },
         {
             "name": "HolidayLights",
             "url": "https://github.com/ptr727/HolidayLights",
             "status": "cataloged",
             "types": ["source-only"],
-            "groundTruthBranch": "develop",
             "hasDevelop": true,
             "publish": [],
             "requiredSecrets": [],

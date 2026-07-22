@@ -63,6 +63,12 @@ end_of_line = lf
 [spec/{validate,audit}.py]
 end_of_line = lf
 
+# The agent-safety kit's Python is shebang-executable tooling run by path (the PreToolUse hook and its
+# installer), so pin LF for the same reason as the entry points above - a CRLF shebang breaks direct
+# execution on a Unix host.
+[host-setup/agent-safety/*.py]
+end_of_line = lf
+
 # uv regenerates uv.lock with LF on every platform, so pin it or an EOL check (editorconfig-checker/CI)
 # reds on every `uv lock`/`uv sync` until the file is manually reconverted - same rationale as the
 # shebang/Dockerfile pins (a tool owns the ending). A Python repo on the CRLF default carries this; a repo
