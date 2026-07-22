@@ -289,6 +289,47 @@ def main():
             elif not isinstance(elt, str):
                 errors.append(f"files.json: {path} section entry {elt!r} must be a string or object")
 
+    # Divergence ledger (spec/divergences.json): the curated burn-down of known fleet divergences, joined
+    # against live reality by fidelity_honesty.py --report. Optional; validate when present so a mistyped repo
+    # name or disposition surfaces in CI rather than silently dropping (or misfiling) a burn-down row.
+    dispositions = ("re-vendor", "track", "accepted", "upstream-candidate", "investigate")
+    if (ROOT / "spec/divergences.json").exists():
+        div = load("spec/divergences.json")
+        repo_names = {r.get("name") for r in repos["repos"] if isinstance(r, dict)}
+        manifest_paths = {i.get("path") for i in baseline if isinstance(i, dict)}
+        for d in div.get("dispositions", []):
+            if not isinstance(d, dict):
+                errors.append(f"divergences.json: disposition {d!r} is not an object")
+                continue
+            p = d.get("path")
+            if p not in manifest_paths:
+                errors.append(f"divergences.json: disposition path '{p}' is not a manifest unit")
+            if d.get("disposition") not in dispositions:
+                errors.append(f"divergences.json: '{p}' disposition '{d.get('disposition')}' invalid (expected one of {', '.join(dispositions)})")
+            if not is_str_list(d.get("repos")) or not d.get("repos"):
+                errors.append(f"divergences.json: '{p}' repos must be a non-empty array of strings")
+            else:
+                for rn in d["repos"]:
+                    if rn not in repo_names:
+                        errors.append(f"divergences.json: '{p}' repo '{rn}' not in the registry")
+            if not d.get("reason"):
+                errors.append(f"divergences.json: '{p}' missing reason")
+            if not (d.get("tracking") is None or isinstance(d.get("tracking"), str)):
+                errors.append(f"divergences.json: '{p}' tracking must be a string or null")
+        for g in div.get("gaps", []):
+            if not isinstance(g, dict):
+                errors.append(f"divergences.json: gap {g!r} is not an object")
+                continue
+            gp = g.get("path")
+            if gp in manifest_paths:
+                errors.append(f"divergences.json: gap '{gp}' is already a manifest unit (not a gap)")
+            if g.get("disposition") not in dispositions:
+                errors.append(f"divergences.json: gap '{gp}' disposition '{g.get('disposition')}' invalid (expected one of {', '.join(dispositions)})")
+            if not g.get("reason"):
+                errors.append(f"divergences.json: gap '{gp}' missing reason")
+            if not (g.get("tracking") is None or isinstance(g.get("tracking"), str)):
+                errors.append(f"divergences.json: gap '{gp}' tracking must be a string or null")
+
     if errors:
         print("Spec validation FAILED:")
         for e in errors:
