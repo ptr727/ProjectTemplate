@@ -507,7 +507,7 @@ def audit_repo(entry, spec):
         # to ""), whereas a too-large or non-inline payload returns encoding "none" (text stays None -> flagged).
         text = base64.b64decode(content["content"]).decode("utf-8", "replace") if content.get("encoding") == "base64" else None
         # Interface conformance (name + wiring) plus any verbatim job regions the contract pins.
-        if item and fid == "interface":
+        if item is not None and fid == "interface":
             if text is None:
                 findings.append(("DRIFT", f"interface: could not read {path} content on {ground} to verify its contract (no inline content returned); verify by hand"))
             else:
@@ -518,7 +518,7 @@ def audit_repo(entry, spec):
                     findings.extend(check_verbatim(f"{path} job '{job}'", text, canonical_rel,
                                                    extract=lambda t, j=job: split_jobs(t).get(j)))
         # Whole-file verbatim: byte-identical to the hub's canonical after EOL normalization.
-        elif item and fid == "verbatim":
+        elif item is not None and fid == "verbatim":
             if text is None:
                 findings.append(("DRIFT", f"verbatim: could not read {path} content on {ground} to compare (no inline content returned); verify by hand"))
             else:
