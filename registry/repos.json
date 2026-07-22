@@ -183,7 +183,7 @@
             "requiredSecrets": [],
             "consumerModel": "pull",
             "releaseTrigger": "two-phase",
-            "driftNotes": ["EDA/KiCad part library; delivers a github-release data zip.", "main is stale (data + README only): the full fleet CI, NBGV version.json, and the Python build/verify pipeline live only on develop (the recorded ground-truth branch) - promote to main to converge.", "Python tooling uses requirements-dev.txt, not pyproject.toml; no repo-config/ rulesets."]
+            "driftNotes": ["EDA/KiCad part library; delivers a github-release data zip.", "main is stale (data + README only): the full fleet CI, NBGV version.json, and the Python build/verify pipeline live only on develop - promote to main to converge.", "Python tooling uses requirements-dev.txt, not pyproject.toml; no repo-config/ rulesets."]
         },
         {
             "name": "EspDinIoT",
@@ -250,7 +250,7 @@
             "requiredSecrets": ["CODECOV_TOKEN"],
             "consumerModel": "pull",
             "releaseTrigger": "none",
-            "driftNotes": ["Work-in-progress: pre-CI (no .github/workflows, no version.json, no repo-config).", "Non-conformant: default/only branch is 'develop', no 'main' - must create main (should never be permanent).", "Dockerfile present but no docker build/push workflow, so no publish wired."]
+            "driftNotes": ["Work-in-progress: pre-CI (no .github/workflows, no version.json, no repo-config).", "Pre-conformance: main exists but the work-in-progress content lives on develop - promote to main to converge.", "Dockerfile present but no docker build/push workflow, so no publish wired."]
         },
         {
             "name": "MediaTools",
