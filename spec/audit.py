@@ -184,7 +184,7 @@ def heading_texts(markdown):
 
 
 _HTML_COMMENT = re.compile(r"<!--.*?-->", re.S)
-_MD_LINK_INLINE = re.compile(r"\[([^\]]*)\]\([^)]*\)")
+_MD_LINK_INLINE = re.compile(r"\[([^\]]*)\]\((?:[^()]|\([^()]*\))*\)")  # URL may hold one level of ()
 _MD_LINK_REF = re.compile(r"\[([^\]]*)\]\[[^\]]*\]")
 
 
@@ -821,7 +821,7 @@ def _selftest():
     else:
         print("  ok   history: mirror matches modulo the ToC-omit comment, intro drift and paragraph-boundary drift detected")
     # Description mirror: links reduce to their text, and a link-free line passes through unchanged.
-    linked = "Utility to clean [media](https://x.example) per the [spec][spec-ref]."
+    linked = "Utility to clean [media](https://x.example/Foo_(bar)) per the [spec][spec-ref]."
     if strip_md_links(linked) != "Utility to clean media per the spec." or strip_md_links("Plain intro line.") != "Plain intro line.":
         ok = False
         print("  FAIL description: strip_md_links behavior")
