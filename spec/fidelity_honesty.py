@@ -29,13 +29,7 @@ REF_ADOPTER = "Financial-Modeling"  # a well-adopted repo, used only for the man
 REPORT_PATH = "reports/divergences.md"  # the generated, checked-in burn-down report (--report)
 
 
-def canonical_text(entry):
-    """The hub's canonical for a unit: its reference snippet, else its own root copy."""
-    ref = entry.get("reference") or entry["path"]
-    try:
-        return (audit.ROOT / ref).read_text(encoding="utf-8", errors="replace")
-    except OSError:
-        return None
+SECTION_SEP = " > "  # joins a file path and a verbatim section name into one unit label (path > section), ASCII
 
 
 def fetch(slug, path, ref):
@@ -46,46 +40,82 @@ def fetch(slug, path, ref):
     return base64.b64decode(content["content"]).decode("utf-8", "replace")
 
 
+def check_units(spec):
+    """Yield the fleet's check units - whole intent/verbatim files, plus each verbatim section of any file.
+
+    Each is (label, fidelity, entry_appliesTo, section_appliesTo, downstream_path, canonical_path, extract).
+    downstream_path is where the repo's copy lives (always the entry's `path`); canonical_path is the hub's
+    canonical (the `reference` snippet for a reference-backed unit, else the same path). extract is None for a
+    whole file, or a section extractor for a verbatim section (the region is compared, not the whole file).
+    """
+    for e in spec["files"]["baseline"]:
+        fid = e.get("fidelity")
+        if fid in ("intent", "verbatim"):
+            yield (e["path"], fid, e.get("appliesTo", "*"), "*", e["path"], e.get("reference") or e["path"], None)
+        sections = e.get("sections")
+        if not isinstance(sections, list):
+            continue
+        for elt in sections:
+            if isinstance(elt, dict) and elt.get("fidelity") == "verbatim" and isinstance(elt.get("name"), str) and elt["name"]:
+                name = elt["name"]
+                yield (f"{e['path']}{SECTION_SEP}{name}", "verbatim", e.get("appliesTo", "*"),
+                       elt.get("appliesTo", "*"), e["path"], e.get("reference") or e["path"],
+                       (lambda t, n=name: audit.extract_section(t, n)))
+
+
 def fidelity_pass(spec):
     defaults = spec["registry"].get("defaults", {})
     repos = [r for r in spec["registry"]["repos"] if r.get("status") == "cataloged"]
-    units = [e for e in spec["files"]["baseline"] if e.get("fidelity") in ("intent", "verbatim")]
 
-    spreads = []          # (entry, spread dict) for the full table
+    spreads = []          # (unit dict, spread dict) for the full table
     promote = []          # intent units that are uniform fleet-wide
     mislabel = []         # verbatim units that diverge non-stale
 
-    for e in units:
-        path, fid = e["path"], e["fidelity"]
-        canon = canonical_text(e)
+    for label, fid, ent_ap, sec_ap, down_path, canon_path, extract in check_units(spec):
+        unit = {"path": label, "fidelity": fid}
+        try:
+            canon_raw = (audit.ROOT / canon_path).read_text(encoding="utf-8", errors="replace")
+        except OSError:
+            canon_raw = None
+        canon = None if canon_raw is None else (canon_raw if extract is None else extract(canon_raw))
         if canon is None:
-            spreads.append((e, None))
+            spreads.append((unit, None))
             continue
         canon_hash = audit.content_hash(canon)
-        history = {audit.content_hash(t) for t in audit.git_file_history(e.get("reference") or path)}
+        # Hash each past revision's same region (a section may be absent in an old revision -> skip it).
+        history = set()
+        for t in audit.git_file_history(canon_path):
+            region = t if extract is None else extract(t)
+            if region is not None:
+                history.add(audit.content_hash(region))
         spread = {"match": [], "stale": [], "differs": [], "unavailable": []}
         for r in repos:
-            if not audit.applies(e.get("appliesTo", "*"), audit.repo_selectors(r, defaults)):
+            sel = audit.repo_selectors(r, defaults)
+            if not (audit.applies(ent_ap, sel) and audit.applies(sec_ap, sel)):
                 continue
-            text = fetch(audit.repo_slug(r), path, r.get("groundTruthBranch", "main"))
+            text = fetch(audit.repo_slug(r), down_path, r.get("groundTruthBranch", "main"))
             if text is None:  # missing (404) or present-but-non-inline (too large / encoding "none")
                 spread["unavailable"].append(r["name"])
                 continue
-            dh = audit.content_hash(text)
+            region = text if extract is None else extract(text)
+            if region is None:  # a verbatim section whose heading is absent downstream
+                spread["differs"].append(r["name"])
+                continue
+            dh = audit.content_hash(region)
             if dh == canon_hash:
                 spread["match"].append(r["name"])
             elif dh in history:
                 spread["stale"].append(r["name"])
             else:
                 spread["differs"].append(r["name"])
-        spreads.append((e, spread))
+        spreads.append((unit, spread))
         # A verbatim candidate has NO hand-modified copy ("differs") and at least one confirmed match with
         # the current canonical. Stale copies do not disqualify it - verbatim would flag them "stale ->
         # re-vendor", which is the point. A unit that is entirely stale/unavailable is not confirmed uniform.
         if fid == "intent" and spread["match"] and not spread["differs"]:
-            promote.append((e, spread))
+            promote.append((unit, spread))
         if fid == "verbatim" and spread["differs"]:
-            mislabel.append((e, spread))
+            mislabel.append((unit, spread))
     return spreads, promote, mislabel
 
 
