@@ -4,7 +4,7 @@ The preferred `README.md` shape for a fleet project. The audit's `readme-structu
 
 ## Sections and Order
 
-1. **Title (`# <Name>`)** - the repo name, then a one-line description as the next paragraph.
+1. **Title (`# <Name>`)** - the repo name, then a one-line description as the next paragraph. That line is **link-free plain text**: it doubles as the GitHub About description (AGENTS.md "Repository Details"), which renders no markdown, so a link would carry as raw brackets. The audit checks both properties.
 2. **Build and Distribution (`##`)** - a bullet per distribution channel the project actually ships, each linking where it lives: **Source Code** (the GitHub repo), **Versioned Releases** (GitHub Releases), **Docker Images** (Docker Hub), **NuGet Packages** (NuGet.org), **PyPI Packages** (PyPI.org). List only the channels the project uses. It carries three sub-sections:
    - **Build Status (`###`)** - the CI/build status shields (release build, Docker build, last commit, last build).
    - **Releases (`###`)** - the version shields (GitHub release, GitHub pre-release, Docker latest/develop, NuGet, PyPI), one per channel the project publishes.

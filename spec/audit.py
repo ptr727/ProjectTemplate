@@ -184,6 +184,16 @@ def heading_texts(markdown):
 
 
 _HTML_COMMENT = re.compile(r"<!--.*?-->", re.S)
+_MD_LINK_INLINE = re.compile(r"\[([^\]]*)\]\([^)]*\)")
+_MD_LINK_REF = re.compile(r"\[([^\]]*)\]\[[^\]]*\]")
+
+
+def strip_md_links(text):
+    """Markdown links reduced to their text - `[text](url)` and `[text][ref]` become `text`.
+
+    The plain-text form AGENTS.md "Repository Details" says the About description carries.
+    """
+    return _MD_LINK_REF.sub(r"\1", _MD_LINK_INLINE.sub(r"\1", text))
 
 
 def title_and_intro(text):
@@ -647,6 +657,20 @@ def audit_repo(entry, spec):
         elif r_intro != h_intro:
             findings.append(("LETTER", "history: HISTORY.md intro does not mirror the README intro - copy the README's opening paragraph (spec/readme-structure.md)"))
 
+    # --- Repository description mirrors the README intro line ---
+    # AGENTS.md "Repository Details": the About description is the README's first line after the H1 as plain
+    # text (links stripped), and the README is the source of truth. spec/readme-structure.md additionally wants
+    # that line link-free, so it carries to the unrendered description without formatting loss.
+    if "README.md" in doc_texts:
+        intro_line = title_and_intro(doc_texts["README.md"])[1].split("\n")[0]
+        if intro_line:
+            if strip_md_links(intro_line) != intro_line:
+                findings.append(("LETTER", "readme: the intro line carries markdown links - keep it link-free plain text, it doubles as the repo About description (spec/readme-structure.md)"))
+            desc = (live.get("description") or "").strip()
+            want = strip_md_links(intro_line).strip()
+            if desc != want:
+                findings.append(("LETTER", f"description: the About description does not match the README intro line (description '{desc}' vs readme '{want}') - set it from the README, or sharpen the README first if the description carries real detail (AGENTS.md Repository Details)"))
+
     # --- cspell single source of truth ---
     # CODESTYLE.md "Markdown and Spelling": cspell.json is the one word list, and a cSpell words block left in
     # a *.code-workspace duplicates it and silently drifts. Checked only when cspell.json is carried - its
@@ -795,6 +819,13 @@ def _selftest():
         print("  FAIL history: README/HISTORY title+intro mirror detection")
     else:
         print("  ok   history: mirror matches modulo the ToC-omit comment, intro drift and paragraph-boundary drift detected")
+    # Description mirror: links reduce to their text, and a link-free line passes through unchanged.
+    linked = "Utility to clean [media](https://x.example) per the [spec][spec-ref]."
+    if strip_md_links(linked) != "Utility to clean media per the spec." or strip_md_links("Plain intro line.") != "Plain intro line.":
+        ok = False
+        print("  FAIL description: strip_md_links behavior")
+    else:
+        print("  ok   description: markdown links reduce to their text, plain text passes through")
     # cspell duplication: a workspace cSpell word list is detected, and a mere cspell.json mention is not.
     ws_dup = '{ "settings": { "cSpell.words": ["foo"] } }'
     ws_ok = '{ "settings": { "editor.rulers": [100] }, "note": "words live in cspell.json" }'
