@@ -151,18 +151,25 @@ def verbatim_sections(item, sel):
 
 
 def extract_section(text, heading):
-    """Body of the `## <heading>` H2 section (heading line excluded) up to the next H2 or EOF, or None if absent.
+    """The `## <heading>` H2 section including its heading line, up to the next sibling H2 or EOF; None if absent.
 
-    EOL-normalized to `\\n`. A nested `###` heading stays inside the body, and only a sibling `## ` ends it.
+    EOL-normalized to `\\n`. The matched heading line is part of the region, so its exact bytes are hashed (a
+    re-cased or re-spaced heading is drift, not a silent pass), while the match that locates it is case- and
+    surrounding-whitespace-insensitive. A nested `###` stays inside the body. A `## ` line inside a fenced code
+    block (``` or ~~~) is not a boundary, so a code sample cannot truncate the region and hide drift after it.
     """
     target = f"## {heading}".strip().lower()
-    out, capturing = [], False
+    out, capturing, fenced = [], False, False
     for ln in normalize(text).split("\n"):
-        if ln.strip().lower().startswith("## "):
+        stripped = ln.strip()
+        if stripped.startswith("```") or stripped.startswith("~~~"):
+            fenced = not fenced
+        elif not fenced and stripped.lower().startswith("## "):
             if capturing:
-                break
-            if ln.strip().lower() == target:
+                break  # a sibling H2 ends the section
+            if stripped.lower() == target:
                 capturing = True
+                out.append(ln)  # include the heading so its exact bytes are part of the hash
             continue
         if capturing:
             out.append(ln)
@@ -675,17 +682,19 @@ def _selftest():
         print("  FAIL verbatim: forked github-release region should hash differently")
     else:
         print("  ok   verbatim: a forked github-release region hashes differently from the canonical")
-    # Section-region extraction: the `## <heading>` body is cut at the next sibling H2, a nested ### stays in,
-    # an absent heading is None, and a body edit changes the hash - the per-section verbatim check depends on it.
-    md = "# Title\n\n## Alpha\n\nbody a\n\n### nested\nstill alpha\n\n## Beta\n\nbody b\n"
+    # Section-region extraction: the region includes the heading line, keeps a nested ### and a fenced ## inside
+    # the body, ends at the next sibling H2, is None if absent, and rehashes when the heading is re-cased - the
+    # per-section verbatim check depends on every one of these.
+    md = "# Title\n\n## Alpha\n\nbody a\n\n```\n## not a heading\n```\n\n### nested\nstill alpha\n\n## Beta\n\nbody b\n"
     a, b, gone = extract_section(md, "Alpha"), extract_section(md, "Beta"), extract_section(md, "Gamma")
-    if (a is None or "body a" not in a or "still alpha" not in a or "body b" in a
-            or b is None or "body b" not in b or "body a" in b or gone is not None
-            or content_hash(a) == content_hash(extract_section(md.replace("body a", "edited a"), "Alpha"))):
+    if (a is None or not a.startswith("## Alpha") or "body a" not in a or "## not a heading" not in a
+            or "still alpha" not in a or "body b" in a
+            or b is None or not b.startswith("## Beta") or "body b" not in b or "body a" in b or gone is not None
+            or content_hash(a) == content_hash(extract_section(md.replace("## Alpha", "## alpha"), "Alpha"))):
         ok = False
         print("  FAIL section: extract_section region/hash behaviour")
     else:
-        print("  ok   section: extract_section cuts at sibling H2, keeps nested H3, None if absent, edit rehashes")
+        print("  ok   section: heading in region, fenced ## kept, sibling H2 ends, None if absent, re-cased heading rehashes")
 
     print("SELFTEST PASS" if ok else "SELFTEST FAIL")
     return 0 if ok else 1
