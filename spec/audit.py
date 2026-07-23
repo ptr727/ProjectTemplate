@@ -151,12 +151,13 @@ def verbatim_sections(item, sel):
 
 
 def extract_section(text, heading):
-    """The `## <heading>` H2 section including its heading line, up to the next sibling H2 or EOF; None if absent.
+    """The `## <heading>` H2 section including its heading line, up to the next sibling H2 or EOF, or None if absent.
 
     EOL-normalized to `\\n`. The match that locates the heading is by its parsed text (the text after the `## `
-    marker, case- and whitespace-folded), so a re-cased or re-spaced heading is still found rather than read as
-    a missing section. The heading line's exact bytes are then part of the hashed region, so that re-casing or
-    re-spacing surfaces as drift. A nested `###` stays inside the body. A `## ` line inside a fenced code block
+    marker, case-folded and stripped of surrounding whitespace), so a re-cased heading or one with extra
+    marker-gap whitespace is still found rather than read as a missing section - internal heading-text
+    whitespace must match exactly. The heading line's exact bytes are then part of the hashed region, so that
+    re-casing or re-spacing surfaces as drift. A nested `###` stays inside the body. A `## ` line inside a fenced code block
     (``` or ~~~) is not a boundary, so a code sample cannot truncate the region and hide drift after it.
     """
     want = heading.strip().lower()
@@ -809,8 +810,8 @@ def main():
             findings, audited_sha = [("ERROR", str(e))], ""
         title, body = render_issue(entry, findings, entry.get("groundTruthBranch", "main"),
                                    audited_sha, run_utc, hub_sha)
-        print(f"TITLE: {title}")
-        print(body, end="")  # body begins on the next line - title first line, body from the second
+        print(title)
+        print(body, end="")  # line 1 is the bare title, the body starts on line 2 - head -1 / tail -n +2 friendly
         return 0
 
     print(f"audit run {run_utc} | hub {hub_sha}")

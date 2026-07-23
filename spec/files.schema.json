@@ -26,7 +26,7 @@
                                     "required": ["name"],
                                     "additionalProperties": false,
                                     "properties": {
-                                        "name": { "type": "string" },
+                                        "name": { "type": "string", "minLength": 1 },
                                         "appliesTo": { "type": ["string", "array"], "items": { "type": "string" }, "minItems": 1 },
                                         "fidelity": { "enum": ["intent", "verbatim"] }
                                     }
