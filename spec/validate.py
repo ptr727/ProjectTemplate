@@ -288,7 +288,7 @@ def main():
                 check_selector(f"{path} section '{elt.get('name', '?')}'", elt.get("appliesTo", "*"))
                 # A section may carry its own fidelity (intent default, or verbatim for a universal rule block
                 # checked byte-for-byte). verbatim is meaningful only on a markdown file, where the heading
-                # delimits the region; the hub's own file is the canonical, so no reference is needed.
+                # delimits the region. The hub's own file is the canonical, so no reference is needed.
                 sfid = elt.get("fidelity", "intent")
                 if sfid not in ("intent", "verbatim"):
                     errors.append(f"files.json: {path} section '{elt.get('name', '?')}' fidelity '{sfid}' invalid (expected intent or verbatim)")

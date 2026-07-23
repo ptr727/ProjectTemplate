@@ -153,7 +153,7 @@ def verbatim_sections(item, sel):
 def extract_section(text, heading):
     """Body of the `## <heading>` H2 section (heading line excluded) up to the next H2 or EOF, or None if absent.
 
-    EOL-normalized to `\\n`. A nested `###` heading stays inside the body; only a sibling `## ` ends the section.
+    EOL-normalized to `\\n`. A nested `###` heading stays inside the body, and only a sibling `## ` ends it.
     """
     target = f"## {heading}".strip().lower()
     out, capturing = [], False
