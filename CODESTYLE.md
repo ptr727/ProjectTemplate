@@ -300,7 +300,7 @@ Follow the scope hierarchy in [Analyzer Diagnostics and Suppressions][analyzer-d
 
 #### Testing Conventions
 
-1. **Framework**: **xUnit v3 or later** (the `xunit.v3` package, never the legacy v2 `xunit` package) with **AwesomeAssertions** for every assertion; native xUnit asserts (`Assert.Equal`, `Assert.True`, ...) are not allowed - use the fluent `.Should()` API. Dynamic test skipping (`Assert.Skip`, `Assert.SkipWhen`) is control flow, not an assertion, and stays native
+1. **Framework**: **xUnit v3 or later** (the `xunit.v3` package, never the legacy v2 `xunit` package) with **AwesomeAssertions** for every assertion. Native xUnit asserts (`Assert.Equal`, `Assert.True`, ...) are not allowed - use the fluent `.Should()` API. Dynamic test skipping (`Assert.Skip`, `Assert.SkipWhen`) is control flow, not an assertion, and stays native.
 
    ```csharp
    [Fact]
