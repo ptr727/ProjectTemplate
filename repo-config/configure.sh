@@ -122,7 +122,7 @@ cmd_apply() {
     done
     echo "Applying configuration to $repo (model: $model)"
     # The writes below silence stdout only (the success-response JSON is noise). They still fail loud -
-    # gh errors go to stderr and `set -Eeuo pipefail` aborts on any non-zero exit. `check` verifies the end state.
+    # gh errors go to stderr and a failed write aborts the script (these writes run unguarded under `set -e`).
     # ----- General repository settings -----
     # has_discussions: enabled on public repos only (fleet policy), never on private.
     private="$(gh api "repos/$repo" --jq '.private')"
