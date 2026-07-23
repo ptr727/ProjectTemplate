@@ -286,6 +286,14 @@ def main():
         for elt in sections:
             if isinstance(elt, dict):
                 check_selector(f"{path} section '{elt.get('name', '?')}'", elt.get("appliesTo", "*"))
+                # A section may carry its own fidelity (intent default, or verbatim for a universal rule block
+                # checked byte-for-byte). verbatim is meaningful only on a markdown file, where the heading
+                # delimits the region; the hub's own file is the canonical, so no reference is needed.
+                sfid = elt.get("fidelity", "intent")
+                if sfid not in ("intent", "verbatim"):
+                    errors.append(f"files.json: {path} section '{elt.get('name', '?')}' fidelity '{sfid}' invalid (expected intent or verbatim)")
+                elif sfid == "verbatim" and not path.endswith(".md"):
+                    errors.append(f"files.json: {path} section '{elt.get('name', '?')}' is verbatim but {path} is not markdown (heading regions apply to .md only)")
             elif not isinstance(elt, str):
                 errors.append(f"files.json: {path} section entry {elt!r} must be a string or object")
 

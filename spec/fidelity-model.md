@@ -12,14 +12,14 @@ Each [`spec/files.json`][files] entry declares one `fidelity`, defaulting to `pr
 
 - **presence** - the unit exists (a file, or a markdown section heading). The audit's baseline check.
 - **intent** - carried faithfully but judged by meaning, not bytes. A downstream copy legitimately differs (a governed divergence or a paraphrase), and equivalence is a human call via `intentRef`. The audit asserts nothing beyond presence.
-- **verbatim** - byte-identical to the hub's canonical after line-ending normalization. The audit content-hashes the downstream copy against canonical. It applies to a whole file or a workflow job region (a job selected by key).
+- **verbatim** - byte-identical to the hub's canonical after line-ending normalization. The audit content-hashes the downstream copy against canonical. It applies to a whole file, a workflow job region (a job selected by key), or a markdown section region (a `## heading` block selected by name). The section granularity lets one file be **intent overall while a few of its sections are verbatim** - a universal rule block stays byte-identical fleet-wide even though the rest of the document is a repo-adapted paraphrase, so a stale section or a missing rule is caught while its heading still passes the presence check.
 - **interface** - an overridable body that must honor a named contract. The audit checks the contract by name and wiring, never the body.
 
 Fidelity is a declared field defaulting to `presence`, never inferred from `whole`/`placeholders`. `.editorconfig` and `.markdownlint-cli2.jsonc` are both whole with no placeholders yet sit at opposite fidelity, because the discriminator is governance, not field shape.
 
 ## Why Each Unit Sits Where It Does
 
-- **verbatim** - `.markdownlint-cli2.jsonc` (fleet-generic, no governed divergence), and the `github-release` job region of the release task (the canonical orchestration a repo must not fork).
+- **verbatim** - `.markdownlint-cli2.jsonc` (fleet-generic, no governed divergence), the `github-release` job region of the release task (the canonical orchestration a repo must not fork), and the universal rule sections of `AGENTS.md` (`Repository Boundaries and Write Safety`, `Git and Commit Rules`, `Verification Discipline`) - fleet-law with no repo-specific content (no SHAs, no `ptr727/<repo>` references), where a paraphrase or a missing rule is a defect, not an adaptation. The rest of `AGENTS.md` stays intent because it carries repo-specific content (the `Branching Model` cites this repo's own historical SHAs, others carry project-type examples).
 - **interface** - the release and PR workflows. Their fixed contract is the job and check names plus the artifact handoff, while the leaf build jobs are owned. See the override seam in [`AGENTS.md`][agents].
 - **intent** - `.editorconfig` and `.gitattributes` (the `[*] end_of_line` default and path pins vary by platform), `cspell.json` (the words list and file scope vary), `CODESTYLE.md` / `WORKFLOW.md` / `AUDIT.md` / `.github/copilot-instructions.md` (carried docs judged by meaning), and the ruleset payloads (whose live state is diffed separately).
 - **presence** - `README.md`, `HISTORY.md`, `.gitignore`, and the per-repo config that only needs to exist.
