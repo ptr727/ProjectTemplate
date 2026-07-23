@@ -66,7 +66,7 @@ main_ruleset="$script_dir/main.json"
 settings_file="$script_dir/settings.json"
 
 # ----- Ruleset id lookup (shared by apply and check) -----
-ruleset_id() { # ruleset-name -> id of the first match (empty if none); warns on duplicates; aborts on API error
+ruleset_id() { # ruleset-name -> id of the first match (empty if none). Warns on duplicates. Aborts on an API error or at the per_page cap (the single-fetch lookup would be unreliable).
     local out ids count
     # per_page=100 returns every ruleset in one array (a repo has only a handful), so the response is a single
     # JSON document - a paginated fetch would concatenate multiple arrays and break the single-array jq below.
@@ -74,6 +74,13 @@ ruleset_id() { # ruleset-name -> id of the first match (empty if none); warns on
     # than treat an API failure as "not found".
     if ! out="$(gh api "repos/$repo/rulesets?per_page=100")"; then
         echo "Failed to list rulesets for $repo (check auth and repo access)." >&2
+        return 1
+    fi
+    # Fail loud rather than silently narrow: a full page means the single-fetch assumption no longer holds, and
+    # a missed lookup would make apply create a duplicate ruleset by name. Abort so the caller stops (it treats a
+    # non-zero return as "stop", never as "not found").
+    if [ "$(jq 'length' <<<"$out")" -eq 100 ]; then
+        echo "Failed for $repo: 100 rulesets returned (the per_page cap), so the single-fetch lookup is unreliable. Reduce rulesets or add pagination before applying." >&2
         return 1
     fi
     # shellcheck disable=SC2016  # $n is a jq --arg variable, not a shell expansion
@@ -121,8 +128,8 @@ cmd_apply() {
         fi
     done
     echo "Applying configuration to $repo (model: $model)"
-    # The writes below silence stdout only (success-response JSON). Errors reach stderr untouched, set
-    # -Eeuo pipefail aborts on any failure, and `configure.sh check` verifies the applied end state.
+    # The writes below silence stdout only (the success-response JSON is noise). They still fail loud -
+    # gh errors go to stderr and a failed write aborts the script (these writes run unguarded under `set -e`).
     # ----- General repository settings -----
     # has_discussions: enabled on public repos only (fleet policy), never on private.
     private="$(gh api "repos/$repo" --jq '.private')"
@@ -170,9 +177,9 @@ check_ruleset() { # payload-file - the live ruleset must match the committed pol
     local file="$1" rname id live t want got wantc gotc want_enf
     rname="$(jq -r '.name // empty' "$file")"
     if [ -z "$rname" ]; then fail "ruleset payload $file has no name"; return; fi
-    id="$(ruleset_id "$rname")"
+    if ! id="$(ruleset_id "$rname")"; then fail "ruleset '$rname' - could not resolve id"; return; fi
     if [ -z "$id" ]; then fail "ruleset '$rname' missing"; return; fi
-    live="$(gh api "repos/$repo/rulesets/$id")"
+    if ! live="$(gh api "repos/$repo/rulesets/$id")"; then fail "ruleset '$rname' - could not read live state"; return; fi
     want_enf="$(jq -r '.enforcement' "$file")"
     assert "ruleset '$rname' enforcement = $want_enf" test "$(jq -r '.enforcement' <<<"$live")" = "$want_enf"
     # Every rule type the committed payload declares must be present live (payload-driven, so repo-agnostic).
@@ -197,7 +204,7 @@ check_ruleset() { # payload-file - the live ruleset must match the committed pol
 check_settings() {
     local live key want got private wantdisc
     if [ ! -e "$settings_file" ]; then fail "settings payload $settings_file missing"; return; fi
-    live="$(gh api "repos/$repo")"
+    if ! live="$(gh api "repos/$repo")"; then fail "could not read repository settings"; return; fi
     # Static settings, driven from settings.json so the check never drifts from the file - add a key there and
     # it is audited here automatically.
     while IFS=$'\t' read -r key want; do
