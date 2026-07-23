@@ -89,7 +89,6 @@ end_of_line = lf
 # [SuppressMessage] attribute or the owning project's .editorconfig; relax a rule
 # repo-wide here only when it applies to every project (never a brownfield batch).
 dotnet_diagnostic.IDE0055.severity = none
-dotnet_analyzer_diagnostic.severity = suggestion
 csharp_indent_block_contents = true
 csharp_indent_braces = false
 csharp_indent_case_contents = true
