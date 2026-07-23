@@ -340,10 +340,11 @@ def check_interface(path, contract, text):
     return findings
 
 
-# A `uses: <action>@<40-hex sha>` pin plus its trailing ` # vN` comment. Dependabot bumps both per repo, so
-# that drift is governed (like EOL), not a fidelity deviation. Anchored to `uses:`; a 64-hex docker digest and
-# a tag/branch ref (`@v4`) do not match, so only a real action pin is neutralized.
-_ACTION_PIN = re.compile(r"(\buses:[ \t]*[^\s@]+)@[0-9a-f]{40}(?:[ \t]+#[^\n]*)?")
+# A `uses: <action>@<40-hex sha>` pin, plus only a trailing Dependabot version comment (` # v1.2.3` - the
+# leading `v`-or-digit is required). Dependabot bumps both per repo, so that drift is governed (like EOL), not a
+# fidelity deviation. Anchored to `uses:`, so a 64-hex docker digest and a tag/branch ref (`@v4`) do not match.
+# Hex is case-insensitive, and a hand-written note on a pin is not version-shaped, so it survives to be compared.
+_ACTION_PIN = re.compile(r"(\buses:[ \t]*[^\s@]+)@[0-9a-fA-F]{40}(?:[ \t]+#[ \t]*v?[0-9][\w.\-]*)?")
 
 
 def normalize(text):
@@ -787,16 +788,21 @@ def _selftest():
     # must not count as verbatim drift, but a changed action name must. This is what lets a verbatim workflow
     # region survive routine action bumps while still catching a real fork.
     pin_a = "      - uses: actions/checkout@" + "a" * 40 + " # v7.0.0\n"
-    pin_b = "      - uses: actions/checkout@" + "b" * 40 + " # v7.0.1\n"
+    pin_b = "      - uses: actions/checkout@" + "B" * 40 + " # v7.0.1\n"  # uppercase hex + version bump
     pin_struct = "      - uses: actions/setup-node@" + "a" * 40 + " # v7.0.0\n"
+    note_x = "      - uses: actions/checkout@" + "a" * 40 + " # kept for the audited build\n"
+    note_y = "      - uses: actions/checkout@" + "a" * 40 + " # kept for a different reason\n"
     if content_hash(pin_a) != content_hash(pin_b):
         ok = False
-        print("  FAIL action-pin: a uses:@<sha> bump (sha + # vN) should normalize equal")
+        print("  FAIL action-pin: a uses:@<sha> bump (sha + # vN, uppercase hex) should normalize equal")
     elif content_hash(pin_a) == content_hash(pin_struct):
         ok = False
         print("  FAIL action-pin: a changed action name must still hash differently")
+    elif content_hash(note_x) == content_hash(note_y):
+        ok = False
+        print("  FAIL action-pin: a hand-written (non-version) pin comment must survive to be compared")
     else:
-        print("  ok   action-pin: uses:@<sha> bump normalizes equal, a changed action still differs")
+        print("  ok   action-pin: version bump normalizes equal, changed action differs, hand-written note survives")
 
     # Region extraction and hashing: a forked github-release block must hash differently from the canonical.
     region = split_jobs(rel_ok).get("github-release")
