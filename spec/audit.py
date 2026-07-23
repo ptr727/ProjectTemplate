@@ -193,7 +193,7 @@ def title_and_intro(text):
     same title and intro, and the README's ToC-omit comment must not read as a difference.
     """
     norm = _HTML_COMMENT.sub("", normalize(text))
-    title, intro, seen_h1 = None, [], False
+    title, region, seen_h1 = None, [], False
     for ln in norm.split("\n"):
         s = ln.strip()
         if not seen_h1:
@@ -203,9 +203,14 @@ def title_and_intro(text):
             continue
         if s.startswith("## "):
             break
-        if s:
-            intro.append(s)
-    return title, "\n".join(intro)
+        region.append(ln.rstrip())
+    # Trim the blank lines surrounding the region but keep the interior ones, so a paragraph-boundary
+    # difference is a real difference - the spec says the intro is copied verbatim.
+    while region and not region[0]:
+        region.pop(0)
+    while region and not region[-1]:
+        region.pop()
+    return title, "\n".join(region)
 
 
 def workspace_cspell_words(text):
@@ -782,11 +787,14 @@ def _selftest():
     r_md = "# Widget <!-- omit from toc -->\n\nDoes widget things.\n\n## Build\n"
     h_md = "# Widget\n\nDoes widget things.\n\n## Release History\n"
     h_bad = "# Widget\n\nDoes other things.\n\n## Release History\n"
-    if title_and_intro(r_md) != title_and_intro(h_md) or title_and_intro(r_md) == title_and_intro(h_bad):
+    r_two = "# W\n\nLine one.\n\nLine two.\n\n## Build\n"
+    h_joined = "# W\n\nLine one.\nLine two.\n\n## Release History\n"
+    if (title_and_intro(r_md) != title_and_intro(h_md) or title_and_intro(r_md) == title_and_intro(h_bad)
+            or title_and_intro(r_two) == title_and_intro(h_joined)):
         ok = False
         print("  FAIL history: README/HISTORY title+intro mirror detection")
     else:
-        print("  ok   history: title+intro mirror matches modulo the ToC-omit comment, intro drift detected")
+        print("  ok   history: mirror matches modulo the ToC-omit comment, intro drift and paragraph-boundary drift detected")
     # cspell duplication: a workspace cSpell word list is detected, and a mere cspell.json mention is not.
     ws_dup = '{ "settings": { "cSpell.words": ["foo"] } }'
     ws_ok = '{ "settings": { "editor.rulers": [100] }, "note": "words live in cspell.json" }'
