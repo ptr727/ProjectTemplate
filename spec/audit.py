@@ -810,8 +810,7 @@ def main():
         title, body = render_issue(entry, findings, entry.get("groundTruthBranch", "main"),
                                    audited_sha, run_utc, hub_sha)
         print(f"TITLE: {title}")
-        print()
-        print(body, end="")
+        print(body, end="")  # body begins on the next line - title first line, body from the second
         return 0
 
     print(f"audit run {run_utc} | hub {hub_sha}")
