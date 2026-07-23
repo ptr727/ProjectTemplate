@@ -56,7 +56,8 @@ def check_units(spec):
             if isinstance(elt, dict) and elt.get("fidelity") == "verbatim":
                 name = elt["name"]
                 yield (f"{e['path']}{SECTION_SEP}{name}", "verbatim", e.get("appliesTo", "*"),
-                       elt.get("appliesTo", "*"), e["path"], e["path"], (lambda t, n=name: audit.extract_section(t, n)))
+                       elt.get("appliesTo", "*"), e["path"], e.get("reference") or e["path"],
+                       (lambda t, n=name: audit.extract_section(t, n)))
 
 
 def fidelity_pass(spec):

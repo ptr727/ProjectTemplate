@@ -308,9 +308,9 @@ def main():
         # SECTION_SEP), so a section-scoped divergence can carry its own disposition. Only well-formed section
         # entries produce a label - a malformed one is already reported by the files.json checks above.
         for i in baseline:
-            if not isinstance(i, dict) or not isinstance(i.get("path"), str):
+            if not isinstance(i, dict) or not isinstance(i.get("path"), str) or not isinstance(i.get("sections"), list):
                 continue
-            for elt in i.get("sections", []):
+            for elt in i["sections"]:
                 if isinstance(elt, dict) and elt.get("fidelity") == "verbatim" and isinstance(elt.get("name"), str):
                     manifest_paths.add(f"{i['path']} > {elt['name']}")
         # Guard the root type: a non-object root (a list from a bad edit) would crash the .get() calls below.
