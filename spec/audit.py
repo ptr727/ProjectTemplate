@@ -682,7 +682,8 @@ def audit_repo(entry, spec):
             if not ws_name.endswith(".code-workspace"):
                 continue
             ws = gh(f"repos/{slug}/contents/{ws_name}?ref={ground}", ok404=True)
-            ws_text = base64.b64decode(ws["content"]).decode("utf-8", "replace") if ws and ws.get("encoding") == "base64" else None
+            # isinstance guard: the contents API returns a list for a directory, and .get would raise on it.
+            ws_text = base64.b64decode(ws["content"]).decode("utf-8", "replace") if isinstance(ws, dict) and ws.get("encoding") == "base64" else None
             if ws_text is None:
                 findings.append(("DRIFT", f"cspell: could not read {ws_name} on {ground} to check for a duplicated word list; verify by hand"))
             elif workspace_cspell_words(ws_text):
