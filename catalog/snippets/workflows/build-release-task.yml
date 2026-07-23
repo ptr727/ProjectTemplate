@@ -142,10 +142,14 @@ jobs:
       branch: ${{ inputs.branch }}
       smoke: ${{ inputs.smoke }}
 
+  # Docker is the terminal registry push, so it needs every other build: the image is pushed only when all
+  # enabled builds passed, never on a partial run where another target failed. A skipped (disabled) build does
+  # not block, a failed one does - github-release gates the same way, so a build failure blocks every publish
+  # target. (A repo that also pushes a package alongside docker would need a build/publish split, not this gate.)
   build-docker:
     name: Build Docker job
     if: ${{ inputs.enable_docker }}
-    needs: [get-version, validate-release]
+    needs: [get-version, validate-release, build-nugetlibrary, build-pypilibrary, build-executable]
     uses: ./.github/workflows/build-docker-task.yml
     secrets: inherit
     with:
