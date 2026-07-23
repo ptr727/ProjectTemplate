@@ -76,6 +76,10 @@ ruleset_id() { # ruleset-name -> id of the first match (empty if none); warns on
         echo "Failed to list rulesets for $repo (check auth and repo access)." >&2
         return 1
     fi
+    # Fail loud rather than silently narrow: a full page means the single-fetch assumption no longer holds.
+    if [ "$(jq 'length' <<<"$out")" -eq 100 ]; then
+        echo "Warning: $repo returned 100 rulesets (the per_page cap). The list may be truncated and '$1' could be missed." >&2
+    fi
     # shellcheck disable=SC2016  # $n is a jq --arg variable, not a shell expansion
     ids="$(jq -r --arg n "$1" '.[] | select(.name==$n) | .id' <<<"$out")"
     if [ -z "$ids" ]; then return 0; fi
@@ -172,7 +176,7 @@ check_ruleset() { # payload-file - the live ruleset must match the committed pol
     if [ -z "$rname" ]; then fail "ruleset payload $file has no name"; return; fi
     id="$(ruleset_id "$rname")"
     if [ -z "$id" ]; then fail "ruleset '$rname' missing"; return; fi
-    live="$(gh api "repos/$repo/rulesets/$id")"
+    if ! live="$(gh api "repos/$repo/rulesets/$id")"; then fail "ruleset '$rname' - could not read live state"; return; fi
     want_enf="$(jq -r '.enforcement' "$file")"
     assert "ruleset '$rname' enforcement = $want_enf" test "$(jq -r '.enforcement' <<<"$live")" = "$want_enf"
     # Every rule type the committed payload declares must be present live (payload-driven, so repo-agnostic).
@@ -197,7 +201,7 @@ check_ruleset() { # payload-file - the live ruleset must match the committed pol
 check_settings() {
     local live key want got private wantdisc
     if [ ! -e "$settings_file" ]; then fail "settings payload $settings_file missing"; return; fi
-    live="$(gh api "repos/$repo")"
+    if ! live="$(gh api "repos/$repo")"; then fail "could not read repository settings"; return; fi
     # Static settings, driven from settings.json so the check never drifts from the file - add a key there and
     # it is audited here automatically.
     while IFS=$'\t' read -r key want; do
