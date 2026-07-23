@@ -121,6 +121,11 @@ cmd_apply() {
         fi
     done
     echo "Applying configuration to $repo (model: $model)"
+    # Write calls below suppress stdout only - the success-response JSON is noise. Failures still fail
+    # loud: gh prints errors to stderr (never suppressed here) and set -Eeuo pipefail aborts on any non-zero
+    # exit, and `configure.sh check` verifies the applied end state independently. The AGENTS.md
+    # never-suppress-write-output rule governs ad-hoc agent commands, whose only verification is reading the
+    # response - not this fail-loud script with its own verify mode.
     # ----- General repository settings -----
     # has_discussions: enabled on public repos only (fleet policy), never on private.
     private="$(gh api "repos/$repo" --jq '.private')"
