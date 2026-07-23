@@ -66,7 +66,7 @@ main_ruleset="$script_dir/main.json"
 settings_file="$script_dir/settings.json"
 
 # ----- Ruleset id lookup (shared by apply and check) -----
-ruleset_id() { # ruleset-name -> id of the first match (empty if none); warns on duplicates; aborts on API error
+ruleset_id() { # ruleset-name -> id of the first match (empty if none). Warns on duplicates. Aborts on an API error or at the per_page cap (the single-fetch lookup would be unreliable).
     local out ids count
     # per_page=100 returns every ruleset in one array (a repo has only a handful), so the response is a single
     # JSON document - a paginated fetch would concatenate multiple arrays and break the single-array jq below.
@@ -177,7 +177,7 @@ check_ruleset() { # payload-file - the live ruleset must match the committed pol
     local file="$1" rname id live t want got wantc gotc want_enf
     rname="$(jq -r '.name // empty' "$file")"
     if [ -z "$rname" ]; then fail "ruleset payload $file has no name"; return; fi
-    id="$(ruleset_id "$rname")"
+    if ! id="$(ruleset_id "$rname")"; then fail "ruleset '$rname' - could not resolve id"; return; fi
     if [ -z "$id" ]; then fail "ruleset '$rname' missing"; return; fi
     if ! live="$(gh api "repos/$repo/rulesets/$id")"; then fail "ruleset '$rname' - could not read live state"; return; fi
     want_enf="$(jq -r '.enforcement' "$file")"
