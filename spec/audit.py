@@ -663,7 +663,9 @@ def audit_repo(entry, spec):
     # that line link-free, so it carries to the unrendered description without formatting loss.
     if "README.md" in doc_texts:
         intro_line = title_and_intro(doc_texts["README.md"])[1].split("\n")[0]
-        if intro_line:
+        if not intro_line:
+            findings.append(("LETTER", "readme: no intro line after the H1 - the README opens with the title then a one-line description, which doubles as the About description (spec/readme-structure.md)"))
+        else:
             if strip_md_links(intro_line) != intro_line:
                 findings.append(("LETTER", "readme: the intro line carries markdown links - keep it link-free plain text, it doubles as the repo About description (spec/readme-structure.md)"))
             desc = (live.get("description") or "").strip()
