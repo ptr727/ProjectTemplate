@@ -246,11 +246,11 @@
             "status": "cataloged",
             "types": ["csharp", "console", "docker"],
             "hasDevelop": true,
-            "publish": [],
-            "requiredSecrets": ["CODECOV_TOKEN"],
+            "publish": [{ "target": "docker", "mechanism": "static-secret" }, { "target": "github-release", "mechanism": "none" }],
+            "requiredSecrets": ["DOCKER_HUB_USERNAME", "DOCKER_HUB_ACCESS_TOKEN", "CODECOV_TOKEN"],
             "consumerModel": "pull",
-            "releaseTrigger": "none",
-            "driftNotes": ["Partially onboarded: the PR gate and linters are live (test-pull-request.yml + validate-task.yml with the canonical aggregator name), but rulesets, repo-config/, version.json, WORKFLOW.md, AUDIT.md, spec/secrets.json, dependabot.yml, and the release pipeline are still missing (reports/photocleaner/audit.md).", "Dockerfile present but no docker build/push workflow, so no publish wired."]
+            "releaseTrigger": "two-phase",
+            "driftNotes": ["Mirrors PlexCleaner's publish shape minus the python subtree: multi-arch Docker (linux/amd64,linux/arm64 on main) pushed to Docker Hub via the static DOCKER_HUB_USERNAME/DOCKER_HUB_ACCESS_TOKEN secret, plus a github-release attaching the multi-arch executables as a 7z. Release is two-phase (workflow_dispatch + weekly Mon 02:00 schedule).", "Fully onboarded 2026-07 (rulesets, repo-config/, version.json, WORKFLOW.md, AUDIT.md, dependabot.yml, and the release pipeline all live); the reports/photocleaner/audit.md snapshot predates the docker/release wiring."]
         },
         {
             "name": "MediaTools",
