@@ -734,10 +734,10 @@ def render_issue(entry, findings, ground, audited_sha, run_utc, hub_sha):
     out = []
     w = out.append
     # No H1 - GitHub renders the issue title as the heading, so an H1 here would duplicate it.
-    w(f"Generated from the hub audit of `{name}` ({types}) at `{stamp}`, hub `{hub_sha}`, {run_utc}. "
-      f"Regenerate with `spec/audit.py --issue {name}`. Findings are a point-in-time snapshot - re-run the "
-      f"audit before acting (AUDIT.md section 8). This lists what the audit mechanically detects. The full "
-      f"letter and intent verdict lives in AUDIT.md.")
+    w(f"Generated from the hub audit of `{name}` ({types}). Run stamp `audit run {run_utc} | hub {hub_sha}`, "
+      f"read `@ {stamp}` (the format AUDIT.md section 8 says a derived artifact quotes). Regenerate with "
+      f"`spec/audit.py --issue {name}`. Findings are a point-in-time snapshot - re-run the audit before acting. "
+      f"This lists what the audit mechanically detects. The full letter and intent verdict lives in AUDIT.md.")
     w("")
     if not findings:
         w("The deterministic checks are clean - nothing to converge.")
@@ -797,9 +797,7 @@ def main():
     hub = subprocess.run(["git", "rev-parse", "--short", "HEAD"], capture_output=True, text=True, cwd=ROOT)
     hub_sha = hub.stdout.strip() if hub.returncode == 0 else "unknown"
 
-    # --issue <repo>: emit a ready-to-file convergence issue for one repo (title on the first line, then the
-    # body) - stdout carries only the issue so it can be captured and filed. The body is generated from the
-    # audit, so it never drifts from reality.
+    # --issue <repo>: emit only the convergence issue on stdout (title first line, then body) so it captures cleanly.
     if issue_mode:
         if len(repos) != 1:
             print("--issue takes exactly one cataloged repo", file=sys.stderr)
