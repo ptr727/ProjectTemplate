@@ -136,6 +136,7 @@ Running backlog (kept here, in a committed file, so the guidance survives across
 - Canonicalize Python linter-config placement on `pyproject.toml` (one cataloged repo uses standalone `.ruff.toml` + `pyrightconfig.json`); track as a drift finding, fix downstream.
 - Consider renaming this repo to reflect the audit-catalog identity (updates badge and link URLs across the fleet).
 - Adopt the OCI annotation keys (`org.opencontainers.image.*`) for Docker image metadata across the Docker repos, replacing the ad-hoc and `org.label-schema.*` labels (from #363).
+- Sweep `ManagePackageVersionsCentrally` placement to `Directory.Packages.props` fleet-wide (PlexCleaner sets it in `Directory.Build.props`, off the CODESTYLE canonical).
 - Finish onboarding hardening (from #310): make the `AUDIT.md` audit a required onboarding step and run the per-type cold-start self-tests tracked in `reports/conformance-matrix.md` (`STANDUP.md` is already in place).
 
 ## License
