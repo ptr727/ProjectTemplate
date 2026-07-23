@@ -304,14 +304,15 @@ def main():
         div = load("spec/divergences.json")
         repo_names = {r.get("name") for r in repos["repos"] if isinstance(r, dict)}
         manifest_paths = {i.get("path") for i in baseline if isinstance(i, dict)}
-        # A verbatim section is an addressable unit too, labelled "path § section" (matches fidelity_honesty),
-        # so a section-scoped divergence can carry its own disposition.
+        # A verbatim section is an addressable unit too, labelled "path > section" (matches fidelity_honesty's
+        # SECTION_SEP), so a section-scoped divergence can carry its own disposition. Only well-formed section
+        # entries produce a label - a malformed one is already reported by the files.json checks above.
         for i in baseline:
-            if not isinstance(i, dict):
+            if not isinstance(i, dict) or not isinstance(i.get("path"), str):
                 continue
             for elt in i.get("sections", []):
-                if isinstance(elt, dict) and elt.get("fidelity") == "verbatim":
-                    manifest_paths.add(f"{i.get('path')} § {elt.get('name')}")
+                if isinstance(elt, dict) and elt.get("fidelity") == "verbatim" and isinstance(elt.get("name"), str):
+                    manifest_paths.add(f"{i['path']} > {elt['name']}")
         # Guard the root type: a non-object root (a list from a bad edit) would crash the .get() calls below.
         if not isinstance(div, dict):
             errors.append("divergences.json: root must be an object")
