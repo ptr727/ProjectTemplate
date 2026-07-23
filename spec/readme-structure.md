@@ -34,6 +34,10 @@ Shields are not a top-level section - they live under **Build and Distribution**
 - A project README describes only that project - no cross-repo references and no template or inheritance framing.
 - Reference-style links only: every URI is a reference link defined at the bottom of the file, grouped by type under an HTML-comment header (`<!-- Shields -->`, `<!-- Workflow -->`, `<!-- Repo -->`, `<!-- External -->`) and alphabetized within each group. The auto-generated Table of Contents is the one exception, keeping inline anchor links.
 
+## HISTORY.md
+
+`HISTORY.md` is the maintainer-curated changelog and opens as the README's twin: the same `# <Title>` (without the README's ToC-omit comment) and the same intro paragraph, copied verbatim, then a `## Release History` section. The mirrored opening keeps the project identity consistent for a reader who lands on the changelog directly, and the audit checks that the title and intro match the README (HTML comments stripped).
+
 ## Docker Hub README
 
 A repo that publishes a Docker image keeps a **separate** `Docker/README.md` for the Docker Hub repository overview: Docker Hub's description has a much smaller size limit than a project README, so it carries a trimmed overview, not the full README. It is published by the docker-readme workflow task, not copied from the root README.

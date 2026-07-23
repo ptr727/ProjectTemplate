@@ -183,6 +183,40 @@ def heading_texts(markdown):
     return {m.group(1).strip().lower() for line in markdown.splitlines() for m in (_HEADING.match(line),) if m}
 
 
+_HTML_COMMENT = re.compile(r"<!--.*?-->", re.S)
+
+
+def title_and_intro(text):
+    """The H1 title text and the intro region before the first H2, HTML comments stripped.
+
+    Drives the README/HISTORY mirror check (spec/readme-structure.md "HISTORY.md"): both files open with the
+    same title and intro, and the README's ToC-omit comment must not read as a difference.
+    """
+    norm = _HTML_COMMENT.sub("", normalize(text))
+    title, intro, seen_h1 = None, [], False
+    for ln in norm.split("\n"):
+        s = ln.strip()
+        if not seen_h1:
+            if s.startswith("# "):
+                title = s[2:].strip()
+                seen_h1 = True
+            continue
+        if s.startswith("## "):
+            break
+        if s:
+            intro.append(s)
+    return title, "\n".join(intro)
+
+
+def workspace_cspell_words(text):
+    """True if workspace/settings JSON carries its own cSpell word list - the block cspell.json canonicalizes.
+
+    Matches the quoted setting keys case-insensitively, so a mere mention of the cspell.json file is not a hit.
+    """
+    low = text.lower()
+    return any(key in low for key in ('"cspell.words"', '"cspell.userwords"', '"cspell.ignorewords"'))
+
+
 _JOB_KEY = re.compile(r"^([A-Za-z0-9_.\-]+):(\s.*)?$")
 
 
@@ -526,6 +560,7 @@ def audit_repo(entry, spec):
     sel = repo_selectors(entry, spec["registry"].get("defaults", {}))
     wanted_sections = {}  # path -> set of required section names, unioned across applicable entries
     verbatim_secs = {}  # path -> set of section names checked byte-for-byte against the hub canonical
+    doc_texts = {}  # README.md / HISTORY.md content, retained for the mirror check
     check_item = {}  # path -> entry, for a fidelity interface/verbatim entry (last applicable wins per path)
     path_order = []
     for item in spec["files"]["baseline"]:
@@ -555,6 +590,8 @@ def audit_repo(entry, spec):
         # Guard on encoding, not truthiness: an empty file returns encoding "base64" with content "" (decode it
         # to ""), whereas a too-large or non-inline payload returns encoding "none" (text stays None -> flagged).
         text = base64.b64decode(content["content"]).decode("utf-8", "replace") if content.get("encoding") == "base64" else None
+        if path in ("README.md", "HISTORY.md") and text is not None:
+            doc_texts[path] = text  # retained for the README/HISTORY mirror check below
         # Interface conformance (name + wiring) plus any verbatim job regions the contract pins.
         if item is not None and fid == "interface":
             if text is None:
@@ -593,6 +630,34 @@ def audit_repo(entry, spec):
                 for name in sorted(verbatim_needed):
                     findings.extend(check_verbatim(f"{path} section '{name}'", text, path,
                                                    extract=lambda t, n=name: extract_section(t, n)))
+
+    # --- HISTORY.md mirrors the README opening ---
+    # spec/readme-structure.md "HISTORY.md": the changelog opens as the README's twin - same H1 title and the
+    # same intro paragraph. Checked only when both files were readable (absence is already a file LETTER above).
+    if "README.md" in doc_texts and "HISTORY.md" in doc_texts:
+        r_title, r_intro = title_and_intro(doc_texts["README.md"])
+        h_title, h_intro = title_and_intro(doc_texts["HISTORY.md"])
+        if r_title != h_title:
+            findings.append(("LETTER", f"history: HISTORY.md title '{h_title}' does not match README.md title '{r_title}' - the changelog opens as the README's twin (spec/readme-structure.md)"))
+        elif r_intro != h_intro:
+            findings.append(("LETTER", "history: HISTORY.md intro does not mirror the README intro - copy the README's opening paragraph (spec/readme-structure.md)"))
+
+    # --- cspell single source of truth ---
+    # CODESTYLE.md "Markdown and Spelling": cspell.json is the one word list, and a cSpell words block left in
+    # a *.code-workspace duplicates it and silently drifts. Checked only when cspell.json is carried - its
+    # absence is already a file LETTER above, and a workspace list with no cspell.json is that same finding.
+    if gh(f"repos/{slug}/contents/cspell.json?ref={ground}", ok404=True) is not None:
+        root_entries = gh(f"repos/{slug}/contents/?ref={ground}", ok404=True) or []
+        for it in root_entries:
+            ws_name = it.get("name", "") if isinstance(it, dict) else ""
+            if not ws_name.endswith(".code-workspace"):
+                continue
+            ws = gh(f"repos/{slug}/contents/{ws_name}?ref={ground}", ok404=True)
+            ws_text = base64.b64decode(ws["content"]).decode("utf-8", "replace") if ws and ws.get("encoding") == "base64" else None
+            if ws_text is None:
+                findings.append(("DRIFT", f"cspell: could not read {ws_name} on {ground} to check for a duplicated word list; verify by hand"))
+            elif workspace_cspell_words(ws_text):
+                findings.append(("LETTER", f"cspell: {ws_name} carries a cSpell word list while cspell.json is the single source of truth - delete the workspace copy (CODESTYLE.md Markdown and Spelling)"))
 
     # --- Registry driftNotes freshness ---
     # Gated on everything else passing: a clean repo has no outstanding work for a pending-marker note to
@@ -712,6 +777,24 @@ def _selftest():
         print("  FAIL issue: render_issue grouping/title/empty behavior")
     else:
         print("  ok   issue: render_issue groups must-fix/converge/unverifiable, counts findings, handles the clean case")
+
+    # README/HISTORY mirror: same title+intro matches modulo the ToC-omit comment, and intro drift is caught.
+    r_md = "# Widget <!-- omit from toc -->\n\nDoes widget things.\n\n## Build\n"
+    h_md = "# Widget\n\nDoes widget things.\n\n## Release History\n"
+    h_bad = "# Widget\n\nDoes other things.\n\n## Release History\n"
+    if title_and_intro(r_md) != title_and_intro(h_md) or title_and_intro(r_md) == title_and_intro(h_bad):
+        ok = False
+        print("  FAIL history: README/HISTORY title+intro mirror detection")
+    else:
+        print("  ok   history: title+intro mirror matches modulo the ToC-omit comment, intro drift detected")
+    # cspell duplication: a workspace cSpell word list is detected, and a mere cspell.json mention is not.
+    ws_dup = '{ "settings": { "cSpell.words": ["foo"] } }'
+    ws_ok = '{ "settings": { "editor.rulers": [100] }, "note": "words live in cspell.json" }'
+    if not workspace_cspell_words(ws_dup) or workspace_cspell_words(ws_ok):
+        ok = False
+        print("  FAIL cspell: workspace word-list detection")
+    else:
+        print("  ok   cspell: workspace cSpell word list detected, a plain cspell.json mention is not")
 
     print("SELFTEST PASS" if ok else "SELFTEST FAIL")
     return 0 if ok else 1
