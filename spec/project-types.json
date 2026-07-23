@@ -9,6 +9,7 @@
             "checks": [
                 { "id": "csharp.editorconfig.ruleblock", "verdict": "letter", "assert": ".editorconfig carries the shared [*.cs] plus ReSharper rule block.", "intentRef": "CODESTYLE.md" },
                 { "id": "csharp.analyzers.zerowarnings", "verdict": "intent", "assert": "Analyzer severities are enforced; warnings are not relaxed or suppressed wholesale.", "intentRef": "CODESTYLE.md" },
+                { "id": "csharp.centralconfig.props", "verdict": "letter", "assert": "Shared MSBuild configuration is centralized at the repo root: Directory.Build.props carries the common analyzer and warning properties (the Zero Warnings set), and Directory.Packages.props enables ManagePackageVersionsCentrally with every dependency version declared once - a csproj carries only project-specific properties and versionless PackageReference items.", "intentRef": "CODESTYLE.md" },
                 { "id": "csharp.coverage.codecov", "verdict": "letter", "assert": "The unit-test job collects coverage (dotnet test --collect:\"XPlat Code Coverage\" --results-directory ./coverage) and uploads it to Codecov via codecov/codecov-action, best-effort (fail_ci_if_error: false so a Codecov outage or an absent token never reds the gate); CODECOV_TOKEN is stored in the repo actions secrets and reaches the reusable validator via secrets: inherit. Required for every C# repo with tests.", "intentRef": "WORKFLOW.md" }
             ]
         },

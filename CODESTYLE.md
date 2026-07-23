@@ -61,6 +61,15 @@ This is the style guide for any **.NET projects** in this repo.
    - CI runs the clean-compile checks on every PR as the authoritative backstop
    - Git hooks are optional; a repo may wire a local runner (Husky.Net) for pre-commit enforcement, but CI is the gate that matters
 
+#### Central Build and Package Configuration
+
+Shared MSBuild configuration is centralized at the repository root, never duplicated per project:
+
+- **`Directory.Build.props`** carries the properties every project shares - the analyzer set and `TreatWarningsAsErrors` from the Zero Warnings Policy above, plus `LangVersion`, `TargetFramework` where uniform, and any repo-wide build metadata. A csproj carries only what is genuinely project-specific (`OutputType`, `IsPackable`, project references).
+- **`Directory.Packages.props`** enables central package management (`ManagePackageVersionsCentrally` true): every dependency version is declared once as a `PackageVersion` item, and a csproj's `PackageReference` items are versionless. One file to review on a bump, one Dependabot surface, and no version skew between projects.
+
+A repo whose projects still carry per-project analyzer settings or versioned `PackageReference` items is drifted - move the shared property or version up to the root file rather than editing it in place.
+
 #### Build Tasks
 
 Available VS Code tasks (run them from VS Code's task runner - **Terminal -> Run Task** - or an agent's task-running tool). The three clean-compile tasks below are carried verbatim; a repo adds its own convenience tasks (tool updates, dependency upgrades, benchmarks) on top:
