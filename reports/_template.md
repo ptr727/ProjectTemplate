@@ -7,7 +7,7 @@
 
 ## Develop Drift
 
-`develop` vs `main`: ahead `<n>`, behind `<n>`. `<in sync | stale | diverged - a drift finding if not in sync>`
+`develop` vs `main`: ahead `<n>`, behind `<n>`. Classify by **content**, not commit count: promotion merge commits leave `main` permanently ahead with identical trees (benign, inherent to merge-commit promotions - a cherry-pick would be an empty no-op). A drift finding only when `main` carries content `develop` lacks; the audit's content-based branch check is the authority.
 
 ## Dimensions
 
