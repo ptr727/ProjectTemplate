@@ -737,7 +737,7 @@ def render_issue(entry, findings, ground, audited_sha, run_utc, hub_sha):
     w(f"Generated from the hub audit of `{name}` ({types}) at `{stamp}`, hub `{hub_sha}`, {run_utc}. "
       f"Regenerate with `spec/audit.py --issue {name}`. Findings are a point-in-time snapshot - re-run the "
       f"audit before acting (AUDIT.md section 8). This lists what the audit mechanically detects. The full "
-      f"letter and intent verdict is AUDIT.md's.")
+      f"letter and intent verdict lives in AUDIT.md.")
     w("")
     if not findings:
         w("The deterministic checks are clean - nothing to converge.")
