@@ -56,7 +56,7 @@ def check_units(spec):
         if not isinstance(sections, list):
             continue
         for elt in sections:
-            if isinstance(elt, dict) and elt.get("fidelity") == "verbatim" and isinstance(elt.get("name"), str):
+            if isinstance(elt, dict) and elt.get("fidelity") == "verbatim" and isinstance(elt.get("name"), str) and elt["name"]:
                 name = elt["name"]
                 yield (f"{e['path']}{SECTION_SEP}{name}", "verbatim", e.get("appliesTo", "*"),
                        elt.get("appliesTo", "*"), e["path"], e.get("reference") or e["path"],

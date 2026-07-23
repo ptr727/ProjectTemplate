@@ -313,7 +313,7 @@ def main():
             if not isinstance(i, dict) or not isinstance(i.get("path"), str) or not isinstance(i.get("sections"), list):
                 continue
             for elt in i["sections"]:
-                if isinstance(elt, dict) and elt.get("fidelity") == "verbatim" and isinstance(elt.get("name"), str):
+                if isinstance(elt, dict) and elt.get("fidelity") == "verbatim" and isinstance(elt.get("name"), str) and elt["name"]:
                     manifest_paths.add(f"{i['path']} > {elt['name']}")
         # Guard the root type: a non-object root (a list from a bad edit) would crash the .get() calls below.
         if not isinstance(div, dict):
