@@ -340,11 +340,22 @@ def check_interface(path, contract, text):
     return findings
 
 
+# A `uses: <action>@<40-hex sha>` pin, plus only a trailing Dependabot version comment (` # v1.2.3` - the
+# leading `v`-or-digit is required). Dependabot bumps both per repo, so that drift is governed (like EOL), not a
+# fidelity deviation. Anchored to `uses:`, so a 64-hex docker digest and a tag/branch ref (`@v4`) do not match.
+# Hex is case-insensitive, and a hand-written note on a pin is not version-shaped, so it survives to be compared.
+_ACTION_PIN = re.compile(r"(\buses:[ \t]*[^\s@]+)@[0-9a-fA-F]{40}(?:[ \t]+#[ \t]*v?[0-9][\w.\-]*)?")
+
+
 def normalize(text):
-    """Reduce a carried unit to its comparable form: neutralize line endings, since EOL variance is governed
-    separately, not a fidelity deviation. No placeholder masking - see spec/fidelity-model.md "Normalization".
+    """Reduce a carried unit to its comparable form: neutralize line endings (EOL variance is governed
+    separately, not a fidelity deviation) and neutralize a Dependabot-owned action pin - the 40-hex commit a
+    `uses: <action>@<sha>` line pins, together with its trailing ` # vN` version comment - since Dependabot
+    bumps those per repo and that drift is governed, same category as EOL. This is NOT placeholder masking of
+    declared per-file tokens; see spec/fidelity-model.md "Normalization".
     """
-    return text.replace("\r\n", "\n").replace("\r", "\n")
+    text = text.replace("\r\n", "\n").replace("\r", "\n")
+    return _ACTION_PIN.sub(r"\1@<pin>", text)
 
 
 @functools.lru_cache(maxsize=1024)  # bounded; the keys that recur across repos are the canonical and its history
@@ -773,6 +784,26 @@ def _selftest():
         if got != want:
             ok = False
         print(f"  {'ok  ' if got == want else 'FAIL'} want={str(want):>8} got={str(got):>8}  verbatim: {label}")
+    # Action-pin neutralization: a Dependabot uses:@<sha> bump (both the 40-hex sha and its ` # vN` comment)
+    # must not count as verbatim drift, but a changed action name must. This is what lets a verbatim workflow
+    # region survive routine action bumps while still catching a real fork.
+    pin_a = "      - uses: actions/checkout@" + "a" * 40 + " # v7.0.0\n"
+    pin_b = "      - uses: actions/checkout@" + "B" * 40 + " # v7.0.1\n"  # uppercase hex + version bump
+    pin_struct = "      - uses: actions/setup-node@" + "a" * 40 + " # v7.0.0\n"
+    note_x = "      - uses: actions/checkout@" + "a" * 40 + " # kept for the audited build\n"
+    note_y = "      - uses: actions/checkout@" + "a" * 40 + " # kept for a different reason\n"
+    if content_hash(pin_a) != content_hash(pin_b):
+        ok = False
+        print("  FAIL action-pin: a uses:@<sha> bump (sha + # vN, uppercase hex) should normalize equal")
+    elif content_hash(pin_a) == content_hash(pin_struct):
+        ok = False
+        print("  FAIL action-pin: a changed action name must still hash differently")
+    elif content_hash(note_x) == content_hash(note_y):
+        ok = False
+        print("  FAIL action-pin: a hand-written (non-version) pin comment must survive to be compared")
+    else:
+        print("  ok   action-pin: version bump normalizes equal, changed action differs, hand-written note survives")
+
     # Region extraction and hashing: a forked github-release block must hash differently from the canonical.
     region = split_jobs(rel_ok).get("github-release")
     forked_region = split_jobs(rel_ok.replace("          merge-multiple: true\n", "          artifact-ids: 1\n")).get("github-release")

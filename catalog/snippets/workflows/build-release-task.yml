@@ -142,10 +142,16 @@ jobs:
       branch: ${{ inputs.branch }}
       smoke: ${{ inputs.smoke }}
 
+  # Docker is the terminal registry push, so it must never push on a partial run. It needs every other build and
+  # guards with `!failure() && !cancelled()`: a *failed* build skips docker (no build, no push), while a *skipped*
+  # build - a target disabled on a smoke PR, or one this repo does not vendor - does not, so docker still builds
+  # the changed target on smoke. Plain `needs` cannot express this (a skipped need skips the dependent). The
+  # github-release job reaches the same intent more simply because it only runs on a publish (`!inputs.smoke`),
+  # where nothing is disabled. (A repo pushing a package alongside docker would need a build/publish split.)
   build-docker:
     name: Build Docker job
-    if: ${{ inputs.enable_docker }}
-    needs: [get-version, validate-release]
+    if: ${{ inputs.enable_docker && !failure() && !cancelled() }}
+    needs: [get-version, validate-release, build-nugetlibrary, build-pypilibrary, build-executable]
     uses: ./.github/workflows/build-docker-task.yml
     secrets: inherit
     with:
