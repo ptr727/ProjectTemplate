@@ -285,6 +285,8 @@ def main():
             continue
         for elt in sections:
             if isinstance(elt, dict):
+                if not isinstance(elt.get("name"), str) or not elt.get("name"):
+                    errors.append(f"files.json: {path} section object missing a non-empty string 'name': {elt!r}")
                 check_selector(f"{path} section '{elt.get('name', '?')}'", elt.get("appliesTo", "*"))
                 # A section may carry its own fidelity (intent default, or verbatim for a universal rule block
                 # checked byte-for-byte). verbatim is meaningful only on a markdown file, where the heading
