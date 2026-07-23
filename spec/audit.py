@@ -118,18 +118,64 @@ def applies(applies_to, sel):
 _HEADING = re.compile(r"^#{1,6}\s+(.*?)\s*$")
 
 
-def required_sections(item, sel):
-    """Section names this repo must carry from a baseline entry, filtered by each section's own appliesTo.
+def _section_spec(elt):
+    """Normalize a sections[] entry to (name, appliesTo, fidelity). A bare string is appliesTo `*`, intent."""
+    if isinstance(elt, str):
+        return elt, "*", "intent"
+    return elt.get("name", ""), elt.get("appliesTo", "*"), elt.get("fidelity", "intent")
 
-    A bare-string section is appliesTo `*`; an object section carries its own selector. The entry's own
-    appliesTo is assumed already matched by the caller (the file is carried at all).
+
+def required_sections(item, sel):
+    """Section names to presence-check (heading grep) for this repo - the non-verbatim sections.
+
+    A bare-string section is appliesTo `*`, intent; an object section carries its own selector and fidelity.
+    A verbatim section is checked byte-for-byte instead (verbatim_sections), so it is excluded here to avoid a
+    redundant presence finding. The entry's own appliesTo is assumed already matched by the caller.
     """
     out = []
     for elt in item.get("sections", []):
-        name, sec = (elt, "*") if isinstance(elt, str) else (elt.get("name", ""), elt.get("appliesTo", "*"))
-        if name and applies(sec, sel):
+        name, sec, fid = _section_spec(elt)
+        if name and fid != "verbatim" and applies(sec, sel):
             out.append(name)
     return out
+
+
+def verbatim_sections(item, sel):
+    """Section names marked fidelity verbatim for this repo - checked byte-for-byte against the hub canonical."""
+    out = []
+    for elt in item.get("sections", []):
+        name, sec, fid = _section_spec(elt)
+        if name and fid == "verbatim" and applies(sec, sel):
+            out.append(name)
+    return out
+
+
+def extract_section(text, heading):
+    """The `## <heading>` H2 section including its heading line, up to the next sibling H2 or EOF, or None if absent.
+
+    EOL-normalized to `\\n`. The match that locates the heading is by its parsed text (the text after the `## `
+    marker, case-folded and stripped of surrounding whitespace), so a re-cased heading or one with extra
+    marker-gap whitespace is still found rather than read as a missing section - internal heading-text
+    whitespace must match exactly. The heading line's exact bytes are then part of the hashed region, so that
+    re-casing or re-spacing surfaces as drift. A nested `###` stays inside the body. A `## ` line inside a fenced code block
+    (``` or ~~~) is not a boundary, so a code sample cannot truncate the region and hide drift after it.
+    """
+    want = heading.strip().lower()
+    out, capturing, fenced = [], False, False
+    for ln in normalize(text).split("\n"):
+        stripped = ln.strip()
+        if stripped.startswith("```") or stripped.startswith("~~~"):
+            fenced = not fenced
+        elif not fenced and stripped.startswith("## "):
+            if capturing:
+                break  # a sibling H2 ends the section
+            if stripped[2:].strip().lower() == want:  # parsed heading text after the "## " marker
+                capturing = True
+                out.append(ln)  # include the heading so its exact bytes are part of the hash
+            continue
+        if capturing:
+            out.append(ln)
+    return "\n".join(out) if capturing else None
 
 
 def heading_texts(markdown):
@@ -479,6 +525,7 @@ def audit_repo(entry, spec):
     # is DRIFT (a hint to verify), never a LETTER.
     sel = repo_selectors(entry, spec["registry"].get("defaults", {}))
     wanted_sections = {}  # path -> set of required section names, unioned across applicable entries
+    verbatim_secs = {}  # path -> set of section names checked byte-for-byte against the hub canonical
     check_item = {}  # path -> entry, for a fidelity interface/verbatim entry (last applicable wins per path)
     path_order = []
     for item in spec["files"]["baseline"]:
@@ -487,8 +534,10 @@ def audit_repo(entry, spec):
         path = item["path"]
         if path not in wanted_sections:
             wanted_sections[path] = set()
+            verbatim_secs[path] = set()
             path_order.append(path)
         wanted_sections[path].update(required_sections(item, sel))
+        verbatim_secs[path].update(verbatim_sections(item, sel))
         if item.get("fidelity") in ("interface", "verbatim"):
             check_item[path] = item
     for path in path_order:
@@ -526,7 +575,8 @@ def audit_repo(entry, spec):
         # Heading-based presence is only meaningful for markdown. A "section" named on a non-md file (e.g. a
         # tasks.json task group) is an intent marker judged per AUDIT.md, not a heading grep.
         needed = wanted_sections[path]
-        if needed and path.endswith(".md"):
+        verbatim_needed = verbatim_secs[path]
+        if (needed or verbatim_needed) and path.endswith(".md"):
             if text is None:
                 # Fail loud rather than skip silently: the contents API returned no inline content (an
                 # oversized file, a symlink, a submodule), so the section check could not run - surface that
@@ -537,6 +587,12 @@ def audit_repo(entry, spec):
                 for name in sorted(needed):
                     if name.strip().lower() not in present:
                         findings.append(("DRIFT", f"section: '{name}' not found as a heading in {path} on {ground} (renamed or missing; verify intent per AUDIT.md section 7)"))
+                # A verbatim section must match the hub's canonical byte-for-byte (EOL-normalized), like a
+                # verbatim file but scoped to the one `## <heading>` region - so a universal rule block cannot
+                # drift or fall behind a newly added rule while its heading still passes the presence check.
+                for name in sorted(verbatim_needed):
+                    findings.extend(check_verbatim(f"{path} section '{name}'", text, path,
+                                                   extract=lambda t, n=name: extract_section(t, n)))
 
     # --- Registry driftNotes freshness ---
     # Gated on everything else passing: a clean repo has no outstanding work for a pending-marker note to
@@ -628,9 +684,93 @@ def _selftest():
         print("  FAIL verbatim: forked github-release region should hash differently")
     else:
         print("  ok   verbatim: a forked github-release region hashes differently from the canonical")
+    # Section-region extraction: the region includes the heading line, keeps a nested ### and a fenced ## inside
+    # the body, ends at the next sibling H2, is None if absent, and rehashes when the heading is re-cased - the
+    # per-section verbatim check depends on every one of these.
+    md = "# Title\n\n## Alpha\n\nbody a\n\n```\n## not a heading\n```\n\n### nested\nstill alpha\n\n## Beta\n\nbody b\n"
+    a, b, gone = extract_section(md, "Alpha"), extract_section(md, "Beta"), extract_section(md, "Gamma")
+    spaced = extract_section("##   Alpha\n\nbody a\n", "Alpha")  # extra marker-gap whitespace still locates
+    if (a is None or not a.startswith("## Alpha") or "body a" not in a or "## not a heading" not in a
+            or "still alpha" not in a or "body b" in a
+            or b is None or not b.startswith("## Beta") or "body b" not in b or "body a" in b or gone is not None
+            or spaced is None or not spaced.startswith("##   Alpha")
+            or content_hash(a) == content_hash(extract_section(md.replace("## Alpha", "## alpha"), "Alpha"))):
+        ok = False
+        print("  FAIL section: extract_section region/hash behavior")
+    else:
+        print("  ok   section: heading in region, fenced ## kept, sibling H2 ends, None if absent, whitespace-tolerant locate, re-cased heading rehashes")
+
+    # Issue generator: findings land in the right buckets and the title carries the count.
+    fe = {"name": "Widget", "types": ["python"]}
+    it, ib = render_issue(fe, [("LETTER", "file: X absent"), ("DRIFT", "verbatim: Y differs"), ("ERROR", "gh failed")],
+                          "main", "abc1234", "2026-01-01T00:00:00Z", "hub123")
+    et, eb = render_issue(fe, [], "main", "abc1234", "2026-01-01T00:00:00Z", "hub123")
+    if ("Widget" not in it or "(3 findings)" not in it or "## Must fix" not in ib
+            or "**LETTER** file: X absent" not in ib or "## Converge" not in ib or "verbatim: Y differs" not in ib
+            or "## Could not verify" not in ib or "(0 findings)" not in et or "nothing to converge" not in eb):
+        ok = False
+        print("  FAIL issue: render_issue grouping/title/empty behavior")
+    else:
+        print("  ok   issue: render_issue groups must-fix/converge/unverifiable, counts findings, handles the clean case")
 
     print("SELFTEST PASS" if ok else "SELFTEST FAIL")
     return 0 if ok else 1
+
+
+def render_issue(entry, findings, ground, audited_sha, run_utc, hub_sha):
+    """A ready-to-file convergence issue (title, body) generated from one repo's audit findings.
+
+    The content is a view over the audit, not composed by hand, so it is always accurate and regenerable -
+    re-run the audit, re-generate the issue. Findings are grouped by what the maintainer does with them:
+    presence/contract findings to fix, drift to converge (re-vendor or review), and anything unverifiable.
+    """
+    name = entry["name"]
+    types = ", ".join(entry.get("types", [])) or "untyped"
+    stamp = f"{ground}@{audited_sha[:7]}" if audited_sha else ground
+    blocking = [(k, t) for k, t in findings if k in ("DEFECT", "LETTER")]
+    drift = [t for k, t in findings if k == "DRIFT"]
+    errors = [t for k, t in findings if k == "ERROR"]
+    title = f"Converge {name} with the hub baseline ({len(findings)} finding{'' if len(findings) == 1 else 's'})"
+
+    out = []
+    w = out.append
+    # No H1 - GitHub renders the issue title as the heading, so an H1 here would duplicate it.
+    w(f"Generated from the hub audit of `{name}` ({types}). Run stamp `audit run {run_utc} | hub {hub_sha}`, "
+      f"against `@ {stamp}` (the format AUDIT.md section 8 says a derived artifact quotes). Regenerate with "
+      f"`spec/audit.py --issue {name}`. Findings are a point-in-time snapshot - re-run the audit before acting. "
+      f"This lists what the audit mechanically detects. The full letter and intent verdict lives in AUDIT.md.")
+    w("")
+    if not findings:
+        w("The deterministic checks are clean - nothing to converge.")
+        return title, "\n".join(out) + "\n"
+    if blocking:
+        w("## Must fix")
+        w("")
+        w("A missing carried file, or a broken workflow contract.")
+        w("")
+        for k, t in blocking:
+            w(f"- **{k}** {t}")
+        w("")
+    if drift:
+        w("## Converge")
+        w("")
+        w("Divergences from the hub canonical. A `verbatim:` file or section re-vendors the current hub copy "
+          "byte-for-byte (a `section` re-vendors just that one `## heading` block). An `interface:` item must "
+          "honor the named workflow contract. A stale-but-present copy is re-vendored. A genuinely repo-specific "
+          "difference is judged by meaning per AUDIT.md.")
+        w("")
+        for t in drift:
+            w(f"- {t}")
+        w("")
+    if errors:
+        w("## Could not verify")
+        w("")
+        w("The audit could not read something it needed. Re-run once the cause is cleared.")
+        w("")
+        for t in errors:
+            w(f"- {t}")
+        w("")
+    return title, "\n".join(out).rstrip() + "\n"
 
 
 def main():
@@ -642,7 +782,8 @@ def main():
         "secrets": load("spec/secrets.json"),
         "files": load("spec/files.json"),
     }
-    wanted = {n.lower() for n in sys.argv[1:]}
+    issue_mode = "--issue" in sys.argv
+    wanted = {n.lower() for n in sys.argv[1:] if not n.startswith("--")}
     repos = [r for r in spec["registry"]["repos"] if r.get("status") == "cataloged"]
     if wanted:
         repos = [r for r in repos if r["name"].lower() in wanted]
@@ -656,6 +797,23 @@ def main():
     run_utc = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
     hub = subprocess.run(["git", "rev-parse", "--short", "HEAD"], capture_output=True, text=True, cwd=ROOT)
     hub_sha = hub.stdout.strip() if hub.returncode == 0 else "unknown"
+
+    # --issue <repo>: emit only the convergence issue on stdout (title first line, then body) so it captures cleanly.
+    if issue_mode:
+        if len(repos) != 1:
+            print("--issue takes exactly one cataloged repo", file=sys.stderr)
+            return 2
+        entry = repos[0]
+        try:
+            findings, audited_sha = audit_repo(entry, spec)
+        except Exception as e:  # an unverifiable audit still produces an honest issue
+            findings, audited_sha = [("ERROR", str(e))], ""
+        title, body = render_issue(entry, findings, entry.get("groundTruthBranch", "main"),
+                                   audited_sha, run_utc, hub_sha)
+        print(title)
+        print(body, end="")  # line 1 is the bare title, the body starts on line 2 - head -1 / tail -n +2 friendly
+        return 0
+
     print(f"audit run {run_utc} | hub {hub_sha}")
     if not HUB_NAME_FROM_REMOTE:
         print(f"warning: no git remote; template-reference check falls back to the directory name '{HUB_NAME}' and may miss", file=sys.stderr)

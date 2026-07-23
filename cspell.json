@@ -82,6 +82,7 @@
     "nuget",
     "nugetlibrary",
     "onCreateCommand",
+    "opencontainers",
     "Optix",
     "othercommand",
     "paramref",

@@ -250,7 +250,7 @@
             "requiredSecrets": ["CODECOV_TOKEN"],
             "consumerModel": "pull",
             "releaseTrigger": "none",
-            "driftNotes": ["Work-in-progress: pre-CI (no .github/workflows, no version.json, no repo-config).", "Pre-conformance: main exists but the work-in-progress content lives on develop - promote to main to converge.", "Dockerfile present but no docker build/push workflow, so no publish wired."]
+            "driftNotes": ["Partially onboarded: the PR gate and linters are live (test-pull-request.yml + validate-task.yml with the canonical aggregator name), but rulesets, repo-config/, version.json, WORKFLOW.md, AUDIT.md, spec/secrets.json, dependabot.yml, and the release pipeline are still missing (reports/photocleaner/audit.md).", "develop is diverged from main (ahead 1, behind 3) - forward-sync the main-only commits to develop.", "Dockerfile present but no docker build/push workflow, so no publish wired."]
         },
         {
             "name": "MediaTools",
