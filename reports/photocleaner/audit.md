@@ -8,7 +8,7 @@
 
 ## Develop Drift
 
-`develop` vs `main`: ahead 1, behind 3 (`gh api repos/ptr727/PhotoCleaner/compare/main...develop`). **Diverged, and the behind direction is the anomaly** - under the forward-only model `develop` never trails `main`, so the three `main`-only commits need a forward sync to `develop` - re-apply or cherry-pick them onto `develop`, never a `main -> develop` back-merge.
+`develop` vs `main`: ahead 1, behind 3 by commit count - **benign**. The three `main`-only commits are `develop -> main` promotion merge commits whose trees match their develop-side parents, an ancestry gap inherent to merge-commit promotions that carries no content `develop` lacks (the audit's content-based branch check is silent on it, and a cherry-pick would be an empty no-op). The one develop-side commit is normal unreleased work. No action.
 
 ## Dimensions
 
