@@ -695,7 +695,7 @@ def _selftest():
             or spaced is None or not spaced.startswith("##   Alpha")
             or content_hash(a) == content_hash(extract_section(md.replace("## Alpha", "## alpha"), "Alpha"))):
         ok = False
-        print("  FAIL section: extract_section region/hash behaviour")
+        print("  FAIL section: extract_section region/hash behavior")
     else:
         print("  ok   section: heading in region, fenced ## kept, sibling H2 ends, None if absent, whitespace-tolerant locate, re-cased heading rehashes")
 
@@ -708,7 +708,7 @@ def _selftest():
             or "**LETTER** file: X absent" not in ib or "## Converge" not in ib or "verbatim: Y differs" not in ib
             or "## Could not verify" not in ib or "(0 findings)" not in et or "nothing to converge" not in eb):
         ok = False
-        print("  FAIL issue: render_issue grouping/title/empty behaviour")
+        print("  FAIL issue: render_issue grouping/title/empty behavior")
     else:
         print("  ok   issue: render_issue groups must-fix/converge/unverifiable, counts findings, handles the clean case")
 
