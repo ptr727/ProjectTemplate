@@ -735,7 +735,7 @@ def render_issue(entry, findings, ground, audited_sha, run_utc, hub_sha):
     w = out.append
     # No H1 - GitHub renders the issue title as the heading, so an H1 here would duplicate it.
     w(f"Generated from the hub audit of `{name}` ({types}). Run stamp `audit run {run_utc} | hub {hub_sha}`, "
-      f"read `@ {stamp}` (the format AUDIT.md section 8 says a derived artifact quotes). Regenerate with "
+      f"against `@ {stamp}` (the format AUDIT.md section 8 says a derived artifact quotes). Regenerate with "
       f"`spec/audit.py --issue {name}`. Findings are a point-in-time snapshot - re-run the audit before acting. "
       f"This lists what the audit mechanically detects. The full letter and intent verdict lives in AUDIT.md.")
     w("")
