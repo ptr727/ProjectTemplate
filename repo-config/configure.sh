@@ -76,9 +76,12 @@ ruleset_id() { # ruleset-name -> id of the first match (empty if none); warns on
         echo "Failed to list rulesets for $repo (check auth and repo access)." >&2
         return 1
     fi
-    # Fail loud rather than silently narrow: a full page means the single-fetch assumption no longer holds.
+    # Fail loud rather than silently narrow: a full page means the single-fetch assumption no longer holds, and
+    # a missed lookup would make apply create a duplicate ruleset by name. Abort so the caller stops (it treats a
+    # non-zero return as "stop", never as "not found").
     if [ "$(jq 'length' <<<"$out")" -eq 100 ]; then
-        echo "Warning: $repo returned 100 rulesets (the per_page cap). The list may be truncated and '$1' could be missed." >&2
+        echo "Failed for $repo: 100 rulesets returned (the per_page cap), so the single-fetch lookup is unreliable. Reduce rulesets or add pagination before applying." >&2
+        return 1
     fi
     # shellcheck disable=SC2016  # $n is a jq --arg variable, not a shell expansion
     ids="$(jq -r --arg n "$1" '.[] | select(.name==$n) | .id' <<<"$out")"
