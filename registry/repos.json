@@ -250,7 +250,7 @@
             "requiredSecrets": ["DOCKER_HUB_USERNAME", "DOCKER_HUB_ACCESS_TOKEN", "CODECOV_TOKEN"],
             "consumerModel": "pull",
             "releaseTrigger": "two-phase",
-            "driftNotes": ["Mirrors PlexCleaner's publish shape minus the python subtree: multi-arch Docker (linux/amd64,linux/arm64 on main) pushed to Docker Hub via the static DOCKER_HUB_USERNAME/DOCKER_HUB_ACCESS_TOKEN secret, plus a github-release attaching the multi-arch executables as a 7z. Release is two-phase (workflow_dispatch + weekly Mon 02:00 schedule).", "Fully onboarded 2026-07 (rulesets, repo-config/, version.json, WORKFLOW.md, AUDIT.md, dependabot.yml, and the release pipeline all live); the reports/photocleaner/audit.md snapshot predates the docker/release wiring."]
+            "driftNotes": ["Mirrors PlexCleaner's publish shape minus the python subtree: multi-arch Docker (linux/amd64,linux/arm64 on main) pushed to Docker Hub via the static DOCKER_HUB_USERNAME/DOCKER_HUB_ACCESS_TOKEN secret, plus a github-release attaching the multi-arch executables as a 7z. Release is two-phase (workflow_dispatch + weekly Mon 02:00 schedule).", "Fully onboarded 2026-07 (rulesets, repo-config/, version.json, WORKFLOW.md, AUDIT.md, dependabot.yml, and the release pipeline all live). The reports/photocleaner/audit.md snapshot predates the docker/release wiring."]
         },
         {
             "name": "MediaTools",
