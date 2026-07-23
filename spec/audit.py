@@ -755,7 +755,7 @@ def render_issue(entry, findings, ground, audited_sha, run_utc, hub_sha):
         w("")
         w("Divergences from the hub canonical. A `verbatim:` file or section re-vendors the current hub copy "
           "byte-for-byte (a `section` re-vendors just that one `## heading` block). An `interface:` item must "
-          "honor the named workflow contract. A stale-but-present copy is re-vendored; a genuinely repo-specific "
+          "honor the named workflow contract. A stale-but-present copy is re-vendored. A genuinely repo-specific "
           "difference is judged by meaning per AUDIT.md.")
         w("")
         for t in drift:
