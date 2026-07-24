@@ -672,7 +672,10 @@ def audit_repo(entry, spec):
                 # a repo may legitimately carry its own project-specific sections (the AGENTS.md preamble allows
                 # them) - so it points at the reconciliation, it never fails. AGENTS.md only, where the section
                 # structure is governed by section-model.md.
-                if path == "AGENTS.md":
+                # Skip the hub itself: its AGENTS.md is the source and legitimately holds hub-only sections
+                # (e.g. Repository Onboarding and Conformance) that are deliberately not carried. A downstream
+                # repo carrying such a section is still flagged, which is the point.
+                if path == "AGENTS.md" and entry.get("name") != HUB_NAME:
                     declared = {n.strip().lower() for n in (needed | verbatim_needed)}
                     h2s = {ln[3:].strip().lower() for ln in text.splitlines() if ln.startswith("## ")}
                     for h in sorted(h2s - declared):
