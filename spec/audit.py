@@ -351,7 +351,7 @@ _ACTION_PIN = re.compile(r"(\buses:[ \t]*[^\s@]+)@[0-9a-fA-F]{40}(?:[ \t]+#[ \t]
 # action pin. The interface contract still checks the required job keys separately.
 _JOB_NEEDS = re.compile(
     r"(^[ \t]*)needs:[ \t]*"
-    r"(?:\[[^\]]*\]"                                    # inline: needs: [a, b]
+    r"(?:\[[^\]\n]*\]"                                  # inline: needs: [a, b] (same line only)
     r"|[A-Za-z0-9_.\-]+[ \t]*(?=\n|$)"                  # scalar: needs: a
     r"|(?:\n[ \t]+-[ \t]*[A-Za-z0-9_.\-]+[ \t]*)+)",    # block: needs:\n  - a\n  - b
     re.MULTILINE)
