@@ -26,8 +26,7 @@ A section is one of the following. Fidelity is declared in [files.json][files], 
 | Git and Commit Rules | verbatim | universal git law |
 | Branching Model | verbatim | universal (repo-specific history SHAs removed so it can carry) |
 | Release Model | verbatim | universal release contract, all target shapes described inline |
-| Operational Repositories | verbatim, `appliesTo: operational` | universal for operational repos, N/A for release repos |
-| Repository Onboarding and Conformance | verbatim | universal audit and registry obligations |
+| Operational Repositories | verbatim | fleet context (the two workflow models); carried by all so the cross-references to it resolve |
 | Pull Request Title and Commit Message Conventions | verbatim | universal, with generic examples |
 | Documentation Style Conventions | verbatim | all rule text, including the Line Endings *rule* (a repo's `.editorconfig` value is not here) |
 | Verification Discipline | verbatim | universal verification law |
@@ -40,6 +39,8 @@ A section is one of the following. Fidelity is declared in [files.json][files], 
 | Devcontainer | intent | describes this repo's toolchain and devcontainer, genuinely per-repo |
 | Repository Layout | intent | describes this repo's directory tree, genuinely per-repo |
 
+**Not carried (hub-only).** `Repository Onboarding and Conformance` lives in the hub's `AGENTS.md` as hub-audit context (reconciling the registry, the STANDUP cold-start, the conformance matrix) but is not a carried section - a downstream agent never runs those. Its one universal rule, that a repo is done when it passes `AUDIT.md` for its type, is carried in `AUDIT.md` itself. Like the model docs and `STANDUP.md`, it is hub machinery, not fleet law.
+
 ## Changing the structure carries review weight
 
 The set of sections, and each section's fidelity, is itself governed.
@@ -47,7 +48,7 @@ The set of sections, and each section's fidelity, is itself governed.
 - **Adding a section** is a fleet-wide act - it declares a new rule every repo must carry. Add it to `AGENTS.md`, to `files.json`, and to the table above in the same change, with its fidelity chosen deliberately.
 - **Changing a verbatim section** re-vendors it across the whole fleet. The audit drift wave that follows is the mechanism working, not a regression.
 - **Changing a section's fidelity** (intent to verbatim or back) is a governance decision, recorded here with its reason.
-- **A downstream repo's extra section** the hub does not declare is drift to reconcile, not a local liberty. Either the rule belongs fleet-wide, so promote it here, or it is repo-specific content that does not belong in a carried section.
+- **A downstream repo's extra section** the hub does not declare is drift to reconcile, not a local liberty - including a section whose *heading* differs but whose *content* duplicates a verbatim section (compare by content, not heading name). Either the rule belongs fleet-wide, so promote it here, or its unique part is repo-specific content that moves to the repo's own topical doc (`CODESTYLE`, `ARCHITECTURE`) and the duplicate is deleted. The audit lists a repo's undeclared sections as an advisory so the reconciliation is not missed.
 
 ## Enforcement
 

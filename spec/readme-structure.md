@@ -4,7 +4,7 @@ The preferred `README.md` shape for a fleet project. The audit's `readme-structu
 
 ## Sections and Order
 
-1. **Title (`# <Name>`)** - the repo name, then a one-line description as the next paragraph. That line is **link-free plain text**: it doubles as the GitHub About description (AGENTS.md "Repository Details"), which renders no markdown, so a link would carry as raw brackets. The audit checks both properties.
+1. **Title (`# <Name>`)** - the H1 **is the repository name** (a hyphenated name may render its hyphens as spaces: `Financial-Modeling` -> `Financial Modeling`), then a one-line description as the next paragraph. That description is a **single sentence, link-free plain text, at most 100 characters** - it is the one canonical short description. It doubles as the GitHub About description (AGENTS.md "Repository Details") and, for a repo that publishes a Docker image, the Docker Hub short description. Both render no markdown, and Docker Hub caps the short description near 100 characters - the tightest surface, which sets the limit. The audit checks the H1 name, the length, the link-free form, and the mirrors.
 2. **Build and Distribution (`##`)** - a bullet per distribution channel the project actually ships, each linking where it lives: **Source Code** (the GitHub repo), **Versioned Releases** (GitHub Releases), **Docker Images** (Docker Hub), **NuGet Packages** (NuGet.org), **PyPI Packages** (PyPI.org). List only the channels the project uses. It carries three sub-sections:
    - **Build Status (`###`)** - the CI/build status shields (release build, Docker build, last commit, last build).
    - **Releases (`###`)** - the version shields (GitHub release, GitHub pre-release, Docker latest/develop, NuGet, PyPI), one per channel the project publishes.
@@ -40,4 +40,4 @@ Shields are not a top-level section - they live under **Build and Distribution**
 
 ## Docker Hub README
 
-A repo that publishes a Docker image keeps a **separate** `Docker/README.md` for the Docker Hub repository overview: Docker Hub's description has a much smaller size limit than a project README, so it carries a trimmed overview, not the full README. It is published by the docker-readme workflow task, not copied from the root README.
+Docker Hub has two text fields: a **short description** (the tagline, capped near 100 characters) that mirrors the README intro line (item 1), and the longer **overview**. A repo that publishes a Docker image keeps a **separate** `Docker/README.md` for the overview: Docker Hub's description has a much smaller size limit than a project README, so it carries a trimmed overview, not the full README. It is published by the docker-readme workflow task, not copied from the root README.
