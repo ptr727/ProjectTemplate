@@ -347,8 +347,8 @@ def check_interface(path, contract, text):
 _ACTION_PIN = re.compile(r"(\buses:[ \t]*[^\s@]+)@[0-9a-fA-F]{40}(?:[ \t]+#[ \t]*v?[0-9][\w.\-]*)?")
 # A workflow job's `needs:` list names the jobs it sequences after. In a verbatim job region a repo prunes that
 # list to the targets it actually vendors - a `needs` entry naming an unvendored job fails the whole workflow to
-# load - so the list is owned per repo, not fixed. Mask the inline `[ ... ]` form the canonical uses, same as the
-# action pin. The interface contract still checks the required job keys separately.
+# load - so the list is owned per repo, not fixed. Mask it (the inline `[ ... ]`, scalar, and block-list forms),
+# same as the action pin. The interface contract still checks the required job keys separately.
 _JOB_NEEDS = re.compile(
     r"(^[ \t]*)needs:[ \t]*"
     r"(?:\[[^\]\n]*\]"                                  # inline: needs: [a, b] (same line only)
@@ -830,10 +830,11 @@ def _selftest():
     needs_full = "  github-release:\n    needs: [get-version, validate-release, build-nugetlibrary, build-executable]\n    runs-on: x\n    steps: []\n"
     needs_pruned = "  github-release:\n    needs: [get-version, validate-release, build-executable]\n    runs-on: x\n    steps: []\n"
     needs_block = "  github-release:\n    needs:\n      - get-version\n      - build-executable\n    runs-on: x\n    steps: []\n"
+    needs_scalar = "  github-release:\n    needs: build-executable\n    runs-on: x\n    steps: []\n"
     needs_forked = "  github-release:\n    needs: [get-version, validate-release]\n    runs-on: x\n    steps:\n      - run: fork\n"
-    if content_hash(needs_full) != content_hash(needs_pruned) or content_hash(needs_full) != content_hash(needs_block):
+    if len({content_hash(needs_full), content_hash(needs_pruned), content_hash(needs_block), content_hash(needs_scalar)}) != 1:
         ok = False
-        print("  FAIL needs-mask: a pruned needs list (inline or block) should normalize equal")
+        print("  FAIL needs-mask: a pruned needs list (inline, block, or scalar) should normalize equal")
     elif content_hash(needs_full) == content_hash(needs_forked):
         ok = False
         print("  FAIL needs-mask: a step change must still hash differently")
@@ -841,7 +842,7 @@ def _selftest():
         ok = False
         print("  FAIL needs-mask: masking a block needs list must not consume the next key")
     else:
-        print("  ok   needs-mask: pruned needs (inline + block) normalizes equal, forked step differs, next key preserved")
+        print("  ok   needs-mask: pruned needs (inline, block, scalar) normalizes equal, forked step differs, next key preserved")
 
     # Region extraction and hashing: a forked github-release block must hash differently from the canonical.
     region = split_jobs(rel_ok).get("github-release")
