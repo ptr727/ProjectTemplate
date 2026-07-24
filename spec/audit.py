@@ -349,7 +349,12 @@ _ACTION_PIN = re.compile(r"(\buses:[ \t]*[^\s@]+)@[0-9a-fA-F]{40}(?:[ \t]+#[ \t]
 # list to the targets it actually vendors - a `needs` entry naming an unvendored job fails the whole workflow to
 # load - so the list is owned per repo, not fixed. Mask the inline `[ ... ]` form the canonical uses, same as the
 # action pin. The interface contract still checks the required job keys separately.
-_JOB_NEEDS = re.compile(r"(^[ \t]*needs:[ \t]*)\[[^\]]*\]", re.MULTILINE)
+_JOB_NEEDS = re.compile(
+    r"(^[ \t]*)needs:[ \t]*"
+    r"(?:\[[^\]]*\]"                                    # inline: needs: [a, b]
+    r"|[A-Za-z0-9_.\-]+[ \t]*(?=\n|$)"                  # scalar: needs: a
+    r"|(?:\n[ \t]+-[ \t]*[A-Za-z0-9_.\-]+[ \t]*)+)",    # block: needs:\n  - a\n  - b
+    re.MULTILINE)
 
 
 def normalize(text):
@@ -361,7 +366,7 @@ def normalize(text):
     """
     text = text.replace("\r\n", "\n").replace("\r", "\n")
     text = _ACTION_PIN.sub(r"\1@<pin>", text)
-    return _JOB_NEEDS.sub(r"\1<needs>", text)
+    return _JOB_NEEDS.sub(r"\1needs: <needs>", text)
 
 
 @functools.lru_cache(maxsize=1024)  # bounded; the keys that recur across repos are the canonical and its history
@@ -669,7 +674,6 @@ def audit_repo(entry, spec):
                 # structure is governed by section-model.md.
                 if path == "AGENTS.md":
                     declared = {n.strip().lower() for n in (needed | verbatim_needed)}
-                    declared.add("repository onboarding and conformance")  # hub-only section, carried by no repo
                     h2s = {ln[3:].strip().lower() for ln in text.splitlines() if ln.startswith("## ")}
                     for h in sorted(h2s - declared):
                         findings.append(("DRIFT", f"section: '{h}' in {path} is not a declared section - reconcile it (a duplicate of a verbatim section, or repo-specific content that moves to a topical doc), or confirm it is intentional (spec/section-model.md)"))
@@ -823,17 +827,21 @@ def _selftest():
 
     # needs-mask: a verbatim job region whose `needs:` list is pruned to the repo's vendored targets must not
     # count as drift (the list is owned), but a structural change to the job's steps must.
-    needs_full = "  github-release:\n    needs: [get-version, validate-release, build-nugetlibrary, build-executable]\n    steps: []\n"
-    needs_pruned = "  github-release:\n    needs: [get-version, validate-release, build-executable]\n    steps: []\n"
-    needs_forked = "  github-release:\n    needs: [get-version, validate-release]\n    steps:\n      - run: fork\n"
-    if content_hash(needs_full) != content_hash(needs_pruned):
+    needs_full = "  github-release:\n    needs: [get-version, validate-release, build-nugetlibrary, build-executable]\n    runs-on: x\n    steps: []\n"
+    needs_pruned = "  github-release:\n    needs: [get-version, validate-release, build-executable]\n    runs-on: x\n    steps: []\n"
+    needs_block = "  github-release:\n    needs:\n      - get-version\n      - build-executable\n    runs-on: x\n    steps: []\n"
+    needs_forked = "  github-release:\n    needs: [get-version, validate-release]\n    runs-on: x\n    steps:\n      - run: fork\n"
+    if content_hash(needs_full) != content_hash(needs_pruned) or content_hash(needs_full) != content_hash(needs_block):
         ok = False
-        print("  FAIL needs-mask: a pruned needs list should normalize equal")
+        print("  FAIL needs-mask: a pruned needs list (inline or block) should normalize equal")
     elif content_hash(needs_full) == content_hash(needs_forked):
         ok = False
         print("  FAIL needs-mask: a step change must still hash differently")
+    elif "runs-on: x" not in normalize(needs_block):
+        ok = False
+        print("  FAIL needs-mask: masking a block needs list must not consume the next key")
     else:
-        print("  ok   needs-mask: a pruned needs list normalizes equal, a forked step still differs")
+        print("  ok   needs-mask: pruned needs (inline + block) normalizes equal, forked step differs, next key preserved")
 
     # Region extraction and hashing: a forked github-release block must hash differently from the canonical.
     region = split_jobs(rel_ok).get("github-release")
