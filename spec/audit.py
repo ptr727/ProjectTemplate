@@ -345,17 +345,23 @@ def check_interface(path, contract, text):
 # fidelity deviation. Anchored to `uses:`, so a 64-hex docker digest and a tag/branch ref (`@v4`) do not match.
 # Hex is case-insensitive, and a hand-written note on a pin is not version-shaped, so it survives to be compared.
 _ACTION_PIN = re.compile(r"(\buses:[ \t]*[^\s@]+)@[0-9a-fA-F]{40}(?:[ \t]+#[ \t]*v?[0-9][\w.\-]*)?")
+# A workflow job's `needs:` list names the jobs it sequences after. In a verbatim job region a repo prunes that
+# list to the targets it actually vendors - a `needs` entry naming an unvendored job fails the whole workflow to
+# load - so the list is owned per repo, not fixed. Mask the inline `[ ... ]` form the canonical uses, same as the
+# action pin. The interface contract still checks the required job keys separately.
+_JOB_NEEDS = re.compile(r"(^[ \t]*needs:[ \t]*)\[[^\]]*\]", re.MULTILINE)
 
 
 def normalize(text):
     """Reduce a carried unit to its comparable form: neutralize line endings (EOL variance is governed
-    separately, not a fidelity deviation) and neutralize a Dependabot-owned action pin - the 40-hex commit a
-    `uses: <action>@<sha>` line pins, together with its trailing ` # vN` version comment - since Dependabot
-    bumps those per repo and that drift is governed, same category as EOL. This is NOT placeholder masking of
-    declared per-file tokens; see spec/fidelity-model.md "Normalization".
+    separately, not a fidelity deviation), a Dependabot-owned action pin (the 40-hex `uses: <action>@<sha>` commit
+    plus its ` # vN` comment, bumped per repo), and a job's owned `needs:` list (pruned per repo to its vendored
+    targets). All three are governed drift, not a fidelity deviation. This is NOT placeholder masking of declared
+    per-file tokens; see spec/fidelity-model.md "Normalization".
     """
     text = text.replace("\r\n", "\n").replace("\r", "\n")
-    return _ACTION_PIN.sub(r"\1@<pin>", text)
+    text = _ACTION_PIN.sub(r"\1@<pin>", text)
+    return _JOB_NEEDS.sub(r"\1<needs>", text)
 
 
 @functools.lru_cache(maxsize=1024)  # bounded; the keys that recur across repos are the canonical and its history
@@ -656,6 +662,17 @@ def audit_repo(entry, spec):
                 for name in sorted(verbatim_needed):
                     findings.extend(check_verbatim(f"{path} section '{name}'", text, path,
                                                    extract=lambda t, n=name: extract_section(t, n)))
+                # Undeclared-section advisory (spec/section-model.md): an H2 the manifest does not declare is a
+                # candidate duplicate of a verbatim section, or repo-specific content to relocate. Advisory only -
+                # a repo may legitimately carry its own project-specific sections (the AGENTS.md preamble allows
+                # them) - so it points at the reconciliation, it never fails. AGENTS.md only, where the section
+                # structure is governed by section-model.md.
+                if path == "AGENTS.md":
+                    declared = {n.strip().lower() for n in (needed | verbatim_needed)}
+                    declared.add("repository onboarding and conformance")  # hub-only section, carried by no repo
+                    h2s = {ln[3:].strip().lower() for ln in text.splitlines() if ln.startswith("## ")}
+                    for h in sorted(h2s - declared):
+                        findings.append(("DRIFT", f"section: '{h}' in {path} is not a declared section - reconcile it (a duplicate of a verbatim section, or repo-specific content that moves to a topical doc), or confirm it is intentional (spec/section-model.md)"))
 
     # --- HISTORY.md mirrors the README opening ---
     # spec/readme-structure.md "HISTORY.md": the changelog opens as the README's twin - same H1 title and the
@@ -803,6 +820,20 @@ def _selftest():
         print("  FAIL action-pin: a hand-written (non-version) pin comment must survive to be compared")
     else:
         print("  ok   action-pin: version bump normalizes equal, changed action differs, hand-written note survives")
+
+    # needs-mask: a verbatim job region whose `needs:` list is pruned to the repo's vendored targets must not
+    # count as drift (the list is owned), but a structural change to the job's steps must.
+    needs_full = "  github-release:\n    needs: [get-version, validate-release, build-nugetlibrary, build-executable]\n    steps: []\n"
+    needs_pruned = "  github-release:\n    needs: [get-version, validate-release, build-executable]\n    steps: []\n"
+    needs_forked = "  github-release:\n    needs: [get-version, validate-release]\n    steps:\n      - run: fork\n"
+    if content_hash(needs_full) != content_hash(needs_pruned):
+        ok = False
+        print("  FAIL needs-mask: a pruned needs list should normalize equal")
+    elif content_hash(needs_full) == content_hash(needs_forked):
+        ok = False
+        print("  FAIL needs-mask: a step change must still hash differently")
+    else:
+        print("  ok   needs-mask: a pruned needs list normalizes equal, a forked step still differs")
 
     # Region extraction and hashing: a forked github-release block must hash differently from the canonical.
     region = split_jobs(rel_ok).get("github-release")
