@@ -1,6 +1,6 @@
 # AGENTS.md Section Model
 
-Companion to [fidelity-model.md](./fidelity-model.md). That doc defines how a carried *file* is verified. This one defines how the *sections* of `AGENTS.md` carry, and records the fidelity of each. It is the ground truth an agent or human consults before adding, removing, or re-typing a section, not a judgment re-derived each session.
+Companion to [fidelity-model.md][fidelity-model]. That doc defines how a carried *file* is verified. This one defines how the *sections* of `AGENTS.md` carry, and records the fidelity of each. It is the ground truth an agent or human consults before adding, removing, or re-typing a section, not a judgment re-derived each session.
 
 ## Why sections have fidelity
 
@@ -8,7 +8,7 @@ Companion to [fidelity-model.md](./fidelity-model.md). That doc defines how a ca
 
 ## The categories
 
-A section is one of the following. Fidelity is declared in [`files.json`](./files.json), never inferred.
+A section is one of the following. Fidelity is declared in [files.json][files], never inferred.
 
 - **verbatim** - universal fleet-law rule *text*, byte-identical in every repo after EOL and action-pin normalization. The audit content-hashes each downstream copy against the hub's `## <heading>` block. A verbatim section may carry clauses only some repos exercise (for example "a source-only repo carries no build task"). The *text* is still identical everywhere - applicability is per-repo, the wording is not.
 - **intent** - the section *describes this particular repo* (its own directory tree, its own devcontainer and toolchain), so its content legitimately varies. The heading must be present, the body is judged by meaning rather than hashed.
@@ -51,4 +51,11 @@ The set of sections, and each section's fidelity, is itself governed.
 
 ## Enforcement
 
-`files.json` declares each section's fidelity. [`validate.py`](./validate.py) proves every declared verbatim section resolves in the hub `AGENTS.md`. [`audit.py`](./audit.py) checks each repo's copy - presence for `intent`, byte-match for `verbatim` - and classifies a mismatch as stale (re-vendor) or modified (review).
+`files.json` declares each section's fidelity. [validate.py][validate] proves every declared verbatim section resolves in the hub `AGENTS.md`. [audit.py][audit] checks each repo's copy - presence for `intent`, byte-match for `verbatim` - and classifies a mismatch as stale (re-vendor) or modified (review).
+
+<!-- Internal -->
+
+[audit]: ./audit.py
+[fidelity-model]: ./fidelity-model.md
+[files]: ./files.json
+[validate]: ./validate.py
