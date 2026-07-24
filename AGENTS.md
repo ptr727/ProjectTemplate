@@ -39,7 +39,7 @@ A state-changing GitHub call is the highest-blast-radius thing an agent does her
 - `develop` is the integration branch. Feature branches -> `develop` is **squash-only**; develop is kept linear.
 - `develop` -> `main` is **merge-commit only** (no squash, no rebase). Merge commits preserve develop's commit list as a real second-parent reference on main, which lets the release model attribute releases to the develop commits that produced them (see "Release Model" below). Branch protection enforces this: the develop ruleset allows only `squash`, the main ruleset allows only `merge`.
 - All commits on both branches must be cryptographically signed (SSH or GPG). Squash and merge commits created via the GitHub UI are signed by GitHub's web-flow key.
-- **`develop` is forward-only - no `main -> develop` back-merges.** The develop ruleset's squash-only setting physically blocks merge commits on develop. Historical back-merge commits visible in `git log` (`b9b0447`, `410ba56`, `ffb9e64`, `5ce95cf`, etc.) predate this rule and must not be repeated.
+- **`develop` is forward-only - no `main -> develop` back-merges.** The develop ruleset's squash-only setting physically blocks merge commits on develop. Any historical back-merge commits in `git log` predate this rule and must not be repeated.
 - **Executing a `develop -> main` promotion safely - two traps, both learned the hard way:**
   - **Never delete `develop`.** A promotion PR's head *is* `develop`, so `gh pr merge --delete-branch` (and the repo's "Automatically delete head branches" toggle, which is why that toggle is [kept off](./repo-config/settings.json)) deletes `develop` itself. Merge a promotion with a plain `gh pr merge --merge`, no `--delete-branch`. If `develop` is ever lost this way, restore it to the merged PR's head SHA - the SHA is still reachable as the merge commit's second parent: `gh api -X POST "repos/<owner>/<repo>/git/refs" -f ref=refs/heads/develop -f sha="$(gh pr view <n> --json headRefOid --jq .headRefOid)"`.
   - **Spurious EOL-only conflicts resolve by taking `develop`.** When develop declared workflow YAML as LF while main is still CRLF, `develop -> main` conflicts *whole-file* on those paths. develop's `required_linear_history` + PR rulesets forbid resolving on `develop` (no merge commit, no force-push), so resolve on a throwaway branch off `main`: `git checkout -b promote/develop-to-main origin/main && git merge origin/develop`, take develop's side for the EOL-conflicted files (`git checkout --theirs <file>`) **after confirming each is content-identical modulo EOL or that develop is a strict superset** (`diff <(git show :2:f|tr -d '\r') <(git show :3:f|tr -d '\r')`), then open that branch -> `main`. Verify no genuine main-only content is dropped (build/test where the repo supports it).
@@ -144,10 +144,27 @@ Applies to code and workflow (`#`) comments alike.
 
 - Comment only when the code does not explain itself or the logic is genuinely complex. Self-evident code needs no comment.
 - Write for the human reading *this* project's code now: state only the non-obvious *why*. No cross-project references (do not name other repos), no historic or design narrative, no rule citations - governance lives in this file, not echoed inline.
-- **Keep it short. One line is the default; a comment earns a second line only by carrying a constraint the code cannot.** Most comments are one sentence. Don't restate *what* the code does - a well-named symbol already says it.
+- **Keep it short.** One line is the default. A comment earns a second line only by carrying a constraint the code cannot. Most comments are one sentence, and never restate *what* the code does - a well-named symbol already says it.
+- **Structured, not prose: one sentence per line, and never wrap a sentence across lines.** No block paragraphs and no multi-sentence run-ons. A comment that genuinely needs several sentences is several lines, each a single sentence. A sentence too long for one sensible line is too long - split the thought.
+- **A multi-line comment shows whether it is a continuation or a list.** A continuation of the same topic stays unindented, one sentence per line. Mark a sub-topic with a `-` after the comment marker (`# -`, `// -`), and only for genuine sub-topics - parallel items hanging off a lead line, never a continuation of one thought.
 - **No class-, type-, or file-header summary comment blocks.** A type or file gets a comment only for a specific non-obvious point, kept terse - never a block summarizing what the file contains or what the class is for. A summary restates the declaration below it, goes stale as the file grows, and is the file-scope form of the design narrative and verbosity creep this section already bans. A license or provenance header a tool or policy requires is not a summary and is unaffected.
 - **Do not grow a comment across edits.** When you touch code near an existing comment, the comment must come out **same length or shorter** - never append "one more clause" of rationale. If a block comment has crept to multiple sentences of prose, cut it back to its single load-bearing point as part of your change. Verbosity creep is the specific regression to prevent: every iteration that adds a clause is a regression, not an improvement.
-- Match the surrounding code's line length (typically ~120), not an 80-column wrap.
+
+A continuation stays unindented, one sentence per line:
+
+```text
+# Change gate for the compile tests.
+# An esp-idf build costs minutes, so gate on what each test covers.
+# A diff that cannot be computed runs everything.
+```
+
+Sub-topics take a `-` after the comment marker, each elaborating a distinct item named in the lead:
+
+```text
+# Source lint plus change-gated compile tests.
+# - compile-test builds the external component.
+# - template-compile-test builds one example device per template.
+```
 
 ### Character Set
 
