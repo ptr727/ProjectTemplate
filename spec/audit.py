@@ -723,7 +723,9 @@ def audit_repo(entry, spec):
         # The H1 is the repository name; a hyphenated name may render its hyphens as spaces. Use the
         # GitHub API's canonical name (the registry-URL slug can carry a different case).
         repo_name = live.get("name") or slug.split("/")[-1]
-        if title.replace("-", " ") != repo_name.replace("-", " "):
+        if not title:
+            findings.append(("LETTER", "readme: no `# ` H1 title - the README opens with `# <repo name>` then a one-line description (spec/readme-structure.md)"))
+        elif title.replace("-", " ") != repo_name.replace("-", " "):
             findings.append(("LETTER", f"readme: the H1 title '{title}' is not the repo name '{repo_name}' (a hyphenated name may render its hyphens as spaces) - the H1 is the repository name (spec/readme-structure.md)"))
         if not intro_line:
             findings.append(("LETTER", "readme: no intro line after the H1 - the README opens with the title then a one-line description, which doubles as the About description (spec/readme-structure.md)"))
