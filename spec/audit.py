@@ -25,6 +25,7 @@ import pathlib
 import re
 import subprocess
 import sys
+import urllib.error
 import urllib.request
 from datetime import datetime, timezone
 from typing import Any
@@ -76,19 +77,22 @@ def gh(path, ok404=False) -> Any:
 
 
 def docker_hub_description(slug):
-    """The Docker Hub short description for a repo, or None if unavailable.
+    """The Docker Hub short description for a repo, or None if the image is genuinely absent (HTTP 404).
 
     The image name is taken as owner/repo lowercased, the fleet convention (`ptr727/PhotoCleaner` ->
-    `ptr727/photocleaner`). Best-effort: a repo whose Docker Hub image is named otherwise, or not yet pushed,
-    404s and is skipped rather than falsely flagged. Read-only, unauthenticated, so it needs no token.
+    `ptr727/photocleaner`), so a repo whose image is named otherwise, or not yet pushed, 404s and is skipped
+    rather than falsely flagged. A transient failure (timeout, network, non-404 status) is **raised**, not
+    swallowed, so the caller surfaces "could not verify" instead of silently passing. Read-only, unauthenticated.
     """
     owner, repo = slug.split("/", 1)
     url = f"https://hub.docker.com/v2/repositories/{owner.lower()}/{repo.lower()}/"
     try:
         with urllib.request.urlopen(url, timeout=5) as r:
             return json.loads(r.read().decode("utf-8")).get("description")
-    except Exception:
-        return None
+    except urllib.error.HTTPError as e:
+        if e.code == 404:
+            return None
+        raise
 
 
 def normalize_ruleset(payload):
@@ -732,9 +736,15 @@ def audit_repo(entry, spec):
             desc = (live.get("description") or "").strip()
             if desc != want:
                 findings.append(("LETTER", f"description: the About description does not match the README intro line (description '{desc}' vs readme '{want}') - set it from the README, or sharpen the README first if the description carries real detail (AGENTS.md Repository Details)"))
-            # Docker Hub short description mirrors the same intro, for a repo that publishes a docker image.
+            # Docker Hub short description mirrors the same intro, for a repo that publishes a docker image. A
+            # transient lookup failure surfaces as a DRIFT ("could not verify") rather than aborting the audit or
+            # silently passing; a 404 (image not at the derived name) returns None and is skipped.
             if any((pt.get("target") if isinstance(pt, dict) else pt) == "docker" for pt in entry.get("publish", [])):
-                dh = docker_hub_description(slug)
+                try:
+                    dh = docker_hub_description(slug)
+                except Exception as e:
+                    dh = None
+                    findings.append(("DRIFT", f"description: could not read the Docker Hub short description to verify it mirrors the README ({e}) - verify by hand"))
                 if dh is not None and dh.strip() != want:
                     findings.append(("LETTER", f"description: the Docker Hub short description ('{dh.strip()}') does not match the README intro ('{want}') - set it from the README (spec/readme-structure.md)"))
 
