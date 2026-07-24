@@ -22,6 +22,7 @@ A section is one of the following. Fidelity is declared in [files.json][files], 
 | Section | Fidelity | Reason |
 | --- | --- | --- |
 | Foundational Principles | verbatim | the governing rationale, universal |
+| Durable Knowledge and Self-Improvement | verbatim | universal meta-rule: durable knowledge belongs in the committed docs and agents keep them current |
 | Repository Boundaries and Write Safety | verbatim | universal write-safety law |
 | Git and Commit Rules | verbatim | universal git law |
 | Branching Model | verbatim | universal (repo-specific history SHAs removed so it can carry) |
