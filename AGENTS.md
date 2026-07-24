@@ -144,10 +144,27 @@ Applies to code and workflow (`#`) comments alike.
 
 - Comment only when the code does not explain itself or the logic is genuinely complex. Self-evident code needs no comment.
 - Write for the human reading *this* project's code now: state only the non-obvious *why*. No cross-project references (do not name other repos), no historic or design narrative, no rule citations - governance lives in this file, not echoed inline.
-- **Keep it short. One line is the default; a comment earns a second line only by carrying a constraint the code cannot.** Most comments are one sentence. Don't restate *what* the code does - a well-named symbol already says it.
+- **Keep it short.** One line is the default. A comment earns a second line only by carrying a constraint the code cannot. Most comments are one sentence, and never restate *what* the code does - a well-named symbol already says it.
+- **Structured, not prose: one sentence per line, and never wrap a sentence across lines.** No block paragraphs and no multi-sentence run-ons. A comment that genuinely needs several sentences is several lines, each a single sentence. A sentence too long for one sensible line is too long - split the thought.
+- **A multi-line comment shows whether it is a continuation or a list.** A continuation of the same topic stays unindented, one sentence per line. Mark a sub-topic with a `-` after the comment marker (`# -`, `// -`), and only for genuine sub-topics - parallel items hanging off a lead line, never a continuation of one thought.
 - **No class-, type-, or file-header summary comment blocks.** A type or file gets a comment only for a specific non-obvious point, kept terse - never a block summarizing what the file contains or what the class is for. A summary restates the declaration below it, goes stale as the file grows, and is the file-scope form of the design narrative and verbosity creep this section already bans. A license or provenance header a tool or policy requires is not a summary and is unaffected.
 - **Do not grow a comment across edits.** When you touch code near an existing comment, the comment must come out **same length or shorter** - never append "one more clause" of rationale. If a block comment has crept to multiple sentences of prose, cut it back to its single load-bearing point as part of your change. Verbosity creep is the specific regression to prevent: every iteration that adds a clause is a regression, not an improvement.
-- Match the surrounding code's line length (typically ~120), not an 80-column wrap.
+
+A continuation stays unindented, one sentence per line:
+
+```text
+# Change gate for the compile tests.
+# An esp-idf build costs minutes, so gate on what each test covers.
+# A diff that cannot be computed runs everything.
+```
+
+Sub-topics take a `-` after the comment marker, each elaborating a distinct item named in the lead:
+
+```text
+# Source lint plus change-gated compile tests.
+# - compile-test builds the external component.
+# - template-compile-test builds one example device per template.
+```
 
 ### Character Set
 
