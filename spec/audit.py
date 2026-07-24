@@ -25,6 +25,7 @@ import pathlib
 import re
 import subprocess
 import sys
+import urllib.request
 from datetime import datetime, timezone
 from typing import Any
 
@@ -72,6 +73,22 @@ def gh(path, ok404=False) -> Any:
             return None
         raise RuntimeError(f"gh api {path}: {r.stderr.strip().splitlines()[-1] if r.stderr else 'failed'}")
     return json.loads(r.stdout) if r.stdout.strip() else None
+
+
+def docker_hub_description(slug):
+    """The Docker Hub short description for a repo, or None if unavailable.
+
+    The image name is taken as owner/repo lowercased, the fleet convention (`ptr727/PhotoCleaner` ->
+    `ptr727/photocleaner`). Best-effort: a repo whose Docker Hub image is named otherwise, or not yet pushed,
+    404s and is skipped rather than falsely flagged. Read-only, unauthenticated, so it needs no token.
+    """
+    owner, repo = slug.split("/", 1)
+    url = f"https://hub.docker.com/v2/repositories/{owner.lower()}/{repo.lower()}/"
+    try:
+        with urllib.request.urlopen(url, timeout=15) as r:
+            return json.loads(r.read().decode("utf-8")).get("description")
+    except Exception:
+        return None
 
 
 def normalize_ruleset(payload):
@@ -692,21 +709,33 @@ def audit_repo(entry, spec):
         elif r_intro != h_intro:
             findings.append(("LETTER", "history: HISTORY.md intro does not mirror the README intro - copy the README's opening paragraph (spec/readme-structure.md)"))
 
-    # --- Repository description mirrors the README intro line ---
-    # AGENTS.md "Repository Details": the About description is the README's first line after the H1 as plain
-    # text (links stripped), and the README is the source of truth. spec/readme-structure.md additionally wants
-    # that line link-free, so it carries to the unrendered description without formatting loss.
+    # --- README title/intro is the one canonical short description ---
+    # spec/readme-structure.md item 1 + AGENTS.md "Repository Details": the H1 is the repo name, and the intro
+    # line after it is a link-free, <=100-char plain sentence that carries verbatim to the GitHub About
+    # description and (for a docker repo) the Docker Hub short description. The README is the source of truth.
     if "README.md" in doc_texts:
-        intro_line = title_and_intro(doc_texts["README.md"])[1].split("\n")[0]
+        title, intro = title_and_intro(doc_texts["README.md"])
+        intro_line = intro.split("\n")[0]
+        # The H1 is the repository name; a hyphenated name may render its hyphens as spaces.
+        repo_name = slug.split("/")[-1]
+        if title.replace("-", " ") != repo_name.replace("-", " "):
+            findings.append(("LETTER", f"readme: the H1 title '{title}' is not the repo name '{repo_name}' (a hyphenated name may render its hyphens as spaces) - the H1 is the repository name (spec/readme-structure.md)"))
         if not intro_line:
             findings.append(("LETTER", "readme: no intro line after the H1 - the README opens with the title then a one-line description, which doubles as the About description (spec/readme-structure.md)"))
         else:
             if strip_md_links(intro_line) != intro_line:
                 findings.append(("LETTER", "readme: the intro line carries markdown links - keep it link-free plain text, it doubles as the repo About description (spec/readme-structure.md)"))
-            desc = (live.get("description") or "").strip()
             want = strip_md_links(intro_line).strip()
+            if len(want) > 100:
+                findings.append(("LETTER", f"readme: the intro line is {len(want)} characters, over the 100-char limit (Docker Hub's short-description cap, the tightest surface it feeds) - tighten it to one short sentence (spec/readme-structure.md)"))
+            desc = (live.get("description") or "").strip()
             if desc != want:
                 findings.append(("LETTER", f"description: the About description does not match the README intro line (description '{desc}' vs readme '{want}') - set it from the README, or sharpen the README first if the description carries real detail (AGENTS.md Repository Details)"))
+            # Docker Hub short description mirrors the same intro, for a repo that publishes a docker image.
+            if any((pt.get("target") if isinstance(pt, dict) else pt) == "docker" for pt in entry.get("publish", [])):
+                dh = docker_hub_description(slug)
+                if dh is not None and dh.strip() != want:
+                    findings.append(("LETTER", f"description: the Docker Hub short description ('{dh.strip()}') does not match the README intro ('{want}') - set it from the README (spec/readme-structure.md)"))
 
     # --- cspell single source of truth ---
     # CODESTYLE.md "Markdown and Spelling": cspell.json is the one word list, and a cSpell words block left in
