@@ -720,8 +720,8 @@ def audit_repo(entry, spec):
     if "README.md" in doc_texts:
         title, intro = title_and_intro(doc_texts["README.md"])
         intro_line = intro.split("\n")[0]
-        # The H1 is the repository name; a hyphenated name may render its hyphens as spaces. Use the
-        # GitHub API's canonical name (the registry-URL slug can carry a different case).
+        # The H1 is the repository name, and a hyphenated name may render its hyphens as spaces.
+        # Use the GitHub API's canonical name, since the registry-URL slug can carry a different case.
         repo_name = live.get("name") or slug.split("/")[-1]
         if not title:
             findings.append(("LETTER", "readme: no `# ` H1 title - the README opens with `# <repo name>` then a one-line description (spec/readme-structure.md)"))
@@ -738,9 +738,9 @@ def audit_repo(entry, spec):
             desc = (live.get("description") or "").strip()
             if desc != want:
                 findings.append(("LETTER", f"description: the About description does not match the README intro line (description '{desc}' vs readme '{want}') - set it from the README, or sharpen the README first if the description carries real detail (AGENTS.md Repository Details)"))
-            # Docker Hub short description mirrors the same intro, for a repo that publishes a docker image. A
-            # transient lookup failure surfaces as a DRIFT ("could not verify") rather than aborting the audit or
-            # silently passing; a 404 (image not at the derived name) returns None and is skipped.
+            # Docker Hub short description mirrors the same intro, for a repo that publishes a docker image.
+            # A transient lookup failure surfaces as a DRIFT ("could not verify"), never aborting or silently passing.
+            # A 404 (image not at the derived name) returns None and is skipped.
             if any((pt.get("target") if isinstance(pt, dict) else pt) == "docker" for pt in entry.get("publish", [])):
                 try:
                     dh = docker_hub_description(slug)
