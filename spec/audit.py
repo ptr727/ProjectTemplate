@@ -85,7 +85,7 @@ def docker_hub_description(slug):
     owner, repo = slug.split("/", 1)
     url = f"https://hub.docker.com/v2/repositories/{owner.lower()}/{repo.lower()}/"
     try:
-        with urllib.request.urlopen(url, timeout=15) as r:
+        with urllib.request.urlopen(url, timeout=5) as r:
             return json.loads(r.read().decode("utf-8")).get("description")
     except Exception:
         return None
@@ -716,8 +716,9 @@ def audit_repo(entry, spec):
     if "README.md" in doc_texts:
         title, intro = title_and_intro(doc_texts["README.md"])
         intro_line = intro.split("\n")[0]
-        # The H1 is the repository name; a hyphenated name may render its hyphens as spaces.
-        repo_name = slug.split("/")[-1]
+        # The H1 is the repository name; a hyphenated name may render its hyphens as spaces. Use the
+        # GitHub API's canonical name (the registry-URL slug can carry a different case).
+        repo_name = live.get("name") or slug.split("/")[-1]
         if title.replace("-", " ") != repo_name.replace("-", " "):
             findings.append(("LETTER", f"readme: the H1 title '{title}' is not the repo name '{repo_name}' (a hyphenated name may render its hyphens as spaces) - the H1 is the repository name (spec/readme-structure.md)"))
         if not intro_line:
