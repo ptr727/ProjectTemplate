@@ -44,6 +44,7 @@
                 "url": { "type": "string", "format": "uri" },
                 "status": { "enum": ["cataloged", "backlog"] },
                 "types": { "type": "array", "items": { "type": "string" } },
+                "profiles": { "type": "object", "additionalProperties": { "enum": ["lint-only", "build"] } },
                 "classificationPending": { "type": "boolean" },
                 "groundTruthBranch": { "type": "string" },
                 "workflowModel": { "$ref": "#/$defs/workflowModel" },

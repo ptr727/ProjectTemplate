@@ -20,7 +20,8 @@
                 "verdict": { "enum": ["letter", "intent"] },
                 "assert": { "type": "string" },
                 "intentRef": { "type": "string" },
-                "workflowRef": { "type": "string" }
+                "workflowRef": { "type": "string" },
+                "minProfile": { "enum": ["lint-only", "build"] }
             }
         },
         "typeDef": {
@@ -28,6 +29,7 @@
             "additionalProperties": true,
             "properties": {
                 "checks": { "type": "array", "items": { "$ref": "#/$defs/check" } },
+                "profiles": { "type": "array", "items": { "enum": ["lint-only", "build"] } },
                 "appliesTo": { "type": ["string", "array"] },
                 "priority": { "enum": ["high", "normal"] }
             }
