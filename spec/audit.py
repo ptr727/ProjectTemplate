@@ -520,7 +520,7 @@ def audit_repo(entry, spec):
                     "main": gh(f"repos/{slug}/git/trees/{branch_main['commit']['commit']['tree']['sha']}?recursive=1"),
                 }
                 if not all(isinstance(t, dict) for t in trees.values()) or any(t.get("truncated") for t in trees.values()):
-                    findings.append(("DRIFT", f"branch: {len(cmp['files'])}+ main-side path change(s) develop is behind on (forward-sync needed; tree unavailable or too large to filter cherry-pick noise)"))
+                    findings.append(("DRIFT", f"branch: {len(cmp['files'])}+ path(s) differ between main and develop (forward-sync or reconciliation may be needed; tree unavailable or too large to classify direction)"))
                 else:
                     objs = {name: {e["path"]: e["sha"] for e in t["tree"] if e["type"] in ("blob", "commit")} for name, t in trees.items()}
                     # Split main-side drift by direction, never flagging every difference as a develop deficit.
