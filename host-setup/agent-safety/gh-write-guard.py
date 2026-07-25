@@ -50,7 +50,9 @@ _EXPLICIT_WRITE_METHOD = re.compile(r"(?:--method|-X)\s+(?:POST|PUT|PATCH|DELETE
 _API_FIELD_FLAG = re.compile(r"(?:^|\s)(?:-f|-F|--field|--raw-field|--input)\b")
 _GRAPHQL = re.compile(r"\bgh\s+api\b.*\bgraphql\b", re.S)
 _MUTATION = re.compile(r"\bmutation\b")
-_GIT_PUSH = re.compile(r"\bgit\s+push\b")
+# Loose pre-filter only: matches `git` before `push` even with global options between them
+# (git -C <dir> push). _git_push_args is the accurate arbiter that confirms an executable push.
+_GIT_PUSH = re.compile(r"\bgit\b.*?\bpush\b", re.S)
 _GIT_COMMIT = re.compile(r"\bgit\s+commit\b")
 
 # --- Bypass-of-branch-rule detectors (Rule 4) --------------------------------------------------------
@@ -90,7 +92,7 @@ _API_REPO_PATH = re.compile(r"\bgh\s+api\b[^\n|]*?\brepos/(?P<owner>[A-Za-z0-9_.
 
 
 def _is_gh_write(cmd):
-    if _GH_WRITE_SUB.search(cmd) or _GIT_PUSH.search(cmd):
+    if _GH_WRITE_SUB.search(cmd) or _git_push_args(cmd) is not None:
         return True
     if _GH_API.search(cmd):
         if _EXPLICIT_WRITE_METHOD.search(cmd):
@@ -154,6 +156,39 @@ def _current_push_branch(cwd):
 
 # Flags that consume the following token as a value, so the value is not a positional (remote/refspec).
 _PUSH_VALUE_FLAGS = {"-o", "--push-option", "--repo", "--receive-pack", "--exec"}
+# git global options (before the subcommand) that consume the following token as their value.
+_GIT_GLOBAL_VALUE_OPTS = {"-C", "-c", "--git-dir", "--work-tree", "--namespace", "--exec-path", "--config-env"}
+
+
+def _git_push_args(cmd):
+    """Return the argv following `git [global-options] push`, or None if there is no executable push.
+
+    shlex tokenizes the way the shell does: a quoted refspec (`'HEAD:develop'`) becomes a clean token and
+    a `git push` inside a quoted --body stays a single token, so neither forms a bare `git`+`push` argv.
+    Global options between `git` and `push` (git -C <dir> push, git -c k=v push, git --git-dir=... push)
+    are skipped - missing them would let a direct push slip past Rule 4. Falls back to a naive split only
+    when the quoting is unbalanced.
+    """
+    try:
+        toks = shlex.split(cmd, posix=True)
+    except ValueError:
+        toks = cmd.split()
+    n = len(toks)
+    i = 0
+    while i < n:
+        if toks[i] != "git":
+            i += 1
+            continue
+        j = i + 1
+        while j < n and toks[j].startswith("-"):
+            if toks[j] in _GIT_GLOBAL_VALUE_OPTS and "=" not in toks[j]:
+                j += 2  # this global option consumes the next token as its value
+            else:
+                j += 1
+        if j < n and toks[j] == "push":
+            return toks[j + 1:]
+        i += 1  # this `git` was a different subcommand; keep scanning for another
+    return None
 
 
 def _push_targets(cmd, cwd=None, current_branch=None):
@@ -162,25 +197,14 @@ def _push_targets(cmd, cwd=None, current_branch=None):
     op is 'delete' | 'force' | 'update'. current_branch, when given, stands in for the git resolution
     of a bare push (the self-test passes it for an offline run).
     """
-    # shlex tokenizes the way the shell does: a quoted refspec (`'HEAD:develop'`) becomes a clean token,
-    # and a `git push ...` mentioned inside a quoted --body stays a single token, so it never forms the
-    # `git` `push` argv adjacency below. Fall back to a naive split only if the quoting is unbalanced.
-    try:
-        toks = shlex.split(cmd, posix=True)
-    except ValueError:
-        toks = cmd.split()
-    start = None
-    for k in range(len(toks) - 1):
-        if toks[k] == "git" and toks[k + 1] == "push":
-            start = k + 2
-            break
-    if start is None:
-        return "update", []  # no executable `git push` (only a quoted mention, or `git -C ... push`)
+    args = _git_push_args(cmd)
+    if args is None:
+        return "update", []
     force = delete = False
     positionals = []
-    i = start
-    while i < len(toks):
-        t = toks[i]
+    i = 0
+    while i < len(args):
+        t = args[i]
         if ">" in t or "<" in t:
             break  # a redirection operator (>, 2>, >>, <, 2>&1): end of git argv, start of shell syntax
         if t in ("--force", "-f") or t.startswith("--force-with-lease"):
@@ -419,6 +443,10 @@ _GIT_CASES = [
     ("git commit -m 'mention --no-verify in the message'", None, {}, "allow", "--no-verify inside a quoted message is not a flag"),
     ("gh issue comment 5 --body \"run: git push origin develop\"", None, {"develop": _CODE_RULES}, "allow", "a git push mentioned inside a quoted body is not an executed push"),
     ("git push origin 'HEAD:develop'", None, {"develop": _CODE_RULES}, "deny", "a quoted refspec is unquoted by shlex and still resolves to develop"),
+    ("git -C /repo push origin develop", None, {"develop": _CODE_RULES}, "deny", "global option -C <dir> before push does not dodge Rule 4"),
+    ("git -c user.name=x push origin main", None, {"main": _CODE_RULES}, "deny", "global option -c k=v before push does not dodge Rule 4"),
+    ("git --git-dir=/r/.git push origin develop", None, {"develop": _CODE_RULES}, "deny", "global option --git-dir=... before push does not dodge Rule 4"),
+    ("git -C /repo push origin feature/x", None, {"feature/x": set()}, "allow", "global options before push to a feature branch: allowed"),
     ("gh issue comment 5 --body \"first git push\" && git push origin develop", None, {"develop": _CODE_RULES}, "deny", "a quoted mention before a real push does not hide the real target"),
     ("git push >push.log 2>&1", "develop", {"develop": _CODE_RULES}, "deny", "redirection tokens are not a branch: bare push to develop still denies"),
     ("git push origin develop >push.log 2>&1", None, {"develop": _CODE_RULES}, "deny", "redirect after a real refspec does not hide the develop target"),
