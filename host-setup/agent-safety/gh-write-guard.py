@@ -93,7 +93,7 @@ _API_REPO_PATH = re.compile(r"\bgh\s+api\b[^\n|]*?\brepos/(?P<owner>[A-Za-z0-9_.
 
 
 def _is_gh_write(cmd):
-    if _GH_WRITE_SUB.search(cmd) or _git_push_args(cmd) is not None:
+    if _GH_WRITE_SUB.search(cmd) or _push_arg_lists(cmd):
         return True
     if _GH_API.search(cmd):
         if _EXPLICIT_WRITE_METHOD.search(cmd):
@@ -161,20 +161,39 @@ _PUSH_VALUE_FLAGS = {"-o", "--push-option", "--repo", "--receive-pack", "--exec"
 _GIT_GLOBAL_VALUE_OPTS = {"-C", "-c", "--git-dir", "--work-tree", "--namespace", "--exec-path", "--config-env"}
 
 
-def _git_push_args(cmd):
-    """Return the argv following `git [global-options] push`, or None if there is no executable push.
+_SHELL_OP_CHARS = set("();<>|&")
 
-    shlex tokenizes the way the shell does: a quoted refspec (`'HEAD:develop'`) becomes a clean token and
-    a `git push` inside a quoted --body stays a single token, so neither forms a bare `git`+`push` argv.
-    Global options between `git` and `push` (git -C <dir> push, git -c k=v push, git --git-dir=... push)
-    are skipped - missing them would let a direct push slip past Rule 4. Falls back to a naive split only
-    when the quoting is unbalanced.
+
+def _shell_tokens(cmd):
+    """Tokenize like a shell, isolating operator runs (`|`, `&&`, `;`, `>`, `2>&1`, ...) as their own
+    tokens even when glued to a word - so a `>` inside a quoted value stays part of that token while a
+    real redirection is separated. Degrades gracefully if the quoting cannot be parsed.
     """
     try:
-        toks = shlex.split(cmd, posix=True)
+        lex = shlex.shlex(cmd, posix=True, punctuation_chars=True)
+        lex.whitespace_split = True
+        return list(lex)
     except ValueError:
-        toks = cmd.split()
+        try:
+            return shlex.split(cmd, posix=True)
+        except ValueError:
+            return cmd.split()
+
+
+def _is_shell_op(tok):
+    return tok != "" and all(c in _SHELL_OP_CHARS for c in tok)
+
+
+def _push_arg_lists(cmd):
+    """Every `git [global-options] push` in the command, each as the argv up to the next shell operator.
+
+    Keying off a real `git`->`push` token sequence (with git's value-taking global options skipped) means
+    a push named only inside a quoted --body forms no such sequence, and a compound `push A && push B`
+    yields two independent arg lists so the second push is checked too.
+    """
+    toks = _shell_tokens(cmd)
     n = len(toks)
+    out = []
     i = 0
     while i < n:
         if toks[i] != "git":
@@ -187,76 +206,77 @@ def _git_push_args(cmd):
             else:
                 j += 1
         if j < n and toks[j] == "push":
-            return toks[j + 1:]
-        i += 1  # this `git` was a different subcommand; keep scanning for another
-    return None
+            k = j + 1
+            args = []
+            while k < n and not _is_shell_op(toks[k]):
+                args.append(toks[k])
+                k += 1
+            out.append(args)
+            i = k
+        else:
+            i += 1  # this `git` was a different subcommand; keep scanning
+    return out
 
 
 def _push_targets(cmd, cwd=None, current_branch=None):
-    """Parse a `git push` invocation into (op, [branches]).
-
-    op is 'delete' | 'force' | 'update'. current_branch, when given, stands in for the git resolution
-    of a bare push (the self-test passes it for an offline run).
-    """
-    args = _git_push_args(cmd)
-    if args is None:
-        return "update", []
-    force = delete = push_all = mirror = tags_only = False
-    positionals = []
-    i = 0
-    while i < len(args):
-        t = args[i]
-        if ">" in t or "<" in t:
-            break  # a redirection operator (>, 2>, >>, <, 2>&1): end of git argv, start of shell syntax
-        if t in ("--force", "-f") or t.startswith("--force-with-lease"):
-            force = True
-        elif t in ("--delete", "-d"):
-            delete = True
-        elif t == "--all":
-            push_all = True
-        elif t == "--mirror":
-            mirror = True
-        elif t in ("--tags", "--follow-tags"):
-            tags_only = True
-        elif t in _PUSH_VALUE_FLAGS:
-            i += 1  # skip this flag's value
-        elif t.startswith("-"):
-            pass  # some other flag (e.g. -u, --no-verify)
-        else:
-            positionals.append(t)
-        i += 1
-    # positionals are [remote, refspec...]; a lone positional is the remote (a bare push).
-    refspecs = positionals[1:] if len(positionals) >= 2 else []
-    branches = []
-    for rs in refspecs:
-        if rs.startswith("+"):
-            force = True
-            rs = rs[1:]
-        if rs.startswith(":"):
-            delete = True  # `:dst` empty-source refspec deletes dst
-        dst = rs.split(":", 1)[1] if ":" in rs else rs
-        if dst.startswith("refs/heads/"):
-            dst = dst[len("refs/heads/"):]
-        elif dst.startswith("refs/"):
-            continue  # a tag or other non-branch ref
-        if dst:
-            branches.append(dst)
-    if not refspecs and not delete:
-        if mirror:
-            # --mirror force-updates and prunes every ref: treat as a force against the protected defaults
-            # (a non-existent one just returns no rules and is skipped).
-            force = True
-            branches = list(_PROTECTED_DEFAULT_ORDER)
-        elif push_all:
-            branches = list(_PROTECTED_DEFAULT_ORDER)  # updates every local branch, protected ones included
-        elif tags_only:
-            branches = []  # tags only, no branch is updated
-        else:
-            b = current_branch if current_branch is not None else _current_push_branch(cwd)
-            if b:
-                branches = [b]
-    op = "delete" if delete else ("force" if force else "update")
-    return op, branches
+    """Parse every push in the command into a list of (op, branch); op is delete | force | update."""
+    results = []
+    for args in _push_arg_lists(cmd):
+        force = delete = push_all = mirror = tags_only = False
+        positionals = []
+        i = 0
+        while i < len(args):
+            t = args[i]
+            if t in ("--force", "-f") or t.startswith("--force-with-lease"):
+                force = True
+            elif t in ("--delete", "-d"):
+                delete = True
+            elif t == "--all":
+                push_all = True
+            elif t == "--mirror":
+                mirror = True
+            elif t in ("--tags", "--follow-tags"):
+                tags_only = True
+            elif t in _PUSH_VALUE_FLAGS:
+                i += 1  # skip this flag's value
+            elif t.startswith("-"):
+                pass  # some other flag (e.g. -u, --no-verify)
+            else:
+                positionals.append(t)
+            i += 1
+        # positionals are [remote, refspec...]; a lone positional is the remote (a bare push).
+        refspecs = positionals[1:] if len(positionals) >= 2 else []
+        branches = []
+        for rs in refspecs:
+            if rs.startswith("+"):
+                force = True
+                rs = rs[1:]
+            if rs.startswith(":"):
+                delete = True  # `:dst` empty-source refspec deletes dst
+            dst = rs.split(":", 1)[1] if ":" in rs else rs
+            if dst.startswith("refs/heads/"):
+                dst = dst[len("refs/heads/"):]
+            elif dst.startswith("refs/"):
+                continue  # a tag or other non-branch ref
+            if dst:
+                branches.append(dst)
+        if not refspecs and not delete:
+            if mirror:
+                # --mirror force-updates and prunes every ref: a force against the protected defaults
+                # (a non-existent one just returns no rules and is skipped).
+                force = True
+                branches = list(_PROTECTED_DEFAULT_ORDER)
+            elif push_all:
+                branches = list(_PROTECTED_DEFAULT_ORDER)  # updates every local branch, protected included
+            elif tags_only:
+                branches = []  # tags only, no branch is updated
+            else:
+                b = current_branch if current_branch is not None else _current_push_branch(cwd)
+                if b:
+                    branches = [b]
+        op = "delete" if delete else ("force" if force else "update")
+        results.extend((op, br) for br in branches)
+    return results
 
 
 def _handoff(cmd):
@@ -287,8 +307,7 @@ def _check_push_bypass(cmd, cwd, origin, current_branch=None, rules_lookup=None)
     """Deny a git push that would only succeed by bypassing an active branch rule."""
     if origin is None:
         origin = _origin_owner_repo(cwd)
-    op, branches = _push_targets(cmd, cwd, current_branch)
-    for br in branches:
+    for op, br in _push_targets(cmd, cwd, current_branch):
         rules = rules_lookup(br) if rules_lookup is not None else (
             _live_branch_rules(origin[0], origin[1], br) if origin else None
         )
@@ -468,6 +487,10 @@ _GIT_CASES = [
     ("git push --all origin", None, {"main": set(), "master": set(), "develop": set()}, "allow", "--all where no default branch is protected: allowed"),
     ("git push --mirror origin", None, {"main": _CODE_RULES, "master": set(), "develop": _CODE_RULES}, "deny", "--mirror force-prunes every ref: a protected default denies"),
     ("git push --tags origin", None, {}, "allow", "--tags pushes tags only, no branch target"),
+    ("git push --push-option='a>b' origin develop", None, {"develop": _CODE_RULES}, "deny", "a > inside a quoted option value is not a redirection: develop still parsed"),
+    ("git push origin feature/x && git push origin develop", None, {"feature/x": set(), "develop": _CODE_RULES}, "deny", "second push in a compound is checked: develop denies"),
+    ("git push origin develop && git push origin feature/x", None, {"develop": _CODE_RULES, "feature/x": set()}, "deny", "first push in a compound is checked: develop denies"),
+    ("git push origin develop | cat", None, {"develop": _CODE_RULES}, "deny", "a pipe ends the push argv: develop still parsed"),
     ("gh issue comment 5 --body \"first git push\" && git push origin develop", None, {"develop": _CODE_RULES}, "deny", "a quoted mention before a real push does not hide the real target"),
     ("git push >push.log 2>&1", "develop", {"develop": _CODE_RULES}, "deny", "redirection tokens are not a branch: bare push to develop still denies"),
     ("git push origin develop >push.log 2>&1", None, {"develop": _CODE_RULES}, "deny", "redirect after a real refspec does not hide the develop target"),
