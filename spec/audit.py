@@ -511,10 +511,20 @@ def audit_repo(entry, spec):
                 else:
                     objs = {name: {e["path"]: e["sha"] for e in t["tree"] if e["type"] in ("blob", "commit")} for name, t in trees.items()}
                     changed_on_main = {p for p in set(objs["base"]) | set(objs["main"]) if objs["base"].get(p) != objs["main"].get(p)}
-                    lacking = sorted(p for p in changed_on_main if objs["main"].get(p) != objs["develop"].get(p))
-                    if lacking:
-                        shown = ", ".join(lacking[:8]) + (" ..." if len(lacking) > 8 else "")
-                        findings.append(("DRIFT", f"branch: {len(lacking)} main-side path change(s) develop lacks (forward-sync needed): {shown}"))
+                    differ = [p for p in changed_on_main if objs["main"].get(p) != objs["develop"].get(p)]
+                    # Direction matters. A path main changed while develop still holds it at the merge-base is
+                    # one develop is genuinely behind on - a forward-sync. A path both branches moved off the
+                    # base is diverged, not a develop deficit: develop's copy may already supersede main's (its
+                    # own re-vendor or Dependabot landed the same intent under different commits), so a blind
+                    # "sync" from main would revert develop. Report the two separately, never conflate them.
+                    behind = sorted(p for p in differ if objs["develop"].get(p) == objs["base"].get(p))
+                    diverged = sorted(p for p in differ if objs["develop"].get(p) != objs["base"].get(p))
+                    if behind:
+                        shown = ", ".join(behind[:8]) + (" ..." if len(behind) > 8 else "")
+                        findings.append(("DRIFT", f"branch: {len(behind)} main-side path change(s) develop lacks (forward-sync needed): {shown}"))
+                    if diverged:
+                        shown = ", ".join(diverged[:8]) + (" ..." if len(diverged) > 8 else "")
+                        findings.append(("DRIFT", f"branch: {len(diverged)} path(s) changed on both main and develop since the merge-base - reconcile before promoting (develop may already supersede main): {shown}"))
 
     # --- General settings ---
     expected = dict(spec["settings"])
