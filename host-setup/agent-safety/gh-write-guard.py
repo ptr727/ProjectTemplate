@@ -244,8 +244,8 @@ def _push_targets(cmd, cwd=None, current_branch=None):
                 push_all = True
             elif t == "--mirror":
                 mirror = True
-            elif t in ("--tags", "--follow-tags"):
-                tags_only = True
+            elif t == "--tags":
+                tags_only = True  # --follow-tags is NOT tags-only: it also pushes the current branch
             elif t in _PUSH_VALUE_FLAGS:
                 i += 1  # skip this flag's value
             elif t.startswith("-"):
@@ -496,6 +496,7 @@ _GIT_CASES = [
     ("git push --all origin", None, {"main": set(), "master": set(), "develop": set()}, "allow", "--all where no default branch is protected: allowed"),
     ("git push --mirror origin", None, {"main": _CODE_RULES, "master": set(), "develop": _CODE_RULES}, "deny", "--mirror force-prunes every ref: a protected default denies"),
     ("git push --tags origin", None, {}, "allow", "--tags pushes tags only, no branch target"),
+    ("git push --follow-tags origin", "develop", {"develop": _CODE_RULES}, "deny", "--follow-tags also pushes the current branch: resolves develop"),
     ("git push --push-option='a>b' origin develop", None, {"develop": _CODE_RULES}, "deny", "a > inside a quoted option value is not a redirection: develop still parsed"),
     ("git push origin feature/x && git push origin develop", None, {"feature/x": set(), "develop": _CODE_RULES}, "deny", "second push in a compound is checked: develop denies"),
     ("git push origin develop && git push origin feature/x", None, {"develop": _CODE_RULES, "feature/x": set()}, "deny", "first push in a compound is checked: develop denies"),
