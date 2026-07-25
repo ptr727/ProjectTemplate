@@ -62,10 +62,10 @@ The set of types, their profiles, and each type's checks is governed, like the s
 
 <!-- Internal -->
 
-[section-model]: ./section-model.md
-[fidelity-model]: ./fidelity-model.md
-[types]: ./project-types.json
-[schema]: ./project-types.schema.json
-[repos]: ../registry/repos.json
-[validate]: ./validate.py
 [audit]: ./audit.py
+[fidelity-model]: ./fidelity-model.md
+[repos]: ../registry/repos.json
+[schema]: ./project-types.schema.json
+[section-model]: ./section-model.md
+[types]: ./project-types.json
+[validate]: ./validate.py
