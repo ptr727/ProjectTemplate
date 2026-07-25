@@ -318,18 +318,28 @@ def _check_bypass_flags(cmd):
 
 def _check_push_bypass(cmd, cwd, origin, current_branch=None, rules_lookup=None):
     """Deny a git push that would only succeed by bypassing an active branch rule."""
-    if origin is None:
+    targets = _push_targets(cmd, cwd, current_branch)
+    if not targets:
+        return "allow", ""  # only a quoted mention or a non-push git command: no git/API work needed
+    if rules_lookup is None and origin is None:
         origin = _origin_owner_repo(cwd)
-    for op, br in _push_targets(cmd, cwd, current_branch):
-        rules = rules_lookup(br) if rules_lookup is not None else (
-            _live_branch_rules(origin[0], origin[1], br) if origin else None
-        )
+    for op, br in targets:
+        if rules_lookup is not None:
+            rules = rules_lookup(br)
+        elif origin is not None:
+            rules = _live_branch_rules(origin[0], origin[1], br)
+        else:
+            rules = None  # no origin to query the rules against
         if rules is None:
             if br in _PROTECTED_DEFAULT:
+                reason = (
+                    "this checkout's origin repository could not be determined"
+                    if origin is None and rules_lookup is None
+                    else "its branch rules could not be read (the API may be unreachable)"
+                )
                 return "deny", (
-                    f"Could not read the branch rules for '{br}', a protected-by-default branch "
-                    f"(main/master/develop). Failing closed rather than risk a silent bypass - retry when "
-                    f"the API is reachable." + _handoff(cmd)
+                    f"Could not verify '{br}', a protected-by-default branch (main/master/develop), "
+                    f"because {reason}. Failing closed rather than risk a silent bypass." + _handoff(cmd)
                 )
             continue  # an unknown-rules feature/other branch: nothing to bypass, let it through
         if op == "update" and "pull_request" in rules:
