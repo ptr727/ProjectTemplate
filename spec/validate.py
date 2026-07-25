@@ -140,7 +140,12 @@ def main():
             if t not in known_types:
                 errors.append(f"{name}: type '{t}' not defined in project-types.json")
         # A declared profile must name one of the repo's types and a profile that type allows (spec/type-model.md).
-        for tname, prof in repo.get("profiles", {}).items():
+        # CI runs no JSON-schema validation, so guard the shape here rather than crash on .items().
+        profiles_decl = repo.get("profiles", {})
+        if not isinstance(profiles_decl, dict):
+            errors.append(f"{name}: profiles must be an object mapping a type to its profile")
+            profiles_decl = {}
+        for tname, prof in profiles_decl.items():
             allowed = types["types"].get(tname, {}).get("profiles", [])
             if tname not in repo_types:
                 errors.append(f"{name}: profile declared for '{tname}', not one of the repo's types")
