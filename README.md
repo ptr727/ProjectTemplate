@@ -138,6 +138,8 @@ Running backlog (kept here, in a committed file, so the guidance survives across
 - Adopt the OCI annotation keys (`org.opencontainers.image.*`) for Docker image metadata across the Docker repos, replacing the ad-hoc and `org.label-schema.*` labels (from #363).
 - Sweep `ManagePackageVersionsCentrally` placement to `Directory.Packages.props` fleet-wide (PlexCleaner sets it in `Directory.Build.props`, off the CODESTYLE canonical).
 - Finish onboarding hardening (from #310): make the `AUDIT.md` audit a required onboarding step and run the per-type cold-start self-tests tracked in `reports/conformance-matrix.md` (`STANDUP.md` is already in place).
+- Refresh the README (it has gone stale) and evaluate a lower-maintenance structure - for example a per-section index that points into each doc with a one-line description, keeping the README as the adoption and audit-instruction entry point with pointers to the other docs. A per-section index trades brevity for a sync obligation: it must track what the docs contain.
+- Add a linter-only Python project type for codegen/boilerplate Python - code that runs during another tool's build to emit generated source (e.g. ESPHome codegen that produces enriched C++ at compile time), so it ships no unit tests and no coverage and needs only the linter. Keep it distinct from the existing `python` type, which is utility code that can and should carry unit tests and coverage (as in PlexCleaner). Until it exists, ESPHome-Config stays `source-only` and its `+python` reclassification is deferred - accept its one outstanding validation finding meanwhile.
 
 ## License
 

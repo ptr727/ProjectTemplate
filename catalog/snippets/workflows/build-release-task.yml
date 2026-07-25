@@ -253,6 +253,7 @@ jobs:
             ids=""
           fi
           for id in $ids; do
-            gh api --method DELETE "repos/$GITHUB_REPOSITORY/actions/artifacts/$id" \
-              || echo "::warning::Failed to delete artifact $id; retention-days backstop will reap it."
+            if ! gh api --method DELETE "repos/$GITHUB_REPOSITORY/actions/artifacts/$id"; then
+              echo "::warning::Failed to delete artifact $id; retention-days backstop will reap it."
+            fi
           done
