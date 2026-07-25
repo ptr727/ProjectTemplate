@@ -201,7 +201,8 @@
             "name": "ESPHome-Config",
             "url": "https://github.com/ptr727/ESPHome-Config",
             "status": "cataloged",
-            "types": ["source-only"],
+            "types": ["source-only", "python", "cpp"],
+            "profiles": { "python": "lint-only", "cpp": "lint-only" },
             "groundTruthBranch": "main",
             "workflowModel": "operational",
             "lineEndings": "lf",
@@ -210,7 +211,7 @@
             "requiredSecrets": [],
             "consumerModel": "pull",
             "releaseTrigger": "dispatch-only",
-            "driftNotes": ["ESPHome device config YAML consumed by the cataloged ESPHome-NonRoot image at runtime; distinct from that Docker repo."]
+            "driftNotes": ["ESPHome device config YAML consumed by the cataloged ESPHome-NonRoot image at runtime. Distinct from that Docker repo.", "First repo with a lint-only python codegen subtree (easystart/python: ruff/mypy config only, no tests, no uv.lock) and lint-only cpp (committed custom-component and template headers). A shared clang-format config for the cpp style is not yet added."]
         },
         {
             "name": "HomeAssistant-Config",
