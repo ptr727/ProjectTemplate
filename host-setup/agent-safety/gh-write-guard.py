@@ -53,7 +53,8 @@ _MUTATION = re.compile(r"\bmutation\b")
 # Loose pre-filter only: matches `git` before `push` even with global options between them
 # (git -C <dir> push). _git_push_args is the accurate arbiter that confirms an executable push.
 _GIT_PUSH = re.compile(r"\bgit\b.*?\bpush\b", re.S)
-_GIT_COMMIT = re.compile(r"\bgit\s+commit\b")
+# `git commit`, allowing an absolute/relative path and a .exe suffix (/usr/bin/git commit, git.exe commit).
+_GIT_COMMIT = re.compile(r"(?:^|\s)\S*?\bgit(?:\.exe)?\s+commit\b", re.I)
 
 # --- Bypass-of-branch-rule detectors (Rule 4) --------------------------------------------------------
 # A git operation is denied when it would only succeed by bypassing an active branch rule - the harm is
@@ -184,6 +185,14 @@ def _is_shell_op(tok):
     return tok != "" and all(c in _SHELL_OP_CHARS for c in tok)
 
 
+def _is_git_exe(tok):
+    """True if the token invokes git, including an absolute/relative path or a .exe suffix
+    (/usr/bin/git, ./git, C:\\...\\git.exe) - an exact "git" match alone is a bypass path.
+    """
+    base = tok.rsplit("/", 1)[-1].rsplit("\\", 1)[-1].lower()
+    return base in ("git", "git.exe")
+
+
 def _push_arg_lists(cmd):
     """Every `git [global-options] push` in the command, each as the argv up to the next shell operator.
 
@@ -196,7 +205,7 @@ def _push_arg_lists(cmd):
     out = []
     i = 0
     while i < n:
-        if toks[i] != "git":
+        if not _is_git_exe(toks[i]):
             i += 1
             continue
         j = i + 1
@@ -491,6 +500,9 @@ _GIT_CASES = [
     ("git push origin feature/x && git push origin develop", None, {"feature/x": set(), "develop": _CODE_RULES}, "deny", "second push in a compound is checked: develop denies"),
     ("git push origin develop && git push origin feature/x", None, {"develop": _CODE_RULES, "feature/x": set()}, "deny", "first push in a compound is checked: develop denies"),
     ("git push origin develop | cat", None, {"develop": _CODE_RULES}, "deny", "a pipe ends the push argv: develop still parsed"),
+    ("/usr/bin/git push origin develop", None, {"develop": _CODE_RULES}, "deny", "an absolute-path git is still git: direct push denies"),
+    ("/usr/bin/git commit -n -m x", None, {}, "deny", "absolute-path git commit -n is --no-verify"),
+    ("git.exe push origin develop", None, {"develop": _CODE_RULES}, "deny", "git.exe is still git: direct push denies"),
     ("gh issue comment 5 --body \"first git push\" && git push origin develop", None, {"develop": _CODE_RULES}, "deny", "a quoted mention before a real push does not hide the real target"),
     ("git push >push.log 2>&1", "develop", {"develop": _CODE_RULES}, "deny", "redirection tokens are not a branch: bare push to develop still denies"),
     ("git push origin develop >push.log 2>&1", None, {"develop": _CODE_RULES}, "deny", "redirect after a real refspec does not hide the develop target"),
