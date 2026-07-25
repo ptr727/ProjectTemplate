@@ -51,7 +51,7 @@ _API_FIELD_FLAG = re.compile(r"(?:^|\s)(?:-f|-F|--field|--raw-field|--input)\b")
 _GRAPHQL = re.compile(r"\bgh\s+api\b.*\bgraphql\b", re.S)
 _MUTATION = re.compile(r"\bmutation\b")
 # Loose pre-filter only: matches `git` before `push` even with global options between them
-# (git -C <dir> push). _git_push_args is the accurate arbiter that confirms an executable push.
+# (git -C <dir> push). _push_arg_lists is the accurate arbiter that confirms an executable push.
 _GIT_PUSH = re.compile(r"\bgit\b.*?\bpush\b", re.S)
 # `git commit`, allowing an absolute/relative path and a .exe suffix (/usr/bin/git commit, git.exe commit).
 _GIT_COMMIT = re.compile(r"(?:^|\s)\S*?\bgit(?:\.exe)?\s+commit\b", re.I)
@@ -304,7 +304,13 @@ def _check_bypass_flags(cmd):
             "This uses `gh pr merge --admin`, which merges past required reviews and status checks using "
             "admin power - a bypass of the merge gate. Merge only when the gate is satisfied." + _handoff(cmd)
         )
-    if _NO_VERIFY_LONG.search(bare) or (_GIT_COMMIT.search(bare) and _COMMIT_SHORT_N.search(bare)):
+    # --no-verify / commit -n skip the git hooks, so they only matter for a git commit or push - other
+    # tools use --no-verify for unrelated things, and denying those would be a false positive.
+    is_commit = _GIT_COMMIT.search(bare) is not None
+    is_push = bool(_push_arg_lists(bare))
+    long_no_verify = (is_commit or is_push) and _NO_VERIFY_LONG.search(bare)
+    short_n_commit = is_commit and _COMMIT_SHORT_N.search(bare)  # `-n` is --no-verify for commit (push -n is dry-run)
+    if long_no_verify or short_n_commit:
         return "deny", (
             "This uses --no-verify, which skips the git hooks (signing, lint, and pre-push gates). "
             "Skipping verification is a bypass; run the command without it." + _handoff(cmd)
@@ -486,6 +492,7 @@ _GIT_CASES = [
     ("gh pr merge 5 --admin --squash", None, {}, "deny", "gh pr merge --admin overrides the merge gate"),
     ("gh pr merge 5 \\\n  --admin --squash", None, {}, "deny", "line-continued gh pr merge --admin still caught"),
     ("git commit -m 'mention --no-verify in the message'", None, {}, "allow", "--no-verify inside a quoted message is not a flag"),
+    ("npm publish --no-verify", None, {}, "allow", "--no-verify on a non-git command is not a git-hook bypass"),
     ("gh issue comment 5 --body \"run: git push origin develop\"", None, {"develop": _CODE_RULES}, "allow", "a git push mentioned inside a quoted body is not an executed push"),
     ("git push origin 'HEAD:develop'", None, {"develop": _CODE_RULES}, "deny", "a quoted refspec is unquoted by shlex and still resolves to develop"),
     ("git -C /repo push origin develop", None, {"develop": _CODE_RULES}, "deny", "global option -C <dir> before push does not dodge Rule 4"),
