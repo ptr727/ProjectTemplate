@@ -5,14 +5,21 @@ Registered as a Claude Code PreToolUse hook on the Bash tool. It reads the tool-
 classifies the command, and DENIES (with a reason shown to the agent) when a command is a GitHub *write*
 matching a known-dangerous pattern. Reads and everything that is not a clear write pass through.
 
-Precision over recall by design: it denies the specific shapes that caused the incident, not everything
-it cannot parse. A false deny would break the agent, while a missed case still falls under the AGENTS.md
-"Repository Boundaries and Write Safety" prose rules. The three denied shapes:
+Precision over recall for the write-footgun shapes (1-3): they deny the specific shapes that caused the
+incident, not everything unparseable - a false deny would break the agent, and a miss still falls under
+the AGENTS.md "Repository Boundaries and Write Safety" prose rules. The branch-bypass rule (4) instead
+fails CLOSED on the protected-by-default branches, because the harm there is a silent success under the
+maintainer's admin bypass. The denied shapes:
 
   1. a state-changing gh call whose output is discarded or forced to success
      (>/dev/null, 2>/dev/null, &>/dev/null, || true, || :, || echo)
   2. a GraphQL mutation passing a literal GitHub node id (PRRT_/PR_/BOT_/...) instead of a $variable
   3. a gh write with an explicit -R/--repo/repos/<owner>/<repo> target outside the checkout's origin
+  4. a git operation that would only land by bypassing an active branch rule: a direct push to a branch
+     whose rules require a pull request, a force-push where history is protected, a delete where deletion
+     is blocked, or an explicit-bypass flag (`gh pr merge --admin`, `git commit/push --no-verify`). The
+     branch's live rules are the judge, so a code-style develop is denied and a config-style develop is
+     allowed with no hardcoded repo list.
 
 Run `gh-write-guard.py --selftest` to verify the decision matrix without Claude Code.
 """
@@ -42,6 +49,23 @@ _API_FIELD_FLAG = re.compile(r"(?:^|\s)(?:-f|-F|--field|--raw-field|--input)\b")
 _GRAPHQL = re.compile(r"\bgh\s+api\b.*\bgraphql\b", re.S)
 _MUTATION = re.compile(r"\bmutation\b")
 _GIT_PUSH = re.compile(r"\bgit\s+push\b")
+_GIT_COMMIT = re.compile(r"\bgit\s+commit\b")
+
+# --- Bypass-of-branch-rule detectors (Rule 4) --------------------------------------------------------
+# A git operation is denied when it would only succeed by bypassing an active branch rule - the harm is
+# that the maintainer's admin identity CAN bypass, so a plain-looking push silently lands on a protected
+# branch. The judgement is made against the branch's *live* rules (self-configuring: a code-style develop
+# carries `pull_request` and is denied, a config-style develop does not and is allowed), except for the
+# explicit-bypass flags below, which are the bypass by definition and need no query.
+#
+# Branches that fail CLOSED when their rules cannot be read - protected-by-default across every config.
+_PROTECTED_DEFAULT = {"main", "master", "develop"}
+# `gh pr merge --admin` overrides required reviews/status checks with admin power.
+_GH_ADMIN_MERGE = re.compile(r"\bgh\s+pr\s+merge\b[^\n|&;]*(?:^|\s)--admin\b")
+# `--no-verify` skips the local git hooks (signing / lint / pre-push gates). `git commit` also spells it
+# `-n`; `git push -n` means --dry-run, so the short form is a bypass only for commit.
+_NO_VERIFY_LONG = re.compile(r"(?:^|\s)--no-verify\b")
+_COMMIT_SHORT_N = re.compile(r"(?:^|\s)-n\b")
 
 # --- Risk-pattern detectors --------------------------------------------------------------------------
 # Output-discard / force-success tails. Bare `2>&1` is NOT here: it merges stderr into stdout, leaving
@@ -88,12 +112,176 @@ def _origin_owner_repo(cwd):
     return (m.group(1).lower(), m.group(2).lower()) if m else None
 
 
-def classify(cmd, cwd=None, origin=None):
+def _live_branch_rules(owner, repo, branch):
+    """Return the set of active rule types on a branch, or None if the query cannot be resolved.
+
+    None (not an empty set) signals "unknown" so the caller can fail closed on a protected-default
+    branch. An empty set means the branch genuinely has no rules (a feature branch).
+    """
+    try:
+        r = subprocess.run(
+            ["gh", "api", f"repos/{owner}/{repo}/rules/branches/{branch}", "--jq", "[.[].type]"],
+            capture_output=True, text=True, timeout=10,
+        )
+    except Exception:
+        return None
+    if r.returncode != 0:
+        return None
+    try:
+        return set(json.loads(r.stdout or "[]"))
+    except Exception:
+        return None
+
+
+def _current_push_branch(cwd):
+    """Resolve the destination branch of a bare `git push` from the branch's configured push target."""
+    for args in (
+        ["rev-parse", "--abbrev-ref", "--symbolic-full-name", "@{push}"],
+        ["rev-parse", "--abbrev-ref", "HEAD"],
+    ):
+        try:
+            r = subprocess.run(["git", "-C", cwd or ".", *args], capture_output=True, text=True, timeout=5)
+        except Exception:
+            return None
+        ref = r.stdout.strip()
+        if r.returncode == 0 and ref and ref != "HEAD":
+            return ref.split("/", 1)[1] if "/" in ref else ref
+    return None
+
+
+# Flags that consume the following token as a value, so the value is not a positional (remote/refspec).
+_PUSH_VALUE_FLAGS = {"-o", "--push-option", "--repo", "--receive-pack", "--exec"}
+
+
+def _push_targets(cmd, cwd=None, current_branch=None):
+    """Parse a `git push` invocation into (op, [branches]).
+
+    op is 'delete' | 'force' | 'update'. current_branch, when given, stands in for the git resolution
+    of a bare push (the self-test passes it for an offline run).
+    """
+    m = _GIT_PUSH.search(cmd)
+    seg = cmd[m.end():]
+    seg = re.split(r"&&|\|\||[;|\n]", seg)[0]
+    toks = seg.split()
+    force = delete = False
+    positionals = []
+    i = 0
+    while i < len(toks):
+        t = toks[i]
+        if t in ("--force", "-f") or t.startswith("--force-with-lease"):
+            force = True
+        elif t in ("--delete", "-d"):
+            delete = True
+        elif t in _PUSH_VALUE_FLAGS:
+            i += 1  # skip this flag's value
+        elif t.startswith("-"):
+            pass  # some other flag (e.g. -u, --tags, --no-verify)
+        else:
+            positionals.append(t)
+        i += 1
+    # positionals are [remote, refspec...]; a lone positional is the remote (a bare push).
+    refspecs = positionals[1:] if len(positionals) >= 2 else []
+    branches = []
+    for rs in refspecs:
+        if rs.startswith("+"):
+            force = True
+            rs = rs[1:]
+        if rs.startswith(":"):
+            delete = True  # `:dst` empty-source refspec deletes dst
+        dst = rs.split(":", 1)[1] if ":" in rs else rs
+        if dst.startswith("refs/heads/"):
+            dst = dst[len("refs/heads/"):]
+        elif dst.startswith("refs/"):
+            continue  # a tag or other non-branch ref
+        if dst:
+            branches.append(dst)
+    if not refspecs and not delete:
+        b = current_branch if current_branch is not None else _current_push_branch(cwd)
+        if b:
+            branches = [b]
+    op = "delete" if delete else ("force" if force else "update")
+    return op, branches
+
+
+def _handoff(cmd):
+    return (
+        " The agent must not bypass this - if the bypass is genuinely intended, hand the exact command "
+        "to Pieter to run in his terminal. See AGENTS.md 'Repository Boundaries and Write Safety' and the "
+        "Branching Model."
+    )
+
+
+def _check_bypass_flags(cmd):
+    """Deny the explicit-bypass flags: they are a bypass by definition, no branch query needed."""
+    bare = _QUOTED_SPAN.sub("", cmd)  # a flag mentioned inside a quoted message/body is not a real flag
+    if _GH_ADMIN_MERGE.search(bare):
+        return "deny", (
+            "This uses `gh pr merge --admin`, which merges past required reviews and status checks using "
+            "admin power - a bypass of the merge gate. Merge only when the gate is satisfied." + _handoff(cmd)
+        )
+    if _NO_VERIFY_LONG.search(bare) or (_GIT_COMMIT.search(bare) and _COMMIT_SHORT_N.search(bare)):
+        return "deny", (
+            "This uses --no-verify, which skips the git hooks (signing, lint, and pre-push gates). "
+            "Skipping verification is a bypass; run the command without it." + _handoff(cmd)
+        )
+    return "allow", ""
+
+
+def _check_push_bypass(cmd, cwd, origin, current_branch=None, rules_lookup=None):
+    """Deny a git push that would only succeed by bypassing an active branch rule."""
+    if origin is None:
+        origin = _origin_owner_repo(cwd)
+    op, branches = _push_targets(cmd, cwd, current_branch)
+    for br in branches:
+        rules = rules_lookup(br) if rules_lookup is not None else (
+            _live_branch_rules(origin[0], origin[1], br) if origin else None
+        )
+        if rules is None:
+            if br in _PROTECTED_DEFAULT:
+                return "deny", (
+                    f"Could not read the branch rules for '{br}', a protected-by-default branch "
+                    f"(main/master/develop). Failing closed rather than risk a silent bypass - retry when "
+                    f"the API is reachable." + _handoff(cmd)
+                )
+            continue  # an unknown-rules feature/other branch: nothing to bypass, let it through
+        if op == "update" and "pull_request" in rules:
+            return "deny", (
+                f"This is a direct push to '{br}', whose branch rules require a pull request "
+                f"(rule: pull_request); it only lands by bypassing that rule with admin power. Use the "
+                f"protocol path - commit on a feature branch and open a PR (feature -> squash -> develop, "
+                f"or develop -> merge -> main)." + _handoff(cmd)
+            )
+        if op == "force" and (rules & {"non_fast_forward", "required_linear_history"}):
+            return "deny", (
+                f"This force-pushes '{br}', whose rules forbid rewriting history "
+                f"(rule: non_fast_forward/required_linear_history). Never force-push a protected branch; "
+                f"land changes as follow-up commits." + _handoff(cmd)
+            )
+        if op == "delete" and "deletion" in rules:
+            return "deny", (
+                f"This deletes '{br}', whose rules forbid deletion (rule: deletion)." + _handoff(cmd)
+            )
+    return "allow", ""
+
+
+def classify(cmd, cwd=None, origin=None, current_branch=None, rules_lookup=None):
     """Return (decision, reason). decision is 'allow' or 'deny'.
 
     origin, when given, is a (owner, repo) tuple used instead of resolving from cwd - the self-test
-    passes it for a deterministic, offline run.
+    passes it for a deterministic, offline run. current_branch and rules_lookup are likewise test seams:
+    current_branch stands in for the git resolution of a bare push, and rules_lookup(branch) stands in
+    for the live branch-rules query.
     """
+    # Rule 4: a git operation that would only succeed by bypassing an active branch rule. Checked before
+    # the gh-write gate below, since `git commit --no-verify` is a bypass yet not a GitHub write.
+    dec, reason = _check_bypass_flags(cmd)
+    if dec == "deny":
+        return dec, reason
+    if _GIT_PUSH.search(cmd):
+        dec, reason = _check_push_bypass(cmd, cwd, origin, current_branch, rules_lookup)
+        if dec == "deny":
+            return dec, reason
+
     if not _is_gh_write(cmd):
         return "allow", ""
 
@@ -163,7 +351,6 @@ _CASES = [
     ("gh api graphql -f query='{repository(owner:\"o\",name:\"r\"){pullRequest(number:1){reviewThreads(first:100){nodes{id}}}}}'", "allow", "graphql READ query"),
     ("gh pr view 5 --json reviews", "allow", "gh pr view (read)"),
     ("return 1 2>/dev/null || exit 1", "allow", "shell guard, not a gh write"),
-    ("git push origin develop", "allow", "normal push (no suppression, no cross-repo)"),
     ("git commit -m 'x' && git push >/dev/null 2>&1", "deny", "push with discarded output"),
     ("gh issue comment 5 --body x 2>&1 | tee out.log", "allow", "bare 2>&1 piped to tee is not suppression"),
     ("gh pr comment 5 --body ok 2>&1", "allow", "bare 2>&1 leaves output visible"),
@@ -178,14 +365,53 @@ _CASES = [
     ("gh api graphql -f query='mutation{resolveReviewThread(input:{threadId:$t}){thread{isResolved}}}' -F t=\"TODO_fixit\"", "allow", "short all-caps token is not a node id"),
 ]
 
+# Rule-4 (branch-rule bypass) cases. Each carries its own branch->rules map so the run is deterministic
+# and offline - the real hook queries the live rules, here rules_lookup is injected. current_branch
+# stands in for the git resolution of a bare push. `None` rules mean the query could not be read.
+_CODE_RULES = {"deletion", "non_fast_forward", "required_linear_history", "required_signatures",
+               "pull_request", "required_status_checks", "copilot_code_review"}  # code-style develop / any main
+_CONFIG_RULES = {"deletion", "non_fast_forward", "required_signatures"}  # config-style develop: no pull_request
+_GIT_CASES = [
+    # (command, current_branch, {branch: rules_set_or_None}, expected_decision, label)
+    ("git push origin develop", None, {"develop": _CODE_RULES}, "deny", "code-style develop: direct push bypasses pull_request"),
+    ("git push origin develop", None, {"develop": _CONFIG_RULES}, "allow", "config-style develop: no pull_request rule, direct push allowed"),
+    ("git push origin main", None, {"main": _CODE_RULES}, "deny", "main: direct push bypasses pull_request"),
+    ("git push origin feature/x", None, {"feature/x": set()}, "allow", "feature branch: no rules, allowed"),
+    ("git push -u origin feature/x", None, {"feature/x": set()}, "allow", "feature branch with -u: allowed"),
+    ("git push origin HEAD:develop", None, {"develop": _CODE_RULES}, "deny", "HEAD:develop refspec resolves to develop"),
+    ("git push origin abc1234:refs/heads/main", None, {"main": _CODE_RULES}, "deny", "sha:refs/heads/main resolves to main"),
+    ("git push", "develop", {"develop": _CODE_RULES}, "deny", "bare push resolving to develop"),
+    ("git push", "feature/x", {"feature/x": set()}, "allow", "bare push resolving to a feature branch"),
+    ("git push --force origin develop", None, {"develop": _CONFIG_RULES}, "deny", "force-push denied by non_fast_forward even on config develop"),
+    ("git push --force-with-lease origin feature/x", None, {"feature/x": set()}, "allow", "force-with-lease to a ruleless feature branch"),
+    ("git push origin +HEAD:develop", None, {"develop": _CODE_RULES}, "deny", "+refspec is a force-push to develop"),
+    ("git push --delete origin develop", None, {"develop": _CODE_RULES}, "deny", "delete develop denied by deletion rule"),
+    ("git push origin :develop", None, {"develop": _CODE_RULES}, "deny", "empty-source :develop is a delete"),
+    ("git push origin develop", None, {"develop": None}, "deny", "develop with unreadable rules: fail closed"),
+    ("git push origin feature/x", None, {"feature/x": None}, "allow", "feature branch with unreadable rules: fail open"),
+    ("git commit --no-verify -m x", None, {}, "deny", "commit --no-verify skips the hooks"),
+    ("git commit -n -m x", None, {}, "deny", "commit -n is --no-verify"),
+    ("git push --no-verify origin feature/x", None, {"feature/x": set()}, "deny", "push --no-verify is a bypass even on a feature branch"),
+    ("git push -n origin develop", None, {"develop": _CODE_RULES}, "deny", "push -n is dry-run not no-verify, but the direct push to develop still denies"),
+    ("gh pr merge 5 --admin --squash", None, {}, "deny", "gh pr merge --admin overrides the merge gate"),
+    ("git commit -m 'mention --no-verify in the message'", None, {}, "allow", "--no-verify inside a quoted message is not a flag"),
+]
+
 
 def _selftest():
-    # Deterministic offline run: pin origin to ptr727/PlexCleaner (the incident repo) so the
-    # cross-origin case resolves without touching a real checkout.
+    # Deterministic offline run: pin origin to ptr727/PlexCleaner (the incident repo) so the cross-origin
+    # case resolves without touching a real checkout. The gh-write cases inject empty rules + a feature
+    # current-branch so no case reaches the live branch-rules query.
     origin = ("ptr727", "plexcleaner")
     ok = True
     for cmd, want, label in _CASES:
-        got, _ = classify(cmd, origin=origin)
+        got, _ = classify(cmd, origin=origin, current_branch="feature/x", rules_lookup=lambda br: set())
+        mark = "ok  " if got == want else "FAIL"
+        if got != want:
+            ok = False
+        print(f"  {mark} [{got:5}] want={want:5} {label}")
+    for cmd, cur, rmap, want, label in _GIT_CASES:
+        got, _ = classify(cmd, origin=origin, current_branch=cur, rules_lookup=lambda br, _m=rmap: _m.get(br))
         mark = "ok  " if got == want else "FAIL"
         if got != want:
             ok = False
