@@ -53,8 +53,6 @@ _MUTATION = re.compile(r"\bmutation\b")
 # Loose pre-filter only: matches `git` before `push` even with global options between them
 # (git -C <dir> push). _push_arg_lists is the accurate arbiter that confirms an executable push.
 _GIT_PUSH = re.compile(r"\bgit\b.*?\bpush\b", re.S)
-# `git commit`, allowing an absolute/relative path and a .exe suffix (/usr/bin/git commit, git.exe commit).
-_GIT_COMMIT = re.compile(r"(?:^|\s)\S*?\bgit(?:\.exe)?\s+commit\b", re.I)
 
 # --- Bypass-of-branch-rule detectors (Rule 4) --------------------------------------------------------
 # A git operation is denied when it would only succeed by bypassing an active branch rule - the harm is
@@ -68,10 +66,6 @@ _PROTECTED_DEFAULT_ORDER = ("main", "master", "develop")
 _PROTECTED_DEFAULT = set(_PROTECTED_DEFAULT_ORDER)
 # `gh pr merge --admin` overrides required reviews/status checks with admin power.
 _GH_ADMIN_MERGE = re.compile(r"\bgh\s+pr\s+merge\b[^\n|&;]*(?:^|\s)--admin\b")
-# `--no-verify` skips the local git hooks (signing / lint / pre-push gates). `git commit` also spells it
-# `-n`; `git push -n` means --dry-run, so the short form is a bypass only for commit.
-_NO_VERIFY_LONG = re.compile(r"(?:^|\s)--no-verify\b")
-_COMMIT_SHORT_N = re.compile(r"(?:^|\s)-n\b")
 
 # --- Risk-pattern detectors --------------------------------------------------------------------------
 # Output-discard / force-success tails. Bare `2>&1` is NOT here: it merges stderr into stdout, leaving
@@ -193,12 +187,12 @@ def _is_git_exe(tok):
     return base in ("git", "git.exe")
 
 
-def _push_arg_lists(cmd):
-    """Every `git [global-options] push` in the command, each as the argv up to the next shell operator.
+def _git_subcommand_arglists(cmd, sub):
+    """Every `git [global-options] <sub>` in the command, each as the argv up to the next shell operator.
 
-    Keying off a real `git`->`push` token sequence (with git's value-taking global options skipped) means
-    a push named only inside a quoted --body forms no such sequence, and a compound `push A && push B`
-    yields two independent arg lists so the second push is checked too.
+    Keying off a real `git`->`<sub>` token sequence (git's value-taking global options skipped, an
+    absolute-path or .exe git recognized) means the same invocation named inside a quoted --body forms no
+    such sequence, and a compound `<sub> A && <sub> B` yields two independent arg lists so both are seen.
     """
     toks = _shell_tokens(cmd)
     n = len(toks)
@@ -214,7 +208,7 @@ def _push_arg_lists(cmd):
                 j += 2  # this global option consumes the next token as its value
             else:
                 j += 1
-        if j < n and toks[j] == "push":
+        if j < n and toks[j] == sub:
             k = j + 1
             args = []
             while k < n and not _is_shell_op(toks[k]):
@@ -225,6 +219,10 @@ def _push_arg_lists(cmd):
         else:
             i += 1  # this `git` was a different subcommand; keep scanning
     return out
+
+
+def _push_arg_lists(cmd):
+    return _git_subcommand_arglists(cmd, "push")
 
 
 def _push_targets(cmd, cwd=None, current_branch=None):
@@ -298,19 +296,19 @@ def _handoff(cmd):
 
 def _check_bypass_flags(cmd):
     """Deny the explicit-bypass flags: they are a bypass by definition, no branch query needed."""
-    bare = _QUOTED_SPAN.sub("", cmd)  # a flag mentioned inside a quoted message/body is not a real flag
-    if _GH_ADMIN_MERGE.search(bare):
+    if _GH_ADMIN_MERGE.search(_QUOTED_SPAN.sub("", cmd)):  # a flag inside a quoted body is not a real flag
         return "deny", (
             "This uses `gh pr merge --admin`, which merges past required reviews and status checks using "
             "admin power - a bypass of the merge gate. Merge only when the gate is satisfied." + _handoff(cmd)
         )
-    # --no-verify / commit -n skip the git hooks, so they only matter for a git commit or push - other
-    # tools use --no-verify for unrelated things, and denying those would be a false positive.
-    is_commit = _GIT_COMMIT.search(bare) is not None
-    is_push = bool(_push_arg_lists(bare))
-    long_no_verify = (is_commit or is_push) and _NO_VERIFY_LONG.search(bare)
-    short_n_commit = is_commit and _COMMIT_SHORT_N.search(bare)  # `-n` is --no-verify for commit (push -n is dry-run)
-    if long_no_verify or short_n_commit:
+    # --no-verify / commit -n skip the git hooks, so they only matter as an actual arg to a git commit or
+    # push (other tools use --no-verify for unrelated things; shlex keeps a quoted mention out of the argv).
+    # `-n` is --no-verify only for commit; `git push -n` is --dry-run.
+    commit_lists = _git_subcommand_arglists(cmd, "commit")
+    push_lists = _push_arg_lists(cmd)
+    commit_bypass = any(("--no-verify" in a) or ("-n" in a) for a in commit_lists)
+    push_bypass = any("--no-verify" in a for a in push_lists)
+    if commit_bypass or push_bypass:
         return "deny", (
             "This uses --no-verify, which skips the git hooks (signing, lint, and pre-push gates). "
             "Skipping verification is a bypass; run the command without it." + _handoff(cmd)
@@ -487,6 +485,8 @@ _GIT_CASES = [
     ("git push origin feature/x", None, {"feature/x": None}, "allow", "feature branch with unreadable rules: fail open"),
     ("git commit --no-verify -m x", None, {}, "deny", "commit --no-verify skips the hooks"),
     ("git commit -n -m x", None, {}, "deny", "commit -n is --no-verify"),
+    ("git -C /repo commit -n -m x", None, {}, "deny", "global option before commit -n does not dodge the check"),
+    ("git -c user.name=x commit --no-verify -m y", None, {}, "deny", "global option before commit --no-verify does not dodge the check"),
     ("git push --no-verify origin feature/x", None, {"feature/x": set()}, "deny", "push --no-verify is a bypass even on a feature branch"),
     ("git push -n origin develop", None, {"develop": _CODE_RULES}, "deny", "push -n is dry-run not no-verify, but the direct push to develop still denies"),
     ("gh pr merge 5 --admin --squash", None, {}, "deny", "gh pr merge --admin overrides the merge gate"),
