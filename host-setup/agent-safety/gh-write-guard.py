@@ -168,7 +168,7 @@ def _shell_tokens(cmd):
         lex = shlex.shlex(cmd, posix=True, punctuation_chars=True)
         lex.whitespace_split = True
         return list(lex)
-    except ValueError:
+    except (ValueError, TypeError):  # bad quoting, or punctuation_chars unsupported on old Python
         try:
             return shlex.split(cmd, posix=True)
         except ValueError:
@@ -177,6 +177,14 @@ def _shell_tokens(cmd):
 
 def _is_shell_op(tok):
     return tok != "" and all(c in _SHELL_OP_CHARS for c in tok)
+
+
+def _is_redir_op(tok):
+    return _is_shell_op(tok) and (">" in tok or "<" in tok)  # >, >>, <, >&, &>
+
+
+def _is_separator(tok):
+    return _is_shell_op(tok) and ">" not in tok and "<" not in tok  # |, ||, &, &&, ;, (, )
 
 
 def _is_git_exe(tok):
@@ -211,8 +219,19 @@ def _git_subcommand_arglists(cmd, sub):
         if j < n and toks[j] == sub:
             k = j + 1
             args = []
-            while k < n and not _is_shell_op(toks[k]):
-                args.append(toks[k])
+            while k < n:
+                t = toks[k]
+                if _is_separator(t):
+                    break  # a command separator (|, &&, ;) ends this git invocation
+                if t.isdigit() and k + 1 < n and _is_redir_op(toks[k + 1]):
+                    k += 1  # a file-descriptor number before a redirection is shell syntax, not git argv
+                    continue
+                if _is_redir_op(t):
+                    k += 1  # skip the redirection operator and its target token; args continue after it
+                    if k < n and not _is_shell_op(toks[k]):
+                        k += 1
+                    continue
+                args.append(t)
                 k += 1
             out.append(args)
             i = k
@@ -518,6 +537,8 @@ _GIT_CASES = [
     ("git push origin feature/x && git push origin develop", None, {"feature/x": set(), "develop": _CODE_RULES}, "deny", "second push in a compound is checked: develop denies"),
     ("git push origin develop && git push origin feature/x", None, {"develop": _CODE_RULES, "feature/x": set()}, "deny", "first push in a compound is checked: develop denies"),
     ("git push origin develop | cat", None, {"develop": _CODE_RULES}, "deny", "a pipe ends the push argv: develop still parsed"),
+    ("git push 2>push.log origin develop", None, {"develop": _CODE_RULES}, "deny", "a leading fd redirection is skipped, not a positional: develop still parsed"),
+    ("git push >log origin develop", None, {"develop": _CODE_RULES}, "deny", "a leading stdout redirection before args does not hide develop"),
     ("/usr/bin/git push origin develop", None, {"develop": _CODE_RULES}, "deny", "an absolute-path git is still git: direct push denies"),
     ("/usr/bin/git commit -n -m x", None, {}, "deny", "absolute-path git commit -n is --no-verify"),
     ("git.exe push origin develop", None, {"develop": _CODE_RULES}, "deny", "git.exe is still git: direct push denies"),
