@@ -2,7 +2,7 @@
 
 Companion to [section-model.md][section-model] and [fidelity-model.md][fidelity-model]. Those define how carried *content* is verified. This one defines how a repo's **types** - what it is built from and for - are declared, validated, and checked. It is the ground truth an agent or human consults before adding a type, a profile, or a type check, not a judgment re-derived each session.
 
-**Rollout status.** This model is being wired in stages. Where a rule below names a check `audit.py` does not yet run, or a schema field not yet defined, this doc is the contract that implementation realizes. This note is removed once the rollout is complete.
+**Rollout status.** This model is being wired in stages. Where a rule below names a check `audit.py` does not yet run, or a schema field not yet defined, this doc is the contract that implementation realizes.
 
 ## Declaration is the source of truth
 
