@@ -26,8 +26,10 @@ Run `gh-write-guard.py --selftest` to verify the decision matrix without Claude 
 import json
 import os
 import re
+import shlex
 import subprocess
 import sys
+from urllib.parse import quote
 
 # --- What counts as a GitHub write -------------------------------------------------------------------
 # gh subcommands that mutate. `gh api` is handled separately (it needs field/method inspection).
@@ -120,7 +122,8 @@ def _live_branch_rules(owner, repo, branch):
     """
     try:
         r = subprocess.run(
-            ["gh", "api", f"repos/{owner}/{repo}/rules/branches/{branch}", "--jq", "[.[].type]"],
+            # quote the branch: a name with `/` (feature/x) would otherwise split the API path.
+            ["gh", "api", f"repos/{owner}/{repo}/rules/branches/{quote(branch, safe='')}", "--jq", "[.[].type]"],
             capture_output=True, text=True, timeout=10,
         )
     except Exception:
@@ -159,13 +162,23 @@ def _push_targets(cmd, cwd=None, current_branch=None):
     op is 'delete' | 'force' | 'update'. current_branch, when given, stands in for the git resolution
     of a bare push (the self-test passes it for an offline run).
     """
-    m = _GIT_PUSH.search(cmd)
-    seg = cmd[m.end():]
-    seg = re.split(r"&&|\|\||[;|\n]", seg)[0]
-    toks = seg.split()
+    # shlex tokenizes the way the shell does: a quoted refspec (`'HEAD:develop'`) becomes a clean token,
+    # and a `git push ...` mentioned inside a quoted --body stays a single token, so it never forms the
+    # `git` `push` argv adjacency below. Fall back to a naive split only if the quoting is unbalanced.
+    try:
+        toks = shlex.split(cmd, posix=True)
+    except ValueError:
+        toks = cmd.split()
+    start = None
+    for k in range(len(toks) - 1):
+        if toks[k] == "git" and toks[k + 1] == "push":
+            start = k + 2
+            break
+    if start is None:
+        return "update", []  # no executable `git push` (only a quoted mention, or `git -C ... push`)
     force = delete = False
     positionals = []
-    i = 0
+    i = start
     while i < len(toks):
         t = toks[i]
         if ">" in t or "<" in t:
@@ -208,8 +221,8 @@ def _push_targets(cmd, cwd=None, current_branch=None):
 def _handoff(cmd):
     return (
         " The agent must not bypass this - if the bypass is genuinely intended, hand the exact command "
-        "to Pieter to run in his terminal. See AGENTS.md 'Repository Boundaries and Write Safety' and the "
-        "Branching Model."
+        "to the maintainer to run in their terminal. See AGENTS.md 'Repository Boundaries and Write "
+        "Safety' and the Branching Model."
     )
 
 
@@ -283,11 +296,10 @@ def classify(cmd, cwd=None, origin=None, current_branch=None, rules_lookup=None)
     dec, reason = _check_bypass_flags(cmd)
     if dec == "deny":
         return dec, reason
-    # Scan for the push on the command with quoted argument values removed, so a `git push ...` that only
-    # appears inside a --body/--message is text, not an executed push (the pattern the other scans use).
-    cmd_unquoted = _QUOTED_SPAN.sub("", cmd)
-    if _GIT_PUSH.search(cmd_unquoted):
-        dec, reason = _check_push_bypass(cmd_unquoted, cwd, origin, current_branch, rules_lookup)
+    # `_push_targets` tokenizes with shlex and keys off a real `git push` argv adjacency, so a push named
+    # only inside a quoted argument yields no target - the raw substring is just a cheap pre-filter.
+    if _GIT_PUSH.search(cmd):
+        dec, reason = _check_push_bypass(cmd, cwd, origin, current_branch, rules_lookup)
         if dec == "deny":
             return dec, reason
 
@@ -406,6 +418,8 @@ _GIT_CASES = [
     ("gh pr merge 5 \\\n  --admin --squash", None, {}, "deny", "line-continued gh pr merge --admin still caught"),
     ("git commit -m 'mention --no-verify in the message'", None, {}, "allow", "--no-verify inside a quoted message is not a flag"),
     ("gh issue comment 5 --body \"run: git push origin develop\"", None, {"develop": _CODE_RULES}, "allow", "a git push mentioned inside a quoted body is not an executed push"),
+    ("git push origin 'HEAD:develop'", None, {"develop": _CODE_RULES}, "deny", "a quoted refspec is unquoted by shlex and still resolves to develop"),
+    ("gh issue comment 5 --body \"first git push\" && git push origin develop", None, {"develop": _CODE_RULES}, "deny", "a quoted mention before a real push does not hide the real target"),
     ("git push >push.log 2>&1", "develop", {"develop": _CODE_RULES}, "deny", "redirection tokens are not a branch: bare push to develop still denies"),
     ("git push origin develop >push.log 2>&1", None, {"develop": _CODE_RULES}, "deny", "redirect after a real refspec does not hide the develop target"),
 ]
