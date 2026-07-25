@@ -168,6 +168,8 @@ def _push_targets(cmd, cwd=None, current_branch=None):
     i = 0
     while i < len(toks):
         t = toks[i]
+        if ">" in t or "<" in t:
+            break  # a redirection operator (>, 2>, >>, <, 2>&1): end of git argv, start of shell syntax
         if t in ("--force", "-f") or t.startswith("--force-with-lease"):
             force = True
         elif t in ("--delete", "-d"):
@@ -272,6 +274,10 @@ def classify(cmd, cwd=None, origin=None, current_branch=None, rules_lookup=None)
     current_branch stands in for the git resolution of a bare push, and rules_lookup(branch) stands in
     for the live branch-rules query.
     """
+    # Fold shell line-continuations so a multi-line Bash invocation (`gh pr merge 5 \<newline> --admin`)
+    # parses as one command; only backslash-newline is joined, so a real newline between commands still
+    # separates them.
+    cmd = re.sub(r"\\\r?\n", " ", cmd)
     # Rule 4: a git operation that would only succeed by bypassing an active branch rule. Checked before
     # the gh-write gate below, since `git commit --no-verify` is a bypass yet not a GitHub write.
     dec, reason = _check_bypass_flags(cmd)
@@ -394,7 +400,10 @@ _GIT_CASES = [
     ("git push --no-verify origin feature/x", None, {"feature/x": set()}, "deny", "push --no-verify is a bypass even on a feature branch"),
     ("git push -n origin develop", None, {"develop": _CODE_RULES}, "deny", "push -n is dry-run not no-verify, but the direct push to develop still denies"),
     ("gh pr merge 5 --admin --squash", None, {}, "deny", "gh pr merge --admin overrides the merge gate"),
+    ("gh pr merge 5 \\\n  --admin --squash", None, {}, "deny", "line-continued gh pr merge --admin still caught"),
     ("git commit -m 'mention --no-verify in the message'", None, {}, "allow", "--no-verify inside a quoted message is not a flag"),
+    ("git push >push.log 2>&1", "develop", {"develop": _CODE_RULES}, "deny", "redirection tokens are not a branch: bare push to develop still denies"),
+    ("git push origin develop >push.log 2>&1", None, {"develop": _CODE_RULES}, "deny", "redirect after a real refspec does not hide the develop target"),
 ]
 
 
