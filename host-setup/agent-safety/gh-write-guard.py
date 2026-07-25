@@ -283,8 +283,11 @@ def classify(cmd, cwd=None, origin=None, current_branch=None, rules_lookup=None)
     dec, reason = _check_bypass_flags(cmd)
     if dec == "deny":
         return dec, reason
-    if _GIT_PUSH.search(cmd):
-        dec, reason = _check_push_bypass(cmd, cwd, origin, current_branch, rules_lookup)
+    # Scan for the push on the command with quoted argument values removed, so a `git push ...` that only
+    # appears inside a --body/--message is text, not an executed push (the pattern the other scans use).
+    cmd_unquoted = _QUOTED_SPAN.sub("", cmd)
+    if _GIT_PUSH.search(cmd_unquoted):
+        dec, reason = _check_push_bypass(cmd_unquoted, cwd, origin, current_branch, rules_lookup)
         if dec == "deny":
             return dec, reason
 
@@ -402,6 +405,7 @@ _GIT_CASES = [
     ("gh pr merge 5 --admin --squash", None, {}, "deny", "gh pr merge --admin overrides the merge gate"),
     ("gh pr merge 5 \\\n  --admin --squash", None, {}, "deny", "line-continued gh pr merge --admin still caught"),
     ("git commit -m 'mention --no-verify in the message'", None, {}, "allow", "--no-verify inside a quoted message is not a flag"),
+    ("gh issue comment 5 --body \"run: git push origin develop\"", None, {"develop": _CODE_RULES}, "allow", "a git push mentioned inside a quoted body is not an executed push"),
     ("git push >push.log 2>&1", "develop", {"develop": _CODE_RULES}, "deny", "redirection tokens are not a branch: bare push to develop still denies"),
     ("git push origin develop >push.log 2>&1", None, {"develop": _CODE_RULES}, "deny", "redirect after a real refspec does not hide the develop target"),
 ]
