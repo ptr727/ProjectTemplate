@@ -565,6 +565,12 @@ def audit_repo(entry, spec):
 
     # --- Secrets (names only) ---
     secrets = spec["secrets"]
+    # The codecov coverage requirement (the CODECOV_TOKEN secret and the codecov.yml file) is claimed by a
+    # type only at build profile: a lint-only language has no tests, so no coverage (spec/type-model.md).
+    repo_profiles = entry.get("profiles", {})
+    if not isinstance(repo_profiles, dict):
+        repo_profiles = {}
+    coverage_active = any(secrets.get("typeMechanisms", {}).get(t) == "codecov" and repo_profiles.get(t) != "lint-only" for t in types)
     stores = {}
     # No ok404: an empty store returns {"secrets": []}, so a 404/403 (permissions, rename) must
     # surface as ERROR rather than cascade into false missing-secret DEFECTs.
@@ -572,7 +578,7 @@ def audit_repo(entry, spec):
         data = gh(path)
         stores[store] = {s["name"] for s in (data or {}).get("secrets", [])}
     mechanisms = [secrets["targetMechanisms"].get(p.get("target")) for p in entry.get("publish", [])]
-    mechanisms += [secrets.get("typeMechanisms", {}).get(t) for t in types]
+    mechanisms += [secrets.get("typeMechanisms", {}).get(t) for t in types if repo_profiles.get(t) != "lint-only"]
     claimed = [secrets["mechanisms"][m] for m in mechanisms if m and m in secrets["mechanisms"]]
     required_by_store = {"actions": set(), "dependabot": set()}
     for store in secrets["baseline"].get("stores", []):
@@ -643,6 +649,8 @@ def audit_repo(entry, spec):
         if not applies(item.get("appliesTo", "*"), sel):
             continue
         path = item["path"]
+        if path == "codecov.yml" and not coverage_active:
+            continue  # coverage feature file: N/A when no type claims codecov at build profile (spec/type-model.md)
         if path not in wanted_sections:
             wanted_sections[path] = set()
             verbatim_secs[path] = set()
