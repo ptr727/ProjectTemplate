@@ -63,7 +63,8 @@ _GIT_COMMIT = re.compile(r"\bgit\s+commit\b")
 # explicit-bypass flags below, which are the bypass by definition and need no query.
 #
 # Branches that fail CLOSED when their rules cannot be read - protected-by-default across every config.
-_PROTECTED_DEFAULT = {"main", "master", "develop"}
+_PROTECTED_DEFAULT_ORDER = ("main", "master", "develop")
+_PROTECTED_DEFAULT = set(_PROTECTED_DEFAULT_ORDER)
 # `gh pr merge --admin` overrides required reviews/status checks with admin power.
 _GH_ADMIN_MERGE = re.compile(r"\bgh\s+pr\s+merge\b[^\n|&;]*(?:^|\s)--admin\b")
 # `--no-verify` skips the local git hooks (signing / lint / pre-push gates). `git commit` also spells it
@@ -200,7 +201,7 @@ def _push_targets(cmd, cwd=None, current_branch=None):
     args = _git_push_args(cmd)
     if args is None:
         return "update", []
-    force = delete = False
+    force = delete = push_all = mirror = tags_only = False
     positionals = []
     i = 0
     while i < len(args):
@@ -211,10 +212,16 @@ def _push_targets(cmd, cwd=None, current_branch=None):
             force = True
         elif t in ("--delete", "-d"):
             delete = True
+        elif t == "--all":
+            push_all = True
+        elif t == "--mirror":
+            mirror = True
+        elif t in ("--tags", "--follow-tags"):
+            tags_only = True
         elif t in _PUSH_VALUE_FLAGS:
             i += 1  # skip this flag's value
         elif t.startswith("-"):
-            pass  # some other flag (e.g. -u, --tags, --no-verify)
+            pass  # some other flag (e.g. -u, --no-verify)
         else:
             positionals.append(t)
         i += 1
@@ -235,9 +242,19 @@ def _push_targets(cmd, cwd=None, current_branch=None):
         if dst:
             branches.append(dst)
     if not refspecs and not delete:
-        b = current_branch if current_branch is not None else _current_push_branch(cwd)
-        if b:
-            branches = [b]
+        if mirror:
+            # --mirror force-updates and prunes every ref: treat as a force against the protected defaults
+            # (a non-existent one just returns no rules and is skipped).
+            force = True
+            branches = list(_PROTECTED_DEFAULT_ORDER)
+        elif push_all:
+            branches = list(_PROTECTED_DEFAULT_ORDER)  # updates every local branch, protected ones included
+        elif tags_only:
+            branches = []  # tags only, no branch is updated
+        else:
+            b = current_branch if current_branch is not None else _current_push_branch(cwd)
+            if b:
+                branches = [b]
     op = "delete" if delete else ("force" if force else "update")
     return op, branches
 
@@ -447,6 +464,10 @@ _GIT_CASES = [
     ("git -c user.name=x push origin main", None, {"main": _CODE_RULES}, "deny", "global option -c k=v before push does not dodge Rule 4"),
     ("git --git-dir=/r/.git push origin develop", None, {"develop": _CODE_RULES}, "deny", "global option --git-dir=... before push does not dodge Rule 4"),
     ("git -C /repo push origin feature/x", None, {"feature/x": set()}, "allow", "global options before push to a feature branch: allowed"),
+    ("git push --all origin", None, {"main": _CODE_RULES, "master": set(), "develop": _CODE_RULES}, "deny", "--all updates every branch: a protected default denies"),
+    ("git push --all origin", None, {"main": set(), "master": set(), "develop": set()}, "allow", "--all where no default branch is protected: allowed"),
+    ("git push --mirror origin", None, {"main": _CODE_RULES, "master": set(), "develop": _CODE_RULES}, "deny", "--mirror force-prunes every ref: a protected default denies"),
+    ("git push --tags origin", None, {}, "allow", "--tags pushes tags only, no branch target"),
     ("gh issue comment 5 --body \"first git push\" && git push origin develop", None, {"develop": _CODE_RULES}, "deny", "a quoted mention before a real push does not hide the real target"),
     ("git push >push.log 2>&1", "develop", {"develop": _CODE_RULES}, "deny", "redirection tokens are not a branch: bare push to develop still denies"),
     ("git push origin develop >push.log 2>&1", None, {"develop": _CODE_RULES}, "deny", "redirect after a real refspec does not hide the develop target"),
