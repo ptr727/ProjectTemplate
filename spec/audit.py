@@ -520,7 +520,7 @@ def audit_repo(entry, spec):
                     "main": gh(f"repos/{slug}/git/trees/{branch_main['commit']['commit']['tree']['sha']}?recursive=1"),
                 }
                 if not all(isinstance(t, dict) for t in trees.values()) or any(t.get("truncated") for t in trees.values()):
-                    findings.append(("DRIFT", f"branch: {len(cmp['files'])}+ main-side path change(s) develop lacks (forward-sync needed; tree unavailable or too large to filter cherry-pick noise)"))
+                    findings.append(("DRIFT", f"branch: {len(cmp['files'])}+ main-side path change(s) develop is behind on (forward-sync needed; tree unavailable or too large to filter cherry-pick noise)"))
                 else:
                     objs = {name: {e["path"]: e["sha"] for e in t["tree"] if e["type"] in ("blob", "commit")} for name, t in trees.items()}
                     # Split main-side drift by direction, never flagging every difference as a develop deficit.
@@ -529,7 +529,7 @@ def audit_repo(entry, spec):
                     behind, diverged = classify_branch_drift(objs["base"], objs["main"], objs["develop"])
                     if behind:
                         shown = ", ".join(behind[:8]) + (" ..." if len(behind) > 8 else "")
-                        findings.append(("DRIFT", f"branch: {len(behind)} main-side change(s) develop is behind on (forward-sync needed): {shown}"))
+                        findings.append(("DRIFT", f"branch: {len(behind)} main-side path change(s) develop is behind on (forward-sync needed): {shown}"))
                     if diverged:
                         shown = ", ".join(diverged[:8]) + (" ..." if len(diverged) > 8 else "")
                         findings.append(("DRIFT", f"branch: {len(diverged)} path(s) changed on both main and develop since the merge-base - reconcile before promoting (develop may already supersede main): {shown}"))
