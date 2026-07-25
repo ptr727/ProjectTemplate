@@ -211,7 +211,7 @@
             "requiredSecrets": [],
             "consumerModel": "pull",
             "releaseTrigger": "dispatch-only",
-            "driftNotes": ["ESPHome device config YAML consumed by the cataloged ESPHome-NonRoot image at runtime. Distinct from that Docker repo.", "First repo with a lint-only python codegen subtree (easystart/python: ruff/mypy config only, no tests, no uv.lock) and lint-only cpp (committed custom-component and template headers). A shared clang-format config for the cpp style is not yet added."]
+            "driftNotes": ["ESPHome device config YAML consumed by the cataloged ESPHome-NonRoot image at runtime. Distinct from that Docker repo.", "First repo with a lint-only python codegen subtree (easystart/python: ruff and pyright config only, no tests, no uv.lock) and lint-only cpp (committed custom-component and template headers, formatted by a shared clang-format config)."]
         },
         {
             "name": "HomeAssistant-Config",
