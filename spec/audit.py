@@ -464,6 +464,19 @@ def check_verbatim(label, down_text, canonical_rel, extract=None):
     return [("DRIFT", f"verbatim: {label} differs from the canonical and matches no past hub revision - the repo modified fixed content, review it")]
 
 
+def classify_branch_drift(base, main, develop):
+    """Split the paths main changed since the merge-base by direction, given {path: object-sha} maps
+    for the merge-base, main-head, and develop-head trees. `behind`: main moved the path and develop
+    still holds the merge-base object - a genuine forward-sync gap. `diverged`: both branches moved
+    the path, so develop may already supersede main and a blind sync from main would revert it. A
+    path only develop moved is not main-side drift and is excluded. Returns (behind, diverged)."""
+    changed_on_main = {p for p in set(base) | set(main) if base.get(p) != main.get(p)}
+    differ = [p for p in changed_on_main if main.get(p) != develop.get(p)]
+    behind = sorted(p for p in differ if develop.get(p) == base.get(p))
+    diverged = sorted(p for p in differ if develop.get(p) != base.get(p))
+    return behind, diverged
+
+
 def audit_repo(entry, spec):
     findings = []  # (kind, text)
     slug = repo_slug(entry)
@@ -510,11 +523,16 @@ def audit_repo(entry, spec):
                     findings.append(("DRIFT", f"branch: {len(cmp['files'])}+ main-side path change(s) develop lacks (forward-sync needed; tree unavailable or too large to filter cherry-pick noise)"))
                 else:
                     objs = {name: {e["path"]: e["sha"] for e in t["tree"] if e["type"] in ("blob", "commit")} for name, t in trees.items()}
-                    changed_on_main = {p for p in set(objs["base"]) | set(objs["main"]) if objs["base"].get(p) != objs["main"].get(p)}
-                    lacking = sorted(p for p in changed_on_main if objs["main"].get(p) != objs["develop"].get(p))
-                    if lacking:
-                        shown = ", ".join(lacking[:8]) + (" ..." if len(lacking) > 8 else "")
-                        findings.append(("DRIFT", f"branch: {len(lacking)} main-side path change(s) develop lacks (forward-sync needed): {shown}"))
+                    # Split main-side drift by direction, never flagging every difference as a develop deficit.
+                    # A path develop still holds at the merge-base is a genuine forward-sync gap.
+                    # A path both branches moved is diverged, and develop may already supersede main.
+                    behind, diverged = classify_branch_drift(objs["base"], objs["main"], objs["develop"])
+                    if behind:
+                        shown = ", ".join(behind[:8]) + (" ..." if len(behind) > 8 else "")
+                        findings.append(("DRIFT", f"branch: {len(behind)} main-side path change(s) develop lacks (forward-sync needed): {shown}"))
+                    if diverged:
+                        shown = ", ".join(diverged[:8]) + (" ..." if len(diverged) > 8 else "")
+                        findings.append(("DRIFT", f"branch: {len(diverged)} path(s) changed on both main and develop since the merge-base - reconcile before promoting (develop may already supersede main): {shown}"))
 
     # --- General settings ---
     expected = dict(spec["settings"])
@@ -954,6 +972,16 @@ def _selftest():
     else:
         print("  ok   cspell: workspace cSpell word list detected, a plain cspell.json mention is not")
 
+    # branch-drift direction split, covering modify/add/delete on main and a develop-only change
+    bd_base = {"keep": "a", "moda": "1", "modb": "2", "deld": "e", "devonly": "x"}
+    bd_main = {"keep": "a", "moda": "9", "modb": "9", "add": "n", "devonly": "x"}          # moved moda/modb, added 'add', deleted 'deld'
+    bd_dev = {"keep": "a", "moda": "1", "modb": "7", "add": "m", "deld": "e", "devonly": "y"}  # still at base on moda/deld, moved modb/add/devonly
+    bd_behind, bd_diverged = classify_branch_drift(bd_base, bd_main, bd_dev)
+    if bd_behind != ["deld", "moda"] or bd_diverged != ["add", "modb"]:
+        ok = False
+        print(f"  FAIL branch-drift classify -> behind={bd_behind} diverged={bd_diverged}")
+    else:
+        print("  ok   branch-drift: behind (modify/delete develop still at base) vs diverged (both moved), develop-only excluded")
     print("SELFTEST PASS" if ok else "SELFTEST FAIL")
     return 0 if ok else 1
 
