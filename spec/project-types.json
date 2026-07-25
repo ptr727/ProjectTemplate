@@ -1,6 +1,6 @@
 {
     "$schema": "./project-types.schema.json",
-    "note": "Type -> requirements and checks. Each check names a verdict tier (letter = exact form, intent = equivalent outcome) and points at the prose section that owns the rationale. The audit (AUDIT.md) runs the checks for a repo's applicable types plus the cross-cutting dimensions; an absent construct is N/A, not a defect.",
+    "note": "Type -> requirements and checks. Each check names a verdict tier (letter = exact form, intent = equivalent outcome) and points at the prose section that owns the rationale. The audit (AUDIT.md) runs the checks for a repo's declared types plus the cross-cutting dimensions. An absent construct is N/A, not a defect. How types and profiles are declared, validated against detection, and gated by profile is defined in spec/type-model.md.",
     "types": {
         "csharp": {
             "detect": ["*.csproj", "*.slnx", "*.sln"],
