@@ -34,7 +34,7 @@ A language type is present at one of two **depths**, declared as its `profile`:
 - **build** - the language is compiled, tested, and/or packaged in this repo. Its full check set applies (style, type-check, tests, coverage, packaging).
 - **lint-only** - the language is present and style-checked here, but not built: there is no build/test/package for it in this repo. Only its lint/style/type-check checks apply. Build, test, coverage, and packaging checks are N/A.
 
-Each check in `project-types.json` names the **minimum profile** it needs. Lint/style/type-check checks apply at every profile, while build/test/coverage/package checks apply only at `build`. This promotes today's per-check "N/A for the SCRIPTS profile" prose to an enforced field, so a lint-only language never draws a coverage or packaging finding.
+Each check may declare the **minimum profile** it needs via a `minProfile` field. A check without one applies at every profile, and a check with `minProfile: build` applies only at `build`. So lint/style/type-check checks omit it, while build/test/coverage/package checks set `build`. The audit uses the declared profile to hold the coverage requirement - the CODECOV_TOKEN secret and the codecov.yml file - N/A for a lint-only language, replacing the older per-check "N/A for the SCRIPTS profile" prose.
 
 The profile is **declared and validated**, not merely detected. `python` already reads its shape structurally from `pyproject.toml` (a uv PROJECT with tests and a lockfile, versus stdlib SCRIPTS tooling). That structural read becomes the profile **validator** - a declared `python` profile that contradicts the pyproject shape is a false declaration. One concept (the declared profile), checked by detection, rather than two ways to classify.
 
