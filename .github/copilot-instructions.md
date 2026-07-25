@@ -102,6 +102,8 @@ Known non-working request paths (don't rely on them - use the `requestReviews` m
 
 Before merging, confirm Copilot reviewed the current PR head SHA. Copilot may respond as either a formal review (carries an exact commit SHA) or an issue comment (no SHA - use the most recent Copilot comment for manual confirmation). Check both.
 
+**Check head coverage before reading merge-state, never the reverse.** A push makes the required checks go green before Copilot re-reviews the new head, so `mergeStateStatus` can read `CLEAN` in the window before any formal review covers the head. A poll that exits on `CLEAN` merges into that gap. Gate on a formal review whose `commit.oid` equals the current head SHA first, then on zero unresolved threads, and only then read merge-state.
+
 ```sh
 PR_HEAD=$(gh pr view <N> --json headRefOid --jq '.headRefOid')
 
