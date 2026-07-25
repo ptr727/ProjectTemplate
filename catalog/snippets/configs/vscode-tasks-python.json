@@ -11,6 +11,8 @@
         // `ruff format` -> `ruff check` -> the type checker. A repo whose CI type checker is mypy (pyright
         // editor-only) swaps the "Python Types" command to `uv run mypy src`; a pyright-strict repo keeps it
         // as `uv run pyright`. Adapt the target paths to the repo's package layout.
+        // A lint-only Scripts-profile subtree (no uv project, no `uv.lock`) runs the tools via `uvx <tool>`
+        // instead of `uv run <tool>` and omits the pytest, coverage, and `uv sync` tasks (CODESTYLE.md Python 'Two profiles').
         {
             "label": "Ruff Format",
             "type": "process",
