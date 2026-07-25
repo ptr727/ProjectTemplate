@@ -1,12 +1,14 @@
 # Project Type Model
 
-Companion to [section-model.md][section-model] and [fidelity-model.md][fidelity-model]. Those define how carried *content* is verified; this one defines how a repo's **types** - what it is built from and for - are declared, validated, and checked. It is the ground truth an agent or human consults before adding a type, a profile, or a type check, not a judgment re-derived each session.
+Companion to [section-model.md][section-model] and [fidelity-model.md][fidelity-model]. Those define how carried *content* is verified. This one defines how a repo's **types** - what it is built from and for - are declared, validated, and checked. It is the ground truth an agent or human consults before adding a type, a profile, or a type check, not a judgment re-derived each session.
+
+**Rollout status.** This model is being wired in stages. Where a rule below names a check `audit.py` does not yet run, or a schema field not yet defined, this doc is the contract that implementation realizes. This note is removed once the rollout is complete.
 
 ## Declaration is the source of truth
 
 A repo's types are **declared** in its [registry/repos.json][repos] entry (`types`), and a language type may also declare a **profile** (below). The audit runs the checks for each declared type plus the cross-cutting dimensions. Declaration - not inference - is authoritative: the registry states what the repo *is*, and [project-types.json][types] holds each type's requirements and checks.
 
-This mirrors the fleet principle that *the registry is ground truth about reality, not intent* (`setup.driftnotes`): a declaration is a claim about the repo that must match what the repo actually contains.
+This mirrors the fleet principle that *the registry is ground truth about reality, not intent* (the `setup.driftnotes.current` check, over the registry `driftNotes` field): a declaration is a claim about the repo that must match what the repo actually contains.
 
 ## Detection validates, it does not classify
 
@@ -30,9 +32,9 @@ A false declaration is always a finding: a claim the repo does not back is drift
 A language type is present at one of two **depths**, declared as its `profile`:
 
 - **build** - the language is compiled, tested, and/or packaged in this repo. Its full check set applies (style, type-check, tests, coverage, packaging).
-- **lint-only** - the language is present and style-checked here, but not built: there is no build/test/package for it in this repo. Only its lint/style/type-check checks apply; build, test, coverage, and packaging checks are N/A.
+- **lint-only** - the language is present and style-checked here, but not built: there is no build/test/package for it in this repo. Only its lint/style/type-check checks apply. Build, test, coverage, and packaging checks are N/A.
 
-Each check in `project-types.json` names the **minimum profile** it needs. Lint/style/type-check checks apply at every profile; build/test/coverage/package checks apply only at `build`. This promotes today's per-check "N/A for the SCRIPTS profile" prose to an enforced field, so a lint-only language never draws a coverage or packaging finding.
+Each check in `project-types.json` names the **minimum profile** it needs. Lint/style/type-check checks apply at every profile, while build/test/coverage/package checks apply only at `build`. This promotes today's per-check "N/A for the SCRIPTS profile" prose to an enforced field, so a lint-only language never draws a coverage or packaging finding.
 
 The profile is **declared and validated**, not merely detected. `python` already reads its shape structurally from `pyproject.toml` (a uv PROJECT with tests and a lockfile, versus stdlib SCRIPTS tooling); that structural read becomes the profile **validator** - a declared `python` profile that contradicts the pyproject shape is a false declaration. One concept (the declared profile), checked by detection, rather than two ways to classify.
 
@@ -51,7 +53,7 @@ Language types carry the style and type-check requirements for their language, g
 The set of types, their profiles, and each type's checks is governed, like the section and fidelity models.
 
 - **Adding a type or a check** declares a new requirement for every repo that carries it. Add it to `project-types.json`, to the schema where the shape changes, and to this doc in the same change.
-- **Declaring or changing a repo's type or profile** is a claim about the repo; detection validates it, and a contradiction is a finding to reconcile, not a liberty.
+- **Declaring or changing a repo's type or profile** is a claim about the repo. Detection validates it, and a contradiction is a finding to reconcile, not a liberty.
 - **A detected-but-undeclared language** is drift to resolve (declare or ignore-with-reason), not silently accepted.
 
 ## Enforcement
