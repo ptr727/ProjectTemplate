@@ -529,7 +529,7 @@ def audit_repo(entry, spec):
                     behind, diverged = classify_branch_drift(objs["base"], objs["main"], objs["develop"])
                     if behind:
                         shown = ", ".join(behind[:8]) + (" ..." if len(behind) > 8 else "")
-                        findings.append(("DRIFT", f"branch: {len(behind)} main-side path change(s) develop lacks (forward-sync needed): {shown}"))
+                        findings.append(("DRIFT", f"branch: {len(behind)} main-side change(s) develop is behind on (forward-sync needed): {shown}"))
                     if diverged:
                         shown = ", ".join(diverged[:8]) + (" ..." if len(diverged) > 8 else "")
                         findings.append(("DRIFT", f"branch: {len(diverged)} path(s) changed on both main and develop since the merge-base - reconcile before promoting (develop may already supersede main): {shown}"))
