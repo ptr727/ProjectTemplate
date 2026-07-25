@@ -18,7 +18,7 @@ Summarized for VS Code's generators; the full rules, rationale, and examples are
 
 ## Reviewing Carried Fleet Content
 
-Several of this repository's governance files are carried from a shared template and are byte-identical across a fleet of sibling repositories: `AGENTS.md`, `CODESTYLE.md`, `WORKFLOW.md`, this file, and the `repo-config/` and `spec/` files. Most of `AGENTS.md` is universal fleet law - every section that states a rule, as opposed to the two that describe this repository's own directory tree and devcontainer, is byte-locked and verified by an automated byte-for-byte match against the template canonical, not by line-by-line review.
+Several of this repository's governance files are carried from a shared template and kept in sync across a fleet of sibling repositories - among them `AGENTS.md`, `CODESTYLE.md`, `WORKFLOW.md`, this file, and the `repo-config/` rulesets. Most of `AGENTS.md` is universal fleet law - every section that states a rule, as opposed to the two that describe this repository's own directory tree and devcontainer, is byte-locked and verified by an automated byte-for-byte match against the template canonical, not by line-by-line review.
 
 Two constraints follow when reviewing that content.
 
