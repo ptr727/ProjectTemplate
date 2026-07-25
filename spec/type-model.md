@@ -36,7 +36,7 @@ A language type is present at one of two **depths**, declared as its `profile`:
 
 Each check in `project-types.json` names the **minimum profile** it needs. Lint/style/type-check checks apply at every profile, while build/test/coverage/package checks apply only at `build`. This promotes today's per-check "N/A for the SCRIPTS profile" prose to an enforced field, so a lint-only language never draws a coverage or packaging finding.
 
-The profile is **declared and validated**, not merely detected. `python` already reads its shape structurally from `pyproject.toml` (a uv PROJECT with tests and a lockfile, versus stdlib SCRIPTS tooling); that structural read becomes the profile **validator** - a declared `python` profile that contradicts the pyproject shape is a false declaration. One concept (the declared profile), checked by detection, rather than two ways to classify.
+The profile is **declared and validated**, not merely detected. `python` already reads its shape structurally from `pyproject.toml` (a uv PROJECT with tests and a lockfile, versus stdlib SCRIPTS tooling). That structural read becomes the profile **validator** - a declared `python` profile that contradicts the pyproject shape is a false declaration. One concept (the declared profile), checked by detection, rather than two ways to classify.
 
 ### Consequence for cross-cutting checks
 
