@@ -124,6 +124,8 @@ Coverage is confirmed when (1) exits 0 - **a formal review with no inline commen
 
 This path is only for a **genuinely missing** review - no Copilot review (formal *or* issue comment) covers the current head SHA after polling. A review that covered the head but produced no comments is a clean pass, not a missing review; do not enter this retry path for it.
 
+**A slow review is pending, not missing - poll with backoff and never escalate on a timeout alone.** Copilot can lag far beyond the usual one-to-three minutes when it has been re-requested many times in quick succession, because it throttles under load - a re-review landing tens of minutes after the request is normal. A poll that times out is therefore evidence only that the review has not landed *yet*, not that Copilot is done or unresponsive. Report the status as "review still pending" and keep polling on a widening interval (for example 20s steps, then a few minutes) rather than stopping. Enter the escalation step below only when the `requestReviews` mutation itself no-ops or errors, or after a genuinely long wait with the request confirmed accepted - never merely because one fixed poll window elapsed.
+
 If a review did not run on the current head, retry:
 
 1. Wait briefly and check head-SHA coverage (see above).
