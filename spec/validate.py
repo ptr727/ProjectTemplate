@@ -8,6 +8,7 @@ dry-run the CI lint job runs; it needs no third-party packages.
 """
 import json
 import pathlib
+import re
 import sys
 
 ROOT = pathlib.Path(__file__).resolve().parent.parent
@@ -310,6 +311,19 @@ def main():
                     errors.append(f"files.json: {path} section '{elt.get('name', '?')}' is verbatim but {path} is not markdown (heading regions apply to .md only)")
             elif not isinstance(elt, str):
                 errors.append(f"files.json: {path} section entry {elt!r} must be a string or object")
+
+        # Every declared section must resolve to a real `## <heading>` in the hub's own copy of the file
+        # (spec/section-model.md "Enforcement"). Without this, a renamed or mistyped section name declares a
+        # region that does not exist: the downstream verbatim byte-match in audit.py then has nothing to
+        # compare, and the section silently stops being checked anywhere - the quiet-narrowing failure that
+        # Verification Discipline forbids. Markdown only, and only when the hub ships the file.
+        if path.endswith(".md") and (ROOT / path).exists():
+            hub_text = (ROOT / path).read_text(encoding="utf-8", errors="replace")
+            headings = {m.group(1).strip() for m in re.finditer(r"^## (.+?)\s*$", hub_text, re.M)}
+            for elt in sections:
+                name = elt.get("name") if isinstance(elt, dict) else elt
+                if isinstance(name, str) and name and name not in headings:
+                    errors.append(f"files.json: {path} declares section '{name}' but no '## {name}' heading exists in {path}")
 
     # Validate the divergence ledger (spec/divergences.json) when present, so a mistyped repo name or
     # disposition fails CI instead of silently dropping a burn-down row.

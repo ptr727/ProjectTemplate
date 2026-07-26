@@ -63,9 +63,9 @@ This repo is the single home for the shared rules the fleet follows, a machine-r
 
 ProjectTemplate follows the same model it documents, and audits its own rules against itself (it classifies as the source-only project type in [WORKFLOW.md][workflow]).
 
-- **Branching.** Persistent `main` and `develop`, each with its own ruleset. This repo uses the default `release` workflow model: commit on feature branches only, feature branch to `develop` is squash-merged, `develop` to `main` is a merge commit, and `develop` is forward-only (no `main -> develop` back-merges). Live-service config repos instead use the `operational` model (registry `workflowModel`) - direct signed commits to `develop`, promoted to `main` by an occasional PR. See [AGENTS.md "Branching Model"][agents-branching-model].
+- **Branching.** Persistent `main` and `develop`, each with its own ruleset. This repo uses the default `release` workflow model: commit on feature branches only, feature branch to `develop` is squash-merged, `develop` to `main` is a merge commit, and `develop` is forward-only (no `main -> develop` back-merges). Live-service config repos instead use the `operational` model (registry `workflowModel`) - direct signed commits to `develop`, promoted to `main` by an occasional PR. See [GOVERNANCE.md "Branching Model"][governance-branching-model].
 - **CI is lint-only.** There is no build or unit test; the PR gate runs markdownlint, cspell, JSON validation (`jq` parses `registry/`, `spec/`, and `repo-config/`, plus the `spec/validate.py` cross-reference and shape checks), and actionlint, and exposes the ruleset-bound `Check pull request workflow status job` aggregator. The same lint configs (`.markdownlint-cli2.jsonc`, `cspell.json`) drive the editor extensions, the CLI, and CI.
-- **Review loop.** Every PR is reviewed by GitHub Copilot; the agent drives the review loop to green and merges only with explicit maintainer permission. See [AGENTS.md "PR Review Etiquette"][agents-pr-review-etiquette].
+- **Review loop.** Every PR is reviewed by GitHub Copilot; the agent drives the review loop to green and merges only with explicit maintainer permission. See [GOVERNANCE.md "PR Review Etiquette"][governance-pr-review-etiquette].
 - **Release.** A `develop -> main` merge is promoted through a GitHub release (tag plus a source zip, README, and LICENSE); versioning is NBGV-driven from [version.json][version]. See [WORKFLOW.md][workflow].
 
 ## Rules
@@ -125,7 +125,7 @@ A human-readable index of the rules agents enforce, implement, and audit. The au
 
 ## Development Environment Setup
 
-Contributors sign every commit. See [docs/ssh-signing.md][ssh-signing] for SSH commit-signing setup, [docs/host-setup.md][host-setup] for host prerequisites, and [docs/devcontainer.md][devcontainer] for devcontainer SSH-agent forwarding. Run the linters before pushing (see [AGENTS.md "Running the Linters Locally"][agents-running-the-linters-locally-known-working-invocations]).
+Contributors sign every commit. See [docs/ssh-signing.md][ssh-signing] for SSH commit-signing setup, [docs/host-setup.md][host-setup] for host prerequisites, and [docs/devcontainer.md][devcontainer] for devcontainer SSH-agent forwarding. Run the linters before pushing (see [AGENTS.md "Running the Linters Locally"][governance-running-the-linters-locally-known-working-invocations]).
 
 ## TODO
 
@@ -158,9 +158,9 @@ See [LICENSE][license].
 <!-- Repo -->
 
 [agents]: ./AGENTS.md
-[agents-branching-model]: ./AGENTS.md#branching-model
-[agents-pr-review-etiquette]: ./AGENTS.md#pr-review-etiquette
-[agents-running-the-linters-locally-known-working-invocations]: ./AGENTS.md#running-the-linters-locally-known-working-invocations
+[governance-branching-model]: ./GOVERNANCE.md#branching-model
+[governance-pr-review-etiquette]: ./GOVERNANCE.md#pr-review-etiquette
+[governance-running-the-linters-locally-known-working-invocations]: ./GOVERNANCE.md#running-the-linters-locally-known-working-invocations
 [audit]: ./AUDIT.md
 [catalog]: ./catalog/
 [codestyle]: ./CODESTYLE.md

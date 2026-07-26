@@ -7,7 +7,7 @@ matching a known-dangerous pattern. Reads and everything that is not a clear wri
 
 Precision over recall for the write-footgun shapes (1-3): they deny the specific shapes that caused the
 incident, not everything unparseable - a false deny would break the agent, and a miss still falls under
-the AGENTS.md "Repository Boundaries and Write Safety" prose rules. The branch-bypass rule (4) instead
+the GOVERNANCE.md "Repository Boundaries and Write Safety" prose rules. The branch-bypass rule (4) instead
 fails CLOSED on the protected-by-default branches, because the harm there is a silent success under the
 maintainer's admin bypass. The denied shapes:
 
@@ -416,7 +416,7 @@ def classify(cmd, cwd=None, origin=None, current_branch=None, rules_lookup=None)
             "(>/dev/null, 2>/dev/null, &>/dev/null, || true, || :, || echo). "
             "A write's result is exactly what must be read: a mutation can succeed on the server "
             "while the client reports an error. Run it without the output-discarding tail and read "
-            "the response. See AGENTS.md 'Repository Boundaries and Write Safety'."
+            "the response. See GOVERNANCE.md 'Repository Boundaries and Write Safety'."
         )
 
     # 2. literal node id in a mutation

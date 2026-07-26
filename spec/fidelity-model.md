@@ -26,7 +26,7 @@ Fidelity is a declared field defaulting to `presence`, never inferred from `whol
 
 ## The Workflow Override Seam Contract
 
-The fixed interface of a workflow is stated in [`AGENTS.md`][agents] ("Orchestration vs. build - the override seam" and "Workflow YAML Conventions"), and the `interface` check enforces it by name and structure: the ruleset-bound required check `name: Check pull request workflow status job`, the `github-release` and `get-version` job keys, the `release-asset-<branch>-<target>` artifact-name handoff, and that `github-release` collects assets by `pattern:` / `merge-multiple:` and never by an `artifact-ids:` that names a build job's output. A repo owns the leaf `build-<target>-task` job list, its `needs` targets, and its paths-filter, and none of those are checked.
+The fixed interface of a workflow is stated in [`GOVERNANCE.md`][governance] ("Orchestration vs. build - the override seam" and "Workflow YAML Conventions"), and the `interface` check enforces it by name and structure: the ruleset-bound required check `name: Check pull request workflow status job`, the `github-release` and `get-version` job keys, the `release-asset-<branch>-<target>` artifact-name handoff, and that `github-release` collects assets by `pattern:` / `merge-multiple:` and never by an `artifact-ids:` that names a build job's output. A repo owns the leaf `build-<target>-task` job list, its `needs` targets, and its paths-filter, and none of those are checked.
 
 ## Normalization
 
@@ -41,5 +41,6 @@ A verbatim mismatch is one of two things, told apart **by hash, not by a version
 [audit]: ./audit.py
 [files]: ./files.json
 [files-schema]: ./files.schema.json
-[section-model]: ./section-model.md
+[governance]: ../GOVERNANCE.md
 [scope-model]: ./scope-model.md
+[section-model]: ./section-model.md

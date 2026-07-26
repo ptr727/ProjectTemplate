@@ -492,7 +492,7 @@ Before pushing or opening a PR:
 [analyzer-diagnostics-and-suppressions]: #analyzer-diagnostics-and-suppressions
 [clean-compile-verification]: #clean-compile-verification
 [history]: ./HISTORY.md
-[line-endings]: ./AGENTS.md#line-endings
+[line-endings]: ./GOVERNANCE.md#line-endings
 [markdown-and-spelling]: #markdown-and-spelling
 [markdownlint-cli2]: ./.markdownlint-cli2.jsonc
 [readme]: ./README.md
