@@ -371,6 +371,7 @@ Every repo's GitHub repository details (the About panel) follow a fixed conventi
 - [`repo-config/`](./repo-config/) - branch rulesets and the apply script, kept out of `.github/` (which is Actions-owned).
 - [`catalog/`](./catalog/) - reusable reference snippets (workflows, configs, devcontainers) the audit compares implementations against.
 - [`scripts/`](./scripts/) - local lint and review tooling this repo runs by hand and in its hook chain, for the documented rules no CI linter checks. Hub-only, not carried.
+- [`docs/`](./docs/) - hub-only procedure and measurement docs (host setup, config carry, signing, agent token cost), none of them carried downstream.
 - [`reports/`](./reports/) - per-repo audit output.
 - [`.github/workflows/`](./.github/workflows/) - this repo's own lint-only CI and source-only release, the workflow contract it dogfoods.
 
