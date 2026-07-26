@@ -69,6 +69,11 @@ end_of_line = lf
 [host-setup/agent-safety/*.py]
 end_of_line = lf
 
+# The repo lint/review scripts are shebang-executable tooling run by path, so a CRLF shebang would
+# break direct execution on a Unix host. Pinned in .gitattributes to match.
+[scripts/*.py]
+end_of_line = lf
+
 # uv regenerates uv.lock with LF on every platform, so pin it or an EOL check (editorconfig-checker/CI)
 # reds on every `uv lock`/`uv sync` until the file is manually reconverted - same rationale as the
 # shebang/Dockerfile pins (a tool owns the ending). A Python repo on the CRLF default carries this; a repo
