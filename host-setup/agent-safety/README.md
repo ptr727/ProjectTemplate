@@ -1,6 +1,6 @@
 # Agent Write-Safety Kit
 
-Per-machine, user-account-scoped guards against an agent making a mis-targeted GitHub **write** under the maintainer's identity, or a **git operation that bypasses a repository protection** - a push, force, or delete that an active branch rule forbids, or a verification-skipping flag like `--admin`/`--no-verify`. Deploy it as the **first thing on any new system** where Claude Code runs with the `gh` credentials logged in (WSL, Linux, macOS, Proxmox, Windows).
+Per-machine, user-account-scoped guards against an agent making a mis-targeted GitHub **write** under the maintainer's identity, or a **git operation that bypasses a repository protection** - a push, force-push, or delete that an active branch rule forbids, or a verification-skipping flag like `--admin`/`--no-verify`. Deploy it as the **first thing on any new system** where Claude Code runs with the `gh` credentials logged in (WSL, Linux, macOS, Proxmox, Windows).
 
 ## What It Installs
 
