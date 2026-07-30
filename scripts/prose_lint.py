@@ -458,7 +458,10 @@ def comment_wrap_findings(path: Path, raw: str, lines: list[str]) -> list[tuple[
             out.append((n, 'comment-case',
                         'comment sentence opens in lowercase -> capitalize, or restructure so it '
                         'does not open on a lowercase name'))
-        prev_body = body if leading else ''
+        # A trailing comment can start a sentence the next full-line comment continues, so it is
+        # remembered. The continuation itself still has to be a full-line comment, since a
+        # trailing one annotates its own line rather than continuing the line above.
+        prev_body = body
         prev_no = n
     return out
 

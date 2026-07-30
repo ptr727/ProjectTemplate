@@ -331,6 +331,20 @@ class TestCommentWrap(BaitCase):
             with self.subTest(text=text.strip()):
                 self.assertEqual([], self.flag('a.py', text))
 
+    def test_a_trailing_comment_can_start_a_wrapped_sentence(self) -> None:
+        """Clearing the predecessor on a trailing comment reported the wrong rule, not merely fewer.
+
+        The pair below is a wrapped sentence, and it was reported as a capitalization error, whose
+        advice would have been to capitalize the continuation rather than to un-wrap it.
+        """
+        self.assertEqual(['comment-wrap'],
+                         self.flag('a.py', 'x = 1  # a sentence that keeps\n# going onto the next line.\n'))
+
+    def test_a_trailing_annotation_does_not_continue_the_line_above(self) -> None:
+        """A trailing comment annotates its own line, so it cannot be a continuation."""
+        self.assertEqual([], self.flag('a.py', 'x = 1  # a thing that\ny = 2  # continues\n'))
+        self.assertEqual([], self.flag('a.py', 'x = 1  # count of items\n# Another thing entirely.\n'))
+
     def test_a_comment_inside_a_fenced_block_is_skipped(self) -> None:
         """A fenced example is quoted code, so its comments belong to whatever is being shown."""
         self.assertEqual([], self.flag('a.md',
