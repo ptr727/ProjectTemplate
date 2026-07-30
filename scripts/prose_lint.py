@@ -285,7 +285,11 @@ def strip_strings(line: str, quotes: str, verbatim: bool = False) -> str:
                 quote = ''
         elif ch in quotes:
             quote = ch
-            inside_verbatim = verbatim and i > 0 and line[i - 1] == '@'
+            # An interpolated one is spelled either way round, so read the whole prefix.
+            start = i
+            while start > 0 and line[start - 1] in '@$':
+                start -= 1
+            inside_verbatim = verbatim and '@' in line[start:i]
         i += 1
     return ''.join(out)
 
@@ -408,7 +412,8 @@ def extracted_comments(path: Path, lines: list[str]) -> list[tuple[int, str, boo
         # Scan left to right and take whichever marker comes first.
         # A ceiling can only describe the first comment, so a later one was unreachable.
         while pos < len(line):
-            at, found = len(line), None
+            found: str | tuple[str, str] | None = None
+            at = len(line)
             for marker in spec['line']:
                 where = masked.find(marker, pos)
                 if 0 <= where < at:

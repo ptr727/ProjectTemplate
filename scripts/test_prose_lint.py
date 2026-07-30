@@ -406,6 +406,11 @@ class TestCommentWrap(BaitCase):
         # Reading a doubled quote as a close then a reopen puts string content outside the string.
         self.assertEqual([],
                          self.flag('a.cs', 'var s = @"a""// One thing. Another thing.""b"; // ok\n'))
+        # An interpolated one is spelled either way round, and only one of them abuts the quote.
+        for text in ('var s = $@"C:\\tmp\\"; // Two things. Here.\n',
+                     'var s = @$"C:\\tmp\\"; // Two things. Here.\n'):
+            with self.subTest(line=text.strip()):
+                self.assertEqual(['comment-wrap'], self.flag('a.cs', text))
 
     def test_only_the_syntax_that_has_verbatim_strings_gets_them(self) -> None:
         """C shares the C-like spec without the form, so `@` there is an ordinary character."""
