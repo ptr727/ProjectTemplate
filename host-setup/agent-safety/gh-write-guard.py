@@ -308,7 +308,7 @@ def _push_targets(cmd, cwd=None, current_branch=None):
 def _handoff(cmd):
     return (
         " The agent must not bypass this - if the bypass is genuinely intended, hand the exact command "
-        "to the maintainer to run in their terminal. See AGENTS.md 'Repository Boundaries and Write "
+        "to the maintainer to run in their terminal. See GOVERNANCE.md 'Repository Boundaries and Write "
         "Safety' and the Branching Model."
     )
 
@@ -430,7 +430,7 @@ def classify(cmd, cwd=None, origin=None, current_branch=None, rules_lookup=None)
                     f"This mutation passes a literal GitHub node id ({val[:16]}...) instead of a "
                     "variable captured from a live query. Node ids resolve globally, so a fabricated "
                     "or stale id writes to a real object in another repository. Capture the id from a "
-                    "query in this session into a variable and pass -F ...=\"$VAR\". See AGENTS.md "
+                    "query in this session into a variable and pass -F ...=\"$VAR\". See GOVERNANCE.md "
                     "'Repository Boundaries and Write Safety'."
                 )
 
@@ -454,7 +454,7 @@ def classify(cmd, cwd=None, origin=None, current_branch=None, rules_lookup=None)
                 return "deny", (
                     f"This write targets {t[0]}/{t[1]}, which is not this checkout's origin "
                     f"({origin[0]}/{origin[1]}). Write only to the current project's own repository. "
-                    "Another repository needs explicit per-session permission. See AGENTS.md "
+                    "Another repository needs explicit per-session permission. See GOVERNANCE.md "
                     "'Repository Boundaries and Write Safety'."
                 )
 

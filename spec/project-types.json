@@ -143,7 +143,7 @@
             "appliesTo": "*",
             "checks": [
                 { "id": "parity.markdownlint", "verdict": "letter", "assert": "One .markdownlint-cli2.jsonc drives the VS Code extension, the CLI, and CI, and CI runs it.", "intentRef": "GOVERNANCE.md#running-the-linters-locally-known-working-invocations" },
-                { "id": "parity.cspell", "verdict": "letter", "assert": "A cspell.json (not only a workspace word list) drives the extension, the CLI, and CI.", "intentRef": "AGENTS.md" },
+                { "id": "parity.cspell", "verdict": "letter", "assert": "A cspell.json (not only a workspace word list) drives the extension, the CLI, and CI.", "intentRef": "CODESTYLE.md" },
                 { "id": "parity.lang", "verdict": "intent", "assert": "ruff/pyright (Python) and editorconfig/csharpier (C#) configs are shared by editor, CLI, and CI where those languages are present.", "intentRef": "CODESTYLE.md" }
             ]
         },

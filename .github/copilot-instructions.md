@@ -6,7 +6,7 @@ The **canonical guide is [AGENTS.md](../AGENTS.md)** at the repo root - read it 
 
 For code-style rules, see [`CODESTYLE.md`](../CODESTYLE.md) at the repo root - one guide with a General section plus a section per language the repo uses.
 
-Do not duplicate language-specific rules here. **Project-specific conventions and API/behavioral contracts also belong in [AGENTS.md](../AGENTS.md), not here** - this file is intentionally limited to the inline commit/PR-title summary, the guidance for reviewing carried fleet content, and the GitHub Copilot Review Runbook. Non-Copilot agents (Claude Code, Codex, Cursor, ...) are not directed to this file and don't read it by default, so any rule a reviewer must honor has to live in `AGENTS.md` to be provider-independent.
+Do not duplicate language-specific rules here. **Project-specific conventions and API/behavioral contracts also belong in [GOVERNANCE.md](../GOVERNANCE.md), not here** - this file is intentionally limited to the inline commit/PR-title summary, the guidance for reviewing carried fleet content, and the GitHub Copilot Review Runbook. Non-Copilot agents (Claude Code, Codex, Cursor, ...) are not directed to this file and don't read it by default, so any rule a reviewer must honor has to live in `AGENTS.md` to be provider-independent.
 
 ## Commit Messages and Pull Request Titles
 
@@ -206,7 +206,7 @@ Issue-level Copilot comments (those in `issues/<N>/comments`) have no resolution
 Reply-body conventions:
 
 - Accepted bug/style fix: include fixing commit SHA and a one-line summary.
-- Declined style comment: cite the rule (AGENTS.md or the CODESTYLE.md language section) and the existing-tree precedent.
+- Declined style comment: cite the rule (GOVERNANCE.md or the CODESTYLE.md language section) and the existing-tree precedent.
 - Declined architecture proposal: one-sentence rationale.
 - Declined false positive on carried fleet content (a broken-link or dead-cross-reference flag inside byte-locked rule text): cite the "Reviewing Carried Fleet Content" section - the reference is intentional and the text cannot be edited locally.
 
@@ -214,6 +214,6 @@ After the final push, sweep-resolve stale older threads for removed code paths.
 
 ## When in Doubt
 
-Read [AGENTS.md](../AGENTS.md) for this repo's conventions. For code-style rules, [`CODESTYLE.md`](../CODESTYLE.md) (its General section plus the relevant language section) is authoritative. Don't restate any of these files' rules in commit bodies or PR descriptions - keep those focused on the change itself.
+Read [AGENTS.md](../AGENTS.md) to find the section that governs your change, and [GOVERNANCE.md](../GOVERNANCE.md) for the rule text itself. For code-style rules, [`CODESTYLE.md`](../CODESTYLE.md) (its General section plus the relevant language section) is authoritative. Don't restate any of these files' rules in commit bodies or PR descriptions - keep those focused on the change itself.
 
-If you find a gap in the governance itself (this file or AGENTS.md is out of date, a rule is missing, something bit this repo and would bite the next), fix it in the governance docs as part of your change rather than only working around it locally.
+If you find a gap in the governance itself (this file, AGENTS.md, or GOVERNANCE.md is out of date, a rule is missing, something bit this repo and would bite the next), fix it in the governance docs as part of your change rather than only working around it locally.

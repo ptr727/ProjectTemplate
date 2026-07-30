@@ -49,7 +49,8 @@ See [Release History][history] for the full history.
 
 This repo is the single home for the shared rules the fleet follows, a machine-readable spec those rules are checked against, a registry of the projects, and an audit-agent instruction set. It ships no application code. Each project owns its own implementation and is **audited** against the ground truth here - to the letter (exact file, section, or config) or to intent (an equivalent outcome).
 
-- **[AGENTS.md][agents]** - cross-cutting rules for AI coding agents: git, branching, release model, doc style, the recurring-violation rules (comments, ASCII charset, US spelling, line endings), PR review etiquette, and workflow YAML conventions.
+- **[AGENTS.md][agents]** - the agent entry point: context and delegation rules, plus the map from a task to the section that governs it.
+- **[GOVERNANCE.md][governance]** - cross-cutting rules for AI coding agents: git, branching, release model, doc style, the recurring-violation rules (comments, ASCII charset, US spelling, line endings), PR review etiquette, and workflow YAML conventions.
 - **[CODESTYLE.md][codestyle]** - code style for .NET and Python.
 - **[WORKFLOW.md][workflow]** - the CI/CD workflow contract (behavioral guarantees D1-D9) and its audit methodology.
 - **[AUDIT.md][audit]** - how an agent audits a repository against the spec and reports drift.
@@ -70,7 +71,7 @@ ProjectTemplate follows the same model it documents, and audits its own rules ag
 
 ## Rules
 
-A human-readable index of the rules agents enforce, implement, and audit. The authority for each is [AGENTS.md][agents], [CODESTYLE.md][codestyle], and [WORKFLOW.md][workflow]; the machine-checkable form lives in [spec/][spec].
+A human-readable index of the rules agents enforce, implement, and audit. The authority for each is [GOVERNANCE.md][governance], [CODESTYLE.md][codestyle], and [WORKFLOW.md][workflow]. The machine-checkable form lives in [spec/][spec].
 
 ### Always
 
@@ -125,7 +126,7 @@ A human-readable index of the rules agents enforce, implement, and audit. The au
 
 ## Development Environment Setup
 
-Contributors sign every commit. See [docs/ssh-signing.md][ssh-signing] for SSH commit-signing setup, [docs/host-setup.md][host-setup] for host prerequisites, and [docs/devcontainer.md][devcontainer] for devcontainer SSH-agent forwarding. Run the linters before pushing (see [AGENTS.md "Running the Linters Locally"][governance-running-the-linters-locally-known-working-invocations]).
+Contributors sign every commit. See [docs/ssh-signing.md][ssh-signing] for SSH commit-signing setup, [docs/host-setup.md][host-setup] for host prerequisites, and [docs/devcontainer.md][devcontainer] for devcontainer SSH-agent forwarding. Run the linters before pushing (see [GOVERNANCE.md "Running the Linters Locally"][governance-running-the-linters-locally-known-working-invocations]).
 
 ## TODO
 
@@ -158,6 +159,7 @@ See [LICENSE][license].
 <!-- Repo -->
 
 [agents]: ./AGENTS.md
+[governance]: ./GOVERNANCE.md
 [governance-branching-model]: ./GOVERNANCE.md#branching-model
 [governance-pr-review-etiquette]: ./GOVERNANCE.md#pr-review-etiquette
 [governance-running-the-linters-locally-known-working-invocations]: ./GOVERNANCE.md#running-the-linters-locally-known-working-invocations

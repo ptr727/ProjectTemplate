@@ -10,7 +10,7 @@ Given this document, an agent must be able to do three things to any project:
 2. **Test** - trace the expected inputs/outputs (section 5B) and, where warranted, drive a live probe (section 5C).
 3. **Assess** - render a verdict: **operational** (every *applicable* guarantee holds and every *applicable* scenario's observed output equals the expected) or **not operational** (any mismatch - which is a *defect*, not a style nit).
 
-> **Canonical scope.** This document is authoritative for the workflow contract and test methodology (sections 3 to 6). The conventions in section 2 and the release policy also live in `GOVERNANCE.md` ("Workflow YAML Conventions" and "Release Model"), which is authoritative where the two overlap. Section 2 restates them so this file reads on its own. On any conflict in that overlap, `AGENTS.md` wins.
+> **Canonical scope.** This document is authoritative for the workflow contract and test methodology (sections 3 to 6). The conventions in section 2 and the release policy also live in `GOVERNANCE.md` ("Workflow YAML Conventions" and "Release Model"), which is authoritative where the two overlap. Section 2 restates them so this file reads on its own. On any conflict in that overlap, `GOVERNANCE.md` wins.
 
 The guarantees are distilled from failures observed in practice and stated as the **failure-mode each prevents**, so the document stays portable to any project.
 

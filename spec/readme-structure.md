@@ -26,7 +26,7 @@ Shields are not a top-level section - they live under **Build and Distribution**
 
 ## Style
 
-- Write in the current state, present tense, so the reader needs no knowledge beyond what they are reading (AGENTS.md Documentation Style).
+- Write in the current state, present tense, so the reader needs no knowledge beyond what they are reading (GOVERNANCE.md Documentation Style).
 - One logical paragraph per line; no hard-wrap.
 - Title-case headings with lowercase short bind words.
 - US English, ASCII only (no em-dash; use a spaced hyphen), straight quotes.

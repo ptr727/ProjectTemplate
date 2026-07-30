@@ -1,6 +1,6 @@
 # AUDIT.md
 
-How an agent audits a repository against the fleet ground truth in this repo and reports drift. This is the procedure. The ground truth it checks against is [`registry/repos.json`][repos], the [`spec/`][spec] manifests, [`repo-config/`][repo-config], and the prose authorities ([`AGENTS.md`][agents], [`CODESTYLE.md`][codestyle], [`WORKFLOW.md`][workflow]). The audit is read-only: it produces a report under [`reports/`][reports], never edits the target repo.
+How an agent audits a repository against the fleet ground truth in this repo and reports drift. This is the procedure. The ground truth it checks against is [`registry/repos.json`][repos], the [`spec/`][spec] manifests, [`repo-config/`][repo-config], and the prose authorities ([`GOVERNANCE.md`][governance], [`CODESTYLE.md`][codestyle], [`WORKFLOW.md`][workflow]). The audit is read-only: it produces a report under [`reports/`][reports], never edits the target repo.
 
 The verdict vocabulary is [`WORKFLOW.md`][workflow]'s: **operational / not operational**, **N/A**,
 **defect**, and the applicable/absent rule. Do not invent a parallel scheme.
@@ -142,10 +142,10 @@ The convergence model: the hub audits and the agent **applies** the fixes via ta
 <!-- Workflow -->
 
 <!-- Repo -->
-[agents]: ./AGENTS.md
 [audit-runner]: ./spec/audit.py
 [codestyle]: ./CODESTYLE.md
 [copilot-runbook]: ./.github/copilot-instructions.md
+[governance]: ./GOVERNANCE.md
 [governance-branching-model]: ./GOVERNANCE.md#branching-model
 [governance-pr-review-etiquette]: ./GOVERNANCE.md#pr-review-etiquette
 [project-types]: ./spec/project-types.json

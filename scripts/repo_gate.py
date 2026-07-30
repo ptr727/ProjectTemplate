@@ -4,7 +4,7 @@
 Each check maps to a recurring review-finding category (counts from a 1,047-finding audit
 of this repo's Copilot reviews):
 
-  sha-pin     Action SHA-pinning gaps                      25 findings  (AGENTS.md rule)
+  sha-pin     Action SHA-pinning gaps                      25 findings  (GOVERNANCE.md rule)
   eol         .editorconfig <-> .gitattributes disagreement 40 findings
 
 A stale-backticked-path check was built and REJECTED: in a template repo, docs
@@ -22,7 +22,7 @@ import argparse, re, subprocess, sys
 from pathlib import Path, PurePosixPath
 from fnmatch import fnmatch
 
-# AGENTS.md documents exactly one floating-ref exception.
+# GOVERNANCE.md documents exactly one floating-ref exception.
 SHA_EXCEPTIONS = {'dotnet/nbgv'}
 USES = re.compile(r'^\s*-?\s*uses:\s*(?P<ref>[^\s#]+)', re.M)
 PIN = re.compile(r'^[0-9a-f]{40}$')
