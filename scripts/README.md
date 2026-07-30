@@ -17,7 +17,7 @@ uvx coverage@latest run -m unittest discover -s scripts && uvx coverage@latest r
 
 ## `prose_lint.py`
 
-Enforces the [`GOVERNANCE.md`](../GOVERNANCE.md) "Documentation Style Conventions" rules that no linter checks: non-ASCII judged against the charset rule's three tiers, a semicolon joining two independent clauses, and a duplicated consecutive word.
+Enforces the [`GOVERNANCE.md`](../GOVERNANCE.md) "Documentation Style Conventions" rules that no linter checks: non-ASCII judged against the charset rule's three tiers, a semicolon in prose, a spaced hyphen joining or interrupting a sentence, a duplicated consecutive word, and the shape of a comment's prose.
 
 The tiers decide by context rather than by a flat ban. Tier 1 carries no meaning its ASCII form loses and always flags. Tier 2 is an operator, kept next to a figure or another operator and replaced between words, so a threshold table reads as the range it is. Tier 3 is a unit or scientific symbol whose ASCII form would be a lie and never flags. Developer-typed characters such as emoji are preserved regardless of tier.
 

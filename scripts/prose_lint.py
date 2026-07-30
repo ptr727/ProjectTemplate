@@ -198,6 +198,8 @@ XML_LIKE: Syntax = {'line': (), 'block': (('<!--', '-->'),), 'doc': (), 'quotes'
 POWERSHELL: Syntax = {'line': ('#',), 'block': (('<#', '#>'),), 'doc': (), 'quotes': '"\''}
 INI: Syntax = {'line': ('#', ';'), 'block': (), 'doc': (), 'quotes': '"\''}
 LISP_LIKE: Syntax = {'line': ('#',), 'block': (), 'doc': (), 'quotes': '"'}
+# CSS has block comments only, so a `//` in it is the scheme separator of a URL.
+CSS: Syntax = {'line': (), 'block': (('/*', '*/'),), 'doc': (), 'quotes': '"\''}
 
 SYNTAX: dict[str, Syntax] = {
     # Python, shell, and the hash-commented configs
@@ -206,7 +208,7 @@ SYNTAX: dict[str, Syntax] = {
     # C#, C, and C++
     '.cs': C_LIKE, '.c': C_LIKE, '.cpp': C_LIKE, '.cc': C_LIKE, '.cxx': C_LIKE,
     '.h': C_LIKE, '.hpp': C_LIKE, '.jsonc': C_LIKE, '.json5': C_LIKE,
-    '.js': C_LIKE, '.ts': C_LIKE, '.css': C_LIKE,
+    '.js': C_LIKE, '.ts': C_LIKE, '.css': CSS, '.scss': CSS,
     # JSON carries comments in practice, which is what JSONC names.
     # VS Code tasks, launch, devcontainer, and workspace files ship them under a plain .json name.
     '.json': C_LIKE, '.code-workspace': C_LIKE,
@@ -270,7 +272,8 @@ def strip_strings(line: str, quotes: str) -> str:
 
 # A pragma, shebang, or divider is machinery rather than prose.
 NOT_PROSE = re.compile(r'^(!|\s*[-=#*/<>]+\s*$)|noqa|type:\s*ignore|pylint|ruff:|mypy:|shellcheck'
-                       r'|cSpell|markdownlint|omit from toc|prettier|eslint|SPDX|Copyright')
+                       r'|cSpell|markdownlint|omit from toc|prettier|eslint|SPDX|Copyright'
+                       r'|^v\d+(\.\d+)*$')
 
 # Two sentences on one line, guarded against an abbreviation or a dotted identifier.
 RUN_ON = re.compile(r'(?<![A-Z])(?<!\be\.g)(?<!\bi\.e)(?<!\bvs)(?<!\betc)[.!?]\s+(?=[A-Z])')
@@ -303,7 +306,7 @@ def in_numeric_context(line: str, pos: int) -> bool:
     """
     def neighbor(step: int) -> str:
         j = pos + step
-        while 0 <= j < len(line) and line[j] == ' ':
+        while 0 <= j < len(line) and line[j].isspace():
             j += step
         return line[j] if 0 <= j < len(line) else ''
 
@@ -471,9 +474,12 @@ def check_file(path: Path, rules: set[str]) -> list[tuple[int, str, str]]:
         # A shell script carries 78 statement separators that are not prose at all.
         if path.suffix == '.md':
             if 'semicolon' in rules:
+                listish = prose.count(';') > 1 or ':' in prose.split(';')[0]
                 for m in SEMICOLON.finditer(prose):
-                    if ',' in prose[:m.start()]:
-                        continue        # a list that already carries commas keeps the semicolon
+                    # A list keeps its semicolons, and a list announces itself with a colon or by
+                    # having more than one separator.
+                    if listish and ',' in prose[:m.start()]:
+                        continue
                     out.append((i, 'semicolon', 'semicolon in prose -> a comma or two sentences'))
             if 'dash' in rules:
                 skip = LABEL_DASH.match(prose)

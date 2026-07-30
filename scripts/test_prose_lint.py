@@ -43,6 +43,12 @@ class TestTierTables(BaitCase):
                 self.assertEqual(['charset'], self.kinds(f'left {ch} right\n', {'charset'}))
                 self.assertEqual(['charset'], self.kinds(f'8 {ch} 9\n', {'charset'}))
 
+    def test_a_tab_separates_an_operator_from_its_neighbor(self) -> None:
+        """Any whitespace, not only a literal space, sits between an operator and its figure."""
+        for gap in (' ', '\t', '  '):
+            with self.subTest(gap=repr(gap)):
+                self.assertEqual([], self.kinds(f'threshold{gap}{chr(0x2264)}{gap}35\n', {'charset'}))
+
     def test_every_tier_two_character_turns_on_its_neighbors(self) -> None:
         """The same operator is the range it describes next to a figure, and prose between words."""
         for ch in prose_lint.TIER2:
@@ -229,6 +235,11 @@ class TestSemicolon2(BaitCase):
     def test_a_list_that_already_carries_commas_keeps_its_semicolon(self) -> None:
         self.assertEqual([], self.kinds('Inputs: a, b, and c; outputs: d and e.\n', {'semicolon'}))
 
+    def test_a_splice_whose_clause_carries_a_comma_is_still_a_splice(self) -> None:
+        """A comma earlier on the line is not a list, so it cannot excuse the semicolon."""
+        self.assertEqual(['semicolon'],
+                         self.kinds('It runs on push, always; it gates the merge.\n', {'semicolon'}))
+
     def test_prose_rules_do_not_reach_code_files(self) -> None:
         """A shell script carries statement separators, not prose, until comments can be extracted."""
         for name in ('bait.sh', 'bait.py', 'bait.yml'):
@@ -319,6 +330,16 @@ class TestCommentWrap(BaitCase):
         for text in ('# The details element is allowed.\n', '# `ruff format` runs first.\n'):
             with self.subTest(text=text.strip()):
                 self.assertEqual([], self.flag('a.py', text))
+
+    def test_css_has_block_comments_only(self) -> None:
+        """A `//` in CSS is the scheme separator of a URL, not a comment marker."""
+        self.assertEqual([], self.flag('a.css', 'a { background: url(http://x/y. Z); }\n'))
+        self.assertEqual(['comment-wrap'], self.flag('a.css', '/* One thing. Another thing. */\n'))
+
+    def test_a_version_pin_is_machinery_rather_than_prose(self) -> None:
+        """The action-pinning rule requires a trailing `# vX.Y.Z`, which is a label, not a sentence."""
+        self.assertEqual([], self.flag('a.yml', '  uses: x@sha # v7.0.0\n'))
+        self.assertEqual([], self.flag('a.yml', '  uses: x@sha # v3\n'))
 
     def test_the_syntax_table_covers_a_plausible_number_of_extensions(self) -> None:
         """A table that shrank would make every case above pass by having nothing to dispatch on."""
