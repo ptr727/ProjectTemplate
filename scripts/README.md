@@ -17,7 +17,11 @@ uvx coverage@latest run -m unittest discover -s scripts && uvx coverage@latest r
 
 ## `prose_lint.py`
 
-Enforces the [`GOVERNANCE.md`](../GOVERNANCE.md) "Documentation Style Conventions" rules that no linter checks: typographic Unicode where an ASCII equivalent exists, a semicolon joining two independent clauses, and a duplicated consecutive word. The two documented non-ASCII exceptions, scientific symbols and developer-typed characters, are deliberately not flagged.
+Enforces the [`GOVERNANCE.md`](../GOVERNANCE.md) "Documentation Style Conventions" rules that no linter checks: non-ASCII judged against the charset rule's three tiers, a semicolon joining two independent clauses, and a duplicated consecutive word.
+
+The tiers decide by context rather than by a flat ban. Tier 1 carries no meaning its ASCII form loses and always flags. Tier 2 is an operator, kept next to a figure or another operator and replaced between words, so a threshold table reads as the range it is. Tier 3 is a unit or scientific symbol whose ASCII form would be a lie and never flags. Developer-typed characters such as emoji are preserved regardless of tier.
+
+A character in no tier is a `charset-unknown` finding rather than a silent pass, since a gate that allows whatever it does not recognize stops gating as the character set grows. Classifying one is a fleet-law edit, so CI surfaces it without blocking on it.
 
 Run it scoped to changed lines, matching the standing rule that existing prose is corrected as each file is next edited rather than swept:
 
@@ -31,7 +35,17 @@ Whole-tree (`python3 scripts/prose_lint.py .`) reports the legacy semicolon back
 
 A double-quoted span in markdown is treated as a quotation and not scanned for prose rules, so a rule that states its own counter-example does not report the document that documents it. Outside markdown a double quote is structural, so the prose inside it still counts.
 
-**Known recall gap:** the splice detector keys on a pronoun or article after the semicolon, so an imperative splice ("Delegate exploration; keep synthesis") is missed. Reading the semicolons in a diff by eye still catches what it cannot.
+The `semicolon` and `dash` rules ban a construction rather than a detectable subset of it, so each flags by default and the exceptions are the ones the rule names: a semicolon inside a list that already carries commas, and for the dash a compound word, a leading list marker, a range, and the `- **Label** - explanation` separator that opens a governed bullet.
+
+**Both are markdown-only for now.** A shell script carries 78 statement separators that are not prose at all, so telling a comment from code is a precondition for reaching source files. Until then a semicolon or dash in a code comment is missed, which reading the diff by eye still catches.
+
+The `comment-wrap` rule covers comments in every syntax the fleet's project types carry, not only the hash ones: `//` and `/* */` for C#, C, C++, JSONC and CSS, `<!-- -->` for XML, csproj and markdown, `<# #>` for PowerShell, `;` for INI, and `#` for Python, shell, YAML and TOML.
+
+JSON is treated as JSONC, because that is what ships: VS Code tasks, launch, devcontainer and workspace files all carry comments under a plain `.json` name. A marker inside a string literal is not a comment, so each line is scanned with quoted spans blanked first, and Python uses `tokenize` so a trailing comment is seen exactly. A documentation comment (`///`, `/**`, a docstring) is left to CODESTYLE, which permits the paragraphs this rule forbids.
+
+A comment sentence also has to start with a capital, which `comment-case` checks. A lowercase opening reads as the continuation of the line above it, so the two rules are read together: a wrapped sentence reports as `comment-wrap`, and a lowercase opening that is not a continuation reports as `comment-case`. Where the first word is a tool whose own casing is lowercase, the fix is to restructure rather than to capitalize the name against CODESTYLE's tooling-casing rule.
+
+`charset` and `dupword` are clean tree-wide and gate CI. `charset-unknown`, `semicolon`, and `dash` run as a warn-only CI step so their backlog is visible without blocking, and are corrected as each file is next edited.
 
 ## `repo_gate.py`
 

@@ -1,7 +1,8 @@
 {
-    // claude-md-safety.md is a fragment the installer appends into ~/.claude/CLAUDE.md (which already
-    // has its own H1), so it intentionally opens at H2. MD041 (first line must be a top-level heading)
-    // does not apply to an appended snippet. This nested config affects only this directory.
+    // The claude-md-safety.md fragment is appended by the installer into ~/.claude/CLAUDE.md.
+    // That file already has its own H1, so the fragment intentionally opens at H2.
+    // MD041 requires the first line to be a top-level heading, which an appended snippet is not.
+    // This nested config affects only this directory.
     "config": {
         "MD041": false
     }

@@ -30,13 +30,14 @@
 
     "remoteUser": "vscode",
 
-    // The bind-mount on macOS hosts surfaces /home/vscode/.ssh as root-owned;
-    // chown it back so writes from inside the container (known_hosts updates
-    // by gh / git) land cleanly. Idempotent on Linux/WSL2.
+    // The bind-mount on macOS hosts surfaces /home/vscode/.ssh as root-owned.
+    // Chown it back so writes from inside the container land cleanly.
+    // Those include the known_hosts updates gh and git make.
+    // Idempotent on Linux and WSL2.
     "onCreateCommand": "sudo install -d -m 700 -o vscode -g vscode /home/vscode/.ssh",
 
-    // Restore .NET local tools (csharpier, dotnet-outdated). No git hooks are
-    // installed by default - see README "Optional: enable git hooks locally".
+    // Restore the .NET local tools, csharpier and dotnet-outdated.
+    // No git hooks are installed by default, per README "Optional: enable git hooks locally".
     "postCreateCommand": ".devcontainer/dotnet/post-create.sh",
 
     "customizations": {

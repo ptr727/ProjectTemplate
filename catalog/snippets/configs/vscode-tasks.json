@@ -1,9 +1,10 @@
 {
     "version": "2.0.0",
     "tasks": [
-        // .NET language group. A non-.NET repo drops this group and adds its own
-        // language's tasks. The first three tasks are the .NET clean-compile set
-        // (CODESTYLE.md) carried verbatim; the rest are convenience/project-specific.
+        // .NET language group.
+        // A non-.NET repo drops this group and adds its own language's tasks.
+        // The first three tasks are the .NET clean-compile set (CODESTYLE.md), carried verbatim.
+        // The rest are convenience or project-specific.
         {
             "label": ".NET Build",
             "type": "process",
@@ -120,8 +121,10 @@
                 "clear": false
             }
         },
-        // Lint group - run on demand via Docker (--pull=always pins each to the current :latest); mirrors the CI
-        // lint gate. Broad live spell-checking is the cspell extension's job. Pre-commit does formatting only.
+        // Lint group, run on demand via Docker, where --pull=always pins each to the current :latest.
+        // It mirrors the CI lint gate.
+        // Broad live spell-checking is the cspell extension's job.
+        // Pre-commit does formatting only.
         {
             "label": "Lint: EditorConfig",
             "type": "process",
