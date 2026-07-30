@@ -48,3 +48,19 @@ jobs:
             jq empty "$f"
           done
           python3 spec/validate.py
+
+      # Each gate in scripts/ is proven by a case that reintroduces the fault it catches.
+      # Standard library only, so no install step and no dependency to pin.
+      - name: Run script self-tests step
+        run: |
+          set -Eeuo pipefail
+          python3 scripts/test_prose_lint.py
+          python3 scripts/test_repo_gate.py
+
+      - name: Check repo gates step
+        run: python3 scripts/repo_gate.py
+
+      # The charset and duplicate-word rules are clean tree-wide, so they gate. The semicolon
+      # rule stays warn-only: going green needs the sweep the prose rule itself forbids.
+      - name: Check prose step
+        run: python3 scripts/prose_lint.py . --check ascii --check dupword

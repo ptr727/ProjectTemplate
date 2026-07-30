@@ -20,13 +20,13 @@ Fidelity is a declared field defaulting to `presence`, never inferred from `whol
 ## Why Each Unit Sits Where It Does
 
 - **verbatim** - `.markdownlint-cli2.jsonc` (fleet-generic, no governed divergence), the `github-release` job region of the release task (the canonical orchestration a repo must not fork), and the universal rule sections of `AGENTS.md` - fleet-law with no repo-specific content (no SHAs, no `ptr727/<repo>` references), where a paraphrase or a missing rule is a defect, not an adaptation. Which `AGENTS.md` sections are verbatim and which stay intent (the few that describe one repo) is defined in [section-model.md][section-model].
-- **interface** - the release and PR workflows. Their fixed contract is the job and check names plus the artifact handoff, while the leaf build jobs are owned. See the override seam in [`AGENTS.md`][agents].
+- **interface** - the release and PR workflows. Their fixed contract is the job and check names plus the artifact handoff, while the leaf build jobs are owned. See the override seam in [`GOVERNANCE.md`][governance].
 - **intent** - `.editorconfig` and `.gitattributes` (the `[*] end_of_line` default and path pins vary by platform), `cspell.json` (the words list and file scope vary), `CODESTYLE.md` / `WORKFLOW.md` / `AUDIT.md` / `.github/copilot-instructions.md` (carried docs judged by meaning), and the ruleset payloads (whose live state is diffed separately).
 - **presence** - `README.md`, `HISTORY.md`, `.gitignore`, and the per-repo config that only needs to exist.
 
 ## The Workflow Override Seam Contract
 
-The fixed interface of a workflow is stated in [`AGENTS.md`][agents] ("Orchestration vs. build - the override seam" and "Workflow YAML Conventions"), and the `interface` check enforces it by name and structure: the ruleset-bound required check `name: Check pull request workflow status job`, the `github-release` and `get-version` job keys, the `release-asset-<branch>-<target>` artifact-name handoff, and that `github-release` collects assets by `pattern:` / `merge-multiple:` and never by an `artifact-ids:` that names a build job's output. A repo owns the leaf `build-<target>-task` job list, its `needs` targets, and its paths-filter, and none of those are checked.
+The fixed interface of a workflow is stated in [`GOVERNANCE.md`][governance] ("Orchestration vs. build - the override seam" and "Workflow YAML Conventions"), and the `interface` check enforces it by name and structure: the ruleset-bound required check `name: Check pull request workflow status job`, the `github-release` and `get-version` job keys, the `release-asset-<branch>-<target>` artifact-name handoff, and that `github-release` collects assets by `pattern:` / `merge-multiple:` and never by an `artifact-ids:` that names a build job's output. A repo owns the leaf `build-<target>-task` job list, its `needs` targets, and its paths-filter, and none of those are checked.
 
 ## Normalization
 
@@ -37,9 +37,9 @@ A verbatim check compares content by hash after **line-ending, action-pin, and j
 A verbatim mismatch is one of two things, told apart **by hash, not by a version**. The audit hashes each past revision of the hub's canonical from its own git history. If the downstream copy matches a **past** canonical revision, the base advanced and the copy is **stale** - re-vendor it. If it matches **no** revision the base ever produced, the repo **modified fixed content** - review it. A version stamp could claim to be current while being neither, so it is demoted to a human-facing label and never consulted for integrity.
 
 <!-- Repo -->
-[agents]: ../AGENTS.md
 [audit]: ./audit.py
 [files]: ./files.json
 [files-schema]: ./files.schema.json
-[section-model]: ./section-model.md
+[governance]: ../GOVERNANCE.md
 [scope-model]: ./scope-model.md
+[section-model]: ./section-model.md

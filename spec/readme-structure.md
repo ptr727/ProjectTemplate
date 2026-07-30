@@ -4,7 +4,7 @@ The preferred `README.md` shape for a fleet project. The audit's `readme-structu
 
 ## Sections and Order
 
-1. **Title (`# <Name>`)** - the H1 **is the repository name** (a hyphenated name may render its hyphens as spaces: `Financial-Modeling` -> `Financial Modeling`), then a one-line description as the next paragraph. That description is a **single sentence, link-free plain text, at most 100 characters** - it is the one canonical short description. It doubles as the GitHub About description (AGENTS.md "Repository Details") and, for a repo that publishes a Docker image, the Docker Hub short description. Both render no markdown, and Docker Hub caps the short description near 100 characters - the tightest surface, which sets the limit. The audit checks the H1 name, the length, the link-free form, and the mirrors.
+1. **Title (`# <Name>`)** - the H1 **is the repository name** (a hyphenated name may render its hyphens as spaces: `Financial-Modeling` -> `Financial Modeling`), then a one-line description as the next paragraph. That description is a **single sentence, link-free plain text, at most 100 characters** - it is the one canonical short description. It doubles as the GitHub About description (GOVERNANCE.md "Repository Details") and, for a repo that publishes a Docker image, the Docker Hub short description. Both render no markdown, and Docker Hub caps the short description near 100 characters - the tightest surface, which sets the limit. The audit checks the H1 name, the length, the link-free form, and the mirrors.
 2. **Build and Distribution (`##`)** - a bullet per distribution channel the project actually ships, each linking where it lives: **Source Code** (the GitHub repo), **Versioned Releases** (GitHub Releases), **Docker Images** (Docker Hub), **NuGet Packages** (NuGet.org), **PyPI Packages** (PyPI.org). List only the channels the project uses. It carries three sub-sections:
    - **Build Status (`###`)** - the CI/build status shields (release build, Docker build, last commit, last build).
    - **Releases (`###`)** - the version shields (GitHub release, GitHub pre-release, Docker latest/develop, NuGet, PyPI), one per channel the project publishes.
@@ -26,7 +26,7 @@ Shields are not a top-level section - they live under **Build and Distribution**
 
 ## Style
 
-- Write in the current state, present tense, so the reader needs no knowledge beyond what they are reading (AGENTS.md Documentation Style).
+- Write in the current state, present tense, so the reader needs no knowledge beyond what they are reading (GOVERNANCE.md Documentation Style).
 - One logical paragraph per line; no hard-wrap.
 - Title-case headings with lowercase short bind words.
 - US English, ASCII only (no em-dash; use a spaced hyphen), straight quotes.
