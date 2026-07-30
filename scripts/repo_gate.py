@@ -26,6 +26,7 @@ from fnmatch import fnmatch
 SHA_EXCEPTIONS = {'dotnet/nbgv'}
 USES = re.compile(r'^\s*-?\s*uses:\s*(?P<ref>[^\s#]+)', re.M)
 PIN = re.compile(r'^[0-9a-f]{40}$')
+WORKFLOW = re.compile(r'workflows/.*\.ya?ml$')
 
 
 def sh(*args: str) -> str:
@@ -37,11 +38,17 @@ def tracked(root: Path) -> list[str]:
     return [l for l in out.split('\n') if l]
 
 
+def workflow_files(files: list[str]) -> list[str]:
+    """The files sha-pin governs, exposed so a test can assert the scan found something.
+
+    A scan that matches nothing reports `0 issue(s)`, indistinguishable from a clean tree.
+    """
+    return [f for f in files if WORKFLOW.search(f)]
+
+
 def check_sha_pin(root: Path, files: list[str]) -> list[str]:
     bad = []
-    for rel in files:
-        if not re.search(r'workflows/.*\.ya?ml$', rel):
-            continue
+    for rel in workflow_files(files):
         try:
             text = (root / rel).read_text(encoding='utf-8', errors='replace')
         except OSError:
@@ -62,24 +69,21 @@ def check_sha_pin(root: Path, files: list[str]) -> list[str]:
     return bad
 
 
-def _globs(path: Path, pat: re.Pattern[str]) -> set[str]:
-    try:
-        text = path.read_text(encoding='utf-8', errors='replace')
-    except OSError:
-        return set()
-    return {m.group(1).strip() for m in pat.finditer(text)}
+def check_eol(root: Path, files: list[str]) -> list[str]:
+    """Every path pinned LF in .gitattributes has the matching .editorconfig override.
 
-
-def check_eol(root: Path) -> list[str]:
-    """Every path pinned LF in .gitattributes should also be LF in .editorconfig, and vice versa.
-
-    AGENTS.md: "Pair each such pin with a matching .editorconfig override - the git pin
+    GOVERNANCE.md: "Pair each such pin with a matching .editorconfig override - the git pin
     alone is not enough." Extensionless executables are the case this protects.
+
+    One direction only. An .editorconfig LF glob with no .gitattributes pin is legitimate, since
+    .editorconfig governs what the editor writes where git enforces a class it must not guess at.
+    `files` is unused, and present so every check in CHECKS shares one signature.
     """
     ec, ga = root / '.editorconfig', root / '.gitattributes'
-    if not ec.exists() or not ga.exists():
-        return [f'missing {"." if ec.exists() else ".editorconfig"} / '
-                f'{".gitattributes" if not ga.exists() else ""}'.strip(' /')]
+    missing = [name for name, p in (('.editorconfig', ec), ('.gitattributes', ga))
+               if not p.exists()]
+    if missing:
+        return [f'missing {name}' for name in missing]
     # .gitattributes: "<glob> text eol=lf"
     ga_lf = set()
     for raw in ga.read_text(encoding='utf-8', errors='replace').split('\n'):
@@ -122,11 +126,11 @@ def check_eol(root: Path) -> list[str]:
 CHECKS = {'sha-pin': check_sha_pin, 'eol': check_eol}
 
 
-def main() -> int:
+def main(argv: list[str] | None = None) -> int:
     ap = argparse.ArgumentParser()
     ap.add_argument('--root', default='.')
     ap.add_argument('--check', action='append', choices=sorted(CHECKS))
-    a = ap.parse_args()
+    a = ap.parse_args(argv)
     root = Path(a.root).resolve()
     files = tracked(root)
     if not files:
@@ -135,8 +139,7 @@ def main() -> int:
 
     total = 0
     for name in (a.check or sorted(CHECKS)):
-        fn = CHECKS[name]
-        hits = fn(root) if name == 'eol' else fn(root, files)
+        hits = CHECKS[name](root, files)
         status = 'FAIL' if hits else 'ok'
         print(f'[{status:4}] {name:12} {len(hits)} issue(s)')
         for h in hits:

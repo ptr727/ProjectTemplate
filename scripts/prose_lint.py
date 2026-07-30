@@ -8,11 +8,42 @@ these rules, so nothing enforced them before this script. Rules implemented:
   dupword        No duplicated consecutive word.
   sentence-split A sentence must not wrap across lines (one sentence per line).
 
-Exit 1 if any violation is found. Read-only; never edits.
+Exit 1 if any violation is found. Read-only, never edits.
 """
 from __future__ import annotations
 import argparse, re, subprocess, sys, unicodedata
 from pathlib import Path
+
+# One source of truth for the rule names, so the CLI choices cannot drift from what check_file
+# implements. Writing them out separately is how a rule exists in one place and not another.
+RULES = {
+    'ascii': 'typographic Unicode where an ASCII equivalent exists',
+    'semicolon': 'a semicolon joining two independent clauses',
+    'dupword': 'a duplicated consecutive word',
+    'sentence-split': 'a sentence wrapping across lines',
+}
+DEFAULT_RULES = frozenset({'ascii', 'semicolon', 'dupword'})
+
+# Produced rather than authored trees, consulted only on the no-git fallback path.
+# Where git can answer, its own ignore rules are the better answer.
+GENERATED_ROOTS = frozenset({
+    '.git', '.artifacts', '.mypy_cache', '.ruff_cache', '.pytest_cache',
+    '.venv', '__pycache__', 'node_modules', 'bin', 'obj', 'dist',
+})
+
+# A floor on what a healthy sweep of this repo reaches, asserted by the tests.
+# A sweep that quietly stops finding files satisfies every rule by having nothing to read.
+LEAST_PLAUSIBLE = 60
+
+
+def rel(path: Path) -> str:
+    """The repo-relative posix key a git diff uses for this path.
+
+    `removeprefix` rather than `lstrip`, which takes a character set and ate the leading dot of
+    every dotfile - it turned `.github/workflows/x.yml` into `github/workflows/x.yml`, so --diff
+    could never match a path under a dot directory.
+    """
+    return path.as_posix().removeprefix('./')
 
 
 def changed_lines(base: str) -> dict[str, set[int]] | None:
@@ -36,15 +67,81 @@ def changed_lines(base: str) -> dict[str, set[int]] | None:
                 out[cur].update(range(start, start + count))
     return out
 
+
+def tracked_paths(root: Path) -> list[Path] | None:
+    """Paths git tracks under `root`, or None when git cannot answer.
+
+    Empty output is a None too. `git ls-files` succeeds with no output in an initialized but
+    empty checkout, and reading that as an empty file set would scan nothing and report success.
+    """
+    try:
+        r = subprocess.run(['git', '-C', str(root), 'ls-files', '-z'],
+                           capture_output=True, text=True)
+    except (OSError, ValueError):
+        return None
+    if r.returncode != 0 or not r.stdout.strip('\0'):
+        return None
+    return [root / name for name in r.stdout.split('\0') if name]
+
+
+def walk_paths(root: Path) -> list[Path]:
+    """Every file under `root` minus the generated trees, for a checkout git cannot describe.
+
+    `git check-ignore` fails on exactly the machine that has no git, so this path asserts the
+    generated-root rule by name instead of asking git which paths are ignored.
+    """
+    return [p for p in root.rglob('*')
+            if p.is_file() and not GENERATED_ROOTS.intersection(p.relative_to(root).parts)]
+
+
+def is_text(path: Path) -> bool:
+    """A NUL byte in the first block marks a binary, the test the line-endings rule prescribes."""
+    try:
+        with path.open('rb') as fh:
+            return b'\0' not in fh.read(8192)
+    except OSError:
+        return False
+
+
+def discover(paths: list[str], excludes: tuple[str, ...] = ()) -> list[Path]:
+    """Every authored text file the rules govern, scoped by what git tracks.
+
+    The line-endings rule already requires a repo-wide sweep be scoped to `git ls-files` rather
+    than a directory list, which covers what its author thought of and silently stops covering
+    whatever is added next. An extension allowlist has that same defect, so the filter here is
+    whether the file is text, not whether its suffix was thought of.
+
+    An explicit file argument bypasses discovery, so a single file can always be checked directly.
+    """
+    found: list[Path] = []
+    for raw in paths:
+        p = Path(raw)
+        if p.is_file():
+            found.append(p)
+            continue
+        root = p if p.is_dir() else Path('.')
+        tracked = tracked_paths(root)
+        if tracked is None:
+            print(f'warning: git cannot describe {root}, falling back to a filesystem walk',
+                  file=sys.stderr)
+            tracked = walk_paths(root)
+        found.extend(tracked)
+    keep = [p for p in found
+            if not any(x in rel(p) for x in excludes) and p.is_file() and is_text(p)]
+    return sorted(set(keep))
+
+
 # Typographic Unicode the rule says to replace with its ASCII equivalent on sight.
-# AGENTS.md allows two narrow exceptions that are deliberately NOT flagged:
+# GOVERNANCE.md allows two narrow exceptions that are deliberately NOT flagged:
 # scientific/technical symbols with no clean ASCII equivalent (ohm, micro, degree,
 # pi, superscripts, section sign) and developer-typed Unicode such as emoji.
 # Only substitutable typography appears here.
+# Escapes, never literals - this file is scanned by the rule below, and a literal is invisible.
 SUGGEST = {
     '\u2014': '-', '\u2013': '-', '\u2018': "'", '\u2019': "'",
     '\u201c': '"', '\u201d': '"', '\u2026': '...', '\u00a0': ' ',
-    '\u2022': '-', '\u2011': '-', '\u2192': '->',
+    '\u2022': '-', '\u2011': '-', '\u2192': '->', '\u21d2': '=>',
+    '\u2264': '<=', '\u2265': '>=',
 }
 
 # A semicolon splice: "<clause>; <pronoun/article/subject> <verb>..."
@@ -54,15 +151,28 @@ SPLICE = re.compile(
     r';\s+(?P<w>it|this|that|they|he|she|we|you|the|a|an|there|these|those)\s+\w+',
     re.IGNORECASE)
 
-DUPWORD = re.compile(r'\b(\w+)\s+\1\b', re.IGNORECASE)
+# The negative lookbehind keeps a word-joining character from starting a repetition:
+# "either/or or must-pair" is one phrase followed by a conjunction, not a doubled word.
+DUPWORD = re.compile(r'(?<![\w/-])(\w+)\s+\1\b', re.IGNORECASE)
 SENT_END = re.compile(r'[.!?]["\')\]]?\s*$')
 CODE_FENCE = re.compile(r'^\s*(```|~~~)')
 
-DUP_ALLOW = {'that that', 'had had', 'the the'}  # 'the the' still flagged below
+# Both are correct English. `the the` is always a typo, so it is not here.
+DUP_ALLOW = frozenset({'that that', 'had had'})
 
 
 def strip_inline_code(s: str) -> str:
     return re.sub(r'`[^`]*`', '``', s)
+
+
+def strip_quoted(s: str) -> str:
+    """Blank double-quoted spans, which hold a quotation rather than agent-authored prose.
+
+    A rule that states its own counter-example quotes the construction it bans, so scanning the
+    quotation reports the doc that documents the rule. Markdown only: in data and code files a
+    double quote is structural, and blanking those spans would hide the prose inside them.
+    """
+    return re.sub(r'"[^"\n]*"', '""', s)
 
 
 def check_file(path: Path, rules: set[str]) -> list[tuple[int, str, str]]:
@@ -93,14 +203,15 @@ def check_file(path: Path, rules: set[str]) -> list[tuple[int, str, str]]:
                 out.append((i, 'ascii', f"typographic {name} -> use '{fix}'"))
 
         txt = strip_inline_code(line)
+        prose = strip_quoted(txt) if path.suffix == '.md' else txt
 
         if 'semicolon' in rules:
-            m = SPLICE.search(txt)
+            m = SPLICE.search(prose)
             if m:
                 out.append((i, 'semicolon', f"semicolon splice before '{m.group('w')}'"))
 
         if 'dupword' in rules:
-            for m in DUPWORD.finditer(txt):
+            for m in DUPWORD.finditer(prose):
                 if m.group(0).lower() in DUP_ALLOW:
                     continue
                 out.append((i, 'dupword', f"duplicated word '{m.group(1)}'"))
@@ -121,50 +232,46 @@ def check_file(path: Path, rules: set[str]) -> list[tuple[int, str, str]]:
     return out
 
 
-def main() -> int:
+def main(argv: list[str] | None = None) -> int:
     ap = argparse.ArgumentParser()
     ap.add_argument('paths', nargs='*', default=['.'])
-    ap.add_argument('--check', action='append', dest='checks',
-                    choices=['ascii', 'semicolon', 'dupword', 'sentence-split'])
-    ap.add_argument('--ext', action='append', default=None)
+    ap.add_argument('--check', action='append', dest='checks', choices=sorted(RULES))
     ap.add_argument('--exclude', action='append', default=[])
     ap.add_argument('--summary', action='store_true')
+    ap.add_argument('--list-files', action='store_true',
+                    help='print the discovered file set and exit, for auditing the sweep scope')
     ap.add_argument('--diff', metavar='BASE',
                     help='only report violations on lines changed vs BASE '
                          '(matches the repo policy: fix as each file is next edited, not swept)')
-    a = ap.parse_args()
+    a = ap.parse_args(argv)
 
-    rules = set(a.checks or ['ascii', 'semicolon', 'dupword'])
-    exts = set(a.ext or ['.md', '.py', '.yml', '.yaml', '.sh', '.cs', '.json'])
-    excl = ['.git/', 'node_modules/', '__pycache__/', '.venv/'] + a.exclude
+    rules = set(a.checks or DEFAULT_RULES)
+    files = discover(a.paths or ['.'], tuple(a.exclude))
 
-    files: list[Path] = []
-    for p in a.paths:
-        pp = Path(p)
-        files.extend([f for f in ([pp] if pp.is_file() else pp.rglob('*'))
-                      if f.is_file() and f.suffix in exts
-                      and not any(x in str(f).replace('\\', '/') for x in excl)])
+    if a.list_files:
+        for f in files:
+            print(rel(f))
+        return 0
 
     scope = changed_lines(a.diff) if a.diff else None
     if a.diff and scope is None:
         print('warning: git diff failed; falling back to whole-tree scan', file=sys.stderr)
     if scope is not None:
-        files = [f for f in files
-                 if str(f).replace('\\', '/').lstrip('./') in scope]
+        files = [f for f in files if rel(f) in scope]
 
     total = 0
     bykind: dict[str, int] = {}
     byfile: dict[str, int] = {}
-    for f in sorted(set(files)):
-        allowed = scope.get(str(f).replace('\\', '/').lstrip('./')) if scope is not None else None
+    for f in files:
+        allowed = scope.get(rel(f)) if scope is not None else None
         for ln, kind, msg in check_file(f, rules):
             if allowed is not None and ln not in allowed:
                 continue
             total += 1
             bykind[kind] = bykind.get(kind, 0) + 1
-            byfile[str(f)] = byfile.get(str(f), 0) + 1
+            byfile[rel(f)] = byfile.get(rel(f), 0) + 1
             if not a.summary:
-                print(f'{f}:{ln}: {kind}: {msg}')
+                print(f'{rel(f)}:{ln}: {kind}: {msg}')
 
     if a.summary or total:
         print(f'\n{total} violation(s) across {len(byfile)} file(s)', file=sys.stderr)
