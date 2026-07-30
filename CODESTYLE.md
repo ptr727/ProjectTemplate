@@ -2,7 +2,7 @@
 
 This is the single code-style guide for the fleet. The **General** section applies to every language. Each **language section** (.NET, Python) is self-contained: a repo follows only the section(s) for the languages it ships and ignores the rest. A repo keeps the whole file rather than trimming it - an unused-language section costs nothing, the same whole-file model as [`.editorconfig`][root], whose inert `[*.cs]` block a non-.NET repo keeps.
 
-Cross-cutting *process* rules (PR titles, branching, US English, markdown style, comments philosophy, workflow YAML, PR review etiquette) live in [AGENTS.md][agents] and are not repeated here.
+Cross-cutting *process* rules (PR titles, branching, US English, markdown style, comments philosophy, workflow YAML, PR review etiquette) live in [GOVERNANCE.md][governance] and are not repeated here.
 
 ## General
 
@@ -22,7 +22,7 @@ Each language defines a **clean-compile** verification - the combination of buil
 
 ### Analyzer Diagnostics and Suppressions
 
-- **A new port is not a license to silence diagnostics.** Brownfield / just-ported status never justifies relaxing analyzer or linter severities or muting newly surfaced warnings - fix them. (The only brownfield allowance is the one-time git-signing / line-ending migration described in [AGENTS.md][agents] and [README.md][readme], which has nothing to do with code analysis.)
+- **A new port is not a license to silence diagnostics.** Brownfield / just-ported status never justifies relaxing analyzer or linter severities or muting newly surfaced warnings - fix them. (The only brownfield allowance is the one-time git-signing / line-ending migration described in [GOVERNANCE.md][governance] and [README.md][readme], which has nothing to do with code analysis.)
 - **Suppress only genuine false-positives or deliberate, documented exceptions**, always at the **narrowest scope that fits**, in this order of preference:
   1. An **in-code annotation on the specific symbol**, with a justification - the language's attribute/comment form, never a blanket pragma spanning a region.
   2. The **owning project's local config** when the exception is project-wide for one project (e.g. a test project's own `.editorconfig` / `pyproject.toml`).
@@ -34,8 +34,8 @@ Each language defines a **clean-compile** verification - the combination of buil
 These apply repo-wide, in every directory:
 
 1. **Markdown linting**: All `.md` files must be lint-clean (error and warning free) via the VS Code `markdownlint` extension. [`.markdownlint-cli2.jsonc`][markdownlint-cli2] at the repo root is the single source of truth - the davidanson `markdownlint` extension and a command-line `markdownlint-cli2` run both read it, so the IDE and CLI stay in lock-step. Rules it deliberately disables (e.g. `MD013` line-length) are **intentional** - do not "fix" them. `MD033` inline HTML stays **enabled**: HTML comments are permitted (markdownlint does not flag them), HTML elements are flagged, and anything with a native markdown equivalent uses the markdown. Fix violations at the source rather than disabling rules.
-2. **Spelling**: All spelling must be clean via the CSpell VS Code integration; words must be correctly spelled in **US English** (the repo-wide convention - see [AGENTS.md][agents]). The shared `cspell.json` sets `"language": "en-US"` so British spellings are flagged - a bare `"en"` accepts both US and British and silently passes the wrong spelling. Project-specific terms go in the shared `cspell.json` `words` list - it is the single source of truth the extension, CLI, and CI all read. The `.code-workspace` must **not** carry its own `cspell.words`/`cSpell.words` block; when externalizing words into `cspell.json`, delete any word list left in the workspace (a leftover one duplicates the list and silently drifts).
-3. **Spelling CI scope**: The enforced CI spell-check gate covers **`README.md` and `HISTORY.md` only** - these are the files every repo visitor sees, so they must be clean. It is deliberately **not** all `**/*.md`: repos carry many markdown files full of technical terms, and gating every one of them would mean endlessly padding `cspell.json` just to keep CI green. Broad, live spell-checking across any file (source, markdown, text) is the **cspell editor extension's** job, so typos still surface to whoever is editing. A repo owner **may** widen their own CI file list, but README + HISTORY are the default; keep the CI workflow, the `Lint: Spelling` VS Code task, and the AGENTS.md cspell one-liner on the same file list. The list is explicit (not a glob), so a repo that ships no `HISTORY.md` (e.g. one with no changelog) must drop it from all three surfaces and gate on `README.md` alone - cspell errors on a listed file that does not exist. Markdown *linting* (item 1) stays repo-wide `**/*.md` - it does not choke on technical terms.
+2. **Spelling**: All spelling must be clean via the CSpell VS Code integration; words must be correctly spelled in **US English** (the repo-wide convention - see [GOVERNANCE.md][governance]). The shared `cspell.json` sets `"language": "en-US"` so British spellings are flagged - a bare `"en"` accepts both US and British and silently passes the wrong spelling. Project-specific terms go in the shared `cspell.json` `words` list - it is the single source of truth the extension, CLI, and CI all read. The `.code-workspace` must **not** carry its own `cspell.words`/`cSpell.words` block; when externalizing words into `cspell.json`, delete any word list left in the workspace (a leftover one duplicates the list and silently drifts).
+3. **Spelling CI scope**: The enforced CI spell-check gate covers **`README.md` and `HISTORY.md` only** - these are the files every repo visitor sees, so they must be clean. It is deliberately **not** all `**/*.md`: repos carry many markdown files full of technical terms, and gating every one of them would mean endlessly padding `cspell.json` just to keep CI green. Broad, live spell-checking across any file (source, markdown, text) is the **cspell editor extension's** job, so typos still surface to whoever is editing. A repo owner **may** widen their own CI file list, but README + HISTORY are the default; keep the CI workflow, the `Lint: Spelling` VS Code task, and the GOVERNANCE.md cspell one-liner on the same file list. The list is explicit (not a glob), so a repo that ships no `HISTORY.md` (e.g. one with no changelog) must drop it from all three surfaces and gate on `README.md` alone - cspell errors on a listed file that does not exist. Markdown *linting* (item 1) stays repo-wide `**/*.md` - it does not choke on technical terms.
 
 ## .NET
 
@@ -197,7 +197,7 @@ Note: Code snippets are illustrative examples only. Replace namespaces/types to 
    - YAML files: 2 spaces
    - JSON files: 4 spaces
 
-5. **Line endings**: not specified here - governed per repo by `.editorconfig` / `.gitattributes` per the [AGENTS.md][agents] "Line Endings" section.
+5. **Line endings**: not specified here - governed per repo by `.editorconfig` / `.gitattributes` per the [GOVERNANCE.md][governance] "Line Endings" section.
 
 6. **`#region`**: Do not use regions. Prefer logical file/folder/namespace organization.
 7. **Member ordering (StyleCop SA1201)**: const -> static readonly -> static fields -> instance readonly fields -> instance fields -> constructors -> public (events -> properties -> indexers -> methods -> operators) -> non-public in same order -> nested types
@@ -364,7 +364,7 @@ This is the style guide for any **Python project(s)** in this repo.
 **Two profiles.** A repo's Python is one of two shapes, declared as the `build` or `lint-only` profile and validated against the `pyproject.toml` shape. The rest of this section (uv project, `uv.lock`, `uv run`, `src` layout, pytest coverage) describes the **Project** shape (the `build` profile). The two differ by whether the Python has **third-party runtime dependencies**, which shows up structurally in `pyproject.toml`, so the audit reads the shape there (`python.profile.detect`):
 
 - **Project** (the `build` profile) - the Python has third-party runtime dependencies, or is the repo's deliverable. It is a PEP 621 uv project: `[project]` with `dependencies` (dev tools in `[project.optional-dependencies]` or `[dependency-groups]`), a `[build-system]`, and a committed `uv.lock` (pinned LF - see [Line Endings][line-endings]). CI runs `uv sync --frozen` + `uv run <tool>`, so the lockfile pins tool versions.
-- **Scripts** (the `lint-only` profile) - stdlib-only utility scripts embedded in a **non-Python** repo (e.g. a Python tooling subtree of a `csharp` app). Run the tools with **`uvx`** (no project install, no lockfile): the `pyproject.toml` carries **only** tool config (`[tool.ruff]`, `[tool.mypy]`, and an optional `[tool.pyright]` editor block) - no `[project]`, no `[build-system]`, no `uv.lock` (that metadata would misrepresent it as a shippable package). **mypy** is the type-check gate (there is no first-party package for pyright strict to anchor on), and a `[tool.pyright]` block in **standard** mode keeps Pylance quiet in the editor - the same mypy-gate/pyright-editor split the build profile uses. There is no lockfile, and a `uvx <tool>@<ver>` pin in a `run:` step is not something Dependabot tracks, so **CI runs `uvx ruff@latest` / `uvx mypy@latest`** rather than a manual pin that would silently go stale. The fleet rule is to pin only what Dependabot auto-updates (SHA-pinned actions, package deps) and otherwise run latest, so the VS Code tasks, README, and CI all run the unpinned latest here. `.py` files follow the repo's line-ending default (CRLF in a CRLF-default repo, and a shebang-executed script is LF-pinned by path - see [Line Endings][line-endings]). There is no pytest suite, so the coverage expectation is N/A. A co-present `csharp` type still carries `codecov.yml` for its own tests.
+- **Scripts** (the `lint-only` profile) - stdlib-only utility scripts embedded in a **non-Python** repo (e.g. a Python tooling subtree of a `csharp` app). Run the tools with **`uvx`** (no project install, no lockfile): the `pyproject.toml` carries **only** tool config (`[tool.ruff]`, `[tool.mypy]`, and an optional `[tool.pyright]` editor block) - no `[project]`, no `[build-system]`, no `uv.lock` (that metadata would misrepresent it as a shippable package). **mypy** is the type-check gate (there is no first-party package for pyright strict to anchor on), and a `[tool.pyright]` block in **standard** mode keeps Pylance quiet in the editor - the same mypy-gate/pyright-editor split the build profile uses. There is no lockfile, and a `uvx <tool>@<ver>` pin in a `run:` step is not something Dependabot tracks, so **CI runs `uvx ruff@latest` / `uvx mypy@latest`** rather than a manual pin that would silently go stale. The fleet rule is to pin only what Dependabot auto-updates (SHA-pinned actions, package deps) and otherwise run latest, so the VS Code tasks, README, and CI all run the unpinned latest here. `.py` files follow the repo's line-ending default (CRLF in a CRLF-default repo, and a shebang-executed script is LF-pinned by path - see [Line Endings][line-endings]). There is no pytest suite and no coverage gate. A script that carries a gate still earns tests, written with the standard library's `unittest` so they run under bare `python3` with nothing installed, as `test_<script>.py` beside the script it exercises; measure them with `uvx coverage@latest run -m unittest discover -s <dir>` when a number is wanted, without adopting a threshold. A co-present `csharp` type still carries `codecov.yml` for its own tests.
 
 ### Toolchain
 
@@ -488,11 +488,11 @@ Before pushing or opening a PR:
 
 <!-- Repo -->
 
-[agents]: ./AGENTS.md
 [analyzer-diagnostics-and-suppressions]: #analyzer-diagnostics-and-suppressions
 [clean-compile-verification]: #clean-compile-verification
 [history]: ./HISTORY.md
-[line-endings]: ./AGENTS.md#line-endings
+[governance]: ./GOVERNANCE.md
+[line-endings]: ./GOVERNANCE.md#line-endings
 [markdown-and-spelling]: #markdown-and-spelling
 [markdownlint-cli2]: ./.markdownlint-cli2.jsonc
 [readme]: ./README.md

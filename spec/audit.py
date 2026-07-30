@@ -212,7 +212,7 @@ _MD_LINK_REF = re.compile(r"\[([^\]]*)\]\[[^\]]*\]")
 def strip_md_links(text):
     """Markdown links reduced to their text - `[text](url)` and `[text][ref]` become `text`.
 
-    The plain-text form AGENTS.md "Repository Details" says the About description carries.
+    The plain-text form GOVERNANCE.md "Repository Details" says the About description carries.
     """
     return _MD_LINK_REF.sub(r"\1", _MD_LINK_INLINE.sub(r"\1", text))
 
@@ -606,7 +606,7 @@ def audit_repo(entry, spec):
     # --- Carried files must not reference the template repo ---
     # The template is private, so a reference 404s for this repo's users and exposes machinery they cannot
     # follow. Checks the agent-instruction files, where a stale "report drift upstream" paragraph spread.
-    for path in ("AGENTS.md", ".github/copilot-instructions.md"):
+    for path in ("AGENTS.md", "GOVERNANCE.md", ".github/copilot-instructions.md"):
         doc = gh(f"repos/{slug}/contents/{path}?ref={ground}", ok404=True)
         if doc and doc.get("content") and HUB_NAME.lower() in base64.b64decode(doc["content"]).decode("utf-8", "replace").lower():
             findings.append(("DRIFT", f"carried: {path} references the template repo by name or link (private - 404s for this repo's readers; state the behavior, not the destination)"))
@@ -717,12 +717,12 @@ def audit_repo(entry, spec):
                 # Undeclared-section advisory (spec/section-model.md): an H2 the manifest does not declare is a
                 # candidate duplicate of a verbatim section, or repo-specific content to relocate. Advisory only -
                 # a repo may legitimately carry its own project-specific sections (the AGENTS.md preamble allows
-                # them) - so it points at the reconciliation, it never fails. AGENTS.md only, where the section
-                # structure is governed by section-model.md.
-                # Skip the hub itself: its AGENTS.md is the source and legitimately holds hub-only sections
+                # them) - so it points at the reconciliation, it never fails. AGENTS.md and GOVERNANCE.md only,
+                # the two files whose section structure is governed by section-model.md.
+                # Skip the hub itself: its copies are the source and legitimately hold hub-only sections
                 # (e.g. Repository Onboarding and Conformance) that are deliberately not carried. A downstream
                 # repo carrying such a section is still flagged, which is the point.
-                if path == "AGENTS.md" and entry.get("name") != HUB_NAME:
+                if path in ("AGENTS.md", "GOVERNANCE.md") and entry.get("name") != HUB_NAME:
                     declared = {n.strip().lower() for n in (needed | verbatim_needed)}
                     h2s = {ln[3:].strip().lower() for ln in text.splitlines() if ln.startswith("## ")}
                     for h in sorted(h2s - declared):
@@ -740,7 +740,7 @@ def audit_repo(entry, spec):
             findings.append(("LETTER", "history: HISTORY.md intro does not mirror the README intro - copy the README's opening paragraph (spec/readme-structure.md)"))
 
     # --- README title/intro is the one canonical short description ---
-    # spec/readme-structure.md item 1 + AGENTS.md "Repository Details": the H1 is the repo name, and the intro
+    # spec/readme-structure.md item 1 + GOVERNANCE.md "Repository Details": the H1 is the repo name, and the intro
     # line after it is a link-free, <=100-char plain sentence that carries verbatim to the GitHub About
     # description and (for a docker repo) the Docker Hub short description. The README is the source of truth.
     if "README.md" in doc_texts:
@@ -763,7 +763,7 @@ def audit_repo(entry, spec):
                 findings.append(("LETTER", f"readme: the intro line is {len(want)} characters, over the 100-char limit (Docker Hub's short-description cap, the tightest surface it feeds) - tighten it to one short sentence (spec/readme-structure.md)"))
             desc = (live.get("description") or "").strip()
             if desc != want:
-                findings.append(("LETTER", f"description: the About description does not match the README intro line (description '{desc}' vs readme '{want}') - set it from the README, or sharpen the README first if the description carries real detail (AGENTS.md Repository Details)"))
+                findings.append(("LETTER", f"description: the About description does not match the README intro line (description '{desc}' vs readme '{want}') - set it from the README, or sharpen the README first if the description carries real detail (GOVERNANCE.md Repository Details)"))
             # Docker Hub short description mirrors the same intro, for a repo that publishes a docker image.
             # A transient lookup failure surfaces as a DRIFT ("could not verify"), never aborting or silently passing.
             # A 404 (image not at the derived name) returns None and is skipped.

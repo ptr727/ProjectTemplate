@@ -11,11 +11,11 @@ Repository and branch configuration held as committed files, kept out of `.githu
 Two workflow models share `main.json` but differ on `develop` (registry `workflowModel`, default `release`):
 
 - **`release`** (`develop.json`): `develop` requires squash merges with linear history and a PR - the feature-branch pipeline.
-- **`operational`** (`operational/develop.json`): `develop` takes **direct signed pushes** - only `deletion`, `non_fast_forward`, and `required_signatures`; no PR, no status-check, no Copilot-on-push. CI runs on the push as advisory feedback. This is for live-service config repos that edit `develop` directly and promote a known-good snapshot to `main` via an occasional PR (see [AGENTS.md "Branching Model"][agents-branching-model]).
+- **`operational`** (`operational/develop.json`): `develop` takes **direct signed pushes** - only `deletion`, `non_fast_forward`, and `required_signatures`; no PR, no status-check, no Copilot-on-push. CI runs on the push as advisory feedback. This is for live-service config repos that edit `develop` directly and promote a known-good snapshot to `main` via an occasional PR (see [GOVERNANCE.md "Branching Model"][governance-branching-model]).
 
-`main` (both models) requires merge-commit merges (no linear-history rule), signed commits, a passing `Check pull request workflow status job`, resolved review threads, and Copilot review, and blocks force-pushes and deletion - so a `develop -> main` promotion is always gated even when `develop` takes direct commits. Every ruleset intentionally leaves "Require branches to be up to date before merging" **off** - see [AGENTS.md "Branching Model"][agents-branching-model].
+`main` (both models) requires merge-commit merges (no linear-history rule), signed commits, a passing `Check pull request workflow status job`, resolved review threads, and Copilot review, and blocks force-pushes and deletion - so a `develop -> main` promotion is always gated even when `develop` takes direct commits. Every ruleset intentionally leaves "Require branches to be up to date before merging" **off** - see [GOVERNANCE.md "Branching Model"][governance-branching-model].
 
-The result is **exactly two rulesets named `develop` and `main`** - the names are load-bearing (`AGENTS.md` and the workflows reference them); only the `develop` *content* varies by model. The required check binds by name and only turns green after the repo's PR workflow runs once.
+The result is **exactly two rulesets named `develop` and `main`** - the names are load-bearing (`GOVERNANCE.md` and the workflows reference them); only the `develop` *content* varies by model. The required check binds by name and only turns green after the repo's PR workflow runs once.
 
 ## Secrets
 
@@ -28,11 +28,11 @@ The fleet-standard general settings live in [`settings.json`][settings-json] and
 - **Default branch `main`** (the script sets it only when a `main` branch exists, never pointing the default at a missing branch).
 - **Merge methods**: `Allow merge commits` and `Allow squash merging` on, **rebase off** - each branch ruleset then picks its method (merge on `main`, squash on `develop`).
 - **Auto-merge on** (the merge-bot needs it) and **`Always suggest updating pull request branches` on**.
-- **`Automatically delete head branches` OFF - deliberately.** With it on, a `develop -> main` promotion (whose PR head is `develop`) would delete `develop`. There is no per-branch exemption, so the repo-wide toggle stays off to protect `develop`. **The CLI has the same trap: never `gh pr merge --delete-branch` a promotion PR whose head is `develop`** - the explicit flag deletes `develop` regardless of this setting (see [AGENTS.md "Branching Model"][agents-branching-model]).
+- **`Automatically delete head branches` OFF - deliberately.** With it on, a `develop -> main` promotion (whose PR head is `develop`) would delete `develop`. There is no per-branch exemption, so the repo-wide toggle stays off to protect `develop`. **The CLI has the same trap: never `gh pr merge --delete-branch` a promotion PR whose head is `develop`** - the explicit flag deletes `develop` regardless of this setting (see [GOVERNANCE.md "Branching Model"][governance-branching-model]).
 - **Wikis and Projects off. Discussions on public repos only** (off on private). **Sponsorships off** - the button is driven by `.github/FUNDING.yml`, not a REST toggle, and the fleet ships none.
 - **Actions / General**: allow GitHub Actions to create and approve pull requests (for the bots).
 
 <!-- Repo -->
 
-[agents-branching-model]: ../AGENTS.md#branching-model
+[governance-branching-model]: ../GOVERNANCE.md#branching-model
 [settings-json]: ./settings.json

@@ -1,6 +1,6 @@
 # AUDIT.md
 
-How an agent audits a repository against the fleet ground truth in this repo and reports drift. This is the procedure. The ground truth it checks against is [`registry/repos.json`][repos], the [`spec/`][spec] manifests, [`repo-config/`][repo-config], and the prose authorities ([`AGENTS.md`][agents], [`CODESTYLE.md`][codestyle], [`WORKFLOW.md`][workflow]). The audit is read-only: it produces a report under [`reports/`][reports], never edits the target repo.
+How an agent audits a repository against the fleet ground truth in this repo and reports drift. This is the procedure. The ground truth it checks against is [`registry/repos.json`][repos], the [`spec/`][spec] manifests, [`repo-config/`][repo-config], and the prose authorities ([`GOVERNANCE.md`][governance], [`CODESTYLE.md`][codestyle], [`WORKFLOW.md`][workflow]). The audit is read-only: it produces a report under [`reports/`][reports], never edits the target repo.
 
 The verdict vocabulary is [`WORKFLOW.md`][workflow]'s: **operational / not operational**, **N/A**,
 **defect**, and the applicable/absent rule. Do not invent a parallel scheme.
@@ -93,7 +93,7 @@ Run [`WORKFLOW.md`][workflow]'s methodology against the repo's **own** Actions: 
 
 - **Secrets** - confirm each required secret exists (name only, not the values). Check the Actions store and, where the mechanism needs it (Docker Hub, codegen App), the Dependabot store too.
 
-- **Dependabot ecosystem coverage** - for each ecosystem the repo's tree implies, `.github/dependabot.yml` must declare it: `github-actions` when `.github/workflows/` is present (its workflows reference actions) - otherwise those versions go stale and a stood-up merge-bot has no action-update PRs to auto-merge - and `devcontainers` when a `.devcontainer` is present. The mechanical check (`spec/audit.py`) asserts each implied ecosystem's **presence**. A tree-implied ecosystem declared nowhere is a **drift finding** (the file exists, so its absence would instead be a file-presence letter). Then confirm **by inspection** that each declared ecosystem **dual-targets `main` + `develop`** per the [Branching Model][agents-branching-model] - the regex below cannot pair an ecosystem with its `target-branch`. Language ecosystems (`nuget`/`uv`/`npm`) are directory-scoped and audited by inspection too.
+- **Dependabot ecosystem coverage** - for each ecosystem the repo's tree implies, `.github/dependabot.yml` must declare it: `github-actions` when `.github/workflows/` is present (its workflows reference actions) - otherwise those versions go stale and a stood-up merge-bot has no action-update PRs to auto-merge - and `devcontainers` when a `.devcontainer` is present. The mechanical check (`spec/audit.py`) asserts each implied ecosystem's **presence**. A tree-implied ecosystem declared nowhere is a **drift finding** (the file exists, so its absence would instead be a file-presence letter). Then confirm **by inspection** that each declared ecosystem **dual-targets `main` + `develop`** per the [Branching Model][governance-branching-model] - the regex below cannot pair an ecosystem with its `target-branch`. Language ecosystems (`nuget`/`uv`/`npm`) are directory-scoped and audited by inspection too.
 
   ```sh
   # Anchor to the line start (optional list dash) so a commented-out '# package-ecosystem:' is not counted.
@@ -132,7 +132,7 @@ Surface spec questions rather than resolving them silently - e.g. the Python con
 Sections 1-9 (the audit and its report) are **read-only** - they never touch the target. **Converging** is the separate follow-on phase: the drift the report found is **resolved by applying fixes to the target repo**, not left as a report. The convergence loop:
 
 - **Apply via a pull request on the target repo.** Branch from the target's `develop` (or `main` for a `main`-only repo), make the fix, and open a PR. Never push a fix directly to a protected branch, and never hand-edit a target outside a PR.
-- **Drive the PR's Copilot review to green** - the same loop this repo runs (see [AGENTS.md "PR Review Etiquette"][agents] and the [Copilot review runbook][copilot-runbook] in `.github/copilot-instructions.md`): request review on every push, address and resolve every thread, and confirm the review covers the head SHA.
+- **Drive the PR's Copilot review to green** - the same loop this repo runs (see [GOVERNANCE.md "PR Review Etiquette"][governance-pr-review-etiquette] and the [Copilot review runbook][copilot-runbook] in `.github/copilot-instructions.md`): request review on every push, address and resolve every thread, and confirm the review covers the head SHA.
 - **Merge only with explicit maintainer approval.** The agent drives to green and stops. The maintainer merges.
 - **One focused PR per drift class**, cross-referencing the audit finding - a sprawling all-drifts PR draws many review rounds and never feels done.
 - **Fix systemic drift in the hub, not per repo.** When many repos share a drift, fix the spec/rule (or add a machine check) here and let a re-audit re-flag it, rather than hand-patching each repo for the shared cause.
@@ -141,15 +141,13 @@ The convergence model: the hub audits and the agent **applies** the fixes via ta
 
 <!-- Workflow -->
 
-[workflows]: ./catalog/snippets/workflows/
-
 <!-- Repo -->
-
-[agents]: ./AGENTS.md
-[agents-branching-model]: ./AGENTS.md#branching-model
 [audit-runner]: ./spec/audit.py
 [codestyle]: ./CODESTYLE.md
 [copilot-runbook]: ./.github/copilot-instructions.md
+[governance]: ./GOVERNANCE.md
+[governance-branching-model]: ./GOVERNANCE.md#branching-model
+[governance-pr-review-etiquette]: ./GOVERNANCE.md#pr-review-etiquette
 [project-types]: ./spec/project-types.json
 [readme-structure]: ./spec/readme-structure.md
 [repo-config]: ./repo-config/
@@ -163,3 +161,4 @@ The convergence model: the hub audits and the agent **applies** the fixes via ta
 [template]: ./reports/_template.md
 [validate]: ./spec/validate.py
 [workflow]: ./WORKFLOW.md
+[workflows]: ./catalog/snippets/workflows/

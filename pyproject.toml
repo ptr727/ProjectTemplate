@@ -9,10 +9,10 @@ extend-select = ["I"]  # isort import ordering, on top of the default rules
 
 [tool.mypy]
 python_version = "3.13"
-files = ["spec", "host-setup"]
+files = ["spec", "host-setup", "scripts"]
 
 [tool.pyright]
 pythonVersion = "3.13"
 typeCheckingMode = "standard"
-include = ["spec", "host-setup"]
+include = ["spec", "host-setup", "scripts"]
 exclude = ["**/__pycache__"]
