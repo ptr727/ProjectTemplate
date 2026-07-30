@@ -10,7 +10,7 @@ Do not duplicate language-specific rules here. **Project-specific conventions an
 
 ## Commit Messages and Pull Request Titles
 
-Summarized for VS Code's generators; the full rules, rationale, and examples are in [GOVERNANCE.md "Pull Request Title and Commit Message Conventions"](../GOVERNANCE.md#pull-request-title-and-commit-message-conventions).
+Summarized for VS Code's generators. The full rules, rationale, and examples are in [GOVERNANCE.md "Pull Request Title and Commit Message Conventions"](../GOVERNANCE.md#pull-request-title-and-commit-message-conventions).
 
 - Imperative subject, <= 72 characters, no trailing period; optional blank-line-separated body for the non-obvious *why*.
 - US English, title case with lowercase short bind words; no vague titles, no `Co-Authored-By:` unless asked, no release-bump magnitude (NBGV handles versioning). Dependabot's `Bump X from Y to Z` titles are fine.

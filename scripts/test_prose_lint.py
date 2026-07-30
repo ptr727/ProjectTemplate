@@ -21,6 +21,7 @@ GOVERNANCE = REPO / 'GOVERNANCE.md'
 # feeds the gate. A test file full of rejected input would otherwise report itself, which is the
 # self-flagging problem the quoted-span exemption solves for prose.
 DUP = 'the ' + 'the'
+SPLICE_BAIT = 'It runs on push; ' + 'it gates the merge'
 
 
 class BaitCase(unittest.TestCase):
@@ -112,19 +113,16 @@ class TestDupword(BaitCase):
 
 class TestSemicolon(BaitCase):
     def test_a_splice_is_flagged(self) -> None:
-        self.assertEqual(['semicolon'], self.kinds('It runs on push; it gates the merge.\n',
-                                                   {'semicolon'}))
+        self.assertEqual(['semicolon'], self.kinds(f'{SPLICE_BAIT}.\n', {'semicolon'}))
 
     def test_a_quoted_counter_example_is_exempt_in_markdown(self) -> None:
         """A rule that states its counter-example quotes the construction it bans."""
-        self.assertEqual([], self.kinds('Recast "it runs on push; it gates the merge" as two.\n',
-                                        {'semicolon'}))
+        self.assertEqual([], self.kinds(f'Recast "{SPLICE_BAIT}" as two.\n', {'semicolon'}))
 
     def test_a_quoted_span_is_not_exempt_outside_markdown(self) -> None:
         """In data and code a double quote is structural, so the prose inside it still counts."""
         self.assertEqual(['semicolon'],
-                         self.kinds('{ "note": "it runs on push; it gates the merge" }\n',
-                                    {'semicolon'}, name='bait.json'))
+                         self.kinds(f'{{ "note": "{SPLICE_BAIT}" }}\n', {'semicolon'}, name='bait.json'))
 
     def test_a_list_semicolon_is_not_a_splice(self) -> None:
         self.assertEqual([], self.kinds('Inputs: a, b, and c; outputs: d and e.\n', {'semicolon'}))
