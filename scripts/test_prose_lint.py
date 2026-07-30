@@ -368,6 +368,13 @@ class TestCommentWrap(BaitCase):
         self.assertEqual(['comment-wrap'],
                          self.flag('a.md', 'Prose.\n\n<!-- One thing. Another thing. -->\n'))
 
+    def test_a_block_opener_inside_a_line_comment_is_text(self) -> None:
+        """Read as a real opener it opens a block, and the code lines below are linted as prose."""
+        for name, text in (('a.cs', '// Match a /* opener here\nvar x = 1; // Two things. Here.\n'),
+                           ('a.ps1', '# Match a <# opener here\n$x = 1 # Two things. Here.\n')):
+            with self.subTest(file=name):
+                self.assertEqual(['comment-wrap'], self.flag(name, text))
+
     def test_css_has_block_comments_only(self) -> None:
         """A `//` in CSS is the scheme separator of a URL, not a comment marker."""
         self.assertEqual([], self.flag('a.css', 'a { background: url(http://x/y. Z); }\n'))

@@ -383,11 +383,18 @@ def extracted_comments(path: Path, lines: list[str]) -> list[tuple[int, str, boo
             closing = '' if end >= 0 else closing
             continue
         masked = strip_strings(line, spec['quotes'])
+        # A line comment runs to end of line, so a block opener after one is text.
+        # Left unbounded it opens a block that swallows the code lines below.
+        line_at = len(line)
+        for marker in spec['line']:
+            at = masked.find(marker)
+            if 0 <= at < line_at and not any(line[at:].startswith(d) for d in spec['doc']):
+                line_at = at
         cut = len(line)
         leading = True
         for opener, closer in spec['block']:
             at = masked.find(opener)
-            if 0 <= at < cut:
+            if 0 <= at < min(cut, line_at):
                 if any(line[at:].startswith(d) for d in spec['doc']):
                     continue
                 cut, leading = at, not line[:at].strip()
