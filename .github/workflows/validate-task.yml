@@ -63,7 +63,7 @@ jobs:
         run: python3 scripts/repo_gate.py
 
       # The charset and duplicate-word rules are clean tree-wide, so they gate.
-      # The semicolon rule stays warn-only, since going green needs a sweep the rule forbids.
+      # Every other prose rule reports in the step below without gating.
       - name: Check prose step
         run: python3 scripts/prose_lint.py . --check charset --check dupword
 

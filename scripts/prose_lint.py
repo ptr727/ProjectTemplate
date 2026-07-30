@@ -275,8 +275,11 @@ NOT_PROSE = re.compile(r'^(!|\s*[-=#*/<>]+\s*$)|noqa|type:\s*ignore|pylint|ruff:
                        r'|cSpell|markdownlint|omit from toc|prettier|eslint|SPDX|Copyright'
                        r'|^v\d+(\.\d+)*$')
 
-# Two sentences on one line, guarded against an abbreviation or a dotted identifier.
-RUN_ON = re.compile(r'(?<![A-Z])(?<!\be\.g)(?<!\bi\.e)(?<!\bvs)(?<!\betc)[.!?]\s+(?=[A-Z])')
+# Two sentences on one line, guarded against an abbreviation, an initial, or a dotted identifier.
+# The initial guard anchors on a word boundary: `J. Smith` is one name, where a sentence ending in
+# an acronym such as CI is two sentences and has to be caught.
+# The second sentence may open in either case, since a lowercase opening is still a second sentence.
+RUN_ON = re.compile(r'(?<!\b[A-Z])(?<!\be\.g)(?<!\bi\.e)(?<!\bvs)(?<!\betc)[.!?]\s+(?=[A-Za-z])')
 CODE_FENCE = re.compile(r'^\s*(```|~~~)')
 
 # Both are correct English. `the the` is always a typo, so it is not here.

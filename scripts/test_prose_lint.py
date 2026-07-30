@@ -331,6 +331,22 @@ class TestCommentWrap(BaitCase):
             with self.subTest(text=text.strip()):
                 self.assertEqual([], self.flag('a.py', text))
 
+    def test_a_sentence_ending_in_an_acronym_is_still_two_sentences(self) -> None:
+        """The initial guard anchored on any capital, and this codebase ends sentences in acronyms."""
+        for text in ('# The check runs in CI. Another thing happens.\n',
+                     '# Pinned by SHA. Dependabot still bumps it.\n'):
+            with self.subTest(text=text.strip()[:40]):
+                self.assertEqual(['comment-wrap'], self.flag('a.py', text))
+
+    def test_a_second_sentence_may_open_in_either_case(self) -> None:
+        """A lowercase opening is still a second sentence on the line."""
+        self.assertEqual(['comment-wrap'],
+                         self.flag('a.py', '# One thing happens. another thing happens.\n'))
+
+    def test_an_initial_is_one_name_rather_than_two_sentences(self) -> None:
+        """`J. Smith` is the case the guard exists for, and it must survive the widening."""
+        self.assertEqual([], self.flag('a.py', '# Reviewed by J. Smith today.\n'))
+
     def test_a_trailing_comment_can_start_a_wrapped_sentence(self) -> None:
         """Clearing the predecessor on a trailing comment reported the wrong rule, not merely fewer.
 
