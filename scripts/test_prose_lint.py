@@ -369,10 +369,15 @@ class TestCommentWrap(BaitCase):
                          self.flag('a.md', 'Prose.\n\n<!-- One thing. Another thing. -->\n'))
 
     def test_a_block_opener_inside_a_line_comment_is_text(self) -> None:
-        """Read as a real opener it opens a block, and the code lines below are linted as prose."""
+        """Read as a real opener it opens a block, and the code lines below are linted as prose.
+
+        The documentation form is the same case: skipping it as prose must not unbound the
+        ceiling, or the syntax whose doc marker is a line comment reopens the defect.
+        """
         for name, text in (('a.cs', '// Match a /* opener here\nvar x = 1; // Two things. Here.\n'),
+                           ('a.cs', '/// See a /* opener here\nvar x = 1; // Two things. Here.\n'),
                            ('a.ps1', '# Match a <# opener here\n$x = 1 # Two things. Here.\n')):
-            with self.subTest(file=name):
+            with self.subTest(file=name, line=text.split('\n')[0]):
                 self.assertEqual(['comment-wrap'], self.flag(name, text))
 
     def test_css_has_block_comments_only(self) -> None:
