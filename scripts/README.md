@@ -29,7 +29,7 @@ Run it scoped to changed lines, matching the standing rule that existing prose i
 python3 scripts/prose_lint.py . --diff origin/develop
 ```
 
-Whole-tree (`python3 scripts/prose_lint.py .`) reports the legacy semicolon backlog as well, which is informational rather than a gate. `ascii` and `dupword` are clean tree-wide, so CI gates those two and leaves `semicolon` warn-only.
+Whole-tree (`python3 scripts/prose_lint.py .`) reports the legacy backlog as well, which is informational rather than a gate. `charset` and `dupword` are clean tree-wide, so CI gates those two and reports the rest warn-only.
 
 **Scope** is every text file git tracks, binaries skipped by a NUL-byte check, with no extension allowlist: an allowlist covers what its author thought of and silently stops covering whatever is added next, which is the same reason the line-endings rule already requires `git ls-files` over a raw `find`. `--list-files` prints the discovered set for auditing.
 
@@ -39,13 +39,13 @@ The `semicolon` and `dash` rules ban a construction rather than a detectable sub
 
 **Both are markdown-only for now.** A shell script carries 78 statement separators that are not prose at all, so telling a comment from code is a precondition for reaching source files. Until then a semicolon or dash in a code comment is missed, which reading the diff by eye still catches.
 
-The `comment-wrap` rule covers comments in every syntax the fleet's project types carry, not only the hash ones: `//` and `/* */` for C#, C, C++, JSONC and CSS, `<!-- -->` for XML, csproj and markdown, `<# #>` for PowerShell, `;` for INI, and `#` for Python, shell, YAML and TOML.
+The `comment-wrap` rule covers comments in every syntax the fleet's project types carry, not only the hash ones: `//` and `/* */` for C#, C, C++ and JSONC, `/* */` alone for CSS, `<!-- -->` for XML, csproj and markdown, `<# #>` for PowerShell, `;` for INI, and `#` for Python, shell, YAML and TOML.
 
 JSON is treated as JSONC, because that is what ships: VS Code tasks, launch, devcontainer and workspace files all carry comments under a plain `.json` name. A marker inside a string literal is not a comment, so each line is scanned with quoted spans blanked first, and Python uses `tokenize` so a trailing comment is seen exactly. A documentation comment (`///`, `/**`, a docstring) is left to CODESTYLE, which permits the paragraphs this rule forbids.
 
 A comment sentence also has to start with a capital, which `comment-case` checks. A lowercase opening reads as the continuation of the line above it, so the two rules are read together: a wrapped sentence reports as `comment-wrap`, and a lowercase opening that is not a continuation reports as `comment-case`. Where the first word is a tool whose own casing is lowercase, the fix is to restructure rather than to capitalize the name against CODESTYLE's tooling-casing rule.
 
-`charset` and `dupword` are clean tree-wide and gate CI. `charset-unknown`, `semicolon`, and `dash` run as a warn-only CI step so their backlog is visible without blocking, and are corrected as each file is next edited.
+`charset` and `dupword` are clean tree-wide and gate CI. `charset-unknown`, `semicolon`, `dash`, `comment-wrap`, and `comment-case` run as one warn-only CI step, so the backlog is visible without blocking and is corrected as each file is next edited.
 
 ## `repo_gate.py`
 

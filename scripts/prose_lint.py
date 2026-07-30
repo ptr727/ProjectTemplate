@@ -407,6 +407,24 @@ def extracted_comments(path: Path, lines: list[str]) -> list[tuple[int, str, boo
     return out
 
 
+def fenced_lines(lines: list[str]) -> set[int]:
+    """Line numbers inside a fenced block, which every rule skips.
+
+    A fenced example is quoted code rather than this file's own prose, so a comment in one belongs
+    to whatever is being shown.
+    """
+    out: set[int] = set()
+    in_fence = False
+    for n, raw in enumerate(lines, 1):
+        if CODE_FENCE.match(raw.rstrip('\r')):
+            in_fence = not in_fence
+            out.add(n)
+            continue
+        if in_fence:
+            out.add(n)
+    return out
+
+
 def comment_wrap_findings(path: Path, raw: str, lines: list[str]) -> list[tuple[int, str, str]]:
     """Comment lines whose sentence wraps into the next, or that carry two sentences.
 
@@ -416,6 +434,8 @@ def comment_wrap_findings(path: Path, raw: str, lines: list[str]) -> list[tuple[
     comments = python_comments(raw) if path.suffix == '.py' else None
     if comments is None:
         comments = extracted_comments(path, lines)
+    skip = fenced_lines(lines)
+    comments = [c for c in comments if c[0] not in skip]
 
     out: list[tuple[int, str, str]] = []
     prev_body = ''

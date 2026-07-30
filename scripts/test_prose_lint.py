@@ -331,6 +331,13 @@ class TestCommentWrap(BaitCase):
             with self.subTest(text=text.strip()):
                 self.assertEqual([], self.flag('a.py', text))
 
+    def test_a_comment_inside_a_fenced_block_is_skipped(self) -> None:
+        """A fenced example is quoted code, so its comments belong to whatever is being shown."""
+        self.assertEqual([], self.flag('a.md',
+                                       'Prose.\n\n```html\n<!-- One thing. Another thing. -->\n```\n'))
+        self.assertEqual(['comment-wrap'],
+                         self.flag('a.md', 'Prose.\n\n<!-- One thing. Another thing. -->\n'))
+
     def test_css_has_block_comments_only(self) -> None:
         """A `//` in CSS is the scheme separator of a URL, not a comment marker."""
         self.assertEqual([], self.flag('a.css', 'a { background: url(http://x/y. Z); }\n'))
