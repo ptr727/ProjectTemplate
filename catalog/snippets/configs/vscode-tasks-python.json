@@ -1,19 +1,24 @@
 {
     "version": "2.0.0",
     "tasks": [
-        // Python language group. Every command-executing task is `type: process` (like the .NET snippet; the
-        // aggregators are dependsOn-only) so the command is
-        // executed directly, never through a shell - it avoids `&&`/`;` chaining, which is not portable
-        // (Windows PowerShell 5.1, still the default VS Code task shell on many setups, rejects `&&`).
-        // Sequencing is expressed with `dependsOrder: sequence` + `dependsOn`, not shell operators.
+        // Python language group.
+        // Every command-executing task is `type: process`, as in the .NET snippet.
+        // The aggregators are dependsOn-only.
+        // The command runs directly rather than through a shell, which avoids `&&` and `;` chaining.
+        // That chaining is not portable, since Windows PowerShell 5.1 rejects `&&` and is still the default
+        // VS Code task shell on many setups.
+        // Sequencing is expressed with `dependsOrder: sequence` and `dependsOn`, never shell operators.
         //
-        // The first tasks are the Python clean-compile set (CODESTYLE.md "Local Development Loop"):
-        // `ruff format` -> `ruff check` -> the type checker. A repo whose CI type checker is mypy (pyright
-        // editor-only) swaps the "Python Types" command to `uv run mypy src`; a pyright-strict repo keeps it
-        // as `uv run pyright`. Adapt the target paths to the repo's package layout.
-        // A lint-only Scripts-profile subtree (no uv project, no `uv.lock`) runs every tool via `uvx <tool>` not `uv run <tool>`.
-        // The type-checker swap above composes with it: `uvx mypy src` for a mypy repo, `uvx pyright` otherwise.
-        // It omits the pytest, coverage, and `uv sync` tasks (CODESTYLE.md Python 'Two profiles').
+        // The first tasks are the Python clean-compile set, per CODESTYLE.md "Local Development Loop":
+        // `ruff format`, then `ruff check`, then the type checker.
+        // A repo whose CI type checker is mypy, with pyright editor-only, swaps "Python Types" to
+        // `uv run mypy src`.
+        // A pyright-strict repo keeps `uv run pyright`.
+        // Adapt the target paths to the repo's package layout.
+        // A lint-only Scripts-profile subtree, with no uv project and no `uv.lock`, runs every tool via
+        // `uvx <tool>` rather than `uv run <tool>`.
+        // The type-checker swap composes with it: `uvx mypy src` for a mypy repo, `uvx pyright` otherwise.
+        // It omits the pytest, coverage, and `uv sync` tasks, per CODESTYLE.md Python "Two profiles".
         {
             "label": "Ruff Format",
             "type": "process",
@@ -59,8 +64,9 @@
             }
         },
         {
-            // The clean-compile aggregator - formats in place, then lints, then type-checks, in order (no shell
-            // chaining). Named "Format" (it mutates, like the sibling ".NET Format" task), not "Verify".
+            // The clean-compile aggregator formats in place, then lints, then type-checks, in order.
+            // No shell chaining is involved.
+            // It is named "Format" rather than "Verify" because it mutates, like the sibling ".NET Format".
             "label": "Python Format",
             "dependsOrder": "sequence",
             "dependsOn": [
@@ -114,9 +120,11 @@
                 "clear": false
             }
         },
-        // Lint group - run on demand via Docker (--pull=always forces each to re-pull the current :latest); mirrors the CI
-        // lint gate. Broad live spell-checking is the cspell extension's job. Pre-commit does formatting only.
-        // These tasks are language-agnostic - identical to the .NET snippet's Lint group.
+        // Lint group, run on demand via Docker, where --pull=always forces each to re-pull :latest.
+        // It mirrors the CI lint gate.
+        // Broad live spell-checking is the cspell extension's job.
+        // Pre-commit does formatting only.
+        // These tasks are language-agnostic, identical to the .NET snippet's Lint group.
         {
             "label": "Lint: EditorConfig",
             "type": "process",

@@ -89,7 +89,7 @@ This inverts the obvious fix. The `gh` output was already tiny at 574 bytes aver
 
 - **Model and effort tiering is unquantified.** The mix was 17,851 Opus requests, 390 Haiku, and zero Sonnet, with a global high effort setting, so the headroom is obvious. The saving is not: establishing it needs deliberate paired runs, and no number is claimed here.
 - **Fresh-context self-review is unproven.** An estimate put 44% of findings within reach of a reviewer reading the diff against the docs, but that was an estimate, and a same-model no-context review was tried and found far less than Copilot did. Removing context does not remove shared priors. Treat it as an experiment, and give any retest the finding taxonomy rather than a generic instruction to be adversarial.
-- **The prose gate is warn-first.** Compare its hits against the next batch of review findings before enforcing it, and do not claim the mechanical share until that comparison exists.
+- **The semicolon and dash rules are warn-first, and the charset and duplicate-word rules gate, being clean tree-wide.** Compare their hits against the next batch of review findings before enforcing them, and do not claim the mechanical share until that comparison exists.
 
 ## Re-measuring
 
