@@ -190,23 +190,29 @@ class Syntax(TypedDict):
     block: tuple[tuple[str, str], ...]
     doc: tuple[str, ...]
     quotes: str
+    verbatim: bool
 
 
-HASH: Syntax = {'line': ('#',), 'block': (), 'doc': (), 'quotes': '"\''}
-C_LIKE: Syntax = {'line': ('//',), 'block': (('/*', '*/'),), 'doc': ('///', '/**'), 'quotes': '"\''}
-XML_LIKE: Syntax = {'line': (), 'block': (('<!--', '-->'),), 'doc': (), 'quotes': '"'}
-POWERSHELL: Syntax = {'line': ('#',), 'block': (('<#', '#>'),), 'doc': (), 'quotes': '"\''}
-INI: Syntax = {'line': ('#', ';'), 'block': (), 'doc': (), 'quotes': '"\''}
-LISP_LIKE: Syntax = {'line': ('#',), 'block': (), 'doc': (), 'quotes': '"'}
+HASH: Syntax = {'line': ('#',), 'block': (), 'doc': (), 'quotes': '"\'', 'verbatim': False}
+C_LIKE: Syntax = {'line': ('//',), 'block': (('/*', '*/'),), 'doc': ('///', '/**'),
+                  'quotes': '"\'', 'verbatim': False}
+# C# alone carries the verbatim string, where a backslash is ordinary and a doubled quote escapes.
+CSHARP: Syntax = {**C_LIKE, 'verbatim': True}
+XML_LIKE: Syntax = {'line': (), 'block': (('<!--', '-->'),), 'doc': (), 'quotes': '"',
+                    'verbatim': False}
+POWERSHELL: Syntax = {'line': ('#',), 'block': (('<#', '#>'),), 'doc': (), 'quotes': '"\'',
+                      'verbatim': False}
+INI: Syntax = {'line': ('#', ';'), 'block': (), 'doc': (), 'quotes': '"\'', 'verbatim': False}
+LISP_LIKE: Syntax = {'line': ('#',), 'block': (), 'doc': (), 'quotes': '"', 'verbatim': False}
 # CSS has block comments only, so a `//` in it is the scheme separator of a URL.
-CSS: Syntax = {'line': (), 'block': (('/*', '*/'),), 'doc': (), 'quotes': '"\''}
+CSS: Syntax = {'line': (), 'block': (('/*', '*/'),), 'doc': (), 'quotes': '"\'', 'verbatim': False}
 
 SYNTAX: dict[str, Syntax] = {
     # Python, shell, and the hash-commented configs
     '.py': HASH, '.sh': HASH, '.bash': HASH, '.yml': HASH, '.yaml': HASH,
     '.toml': HASH, '.tf': HASH, '.gitattributes': HASH, '.gitignore': HASH,
     # C#, C, and C++
-    '.cs': C_LIKE, '.c': C_LIKE, '.cpp': C_LIKE, '.cc': C_LIKE, '.cxx': C_LIKE,
+    '.cs': CSHARP, '.c': C_LIKE, '.cpp': C_LIKE, '.cc': C_LIKE, '.cxx': C_LIKE,
     '.h': C_LIKE, '.hpp': C_LIKE, '.jsonc': C_LIKE, '.json5': C_LIKE,
     '.js': C_LIKE, '.ts': C_LIKE, '.css': CSS, '.scss': CSS,
     # JSON carries comments in practice, which is what JSONC names.
@@ -244,29 +250,43 @@ def syntax_for(path: Path) -> Syntax | None:
     return HASH if not suffix else None
 
 
-def strip_strings(line: str, quotes: str) -> str:
+def strip_strings(line: str, quotes: str, verbatim: bool = False) -> str:
     """Blank quoted spans so a comment marker inside a string is not read as one.
 
     Length-preserving, so an offset into the result is an offset into the line.
+    A verbatim string takes its own rules where the syntax has one.
+    There the backslash is an ordinary character and a doubled quote is the escape, so reading a
+    backslash as an escape consumes the closing quote and blanks the rest of the line.
     """
     out = list(line)
     quote = ''
+    inside_verbatim = False
     escaped = False
-    for i, ch in enumerate(line):
+    i = 0
+    while i < len(line):
+        ch = line[i]
         if escaped:
             escaped = False
             out[i] = ' '
-            continue
-        if ch == '\\' and quote:
+        elif inside_verbatim:
+            if ch == quote and line[i + 1:i + 2] == quote:   # a doubled quote is one character
+                out[i] = out[i + 1] = ' '
+                i += 2
+                continue
+            out[i] = ' ' if ch != quote else ch
+            if ch == quote:
+                quote, inside_verbatim = '', False
+        elif ch == '\\' and quote:
             escaped = True
             out[i] = ' '
-            continue
-        if quote:
+        elif quote:
             out[i] = ' ' if ch != quote else ch
             if ch == quote:
                 quote = ''
         elif ch in quotes:
             quote = ch
+            inside_verbatim = verbatim and i > 0 and line[i - 1] == '@'
+        i += 1
     return ''.join(out)
 
 
@@ -375,46 +395,48 @@ def extracted_comments(path: Path, lines: list[str]) -> list[tuple[int, str, boo
     closing = ''
     for n, raw in enumerate(lines, 1):
         line = raw.rstrip('\r')
-        if closing:                                  # inside a block comment
+        masked = strip_strings(line, spec['quotes'], spec['verbatim'])
+        pos = 0
+        if closing:                                  # carried in from an unclosed block
             end = line.find(closing)
             body = (line if end < 0 else line[:end]).strip().lstrip('*').strip()
             if body:
                 out.append((n, body, True))
-            closing = '' if end >= 0 else closing
-            continue
-        masked = strip_strings(line, spec['quotes'])
-        # A line comment runs to end of line, so a block opener after one is text.
-        # Left unbounded it opens a block that swallows the code lines below.
-        # A documentation comment bounds it too, being exempt from linting rather than from here.
-        line_at = len(line)
-        for marker in spec['line']:
-            at = masked.find(marker)
-            if 0 <= at < line_at:
-                line_at = at
-        cut = len(line)
-        leading = True
-        for opener, closer in spec['block']:
-            at = masked.find(opener)
-            if 0 <= at < min(cut, line_at):
-                if any(line[at:].startswith(d) for d in spec['doc']):
-                    continue
-                cut, leading = at, not line[:at].strip()
-                end = masked.find(closer, at + len(opener))
-                body = (line[at + len(opener):end if end >= 0 else None]).strip().lstrip('*').strip()
+            if end < 0:
+                continue
+            pos, closing = end + len(closing), ''
+        # Scan left to right and take whichever marker comes first.
+        # A ceiling can only describe the first comment, so a later one was unreachable.
+        while pos < len(line):
+            at, found = len(line), None
+            for marker in spec['line']:
+                where = masked.find(marker, pos)
+                if 0 <= where < at:
+                    at, found = where, marker
+            for opener, closer in spec['block']:
+                where = masked.find(opener, pos)
+                if 0 <= where < at:
+                    at, found = where, (opener, closer)
+            if found is None:
+                break
+            # A documentation comment is left to CODESTYLE, so the rest of the line goes with it.
+            if any(line[at:].startswith(d) for d in spec['doc']):
+                break
+            leading = not line[:at].strip()
+            if isinstance(found, str):               # a line comment runs to end of line
+                body = line[at + len(found):].strip()
                 if body:
                     out.append((n, body, leading))
-                closing = '' if end >= 0 else closer
-        if closing:
-            continue
-        for marker in spec['line']:
-            at = masked.find(marker)
-            if 0 <= at < cut:
-                if any(line[at:].startswith(d) for d in spec['doc']):
-                    continue
-                body = line[at + len(marker):].strip()
-                if body:
-                    out.append((n, body, not line[:at].strip()))
-                cut = at
+                break
+            opener, closer = found
+            end = masked.find(closer, at + len(opener))
+            body = (line[at + len(opener):end if end >= 0 else None]).strip().lstrip('*').strip()
+            if body:
+                out.append((n, body, leading))
+            if end < 0:
+                closing = closer
+                break
+            pos = end + len(closer)
     return out
 
 

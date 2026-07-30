@@ -380,6 +380,42 @@ class TestCommentWrap(BaitCase):
             with self.subTest(file=name, line=text.split('\n')[0]):
                 self.assertEqual(['comment-wrap'], self.flag(name, text))
 
+    def test_every_comment_on_a_line_is_read_not_just_the_first(self) -> None:
+        """A ceiling can only describe the first comment, so a later one was unreachable.
+
+        Each case puts the offending sentence in the second comment, which a scan that stops at
+        the first reports as clean.
+        """
+        for name, text in (
+            ('a.cs', 'var x = 1; /* Note. */ // Two things. Here.\n'),
+            ('a.cs', '/* Note. */ /* Two things. Here. */\n'),
+            ('a.cs', '/* Start here.\n   Still going. */ // Two things. Here.\n'),
+        ):
+            with self.subTest(line=text.split('\n')[0]):
+                self.assertEqual(['comment-wrap'], self.flag(name, text))
+
+    def test_a_verbatim_string_keeps_its_own_closing_quote(self) -> None:
+        """A backslash is ordinary inside one and a doubled quote is the escape.
+
+        Read with C escape rules the string never closes, so the masker blanks the rest of the
+        line and the trailing comment goes unseen.
+        """
+        # Ending in a backslash, the string swallows its closing quote and hides a real comment.
+        self.assertEqual(['comment-wrap'],
+                         self.flag('a.cs', 'var p = @"C:\\tmp\\"; // Two things. Here.\n'))
+        # Reading a doubled quote as a close then a reopen puts string content outside the string.
+        self.assertEqual([],
+                         self.flag('a.cs', 'var s = @"a""// One thing. Another thing.""b"; // ok\n'))
+
+    def test_only_the_syntax_that_has_verbatim_strings_gets_them(self) -> None:
+        """C shares the C-like spec without the form, so `@` there is an ordinary character."""
+        self.assertTrue(prose_lint.SYNTAX['.cs']['verbatim'])
+        self.assertFalse(prose_lint.SYNTAX['.c']['verbatim'])
+        self.assertFalse(prose_lint.SYNTAX['.json']['verbatim'])
+        # The C escape still hides a marker, which is what the verbatim rule must not undo.
+        self.assertEqual(['comment-wrap'],
+                         self.flag('a.cs', 'var s = "a\\"b"; // Two things. Here.\n'))
+
     def test_css_has_block_comments_only(self) -> None:
         """A `//` in CSS is the scheme separator of a URL, not a comment marker."""
         self.assertEqual([], self.flag('a.css', 'a { background: url(http://x/y. Z); }\n'))
