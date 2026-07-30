@@ -385,7 +385,7 @@ def extracted_comments(path: Path, lines: list[str]) -> list[tuple[int, str, boo
         masked = strip_strings(line, spec['quotes'])
         # A line comment runs to end of line, so a block opener after one is text.
         # Left unbounded it opens a block that swallows the code lines below.
-        # A documentation comment bounds it too, being skipped as prose rather than as a comment.
+        # A documentation comment bounds it too, being exempt from linting rather than from here.
         line_at = len(line)
         for marker in spec['line']:
             at = masked.find(marker)

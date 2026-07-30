@@ -371,8 +371,8 @@ class TestCommentWrap(BaitCase):
     def test_a_block_opener_inside_a_line_comment_is_text(self) -> None:
         """Read as a real opener it opens a block, and the code lines below are linted as prose.
 
-        The documentation form is the same case: skipping it as prose must not unbound the
-        ceiling, or the syntax whose doc marker is a line comment reopens the defect.
+        The documentation form is the same case: exempting it from linting must not leave the
+        ceiling unbounded, or the syntax whose doc marker is a line comment reopens the defect.
         """
         for name, text in (('a.cs', '// Match a /* opener here\nvar x = 1; // Two things. Here.\n'),
                            ('a.cs', '/// See a /* opener here\nvar x = 1; // Two things. Here.\n'),
