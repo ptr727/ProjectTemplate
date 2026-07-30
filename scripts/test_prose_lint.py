@@ -174,6 +174,19 @@ class TestDiscovery(unittest.TestCase):
         self.assertEqual('.editorconfig', prose_lint.rel(Path('.editorconfig')))
         self.assertEqual('GOVERNANCE.md', prose_lint.rel(Path('./GOVERNANCE.md')))
 
+    def test_a_subdirectory_root_yields_paths_that_exist(self) -> None:
+        """`git ls-files` prints paths relative to its `-C` directory, not the repo top level.
+
+        Review read it the other way round, which would make the join in tracked_paths produce
+        broken paths. It does not, and the invariant is pinned here because passing `--full-name`
+        would flip the behavior with nothing else to notice.
+        """
+        for root in (REPO / 'spec', REPO / 'scripts'):
+            with self.subTest(root=root.name):
+                found = prose_lint.discover([str(root)])
+                self.assertGreaterEqual(len(found), 5)
+                self.assertEqual([], [str(p) for p in found if not p.exists()])
+
     def test_a_binary_file_is_not_scanned(self) -> None:
         blob = self.tmp / 'payload.md'
         blob.write_bytes(DUP.encode() + b'\x00binary\n')
