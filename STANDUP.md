@@ -8,16 +8,23 @@ Standing up a repo is **applying the manifests until the audit passes**, nothing
 
 Do this before `git init` or any commit, because the window closes at the first one. A repo whose initial history is unsigned or committed under the wrong identity cannot be cleanly repaired: `Require signed commits` blocks the first `develop -> main` release, re-signing that history is a non-fast-forward the `Block force pushes` rule rejects, and completing it needs the ruleset temporarily disabled plus a maintainer force-push that [`docs/repo-config-carry.md`][repo-config-carry] forbids an agent to perform. Greenfield repos where signing is live before the first commit never hit this.
 
-**Verify the inherited configuration. Never set it.** The host already carries the correct identity, so a repo-local `user.email` is redundant at best and a wrong identity at worst, and it silently shadows the global it overrides:
+**Verify the inherited configuration. Never set it.** The host already carries the correct identity, so a repo-local `user.email` is redundant at best and a wrong identity at worst, and it silently shadows the global it overrides. These read the effective configuration and work in any directory, so run them first, before there is a repo:
 
 ```shell
 git config --get user.email            # the GitHub noreply address, per GOVERNANCE.md "Git and Commit Rules"
 git config --get commit.gpgsign        # true
-git config --get gpg.format            # ssh
-git config --local --get user.email    # expect empty - a repo-local override is itself a finding
+git config --get user.signingkey       # set
+git config --get gpg.format            # ssh for an SSH key; unset or openpgp for GPG
+ssh-add -L                             # SSH: at least one loaded key. GPG: gpg --list-secret-keys
 ```
 
-If any of the first three is wrong or absent, that is a **host** misconfiguration to surface to the maintainer ([`docs/host-setup.md`][host-setup] is the setup procedure), not something to patch per repo. Patching it locally hides a broken host that then produces wrong identities in every other repo on that machine.
+Signing is **SSH or GPG**, so judge the last two together rather than requiring `ssh`: what matters is that the configured format has a matching agent holding the key, which is the check [GOVERNANCE.md "Git and Commit Rules"][governance-git-and-commit-rules] prescribes. Any of these wrong or absent is a **host** misconfiguration to surface to the maintainer ([`docs/host-setup.md`][host-setup] is the setup procedure), not something to patch per repo. Patching it locally hides a broken host that then produces wrong identities in every other repo on that machine.
+
+After `git init` and before the first commit, confirm the repo added no override of its own. This one needs a repository, since `--local` fails outside one:
+
+```shell
+git config --local --get user.email    # expect empty - a repo-local override is itself a finding
+```
 
 After the first commit, confirm it took with `git log -1 --format='%G? %an <%ae>'`, which prints the signature status letter followed by the identity, so `G` plus the expected `noreply` address is the passing result. `git verify-commit HEAD` is the pass/fail form, exiting non-zero on a bad signature and writing its "Good signature" line to stderr rather than emitting a status letter.
 
@@ -79,6 +86,7 @@ The same [`AUDIT.md`][audit] run is the on-demand audit for any known repo, and 
 [codestyle]: ./CODESTYLE.md
 [files]: ./spec/files.json
 [governance]: ./GOVERNANCE.md
+[governance-git-and-commit-rules]: ./GOVERNANCE.md#git-and-commit-rules
 [host-setup]: ./docs/host-setup.md
 [matrix]: ./reports/conformance-matrix.md
 [project-types]: ./spec/project-types.json
