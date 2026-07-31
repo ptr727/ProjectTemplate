@@ -23,9 +23,8 @@ import argparse, json, subprocess, sys, time
 
 REVIEWER = 'copilot-pull-request-reviewer'
 
-# Liveness query: two scalars only. No comment bodies - a "has it landed yet"
-# check does not need the finding text, and re-fetching bodies on every poll
-# was measured at 76% of polls.
+# Liveness query: two scalars only, no comment bodies.
+# A liveness check does not need the finding text, and re-fetching bodies was 76% of polls.
 Q_LIVE = """
 query($o:String!,$r:String!,$n:Int!){
   repository(owner:$o,name:$r){ pullRequest(number:$n){
@@ -103,13 +102,13 @@ def digest(owner: str, repo: str, num: int, seen: set[str] | None = None) -> tup
     return '\n'.join(lines), len(unresolved)
 
 
-def main() -> int:
+def main(argv: list[str] | None = None) -> int:
     ap = argparse.ArgumentParser()
     ap.add_argument('cmd', choices=['status', 'wait'])
     ap.add_argument('number', type=int)
     ap.add_argument('--repo', default='ptr727/ProjectTemplate')
     ap.add_argument('--timeout', type=int, default=2700, help='seconds (default 45m)')
-    a = ap.parse_args()
+    a = ap.parse_args(argv)
     owner, repo = a.repo.split('/', 1)
 
     if a.cmd == 'status':
@@ -117,7 +116,7 @@ def main() -> int:
         print(out)
         return 0
 
-    # wait: in-process backoff. One agent turn for the whole wait.
+    # In-process backoff, so the whole wait costs one agent turn.
     delays = [15, 20, 30, 45, 60, 120]
     start = time.monotonic()
     head0, done = live_state(owner, repo, a.number)
