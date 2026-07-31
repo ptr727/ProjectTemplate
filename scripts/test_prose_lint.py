@@ -298,6 +298,35 @@ class TestCommentWrap(BaitCase):
         self.assertEqual([], self.flag('a.cs', f'/// <summary>{self.RUN_ON}</summary>\n'))
         self.assertEqual([], self.flag('a.py', f'"""{self.RUN_ON}"""\n'))
 
+    def test_a_closed_block_doc_gives_the_rest_of_the_line_back(self) -> None:
+        """CODESTYLE owns the documentation comment, not the line it happens to sit on.
+
+        A line doc comment does run to end of line, so only the block form gives anything back.
+        """
+        self.assertEqual([], self.flag('a.cs', f'/** {self.RUN_ON} */\n'))
+        self.assertEqual([], self.flag('a.cs', f'/// {self.RUN_ON} // and more\n'))
+        self.assertEqual(['comment-wrap'],
+                         self.flag('a.cs', '/** Docs. */ // Two things. Here.\n'))
+
+    def test_a_multi_line_doc_block_owns_every_line_until_it_closes(self) -> None:
+        """A marker in documentation text is prose, so scanning those lines invents comments.
+
+        The closing line still gives back what follows the closer, which is the one finding here.
+        """
+        self.assertEqual(['comment-wrap'], self.flag('a.cs', '/** Docs start\n'
+                                                             ' * // Two things. Here.\n'
+                                                             ' * /* not an opener\n'
+                                                             ' */ // Two things. Here.\n'))
+
+    def test_verbatim_rules_apply_to_the_double_quoted_form_only(self) -> None:
+        """C# spells a verbatim string with double quotes, so `@` on a char literal is ordinary.
+
+        Under verbatim rules the doubled quote is one escaped character and both are blanked,
+        so counting what survives tells the two readings apart.
+        """
+        masked = prose_lint.strip_strings("var c = @'a''b'; // t", '"\'', True)
+        self.assertEqual(4, masked.count("'"))
+
     def test_a_format_with_no_comment_syntax_is_skipped(self) -> None:
         for name in ('a.lock', 'a.csv', 'a.txt'):
             with self.subTest(file=name):
@@ -379,6 +408,47 @@ class TestCommentWrap(BaitCase):
                            ('a.ps1', '# Match a <# opener here\n$x = 1 # Two things. Here.\n')):
             with self.subTest(file=name, line=text.split('\n')[0]):
                 self.assertEqual(['comment-wrap'], self.flag(name, text))
+
+    def test_every_comment_on_a_line_is_read_not_just_the_first(self) -> None:
+        """A ceiling can only describe the first comment, so a later one was unreachable.
+
+        Each case puts the offending sentence in the second comment, which a scan that stops at
+        the first reports as clean.
+        """
+        for name, text in (
+            ('a.cs', 'var x = 1; /* Note. */ // Two things. Here.\n'),
+            ('a.cs', '/* Note. */ /* Two things. Here. */\n'),
+            ('a.cs', '/* Start here.\n   Still going. */ // Two things. Here.\n'),
+        ):
+            with self.subTest(line=text.split('\n')[0]):
+                self.assertEqual(['comment-wrap'], self.flag(name, text))
+
+    def test_a_verbatim_string_keeps_its_own_closing_quote(self) -> None:
+        """A backslash is ordinary inside one and a doubled quote is the escape.
+
+        Read with C escape rules the string never closes, so the masker blanks the rest of the
+        line and the trailing comment goes unseen.
+        """
+        # Ending in a backslash, the string swallows its closing quote and hides a real comment.
+        self.assertEqual(['comment-wrap'],
+                         self.flag('a.cs', 'var p = @"C:\\tmp\\"; // Two things. Here.\n'))
+        # Reading a doubled quote as a close then a reopen puts string content outside the string.
+        self.assertEqual([],
+                         self.flag('a.cs', 'var s = @"a""// One thing. Another thing.""b"; // ok\n'))
+        # An interpolated one is spelled either way round, and only one of them abuts the quote.
+        for text in ('var s = $@"C:\\tmp\\"; // Two things. Here.\n',
+                     'var s = @$"C:\\tmp\\"; // Two things. Here.\n'):
+            with self.subTest(line=text.strip()):
+                self.assertEqual(['comment-wrap'], self.flag('a.cs', text))
+
+    def test_only_the_syntax_that_has_verbatim_strings_gets_them(self) -> None:
+        """C shares the C-like spec without the form, so `@` there is an ordinary character."""
+        self.assertTrue(prose_lint.SYNTAX['.cs']['verbatim'])
+        self.assertFalse(prose_lint.SYNTAX['.c']['verbatim'])
+        self.assertFalse(prose_lint.SYNTAX['.json']['verbatim'])
+        # The C escape still hides a marker, which is what the verbatim rule must not undo.
+        self.assertEqual(['comment-wrap'],
+                         self.flag('a.cs', 'var s = "a\\"b"; // Two things. Here.\n'))
 
     def test_css_has_block_comments_only(self) -> None:
         """A `//` in CSS is the scheme separator of a URL, not a comment marker."""
