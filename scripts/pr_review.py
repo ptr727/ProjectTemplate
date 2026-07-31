@@ -29,7 +29,9 @@ REVIEWER = 'copilot-pull-request-reviewer'
 # already, and matching one phrasing alone reports zero on a review that has them.
 SUPPRESSED = re.compile(r'Suppressed comments|low confidence', re.IGNORECASE)
 DETAILS = re.compile(r'<details>(.*?)</details>', re.DOTALL | re.IGNORECASE)
+SUMMARY = re.compile(r'<summary>(.*?)</summary>', re.DOTALL | re.IGNORECASE)
 TAGS = re.compile(r'</?(?:details|summary)>', re.IGNORECASE)
+COUNT = re.compile(r'\((\d+)\)')
 
 # Liveness query: two scalars only, no comment bodies.
 # A liveness check does not need the finding text, and re-fetching bodies was 76% of polls.
@@ -74,15 +76,35 @@ def live_state(owner: str, repo: str, num: int) -> tuple[str, bool]:
     return head, done
 
 
-def suppressed_blocks(body: str) -> list[str]:
-    """Return the review body's low-confidence sections, or the whole body if it is not collapsed.
+def heading_of(block: str) -> str:
+    """The block's `<summary>`, or its opening where the wrapper carries none."""
+    m = SUMMARY.search(block)
+    return m.group(1) if m else block[:200]
 
-    The wrapper is a `<details>` block today, so the fallback covers the day it is not: a body
-    that names the block but parses to no section is reported whole rather than as zero findings.
+
+def suppressed_blocks(body: str) -> list[str]:
+    """Return the review body's low-confidence sections, matched on their heading.
+
+    The heading carries the match rather than the body text, since a review whose prose discusses
+    suppressed findings is not itself carrying any. The fallback covers the day the `<details>`
+    wrapper moves, and takes a heading with a count so ordinary prose is not read as one.
     """
-    if not body or not SUPPRESSED.search(body):
+    if not body:
         return []
-    return [b for b in DETAILS.findall(body) if SUPPRESSED.search(b)] or [body]
+    blocks = [b for b in DETAILS.findall(body) if SUPPRESSED.search(heading_of(b))]
+    if blocks:
+        return blocks
+    outside = DETAILS.sub('', body).splitlines()
+    for i, line in enumerate(outside):
+        if SUPPRESSED.search(line) and COUNT.search(line):
+            return ['\n'.join(outside[i:])]
+    return []
+
+
+def finding_count(block: str) -> int:
+    """The heading's `(N)`, floored at one, since a block reported as zero reads as a clean pass."""
+    m = COUNT.search(heading_of(block))
+    return max(int(m.group(1)), 1) if m else 1
 
 
 def digest(owner: str, repo: str, num: int, seen: set[str] | None = None) -> tuple[str, int]:
@@ -104,7 +126,7 @@ def digest(owner: str, repo: str, num: int, seen: set[str] | None = None) -> tup
         f'pr={num} head={head[:8]} rounds={len(revs)} '
         f'review_on_head={"yes" if on_head else "NO"} '
         f'threads={len(threads)} unresolved={len(unresolved)} '
-        f'suppressed={len(blocks)} '
+        f'suppressed={sum(finding_count(b) for b in blocks)} '
         f'merge={pr.get("mergeStateStatus")}'
     ]
     new = 0

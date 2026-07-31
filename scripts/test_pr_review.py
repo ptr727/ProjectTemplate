@@ -138,7 +138,8 @@ class TestSuppressed(GqlCase):
         """One phrasing alone reports zero on a review that has them, the false clean once more."""
         for label, body, want in (
             ('the current heading', collapsed(), 1),
-            ('the earlier heading', collapsed(heading='Suppressed comments (2)'), 1),
+            ('the earlier heading', collapsed(heading='Suppressed comments (2)'), 2),
+            ('a heading with no count', collapsed(heading='Suppressed comments'), 1),
             ('a clean pass', 'Reviewed 3 of 3 changed files and generated no comments.', 0),
             ('no body at all', '', 0),
         ):
@@ -181,6 +182,23 @@ class TestSuppressed(GqlCase):
         self.assertIn('suppressed=1', out)
         self.assertNotIn('Show a summary per file', out)
         self.assertIn('The retry count is off by one.', out)
+
+    def test_the_count_is_findings_rather_than_blocks(self) -> None:
+        """A body holds one block per round, so counting blocks reports two findings as one."""
+        self.answer(payload([review(body=collapsed(heading='Suppressed comments (3)')),
+                             review(body=collapsed(heading='Suppressed comments (2)'))]))
+        out, _ = pr_review.digest('o', 'r', 7)
+        self.assertIn('suppressed=5', out)
+
+    def test_prose_that_merely_discusses_the_phrase_is_not_a_block(self) -> None:
+        """This PR's own review body was the false positive, discussing the phrase and carrying none."""
+        body = ('## Pull request overview\n\nThis PR reports the suppressed and low confidence '
+                'findings that reach no thread (and are therefore invisible to a thread poll).\n\n'
+                '<details>\n<summary>Show a summary per file</summary>\n\n| File |\n\n</details>\n')
+        self.answer(payload([review(body=body)]))
+        out, _ = pr_review.digest('o', 'r', 7)
+        self.assertIn('suppressed=0', out)
+        self.assertNotIn('SUPPRESSED', out)
 
     def test_a_human_review_carrying_the_phrase_is_not_a_copilot_finding(self) -> None:
         self.answer(payload([review(login='ptr727', body=collapsed()), review()]))
