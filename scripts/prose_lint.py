@@ -186,8 +186,8 @@ SENT_END = re.compile(r'[.!?:]["\')\]]?\s*$')
 # Comment syntax per language, since the rule governs every comment the fleet's types carry.
 # A `doc` marker opens a documentation comment, which CODESTYLE governs and may run to paragraphs.
 # `raw` names the quotes whose strings embed the delimiter by doubling it.
-# `escape` is the character that escapes the next one, `escape_in` the quotes it works inside,
-# and `escape_out` whether it also works outside a string.
+# `escape` is the character that escapes the next one.
+# `escape_in` names the quotes it works inside, and `escape_out` whether it works outside one.
 # `carry` names the forms that survive a newline, so a marker inside one is string content.
 class Syntax(TypedDict):
     line: tuple[str, ...]
@@ -206,10 +206,11 @@ PLAIN: Syntax = {'line': (), 'block': (), 'doc': (), 'quotes': '"\'', 'verbatim'
                  'raw': '', 'escape': '\\', 'escape_in': '"\'', 'escape_out': False,
                  'carry': frozenset()}
 HASH: Syntax = {**PLAIN, 'line': ('#',)}
-# A shell single-quoted string takes no escape at all, and either quote form spans lines.
+# A shell single-quoted string takes no escape and cannot embed its own delimiter.
+# It is neither doubling nor escaped, so `'a''b'` is two adjacent strings rather than one.
 # Outside a string a backslash escapes the next character, which is how `'\''` embeds a quote.
-# A heredoc runs from its label to the line that repeats it.
-SHELL: Syntax = {**HASH, 'raw': "'", 'escape_in': '"', 'escape_out': True,
+# A heredoc runs from its label to the line that repeats it, and either quote form spans lines.
+SHELL: Syntax = {**HASH, 'escape_in': '"', 'escape_out': True,
                  'carry': frozenset({'quote', 'label'})}
 # A YAML block scalar is the multi-line form.
 # A plain scalar's apostrophe is not a string, so an ordinary quote must not carry here.
@@ -220,8 +221,8 @@ C_LIKE: Syntax = {**PLAIN, 'line': ('//',), 'block': (('/*', '*/'),), 'doc': ('/
 # C# alone carries the verbatim string, where a backslash is ordinary and a doubled quote escapes.
 CSHARP: Syntax = {**C_LIKE, 'verbatim': True, 'carry': frozenset({'verbatim'})}
 XML_LIKE: Syntax = {**PLAIN, 'block': (('<!--', '-->'),), 'quotes': '"'}
-# PowerShell escapes with a backtick rather than a backslash, and both quote forms also double the
-# delimiter to embed it, so its double-quoted string is escaped and doubling at once.
+# PowerShell escapes with a backtick, and both quote forms double the delimiter to embed it.
+# Its double-quoted string is therefore escaped and doubling at once.
 # Both forms span lines, and the here-string (`@"` to `"@`) is the delimited one.
 POWERSHELL: Syntax = {**PLAIN, 'line': ('#',), 'block': (('<#', '#>'),), 'raw': '"\'',
                       'escape': '`', 'escape_in': '"', 'escape_out': True,

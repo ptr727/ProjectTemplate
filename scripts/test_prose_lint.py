@@ -562,6 +562,21 @@ class TestMultiLineStrings(BaitCase):
                          self.flag('a.sh', "p='C:\\tmp\\'\n"
                                            f'# {self.BAIT}\n'))
 
+    def test_a_shell_single_quoted_string_is_neither_doubling_nor_escaped(self) -> None:
+        """It takes no escape at all and cannot embed its own delimiter, so `'a''b'` is two strings.
+
+        Declaring it doubling would state something false about the language. It happens to mask
+        the same either way, since doubling and plain toggling agree on whether a run of quotes
+        leaves a string open, so counting the quotes that survive is what tells the readings apart.
+        """
+        masked, carry = prose_lint.strip_strings(
+            "echo 'a''b'", '"\'', False, prose_lint.CLEAR, prose_lint.SHELL['raw'],
+            prose_lint.SHELL['escape'], prose_lint.SHELL['escape_in'],
+            prose_lint.SHELL['escape_out'])
+        self.assertEqual(4, masked.count("'"))
+        self.assertEqual('', carry.kind)
+        self.assertEqual('', prose_lint.SHELL['raw'])
+
     def test_a_shell_backslash_outside_a_string_escapes_the_next_character(self) -> None:
         r"""`'\''` is how shell embeds a quote in a single-quoted string, and it balances.
 
@@ -675,9 +690,16 @@ class TestMultiLineStrings(BaitCase):
         """Its `#` lines are shell comments, so treating the block as data would stop linting them.
 
         A data key holds text the reader cannot edit, which is the case the block rule is for.
+        The chomping and indent indicators ride along on the header, so every form of it counts.
         """
-        self.assertEqual(['comment-wrap'], self.flag('a.yml', f'run: |\n  # {self.BAIT}\n'))
-        self.assertEqual([], self.flag('a.yml', f'files: |\n  # {self.BAIT}\n'))
+        for header in ('run: |', 'run: |-', 'run: |+', 'run: |2', 'run: >', 'run: >-',
+                       '      run: |'):
+            with self.subTest(header=header):
+                self.assertEqual(['comment-wrap'],
+                                 self.flag('a.yml', f'{header}\n        # {self.BAIT}\n'))
+        for header in ('files: |', 'files: |-', 'tags: >-'):
+            with self.subTest(header=header):
+                self.assertEqual([], self.flag('a.yml', f'{header}\n  # {self.BAIT}\n'))
 
     def test_a_pipe_that_is_not_a_block_header_opens_nothing(self) -> None:
         """A plain scalar ending in a pipe is a value, not a block indicator."""
