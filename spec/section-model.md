@@ -12,7 +12,7 @@ The set spans two files. [`AGENTS.md`][agents] is the entry point every agent re
 
 A section is one of the following. Fidelity is declared in [files.json][files], never inferred.
 
-- **verbatim** - universal fleet-law rule *text*, byte-identical in every repo after EOL and action-pin normalization. The audit content-hashes each downstream copy against the hub's `## <heading>` block. A verbatim section may carry clauses only some repos exercise (for example "a source-only repo carries no build task"). The *text* is still identical everywhere, since applicability is per-repo and the wording is not.
+- **verbatim** - universal fleet-law rule *text*, byte-identical in every repo after EOL and action-pin normalization. The audit content-hashes each downstream copy against the hub's `## <heading>` block. A verbatim section may carry clauses only some repos exercise (for example "a source-only repo carries no build task"). The *text* is still identical everywhere, since applicability varies by repo while the wording does not.
 - **intent** - the section *describes this particular repo* (its own directory tree, its own devcontainer and toolchain), so its content legitimately varies. The heading must be present, the body is judged by meaning rather than hashed.
 
 `appliesTo` scope is orthogonal to fidelity. A section may apply to a subset of repos (for example `operational`) and is checked only for repos in that subset.

@@ -15,20 +15,21 @@ git config --global --get user.email        # the GitHub noreply address, per GO
 git config --global --get commit.gpgsign    # true
 git config --global --get user.signingkey   # set
 git config --global --get gpg.format        # ssh for an SSH key; unset or openpgp for GPG
-ssh-add -L                                  # SSH: at least one loaded key. GPG: gpg --list-secret-keys
+ssh-add -L                                  # SSH host: at least one loaded key
+gpg --list-secret-keys                      # GPG host instead: the signing key is present
 ```
 
 `--global` rather than the effective config, because the effective value depends on where the command runs: inside any existing repository a repo-local override wins, so a bare `git config --get user.email` there reports that repository's identity and hides the host setting this step exists to check. The two scopes together are what make the result sound, since this block proves the host is right and the block below proves nothing shadows it.
 
-Signing is **SSH or GPG**, so judge the last two together rather than requiring `ssh`: what matters is that the configured format has a matching agent holding the key, which is the check [GOVERNANCE.md "Git and Commit Rules"][governance-git-and-commit-rules] prescribes. Any of these wrong or absent is a **host** misconfiguration to surface to the maintainer ([`docs/host-setup.md`][host-setup] is the setup procedure), not something to patch per repo. Patching it locally hides a broken host that then produces wrong identities in every other repo on that machine.
+Run the agent check that matches the configured format, not both. Signing is **SSH or GPG**, so judge the format and its agent together rather than requiring `ssh`: what matters is that the configured format has a matching agent holding the key, which is the check [GOVERNANCE.md "Git and Commit Rules"][governance-git-and-commit-rules] prescribes. Any of these wrong or absent is a **host** misconfiguration to surface to the maintainer ([`docs/host-setup.md`][host-setup] is the setup procedure), not something to patch per repo. Patching it locally hides a broken host that then produces wrong identities in every other repo on that machine.
 
 After `git init` and before the first commit, confirm the repo added no override of its own. This one needs a repository, since `--local` fails outside one:
 
 ```shell
-git config --local --get user.email    # expect no output
+git config --local --get user.email || true    # expect no output
 ```
 
-**The finding is a printed value, never the exit code.** An unset key prints nothing and exits `1`, so the passing case is a non-zero exit with empty output, and reading the exit status as failure inverts the check. Under `set -e`, write it `git config --local --get user.email || true` so the expected case does not abort the script.
+**The finding is a printed value, never the exit code.** An unset key prints nothing and exits `1`, so the passing case is a non-zero exit with empty output, and reading the exit status as failure inverts the check. The tolerant tail is in the snippet above so a copy into a `set -e` script does not abort on the expected case.
 
 After the first commit, confirm it took with `git log -1 --format='%G? author=%an <%ae> committer=%cn <%ce>'`, so the passing result is `G` plus the expected `noreply` address in **both** identities. Read both rather than the author alone: the rule governs the `author` and the `committer` together, GitHub verifies the signature against the **committer**, and a rebase, amend, or cherry-pick rewrites the committer while leaving the author untouched, which is exactly the case an author-only check passes and should not. `git verify-commit HEAD` is the pass/fail form, exiting non-zero on a bad signature and writing its "Good signature" line to stderr rather than emitting a status letter.
 
