@@ -26,7 +26,7 @@ After `git init` and before the first commit, confirm the repo added no override
 git config --local --get user.email    # expect empty - a repo-local override is itself a finding
 ```
 
-After the first commit, confirm it took with `git log -1 --format='%G? %an <%ae>'`, which prints the signature status letter followed by the identity, so `G` plus the expected `noreply` address is the passing result. `git verify-commit HEAD` is the pass/fail form, exiting non-zero on a bad signature and writing its "Good signature" line to stderr rather than emitting a status letter.
+After the first commit, confirm it took with `git log -1 --format='%G? author=%an <%ae> committer=%cn <%ce>'`, so the passing result is `G` plus the expected `noreply` address in **both** identities. Read both rather than the author alone: the rule governs the `author` and the `committer` together, GitHub verifies the signature against the **committer**, and a rebase, amend, or cherry-pick rewrites the committer while leaving the author untouched, which is exactly the case an author-only check passes and should not. `git verify-commit HEAD` is the pass/fail form, exiting non-zero on a bad signature and writing its "Good signature" line to stderr rather than emitting a status letter.
 
 ## 1. Classify and Catalog
 
