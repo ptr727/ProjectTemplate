@@ -377,7 +377,7 @@ class TestCommentWrap(BaitCase):
         self.assertEqual([(1, 'Start here.', True), (2, 'Still going.', True)],
                          prose_lint.extracted_comments(Path('a.cs'),
                                                        ['/* Start here.', ' * Still going. */']))
-        # The marker is one `*` and a space, so a continuation line keeps its own emphasis.
+        # The marker is one `*` against whitespace, so a continuation keeps its own emphasis.
         for text, body in ((' * **bold** here */', '**bold** here'),
                            (' **bold** here */', '**bold** here'),
                            (' *emphasis* here */', '*emphasis* here')):
