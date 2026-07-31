@@ -412,7 +412,11 @@ def extracted_comments(path: Path, lines: list[str]) -> list[tuple[int, str, boo
             pos, doc_closing = end + len(doc_closing), ''
         elif closing:                                # carried in from an unclosed block
             end = line.find(closing)
-            body = (line if end < 0 else line[:end]).strip().lstrip('*').strip()
+            body = (line if end < 0 else line[:end]).strip()
+            # Only `/* */` continues a line with a leading `*`, and only on a line it continues.
+            # Taking it off anywhere else edits the prose the rules then judge.
+            if closing == '*/':
+                body = body.lstrip('*').strip()
             if body:
                 out.append((n, body, True))
             if end < 0:
@@ -459,7 +463,7 @@ def extracted_comments(path: Path, lines: list[str]) -> list[tuple[int, str, boo
                 break
             opener, closer = found
             end = line.find(closer, at + len(opener))    # a quote in the comment is prose
-            body = (line[at + len(opener):end if end >= 0 else None]).strip().lstrip('*').strip()
+            body = (line[at + len(opener):end if end >= 0 else None]).strip()
             if body:
                 out.append((n, body, leading))
             if end < 0:

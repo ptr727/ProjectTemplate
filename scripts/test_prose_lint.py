@@ -362,6 +362,22 @@ class TestCommentWrap(BaitCase):
                                            '   And more. */ // Two things. Here.\n'
                                            'var x = 1; // Two things. Here.\n'))
 
+    def test_only_a_c_style_continuation_loses_its_leading_asterisk(self) -> None:
+        """The `*` continuing a `/* */` line is punctuation, and anywhere else it is prose.
+
+        Taking it off an emphasis marker leaves a lowercase opening that the case rule reports,
+        which is the rule judging text the extractor damaged.
+        """
+        for name, text in (('a.md', '<!-- *emphasis* leads here -->\n'),
+                           ('a.ps1', '<# *emphasis* leads here #>\n'),
+                           ('a.cs', '/* *emphasis* leads here */\n')):
+            with self.subTest(file=name):
+                self.assertEqual([], self.flag(name, text))
+        # The convention still holds on the lines it was written for.
+        self.assertEqual([(1, 'Start here.', True), (2, 'Still going.', True)],
+                         prose_lint.extracted_comments(Path('a.cs'),
+                                                       ['/* Start here.', ' * Still going. */']))
+
     def test_a_format_with_no_comment_syntax_is_skipped(self) -> None:
         for name in ('a.lock', 'a.csv', 'a.txt'):
             with self.subTest(file=name):
