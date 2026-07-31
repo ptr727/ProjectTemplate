@@ -104,10 +104,6 @@ Known non-working request paths (don't rely on them - use the `requestReviews` m
 - `suggestedActors(capabilities: [CAN_BE_ASSIGNED])` lists `copilot-swe-agent` (the coding agent), not `copilot-pull-request-reviewer` - do not source the reviewer's bot node id there. Read it from an existing review per step 1 above.
 - There is no `removePullRequestFromReviewRequest` mutation, and removing the reviewer to force a fresh pass is unnecessary anyway - `requestReviews` with `union: true` re-fires the review on the current head.
 
-Known non-working paths for the PR edits the loop makes between rounds, as opposed to the review request itself:
-
-- `gh pr edit` fails with `GraphQL: Projects (classic) is being deprecated ... (repository.pullRequest.projectCards)` and mutates nothing, so a PR body that grew stale as fixes landed cannot be refreshed with it. Use `gh api -X PATCH "repos/<owner>/<repo>/pulls/<N>" -F body=@<file>` instead. Read the body back afterwards rather than assuming a failed call left the PR untouched.
-
 ### Verify Review Covered Current Head
 
 Before merging, confirm Copilot reviewed the current PR head SHA. Copilot may respond as either a formal review (carries an exact commit SHA) or an issue comment (no SHA - use the most recent Copilot comment for manual confirmation). Check both.
