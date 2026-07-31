@@ -188,7 +188,7 @@ class TestContract(unittest.TestCase):
         The runbook is the source, so this reads it rather than restating the string.
         """
         text = RUNBOOK.read_text(encoding='utf-8')
-        self.assertIn(f'`{pr_review.REVIEWER}` - **no `[bot]` suffix**', text)
+        self.assertIn(f'`{pr_review.REVIEWER}`, with **no `[bot]` suffix**', text)
         self.assertFalse(pr_review.REVIEWER.endswith('[bot]'))
 
     def test_no_mutation_reaches_this_script(self) -> None:
