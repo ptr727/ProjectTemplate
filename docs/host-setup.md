@@ -169,6 +169,8 @@ gh auth status
 
 If signing fails locally, the devcontainer will fail too, so fix here first.
 
+**This block is POSIX, and on native Windows the interpreter line needs translating**, since `python3` is the one name a correctly set-up Windows host does not have. Read it as `py -3 --version` there, matching the contract table above, and run the rest from WSL2 or Git Bash per the shell note. Git Bash inherits the Windows `PATH`, so `python3` reaches the same Store alias stub it does in PowerShell and reports a working interpreter as missing. A PowerShell equivalent of this block is deliberately **not** given here, because it has not been run on a Windows host, and an unverified verification command is worse than none. [#483][issue-483] is where one belongs once someone has executed it.
+
 **What the host can do once this passes**, which is the point of the contract above:
 
 | Now possible | Because |
@@ -191,6 +193,7 @@ A host that fails any row is not ready for the procedure that row names, and the
 [agent-safety]: ../host-setup/agent-safety/README.md
 [devcontainer]: ./devcontainer.md
 [governance-git-and-commit-rules]: ../GOVERNANCE.md#git-and-commit-rules
+[issue-483]: https://github.com/ptr727/ProjectTemplate/issues/483
 [ssh-signing]: ./ssh-signing.md
 [standup]: ../STANDUP.md
 
