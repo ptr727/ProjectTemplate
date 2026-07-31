@@ -18,11 +18,13 @@ This section is the **contract**: which tools a host needs and which repo proced
 | --- | --- | --- |
 | `git` | everything, and the identity and signing contract in [`STANDUP.md`][standup] step 0 | `git --version` |
 | `gh` | the PR and review loop, `gh api` queries, `repo-config/configure.sh` | `gh --version` |
-| `python3` | `scripts/` and `spec/` (standard library only, no packages to install) | `python3 --version` |
+| Python 3 | `scripts/` and `spec/` (standard library only, no packages to install) | `python3 --version`, or `py -3 --version` on native Windows |
 | `docker` | the four linters, which run as pinned images rather than local installs | `docker --version` |
 | `uv` / `uvx` | coverage runs, and the Python toolchain (`ruff`, `pyright` or `mypy`) in a Python repo | `uv --version` |
 
-Two consequences worth reading off the table rather than discovering later. **`python3` needs no packages**, because every script here is standard library only, so a bare interpreter is enough. And **the linters need only `docker`**, not `node`, `dotnet` or a local `markdownlint`, since each runs as a pinned image, which is what keeps a local run and CI the same check.
+Two consequences worth reading off the table rather than discovering later. **Python 3 needs no packages**, because every script here is standard library only, so a bare interpreter is enough. And **the linters need only `docker`**, not `node`, `dotnet` or a local `markdownlint`, since each runs as a pinned image, which is what keeps a local run and CI the same check.
+
+**The interpreter is not called `python3` everywhere.** On native Windows the installer registers `python`, `py` and `python3.13` but **not** `python3`, where that name instead resolves to a Microsoft Store alias stub that reports the interpreter as missing, so a correctly set-up host fails a `python3` check. Stock Debian is the mirror image, carrying `python3` and no bare `python`. Use `py -3` on native Windows and `python3` elsewhere, and prefer `python3` in any script that must run on both, since WSL2 shadows the Windows stub.
 
 A missing tool is a host gap, not a repo problem. Install it and re-run, rather than working around it in a repo.
 
@@ -147,7 +149,7 @@ host-setup/agent-safety/install.sh        # Linux, WSL, macOS, Proxmox
 ```
 
 ```powershell
-host-setup\agent-safety\install.ps1       # Windows
+.\host-setup\agent-safety\install.ps1     # Windows, and the .\ prefix is required
 ```
 
 Both wrap one `install.py`, so every platform runs the same tested path. Restart Claude Code sessions on the machine afterward so the hook and the `CLAUDE.md` block load. Details, verification, and scope limits are in [`host-setup/agent-safety/README.md`][agent-safety].
@@ -167,13 +169,15 @@ gh auth status
 
 If signing fails locally, the devcontainer will fail too, so fix here first.
 
+**This block is POSIX, and on native Windows the interpreter line needs translating**, since `python3` is the one name a correctly set-up Windows host does not have. Read it as `py -3 --version` there, matching the contract table above, and run the rest from WSL2 or Git Bash per the shell note. Git Bash inherits the Windows `PATH`, so `python3` reaches the same Store alias stub it does in PowerShell and reports a working interpreter as missing. A PowerShell equivalent of this block is deliberately **not** given here, because it has not been run on a Windows host, and an unverified verification command is worse than none. [#483][issue-483] is where one belongs once someone has executed it.
+
 **What the host can do once this passes**, which is the point of the contract above:
 
 | Now possible | Because |
 | --- | --- |
 | Stand up a new repo through [`STANDUP.md`][standup] | step 0 verifies identity and signing, and its window closes at the first commit |
 | Run the four linters locally, matching CI | `docker` runs each as the same pinned image CI uses |
-| Run the repo's own gates and tests | `python3` covers `scripts/` and `spec/` with no packages to install |
+| Run the repo's own gates and tests | Python 3 covers `scripts/` and `spec/` with no packages to install |
 | Drive the PR and Copilot review loop | `gh` and an authenticated session |
 | Let an agent work with the `gh` credentials live | the write-safety kit is installed |
 
@@ -189,6 +193,7 @@ A host that fails any row is not ready for the procedure that row names, and the
 [agent-safety]: ../host-setup/agent-safety/README.md
 [devcontainer]: ./devcontainer.md
 [governance-git-and-commit-rules]: ../GOVERNANCE.md#git-and-commit-rules
+[issue-483]: https://github.com/ptr727/ProjectTemplate/issues/483
 [ssh-signing]: ./ssh-signing.md
 [standup]: ../STANDUP.md
 
