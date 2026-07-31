@@ -395,7 +395,8 @@ HERE_STRING = re.compile(r'@(["\'])\s*$')
 BLOCK_SCALAR = re.compile(r'(?::|^\s*-)\s*[|>][+-]?\d?\s*$')
 
 # `run:` holds a script rather than data, so its `#` lines are comments this rule governs.
-SCRIPT_SCALAR = re.compile(r'(?:^|\s)run:\s*[|>]')
+# Anchored to the key position, since a key merely ending in the word (`dry run:`) is data.
+SCRIPT_SCALAR = re.compile(r'^\s*(?:-\s+)?run:\s*[|>]')
 
 
 def opened_string(spec: Syntax, head: str, line: str) -> Carried:

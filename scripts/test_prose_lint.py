@@ -693,11 +693,13 @@ class TestMultiLineStrings(BaitCase):
         The chomping and indent indicators ride along on the header, so every form of it counts.
         """
         for header in ('run: |', 'run: |-', 'run: |+', 'run: |2', 'run: >', 'run: >-',
-                       '      run: |'):
+                       '      run: |', '      - run: |'):
             with self.subTest(header=header):
                 self.assertEqual(['comment-wrap'],
                                  self.flag('a.yml', f'{header}\n        # {self.BAIT}\n'))
-        for header in ('files: |', 'files: |-', 'tags: >-'):
+        # The exemption is anchored to the key, so a key merely ending in the word is still data.
+        for header in ('files: |', 'files: |-', 'tags: >-', 'dry run: |', 'first run: |-',
+                       'post-run: |'):
             with self.subTest(header=header):
                 self.assertEqual([], self.flag('a.yml', f'{header}\n  # {self.BAIT}\n'))
 
