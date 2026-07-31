@@ -324,8 +324,43 @@ class TestCommentWrap(BaitCase):
         Under verbatim rules the doubled quote is one escaped character and both are blanked,
         so counting what survives tells the two readings apart.
         """
-        masked = prose_lint.strip_strings("var c = @'a''b'; // t", '"\'', True)
+        masked, _ = prose_lint.strip_strings("var c = @'a''b'; // t", '"\'', True)
         self.assertEqual(4, masked.count("'"))
+
+    def test_a_verbatim_string_spans_lines(self) -> None:
+        """It is the one string form here that carries, so masking per line invents comments.
+
+        The line that closes it still gives back what follows the quote.
+        """
+        # The marker on the second line is string content, so nothing is reported.
+        self.assertEqual([], self.flag('a.cs', 'var s = @"line one\n'
+                                               '// Two things. Here.\n'
+                                               'line three";\n'))
+        # The line that closes it still gives back the comment after the quote.
+        self.assertEqual(['comment-wrap'], self.flag('a.cs', 'var s = @"line one\n'
+                                                             'line two"; // Two things. Here.\n'))
+        # A plain string ends on its own line, so the next line is ordinary code.
+        self.assertEqual(['comment-wrap'], self.flag('a.cs', 'var s = "line one";\n'
+                                                             '// Two things. Here.\n'))
+        # Closing one and opening another leaves real code between them, which is not string content.
+        self.assertEqual(['comment-wrap'],
+                         self.flag('a.cs', 'var s = @"start\n'
+                                           'end"; /* Two things. Here. */ var t = @"open again\n'
+                                           'still string";\n'))
+
+    def test_a_quote_in_comment_text_is_prose_rather_than_a_string(self) -> None:
+        """Masking the comment too lets its quote open a string that blanks the markers after it.
+
+        Within the line that costs the block its closer, and across lines the state carries and
+        blanks every marker below until something closes it.
+        """
+        self.assertEqual(['comment-wrap'],
+                         self.flag('a.cs', 'code(); /* note @"x */ code2(); // Two things. Here.\n'))
+        # Each block line is its own sentence, so the two findings are the recovered comments.
+        self.assertEqual(['comment-wrap', 'comment-wrap'],
+                         self.flag('a.cs', '/* A note about @"paths.\n'
+                                           '   And more. */ // Two things. Here.\n'
+                                           'var x = 1; // Two things. Here.\n'))
 
     def test_a_format_with_no_comment_syntax_is_skipped(self) -> None:
         for name in ('a.lock', 'a.csv', 'a.txt'):

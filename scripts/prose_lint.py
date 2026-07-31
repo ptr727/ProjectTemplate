@@ -250,17 +250,19 @@ def syntax_for(path: Path) -> Syntax | None:
     return HASH if not suffix else None
 
 
-def strip_strings(line: str, quotes: str, verbatim: bool = False) -> str:
+def strip_strings(line: str, quotes: str, verbatim: bool = False,
+                  carried: bool = False) -> tuple[str, bool]:
     """Blank quoted spans so a comment marker inside a string is not read as one.
 
     Length-preserving, so an offset into the result is an offset into the line.
     A verbatim string takes its own rules where the syntax has one.
     There the backslash is an ordinary character and a doubled quote is the escape, so reading a
     backslash as an escape consumes the closing quote and blanks the rest of the line.
+    It also spans lines, so `carried` opens one and the second return says it is still open.
     """
     out = list(line)
-    quote = ''
-    inside_verbatim = False
+    quote = '"' if carried else ''
+    inside_verbatim = carried
     escaped = False
     i = 0
     while i < len(line):
@@ -292,7 +294,7 @@ def strip_strings(line: str, quotes: str, verbatim: bool = False) -> str:
                 start -= 1
             inside_verbatim = verbatim and ch == '"' and '@' in line[start:i]
         i += 1
-    return ''.join(out)
+    return ''.join(out), inside_verbatim
 
 
 # A pragma, shebang, or divider is machinery rather than prose.
@@ -399,9 +401,9 @@ def extracted_comments(path: Path, lines: list[str]) -> list[tuple[int, str, boo
     out: list[tuple[int, str, bool]] = []
     closing = ''
     doc_closing = ''
+    in_string = False
     for n, raw in enumerate(lines, 1):
         line = raw.rstrip('\r')
-        masked = strip_strings(line, spec['quotes'], spec['verbatim'])
         pos = 0
         if doc_closing:                              # CODESTYLE owns every line until it closes
             end = line.find(doc_closing)
@@ -419,6 +421,10 @@ def extracted_comments(path: Path, lines: list[str]) -> list[tuple[int, str, boo
         # Scan left to right and take whichever marker comes first.
         # A ceiling can only describe the first comment, so a later one was unreachable.
         while pos < len(line):
+            # Mask from here rather than once per line, so comment text never sets string state.
+            # A quote in a comment is prose, and reading it as a string blanks the markers after it.
+            tail, tail_state = strip_strings(line[pos:], spec['quotes'], spec['verbatim'], in_string)
+            masked = ' ' * pos + tail
             found: str | tuple[str, str] | None = None
             at = len(line)
             for marker in spec['line']:
@@ -430,13 +436,16 @@ def extracted_comments(path: Path, lines: list[str]) -> list[tuple[int, str, boo
                 if 0 <= where < at:
                     at, found = where, (opener, closer)
             if found is None:
+                in_string = tail_state               # the rest of the line is code
                 break
+            # Only the code before the marker advances the string state.
+            _, in_string = strip_strings(line[pos:at], spec['quotes'], spec['verbatim'], in_string)
             # CODESTYLE owns a documentation comment, so this rule skips over it.
             # A line one runs to end of line, while a closed block one gives the rest back.
             if any(line[at:].startswith(d) for d in spec['doc']):
                 if isinstance(found, str):
                     break
-                end = masked.find(found[1], at + len(found[0]))
+                end = line.find(found[1], at + len(found[0]))
                 if end < 0:
                     doc_closing = found[1]               # it carries on into the lines below
                     break
@@ -449,7 +458,7 @@ def extracted_comments(path: Path, lines: list[str]) -> list[tuple[int, str, boo
                     out.append((n, body, leading))
                 break
             opener, closer = found
-            end = masked.find(closer, at + len(opener))
+            end = line.find(closer, at + len(opener))    # a quote in the comment is prose
             body = (line[at + len(opener):end if end >= 0 else None]).strip().lstrip('*').strip()
             if body:
                 out.append((n, body, leading))
