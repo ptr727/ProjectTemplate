@@ -944,7 +944,12 @@ class TestSentenceSplit(BaitCase):
 
 
 class TestSpelling(BaitCase):
-    """US English, gated where cspell does not reach: every file that is not README or HISTORY."""
+    """US English, read from markdown prose and from the comments of every other syntax.
+
+    The rule runs on whatever file it is handed, README and HISTORY included. It complements the
+    cspell gate rather than dividing the tree with it: cspell reads those two files and this reads
+    the prose in all of them, so what it adds is coverage of everywhere cspell was never pointed.
+    """
 
     def messages(self, text: str, name: str = 'bait.md') -> list[str]:
         path = self.tmp / name
