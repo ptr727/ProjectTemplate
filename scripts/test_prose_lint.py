@@ -633,6 +633,18 @@ class TestMultiLineStrings(BaitCase):
                                                     f'body\n'
                                                     f'{quote}@  # {self.BAIT}\n'))
 
+    def test_a_powershell_double_quoted_string_is_escaped_and_doubling_at_once(self) -> None:
+        """Its escape is a backtick, and it also embeds the delimiter by doubling it.
+
+        Neither property implies the other, so both are read per string. Missing the backtick ends
+        the string on the escaped quote, and reading a backslash as an escape consumes the closing
+        one. The single-quoted form takes no backtick escape, so its escape is doubling only.
+        """
+        for code in ('$s = "a`"b"', '$s = "a""b"', "$s = 'a`'", "$s = 'a''b'",
+                     '$p = "C:\\tmp\\"'):
+            with self.subTest(code=code):
+                self.assertEqual(['comment-wrap'], self.flag('a.ps1', f'{code}  # {self.BAIT}\n'))
+
     def test_a_here_string_closes_only_on_a_token_at_the_start_of_the_line(self) -> None:
         """PowerShell requires the closer at column 0, so an indented one is here-string content."""
         self.assertEqual([], self.flag('a.ps1', '$s = @"\n'
@@ -712,6 +724,11 @@ class TestMultiLineStrings(BaitCase):
                 self.assertLessEqual(set(spec['raw']), set(spec['quotes']))
                 # An escape character that is also a quote would never reach the escape branch.
                 self.assertEqual(set(), set(spec['escape']) & set(spec['quotes']))
+                # The escape works inside quotes the syntax actually has, and is one character.
+                self.assertLessEqual(set(spec['escape_in']), set(spec['quotes']) | {'"', "'"})
+                self.assertEqual(1, len(spec['escape']))
+                # A syntax with nowhere for its escape to apply would carry a dead field.
+                self.assertTrue(spec['escape_in'] or spec['escape_out'])
 
     def test_the_carrying_syntaxes_are_still_wired_to_their_extensions(self) -> None:
         """Every case above dispatches on a suffix, so a rewired table would pass them vacuously."""

@@ -185,8 +185,9 @@ SENT_END = re.compile(r'[.!?:]["\')\]]?\s*$')
 
 # Comment syntax per language, since the rule governs every comment the fleet's types carry.
 # A `doc` marker opens a documentation comment, which CODESTYLE governs and may run to paragraphs.
-# `raw` names the quotes whose strings take no backslash escape.
-# `escape` names the characters that escape the next one outside a string.
+# `raw` names the quotes whose strings embed the delimiter by doubling it.
+# `escape` is the character that escapes the next one, `escape_in` the quotes it works inside,
+# and `escape_out` whether it also works outside a string.
 # `carry` names the forms that survive a newline, so a marker inside one is string content.
 class Syntax(TypedDict):
     line: tuple[str, ...]
@@ -196,28 +197,34 @@ class Syntax(TypedDict):
     verbatim: bool
     raw: str
     escape: str
+    escape_in: str
+    escape_out: bool
     carry: frozenset[str]
 
 
 PLAIN: Syntax = {'line': (), 'block': (), 'doc': (), 'quotes': '"\'', 'verbatim': False,
-                 'raw': '', 'escape': '', 'carry': frozenset()}
+                 'raw': '', 'escape': '\\', 'escape_in': '"\'', 'escape_out': False,
+                 'carry': frozenset()}
 HASH: Syntax = {**PLAIN, 'line': ('#',)}
 # A shell single-quoted string takes no escape at all, and either quote form spans lines.
 # Outside a string a backslash escapes the next character, which is how `'\''` embeds a quote.
 # A heredoc runs from its label to the line that repeats it.
-SHELL: Syntax = {**HASH, 'raw': "'", 'escape': '\\', 'carry': frozenset({'quote', 'label'})}
+SHELL: Syntax = {**HASH, 'raw': "'", 'escape_in': '"', 'escape_out': True,
+                 'carry': frozenset({'quote', 'label'})}
 # A YAML block scalar is the multi-line form.
 # A plain scalar's apostrophe is not a string, so an ordinary quote must not carry here.
-YAML: Syntax = {**HASH, 'raw': "'", 'carry': frozenset({'block'})}
+YAML: Syntax = {**HASH, 'raw': "'", 'escape_in': '"', 'carry': frozenset({'block'})}
 # A TOML literal string is raw the same way, while its basic string keeps the backslash escape.
-TOML: Syntax = {**HASH, 'raw': "'"}
+TOML: Syntax = {**HASH, 'raw': "'", 'escape_in': '"'}
 C_LIKE: Syntax = {**PLAIN, 'line': ('//',), 'block': (('/*', '*/'),), 'doc': ('///', '/**')}
 # C# alone carries the verbatim string, where a backslash is ordinary and a doubled quote escapes.
 CSHARP: Syntax = {**C_LIKE, 'verbatim': True, 'carry': frozenset({'verbatim'})}
 XML_LIKE: Syntax = {**PLAIN, 'block': (('<!--', '-->'),), 'quotes': '"'}
-# PowerShell escapes with a backtick, so a backslash is ordinary in either quote form.
+# PowerShell escapes with a backtick rather than a backslash, and both quote forms also double the
+# delimiter to embed it, so its double-quoted string is escaped and doubling at once.
 # Both forms span lines, and the here-string (`@"` to `"@`) is the delimited one.
 POWERSHELL: Syntax = {**PLAIN, 'line': ('#',), 'block': (('<#', '#>'),), 'raw': '"\'',
+                      'escape': '`', 'escape_in': '"', 'escape_out': True,
                       'carry': frozenset({'quote', 'here'})}
 INI: Syntax = {**PLAIN, 'line': ('#', ';')}
 LISP_LIKE: Syntax = {**PLAIN, 'line': ('#',), 'quotes': '"'}
@@ -291,27 +298,35 @@ WHOLE_LINE = frozenset({'here', 'label', 'block'})
 
 
 def strip_strings(line: str, quotes: str, verbatim: bool = False,
-                  carried: Carried = CLEAR, raw: str = '',
-                  escape: str = '') -> tuple[str, Carried]:
+                  carried: Carried = CLEAR, raw: str = '', escape: str = '\\',
+                  escape_in: str = '"\'', escape_out: bool = False) -> tuple[str, Carried]:
     """Blank quoted spans so a comment marker inside a string is not read as one.
 
     Length-preserving, so an offset into the result is an offset into the line.
-    A raw string takes its own rules, where the backslash is an ordinary character and a doubled
-    quote is the escape, so reading a backslash as an escape consumes the closing quote and blanks
-    the rest of the line. C# spells one with an `@` prefix, and shell and PowerShell have forms
-    that are always raw. `carried` reopens a string the line above left open, and the second
-    return says what this line leaves open in turn.
+    Two properties are read per string as it opens, because they are independent. A **doubled**
+    string embeds its delimiter by repeating it, and C# spells one with an `@` prefix while shell,
+    PowerShell, YAML, and TOML have forms that always are. An **escaped** string reads one
+    character as escaping the next, which is a backslash almost everywhere and a backtick in
+    PowerShell. PowerShell's double-quoted string is both at once, and the C# verbatim string is
+    doubled and not escaped, so neither property implies the other. Reading an escape a string
+    does not have consumes its closing quote and blanks the rest of the line, and missing one it
+    does have ends the string early on the escaped quote. `carried` reopens a string the line
+    above left open, and the second return says what this line leaves open in turn.
     """
     out = list(line)
     quote = carried.text if carried.kind in ('quote', 'verbatim') else ''
     at_verbatim = carried.kind == 'verbatim'
     doubled = at_verbatim or (quote != '' and quote in raw)
+    escapes = quote != '' and not at_verbatim and quote in escape_in
     escaped = False
     i = 0
     while i < len(line):
         ch = line[i]
         if escaped:
             escaped = False
+            out[i] = ' '
+        elif quote and escapes and ch == escape:
+            escaped = True
             out[i] = ' '
         elif doubled:
             if ch == quote and line[i + 1:i + 2] == quote:   # a doubled quote is one character
@@ -320,17 +335,14 @@ def strip_strings(line: str, quotes: str, verbatim: bool = False,
                 continue
             out[i] = ' ' if ch != quote else ch
             if ch == quote:
-                quote, doubled, at_verbatim = '', False, False
-        elif ch in escape and not quote:          # outside a string it escapes the next character
-            escaped = True
-            out[i] = ' '
-        elif ch == '\\' and quote:
-            escaped = True
-            out[i] = ' '
+                quote, doubled, escapes, at_verbatim = '', False, False, False
         elif quote:
             out[i] = ' ' if ch != quote else ch
             if ch == quote:
-                quote = ''
+                quote, escapes = '', False
+        elif escape_out and ch == escape:         # outside a string it escapes the next character
+            escaped = True
+            out[i] = ' '
         elif ch in quotes:
             quote = ch
             # An interpolated one is spelled either way round, so read the whole prefix.
@@ -340,6 +352,7 @@ def strip_strings(line: str, quotes: str, verbatim: bool = False,
                 start -= 1
             at_verbatim = verbatim and ch == '"' and '@' in line[start:i]
             doubled = at_verbatim or ch in raw
+            escapes = not at_verbatim and ch in escape_in
         i += 1
     if not quote:
         return ''.join(out), CLEAR
@@ -548,7 +561,7 @@ def extracted_comments(path: Path, lines: list[str]) -> list[tuple[int, str, boo
             # Mask from here rather than once per line, so comment text never sets string state.
             # A quote in a comment is prose, and reading it as a string blanks the markers after it.
             tail, tail_state = strip_strings(line[pos:], spec['quotes'], spec['verbatim'], carry,
-                                             spec['raw'], spec['escape'])
+                                             spec['raw'], spec['escape'], spec['escape_in'], spec['escape_out'])
             masked = ' ' * pos + tail
             found: str | tuple[str, str] | None = None
             at = len(line)
@@ -567,7 +580,7 @@ def extracted_comments(path: Path, lines: list[str]) -> list[tuple[int, str, boo
                 break
             # Only the code before the marker advances the string state.
             _, carry = strip_strings(line[pos:at], spec['quotes'], spec['verbatim'], carry,
-                                     spec['raw'], spec['escape'])
+                                     spec['raw'], spec['escape'], spec['escape_in'], spec['escape_out'])
             # CODESTYLE owns a documentation comment, so this rule skips over it.
             # A line one runs to end of line, while a closed block one gives the rest back.
             if any(line[at:].startswith(d) for d in spec['doc']):
