@@ -210,6 +210,12 @@ class TestDash(BaitCase):
         """`- **Label** - explanation` is structurally a colon and the shape every bullet uses."""
         self.assertEqual([], self.kinds('- **Bug** - wrong behavior, missing coverage\n', {'dash'}))
 
+    def test_an_ordered_label_separator_is_exempt(self) -> None:
+        """A numbered definition list is the same construct as a bulleted one."""
+        self.assertEqual([], self.kinds('1. **Audit** - check it statically\n', {'dash'}))
+        self.assertEqual(['dash'],
+                         self.kinds('2. **Test** - trace it - and probe it\n', {'dash'}))
+
     def test_a_later_dash_on_a_label_line_still_counts(self) -> None:
         """Exempting the separator must not exempt the rest of the line."""
         self.assertEqual(['dash'],

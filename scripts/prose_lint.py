@@ -179,7 +179,8 @@ DASH = re.compile(r'(?<=[^\s\d])\s+-\s+(?=[^\s\d])')
 # `- **Label** - explanation` is a definition separator, structurally a colon.
 # Flagging it would restructure the document format rather than the prose.
 # The first dash on such a line is skipped, and any later one still counts.
-LABEL_DASH = re.compile(r'^\s*[-*]\s+\*\*[^*]+\*\*[.:]?\s+-\s+')
+# An ordered marker introduces the same construct, so `1. **Label** - ...` is one too.
+LABEL_DASH = re.compile(r'^\s*(?:[-*]|[0-9]+\.)\s+\*\*[^*]+\*\*[.:]?\s+-\s+')
 
 # The negative lookbehind keeps a word-joining character from starting a repetition:
 # "either/or or must-pair" is one phrase followed by a conjunction, not a doubled word.
