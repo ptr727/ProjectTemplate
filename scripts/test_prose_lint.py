@@ -342,6 +342,11 @@ class TestCommentWrap(BaitCase):
         # A plain string ends on its own line, so the next line is ordinary code.
         self.assertEqual(['comment-wrap'], self.flag('a.cs', 'var s = "line one";\n'
                                                              '// Two things. Here.\n'))
+        # Closing one and opening another leaves real code between them, which is not string content.
+        self.assertEqual(['comment-wrap'],
+                         self.flag('a.cs', 'var s = @"start\n'
+                                           'end"; /* Two things. Here. */ var t = @"open again\n'
+                                           'still string";\n'))
 
     def test_a_format_with_no_comment_syntax_is_skipped(self) -> None:
         for name in ('a.lock', 'a.csv', 'a.txt'):

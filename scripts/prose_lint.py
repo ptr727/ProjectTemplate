@@ -404,10 +404,9 @@ def extracted_comments(path: Path, lines: list[str]) -> list[tuple[int, str, boo
     in_string = False
     for n, raw in enumerate(lines, 1):
         line = raw.rstrip('\r')
-        was_inside = in_string
+        # A line inside a carried string is blanked whole, so the scan below finds nothing in it.
+        # Skipping the line instead would drop a string that closes and reopens around real code.
         masked, in_string = strip_strings(line, spec['quotes'], spec['verbatim'], in_string)
-        if was_inside and in_string:                 # the whole line is string content
-            continue
         pos = 0
         if doc_closing:                              # CODESTYLE owns every line until it closes
             end = line.find(doc_closing)
