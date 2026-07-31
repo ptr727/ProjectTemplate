@@ -19,7 +19,7 @@ git config --local --get user.email    # expect empty - a repo-local override is
 
 If any of the first three is wrong or absent, that is a **host** misconfiguration to surface to the maintainer ([`docs/host-setup.md`][host-setup] is the setup procedure), not something to patch per repo. Patching it locally hides a broken host that then produces wrong identities in every other repo on that machine.
 
-After the first commit, confirm it took: `git verify-commit HEAD` reports `G`, and `git log -1 --format='%an <%ae>'` shows the expected identity.
+After the first commit, confirm it took with `git log -1 --format='%G? %an <%ae>'`, which prints the signature status letter followed by the identity, so `G` plus the expected `noreply` address is the passing result. `git verify-commit HEAD` is the pass/fail form, exiting non-zero on a bad signature and writing its "Good signature" line to stderr rather than emitting a status letter.
 
 ## 1. Classify and Catalog
 
