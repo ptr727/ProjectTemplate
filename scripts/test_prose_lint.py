@@ -706,6 +706,32 @@ class TestMultiLineStrings(BaitCase):
         self.assertEqual(['comment-wrap'], self.flag('a.yml', 'key: a | b\n'
                                                               f'# {self.BAIT}\n'))
 
+    def test_a_yaml_quote_delimits_only_at_the_start_of_a_value(self) -> None:
+        """A plain scalar's apostrophe is text, so reading it as an opener hides a real comment.
+
+        The masked span would run from the apostrophe to the end of the line, taking the trailing
+        `#` with it, and this repo's own workflow YAML carries the pattern (`the merge-bot's ...`).
+        A quote that does open one is preceded by the `:`, the sequence dash, or a flow indicator.
+        """
+        for code in ("key: don't", "name: Don't do this", "key: [don't, 'x']",
+                     "key: 'quoted'", "  - 'item'", 'key: "don\'t"', "key: {k: 'v'}"):
+            with self.subTest(code=code):
+                self.assertEqual(['comment-wrap'], self.flag('a.yml', f'{code}  # {self.BAIT}\n'))
+
+    def test_a_quote_still_opens_anywhere_in_a_syntax_with_no_bare_words(self) -> None:
+        """The restriction is scoped to YAML, the one syntax here whose values can go unquoted.
+
+        A C# string opens after `=`, `(`, or `,`, none of which YAML's set contains, so applying the
+        restriction everywhere would stop masking C# strings entirely. The masked span is what shows
+        it, since no C# comment marker fits inside a char literal to hide.
+        """
+        self.assertEqual('', prose_lint.SYNTAX['.cs']['quote_after'])
+        self.assertTrue(prose_lint.SYNTAX['.yml']['quote_after'])
+        masked, _ = prose_lint.strip_strings('var s = "// no";', '"\'')
+        self.assertEqual('var s = "     ";', masked)
+        self.assertEqual(['comment-wrap'], self.flag('a.cs', f"var s = 'a';  // {self.BAIT}\n"))
+        self.assertEqual([], self.flag('a.cs', f'var s = "// {self.BAIT}";\n'))
+
     def test_a_single_quoted_yaml_or_toml_scalar_takes_no_backslash_escape(self) -> None:
         r"""A trailing backslash would otherwise consume the closing quote and hide the comment.
 

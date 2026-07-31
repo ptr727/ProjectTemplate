@@ -186,6 +186,7 @@ SENT_END = re.compile(r'[.!?:]["\')\]]?\s*$')
 # Comment syntax per language, since the rule governs every comment the fleet's types carry.
 # A `doc` marker opens a documentation comment, which CODESTYLE governs and may run to paragraphs.
 # `raw` names the quotes whose strings embed the delimiter by doubling it.
+# `quote_after` names what a quote must follow to delimit a string, empty where any quote does.
 # `escape` is the character that escapes the next one.
 # `escape_in` names the quotes it works inside, and `escape_out` whether it works outside one.
 # `carry` names the forms that survive a newline, so a marker inside one is string content.
@@ -196,6 +197,7 @@ class Syntax(TypedDict):
     quotes: str
     verbatim: bool
     raw: str
+    quote_after: str
     escape: str
     escape_in: str
     escape_out: bool
@@ -203,7 +205,8 @@ class Syntax(TypedDict):
 
 
 PLAIN: Syntax = {'line': (), 'block': (), 'doc': (), 'quotes': '"\'', 'verbatim': False,
-                 'raw': '', 'escape': '\\', 'escape_in': '"\'', 'escape_out': False,
+                 'raw': '', 'quote_after': '', 'escape': '\\', 'escape_in': '"\'',
+                 'escape_out': False,
                  'carry': frozenset()}
 HASH: Syntax = {**PLAIN, 'line': ('#',)}
 # A shell single-quoted string takes no escape and cannot embed its own delimiter.
@@ -213,8 +216,10 @@ HASH: Syntax = {**PLAIN, 'line': ('#',)}
 SHELL: Syntax = {**HASH, 'escape_in': '"', 'escape_out': True,
                  'carry': frozenset({'quote', 'label'})}
 # A YAML block scalar is the multi-line form.
-# A plain scalar's apostrophe is not a string, so an ordinary quote must not carry here.
-YAML: Syntax = {**HASH, 'raw': "'", 'escape_in': '"', 'carry': frozenset({'block'})}
+# A quote delimits a scalar only at the start of a value, so a plain scalar's apostrophe is text.
+# Such a quote must also not carry, since one `don't` would blank the rest of the file.
+YAML: Syntax = {**HASH, 'raw': "'", 'quote_after': ':-,[{', 'escape_in': '"',
+                'carry': frozenset({'block'})}
 # A TOML literal string is raw the same way, while its basic string keeps the backslash escape.
 TOML: Syntax = {**HASH, 'raw': "'", 'escape_in': '"'}
 C_LIKE: Syntax = {**PLAIN, 'line': ('//',), 'block': (('/*', '*/'),), 'doc': ('///', '/**')}
@@ -298,9 +303,26 @@ CLEAR = Carried()
 WHOLE_LINE = frozenset({'here', 'label', 'block'})
 
 
+def opens_a_string(line: str, i: int, quote_after: str) -> bool:
+    """Whether the quote at `i` delimits a string rather than sitting inside a bare word.
+
+    YAML is the case this exists for: a plain scalar's apostrophe is text, and a quote delimits
+    only at the start of a value. Reading one as an opener masks the rest of the line and hides a
+    real trailing comment. An empty `quote_after` means the syntax has no bare-word form, so every
+    quote delimits.
+    """
+    if not quote_after:
+        return True
+    j = i - 1
+    while j >= 0 and line[j].isspace():
+        j -= 1
+    return j < 0 or line[j] in quote_after
+
+
 def strip_strings(line: str, quotes: str, verbatim: bool = False,
                   carried: Carried = CLEAR, raw: str = '', escape: str = '\\',
-                  escape_in: str = '"\'', escape_out: bool = False) -> tuple[str, Carried]:
+                  escape_in: str = '"\'', escape_out: bool = False,
+                  quote_after: str = '') -> tuple[str, Carried]:
     """Blank quoted spans so a comment marker inside a string is not read as one.
 
     Length-preserving, so an offset into the result is an offset into the line.
@@ -344,7 +366,7 @@ def strip_strings(line: str, quotes: str, verbatim: bool = False,
         elif escape_out and ch == escape:         # outside a string it escapes the next character
             escaped = True
             out[i] = ' '
-        elif ch in quotes:
+        elif ch in quotes and opens_a_string(line, i, quote_after):
             quote = ch
             # An interpolated one is spelled either way round, so read the whole prefix.
             # Only the double-quoted form has a verbatim spelling, so a char literal is ordinary.
@@ -563,7 +585,8 @@ def extracted_comments(path: Path, lines: list[str]) -> list[tuple[int, str, boo
             # Mask from here rather than once per line, so comment text never sets string state.
             # A quote in a comment is prose, and reading it as a string blanks the markers after it.
             tail, tail_state = strip_strings(line[pos:], spec['quotes'], spec['verbatim'], carry,
-                                             spec['raw'], spec['escape'], spec['escape_in'], spec['escape_out'])
+                                             spec['raw'], spec['escape'], spec['escape_in'],
+                                             spec['escape_out'], spec['quote_after'])
             masked = ' ' * pos + tail
             found: str | tuple[str, str] | None = None
             at = len(line)
@@ -581,7 +604,8 @@ def extracted_comments(path: Path, lines: list[str]) -> list[tuple[int, str, boo
                 break
             # Only the code before the marker advances the string state.
             _, carry = strip_strings(line[pos:at], spec['quotes'], spec['verbatim'], carry,
-                                     spec['raw'], spec['escape'], spec['escape_in'], spec['escape_out'])
+                                     spec['raw'], spec['escape'], spec['escape_in'],
+                                     spec['escape_out'], spec['quote_after'])
             # CODESTYLE owns a documentation comment, so this rule skips over it.
             # A line one runs to end of line, while a closed block one gives the rest back.
             if any(line[at:].startswith(d) for d in spec['doc']):
