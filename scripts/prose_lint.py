@@ -11,6 +11,7 @@ these rules, so nothing enforced them before this script. Rules implemented:
   comment-case   A comment sentence starts with a capital, not a lowercase word.
   dupword        No duplicated consecutive word.
   sentence-split A sentence must not wrap across lines (one sentence per line).
+  spelling       No British spelling, the repo-wide convention being US English.
 
 Exit 1 if any violation is found. Read-only, never edits.
 """
@@ -29,8 +30,10 @@ RULES = {
     'comment-case': 'a comment sentence opening in lowercase',
     'dupword': 'a duplicated consecutive word',
     'sentence-split': 'a sentence wrapping across lines',
+    'spelling': 'a British spelling where the repo convention is US English',
 }
-DEFAULT_RULES = frozenset({'charset', 'charset-unknown', 'semicolon', 'dash', 'dupword'})
+DEFAULT_RULES = frozenset({'charset', 'charset-unknown', 'semicolon', 'dash', 'dupword',
+                           'spelling'})
 
 # Produced rather than authored trees, consulted only on the no-git fallback path.
 # Where git can answer, its own ignore rules are the better answer.
@@ -176,12 +179,74 @@ DASH = re.compile(r'(?<=[^\s\d])\s+-\s+(?=[^\s\d])')
 # `- **Label** - explanation` is a definition separator, structurally a colon.
 # Flagging it would restructure the document format rather than the prose.
 # The first dash on such a line is skipped, and any later one still counts.
-LABEL_DASH = re.compile(r'^\s*[-*]\s+\*\*[^*]+\*\*[.:]?\s+-\s+')
+# An ordered marker introduces the same construct, so `1. **Label** - ...` is one too.
+LABEL_DASH = re.compile(r'^\s*(?:[-*]|[0-9]+\.)\s+\*\*[^*]+\*\*[.:]?\s+-\s+')
 
 # The negative lookbehind keeps a word-joining character from starting a repetition:
 # "either/or or must-pair" is one phrase followed by a conjunction, not a doubled word.
 DUPWORD = re.compile(r'(?<![\w/-])(\w+)\s+\1\b', re.IGNORECASE)
 SENT_END = re.compile(r'[.!?:]["\')\]]?\s*$')
+
+# US English is a repo-wide rule, and the cspell gate reads README and HISTORY only.
+# A British spelling anywhere else in the tree therefore reaches main unchallenged.
+# Each family generates its own inflections, since an inflected spelling is as wrong as its base.
+# A hand-listed family drifts the moment one form is added without the others.
+# The cross product also generates forms no stem takes, which simply never match.
+# `analyses` is omitted, being the US plural of `analysis` as much as a British verb form.
+# `cancelled` is omitted, being the GitHub Actions job status rather than prose.
+ISE_STEMS = ('author', 'custom', 'initial', 'maxim', 'minim', 'normal', 'optim', 'organ',
+             'priorit', 'recogn', 'serial', 'special', 'standard', 'summar', 'synchron',
+             'util', 'visual')
+ISE_ENDINGS = (('ise', 'ize'), ('ised', 'ized'), ('ises', 'izes'), ('ising', 'izing'),
+               ('isation', 'ization'), ('isations', 'izations'))
+OUR_STEMS = ('behavi', 'col', 'fav', 'flav', 'hon', 'lab', 'neighb')
+OUR_ENDINGS = ('', 's', 'ed', 'ing', 'al', 'ally', 'ful', 'ite', 'ites')
+RE_STEMS = ('cent', 'fib', 'lit', 'met', 'theat')
+RE_ENDINGS = (('re', 'er'), ('res', 'ers'), ('red', 'ered'))
+# The spellings that follow no family, each with the US form that replaces it.
+BRITISH_ODD = {
+    'analyse': 'analyze', 'analysed': 'analyzed', 'analysing': 'analyzing',
+    'artefact': 'artifact', 'artefacts': 'artifacts',
+    'catalogue': 'catalog', 'catalogues': 'catalogs', 'catalogued': 'cataloged',
+    'defence': 'defense', 'defences': 'defenses',
+    'fulfil': 'fulfill', 'fulfils': 'fulfills', 'fulfilment': 'fulfillment',
+    'judgement': 'judgment', 'judgements': 'judgments',
+    'labelled': 'labeled', 'labelling': 'labeling',
+    'licence': 'license', 'licences': 'licenses',
+    'modelled': 'modeled', 'modelling': 'modeling',
+    'offence': 'offense', 'offences': 'offenses',
+    'practise': 'practice', 'practised': 'practiced', 'practising': 'practicing',
+    'programme': 'program', 'programmes': 'programs',
+    'signalled': 'signaled', 'signalling': 'signaling',
+    'travelled': 'traveled', 'travelling': 'traveling',
+    'whilst': 'while',
+}
+
+
+def british_spellings() -> dict[str, str]:
+    """Every banned spelling mapped to the US form that replaces it."""
+    words = dict(BRITISH_ODD)
+    for stem in ISE_STEMS:
+        words.update({stem + gb: stem + us for gb, us in ISE_ENDINGS})
+    for stem in OUR_STEMS:
+        words.update({f'{stem}our{end}': f'{stem}or{end}' for end in OUR_ENDINGS})
+    for stem in RE_STEMS:
+        words.update({stem + gb: stem + us for gb, us in RE_ENDINGS})
+    return words
+
+
+BRITISH = british_spellings()
+# Longest alternative first, so an inflection is read whole rather than as its base word.
+BRITISH_RE = re.compile(r'\b(?:' + '|'.join(sorted(BRITISH, key=len, reverse=True)) + r')\b',
+                        re.IGNORECASE)
+
+
+def us_form(found: str) -> str:
+    """The US spelling for a match, carrying the case the source wrote it in."""
+    us = BRITISH[found.lower()]
+    if found.isupper():
+        return us.upper()
+    return us.capitalize() if found[0].isupper() else us
 
 # Comment syntax per language, since the rule governs every comment the fleet's types carry.
 # A `doc` marker opens a documentation comment, which CODESTYLE governs and may run to paragraphs.
@@ -218,7 +283,8 @@ SHELL: Syntax = {**HASH, 'escape_in': '"', 'escape_out': True,
 # A YAML block scalar is the multi-line form.
 # A quote delimits a scalar only at the start of a value, so a plain scalar's apostrophe is text.
 # Such a quote must also not carry, since one `don't` would blank the rest of the file.
-YAML: Syntax = {**HASH, 'raw': "'", 'quote_after': ':-,[{', 'escape_in': '"',
+# The dash leads `quote_after` so the set does not read as a character range.
+YAML: Syntax = {**HASH, 'raw': "'", 'quote_after': '-:,[{', 'escape_in': '"',
                 'carry': frozenset({'block'})}
 # A TOML literal string is raw the same way, while its basic string keeps the backslash escape.
 TOML: Syntax = {**HASH, 'raw': "'", 'escape_in': '"'}
@@ -476,6 +542,21 @@ def strip_quoted(s: str) -> str:
     return re.sub(r'"[^"\n]*"', '""', s)
 
 
+# A bullet's `**Label**:` opens the text the same way `- **Label** -` does, so its colon
+# introduces the bullet rather than a list, and reading it as one excused the splice after it.
+LABEL_COLON = re.compile(r'^\s*(?:[-*]|[0-9]+\.)\s+\*\*[^*]+\*\*\s*:')
+
+
+def list_spans(s: str) -> list[str]:
+    """Split a line into the spans that each hold their own list.
+
+    A markdown table row is a record of fields rather than one sentence, so judging the row whole
+    let a comma in one column excuse a semicolon in another.
+    """
+    cells = s.strip().strip('|').split('|') if s.lstrip().startswith('|') else [s]
+    return [LABEL_COLON.sub('', cell) for cell in cells]
+
+
 def in_numeric_context(line: str, pos: int) -> bool:
     """Whether the character at `pos` sits in an expression rather than in a sentence.
 
@@ -707,6 +788,12 @@ def check_file(path: Path, rules: set[str]) -> list[tuple[int, str, str]]:
     lines = raw.split('\n')
     if {'comment-wrap', 'comment-case'} & rules:
         out.extend(f for f in comment_wrap_findings(path, raw, lines) if f[1] in rules)
+    # Outside markdown the prose lives in the comments, and the rule judges prose rather than code.
+    # Reading the source line itself would flag an identifier, or in this file the rule's own table.
+    comments: dict[int, list[str]] = {}
+    if 'spelling' in rules and path.suffix != '.md':
+        for ln, text, _ in extracted_comments(path, lines):
+            comments.setdefault(ln, []).append(text)
     in_fence = False
     prev_txt = ''
     prev_no = 0
@@ -729,12 +816,18 @@ def check_file(path: Path, rules: set[str]) -> list[tuple[int, str, str]]:
         # A shell script carries 78 statement separators that are not prose at all.
         if path.suffix == '.md':
             if 'semicolon' in rules:
-                listish = prose.count(';') > 1 or ':' in prose.split(';')[0]
-                for m in SEMICOLON.finditer(prose):
+                for span in list_spans(prose):
                     # A list keeps its semicolons, announced by a colon or a second separator.
-                    if listish and ',' in prose[:m.start()]:
+                    # The comma is a property of the list rather than of one separator's position,
+                    # so an enumeration whose commas fall in a later item keeps every semicolon it
+                    # carries. Reading it positionally split such a list, flagging the openers of
+                    # the same series it then exempted the tail of.
+                    listish = span.count(';') > 1 or ':' in span.split(';')[0]
+                    if listish and ',' in span:
                         continue
-                    out.append((i, 'semicolon', 'semicolon in prose -> a comma or two sentences'))
+                    for _ in SEMICOLON.finditer(span):
+                        out.append((i, 'semicolon',
+                                    'semicolon in prose -> a comma or two sentences'))
             if 'dash' in rules:
                 skip = LABEL_DASH.match(prose)
                 for m in DASH.finditer(prose):
@@ -748,6 +841,13 @@ def check_file(path: Path, rules: set[str]) -> list[tuple[int, str, str]]:
                 if m.group(0).lower() in DUP_ALLOW:
                     continue
                 out.append((i, 'dupword', f"duplicated word '{m.group(1)}'"))
+
+        if 'spelling' in rules:
+            texts = [prose] if path.suffix == '.md' else comments.get(i, [])
+            for m in BRITISH_RE.finditer(strip_inline_code(' '.join(texts))):
+                found = m.group(0)
+                out.append((i, 'spelling',
+                            f"British spelling '{found}' -> '{us_form(found)}'"))
 
         if 'sentence-split' in rules and path.suffix == '.md':
             stripped = txt.strip()

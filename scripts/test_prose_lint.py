@@ -210,6 +210,12 @@ class TestDash(BaitCase):
         """`- **Label** - explanation` is structurally a colon and the shape every bullet uses."""
         self.assertEqual([], self.kinds('- **Bug** - wrong behavior, missing coverage\n', {'dash'}))
 
+    def test_an_ordered_label_separator_is_exempt(self) -> None:
+        """A numbered definition list is the same construct as a bulleted one."""
+        self.assertEqual([], self.kinds('1. **Audit** - check it statically\n', {'dash'}))
+        self.assertEqual(['dash'],
+                         self.kinds('2. **Test** - trace it - and probe it\n', {'dash'}))
+
     def test_a_later_dash_on_a_label_line_still_counts(self) -> None:
         """Exempting the separator must not exempt the rest of the line."""
         self.assertEqual(['dash'],
@@ -239,6 +245,22 @@ class TestSemicolon2(BaitCase):
         """A comma earlier on the line is not a list, so it cannot excuse the semicolon."""
         self.assertEqual(['semicolon'],
                          self.kinds('It runs on push, always; it gates the merge.\n', {'semicolon'}))
+
+    def test_a_list_whose_commas_fall_in_a_later_item_keeps_its_semicolons(self) -> None:
+        """The comma qualifies the list, so reading it positionally split one series in two."""
+        self.assertEqual([], self.kinds(
+            'It exists; it covers each target, and excludes the rest; it runs.\n', {'semicolon'}))
+
+    def test_a_table_row_judges_each_cell_alone(self) -> None:
+        """A row is a record of fields, so one column's comma cannot excuse another's semicolon."""
+        self.assertEqual(['semicolon'], self.kinds('| S1 | it runs; it gates | D1, D2 |\n',
+                                                   {'semicolon'}))
+
+    def test_a_bullet_label_colon_does_not_announce_a_list(self) -> None:
+        """`- **Label**:` opens the bullet, the same construct the label dash is exempted for."""
+        self.assertEqual(['semicolon'],
+                         self.kinds('- **Async**: avoid blocking calls; use await, always\n',
+                                    {'semicolon'}))
 
     def test_prose_rules_do_not_reach_code_files(self) -> None:
         """A shell script carries statement separators, not prose, until comments can be extracted."""
@@ -941,6 +963,74 @@ class TestSentenceSplit(BaitCase):
         """A source file's wrapped lines are code, which comment-wrap judges instead."""
         self.assertEqual([], self.kinds('a sentence that keeps\ngoing onto the next line.\n',
                                         {'sentence-split'}, name='bait.py'))
+
+
+class TestSpelling(BaitCase):
+    """US English, read from markdown prose and from the comments of every other syntax.
+
+    The rule runs on whatever file it is handed, README and HISTORY included. It complements the
+    cspell gate rather than dividing the tree with it: cspell reads those two files and this reads
+    the prose in all of them, so what it adds is coverage of everywhere cspell was never pointed.
+    """
+
+    def messages(self, text: str, name: str = 'bait.md') -> list[str]:
+        path = self.tmp / name
+        path.write_text(text, encoding='utf-8')
+        return [msg for _, _, msg in prose_lint.check_file(path, {'spelling'})]
+
+    def test_every_banned_spelling_is_caught_and_its_us_form_is_not(self) -> None:
+        """The live table drives the case, so a word added to it arrives already proven."""
+        for british, us in prose_lint.BRITISH.items():
+            with self.subTest(word=british):
+                self.assertEqual(['spelling'], self.kinds(f'One {british} here.\n', {'spelling'}))
+                self.assertEqual([], self.kinds(f'One {us} here.\n', {'spelling'}))
+
+    def test_the_finding_names_the_replacement(self) -> None:
+        word = 'behavi' + 'our'
+        self.assertEqual([f"British spelling '{word}' -> 'behavior'"],
+                         self.messages(f'The {word} of it.\n'))
+
+    def test_a_match_keeps_the_case_the_source_wrote(self) -> None:
+        """A capitalized or shouted word gets a replacement it can be swapped in for."""
+        word = 'colo' + 'ur'
+        for written, offered in ((word.capitalize(), 'Color'), (word.upper(), 'COLOR')):
+            with self.subTest(written=written):
+                self.assertEqual([f"British spelling '{written}' -> '{offered}'"],
+                                 self.messages(f'{written} of the box.\n'))
+
+    def test_a_word_that_is_also_correct_us_english_is_not_banned(self) -> None:
+        """`analyses` is the plural of `analysis`, and `cancelled` is an Actions job status."""
+        for word in ('analyses', 'cancelled', 'analysis', 'advertise', 'surprise', 'exercise'):
+            with self.subTest(word=word):
+                self.assertEqual([], self.kinds(f'One {word} here.\n', {'spelling'}))
+
+    def test_a_banned_spelling_inside_a_word_is_not_a_match(self) -> None:
+        """The pattern is word-anchored, so a longer word that contains one is left alone."""
+        for word in ('parameter', 'collaborate', 'metering'):
+            with self.subTest(word=word):
+                self.assertEqual([], self.kinds(f'One {word} here.\n', {'spelling'}))
+
+    def test_code_is_not_prose_outside_markdown(self) -> None:
+        """A source file is read through its comments, so an identifier or a table is not bait.
+
+        This is what keeps prose_lint.py from reporting its own lookup table.
+        """
+        word = 'organis' + 'ation'
+        self.assertEqual([], self.kinds(f"x = '{word}'\n", {'spelling'}, name='bait.py'))
+        self.assertEqual(['spelling'],
+                         self.kinds(f'# The {word} of it.\n', {'spelling'}, name='bait.py'))
+
+    def test_inline_code_is_not_prose(self) -> None:
+        """A backticked word is a quoted token, the same exemption every other prose rule takes."""
+        word = 'licen' + 'ce'
+        self.assertEqual([], self.kinds(f'The `{word}` field.\n', {'spelling'}))
+        self.assertEqual([], self.kinds(f'# The `{word}` field.\n', {'spelling'}, name='bait.py'))
+
+    def test_the_repo_is_clean_of_british_spellings(self) -> None:
+        """The rule gates in CI, so the tree it gates has to pass it today and not eventually."""
+        found = [f'{prose_lint.rel(p)}:{ln}' for p in prose_lint.discover(['.'])
+                 for ln, kind, _ in prose_lint.check_file(p, {'spelling'}) if kind == 'spelling']
+        self.assertEqual([], found)
 
 
 class TestSyntaxDispatch(unittest.TestCase):
