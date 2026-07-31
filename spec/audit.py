@@ -15,8 +15,11 @@ changes develop lacks, a stale secret, a registry field contradicting reality), 
 failed, so the repo could not be fully audited). Exits non-zero when any repo has a DEFECT,
 LETTER, or ERROR finding.
 
-Usage: python3 spec/audit.py [RepoName ...]   (default: every cataloged repo)
+Usage: python3 spec/audit.py [RepoName ...] [--branch REF]   (default: every cataloged repo,
+each read at its registry groundTruthBranch). --branch overrides that branch for the run, so a
+convergence can be verified before it is promoted, without editing the registry.
 """
+import argparse
 import base64
 import functools
 import hashlib
@@ -477,12 +480,17 @@ def classify_branch_drift(base, main, develop):
     return behind, diverged
 
 
-def audit_repo(entry, spec):
+def ground_branch_of(entry, branch=None):
+    """The branch this audit reads, the registry's `groundTruthBranch` unless overridden."""
+    return branch or entry.get("groundTruthBranch", "main")
+
+
+def audit_repo(entry, spec, branch=None):
     findings = []  # (kind, text)
     slug = repo_slug(entry)
     types = entry.get("types", [])
     model = entry.get("workflowModel") or spec["registry"].get("defaults", {}).get("workflowModel") or "release"
-    ground = entry.get("groundTruthBranch", "main")
+    ground = ground_branch_of(entry, branch)
 
     try:
         live = gh(f"repos/{slug}")
@@ -493,6 +501,14 @@ def audit_repo(entry, spec):
     branch_main = gh(f"repos/{slug}/branches/main", ok404=True)
     branch_dev = gh(f"repos/{slug}/branches/develop", ok404=True)
     main_exists, dev_exists = branch_main is not None, branch_dev is not None
+    # Resolve the branch every content read is keyed on, reusing what the branch facts already read.
+    # An unresolvable one is an error rather than a run: every `?ref=` read would 404 and report the
+    # whole baseline as absent, which is a flood of letters describing the ref, not the repo.
+    ground_head = {"main": branch_main, "develop": branch_dev}.get(ground)
+    if ground_head is None:
+        ground_head = gh(f"repos/{slug}/branches/{ground}", ok404=True)
+    if ground_head is None:
+        return findings + [("ERROR", f"branch: ground-truth branch {ground} does not exist, so nothing could be read")], ""
     if not main_exists:
         findings.append(("DEFECT", "branch: main does not exist"))
     if bool(entry.get("hasDevelop")) != dev_exists:
@@ -803,10 +819,9 @@ def audit_repo(entry, spec):
             if marker:
                 findings.append(("DRIFT", f"registry: driftNote says '{marker}' but the audit is clean - verify and reconcile: \"{note[:70]}{'...' if len(note) > 70 else ''}\""))
 
-    # Stamp the commit actually read for the ground-truth branch. Never fall back to the other branch:
+    # Stamp the commit actually read for the ground-truth branch. Never fall back to another branch:
     # a stamp naming develop while carrying main's sha would misattribute every finding.
-    ground_branch = branch_dev if ground == "develop" else branch_main
-    audited_sha = (ground_branch or {}).get("commit", {}).get("sha", "")
+    audited_sha = ground_head.get("commit", {}).get("sha", "")
     return findings, audited_sha
 
 
@@ -990,6 +1005,57 @@ def _selftest():
         print(f"  FAIL branch-drift classify -> behind={bd_behind} diverged={bd_diverged}")
     else:
         print("  ok   branch-drift: behind (modify/delete develop still at base) vs diverged (both moved), develop-only excluded")
+
+    # CLI parsing: a repo name and a flag value must not be confused for one another. The previous
+    # hand-rolled parse took every non `--` argument as a repo name, so `--branch develop` would have
+    # audited a repo called "develop" instead of overriding the branch.
+    cli_cases = [
+        ([], [], None, False, False),
+        (["Utilities"], ["Utilities"], None, False, False),
+        (["Utilities", "--branch", "develop"], ["Utilities"], "develop", False, False),
+        (["--branch=feature/x", "Utilities"], ["Utilities"], "feature/x", False, False),
+        (["--issue", "Utilities"], ["Utilities"], None, True, False),
+        (["--selftest"], [], None, False, True),
+    ]
+    for argv, names, branch, issue, selftest in cli_cases:
+        got = parse_args(argv)
+        if (got.names, got.branch, got.issue, got.selftest) != (names, branch, issue, selftest):
+            ok = False
+            print(f"  FAIL cli parse {argv} -> {got}")
+        else:
+            print(f"  ok   cli: {argv or ['(no args)']} -> names={names} branch={branch}")
+
+    # The override wins over the registry field, and the registry default is main.
+    ground_cases = [
+        ({}, None, "main"),
+        ({"groundTruthBranch": "develop"}, None, "develop"),
+        ({"groundTruthBranch": "main"}, "develop", "develop"),
+        ({}, "feature/x", "feature/x"),
+    ]
+    for entry, branch, want in ground_cases:
+        got = ground_branch_of(entry, branch)
+        if got != want:
+            ok = False
+            print(f"  FAIL ground branch {entry} + {branch} -> {got}, want {want}")
+        else:
+            print(f"  ok   ground branch: registry={entry.get('groundTruthBranch')} override={branch} -> {want}")
+
+    # A ground-truth branch that does not resolve is one error, not a baseline's worth of letters.
+    # Every `?ref=` read would 404 and report each carried file absent, describing the ref, not the repo.
+    entry = {"name": "Fixture", "url": "https://github.com/owner/Fixture", "hasDevelop": False}
+    real_gh = globals()["gh"]
+    globals()["gh"] = lambda path, ok404=False: None if "/branches/" in path else {"private": False}
+    try:
+        missing_findings, missing_sha = audit_repo(entry, {"registry": {}}, "no-such-branch")
+    finally:
+        globals()["gh"] = real_gh
+    errors = [t for k, t in missing_findings if k == "ERROR"]
+    if missing_sha != "" or len(errors) != 1 or "no-such-branch" not in errors[0]:
+        ok = False
+        print(f"  FAIL missing ground branch -> {missing_findings}")
+    else:
+        print("  ok   missing ground branch: one error naming the ref, no file-presence letters")
+
     print("SELFTEST PASS" if ok else "SELFTEST FAIL")
     return 0 if ok else 1
 
@@ -1050,8 +1116,20 @@ def render_issue(entry, findings, ground, audited_sha, run_utc, hub_sha):
     return title, "\n".join(out).rstrip() + "\n"
 
 
-def main():
-    if "--selftest" in sys.argv:
+def parse_args(argv=None):
+    ap = argparse.ArgumentParser(description="Live fleet audit: the deterministic subset of AUDIT.md.")
+    ap.add_argument("names", nargs="*", metavar="RepoName", help="cataloged repos to audit (default: every one)")
+    ap.add_argument("--branch", metavar="REF",
+                    help="read this branch instead of each repo's registry groundTruthBranch, so a "
+                         "convergence can be verified before it is promoted; read-only, the registry is unchanged")
+    ap.add_argument("--issue", action="store_true", help="emit one repo's convergence issue on stdout")
+    ap.add_argument("--selftest", action="store_true", help="run the offline engine self-test")
+    return ap.parse_args(argv)
+
+
+def main(argv=None):
+    a = parse_args(argv)
+    if a.selftest:
         return _selftest()
     spec = {
         "registry": load("registry/repos.json"),
@@ -1059,8 +1137,8 @@ def main():
         "secrets": load("spec/secrets.json"),
         "files": load("spec/files.json"),
     }
-    issue_mode = "--issue" in sys.argv
-    wanted = {n.lower() for n in sys.argv[1:] if not n.startswith("--")}
+    issue_mode = a.issue
+    wanted = {n.lower() for n in a.names}
     repos = [r for r in spec["registry"]["repos"] if r.get("status") == "cataloged"]
     if wanted:
         repos = [r for r in repos if r["name"].lower() in wanted]
@@ -1082,16 +1160,17 @@ def main():
             return 2
         entry = repos[0]
         try:
-            findings, audited_sha = audit_repo(entry, spec)
+            findings, audited_sha = audit_repo(entry, spec, a.branch)
         except Exception as e:  # an unverifiable audit still produces an honest issue
             findings, audited_sha = [("ERROR", str(e))], ""
-        title, body = render_issue(entry, findings, entry.get("groundTruthBranch", "main"),
+        title, body = render_issue(entry, findings, ground_branch_of(entry, a.branch),
                                    audited_sha, run_utc, hub_sha)
         print(title)
         print(body, end="")  # line 1 is the bare title, the body starts on line 2 - head -1 / tail -n +2 friendly
         return 0
 
-    print(f"audit run {run_utc} | hub {hub_sha}")
+    override = f" | branch override {a.branch}" if a.branch else ""
+    print(f"audit run {run_utc} | hub {hub_sha}{override}")
     if not HUB_NAME_FROM_REMOTE:
         print(f"warning: no git remote; template-reference check falls back to the directory name '{HUB_NAME}' and may miss", file=sys.stderr)
     print()
@@ -1099,9 +1178,9 @@ def main():
     hard = 0
     for entry in repos:
         model = entry.get("workflowModel") or spec["registry"].get("defaults", {}).get("workflowModel") or "release"
-        ground = entry.get("groundTruthBranch", "main")
+        ground = ground_branch_of(entry, a.branch)
         try:
-            findings, audited_sha = audit_repo(entry, spec)
+            findings, audited_sha = audit_repo(entry, spec, a.branch)
         except Exception as e:  # a gh/JSON failure mid-audit must not abort the sweep
             findings, audited_sha = [("ERROR", str(e))], ""
         stamp = f" @ {ground}@{audited_sha[:7]}" if audited_sha else ""

@@ -17,7 +17,7 @@ Exit 1 if any violation is found. Read-only, never edits.
 from __future__ import annotations
 import argparse, io, re, subprocess, sys, tokenize, unicodedata
 from pathlib import Path
-from typing import TypedDict
+from typing import NamedTuple, TypedDict
 
 # One source of truth for the rule names, so the CLI choices cannot drift from check_file.
 RULES = {
@@ -185,31 +185,46 @@ SENT_END = re.compile(r'[.!?:]["\')\]]?\s*$')
 
 # Comment syntax per language, since the rule governs every comment the fleet's types carry.
 # A `doc` marker opens a documentation comment, which CODESTYLE governs and may run to paragraphs.
+# `raw` names the quotes whose strings take no backslash escape.
+# `escape` names the characters that escape the next one outside a string.
+# `carry` names the forms that survive a newline, so a marker inside one is string content.
 class Syntax(TypedDict):
     line: tuple[str, ...]
     block: tuple[tuple[str, str], ...]
     doc: tuple[str, ...]
     quotes: str
     verbatim: bool
+    raw: str
+    escape: str
+    carry: frozenset[str]
 
 
-HASH: Syntax = {'line': ('#',), 'block': (), 'doc': (), 'quotes': '"\'', 'verbatim': False}
-C_LIKE: Syntax = {'line': ('//',), 'block': (('/*', '*/'),), 'doc': ('///', '/**'),
-                  'quotes': '"\'', 'verbatim': False}
+PLAIN: Syntax = {'line': (), 'block': (), 'doc': (), 'quotes': '"\'', 'verbatim': False,
+                 'raw': '', 'escape': '', 'carry': frozenset()}
+HASH: Syntax = {**PLAIN, 'line': ('#',)}
+# A shell single-quoted string takes no escape at all, and either quote form spans lines.
+# Outside a string a backslash escapes the next character, which is how `'\''` embeds a quote.
+# A heredoc runs from its label to the line that repeats it.
+SHELL: Syntax = {**HASH, 'raw': "'", 'escape': '\\', 'carry': frozenset({'quote', 'label'})}
+# A YAML block scalar is the multi-line form.
+# A plain scalar's apostrophe is not a string, so an ordinary quote must not carry here.
+YAML: Syntax = {**HASH, 'carry': frozenset({'block'})}
+C_LIKE: Syntax = {**PLAIN, 'line': ('//',), 'block': (('/*', '*/'),), 'doc': ('///', '/**')}
 # C# alone carries the verbatim string, where a backslash is ordinary and a doubled quote escapes.
-CSHARP: Syntax = {**C_LIKE, 'verbatim': True}
-XML_LIKE: Syntax = {'line': (), 'block': (('<!--', '-->'),), 'doc': (), 'quotes': '"',
-                    'verbatim': False}
-POWERSHELL: Syntax = {'line': ('#',), 'block': (('<#', '#>'),), 'doc': (), 'quotes': '"\'',
-                      'verbatim': False}
-INI: Syntax = {'line': ('#', ';'), 'block': (), 'doc': (), 'quotes': '"\'', 'verbatim': False}
-LISP_LIKE: Syntax = {'line': ('#',), 'block': (), 'doc': (), 'quotes': '"', 'verbatim': False}
+CSHARP: Syntax = {**C_LIKE, 'verbatim': True, 'carry': frozenset({'verbatim'})}
+XML_LIKE: Syntax = {**PLAIN, 'block': (('<!--', '-->'),), 'quotes': '"'}
+# PowerShell escapes with a backtick, so a backslash is ordinary in either quote form.
+# Both forms span lines, and the here-string (`@"` to `"@`) is the delimited one.
+POWERSHELL: Syntax = {**PLAIN, 'line': ('#',), 'block': (('<#', '#>'),), 'raw': '"\'',
+                      'carry': frozenset({'quote', 'here'})}
+INI: Syntax = {**PLAIN, 'line': ('#', ';')}
+LISP_LIKE: Syntax = {**PLAIN, 'line': ('#',), 'quotes': '"'}
 # CSS has block comments only, so a `//` in it is the scheme separator of a URL.
-CSS: Syntax = {'line': (), 'block': (('/*', '*/'),), 'doc': (), 'quotes': '"\'', 'verbatim': False}
+CSS: Syntax = {**PLAIN, 'block': (('/*', '*/'),)}
 
 SYNTAX: dict[str, Syntax] = {
     # Python, shell, and the hash-commented configs
-    '.py': HASH, '.sh': HASH, '.bash': HASH, '.yml': HASH, '.yaml': HASH,
+    '.py': HASH, '.sh': SHELL, '.bash': SHELL, '.yml': YAML, '.yaml': YAML,
     '.toml': HASH, '.tf': HASH, '.gitattributes': HASH, '.gitignore': HASH,
     # C#, C, and C++
     '.cs': CSHARP, '.c': C_LIKE, '.cpp': C_LIKE, '.cc': C_LIKE, '.cxx': C_LIKE,
@@ -228,8 +243,9 @@ SYNTAX: dict[str, Syntax] = {
 }
 
 # Extensionless files whose name fixes the syntax.
+# A Dockerfile, a makefile recipe, and a git hook all hold shell, heredocs included.
 BY_NAME = {
-    'dockerfile': HASH, 'makefile': HASH, 'pre-commit': HASH, 'gemfile': HASH,
+    'dockerfile': SHELL, 'makefile': SHELL, 'pre-commit': SHELL, 'gemfile': HASH,
     'caddyfile': HASH, '.gitattributes': HASH, '.editorconfig': INI, '.gitignore': HASH,
 }
 
@@ -250,19 +266,42 @@ def syntax_for(path: Path) -> Syntax | None:
     return HASH if not suffix else None
 
 
+class Carried(NamedTuple):
+    """A string left open at the end of a line, and what it takes to close it.
+
+    `kind` is `quote` for an ordinary one still open, `verbatim` for the doubled-quote form,
+    `here` for a PowerShell here-string, `label` for a heredoc, and `block` for a YAML block
+    scalar. `text` holds the open quote or the closing token, `indent` a block scalar's parent
+    column, and `queued` the heredoc labels stacked behind this one on the same line.
+    """
+    kind: str = ''
+    text: str = ''
+    indent: int = 0
+    queued: tuple[str, ...] = ()
+
+
+CLEAR = Carried()
+
+# The forms whose whole line is string content, judged before the line is scanned for a marker.
+WHOLE_LINE = frozenset({'here', 'label', 'block'})
+
+
 def strip_strings(line: str, quotes: str, verbatim: bool = False,
-                  carried: bool = False) -> tuple[str, bool]:
+                  carried: Carried = CLEAR, raw: str = '',
+                  escape: str = '') -> tuple[str, Carried]:
     """Blank quoted spans so a comment marker inside a string is not read as one.
 
     Length-preserving, so an offset into the result is an offset into the line.
-    A verbatim string takes its own rules where the syntax has one.
-    There the backslash is an ordinary character and a doubled quote is the escape, so reading a
-    backslash as an escape consumes the closing quote and blanks the rest of the line.
-    It also spans lines, so `carried` opens one and the second return says it is still open.
+    A raw string takes its own rules, where the backslash is an ordinary character and a doubled
+    quote is the escape, so reading a backslash as an escape consumes the closing quote and blanks
+    the rest of the line. C# spells one with an `@` prefix, and shell and PowerShell have forms
+    that are always raw. `carried` reopens a string the line above left open, and the second
+    return says what this line leaves open in turn.
     """
     out = list(line)
-    quote = '"' if carried else ''
-    inside_verbatim = carried
+    quote = carried.text if carried.kind in ('quote', 'verbatim') else ''
+    at_verbatim = carried.kind == 'verbatim'
+    doubled = at_verbatim or (quote != '' and quote in raw)
     escaped = False
     i = 0
     while i < len(line):
@@ -270,14 +309,17 @@ def strip_strings(line: str, quotes: str, verbatim: bool = False,
         if escaped:
             escaped = False
             out[i] = ' '
-        elif inside_verbatim:
+        elif doubled:
             if ch == quote and line[i + 1:i + 2] == quote:   # a doubled quote is one character
                 out[i] = out[i + 1] = ' '
                 i += 2
                 continue
             out[i] = ' ' if ch != quote else ch
             if ch == quote:
-                quote, inside_verbatim = '', False
+                quote, doubled, at_verbatim = '', False, False
+        elif ch in escape and not quote:          # outside a string it escapes the next character
+            escaped = True
+            out[i] = ' '
         elif ch == '\\' and quote:
             escaped = True
             out[i] = ' '
@@ -292,9 +334,73 @@ def strip_strings(line: str, quotes: str, verbatim: bool = False,
             start = i
             while start > 0 and line[start - 1] in '@$':
                 start -= 1
-            inside_verbatim = verbatim and ch == '"' and '@' in line[start:i]
+            at_verbatim = verbatim and ch == '"' and '@' in line[start:i]
+            doubled = at_verbatim or ch in raw
         i += 1
-    return ''.join(out), inside_verbatim
+    if not quote:
+        return ''.join(out), CLEAR
+    return ''.join(out), Carried('verbatim' if at_verbatim else 'quote', quote)
+
+
+# A shell heredoc opener, read off masked code so a `<<` inside a string does not open one.
+# `<<<` is a bash here-string, which is one line, so both lookarounds exclude it.
+HEREDOC = re.compile(r'(?<!<)<<-?(?!<)')
+HEREDOC_LABEL = re.compile(r'\s*(?:"([^"\n]+)"|\'([^\'\n]+)\'|([A-Za-z_][A-Za-z0-9_]*))')
+
+# A PowerShell here-string opens on `@"` or `@'` as the last thing on its line.
+HERE_STRING = re.compile(r'@(["\'])\s*$')
+
+# A YAML block scalar: a value that is `|` or `>`, with the optional chomping and indent indicators.
+# Anchored to the `:` or the sequence dash, so a plain scalar merely ending in a pipe is not one.
+BLOCK_SCALAR = re.compile(r'(?::|^\s*-)\s*[|>][+-]?\d?\s*$')
+
+# `run:` holds a script rather than data, so its `#` lines are comments this rule governs.
+SCRIPT_SCALAR = re.compile(r'(?:^|\s)run:\s*[|>]')
+
+
+def opened_string(spec: Syntax, head: str, line: str) -> Carried:
+    """The multi-line string this line's code opens, for the forms this syntax carries.
+
+    `head` is the masked code ahead of any comment, so a marker inside a string cannot open one.
+    A quoted heredoc label is read off the raw line at the same offset, since masking blanks it.
+    """
+    if 'label' in spec['carry']:
+        labels = [next(g for g in m.groups() if g)
+                  for m in (HEREDOC_LABEL.match(line, h.end()) for h in HEREDOC.finditer(head))
+                  if m]
+        if labels:
+            return Carried('label', labels[0], 0, tuple(labels[1:]))
+    if 'here' in spec['carry']:
+        m = HERE_STRING.search(head)
+        if m:
+            return Carried('here', m.group(1) + '@')
+    if 'block' in spec['carry'] and BLOCK_SCALAR.search(head) and not SCRIPT_SCALAR.search(head):
+        return Carried('block', '', len(line) - len(line.lstrip()))
+    return CLEAR
+
+
+def resume_at(carry: Carried, line: str) -> tuple[Carried, int | None]:
+    """Where code resumes on this line, or None while the whole line is still string content.
+
+    A heredoc's terminator is the label on a line of its own, so that line is content too. A
+    here-string gives back what follows its closer, matching how a closing quote does. A block
+    scalar ends by dedent rather than by a delimiter, on a line that is ordinary code.
+    """
+    if carry.kind == 'label':
+        if line.strip() != carry.text:
+            return carry, None
+        # Indentation is not compared, since `<<-` strips leading tabs from the terminator.
+        if carry.queued:
+            return Carried('label', carry.queued[0], 0, carry.queued[1:]), None
+        return CLEAR, None
+    if carry.kind == 'here':
+        body = line.lstrip()
+        if not body.startswith(carry.text):
+            return carry, None
+        return CLEAR, len(line) - len(body) + len(carry.text)
+    if not line.strip() or len(line) - len(line.lstrip()) > carry.indent:
+        return carry, None                       # a blank line belongs to the scalar as well
+    return CLEAR, 0
 
 
 # A pragma, shebang, or divider is machinery rather than prose.
@@ -303,8 +409,8 @@ NOT_PROSE = re.compile(r'^(!|\s*[-=#*/<>]+\s*$)|noqa|type:\s*ignore|pylint|ruff:
                        r'|^v\d+(\.\d+)*$')
 
 # Two sentences on one line, guarded against an abbreviation, an initial, or a dotted identifier.
-# The initial guard anchors on a word boundary: `J. Smith` is one name, where a sentence ending in
-# an acronym such as CI is two sentences and has to be caught.
+# The initial guard anchors on a word boundary, so `J. Smith` reads as one name.
+# A sentence ending in an acronym such as CI is two sentences and has to be caught.
 # The second sentence may open in either case, since a lowercase opening is still a second sentence.
 RUN_ON = re.compile(r'(?<!\b[A-Z])(?<!\be\.g)(?<!\bi\.e)(?<!\bvs)(?<!\betc)[.!?]\s+(?=[A-Za-z])')
 CODE_FENCE = re.compile(r'^\s*(```|~~~)')
@@ -401,10 +507,16 @@ def extracted_comments(path: Path, lines: list[str]) -> list[tuple[int, str, boo
     out: list[tuple[int, str, bool]] = []
     closing = ''
     doc_closing = ''
-    in_string = False
+    carry = CLEAR
     for n, raw in enumerate(lines, 1):
         line = raw.rstrip('\r')
         pos = 0
+        head = ''                                    # the masked code, for a string opening here
+        if carry.kind in WHOLE_LINE:                 # the line is string content until it closes
+            carry, resumed = resume_at(carry, line)
+            if resumed is None:
+                continue
+            pos = resumed
         if doc_closing:                              # CODESTYLE owns every line until it closes
             end = line.find(doc_closing)
             if end < 0:
@@ -425,10 +537,12 @@ def extracted_comments(path: Path, lines: list[str]) -> list[tuple[int, str, boo
             pos, closing = end + len(closing), ''
         # Scan left to right and take whichever marker comes first.
         # A ceiling can only describe the first comment, so a later one was unreachable.
+        scanned = False
         while pos < len(line):
             # Mask from here rather than once per line, so comment text never sets string state.
             # A quote in a comment is prose, and reading it as a string blanks the markers after it.
-            tail, tail_state = strip_strings(line[pos:], spec['quotes'], spec['verbatim'], in_string)
+            tail, tail_state = strip_strings(line[pos:], spec['quotes'], spec['verbatim'], carry,
+                                             spec['raw'], spec['escape'])
             masked = ' ' * pos + tail
             found: str | tuple[str, str] | None = None
             at = len(line)
@@ -440,11 +554,14 @@ def extracted_comments(path: Path, lines: list[str]) -> list[tuple[int, str, boo
                 where = masked.find(opener, pos)
                 if 0 <= where < at:
                     at, found = where, (opener, closer)
+            if not scanned:
+                head, scanned = masked[:at], True    # the code this line opens a string from
             if found is None:
-                in_string = tail_state               # the rest of the line is code
+                carry = tail_state                   # the rest of the line is code
                 break
             # Only the code before the marker advances the string state.
-            _, in_string = strip_strings(line[pos:at], spec['quotes'], spec['verbatim'], in_string)
+            _, carry = strip_strings(line[pos:at], spec['quotes'], spec['verbatim'], carry,
+                                     spec['raw'], spec['escape'])
             # CODESTYLE owns a documentation comment, so this rule skips over it.
             # A line one runs to end of line, while a closed block one gives the rest back.
             if any(line[at:].startswith(d) for d in spec['doc']):
@@ -471,6 +588,10 @@ def extracted_comments(path: Path, lines: list[str]) -> list[tuple[int, str, boo
                 closing = closer
                 break
             pos = end + len(closer)
+        # A string opened here carries into the lines below only where the syntax has that form.
+        # A block comment left open owns them instead, so nothing opens under one.
+        form = CLEAR if (closing or doc_closing) else opened_string(spec, head, line)
+        carry = form if form.kind else (carry if carry.kind in spec['carry'] else CLEAR)
     return out
 
 
@@ -525,9 +646,8 @@ def comment_wrap_findings(path: Path, raw: str, lines: list[str]) -> list[tuple[
             out.append((n, 'comment-case',
                         'comment sentence opens in lowercase -> capitalize, or restructure so it '
                         'does not open on a lowercase name'))
-        # A trailing comment can start a sentence the next full-line comment continues, so it is
-        # remembered. The continuation itself still has to be a full-line comment, since a
-        # trailing one annotates its own line rather than continuing the line above.
+        # A trailing comment can start a sentence the next full-line comment continues.
+        # The continuation has to be a full-line comment, since a trailing one annotates its own.
         prev_body = body
         prev_no = n
     return out
@@ -566,8 +686,7 @@ def check_file(path: Path, rules: set[str]) -> list[tuple[int, str, str]]:
             if 'semicolon' in rules:
                 listish = prose.count(';') > 1 or ':' in prose.split(';')[0]
                 for m in SEMICOLON.finditer(prose):
-                    # A list keeps its semicolons, and a list announces itself with a colon or by
-                    # having more than one separator.
+                    # A list keeps its semicolons, announced by a colon or a second separator.
                     if listish and ',' in prose[:m.start()]:
                         continue
                     out.append((i, 'semicolon', 'semicolon in prose -> a comma or two sentences'))

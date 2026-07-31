@@ -8,8 +8,9 @@ other half: a check whose scan matches nothing reports zero issues and reads exa
 Run as `python3 scripts/test_repo_gate.py`, or under `python3 -m unittest discover -s scripts`.
 """
 from __future__ import annotations
-import re, shutil, sys, tempfile, unittest
+import contextlib, io, re, shutil, sys, tempfile, unittest
 from pathlib import Path
+from unittest import mock
 
 import repo_gate
 
@@ -140,14 +141,45 @@ class TestCoverageFloors(unittest.TestCase):
 
     def test_a_root_with_no_tracked_files_exits_two_rather_than_zero(self) -> None:
         """An empty file set is a broken invocation, not a clean repo."""
-        with tempfile.TemporaryDirectory() as d:
+        with tempfile.TemporaryDirectory() as d, contextlib.redirect_stderr(io.StringIO()) as err:
             self.assertEqual(2, repo_gate.main(['--root', d]))
+        self.assertIn('not a git repo or no tracked files', err.getvalue())
+
+    def test_this_repo_passes_both_checks_from_the_cli(self) -> None:
+        """The gates run in CI from this entry point, so the entry point is what is proven."""
+        with contextlib.redirect_stdout(io.StringIO()) as out:
+            self.assertEqual(0, repo_gate.main(['--root', str(REPO)]))
+        printed = out.getvalue()
+        for name in repo_gate.CHECKS:
+            with self.subTest(check=name):
+                self.assertIn(f'[ok  ] {name}', printed)
+
+    def test_a_single_check_runs_alone(self) -> None:
+        """`--check` scopes the run, and a name outside CHECKS is rejected by the parser."""
+        with contextlib.redirect_stdout(io.StringIO()) as out:
+            self.assertEqual(0, repo_gate.main(['--root', str(REPO), '--check', 'sha-pin']))
+        self.assertIn('sha-pin', out.getvalue())
+        self.assertNotIn('eol', out.getvalue())
+        with contextlib.redirect_stderr(io.StringIO()), self.assertRaises(SystemExit):
+            repo_gate.main(['--check', 'no-such-check'])
+
+    def test_a_failing_check_exits_one_and_prints_each_hit(self) -> None:
+        """A gate that finds something has to say so and fail, not report and pass."""
+        with mock.patch.dict(repo_gate.CHECKS, {'sha-pin': lambda root, files: ['a.yml: unpinned']}), \
+                contextlib.redirect_stdout(io.StringIO()) as out:
+            self.assertEqual(1, repo_gate.main(['--root', str(REPO), '--check', 'sha-pin']))
+        self.assertIn('[FAIL] sha-pin      1 issue(s)', out.getvalue())
+        self.assertIn('a.yml: unpinned', out.getvalue())
+
+    def test_an_unreadable_workflow_is_skipped_rather_than_raising(self) -> None:
+        """`git ls-files` lists a path a later commit deleted from the working tree."""
+        self.assertEqual([], repo_gate.check_sha_pin(REPO, ['.github/workflows/absent.yml']))
 
 
 class TestHarness(unittest.TestCase):
     def test_this_module_collects_a_plausible_number_of_cases(self) -> None:
         loaded = unittest.defaultTestLoader.loadTestsFromModule(sys.modules[__name__])
-        self.assertGreaterEqual(loaded.countTestCases(), 18)
+        self.assertGreaterEqual(loaded.countTestCases(), 22)
 
 
 if __name__ == '__main__':

@@ -1,8 +1,8 @@
 # Repo Scripts
 
-Local checks and tooling this repo runs by hand, with the deterministic ones also gating CI. Each one exists because the CI linters pass on the failure it catches: `markdownlint`, `cspell`, `actionlint`, and `editorconfig-checker` all report clean on prose that breaks a documented [`GOVERNANCE.md`](../GOVERNANCE.md) rule. Doc linters stay out of the pre-commit hook, which runs language formatting only so it stays fast.
+Local checks and tooling this repo runs by hand, with the deterministic ones also gating CI. Each one exists because the CI linters pass on the failure it catches: `markdownlint`, `cspell`, `actionlint`, and `editorconfig-checker` all report clean on prose that breaks a documented [`GOVERNANCE.md`][governance] rule. Doc linters stay out of the pre-commit hook, which runs language formatting only so it stays fast.
 
-**Hub-only, not carried.** These are not declared in [`spec/files.json`](../spec/files.json), so the audit does not expect a downstream repo to ship them - the same footing as `spec/audit.py`. Promoting one to fleet-carried is a deliberate act: declare it in the baseline and vendor it, per [`spec/section-model.md`](../spec/section-model.md).
+**Hub-only, not carried.** These are not declared in [`spec/files.json`][files], so the audit does not expect a downstream repo to ship them - the same footing as `spec/audit.py`. Promoting one to fleet-carried is a deliberate act: declare it in the baseline and vendor it, per [`spec/section-model.md`][section-model].
 
 Python only, standard library only, no third-party packages. Every script is read-only and exits non-zero on a finding.
 
@@ -11,13 +11,14 @@ Each script has a `test_<script>.py` beside it, driving its gates against input 
 ```sh
 python3 scripts/test_prose_lint.py
 python3 scripts/test_repo_gate.py
-python3 -m unittest discover -s scripts          # both, and exits 5 if the suite vanishes
-uvx coverage@latest run -m unittest discover -s scripts && uvx coverage@latest report
+python3 scripts/test_pr_review.py
+python3 -m unittest discover -s scripts          # all three, and exits 5 if the suite vanishes
+uvx coverage@latest run --source=. -m unittest discover -s scripts && uvx coverage@latest report
 ```
 
 ## `prose_lint.py`
 
-Enforces the [`GOVERNANCE.md`](../GOVERNANCE.md) "Documentation Style Conventions" rules that no linter checks: non-ASCII judged against the charset rule's three tiers, a semicolon in prose, a spaced hyphen joining or interrupting a sentence, a duplicated consecutive word, and the shape of a comment's prose.
+Enforces the [`GOVERNANCE.md`][governance] "Documentation Style Conventions" rules that no linter checks: non-ASCII judged against the charset rule's three tiers, a semicolon in prose, a spaced hyphen joining or interrupting a sentence, a duplicated consecutive word, and the shape of a comment's prose.
 
 The tiers decide by context rather than by a flat ban. Tier 1 carries no meaning its ASCII form loses and always flags. Tier 2 is an operator, kept next to a figure or another operator and replaced between words, so a threshold table reads as the range it is. Tier 3 is a unit or scientific symbol whose ASCII form would be a lie and never flags. Developer-typed characters such as emoji are preserved regardless of tier, and an un-tiered one is still reported as `charset-unknown` until it is classified.
 
@@ -41,7 +42,9 @@ The `semicolon` and `dash` rules ban a construction rather than a detectable sub
 
 The `comment-wrap` rule covers comments in every syntax the fleet's project types carry, not only the hash ones: `//` and `/* */` for C#, C, C++ and JSONC, `/* */` alone for CSS, `<!-- -->` for XML, csproj and markdown, `<# #>` for PowerShell, `;` for INI, and `#` for Python, shell, YAML and TOML.
 
-JSON is treated as JSONC, because that is what ships: VS Code tasks, launch, devcontainer and workspace files all carry comments under a plain `.json` name. A marker inside a string literal is not a comment, so each line is scanned with quoted spans blanked first, and Python uses `tokenize` so a trailing comment is seen exactly. Blanking is per line, which suits a string that ends on the line it starts. The C# verbatim string is the one form carried across lines. Every other syntax is scanned a line at a time, so any string that spans lines leaves its markers readable, and an ordinary quoted string in shell, a PowerShell here-string, a YAML block scalar, and a heredoc all report a marker inside them as a comment. A documentation comment (`///`, `/**`, a docstring) is left to CODESTYLE, which permits the paragraphs this rule forbids.
+JSON is treated as JSONC, because that is what ships: VS Code tasks, launch, devcontainer and workspace files all carry comments under a plain `.json` name. A marker inside a string literal is not a comment, so each line is scanned with quoted spans blanked first, and Python uses `tokenize` so a trailing comment is seen exactly. A documentation comment (`///`, `/**`, a docstring) is left to CODESTYLE, which permits the paragraphs this rule forbids.
+
+A string that spans lines carries its state onto the lines it covers, so a marker inside one is data rather than a comment. Each syntax declares the forms it carries: the C# verbatim string, an ordinary quoted string in shell and in PowerShell, a PowerShell here-string, a shell heredoc, and a YAML block scalar. A YAML `run:` scalar is deliberately not one of them, because it holds a script whose `#` lines are exactly the comments this rule governs. A form no syntax declares stays scanned a line at a time, which is where a false positive is still possible: a TOML triple-quoted string is the open case. The reverse direction is guarded too, since a form that carried where the language has none would blank the rest of the file and report nothing - a YAML plain scalar's apostrophe is not a string, so an ordinary quote does not carry there.
 
 A comment sentence also has to start with a capital, which `comment-case` checks. A lowercase opening reads as the continuation of the line above it, so the two rules are read together: a wrapped sentence reports as `comment-wrap`, and a lowercase opening that is not a continuation reports as `comment-case`. Where the first word is a tool whose own casing is lowercase, the fix is to restructure rather than to capitalize the name against CODESTYLE's tooling-casing rule.
 
@@ -52,7 +55,7 @@ A comment sentence also has to start with a capital, which `comment-case` checks
 Two deterministic checks:
 
 - `sha-pin` - every workflow `uses:` is a 40-hex commit SHA, with the one documented `dotnet/nbgv@master` exception allowed.
-- `eol` - every path pinned LF in [`.gitattributes`](../.gitattributes) has the matching [`.editorconfig`](../.editorconfig) override the line-ending rule requires, with EditorConfig brace syntax expanded. One direction only: an `.editorconfig` LF glob with no git pin is legitimate, since `.editorconfig` governs what the editor writes where git enforces a class it must not guess at.
+- `eol` - every path pinned LF in [`.gitattributes`][gitattributes] has the matching [`.editorconfig`][editorconfig] override the line-ending rule requires, with EditorConfig brace syntax expanded. One direction only: an `.editorconfig` LF glob with no git pin is legitimate, since `.editorconfig` governs what the editor writes where git enforces a class it must not guess at.
 
 ```sh
 python3 scripts/repo_gate.py
@@ -63,11 +66,20 @@ A stale-backticked-path check was built and **rejected**: a template repo legiti
 
 ## `pr_review.py`
 
-One compact digest of a pull request's Copilot review state, replacing a sequence of one-`gh`-call-per-turn polls. `status` prints the digest, and `wait` runs the backoff in-process so a long review wait costs one agent turn instead of one per poll. Read-only by design: the mutations (re-request, reply, resolve) stay as explicit `gh` calls so they remain visible to the `gh-write-guard` hook and to review, and their runbook is in [`.github/copilot-instructions.md`](../.github/copilot-instructions.md).
+One compact digest of a pull request's Copilot review state, replacing a sequence of one-`gh`-call-per-turn polls. `status` prints the digest, and `wait` runs the backoff in-process so a long review wait costs one agent turn instead of one per poll. Read-only by design: the mutations (re-request, reply, resolve) stay as explicit `gh` calls so they remain visible to the `gh-write-guard` hook and to review, and their runbook is in [`.github/copilot-instructions.md`][copilot-instructions].
 
 ```sh
 python3 scripts/pr_review.py status 452
 python3 scripts/pr_review.py wait 452 --timeout 2700
 ```
 
-`wait` exits `30` when the review is still pending at the timeout, which is pending rather than failed.
+`wait` exits `30` when the review is still pending at the timeout, which is pending rather than failed. Its failure mode is a wrong answer rather than a crash, so the cases feed crafted GraphQL payloads: a review attributed to the wrong login, a review counted against a stale head, a maintainer's own thread read as a finding, and a wait that returns success while nothing landed. One case reads the reviewer login out of the runbook rather than restating it, since GraphQL drops the `[bot]` suffix REST carries, and another asserts no mutation has crept into a read-only script.
+
+<!-- Internal -->
+
+[copilot-instructions]: ../.github/copilot-instructions.md
+[editorconfig]: ../.editorconfig
+[files]: ../spec/files.json
+[gitattributes]: ../.gitattributes
+[governance]: ../GOVERNANCE.md
+[section-model]: ../spec/section-model.md
