@@ -8,7 +8,7 @@ invocation whose output is a few hundred bytes. See GOVERNANCE.md "Context and D
 Discipline" for the rule this implements.
 
 Subcommands
-  status   One digest line plus any unresolved threads. Read-only.
+  status   One digest line, any unresolved threads, and any suppressed findings. Read-only.
   wait     Poll until Copilot's review lands on the current head, then print the digest.
            The loop runs in-process, so a 45-minute wait costs one agent turn, not 90.
            Exit 0 = review present, 30 = still pending at timeout (pending is not failure).
@@ -19,9 +19,17 @@ visible to the gh-write-guard PreToolUse hook and to review. See
 .github/copilot-instructions.md for the mutation runbook.
 """
 from __future__ import annotations
-import argparse, json, subprocess, sys, time
+import argparse, json, re, subprocess, sys, time
 
 REVIEWER = 'copilot-pull-request-reviewer'
+
+# A review body can carry a collapsed block of findings withheld from the inline threads.
+# Those appear nowhere in `reviewThreads`, so polling threads alone reports a clean pass while
+# they stand. The alternation is the runbook's, because the heading wording has changed once
+# already, and matching one phrasing alone reports zero on a review that has them.
+SUPPRESSED = re.compile(r'Suppressed comments|low confidence', re.IGNORECASE)
+DETAILS = re.compile(r'<details>(.*?)</details>', re.DOTALL | re.IGNORECASE)
+TAGS = re.compile(r'</?(?:details|summary)>', re.IGNORECASE)
 
 # Liveness query: two scalars only, no comment bodies.
 # A liveness check does not need the finding text, and re-fetching bodies was 76% of polls.
@@ -38,7 +46,7 @@ Q_FULL = """
 query($o:String!,$r:String!,$n:Int!){
   repository(owner:$o,name:$r){ pullRequest(number:$n){
     headRefOid mergeable mergeStateStatus
-    reviews(last:20){ nodes{ author{login} state commit{oid} submittedAt } }
+    reviews(last:20){ nodes{ author{login} state commit{oid} submittedAt body } }
     reviewThreads(first:100){ nodes{ id isResolved
       comments(first:1){ nodes{ author{login} path line body } } }}
   }}}
@@ -66,6 +74,17 @@ def live_state(owner: str, repo: str, num: int) -> tuple[str, bool]:
     return head, done
 
 
+def suppressed_blocks(body: str) -> list[str]:
+    """Return the review body's low-confidence sections, or the whole body if it is not collapsed.
+
+    The wrapper is a `<details>` block today, so the fallback covers the day it is not: a body
+    that names the block but parses to no section is reported whole rather than as zero findings.
+    """
+    if not body or not SUPPRESSED.search(body):
+        return []
+    return [b for b in DETAILS.findall(body) if SUPPRESSED.search(b)] or [body]
+
+
 def digest(owner: str, repo: str, num: int, seen: set[str] | None = None) -> tuple[str, int]:
     pr = gql(Q_FULL, owner, repo, num)
     head = pr['headRefOid']
@@ -78,10 +97,14 @@ def digest(owner: str, repo: str, num: int, seen: set[str] | None = None) -> tup
                   and ((t.get('comments') or {}).get('nodes') or [{}])[0]
                   .get('author', {}).get('login') == REVIEWER]
 
+    # Scoped to the head, so a finding answered in an earlier round does not re-open.
+    blocks = [b for n in on_head for b in suppressed_blocks(n.get('body') or '')]
+
     lines = [
         f'pr={num} head={head[:8]} rounds={len(revs)} '
         f'review_on_head={"yes" if on_head else "NO"} '
         f'threads={len(threads)} unresolved={len(unresolved)} '
+        f'suppressed={len(blocks)} '
         f'merge={pr.get("mergeStateStatus")}'
     ]
     new = 0
@@ -97,6 +120,12 @@ def digest(owner: str, repo: str, num: int, seen: set[str] | None = None) -> tup
             new += 1
         body = ' '.join((c.get('body') or '').split())
         lines.append(f'  {mark}{tid} {c.get("path")}:{c.get("line")} {body[:160]}')
+    for b in blocks:
+        # Printed whole where a thread body is truncated: a thread can be re-read at its id,
+        # while a suppressed finding has no thread, so this digest is the only place it appears.
+        lines.append('  SUPPRESSED: no thread to resolve, answer it in the PR conversation')
+        # Indentation is kept, since a block carries fenced code a flattened line would garble.
+        lines += [f'    {ln.rstrip()}' for ln in TAGS.sub('', b).splitlines() if ln.strip()]
     if seen is not None:
         lines[0] += f' new={new}'
     return '\n'.join(lines), len(unresolved)
