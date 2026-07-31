@@ -55,7 +55,7 @@ This is the style guide for any **.NET projects** in this repo.
 
 2. **Analyzer configuration**
    - `<EnableNETAnalyzers>true</EnableNETAnalyzers>` with `<AnalysisLevel>latest-all</AnalysisLevel>` and `<AnalysisMode>All</AnalysisMode>` (full analyzer set enabled)
-   - `<TreatWarningsAsErrors>true</TreatWarningsAsErrors>`, so any diagnostic surfaced as a warning fails the build, so it must be fixed or deliberately suppressed, not left to accumulate (see [Analyzer Diagnostics and Suppressions][analyzer-diagnostics-and-suppressions])
+   - `<TreatWarningsAsErrors>true</TreatWarningsAsErrors>`, so any diagnostic surfaced as a warning fails the build and must be fixed or deliberately suppressed, not left to accumulate (see [Analyzer Diagnostics and Suppressions][analyzer-diagnostics-and-suppressions])
 
 3. **CI lint backstop**
    - CI runs the clean-compile checks on every PR as the authoritative backstop
