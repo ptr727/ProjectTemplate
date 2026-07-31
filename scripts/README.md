@@ -18,7 +18,7 @@ uvx coverage@latest run --source=. -m unittest discover -s scripts && uvx covera
 
 ## `prose_lint.py`
 
-Enforces the [`GOVERNANCE.md`][governance] "Documentation Style Conventions" rules that no linter checks: non-ASCII judged against the charset rule's three tiers, a semicolon in prose, a spaced hyphen joining or interrupting a sentence, a duplicated consecutive word, and the shape of a comment's prose.
+Enforces the [`GOVERNANCE.md`][governance] "Documentation Style Conventions" rules that no linter checks: non-ASCII judged against the charset rule's three tiers, a semicolon in prose, a spaced hyphen joining or interrupting a sentence, a duplicated consecutive word, a British spelling, and the shape of a comment's prose.
 
 The tiers decide by context rather than by a flat ban. Tier 1 carries no meaning its ASCII form loses and always flags. Tier 2 is an operator, kept next to a figure or another operator and replaced between words, so a threshold table reads as the range it is. Tier 3 is a unit or scientific symbol whose ASCII form would be a lie and never flags. Developer-typed characters such as emoji are preserved regardless of tier, and an un-tiered one is still reported as `charset-unknown` until it is classified.
 
@@ -30,7 +30,11 @@ Run it scoped to changed lines, matching the standing rule that existing prose i
 python3 scripts/prose_lint.py . --diff origin/develop
 ```
 
-Whole-tree (`python3 scripts/prose_lint.py .`) reports the legacy backlog as well, which is informational rather than a gate. `charset` and `dupword` are clean tree-wide, so CI gates those two and reports the rest warn-only.
+Whole-tree (`python3 scripts/prose_lint.py .`) reports the legacy backlog as well, which is informational rather than a gate. `charset`, `dupword` and `spelling` are clean tree-wide, so CI gates those three and reports the rest warn-only.
+
+The `spelling` rule covers the US English convention where cspell does not reach. That gate reads README and HISTORY only, deliberately, because gating every markdown file would mean endlessly padding `cspell.json` with technical terms, so a British spelling anywhere else in the tree had nothing checking it. The banned words are generated from stems rather than listed one by one, since an inflected spelling is as wrong as its base and a hand-listed family drifts as soon as one form is added without the others. Two words are deliberately absent: `analyses` is the US plural of `analysis` as much as it is a British verb form, and `cancelled` is a GitHub Actions job status rather than prose.
+
+**Outside markdown the rule reads the comments, not the source lines**, reusing the extraction the `comment-wrap` rule already does. An identifier, a string literal, or a lookup table is code, and judging it as prose would make this script report its own table of banned words.
 
 **Scope** is every text file git tracks, binaries skipped by a NUL-byte check, with no extension allowlist: an allowlist covers what its author thought of and silently stops covering whatever is added next, which is the same reason the line-endings rule already requires `git ls-files` over a raw `find`. `--list-files` prints the discovered set for auditing.
 
