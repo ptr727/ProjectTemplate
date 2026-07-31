@@ -9,7 +9,7 @@ The verdict vocabulary is [`WORKFLOW.md`][workflow]'s: **operational / not opera
 
 This audit is not occasional. Run it whenever you **create, adopt, or materially change** a fleet repo, and on demand for any known repo:
 
-- **Onboarding a repo is complete only when it either passes this audit** (operational on every applicable check) **or carries a committed `reports/<repo>/audit.md` plus a tracking issue** enumerating every residual delta. A repo that is partially set up but never audited is itself a **defect**, the exact state this process prevents. The create-to-conformance counterpart is [`STANDUP.md`][standup]; because both read the same manifests, a repo stood up by that file passes this audit by construction.
+- **Onboarding a repo is complete only when it either passes this audit** (operational on every applicable check) **or carries a committed `reports/<repo>/audit.md` plus a tracking issue** enumerating every residual delta. A repo that is partially set up but never audited is itself a **defect**, the exact state this process prevents. The create-to-conformance counterpart is [`STANDUP.md`][standup]. Because both read the same manifests, a repo stood up by that file passes this audit by construction.
 - **Touching a repo** (any conformance-affecting change) ends by re-running the applicable checks and **reconciling the registry entry to reality**: `status`, `types`, `releaseTrigger`, `workflowModel`, `driftNotes`. The registry records reality, not intent. [`spec/validate.py`][validate] proves the catalog is self-consistent, not that it matches the live repo. Closing that gap is this audit's job. The deterministic subset (settings, rulesets, secret names, file presence, per-scope markdown section presence, workflow interface conformance, verbatim content, branch facts) is mechanized in [`spec/audit.py`][audit-runner]: owner-initiated, run on demand when onboarding a repo, on suspected drift, or before fleet-wide changes. A required section missing from a carried markdown file is a **drift finding**, not a letter, because a heading rename reads as missing and equivalence is judged by hand. A carried `interface` workflow (spec/fidelity-model.md) is checked by name and wiring (required jobs, the ruleset-bound check name, the artifact-name handoff, and the forbidden `artifact-ids:` fork), all at **drift**, since the body is owned and a rename is a hint to verify. A carried `verbatim` unit, whether a whole file (`.markdownlint-cli2.jsonc`) or a canonical workflow job region (the `github-release` job), is content-hashed against the hub's canonical after line-ending normalization. A mismatch is classified **stale** (matches a past hub revision, re-vendor) or **modified** (matches none, the repo changed fixed content), both at **drift**, since equivalence is intent-governed and a byte diff is a hint to review.
 
 ## 1. Scope and Ground-Truth Branch
@@ -22,10 +22,10 @@ This holds for **both workflow models**. An `operational` repo commits directly 
 
 Look up the repo in [`registry/repos.json`][repos] and read its `types[]`. If the entry is `classificationPending` (a backlog repo), classify it from the tree and propose a registry update:
 
-- `*.csproj` / `*.slnx` -> `csharp`; a `dotnet nuget push` workflow -> `nuget`; a `System.CommandLine` console -> `console`.
-- `pyproject.toml` / `setup.py` -> `python`; a `pypa/gh-action-pypi-publish` workflow -> `pypi`.
-- `Dockerfile` + a docker build/push workflow -> `docker`; an `upstream-version.json` tracker -> `upstream-wrapper`.
-- `custom_components/*/manifest.json` + `hacs.json` -> `homeassistant`; a codegen workflow -> `codegen`; no `build-*` task -> `source-only`; governance-only -> `docs`.
+- `*.csproj` / `*.slnx` -> `csharp`, a `dotnet nuget push` workflow -> `nuget`, a `System.CommandLine` console -> `console`.
+- `pyproject.toml` / `setup.py` -> `python`, a `pypa/gh-action-pypi-publish` workflow -> `pypi`.
+- `Dockerfile` + a docker build/push workflow -> `docker`, an `upstream-version.json` tracker -> `upstream-wrapper`.
+- `custom_components/*/manifest.json` + `hacs.json` -> `homeassistant`, a codegen workflow -> `codegen`, no `build-*` task -> `source-only`, governance-only -> `docs`.
 
 ## 3. Applicability Gate
 
@@ -43,8 +43,8 @@ For each applicable type in [`spec/project-types.json`][project-types] and every
 A check with `intentRef`/`workflowRef` points at the prose section that owns the rationale, so read it to judge intent. The dimensions:
 
 - **csharp** - `.editorconfig` carries the shared `[*.cs]` rule block (letter), and analyzer severities are enforced, not relaxed (intent).
-- **nuget** - publish uses OIDC Trusted Publishing, no `NUGET_API_KEY` (letter+intent); `--skip-duplicate`.
-- **pypi** - OIDC publish job with `environment: pypi`, `id-token: write`, `skip-existing: true`; no stored token.
+- **nuget** - publish uses OIDC Trusted Publishing with no `NUGET_API_KEY` (letter+intent), and the push carries `--skip-duplicate`.
+- **pypi** - OIDC publish job carrying `environment: pypi`, `id-token: write` and `skip-existing: true`, with no stored token.
 - **python** - ruff and pyright present (intent), canonical in `pyproject.toml` (letter), and a standalone `.ruff.toml` / `pyrightconfig.json` is a drift finding.
 - **console** - smoke runtime matrix is a strict subset, and per-runtime outputs aggregate to one `release-asset-*`, gated `!smoke`.
 - **docker** - registry layer cache (`buildcache-<branch>`, never `type=gha`), the size-limited Docker Hub README is published via the docker-readme task, and the image always re-pushes on publish.

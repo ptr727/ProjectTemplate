@@ -246,6 +246,22 @@ class TestSemicolon2(BaitCase):
         self.assertEqual(['semicolon'],
                          self.kinds('It runs on push, always; it gates the merge.\n', {'semicolon'}))
 
+    def test_a_list_whose_commas_fall_in_a_later_item_keeps_its_semicolons(self) -> None:
+        """The comma qualifies the list, so reading it positionally split one series in two."""
+        self.assertEqual([], self.kinds(
+            'It exists; it covers each target, and excludes the rest; it runs.\n', {'semicolon'}))
+
+    def test_a_table_row_judges_each_cell_alone(self) -> None:
+        """A row is a record of fields, so one column's comma cannot excuse another's semicolon."""
+        self.assertEqual(['semicolon'], self.kinds('| S1 | it runs; it gates | D1, D2 |\n',
+                                                   {'semicolon'}))
+
+    def test_a_bullet_label_colon_does_not_announce_a_list(self) -> None:
+        """`- **Label**:` opens the bullet, the same construct the label dash is exempted for."""
+        self.assertEqual(['semicolon'],
+                         self.kinds('- **Async**: avoid blocking calls; use await, always\n',
+                                    {'semicolon'}))
+
     def test_prose_rules_do_not_reach_code_files(self) -> None:
         """A shell script carries statement separators, not prose, until comments can be extracted."""
         for name in ('bait.sh', 'bait.py', 'bait.yml'):

@@ -12,9 +12,9 @@ Do not duplicate language-specific rules here. **Project-specific conventions an
 
 Summarized for VS Code's generators. The full rules, rationale, and examples are in [GOVERNANCE.md "Pull Request Title and Commit Message Conventions"](../GOVERNANCE.md#pull-request-title-and-commit-message-conventions).
 
-- Imperative subject, <= 72 characters, no trailing period; optional blank-line-separated body for the non-obvious *why*.
-- US English, title case with lowercase short bind words; no vague titles, no `Co-Authored-By:` unless asked, no release-bump magnitude (NBGV handles versioning). Dependabot's `Bump X from Y to Z` titles are fine.
-- develop PRs squash-merge (`gh pr merge --squash`), main PRs merge-commit (`--merge`); a mismatched flag is rejected by branch protection.
+- Imperative subject, <= 72 characters, no trailing period, with an optional blank-line-separated body for the non-obvious *why*.
+- US English, title case with lowercase short bind words. No vague titles, no `Co-Authored-By:` unless asked, no release-bump magnitude (NBGV handles versioning). Dependabot's `Bump X from Y to Z` titles are fine.
+- develop PRs squash-merge (`gh pr merge --squash`), main PRs merge-commit (`--merge`). A mismatched flag is rejected by branch protection.
 
 ## Reviewing Carried Fleet Content
 
@@ -50,9 +50,9 @@ gh api repos/<owner>/<repo>/pulls/<N>/reviews --jq \
   "[.[] | select(.commit_id==\"$PR_HEAD\") | select(.body | test(\"Suppressed comments|low confidence\"))] | length"
 ```
 
-**Round 1 is normally auto-seeded, so poll for it before trying to self-trigger.** Auto-review-on-open supplies the first review with no `botIds` call needed, but it can lag one to three minutes. After opening a PR (or the first push), **poll** for a Copilot review on the head SHA (see [Verify Review Covered Current Head](#verify-review-covered-current-head)) before concluding none ran. The `requestReviews` mutation below is for **re-requesting on later pushes** (a new head SHA); by then a prior review exists, so its bot node id is readable. A missing bot node id on round 1 therefore means "the auto-review has not landed yet - wait and poll," **not** "ask the maintainer to kick it off."
+**Round 1 is normally auto-seeded, so poll for it before trying to self-trigger.** Auto-review-on-open supplies the first review with no `botIds` call needed, but it can lag one to three minutes. After opening a PR (or the first push), **poll** for a Copilot review on the head SHA (see [Verify Review Covered Current Head](#verify-review-covered-current-head)) before concluding none ran. The `requestReviews` mutation below is for **re-requesting on later pushes** (a new head SHA). By then a prior review exists, so its bot node id is readable. A missing bot node id on round 1 therefore means "the auto-review has not landed yet - wait and poll," **not** "ask the maintainer to kick it off."
 
-> **The reviewer login differs by API.** In **GraphQL** (`gh api graphql` and `gh pr view --json reviews`, which is GraphQL-backed) the `Bot.login` is `copilot-pull-request-reviewer`, with **no `[bot]` suffix**. In the **REST** API (`gh api repos/.../issues|pulls/...`) the same account's `user.login` is `copilot-pull-request-reviewer[bot]`, **with** the suffix. Each query below uses the correct form for its API; match the API, not a single spelling, when adapting them.
+> **The reviewer login differs by API.** In **GraphQL** (`gh api graphql` and `gh pr view --json reviews`, which is GraphQL-backed) the `Bot.login` is `copilot-pull-request-reviewer`, with **no `[bot]` suffix**. In the **REST** API (`gh api repos/.../issues|pulls/...`) the same account's `user.login` is `copilot-pull-request-reviewer[bot]`, **with** the suffix. Each query below uses the correct form for its API, so match the API, not a single spelling, when adapting them.
 
 ```sh
 # 1. PR node id + the Copilot reviewer's bot node id (read from any existing
@@ -78,7 +78,7 @@ mutation($pr: ID!, $bot: ID!) {
 }' -F pr="$PR_NODE" -F bot="$BOT_ID"
 ```
 
-The bot node id is read from an existing Copilot **formal** review (`pullRequest.reviews`), so step 1 needs at least one prior formal review on the PR, and the auto-review-on-open normally supplies the first one (it may have **no inline comments**; that still counts, and its bot node id is still readable). Poll for it (give auto-review-on-open a few minutes) before deciding it is missing.
+The bot node id is read from an existing Copilot **formal** review (`pullRequest.reviews`), so step 1 needs at least one prior formal review on the PR, and the auto-review-on-open normally supplies the first one (it may have **no inline comments**, which still counts, and its bot node id is still readable). Poll for it (give auto-review-on-open a few minutes) before deciding it is missing.
 
 **Cold start (round 1 not yet landed): read the id repo-wide, not from this PR.** The Copilot reviewer's bot node id is the reviewer bot *account's* node id and is **stable across every PR in the repo**. So a freshly opened PR that has neither a formal review nor an issue comment yet does **not** need UI seeding to bootstrap the id: read it from any prior Copilot review anywhere in the repo, then feed it into the `requestReviews` mutation to drive round 1. Query the **most recent** PRs (`first: 20` with an explicit newest-first order; plain `last: 20` returns the *oldest* PRs, which may predate Copilot on the repo), and **guard for an empty result**, since an empty `$BOT_ID` means none of the sampled PRs carry a Copilot review. Widen the window (raise the count or paginate) before concluding the repo has never had one and falling back to UI seeding; never feed an empty id into the mutation:
 
@@ -99,7 +99,7 @@ if [ -z "$BOT_ID" ]; then
 fi
 ```
 
-If Copilot posted **only an issue comment** on this PR and no formal review, you can instead read the id from that comment's author (`pullRequest.comments` -> author `... on Bot { id }`). Manual UI seeding is the last resort, needed only for a repo that has **never** had a Copilot review, so no prior id exists anywhere to read; then use the mutation for every subsequent re-request.
+If Copilot posted **only an issue comment** on this PR and no formal review, you can instead read the id from that comment's author (`pullRequest.comments` -> author `... on Bot { id }`). Manual UI seeding is the last resort, needed only for a repo that has **never** had a Copilot review, so no prior id exists anywhere to read. Use the mutation for every subsequent re-request.
 
 **Do NOT post `@Copilot review` as a PR comment.** That comment triggers the Copilot *coding agent* (`copilot-swe-agent[bot]`), which makes code changes rather than posting a review.
 
@@ -137,14 +137,14 @@ Coverage is confirmed when (1) exits 0, and **a formal review with no inline com
 
 ### Bounded Retry Workflow
 
-This path is only for a **genuinely missing** review, meaning no Copilot review (formal *or* issue comment) covers the current head SHA after polling. A review that covered the head but produced no comments is a clean pass, not a missing review; do not enter this retry path for it.
+This path is only for a **genuinely missing** review, meaning no Copilot review (formal *or* issue comment) covers the current head SHA after polling. A review that covered the head but produced no comments is a clean pass, not a missing review, so do not enter this retry path for it.
 
 **A slow review is pending, not missing, so poll with backoff and never escalate on a timeout alone.** Copilot can lag far beyond the usual one-to-three minutes when it has been re-requested many times in quick succession, because it throttles under load, and a re-review landing tens of minutes after the request is normal. A poll that times out is therefore evidence only that the review has not landed *yet*, not that Copilot is done or unresponsive. Report the status as "review still pending" and keep polling on a widening interval (for example 20s steps, then a few minutes) rather than stopping. Enter the escalation step below only when the `requestReviews` mutation itself no-ops or errors, or after a genuinely long wait with the request confirmed accepted, never merely because one fixed poll window elapsed.
 
 If a review did not run on the current head, retry:
 
 1. Wait briefly and check head-SHA coverage (see above).
-1. Re-request the review via the `requestReviews` mutation (see "Triggering and Polling"); fall back to the GitHub PR UI only if the mutation no-ops.
+1. Re-request the review via the `requestReviews` mutation (see "Triggering and Polling"), falling back to the GitHub PR UI only if the mutation no-ops.
 1. Retry up to two more times (three total).
 1. If still missing, mark review as blocked and escalate to the user/maintainer with what was attempted.
 
@@ -152,7 +152,7 @@ If a review did not run on the current head, retry:
 
 Every id below is captured from a live query into a variable and passed from there, never hand-typed, guessed, or pasted as a `PRRT_...` literal. A node id resolves globally, so a fabricated or stale id does not fail, it writes to a real thread on an unrelated repository. This runbook implements [GOVERNANCE.md "Repository Boundaries and Write Safety"](../GOVERNANCE.md#repository-boundaries-and-write-safety): write only to this repo, capture every id from a live query, and never suppress a mutation's output.
 
-List unresolved threads. Use `first: 100` with cursor-based pagination; if `hasNextPage` is true, re-run with `after: "<endCursor>"` to retrieve the next page:
+List unresolved threads. Use `first: 100` with cursor-based pagination, and where `hasNextPage` is true, re-run with `after: "<endCursor>"` to retrieve the next page:
 
 ```sh
 gh api graphql -f query='
@@ -209,14 +209,14 @@ mutation($threadId: ID!) {
 }' -F threadId="$TID"
 ```
 
-Issue-level Copilot comments (those in `issues/<N>/comments`) have no resolution action, since GitHub provides no API or UI to resolve them. Reply if the finding warrants it; no resolution step is needed or possible.
+Issue-level Copilot comments (those in `issues/<N>/comments`) have no resolution action, since GitHub provides no API or UI to resolve them. Reply if the finding warrants it, but no resolution step is needed or possible.
 
 ### PR Edits and Merge-State Gotchas
 
 - **`gh pr edit --title/--body` is broken here.** It touches the deprecated Projects-classic `projectCards` GraphQL field and **exits non-zero without applying the change** (a stale PR description then survives review rounds). Edit the title/body via the API and verify it took: GraphQL `updatePullRequest(input: { pullRequestId, title, body })`, or REST `gh api -X PATCH repos/<owner>/<repo>/pulls/<N> -F body=@body.md` (the `@` reads the body from a file, so name it explicitly, not the literal `file`).
 - **`main`/`develop` use rulesets, not classic branch protection.** The classic protection REST endpoint (`repos/.../branches/<b>/protection`) 404s, so read the ruleset instead. A `mergeStateStatus` of `BLOCKED` on a green PR is usually just **unresolved review threads** (the ruleset requires thread resolution); resolving them moves it to `CLEAN`. (`BLOCKED` is a `mergeStateStatus` value; don't confuse it with the separate `mergeable` field's `MERGEABLE`/`CONFLICTING`, which reports merge conflicts, not review gates.)
-- **Push -> head-SHA read race.** A `headRefOid` read taken immediately after a push can return the **old** head; re-read after the push registers, or a coverage poll evaluates the stale SHA.
-- **Copilot is sometimes factually wrong** (e.g. it claimed `actionlint -color` "requires a value" when it is a boolean flag). Verify a finding before fixing; decline with evidence when it is wrong, which is distinct from dismissing a still-present finding as stale.
+- **Push -> head-SHA read race.** A `headRefOid` read taken immediately after a push can return the **old** head, so re-read after the push registers, or a coverage poll evaluates the stale SHA.
+- **Copilot is sometimes factually wrong** (e.g. it claimed `actionlint -color` "requires a value" when it is a boolean flag). Verify a finding before fixing, and decline with evidence when it is wrong, which is distinct from dismissing a still-present finding as stale.
 
 Reply-body conventions:
 

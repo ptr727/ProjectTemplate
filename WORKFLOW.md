@@ -53,7 +53,7 @@ flowchart LR
   main -.->|no back-merge| develop
 ```
 
-`operational` repos (live-service config; `workflowModel: operational`) commit directly to `develop` and promote a known-good snapshot to `main` via an occasional PR:
+`operational` repos (live-service config, `workflowModel: operational`) commit directly to `develop` and promote a known-good snapshot to `main` via an occasional PR:
 
 ```mermaid
 flowchart LR
@@ -164,7 +164,7 @@ The required behaviors, organized by domain. Each is a **MUST**, stated as input
 
 ### D4 - Release / Publish
 
-- **D4.1 Gated single-branch publish.** Output: PRs smoke-test and publish nothing. A **human merge never auto-publishes**. A first `plan` job (`publish-plan-task.yml`) decides once and every job gates on it: publish on a **code-affecting bot push to `main`** (gated to the codegen App / Dependabot `github.actor`; an Actions-only bump matches no release path and publishes nothing), a **dispatch** of `main`/`develop`, or a **main-only weekly schedule** (Docker). A source-only repo publishes on dispatch only. Each run builds one branch.
+- **D4.1 Gated single-branch publish.** Output: PRs smoke-test and publish nothing. A **human merge never auto-publishes**. A first `plan` job (`publish-plan-task.yml`) decides once and every job gates on it: publish on a **code-affecting bot push to `main`** (gated to the codegen App / Dependabot `github.actor`, with an Actions-only bump matching no release path and publishing nothing), a **dispatch** of `main`/`develop`, or a **main-only weekly schedule** (Docker). A source-only repo publishes on dispatch only. Each run builds one branch.
 - **D4.2 Tag the built commit.** Output: the release `target_commitish` is the built commit's SHA (NBGV's `GitCommitId`), never a branch name or a separately re-resolved ref. *Prevents: the tag landing on the default branch instead of the built tree.*
 - **D4.3 Release contents.** Output: every release is a tag on the built commit plus the auto source zip, README, and LICENSE; file-producing targets attach `release-asset-*`; `prerelease` equals `branch != default`. A no-file-target repo that uses the release task (Docker-only, PyPI-only) reaches the tag-only shape **only** with `expect_release_assets: false` set by the caller (which relaxes `fail_on_unmatched_files` and skips the asset download). With the default `true` and no assets the release-create step fails. A source-only repo reaches the same shape through its inlined `action-gh-release` instead, with no release task or `expect_release_assets`.
 - **D4.4 No-op republish.** Input: a re-run whose version is unchanged. Output: nothing is re-pushed, because the release-create step is skipped when the tag exists (refreshed only on `workflow_dispatch`), and the paired asset-delete is skipped with it. Registry pushes are no-ops. The NuGet/PyPI publish steps are **not** statically gated on existence. They run and the **server** dedupes (`dotnet nuget push --skip-duplicate` turns a 409 into success; PyPI `skip-existing: true`). **Docker always re-pushes** the image (base-image refresh), independently of the release-create skip, within the same run. *Prevents: duplicate releases and wasted pushes.*
@@ -240,23 +240,23 @@ For each *applicable* scenario, evaluate every job's `if:`/`needs:` against the 
 | # | Input | Expected output | Exercises |
 | --- | --- | --- | --- |
 | S1 | PR touching a build target | `changes` flags it; validation runs; that target's smoke build runs; no push, **no uploads**; validate-release **skipped (smoke), succeeds**; release **skipped**; aggregator **success**; version = prerelease; no release; no dangling artifacts | D1, D2.2, D3 |
-| S2 | PR changing only docs | smoke-build **skipped**; validation runs; aggregator **success** | D1.1, D1.5 |
-| S3 | PR changing only `.github/workflows/**` | filter excludes -> smoke-build **skipped**; aggregator **success** | D1.4 |
-| S4 | PR base = default branch, carrying a build target | smoke versions as prerelease; validate-release **skipped (smoke)** so the default-branch arm does **not** fire; aggregator **success**; promotion not blocked | D1.3, D2.2 |
-| S5 | bot push to `main` not touching a release path (e.g. an Actions bump) | the paths filter excludes it; nothing publishes | D4.1 |
-| S6 | code-affecting **bot** push to `main` (a human push/promotion, or any develop push, does not) | the `plan` job gates it to the App/Dependabot actor; `main` publishes a release | D3, D4 |
+| S2 | PR changing only docs | smoke-build **skipped**, validation runs, aggregator **success** | D1.1, D1.5 |
+| S3 | PR changing only `.github/workflows/**` | filter excludes -> smoke-build **skipped**, aggregator **success** | D1.4 |
+| S4 | PR base = default branch, carrying a build target | smoke versions as prerelease, validate-release **skipped (smoke)** so the default-branch arm does **not** fire, aggregator **success**, promotion not blocked | D1.3, D2.2 |
+| S5 | bot push to `main` not touching a release path (e.g. an Actions bump) | the paths filter excludes it, so nothing publishes | D4.1 |
+| S6 | code-affecting **bot** push to `main` (a human push/promotion, or any develop push, does not) | the `plan` job gates it to the App/Dependabot actor, and `main` publishes a release | D3, D4 |
 | S7 | publish run (schedule, a bot push to main, or a dispatch) | builds the **one** trigger branch: `main` -> `X.Y.Z`, `prerelease=false`, registry stable, badge/readme run; `develop` -> `X.Y.Z-g<sha>`, `prerelease=true`, registry prerelease; `release-asset-*` consumed-then-deleted; PyPI build-artifact deleted after its publish; **no dangling artifacts** | D3, D4, D5, D6, D7 |
 | S8 | dispatch from a ref other than `main` or `develop` | **fails fast** | D2.3 |
 | S9 | re-run publish, version unchanged | release-create **skipped**, `release-asset-*` delete **skipped**; NuGet/PyPI pushes no-op (server dedupe); **PyPI build-artifact still deleted** (its publish ran); **Docker still re-pushes** the image; no duplicate release | D4.4, D5.2 |
-| S10 | branch/version classification disagree | validate-release **fails loud**; build/publish skip | D2.2 |
-| S11 | scheduled upstream-version bump (wrapper) | resolver detects a change -> commits the state file -> opens a `<prefix>-<branch>` PR -> merge-bot auto-merges -> the `main` pin publishes via the gate (a develop pin does not auto-publish; it ships via a develop dispatch or promotion) | D8.3, D3.5 |
+| S10 | branch/version classification disagree | validate-release **fails loud**, build/publish skip | D2.2 |
+| S11 | scheduled upstream-version bump (wrapper) | resolver detects a change -> commits the state file -> opens a `<prefix>-<branch>` PR -> merge-bot auto-merges -> the `main` pin publishes via the gate (a develop pin does not auto-publish, shipping instead via a develop dispatch or promotion) | D8.3, D3.5 |
 
 ### 5C. Live Probe (Where Warranted)
 
 - Open a trivial-change PR touching one target and confirm S1.
 - Drive a `smoke: true` push-probe of the build task for **both** the default and a non-default branch and assert the version classification (clean vs prerelease) and that the gate passes, **without publishing**. *Caveat: the Docker leg logs in to the registry even on smoke and reads the buildcache, so it needs `DOCKER_HUB_*` secrets and cannot run on a fork PR (same-repo only).*
 - Per registry: after a real publish, query NuGet.org for the expected version + prerelease classification (and the `.snupkg` on the symbol server), and confirm a re-run added no duplicate. For PyPI inspect the `Compute PyPI version step` log and the built `dist/*` filenames for `.dev0` off `develop` vs a plain version on the default branch.
-- Inspect the latest real publish's logs for `PublicRelease`/`SemVer2` per leg and confirm the artifact lifecycle (uploaded, consumed, deleted; none left behind).
+- Inspect the latest real publish's logs for `PublicRelease`/`SemVer2` per leg and confirm the artifact lifecycle (uploaded, consumed, deleted, with none left behind).
 
 ### Assessment
 

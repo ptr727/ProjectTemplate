@@ -542,6 +542,21 @@ def strip_quoted(s: str) -> str:
     return re.sub(r'"[^"\n]*"', '""', s)
 
 
+# A bullet's `**Label**:` opens the text the same way `- **Label** -` does, so its colon
+# introduces the bullet rather than a list, and reading it as one excused the splice after it.
+LABEL_COLON = re.compile(r'^\s*(?:[-*]|[0-9]+\.)\s+\*\*[^*]+\*\*\s*:')
+
+
+def list_spans(s: str) -> list[str]:
+    """Split a line into the spans that each hold their own list.
+
+    A markdown table row is a record of fields rather than one sentence, so judging the row whole
+    let a comma in one column excuse a semicolon in another.
+    """
+    cells = s.strip().strip('|').split('|') if s.lstrip().startswith('|') else [s]
+    return [LABEL_COLON.sub('', cell) for cell in cells]
+
+
 def in_numeric_context(line: str, pos: int) -> bool:
     """Whether the character at `pos` sits in an expression rather than in a sentence.
 
@@ -801,12 +816,18 @@ def check_file(path: Path, rules: set[str]) -> list[tuple[int, str, str]]:
         # A shell script carries 78 statement separators that are not prose at all.
         if path.suffix == '.md':
             if 'semicolon' in rules:
-                listish = prose.count(';') > 1 or ':' in prose.split(';')[0]
-                for m in SEMICOLON.finditer(prose):
+                for span in list_spans(prose):
                     # A list keeps its semicolons, announced by a colon or a second separator.
-                    if listish and ',' in prose[:m.start()]:
+                    # The comma is a property of the list rather than of one separator's position,
+                    # so an enumeration whose commas fall in a later item keeps every semicolon it
+                    # carries. Reading it positionally split such a list, flagging the openers of
+                    # the same series it then exempted the tail of.
+                    listish = span.count(';') > 1 or ':' in span.split(';')[0]
+                    if listish and ',' in span:
                         continue
-                    out.append((i, 'semicolon', 'semicolon in prose -> a comma or two sentences'))
+                    for _ in SEMICOLON.finditer(span):
+                        out.append((i, 'semicolon',
+                                    'semicolon in prose -> a comma or two sentences'))
             if 'dash' in rules:
                 skip = LABEL_DASH.match(prose)
                 for m in DASH.finditer(prose):
