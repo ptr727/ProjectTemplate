@@ -272,12 +272,14 @@ class Carried(NamedTuple):
     `kind` is `quote` for an ordinary one still open, `verbatim` for the doubled-quote form,
     `here` for a PowerShell here-string, `label` for a heredoc, and `block` for a YAML block
     scalar. `text` holds the open quote or the closing token, `indent` a block scalar's parent
-    column, and `queued` the heredoc labels stacked behind this one on the same line.
+    column, `dedent` whether a heredoc opened with `<<-`, and `queued` the (label, dedent) pairs
+    stacked behind this one on the same line.
     """
     kind: str = ''
     text: str = ''
     indent: int = 0
-    queued: tuple[str, ...] = ()
+    dedent: bool = False
+    queued: tuple[tuple[str, bool], ...] = ()
 
 
 CLEAR = Carried()
@@ -344,7 +346,7 @@ def strip_strings(line: str, quotes: str, verbatim: bool = False,
 
 # A shell heredoc opener, read off masked code so a `<<` inside a string does not open one.
 # `<<<` is a bash here-string, which is one line, so both lookarounds exclude it.
-HEREDOC = re.compile(r'(?<!<)<<-?(?!<)')
+HEREDOC = re.compile(r'(?<!<)<<(-?)(?!<)')
 HEREDOC_LABEL = re.compile(r'\s*(?:"([^"\n]+)"|\'([^\'\n]+)\'|([A-Za-z_][A-Za-z0-9_]*))')
 
 # A PowerShell here-string opens on `@"` or `@'` as the last thing on its line.
@@ -365,11 +367,11 @@ def opened_string(spec: Syntax, head: str, line: str) -> Carried:
     A quoted heredoc label is read off the raw line at the same offset, since masking blanks it.
     """
     if 'label' in spec['carry']:
-        labels = [next(g for g in m.groups() if g)
-                  for m in (HEREDOC_LABEL.match(line, h.end()) for h in HEREDOC.finditer(head))
-                  if m]
+        opens = [(HEREDOC_LABEL.match(line, h.end()), h.group(1) == '-')
+                 for h in HEREDOC.finditer(head)]
+        labels = [(next(g for g in m.groups() if g), dedent) for m, dedent in opens if m]
         if labels:
-            return Carried('label', labels[0], 0, tuple(labels[1:]))
+            return Carried('label', labels[0][0], 0, labels[0][1], tuple(labels[1:]))
     if 'here' in spec['carry']:
         m = HERE_STRING.search(head)
         if m:
@@ -387,17 +389,19 @@ def resume_at(carry: Carried, line: str) -> tuple[Carried, int | None]:
     scalar ends by dedent rather than by a delimiter, on a line that is ordinary code.
     """
     if carry.kind == 'label':
-        if line.strip() != carry.text:
+        # `<<-` strips leading tabs from the terminator, and a plain `<<` needs it at column 0.
+        # An indented line is body content under either form, so ending there resumes inside it.
+        if (line.lstrip('\t') if carry.dedent else line) != carry.text:
             return carry, None
-        # Indentation is not compared, since `<<-` strips leading tabs from the terminator.
         if carry.queued:
-            return Carried('label', carry.queued[0], 0, carry.queued[1:]), None
+            head, dedent = carry.queued[0]
+            return Carried('label', head, 0, dedent, carry.queued[1:]), None
         return CLEAR, None
     if carry.kind == 'here':
-        body = line.lstrip()
-        if not body.startswith(carry.text):
+        # The closing token starts the line, so an indented one is here-string content.
+        if not line.startswith(carry.text):
             return carry, None
-        return CLEAR, len(line) - len(body) + len(carry.text)
+        return CLEAR, len(carry.text)
     if not line.strip() or len(line) - len(line.lstrip()) > carry.indent:
         return carry, None                       # a blank line belongs to the scalar as well
     return CLEAR, 0

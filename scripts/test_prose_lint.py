@@ -582,6 +582,27 @@ class TestMultiLineStrings(BaitCase):
                                                    f'EOF\n'
                                                    f'# {self.BAIT}\n'))
 
+    def test_only_the_exact_terminator_ends_a_heredoc(self) -> None:
+        """An indented line is body content, and ending there resumes scanning inside the string.
+
+        `<<-` strips leading tabs and nothing else, so a space-indented line is body under either
+        form. The bait sits on the line after the near-miss, which a premature end reports.
+        """
+        for opener, near_miss in (('<<EOF', '  EOF'), ('<<EOF', '\tEOF'),
+                                  ('<<-EOF', '  EOF'), ('<<EOF', 'EOF_NOT')):
+            with self.subTest(opener=opener, near_miss=repr(near_miss)):
+                self.assertEqual([], self.flag('a.sh', f'cat {opener}\n'
+                                                       f'{near_miss}\n'
+                                                       f'# {self.BAIT}\n'))
+
+    def test_a_tab_indented_terminator_ends_a_dash_heredoc(self) -> None:
+        """That is the whole point of `<<-`, so refusing it would run the heredoc to end of file."""
+        self.assertEqual(['comment-wrap'],
+                         self.flag('a.sh', 'cat <<-EOF\n'
+                                           '\tbody\n'
+                                           '\tEOF\n'
+                                           f'# {self.BAIT}\n'))
+
     def test_heredocs_stacked_on_one_line_are_read_in_order(self) -> None:
         """Each body belongs to its own label, so clearing the first must open the second."""
         self.assertEqual(['comment-wrap'],
@@ -611,6 +632,13 @@ class TestMultiLineStrings(BaitCase):
                                  self.flag('a.ps1', f'$s = @{quote}\n'
                                                     f'body\n'
                                                     f'{quote}@  # {self.BAIT}\n'))
+
+    def test_a_here_string_closes_only_on_a_token_at_the_start_of_the_line(self) -> None:
+        """PowerShell requires the closer at column 0, so an indented one is here-string content."""
+        self.assertEqual([], self.flag('a.ps1', '$s = @"\n'
+                                                '  "@ is not the closer\n'
+                                                f'# {self.BAIT}\n'
+                                                '"@\n'))
 
     def test_a_powershell_quote_carries_because_the_escape_is_a_backtick(self) -> None:
         """A backslash is an ordinary character there, so it cannot consume the closing quote."""

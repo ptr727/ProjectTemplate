@@ -33,9 +33,10 @@ def thread(tid: str, resolved: bool = False, login: str = pr_review.REVIEWER,
                                     'line': line, 'body': body}]}}
 
 
-def payload(reviews: list[dict], threads: list[dict] = [], merge: str = 'CLEAN') -> dict:
+def payload(reviews: list[dict], threads: list[dict] | None = None,
+            merge: str = 'CLEAN') -> dict:
     return {'headRefOid': HEAD, 'mergeable': 'MERGEABLE', 'mergeStateStatus': merge,
-            'reviews': {'nodes': reviews}, 'reviewThreads': {'nodes': threads}}
+            'reviews': {'nodes': reviews}, 'reviewThreads': {'nodes': threads or []}}
 
 
 class GqlCase(unittest.TestCase):
