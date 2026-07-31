@@ -348,6 +348,20 @@ class TestCommentWrap(BaitCase):
                                            'end"; /* Two things. Here. */ var t = @"open again\n'
                                            'still string";\n'))
 
+    def test_a_quote_in_comment_text_is_prose_rather_than_a_string(self) -> None:
+        """Masking the comment too lets its quote open a string that blanks the markers after it.
+
+        Within the line that costs the block its closer, and across lines the state carries and
+        blanks every marker below until something closes it.
+        """
+        self.assertEqual(['comment-wrap'],
+                         self.flag('a.cs', 'code(); /* note @"x */ code2(); // Two things. Here.\n'))
+        # Each block line is its own sentence, so the two findings are the recovered comments.
+        self.assertEqual(['comment-wrap', 'comment-wrap'],
+                         self.flag('a.cs', '/* A note about @"paths.\n'
+                                           '   And more. */ // Two things. Here.\n'
+                                           'var x = 1; // Two things. Here.\n'))
+
     def test_a_format_with_no_comment_syntax_is_skipped(self) -> None:
         for name in ('a.lock', 'a.csv', 'a.txt'):
             with self.subTest(file=name):

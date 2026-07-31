@@ -404,9 +404,6 @@ def extracted_comments(path: Path, lines: list[str]) -> list[tuple[int, str, boo
     in_string = False
     for n, raw in enumerate(lines, 1):
         line = raw.rstrip('\r')
-        # A line inside a carried string is blanked whole, so the scan below finds nothing in it.
-        # Skipping the line instead would drop a string that closes and reopens around real code.
-        masked, in_string = strip_strings(line, spec['quotes'], spec['verbatim'], in_string)
         pos = 0
         if doc_closing:                              # CODESTYLE owns every line until it closes
             end = line.find(doc_closing)
@@ -424,6 +421,10 @@ def extracted_comments(path: Path, lines: list[str]) -> list[tuple[int, str, boo
         # Scan left to right and take whichever marker comes first.
         # A ceiling can only describe the first comment, so a later one was unreachable.
         while pos < len(line):
+            # Mask from here rather than once per line, so comment text never sets string state.
+            # A quote in a comment is prose, and reading it as a string blanks the markers after it.
+            tail, tail_state = strip_strings(line[pos:], spec['quotes'], spec['verbatim'], in_string)
+            masked = ' ' * pos + tail
             found: str | tuple[str, str] | None = None
             at = len(line)
             for marker in spec['line']:
@@ -435,13 +436,16 @@ def extracted_comments(path: Path, lines: list[str]) -> list[tuple[int, str, boo
                 if 0 <= where < at:
                     at, found = where, (opener, closer)
             if found is None:
+                in_string = tail_state               # the rest of the line is code
                 break
+            # Only the code before the marker advances the string state.
+            _, in_string = strip_strings(line[pos:at], spec['quotes'], spec['verbatim'], in_string)
             # CODESTYLE owns a documentation comment, so this rule skips over it.
             # A line one runs to end of line, while a closed block one gives the rest back.
             if any(line[at:].startswith(d) for d in spec['doc']):
                 if isinstance(found, str):
                     break
-                end = masked.find(found[1], at + len(found[0]))
+                end = line.find(found[1], at + len(found[0]))
                 if end < 0:
                     doc_closing = found[1]               # it carries on into the lines below
                     break
@@ -454,7 +458,7 @@ def extracted_comments(path: Path, lines: list[str]) -> list[tuple[int, str, boo
                     out.append((n, body, leading))
                 break
             opener, closer = found
-            end = masked.find(closer, at + len(opener))
+            end = line.find(closer, at + len(opener))    # a quote in the comment is prose
             body = (line[at + len(opener):end if end >= 0 else None]).strip().lstrip('*').strip()
             if body:
                 out.append((n, body, leading))
