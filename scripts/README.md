@@ -17,7 +17,11 @@ uvx coverage@latest run -m unittest discover -s scripts && uvx coverage@latest r
 
 ## `prose_lint.py`
 
-Enforces the [`GOVERNANCE.md`](../GOVERNANCE.md) "Documentation Style Conventions" rules that no linter checks: typographic Unicode where an ASCII equivalent exists, a semicolon joining two independent clauses, and a duplicated consecutive word. The two documented non-ASCII exceptions, scientific symbols and developer-typed characters, are deliberately not flagged.
+Enforces the [`GOVERNANCE.md`](../GOVERNANCE.md) "Documentation Style Conventions" rules that no linter checks: non-ASCII judged against the charset rule's three tiers, a semicolon in prose, a spaced hyphen joining or interrupting a sentence, a duplicated consecutive word, and the shape of a comment's prose.
+
+The tiers decide by context rather than by a flat ban. Tier 1 carries no meaning its ASCII form loses and always flags. Tier 2 is an operator, kept next to a figure or another operator and replaced between words, so a threshold table reads as the range it is. Tier 3 is a unit or scientific symbol whose ASCII form would be a lie and never flags. Developer-typed characters such as emoji are preserved regardless of tier, and an un-tiered one is still reported as `charset-unknown` until it is classified.
+
+A character in no tier is a `charset-unknown` finding rather than a silent pass, since a gate that allows whatever it does not recognize stops gating as the character set grows. Classifying one is a fleet-law edit, so CI surfaces it without blocking on it.
 
 Run it scoped to changed lines, matching the standing rule that existing prose is corrected as each file is next edited rather than swept:
 
@@ -25,13 +29,23 @@ Run it scoped to changed lines, matching the standing rule that existing prose i
 python3 scripts/prose_lint.py . --diff origin/develop
 ```
 
-Whole-tree (`python3 scripts/prose_lint.py .`) reports the legacy semicolon backlog as well, which is informational rather than a gate. `ascii` and `dupword` are clean tree-wide, so CI gates those two and leaves `semicolon` warn-only.
+Whole-tree (`python3 scripts/prose_lint.py .`) reports the legacy backlog as well, which is informational rather than a gate. `charset` and `dupword` are clean tree-wide, so CI gates those two and reports the rest warn-only.
 
 **Scope** is every text file git tracks, binaries skipped by a NUL-byte check, with no extension allowlist: an allowlist covers what its author thought of and silently stops covering whatever is added next, which is the same reason the line-endings rule already requires `git ls-files` over a raw `find`. `--list-files` prints the discovered set for auditing.
 
 A double-quoted span in markdown is treated as a quotation and not scanned for prose rules, so a rule that states its own counter-example does not report the document that documents it. Outside markdown a double quote is structural, so the prose inside it still counts.
 
-**Known recall gap:** the splice detector keys on a pronoun or article after the semicolon, so an imperative splice ("Delegate exploration; keep synthesis") is missed. Reading the semicolons in a diff by eye still catches what it cannot.
+The `semicolon` and `dash` rules ban a construction rather than a detectable subset of it, so each flags by default and the exceptions are the ones the rule names: a semicolon inside a list that already carries commas, and for the dash a compound word, a leading list marker, a range, and the `- **Label** - explanation` separator that opens a governed bullet.
+
+**Both are markdown-only for now.** A shell script carries 78 statement separators that are not prose at all, so telling a comment from code is a precondition for reaching source files. Until then a semicolon or dash in a code comment is missed, which reading the diff by eye still catches.
+
+The `comment-wrap` rule covers comments in every syntax the fleet's project types carry, not only the hash ones: `//` and `/* */` for C#, C, C++ and JSONC, `/* */` alone for CSS, `<!-- -->` for XML, csproj and markdown, `<# #>` for PowerShell, `;` for INI, and `#` for Python, shell, YAML and TOML.
+
+JSON is treated as JSONC, because that is what ships: VS Code tasks, launch, devcontainer and workspace files all carry comments under a plain `.json` name. A marker inside a string literal is not a comment, so each line is scanned with quoted spans blanked first, and Python uses `tokenize` so a trailing comment is seen exactly. Blanking is per line, which suits a string that ends on the line it starts. The C# verbatim string is the one form carried across lines. Every other syntax is scanned a line at a time, so any string that spans lines leaves its markers readable, and an ordinary quoted string in shell, a PowerShell here-string, a YAML block scalar, and a heredoc all report a marker inside them as a comment. A documentation comment (`///`, `/**`, a docstring) is left to CODESTYLE, which permits the paragraphs this rule forbids.
+
+A comment sentence also has to start with a capital, which `comment-case` checks. A lowercase opening reads as the continuation of the line above it, so the two rules are read together: a wrapped sentence reports as `comment-wrap`, and a lowercase opening that is not a continuation reports as `comment-case`. Where the first word is a tool whose own casing is lowercase, the fix is to restructure rather than to capitalize the name against CODESTYLE's tooling-casing rule.
+
+`charset` and `dupword` are clean tree-wide and gate CI. `charset-unknown`, `semicolon`, `dash`, `comment-wrap`, and `comment-case` run as one warn-only CI step, so the backlog is visible without blocking and is corrected as each file is next edited.
 
 ## `repo_gate.py`
 

@@ -25,8 +25,10 @@ jobs:
         with:
           globs: '**/*.md'
 
-      # cspell gate = README + HISTORY only; all-*.md would mean endlessly padding cspell.json for technical terms
-      # (broad live spell-check is the editor extension's job). See CODESTYLE.md "Markdown and Spelling".
+      # The cspell gate covers README + HISTORY only.
+      # Gating all *.md would mean endlessly padding cspell.json for technical terms.
+      # Broad live spell-check is the editor extension's job.
+      # See CODESTYLE.md "Markdown and Spelling".
       - name: Spell check step
         uses: streetsidesoftware/cspell-action@de2a73e963e7443969755b648a1008f77033c5b2 # v8.4.0
         with:
@@ -60,7 +62,13 @@ jobs:
       - name: Check repo gates step
         run: python3 scripts/repo_gate.py
 
-      # The charset and duplicate-word rules are clean tree-wide, so they gate. The semicolon
-      # rule stays warn-only: going green needs the sweep the prose rule itself forbids.
+      # The charset and duplicate-word rules are clean tree-wide, so they gate.
+      # Every other prose rule reports in the step below without gating.
       - name: Check prose step
-        run: python3 scripts/prose_lint.py . --check ascii --check dupword
+        run: python3 scripts/prose_lint.py . --check charset --check dupword
+
+      # Warn-only, and visible rather than absent: an unrun check is one nobody acts on.
+      # The backlog is corrected as each file is next edited, never swept.
+      - name: Report prose backlog step
+        continue-on-error: true
+        run: python3 scripts/prose_lint.py . --check charset-unknown --check semicolon --check dash --check comment-wrap --check comment-case --summary

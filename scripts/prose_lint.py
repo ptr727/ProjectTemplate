@@ -3,26 +3,34 @@
 
 markdownlint, cspell, actionlint, and editorconfig-checker all pass on prose that breaks
 these rules, so nothing enforced them before this script. Rules implemented:
-  ascii          Write ASCII in all agent-authored text.
-  semicolon      No semicolon joining two independent clauses.
+  charset        Non-ASCII judged against the three tiers the charset rule defines.
+  charset-unknown A non-ASCII character in no tier, so it is classified rather than assumed.
+  semicolon      No semicolon in prose, outside a list that already carries commas.
+  dash           No spaced hyphen joining or interrupting a sentence.
+  comment-wrap   One sentence per comment line, never wrapped and never two on a line.
+  comment-case   A comment sentence starts with a capital, not a lowercase word.
   dupword        No duplicated consecutive word.
   sentence-split A sentence must not wrap across lines (one sentence per line).
 
 Exit 1 if any violation is found. Read-only, never edits.
 """
 from __future__ import annotations
-import argparse, re, subprocess, sys, unicodedata
+import argparse, io, re, subprocess, sys, tokenize, unicodedata
 from pathlib import Path
+from typing import TypedDict
 
-# One source of truth for the rule names, so the CLI choices cannot drift from what check_file
-# implements. Writing them out separately is how a rule exists in one place and not another.
+# One source of truth for the rule names, so the CLI choices cannot drift from check_file.
 RULES = {
-    'ascii': 'typographic Unicode where an ASCII equivalent exists',
-    'semicolon': 'a semicolon joining two independent clauses',
+    'charset': 'a non-ASCII character its tier does not permit here',
+    'charset-unknown': 'a non-ASCII character in no tier',
+    'semicolon': 'a semicolon in prose, outside a list that already carries commas',
+    'dash': 'a spaced hyphen joining or interrupting a sentence',
+    'comment-wrap': 'a comment sentence wrapped across lines, or two on one line',
+    'comment-case': 'a comment sentence opening in lowercase',
     'dupword': 'a duplicated consecutive word',
     'sentence-split': 'a sentence wrapping across lines',
 }
-DEFAULT_RULES = frozenset({'ascii', 'semicolon', 'dupword'})
+DEFAULT_RULES = frozenset({'charset', 'charset-unknown', 'semicolon', 'dash', 'dupword'})
 
 # Produced rather than authored trees, consulted only on the no-git fallback path.
 # Where git can answer, its own ignore rules are the better answer.
@@ -131,30 +139,174 @@ def discover(paths: list[str], excludes: tuple[str, ...] = ()) -> list[Path]:
     return sorted(set(keep))
 
 
-# Typographic Unicode the rule says to replace with its ASCII equivalent on sight.
-# GOVERNANCE.md allows two narrow exceptions that are deliberately NOT flagged:
-# scientific/technical symbols with no clean ASCII equivalent (ohm, micro, degree,
-# pi, superscripts, section sign) and developer-typed Unicode such as emoji.
-# Only substitutable typography appears here.
-# Escapes, never literals - this file is scanned by the rule below, and a literal is invisible.
-SUGGEST = {
-    '\u2014': '-', '\u2013': '-', '\u2018': "'", '\u2019': "'",
-    '\u201c': '"', '\u201d': '"', '\u2026': '...', '\u00a0': ' ',
-    '\u2022': '-', '\u2011': '-', '\u2192': '->', '\u21d2': '=>',
-    '\u2264': '<=', '\u2265': '>=',
+# A non-ASCII character is typography in one place and meaning in another, so it is read by tier.
+# Escapes, never literals: this file is scanned by the rule it implements.
+#
+# Tier 1 carries no meaning its ASCII form loses, so it always flags.
+TIER1 = {
+    '\u2014': 'restructure', '\u2013': 'restructure', '\u2018': "'",
+    '\u2019': "'", '\u201c': '"', '\u201d': '"',
+    '\u2026': '...', '\u2022': '-', '\u00a0': ' ',
+    '\u2011': '-', '\u2192': '->', '\u21d2': '=>',
 }
 
-# A semicolon splice: "<clause>; <pronoun/article/subject> <verb>..."
-# Deliberately conservative - only flags a lowercase word after "; " that starts
-# a clause with a following finite verb. List semicolons and code are not matched.
-SPLICE = re.compile(
-    r';\s+(?P<w>it|this|that|they|he|she|we|you|the|a|an|there|these|those)\s+\w+',
-    re.IGNORECASE)
+# Tier 2 is an operator, and only its use between two words is a finding.
+TIER2 = {
+    '\u2264': '<=', '\u2265': '>=', '\u2260': '!=',
+    '\u00b1': '+/-', '\u2212': '-', '\u00d7': 'x',
+    '\u00f7': '/', '\u00b7': '.',
+}
+
+# Tier 3 is a unit symbol whose ASCII form would be a lie, so it never flags.
+TIER3 = frozenset({
+    '\u00b5', '\u00b0', '\u2126', '\u03c0', '\u00b2', '\u00b3', '\u00a7',
+})
+
+# A digit, unit, or operator on either side makes a tier-2 character the range it describes.
+NUMERIC = re.compile(r'[0-9]')
+
+# The rule bans the construction, not a detectable subset, so a prose semicolon flags by default.
+# A pronoun-keyed pattern found 170 of 493 and missed every imperative splice.
+SEMICOLON = re.compile(r';')
+
+# A spaced hyphen, the em-dash-style clause break and the paired aside alike.
+# A compound word carries no spaces, a list marker nothing before it, and a range is digit-bounded.
+DASH = re.compile(r'(?<=[^\s\d])\s+-\s+(?=[^\s\d])')
+
+# `- **Label** - explanation` is a definition separator, structurally a colon.
+# Flagging it would restructure the document format rather than the prose.
+# The first dash on such a line is skipped, and any later one still counts.
+LABEL_DASH = re.compile(r'^\s*[-*]\s+\*\*[^*]+\*\*[.:]?\s+-\s+')
 
 # The negative lookbehind keeps a word-joining character from starting a repetition:
 # "either/or or must-pair" is one phrase followed by a conjunction, not a doubled word.
 DUPWORD = re.compile(r'(?<![\w/-])(\w+)\s+\1\b', re.IGNORECASE)
-SENT_END = re.compile(r'[.!?]["\')\]]?\s*$')
+SENT_END = re.compile(r'[.!?:]["\')\]]?\s*$')
+
+# Comment syntax per language, since the rule governs every comment the fleet's types carry.
+# A `doc` marker opens a documentation comment, which CODESTYLE governs and may run to paragraphs.
+class Syntax(TypedDict):
+    line: tuple[str, ...]
+    block: tuple[tuple[str, str], ...]
+    doc: tuple[str, ...]
+    quotes: str
+    verbatim: bool
+
+
+HASH: Syntax = {'line': ('#',), 'block': (), 'doc': (), 'quotes': '"\'', 'verbatim': False}
+C_LIKE: Syntax = {'line': ('//',), 'block': (('/*', '*/'),), 'doc': ('///', '/**'),
+                  'quotes': '"\'', 'verbatim': False}
+# C# alone carries the verbatim string, where a backslash is ordinary and a doubled quote escapes.
+CSHARP: Syntax = {**C_LIKE, 'verbatim': True}
+XML_LIKE: Syntax = {'line': (), 'block': (('<!--', '-->'),), 'doc': (), 'quotes': '"',
+                    'verbatim': False}
+POWERSHELL: Syntax = {'line': ('#',), 'block': (('<#', '#>'),), 'doc': (), 'quotes': '"\'',
+                      'verbatim': False}
+INI: Syntax = {'line': ('#', ';'), 'block': (), 'doc': (), 'quotes': '"\'', 'verbatim': False}
+LISP_LIKE: Syntax = {'line': ('#',), 'block': (), 'doc': (), 'quotes': '"', 'verbatim': False}
+# CSS has block comments only, so a `//` in it is the scheme separator of a URL.
+CSS: Syntax = {'line': (), 'block': (('/*', '*/'),), 'doc': (), 'quotes': '"\'', 'verbatim': False}
+
+SYNTAX: dict[str, Syntax] = {
+    # Python, shell, and the hash-commented configs
+    '.py': HASH, '.sh': HASH, '.bash': HASH, '.yml': HASH, '.yaml': HASH,
+    '.toml': HASH, '.tf': HASH, '.gitattributes': HASH, '.gitignore': HASH,
+    # C#, C, and C++
+    '.cs': CSHARP, '.c': C_LIKE, '.cpp': C_LIKE, '.cc': C_LIKE, '.cxx': C_LIKE,
+    '.h': C_LIKE, '.hpp': C_LIKE, '.jsonc': C_LIKE, '.json5': C_LIKE,
+    '.js': C_LIKE, '.ts': C_LIKE, '.css': CSS, '.scss': CSS,
+    # JSON carries comments in practice, which is what JSONC names.
+    # VS Code tasks, launch, devcontainer, and workspace files ship them under a plain .json name.
+    '.json': C_LIKE, '.code-workspace': C_LIKE,
+    # Markup and project files
+    '.md': XML_LIKE, '.html': XML_LIKE, '.xml': XML_LIKE, '.csproj': XML_LIKE,
+    '.props': XML_LIKE, '.targets': XML_LIKE, '.slnx': XML_LIKE, '.resx': XML_LIKE,
+    # PowerShell, INI, and EDA
+    '.ps1': POWERSHELL, '.psm1': POWERSHELL,
+    '.ini': INI, '.cfg': INI, '.conf': INI, '.editorconfig': INI,
+    '.kicad_sch': LISP_LIKE, '.kicad_pcb': LISP_LIKE, '.kicad_mod': LISP_LIKE,
+}
+
+# Extensionless files whose name fixes the syntax.
+BY_NAME = {
+    'dockerfile': HASH, 'makefile': HASH, 'pre-commit': HASH, 'gemfile': HASH,
+    'caddyfile': HASH, '.gitattributes': HASH, '.editorconfig': INI, '.gitignore': HASH,
+}
+
+# JSON proper carries no comments, so a `//` in one is data.
+NO_COMMENTS = frozenset({'.lock', '.csv', '.tsv', '.txt', '.svg', '.min'})
+
+
+def syntax_for(path: Path) -> Syntax | None:
+    """The comment syntax for this file, or None when it carries no comments."""
+    name = path.name.lower()
+    if name in BY_NAME:
+        return BY_NAME[name]
+    suffix = path.suffix.lower()
+    if suffix in NO_COMMENTS:
+        return None
+    if suffix in SYNTAX:
+        return SYNTAX[suffix]
+    return HASH if not suffix else None
+
+
+def strip_strings(line: str, quotes: str, verbatim: bool = False,
+                  carried: bool = False) -> tuple[str, bool]:
+    """Blank quoted spans so a comment marker inside a string is not read as one.
+
+    Length-preserving, so an offset into the result is an offset into the line.
+    A verbatim string takes its own rules where the syntax has one.
+    There the backslash is an ordinary character and a doubled quote is the escape, so reading a
+    backslash as an escape consumes the closing quote and blanks the rest of the line.
+    It also spans lines, so `carried` opens one and the second return says it is still open.
+    """
+    out = list(line)
+    quote = '"' if carried else ''
+    inside_verbatim = carried
+    escaped = False
+    i = 0
+    while i < len(line):
+        ch = line[i]
+        if escaped:
+            escaped = False
+            out[i] = ' '
+        elif inside_verbatim:
+            if ch == quote and line[i + 1:i + 2] == quote:   # a doubled quote is one character
+                out[i] = out[i + 1] = ' '
+                i += 2
+                continue
+            out[i] = ' ' if ch != quote else ch
+            if ch == quote:
+                quote, inside_verbatim = '', False
+        elif ch == '\\' and quote:
+            escaped = True
+            out[i] = ' '
+        elif quote:
+            out[i] = ' ' if ch != quote else ch
+            if ch == quote:
+                quote = ''
+        elif ch in quotes:
+            quote = ch
+            # An interpolated one is spelled either way round, so read the whole prefix.
+            # Only the double-quoted form has a verbatim spelling, so a char literal is ordinary.
+            start = i
+            while start > 0 and line[start - 1] in '@$':
+                start -= 1
+            inside_verbatim = verbatim and ch == '"' and '@' in line[start:i]
+        i += 1
+    return ''.join(out), inside_verbatim
+
+
+# A pragma, shebang, or divider is machinery rather than prose.
+NOT_PROSE = re.compile(r'^(!|\s*[-=#*/<>]+\s*$)|noqa|type:\s*ignore|pylint|ruff:|mypy:|shellcheck'
+                       r'|cSpell|markdownlint|omit from toc|prettier|eslint|SPDX|Copyright'
+                       r'|^v\d+(\.\d+)*$')
+
+# Two sentences on one line, guarded against an abbreviation, an initial, or a dotted identifier.
+# The initial guard anchors on a word boundary: `J. Smith` is one name, where a sentence ending in
+# an acronym such as CI is two sentences and has to be caught.
+# The second sentence may open in either case, since a lowercase opening is still a second sentence.
+RUN_ON = re.compile(r'(?<!\b[A-Z])(?<!\be\.g)(?<!\bi\.e)(?<!\bvs)(?<!\betc)[.!?]\s+(?=[A-Za-z])')
 CODE_FENCE = re.compile(r'^\s*(```|~~~)')
 
 # Both are correct English. `the the` is always a typo, so it is not here.
@@ -175,6 +327,212 @@ def strip_quoted(s: str) -> str:
     return re.sub(r'"[^"\n]*"', '""', s)
 
 
+def in_numeric_context(line: str, pos: int) -> bool:
+    """Whether the character at `pos` sits in an expression rather than in a sentence.
+
+    The discriminator is what flanks it once spaces are skipped. A digit, a tier-3 unit, or
+    another operator on either side makes it the range it describes. A word on both sides makes
+    it prose, which is the case the ASCII form is for.
+    """
+    def neighbor(step: int) -> str:
+        j = pos + step
+        while 0 <= j < len(line) and line[j].isspace():
+            j += step
+        return line[j] if 0 <= j < len(line) else ''
+
+    return any(c and (NUMERIC.match(c) or c in TIER3 or c in TIER2)
+               for c in (neighbor(-1), neighbor(1)))
+
+
+def charset_findings(lineno: int, line: str) -> list[tuple[int, str, str]]:
+    """Every non-ASCII character on the line, judged against its tier.
+
+    An unrecognized character is reported rather than passed. A gate that allows whatever it does
+    not recognize stops gating as the character set grows.
+    """
+    out: list[tuple[int, str, str]] = []
+    for pos, ch in enumerate(line):
+        if ch.isascii():
+            continue
+        name = unicodedata.name(ch, f'U+{ord(ch):04X}')
+        if ch in TIER3:
+            continue
+        if ch in TIER1:
+            fix = TIER1[ch]
+            hint = 'restructure the sentence' if fix == 'restructure' else f"use '{fix}'"
+            out.append((lineno, 'charset', f'{name} (U+{ord(ch):04X}) -> {hint}'))
+        elif ch in TIER2:
+            if not in_numeric_context(line, pos):
+                out.append((lineno, 'charset',
+                            f"{name} (U+{ord(ch):04X}) in prose -> use '{TIER2[ch]}'"))
+        else:
+            out.append((lineno, 'charset-unknown',
+                        f'{name} (U+{ord(ch):04X}) is in no tier - classify it in GOVERNANCE.md'))
+    return out
+
+
+def python_comments(raw: str) -> list[tuple[int, str, bool]] | None:
+    """Every comment in Python source as (line, text, starts-the-line), or None if it will not parse.
+
+    `tokenize` rather than a regex because a `#` inside a string literal is not a comment, and a
+    trailing comment is one a line-anchored pattern never sees.
+    """
+    out: list[tuple[int, str, bool]] = []
+    try:
+        for tok in tokenize.generate_tokens(io.StringIO(raw).readline):
+            if tok.type == tokenize.COMMENT:
+                leading = not tok.line[:tok.start[1]].strip()
+                out.append((tok.start[0], tok.string.lstrip('#').strip(), leading))
+    except (tokenize.TokenError, IndentationError, SyntaxError, ValueError):
+        return None
+    return out
+
+
+def extracted_comments(path: Path, lines: list[str]) -> list[tuple[int, str, bool]]:
+    """Every comment in the file as (line, text, starts-the-line), for any syntax the fleet uses.
+
+    A marker inside a string literal is not a comment, so each line is scanned with quoted spans
+    blanked first. A documentation comment is skipped: CODESTYLE governs those and permits the
+    paragraphs this rule forbids.
+    """
+    spec = syntax_for(path)
+    if spec is None:
+        return []
+    out: list[tuple[int, str, bool]] = []
+    closing = ''
+    doc_closing = ''
+    in_string = False
+    for n, raw in enumerate(lines, 1):
+        line = raw.rstrip('\r')
+        pos = 0
+        if doc_closing:                              # CODESTYLE owns every line until it closes
+            end = line.find(doc_closing)
+            if end < 0:
+                continue
+            pos, doc_closing = end + len(doc_closing), ''
+        elif closing:                                # carried in from an unclosed block
+            end = line.find(closing)
+            body = (line if end < 0 else line[:end]).strip()
+            # Only `/* */` continues a line with a leading `*`, and only on a line it continues.
+            # Taking it off anywhere else edits the prose the rules then judge.
+            # The marker is one `*` against whitespace, so `**bold**` and `*emphasis*` keep theirs.
+            if closing == '*/' and body.startswith('*') and body[1:2].isspace():
+                body = body[1:].strip()
+            if body:
+                out.append((n, body, True))
+            if end < 0:
+                continue
+            pos, closing = end + len(closing), ''
+        # Scan left to right and take whichever marker comes first.
+        # A ceiling can only describe the first comment, so a later one was unreachable.
+        while pos < len(line):
+            # Mask from here rather than once per line, so comment text never sets string state.
+            # A quote in a comment is prose, and reading it as a string blanks the markers after it.
+            tail, tail_state = strip_strings(line[pos:], spec['quotes'], spec['verbatim'], in_string)
+            masked = ' ' * pos + tail
+            found: str | tuple[str, str] | None = None
+            at = len(line)
+            for marker in spec['line']:
+                where = masked.find(marker, pos)
+                if 0 <= where < at:
+                    at, found = where, marker
+            for opener, closer in spec['block']:
+                where = masked.find(opener, pos)
+                if 0 <= where < at:
+                    at, found = where, (opener, closer)
+            if found is None:
+                in_string = tail_state               # the rest of the line is code
+                break
+            # Only the code before the marker advances the string state.
+            _, in_string = strip_strings(line[pos:at], spec['quotes'], spec['verbatim'], in_string)
+            # CODESTYLE owns a documentation comment, so this rule skips over it.
+            # A line one runs to end of line, while a closed block one gives the rest back.
+            if any(line[at:].startswith(d) for d in spec['doc']):
+                if isinstance(found, str):
+                    break
+                end = line.find(found[1], at + len(found[0]))
+                if end < 0:
+                    doc_closing = found[1]               # it carries on into the lines below
+                    break
+                pos = end + len(found[1])
+                continue
+            leading = not line[:at].strip()
+            if isinstance(found, str):               # a line comment runs to end of line
+                body = line[at + len(found):].strip()
+                if body:
+                    out.append((n, body, leading))
+                break
+            opener, closer = found
+            end = line.find(closer, at + len(opener))    # a quote in the comment is prose
+            body = (line[at + len(opener):end if end >= 0 else None]).strip()
+            if body:
+                out.append((n, body, leading))
+            if end < 0:
+                closing = closer
+                break
+            pos = end + len(closer)
+    return out
+
+
+def fenced_lines(lines: list[str]) -> set[int]:
+    """Line numbers inside a fenced block, which every rule skips.
+
+    A fenced example is quoted code rather than this file's own prose, so a comment in one belongs
+    to whatever is being shown.
+    """
+    out: set[int] = set()
+    in_fence = False
+    for n, raw in enumerate(lines, 1):
+        if CODE_FENCE.match(raw.rstrip('\r')):
+            in_fence = not in_fence
+            out.add(n)
+            continue
+        if in_fence:
+            out.add(n)
+    return out
+
+
+def comment_wrap_findings(path: Path, raw: str, lines: list[str]) -> list[tuple[int, str, str]]:
+    """Comment lines whose sentence wraps into the next, or that carry two sentences.
+
+    The rule is one sentence per comment line. A wrapped sentence is the common failure, and a
+    run-on is the other half of the same rule, so both are reported.
+    """
+    comments = python_comments(raw) if path.suffix == '.py' else None
+    if comments is None:
+        comments = extracted_comments(path, lines)
+    skip = fenced_lines(lines)
+    comments = [c for c in comments if c[0] not in skip]
+
+    out: list[tuple[int, str, str]] = []
+    prev_body = ''
+    prev_no = 0
+    for n, body, leading in comments:
+        if not body or NOT_PROSE.search(body):
+            prev_body = ''
+            continue
+        if RUN_ON.search(strip_inline_code(body)):
+            out.append((n, 'comment-wrap', 'two sentences on one comment line -> split them'))
+        # A continuation is the very next line: two comments with code between them are separate.
+        adjacent = n == prev_no + 1
+        continuation = (adjacent and leading and prev_body
+                        and not SENT_END.search(prev_body) and body[:1].islower())
+        if continuation:
+            out.append((prev_no, 'comment-wrap',
+                        'comment sentence wraps into the next line -> one sentence per line'))
+        # A lowercase opening that is not a continuation is a sentence that failed to start.
+        elif leading and body[:1].islower():
+            out.append((n, 'comment-case',
+                        'comment sentence opens in lowercase -> capitalize, or restructure so it '
+                        'does not open on a lowercase name'))
+        # A trailing comment can start a sentence the next full-line comment continues, so it is
+        # remembered. The continuation itself still has to be a full-line comment, since a
+        # trailing one annotates its own line rather than continuing the line above.
+        prev_body = body
+        prev_no = n
+    return out
+
+
 def check_file(path: Path, rules: set[str]) -> list[tuple[int, str, str]]:
     out: list[tuple[int, str, str]] = []
     try:
@@ -182,6 +540,8 @@ def check_file(path: Path, rules: set[str]) -> list[tuple[int, str, str]]:
     except (UnicodeDecodeError, OSError):
         return out
     lines = raw.split('\n')
+    if {'comment-wrap', 'comment-case'} & rules:
+        out.extend(f for f in comment_wrap_findings(path, raw, lines) if f[1] in rules)
     in_fence = False
     prev_txt = ''
     prev_no = 0
@@ -194,21 +554,30 @@ def check_file(path: Path, rules: set[str]) -> list[tuple[int, str, str]]:
         if in_fence:
             continue
 
-        if 'ascii' in rules:
-            for ch in set(line):
-                fix = SUGGEST.get(ch)
-                if fix is None:
-                    continue
-                name = unicodedata.name(ch, f'U+{ord(ch):04X}')
-                out.append((i, 'ascii', f"typographic {name} -> use '{fix}'"))
+        if 'charset' in rules or 'charset-unknown' in rules:
+            out.extend(f for f in charset_findings(i, line) if f[1] in rules)
 
         txt = strip_inline_code(line)
         prose = strip_quoted(txt) if path.suffix == '.md' else txt
 
-        if 'semicolon' in rules:
-            m = SPLICE.search(prose)
-            if m:
-                out.append((i, 'semicolon', f"semicolon splice before '{m.group('w')}'"))
+        # Both prose rules are markdown-only until a comment can be told from code.
+        # A shell script carries 78 statement separators that are not prose at all.
+        if path.suffix == '.md':
+            if 'semicolon' in rules:
+                listish = prose.count(';') > 1 or ':' in prose.split(';')[0]
+                for m in SEMICOLON.finditer(prose):
+                    # A list keeps its semicolons, and a list announces itself with a colon or by
+                    # having more than one separator.
+                    if listish and ',' in prose[:m.start()]:
+                        continue
+                    out.append((i, 'semicolon', 'semicolon in prose -> a comma or two sentences'))
+            if 'dash' in rules:
+                skip = LABEL_DASH.match(prose)
+                for m in DASH.finditer(prose):
+                    if skip and m.start() < skip.end():
+                        continue
+                    out.append((i, 'dash',
+                                'spaced hyphen -> a comma, two sentences, or parentheses'))
 
         if 'dupword' in rules:
             for m in DUPWORD.finditer(prose):
@@ -222,7 +591,7 @@ def check_file(path: Path, rules: set[str]) -> list[tuple[int, str, str]]:
                         and not re.match(r'^\s*\[[^\]]+\]:', stripped))
             if prev_txt and is_prose:
                 p = prev_txt.strip()
-                # previous prose line ended mid-sentence and this line continues it
+                # The previous prose line ended mid-sentence, and this line continues it.
                 if (p and not SENT_END.search(p) and not p.endswith((':', '-', '|'))
                         and stripped[0].islower()):
                     out.append((prev_no, 'sentence-split',
