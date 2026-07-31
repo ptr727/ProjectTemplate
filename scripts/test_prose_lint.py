@@ -377,6 +377,13 @@ class TestCommentWrap(BaitCase):
         self.assertEqual([(1, 'Start here.', True), (2, 'Still going.', True)],
                          prose_lint.extracted_comments(Path('a.cs'),
                                                        ['/* Start here.', ' * Still going. */']))
+        # The marker is one `*` and a space, so a continuation line keeps its own emphasis.
+        for text, body in ((' * **bold** here */', '**bold** here'),
+                           (' **bold** here */', '**bold** here'),
+                           (' *emphasis* here */', '*emphasis* here')):
+            with self.subTest(line=text):
+                self.assertEqual([(1, 'Start.', True), (2, body, True)],
+                                 prose_lint.extracted_comments(Path('a.cs'), ['/* Start.', text]))
 
     def test_a_format_with_no_comment_syntax_is_skipped(self) -> None:
         for name in ('a.lock', 'a.csv', 'a.txt'):

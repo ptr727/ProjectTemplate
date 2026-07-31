@@ -415,8 +415,9 @@ def extracted_comments(path: Path, lines: list[str]) -> list[tuple[int, str, boo
             body = (line if end < 0 else line[:end]).strip()
             # Only `/* */` continues a line with a leading `*`, and only on a line it continues.
             # Taking it off anywhere else edits the prose the rules then judge.
-            if closing == '*/':
-                body = body.lstrip('*').strip()
+            # The marker is one `*` and a space, so `**bold**` and `*emphasis*` keep theirs.
+            if closing == '*/' and body.startswith('*') and body[1:2].isspace():
+                body = body[1:].strip()
             if body:
                 out.append((n, body, True))
             if end < 0:
