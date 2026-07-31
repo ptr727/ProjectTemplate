@@ -57,7 +57,7 @@ _GIT_PUSH = re.compile(r"\bgit\b.*?\bpush\b", re.S)
 # --- Bypass-of-branch-rule detectors (Rule 4) --------------------------------------------------------
 # A git operation is denied when it would only succeed by bypassing an active branch rule - the harm is
 # that the maintainer's admin identity CAN bypass, so a plain-looking push silently lands on a protected
-# branch. The judgement is made against the branch's *live* rules (self-configuring: a code-style develop
+# branch. The judgment is made against the branch's *live* rules (self-configuring: a code-style develop
 # carries `pull_request` and is denied, a config-style develop does not and is allowed), except for the
 # explicit-bypass flags below, which are the bypass by definition and need no query.
 #

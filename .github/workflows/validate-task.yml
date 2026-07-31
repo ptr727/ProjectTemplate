@@ -66,10 +66,10 @@ jobs:
       - name: Check repo gates step
         run: python3 scripts/repo_gate.py
 
-      # The charset and duplicate-word rules are clean tree-wide, so they gate.
+      # The charset, duplicate-word and spelling rules are clean tree-wide, so they gate.
       # Every other prose rule reports in the step below without gating.
       - name: Check prose step
-        run: python3 scripts/prose_lint.py . --check charset --check dupword
+        run: python3 scripts/prose_lint.py . --check charset --check dupword --check spelling
 
       # Warn-only, and visible rather than absent: an unrun check is one nobody acts on.
       # The backlog is corrected as each file is next edited, never swept.

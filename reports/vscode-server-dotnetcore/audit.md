@@ -85,7 +85,7 @@ None. No applicable check fails both letter and intent.
 9. **Dispatch guard skips instead of failing fast.** `publish-release.yml:33` silently no-ops a dispatch from a non-`main`/`develop` ref; WORKFLOW.md D2.3 wants a fail-fast `::error::`. **(Recurs across the fleet.)**
 10. **Docker-only release attaches repo files without the `expect_release_assets` mechanism.** The bespoke `build-release-task.yml:117-128` lists `LICENSE`/`README.md` directly with `fail_on_unmatched_files: true` rather than the template's `expect_release_assets: false` + `release-asset-*` pattern download. Equivalent tag+files outcome; forks the mechanism (differs from ESPHome-NonRoot, which reached tag-only by omitting `fail_on_unmatched_files`).
 11. **README reshaped from the canonical structure.** `## License` is the first section (`README.md:6`); no `## Build and Distribution` parent, no `## Table of Contents`, no `Releases`/`Use Cases`/`Questions or Issues`; headings are flat `##` siblings; all links inline, not reference-style. Content complete; shape non-canonical - more minimal than the other docker repos.
-12. **`HISTORY.md` overstates the publish model.** `HISTORY.md:8` says the weekly run "publishes both `main` ... and `develop`", but the schedule is `main`-only (`publish-release.yml:12-16`) and `develop` publishes only via manual dispatch. Minor doc/behaviour mismatch.
+12. **`HISTORY.md` overstates the publish model.** `HISTORY.md:8` says the weekly run "publishes both `main` ... and `develop`", but the schedule is `main`-only (`publish-release.yml:12-16`) and `develop` publishes only via manual dispatch. Minor doc/behavior mismatch.
 13. **`develop` diverged from `main`** (ahead 1, behind 19). See Develop Drift.
 
 ## Proposed Registry / Spec Updates
