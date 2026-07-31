@@ -8,7 +8,7 @@ Supported hosts:
 - **macOS** - both the devcontainer flow and the host-install flow.
 - **Windows** - the devcontainer flow requires **WSL2**, and native Windows (PowerShell + winget) is supported only for the host-install flow described in `README.md`. The bind-mounts in `.devcontainer/dotnet/devcontainer.json` and `.devcontainer/python/devcontainer.json` rely on POSIX paths and only work from Linux/macOS/WSL2.
 
-> **Shell assumptions in this doc**: every command snippet below assumes a **POSIX shell** (bash/zsh) and POSIX path conventions (`~/.ssh/...`, `mkdir -p`, `$(...)` command substitution). On Windows, run them from **WSL2** or **Git Bash**, since they will not work as-is in PowerShell or `cmd.exe`. The git config and `gh` commands are portable; only the file/path manipulation differs by shell.
+> **Shell assumptions in this doc**: every command snippet below assumes a **POSIX shell** (bash/zsh) and POSIX path conventions (`~/.ssh/...`, `mkdir -p`, `$(...)` command substitution), with one exception. A block marked `powershell` is the **Windows-native** form of the step it sits in, meant to run in PowerShell rather than translated. On Windows, run the POSIX snippets from **WSL2** or **Git Bash**, since they will not work as-is in PowerShell or `cmd.exe`. The git config and `gh` commands are portable, and only the file and path manipulation differs by shell.
 
 ## What a Host Must Provide
 
