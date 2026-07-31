@@ -208,7 +208,9 @@ HASH: Syntax = {**PLAIN, 'line': ('#',)}
 SHELL: Syntax = {**HASH, 'raw': "'", 'escape': '\\', 'carry': frozenset({'quote', 'label'})}
 # A YAML block scalar is the multi-line form.
 # A plain scalar's apostrophe is not a string, so an ordinary quote must not carry here.
-YAML: Syntax = {**HASH, 'carry': frozenset({'block'})}
+YAML: Syntax = {**HASH, 'raw': "'", 'carry': frozenset({'block'})}
+# A TOML literal string is raw the same way, while its basic string keeps the backslash escape.
+TOML: Syntax = {**HASH, 'raw': "'"}
 C_LIKE: Syntax = {**PLAIN, 'line': ('//',), 'block': (('/*', '*/'),), 'doc': ('///', '/**')}
 # C# alone carries the verbatim string, where a backslash is ordinary and a doubled quote escapes.
 CSHARP: Syntax = {**C_LIKE, 'verbatim': True, 'carry': frozenset({'verbatim'})}
@@ -225,7 +227,7 @@ CSS: Syntax = {**PLAIN, 'block': (('/*', '*/'),)}
 SYNTAX: dict[str, Syntax] = {
     # Python, shell, and the hash-commented configs
     '.py': HASH, '.sh': SHELL, '.bash': SHELL, '.yml': YAML, '.yaml': YAML,
-    '.toml': HASH, '.tf': HASH, '.gitattributes': HASH, '.gitignore': HASH,
+    '.toml': TOML, '.tf': HASH, '.gitattributes': HASH, '.gitignore': HASH,
     # C#, C, and C++
     '.cs': CSHARP, '.c': C_LIKE, '.cpp': C_LIKE, '.cc': C_LIKE, '.cxx': C_LIKE,
     '.h': C_LIKE, '.hpp': C_LIKE, '.jsonc': C_LIKE, '.json5': C_LIKE,

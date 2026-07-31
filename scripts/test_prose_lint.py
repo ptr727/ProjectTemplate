@@ -672,6 +672,22 @@ class TestMultiLineStrings(BaitCase):
         self.assertEqual(['comment-wrap'], self.flag('a.yml', 'key: a | b\n'
                                                               f'# {self.BAIT}\n'))
 
+    def test_a_single_quoted_yaml_or_toml_scalar_takes_no_backslash_escape(self) -> None:
+        r"""A trailing backslash would otherwise consume the closing quote and hide the comment.
+
+        Both languages spell the escape as a doubled quote in the single-quoted form, and both
+        keep the backslash escape in the double-quoted one, so the two forms are read differently
+        in the same file. The bait is a trailing comment, which only survives a correct read.
+        """
+        for name, code in (('a.yml', "key: 'C:\\tmp\\'"), ('a.yml', "key: 'it''s'"),
+                           ('a.toml', "s = 'C:\\tmp\\'"), ('a.toml', "s = 'it''s'")):
+            with self.subTest(file=name, code=code):
+                self.assertEqual(['comment-wrap'], self.flag(name, f'{code}  # {self.BAIT}\n'))
+        # The double-quoted form keeps it, so an escaped quote does not close the string early.
+        for name, code in (('a.yml', 'key: "a\\"b"'), ('a.toml', 's = "a\\"b"')):
+            with self.subTest(file=name, code=code):
+                self.assertEqual(['comment-wrap'], self.flag(name, f'{code}  # {self.BAIT}\n'))
+
     def test_a_form_carries_only_in_the_syntax_that_has_it(self) -> None:
         """A YAML plain scalar's apostrophe is not a string, and a TOML file has no heredoc.
 
