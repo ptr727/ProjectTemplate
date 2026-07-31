@@ -531,7 +531,9 @@ def extracted_comments(path: Path, lines: list[str]) -> list[tuple[int, str, boo
     for n, raw in enumerate(lines, 1):
         line = raw.rstrip('\r')
         pos = 0
-        head = ''                                    # the masked code, for a string opening here
+        # Every code span on the line, comments blanked, for a string this line opens.
+        # Built up rather than captured once, since code after a closed block comment is code.
+        code = [' '] * len(line)
         if carry.kind in WHOLE_LINE:                 # the line is string content until it closes
             carry, resumed = resume_at(carry, line)
             if resumed is None:
@@ -557,7 +559,6 @@ def extracted_comments(path: Path, lines: list[str]) -> list[tuple[int, str, boo
             pos, closing = end + len(closing), ''
         # Scan left to right and take whichever marker comes first.
         # A ceiling can only describe the first comment, so a later one was unreachable.
-        scanned = False
         while pos < len(line):
             # Mask from here rather than once per line, so comment text never sets string state.
             # A quote in a comment is prose, and reading it as a string blanks the markers after it.
@@ -574,8 +575,7 @@ def extracted_comments(path: Path, lines: list[str]) -> list[tuple[int, str, boo
                 where = masked.find(opener, pos)
                 if 0 <= where < at:
                     at, found = where, (opener, closer)
-            if not scanned:
-                head, scanned = masked[:at], True    # the code this line opens a string from
+            code[pos:at] = masked[pos:at]
             if found is None:
                 carry = tail_state                   # the rest of the line is code
                 break
@@ -610,7 +610,7 @@ def extracted_comments(path: Path, lines: list[str]) -> list[tuple[int, str, boo
             pos = end + len(closer)
         # A string opened here carries into the lines below only where the syntax has that form.
         # A block comment left open owns them instead, so nothing opens under one.
-        form = CLEAR if (closing or doc_closing) else opened_string(spec, head, line)
+        form = CLEAR if (closing or doc_closing) else opened_string(spec, ''.join(code), line)
         carry = form if form.kind else (carry if carry.kind in spec['carry'] else CLEAR)
     return out
 

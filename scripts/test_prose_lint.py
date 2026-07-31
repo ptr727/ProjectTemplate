@@ -760,6 +760,21 @@ class TestMultiLineStrings(BaitCase):
                 self.assertIn(kind, prose_lint.SYNTAX[label]['carry'])
         self.assertIn('label', prose_lint.BY_NAME['dockerfile']['carry'])
 
+    def test_a_string_opens_from_code_after_a_closed_block_comment(self) -> None:
+        """The code a line holds is every span outside its comments, not only the first one.
+
+        Reading only the code before the first marker misses an opener that sits after a block
+        comment that closed on the same line. The here-string then falls back to an ordinary
+        carried quote, which the first quote in its body closes, and scanning resumes inside it.
+        """
+        for opener in ('<# Note. #> $s = @"', '$s = @"'):
+            with self.subTest(opener=opener):
+                self.assertEqual([],
+                                 self.flag('a.ps1', f'{opener}\n'
+                                                    'he said "hi\n'
+                                                    f'# {self.BAIT}\n'
+                                                    '"@\n'))
+
     def test_a_string_does_not_open_under_a_block_comment(self) -> None:
         """The block comment owns the lines below, so its text cannot open one."""
         self.assertEqual(['comment-wrap', 'comment-wrap'],
