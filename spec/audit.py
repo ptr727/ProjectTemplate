@@ -501,18 +501,19 @@ def audit_repo(entry, spec, branch=None):
     branch_main = gh(f"repos/{slug}/branches/main", ok404=True)
     branch_dev = gh(f"repos/{slug}/branches/develop", ok404=True)
     main_exists, dev_exists = branch_main is not None, branch_dev is not None
+    if not main_exists:
+        findings.append(("DEFECT", "branch: main does not exist"))
+    if bool(entry.get("hasDevelop")) != dev_exists:
+        findings.append(("DRIFT", f"registry: hasDevelop={entry.get('hasDevelop')} but develop {'exists' if dev_exists else 'is absent'}"))
     # Resolve the branch every content read is keyed on, reusing what the branch facts already read.
     # An unresolvable one is an error rather than a run: every `?ref=` read would 404 and report the
     # whole baseline as absent, which is a flood of letters describing the ref, not the repo.
+    # The branch facts above are reported either way, since they are already read and still true.
     ground_head = {"main": branch_main, "develop": branch_dev}.get(ground)
     if ground_head is None:
         ground_head = gh(f"repos/{slug}/branches/{ground}", ok404=True)
     if ground_head is None:
         return findings + [("ERROR", f"branch: ground-truth branch {ground} does not exist, so nothing could be read")], ""
-    if not main_exists:
-        findings.append(("DEFECT", "branch: main does not exist"))
-    if bool(entry.get("hasDevelop")) != dev_exists:
-        findings.append(("DRIFT", f"registry: hasDevelop={entry.get('hasDevelop')} but develop {'exists' if dev_exists else 'is absent'}"))
     if main_exists and dev_exists:
         # Commit counts mislead here: merge-commit promotions leave main permanently "ahead" while the
         # head trees are identical, so tree equality is the no-drift fast path. When the head trees
@@ -1042,19 +1043,22 @@ def _selftest():
 
     # A ground-truth branch that does not resolve is one error, not a baseline's worth of letters.
     # Every `?ref=` read would 404 and report each carried file absent, describing the ref, not the repo.
-    entry = {"name": "Fixture", "url": "https://github.com/owner/Fixture", "hasDevelop": False}
+    # The branch facts are already read at that point, so they are reported rather than dropped.
+    entry = {"name": "Fixture", "url": "https://github.com/owner/Fixture", "hasDevelop": True}
     real_gh = globals()["gh"]
     globals()["gh"] = lambda path, ok404=False: None if "/branches/" in path else {"private": False}
     try:
         missing_findings, missing_sha = audit_repo(entry, {"registry": {}}, "no-such-branch")
     finally:
         globals()["gh"] = real_gh
+    kinds = [k for k, _ in missing_findings]
     errors = [t for k, t in missing_findings if k == "ERROR"]
-    if missing_sha != "" or len(errors) != 1 or "no-such-branch" not in errors[0]:
+    if (missing_sha != "" or len(errors) != 1 or "no-such-branch" not in errors[0]
+            or kinds != ["DEFECT", "DRIFT", "ERROR"]):
         ok = False
         print(f"  FAIL missing ground branch -> {missing_findings}")
     else:
-        print("  ok   missing ground branch: one error naming the ref, no file-presence letters")
+        print("  ok   missing ground branch: the branch facts, then one error naming the ref, no letters")
 
     print("SELFTEST PASS" if ok else "SELFTEST FAIL")
     return 0 if ok else 1
