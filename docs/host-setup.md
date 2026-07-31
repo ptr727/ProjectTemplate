@@ -1,23 +1,25 @@
 # Host Setup
 
-Prerequisites for working with this repo locally - apply once per machine before opening the devcontainer or building outside one.
+Prerequisites for working with this repo locally, applied once per machine before opening the devcontainer or building outside one.
 
 Supported hosts:
 
 - **Linux** - both the devcontainer flow and the host-install flow.
 - **macOS** - both the devcontainer flow and the host-install flow.
-- **Windows** - the devcontainer flow requires **WSL2**; native Windows (PowerShell + winget) is supported only for the host-install flow described in `README.md`. The bind-mounts in `.devcontainer/dotnet/devcontainer.json` and `.devcontainer/python/devcontainer.json` rely on POSIX paths and only work from Linux/macOS/WSL2.
+- **Windows** - the devcontainer flow requires **WSL2**, and native Windows (PowerShell + winget) is supported only for the host-install flow described in `README.md`. The bind-mounts in `.devcontainer/dotnet/devcontainer.json` and `.devcontainer/python/devcontainer.json` rely on POSIX paths and only work from Linux/macOS/WSL2.
 
-> **Shell assumptions in this doc**: every command snippet below assumes a **POSIX shell** (bash/zsh) and POSIX path conventions (`~/.ssh/...`, `mkdir -p`, `$(...)` command substitution). On Windows, run them from **WSL2** or **Git Bash** - they will not work as-is in PowerShell or `cmd.exe`. The git config and `gh` commands are portable; only the file/path manipulation differs by shell.
+> **Shell assumptions in this doc**: every command snippet below assumes a **POSIX shell** (bash/zsh) and POSIX path conventions (`~/.ssh/...`, `mkdir -p`, `$(...)` command substitution). On Windows, run them from **WSL2** or **Git Bash**, since they will not work as-is in PowerShell or `cmd.exe`. The git config and `gh` commands are portable; only the file/path manipulation differs by shell.
 
 ## Git Identity
 
-Configure your name and email - used for commit authorship.
+Configure your name and email, used for commit authorship. **The email is the committing account's GitHub `noreply` address, never a private, personal, or invented one**, per [GOVERNANCE.md "Git and Commit Rules"][governance-git-and-commit-rules], which owns the rule and states the fleet's value. A private address trips GitHub's email-privacy push protection (GH007), and an invented one pollutes history.
 
 ```shell
 git config --global user.name "Your Name"
-git config --global user.email "you@example.com"
+git config --global user.email "<id>+<username>@users.noreply.github.com"
 ```
+
+Set this **globally**, once per machine. Repositories inherit it, so a repo-local `user.email` is redundant where the global is right and a wrong identity where it is not. An agent standing up a repo verifies this configuration rather than setting it ([`STANDUP.md`][standup] step 0).
 
 ## SSH Key
 
@@ -60,7 +62,7 @@ systemctl --user enable --now ssh-agent.socket
 ssh-add ~/.ssh/id_ed25519
 ```
 
-For non-systemd shells, add to `~/.bashrc` or `~/.zshrc`. The check probes the agent for at least one loaded key - `[ -z "$SSH_AUTH_SOCK" ]` alone would miss the case where `SSH_AUTH_SOCK` is set but points at a stale socket or a keyless agent:
+For non-systemd shells, add to `~/.bashrc` or `~/.zshrc`. The check probes the agent for at least one loaded key, because `[ -z "$SSH_AUTH_SOCK" ]` alone would miss the case where `SSH_AUTH_SOCK` is set but points at a stale socket or a keyless agent:
 
 ```shell
 if [ -z "$SSH_AUTH_SOCK" ] || ! ssh-add -l >/dev/null 2>&1; then
@@ -130,17 +132,19 @@ git log --show-signature -1
 gh auth status
 ```
 
-If signing fails locally, the devcontainer will fail too - fix here first.
+If signing fails locally, the devcontainer will fail too, so fix here first.
 
 ## Next Steps
 
-- [Devcontainer setup][devcontainer] - open the repo in the per-language .NET or Python devcontainer.
-- [SSH commit signing][ssh-signing] - per-OS setup details, verification, and troubleshooting.
+- [Devcontainer setup][devcontainer]: open the repo in the per-language .NET or Python devcontainer.
+- [SSH commit signing][ssh-signing]: per-OS setup details, verification, and troubleshooting.
 
 <!-- Repo -->
 
 [devcontainer]: ./devcontainer.md
+[governance-git-and-commit-rules]: ../GOVERNANCE.md#git-and-commit-rules
 [ssh-signing]: ./ssh-signing.md
+[standup]: ../STANDUP.md
 
 <!-- External -->
 

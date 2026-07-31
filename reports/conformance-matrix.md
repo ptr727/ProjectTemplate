@@ -19,7 +19,7 @@ The primary shapes are stood up as whole repos; the **composable targets** (`nug
 | `upstream-wrapper` | - | not-tested | - | Tag from a committed state file, not SemVer2. |
 | `codegen` | - | not-tested | - | Deterministic matrix over both branches. |
 | `docs` | ProjectTemplate | not-tested | - | Governance hub; CI is lint-only. |
-| `operational` config | - | not-tested | - | `workflowModel: operational`; direct signed commits to `develop`, promotion-PR gate. |
+| `operational` config | - | not-tested | - | `workflowModel: operational`, direct signed commits to `develop`, promotion-PR gate. Carries a required `OPERATIONS.md` (`appliesTo: ["operational"]`, presence-checked) for its runbooks. Blog (#456) is the next standup and the first cold test of `STANDUP.md` step 0. |
 
 ## Composable Targets
 

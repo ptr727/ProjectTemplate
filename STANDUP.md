@@ -4,6 +4,23 @@ How an agent takes a repository from nothing (or a partial state) to **operation
 
 Standing up a repo is **applying the manifests until the audit passes**, nothing more invented. If a repo needs a construct no manifest covers, that is a spec gap: raise it ([`AUDIT.md`][audit] section 9), never improvise a per-repo answer. This is the downward-audit model (standard-style repos the hub audits against their declared type), which the fleet uses because managing downstream divergence is too costly.
 
+## 0. Verify Commit Identity and Signing, Before the First Commit
+
+Do this before `git init` or any commit, because the window closes at the first one. A repo whose initial history is unsigned or committed under the wrong identity cannot be cleanly repaired: `Require signed commits` blocks the first `develop -> main` release, re-signing that history is a non-fast-forward the `Block force pushes` rule rejects, and completing it needs the ruleset temporarily disabled plus a maintainer force-push that [`docs/repo-config-carry.md`][repo-config-carry] forbids an agent to perform. Greenfield repos where signing is live before the first commit never hit this.
+
+**Verify the inherited configuration. Never set it.** The host already carries the correct identity, so a repo-local `user.email` is redundant at best and a wrong identity at worst, and it silently shadows the global it overrides:
+
+```shell
+git config --get user.email            # the GitHub noreply address, per GOVERNANCE.md "Git and Commit Rules"
+git config --get commit.gpgsign        # true
+git config --get gpg.format            # ssh
+git config --local --get user.email    # expect empty - a repo-local override is itself a finding
+```
+
+If any of the first three is wrong or absent, that is a **host** misconfiguration to surface to the maintainer ([`docs/host-setup.md`][host-setup] is the setup procedure), not something to patch per repo. Patching it locally hides a broken host that then produces wrong identities in every other repo on that machine.
+
+After the first commit, confirm it took: `git verify-commit HEAD` reports `G`, and `git log -1 --format='%an <%ae>'` shows the expected identity.
+
 ## 1. Classify and Catalog
 
 Resolve the repo's type(s) with the [`AUDIT.md`][audit] section 2 detection rules, then write or repair its [`registry/repos.json`][repos] entry: `status`, `types[]`, `groundTruthBranch`, `hasDevelop`, `publish[]`, `requiredSecrets[]`, `consumerModel`, `releaseTrigger`, `workflowModel` (omit to take the `release` default), `configLayout`, and `driftNotes` that describe what the repo **actually is**. Run [`spec/validate.py`][validate] to confirm it classifies cleanly. The registry is ground truth about reality, not intent, and a `validate.py`-clean entry is still false if it disagrees with the live repo.
@@ -18,7 +35,7 @@ Copy every [`spec/files.json`][files] entry whose `appliesTo` matches the repo's
 - `ARCHITECTURE.md`: how a code repo is built, its module layout, data flow, and design decisions.
 - `OPERATIONS.md`: how an operational repo is run, covering runbooks, backup, log and debug procedures, tool-usage notes, and config layout.
 
-`OPERATIONS.md` is the operational-repo analogue of `ARCHITECTURE.md`, and it is where an `AGENTS.md` split puts the repo-specific half, so an `operational` repo with real runbooks (a deploy procedure, a rollback, a retention policy, a credential rotation) writes them there rather than into a carried file. It is agent-instruction content, so it takes the inline-link exception the markdown rules name rather than the reference-style default.
+**`OPERATIONS.md` is required on an `operational` repo**, not optional, so it appears in the baseline above with `appliesTo: ["operational"]`. It is presence-checked only, the same footing as `README.md` and `HISTORY.md`, so its content is entirely the repo's own and a repo with little to say still carries the file. It is the operational-repo analogue of `ARCHITECTURE.md`, and it is where an `AGENTS.md` split puts the repo-specific half, so real runbooks (a deploy procedure, a rollback, a retention policy, a credential rotation) go there rather than into a carried file. It is agent-instruction content, so it takes the inline-link exception the markdown rules name rather than the reference-style default. `ARCHITECTURE.md` stays advisory and is not required by any selector.
 
 Choose the destination while scaffolding rather than after. Repo-specific content left in a carried file is drift, which the audit lists as an undeclared section to reconcile, and reconciling it later means moving prose that downstream readers have already started trusting in the wrong place.
 
@@ -62,6 +79,7 @@ The same [`AUDIT.md`][audit] run is the on-demand audit for any known repo, and 
 [codestyle]: ./CODESTYLE.md
 [files]: ./spec/files.json
 [governance]: ./GOVERNANCE.md
+[host-setup]: ./docs/host-setup.md
 [matrix]: ./reports/conformance-matrix.md
 [project-types]: ./spec/project-types.json
 [repo-config]: ./repo-config/
