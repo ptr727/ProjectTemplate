@@ -298,6 +298,16 @@ class TestCommentWrap(BaitCase):
         self.assertEqual([], self.flag('a.cs', f'/// <summary>{self.RUN_ON}</summary>\n'))
         self.assertEqual([], self.flag('a.py', f'"""{self.RUN_ON}"""\n'))
 
+    def test_a_closed_block_doc_gives_the_rest_of_the_line_back(self) -> None:
+        """CODESTYLE owns the documentation comment, not the line it happens to sit on.
+
+        A line doc comment does run to end of line, so only the block form gives anything back.
+        """
+        self.assertEqual([], self.flag('a.cs', f'/** {self.RUN_ON} */\n'))
+        self.assertEqual([], self.flag('a.cs', f'/// {self.RUN_ON} // and more\n'))
+        self.assertEqual(['comment-wrap'],
+                         self.flag('a.cs', '/** Docs. */ // Two things. Here.\n'))
+
     def test_a_format_with_no_comment_syntax_is_skipped(self) -> None:
         for name in ('a.lock', 'a.csv', 'a.txt'):
             with self.subTest(file=name):

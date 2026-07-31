@@ -424,9 +424,16 @@ def extracted_comments(path: Path, lines: list[str]) -> list[tuple[int, str, boo
                     at, found = where, (opener, closer)
             if found is None:
                 break
-            # A documentation comment is left to CODESTYLE, so the rest of the line goes with it.
+            # CODESTYLE owns a documentation comment, so this rule skips over it.
+            # A line one runs to end of line, while a closed block one gives the rest back.
             if any(line[at:].startswith(d) for d in spec['doc']):
-                break
+                if isinstance(found, str):
+                    break
+                end = masked.find(found[1], at + len(found[0]))
+                if end < 0:
+                    break                                # CODESTYLE owns it until it closes
+                pos = end + len(found[1])
+                continue
             leading = not line[:at].strip()
             if isinstance(found, str):               # a line comment runs to end of line
                 body = line[at + len(found):].strip()
