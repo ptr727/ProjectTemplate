@@ -324,8 +324,24 @@ class TestCommentWrap(BaitCase):
         Under verbatim rules the doubled quote is one escaped character and both are blanked,
         so counting what survives tells the two readings apart.
         """
-        masked = prose_lint.strip_strings("var c = @'a''b'; // t", '"\'', True)
+        masked, _ = prose_lint.strip_strings("var c = @'a''b'; // t", '"\'', True)
         self.assertEqual(4, masked.count("'"))
+
+    def test_a_verbatim_string_spans_lines(self) -> None:
+        """It is the one string form here that carries, so masking per line invents comments.
+
+        The line that closes it still gives back what follows the quote.
+        """
+        # The marker on the second line is string content, so nothing is reported.
+        self.assertEqual([], self.flag('a.cs', 'var s = @"line one\n'
+                                               '// Two things. Here.\n'
+                                               'line three";\n'))
+        # The line that closes it still gives back the comment after the quote.
+        self.assertEqual(['comment-wrap'], self.flag('a.cs', 'var s = @"line one\n'
+                                                             'line two"; // Two things. Here.\n'))
+        # A plain string ends on its own line, so the next line is ordinary code.
+        self.assertEqual(['comment-wrap'], self.flag('a.cs', 'var s = "line one";\n'
+                                                             '// Two things. Here.\n'))
 
     def test_a_format_with_no_comment_syntax_is_skipped(self) -> None:
         for name in ('a.lock', 'a.csv', 'a.txt'):

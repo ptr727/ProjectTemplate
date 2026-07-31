@@ -250,17 +250,19 @@ def syntax_for(path: Path) -> Syntax | None:
     return HASH if not suffix else None
 
 
-def strip_strings(line: str, quotes: str, verbatim: bool = False) -> str:
+def strip_strings(line: str, quotes: str, verbatim: bool = False,
+                  carried: bool = False) -> tuple[str, bool]:
     """Blank quoted spans so a comment marker inside a string is not read as one.
 
     Length-preserving, so an offset into the result is an offset into the line.
     A verbatim string takes its own rules where the syntax has one.
     There the backslash is an ordinary character and a doubled quote is the escape, so reading a
     backslash as an escape consumes the closing quote and blanks the rest of the line.
+    It also spans lines, so `carried` opens one and the second return says it is still open.
     """
     out = list(line)
-    quote = ''
-    inside_verbatim = False
+    quote = '"' if carried else ''
+    inside_verbatim = carried
     escaped = False
     i = 0
     while i < len(line):
@@ -292,7 +294,7 @@ def strip_strings(line: str, quotes: str, verbatim: bool = False) -> str:
                 start -= 1
             inside_verbatim = verbatim and ch == '"' and '@' in line[start:i]
         i += 1
-    return ''.join(out)
+    return ''.join(out), inside_verbatim
 
 
 # A pragma, shebang, or divider is machinery rather than prose.
@@ -399,9 +401,13 @@ def extracted_comments(path: Path, lines: list[str]) -> list[tuple[int, str, boo
     out: list[tuple[int, str, bool]] = []
     closing = ''
     doc_closing = ''
+    in_string = False
     for n, raw in enumerate(lines, 1):
         line = raw.rstrip('\r')
-        masked = strip_strings(line, spec['quotes'], spec['verbatim'])
+        was_inside = in_string
+        masked, in_string = strip_strings(line, spec['quotes'], spec['verbatim'], in_string)
+        if was_inside and in_string:                 # the whole line is string content
+            continue
         pos = 0
         if doc_closing:                              # CODESTYLE owns every line until it closes
             end = line.find(doc_closing)
