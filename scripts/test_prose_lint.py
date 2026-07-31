@@ -308,6 +308,25 @@ class TestCommentWrap(BaitCase):
         self.assertEqual(['comment-wrap'],
                          self.flag('a.cs', '/** Docs. */ // Two things. Here.\n'))
 
+    def test_a_multi_line_doc_block_owns_every_line_until_it_closes(self) -> None:
+        """A marker in documentation text is prose, so scanning those lines invents comments.
+
+        The closing line still gives back what follows the closer, which is the one finding here.
+        """
+        self.assertEqual(['comment-wrap'], self.flag('a.cs', '/** Docs start\n'
+                                                             ' * // Two things. Here.\n'
+                                                             ' * /* not an opener\n'
+                                                             ' */ // Two things. Here.\n'))
+
+    def test_verbatim_rules_apply_to_the_double_quoted_form_only(self) -> None:
+        """C# spells a verbatim string with double quotes, so `@` on a char literal is ordinary.
+
+        Under verbatim rules the doubled quote is one escaped character and both are blanked,
+        so counting what survives tells the two readings apart.
+        """
+        masked = prose_lint.strip_strings("var c = @'a''b'; // t", '"\'', True)
+        self.assertEqual(4, masked.count("'"))
+
     def test_a_format_with_no_comment_syntax_is_skipped(self) -> None:
         for name in ('a.lock', 'a.csv', 'a.txt'):
             with self.subTest(file=name):

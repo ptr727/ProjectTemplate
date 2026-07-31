@@ -286,10 +286,11 @@ def strip_strings(line: str, quotes: str, verbatim: bool = False) -> str:
         elif ch in quotes:
             quote = ch
             # An interpolated one is spelled either way round, so read the whole prefix.
+            # Only the double-quoted form has a verbatim spelling, so a char literal is ordinary.
             start = i
             while start > 0 and line[start - 1] in '@$':
                 start -= 1
-            inside_verbatim = verbatim and '@' in line[start:i]
+            inside_verbatim = verbatim and ch == '"' and '@' in line[start:i]
         i += 1
     return ''.join(out)
 
@@ -397,11 +398,17 @@ def extracted_comments(path: Path, lines: list[str]) -> list[tuple[int, str, boo
         return []
     out: list[tuple[int, str, bool]] = []
     closing = ''
+    doc_closing = ''
     for n, raw in enumerate(lines, 1):
         line = raw.rstrip('\r')
         masked = strip_strings(line, spec['quotes'], spec['verbatim'])
         pos = 0
-        if closing:                                  # carried in from an unclosed block
+        if doc_closing:                              # CODESTYLE owns every line until it closes
+            end = line.find(doc_closing)
+            if end < 0:
+                continue
+            pos, doc_closing = end + len(doc_closing), ''
+        elif closing:                                # carried in from an unclosed block
             end = line.find(closing)
             body = (line if end < 0 else line[:end]).strip().lstrip('*').strip()
             if body:
@@ -431,7 +438,8 @@ def extracted_comments(path: Path, lines: list[str]) -> list[tuple[int, str, boo
                     break
                 end = masked.find(found[1], at + len(found[0]))
                 if end < 0:
-                    break                                # CODESTYLE owns it until it closes
+                    doc_closing = found[1]               # it carries on into the lines below
+                    break
                 pos = end + len(found[1])
                 continue
             leading = not line[:at].strip()
