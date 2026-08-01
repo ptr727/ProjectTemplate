@@ -1,44 +1,69 @@
 # Audit: PhotoCleaner
 
-- **Audited branch:** main (`3b33b98956190b91b8ed1d3e49e8242545ea523c`)
+- **Audited branch:** main (`15b9b5b`)
 - **Types:** csharp, console, docker (from registry)
 - **Verdict:** not operational
-- **Date:** 2026-07-23
-- **Run stamp:** `audit run 2026-07-23T13:51:20Z | hub 614a291`
+- **Date:** 2026-08-01
+- **Run stamp:** `audit run 2026-08-01T15:30:19Z | hub 6501479`
+
+Supersedes the 2026-07-23 snapshot, which predated the release pipeline. Everything that snapshot listed as a defect has landed: both rulesets are live, `repo-config/` is carried, and the publisher cut release `1.0.9` on 2026-07-23 with the multi-arch image and the executable 7z attached. What remains is a different set, created mostly by the hub advancing rather than by the repo regressing.
 
 ## Develop Drift
 
-`develop` vs `main`: ahead 1, behind 3 by commit count - **benign**. The three `main`-only commits are `develop -> main` promotion merge commits whose trees match their develop-side parents, an ancestry gap inherent to merge-commit promotions that carries no content `develop` lacks (the audit's content-based branch check is silent on it, and a cherry-pick would be an empty no-op). The one develop-side commit is normal unreleased work. No action.
+`develop` vs `main`: the audit reads both and reports the same findings on each, so `develop` carries no conformance content `main` lacks and vice versa. The commit-count gap is the promotion-merge ancestry artifact recorded before and is **benign**. No action.
 
 ## Dimensions
 
 | Dimension | Letter | Intent | Verdict | Evidence (file:line) |
 | --- | --- | --- | --- | --- |
-| csharp | fail | fail | drift | `.editorconfig:60` carries the repo-wide `dotnet_analyzer_diagnostic.severity = suggestion` CODESTYLE.md forbids (the hub canonical dropped it in ProjectTemplate#400). `PhotoCleaner/PhotoCleaner.csproj:3-4` sets `AnalysisLevel=latest-all` + `EnableNETAnalyzers=true` but **no `TreatWarningsAsErrors` anywhere**, so analyzers are demoted to suggestions and warnings never fail the build. The ProjectTemplate#353 probe measured what this hides: 362 `xUnit1051` + 2 `xUnit1030`, plus pre-existing `NU1903` (SQLitePCLRaw 2.1.10 high-severity advisory) and 4 `CS8625` that warn without failing anything |
-| console | fail | pass | drift | a real System.CommandLine console app (`PhotoCleaner/PhotoCleaner.csproj:9 OutputType=Exe`, `PhotoCleaner/PhotoCleaner.csproj:34 System.CommandLine 2.0.5`, net10.0) but no `build-executable-task.yml` and no release pipeline, so the smoke-subset and `release-asset-<branch>-<target>` checks have nothing to bind to |
-| docker | fail | fail | drift | `Docker/Dockerfile` present but no docker build/push workflow and no `Docker/README.md` - the Dockerfile is dead weight until a pipeline exists |
-| branch-model | fail | fail | defect | **no rulesets at all** - `develop` and `main` both unprotected (audit DEFECT x2). No `repo-config/` payloads to import. Branches diverged (see Develop Drift) |
-| repo-setup | pass | fail | drift | secrets fully provisioned in both stores (`CODECOV_TOKEN`, `CODEGEN_APP_CLIENT_ID`, `CODEGEN_APP_PRIVATE_KEY` in actions + dependabot) but nothing consumes the App creds - `.github/dependabot.yml` is absent (no dual-target sync keystone) and there is no merge-bot workflow |
-| linter-parity | pass | pass | pass | `validate-task.yml:66-88` runs csharpier check, `dotnet format style --verify-no-changes`, markdownlint (SHA-pinned action), cspell (SHA-pinned), actionlint (SHA-pinned), and editorconfig-checker via docker `:latest`. The unit-test job collects coverage and uploads to codecov v7 (`validate-task.yml:36-40`). Matches the fleet lint architecture |
-| recurring-violations | pass | pass | pass | `.gitattributes:3` fleet-standard `* -text` with LF pins for `*.sh` and `.husky/pre-commit`. README em-dash grep clean |
-| readme-structure | fail | pass | drift | app-focused and thorough (`## Overview:5`, `## Usage:46`, flow sections, `## Docker:415`, `## Development Tooling:474`, `## License:653`) but not the fleet section set - no Build and Distribution block (nothing to badge pre-release), no Table of Contents, no Questions or Issues, Development-Environment-Setup slot filled by `Development Tooling` |
-| workflow (WORKFLOW.md 5A/5B) | fail | pass | drift | no publisher, so the 5A publish guarantees are N/A. The PR gate itself is sound - `validate` runs unconditionally and the aggregator carries the canonical ruleset-bound name `Check pull request workflow status job` (`test-pull-request.yml:34-40`, interface contract passes, no paths-filter/smoke by design per the header `test-pull-request.yml:5`) - but with no ruleset the required check binds to nothing, so the gate is advisory until branch-model lands |
+| csharp | pass | pass | pass | `Directory.Build.props` carries the analyzer set and `TreatWarningsAsErrors`, `Directory.Packages.props` centralizes versions, and the repo-wide analyzer relaxation the previous snapshot flagged at `.editorconfig:60` is gone. The shared `[*.cs]` block is present |
+| console | pass | pass | pass | System.CommandLine console (`PhotoCleaner/PhotoCleaner.csproj`, `OutputType=Exe`, net10.0). `build-executable-task.yml` aggregates per-runtime output to `release-asset-<branch>-*`, and the smoke matrix is a strict subset |
+| docker | pass | pass | pass | `Docker/Dockerfile` multi-arch, `Docker/README.md` present, `build-docker-task.yml` uses a registry layer cache (`buildcache-<branch>`), and the image re-pushes on publish |
+| branch-model | pass | pass | pass | Both rulesets live and matching `repo-config/develop.json` and `repo-config/main.json` by normalized diff |
+| repo-setup | pass | pass | pass | Every name in `spec/secrets.json` present in the store its mechanism claims, and no forbidden name |
+| linter-parity | pass | pass | pass | `validate-task.yml:66-88` runs csharpier check, `dotnet format style --verify-no-changes`, markdownlint, cspell, actionlint, and editorconfig-checker. One config per linter |
+| recurring-violations | pass | pass | pass | ASCII clean across the carried docs, and `.gitattributes` is fleet-standard with the LF pins |
+| readme-structure | fail | fail | defect | Intro line 150 characters against the 100-character cap (`README.md:3`), and the Docker Hub short description does not mirror it. No Build and Distribution block, no Table of Contents, no Questions or Issues, and the Development-Environment-Setup slot is filled by `Development Tooling` (`README.md:482`) |
+| workflow (WORKFLOW.md 5A/5B) | fail | pass | drift | The publisher, build tasks, and PR gate satisfy the D-guarantees, **except** that `build-release-task.yml` carries no `validate-release` job, so D2.2 (branch matches version classification) is unimplemented and scenarios S1, S4, and S10 bind to a job name that does not exist. The `github-release` job body matches no hub revision |
+| agent-instruction set | fail | fail | defect | `GOVERNANCE.md` absent, and `AGENTS.md` is the pre-split single file, so neither verbatim region can be compared and all ten of its sections read as undeclared. `.github/copilot-instructions.md` lacks `Reviewing Carried Fleet Content` |
 
 nuget, pypi, python: N/A (no packaging, no Python).
 
 ## Defects (most severe first)
 
-1. **Both branch rulesets missing** - `develop` and `main` are unprotected: no signed-commit requirement, no PR gate, no required status check, force-push and deletion possible. Import `repo-config/develop.json` + `main.json` via `configure.sh apply` once `repo-config/` is carried.
+1. **The agent instruction set predates the router split.** `GOVERNANCE.md` is absent (the only LETTER-class file finding) and `AGENTS.md` still carries the ten topical rule sections inline, so no verbatim region can be compared and every section reads as undeclared. A downstream agent reading this repo gets rule text that no longer tracks the canonical.
+2. **README intro over the cap, and the description mirrors diverged.** The intro is 150 characters against the 100-character Docker Hub cap, and the Docker Hub short description (`Pre-process media files for import into photo management systems.`) no longer matches it, so the repo carries two different canonical sentences.
 
 ## Drift Findings
 
-- `AGENTS.md` is an old skeleton: 6 of the carried intent sections missing (Branching Model, Release Model, Pull Request Title and Commit Message Conventions, Documentation Style Conventions, PR Review Etiquette, Workflow YAML Conventions) and all 3 verbatim universal sections absent (Repository Boundaries and Write Safety, Git and Commit Rules, Verification Discipline) - re-vendor from the hub.
-- `.markdownlint-cli2.jsonc` hand-modified (matches no hub revision) - re-vendor the canonical.
-- Absent baseline files (audit LETTERs): `WORKFLOW.md`, `version.json`, `repo-config/` (all six), `AUDIT.md`, `spec/secrets.json`, `.github/dependabot.yml`, `Docker/README.md`.
-- `.editorconfig:60` analyzer relaxation + no `TreatWarningsAsErrors` (see csharp dimension) - the ProjectTemplate#353 downstream item, sequenced as its own PR (362 sites).
-- Committed `CLAUDE.md` and `PhotoCleaner.code-workspace` at the repo root - repo-local extras. `AGENTS.md` is the fleet's agent-agnostic doc, so a committed `CLAUDE.md` duplicates that role and can drift from it.
+- `.markdownlint-cli2.jsonc` matches a past hub revision, so re-vendor it (the base gained `MD033 allowed_elements` for `details` and `summary`).
+- `repo-config/configure.sh` matches a past hub revision, so re-vendor it (the base gained the `per_page` cap guard in `ruleset_id` and explicit failure guards on four reads).
+- `build-release-task.yml` is missing the `validate-release` job, and its `github-release` body matches no hub revision.
+- `version.json` carries a `nugetPackageVersion` block for a repo that publishes no package (STANDUP.md section 2, "carry only the fields the repo uses"). Not a mechanical finding, since `version.json` is checked at `intent`.
+
+## Convergence in Flight
+
+Six pull requests opened 2026-08-01 against `develop`, one per drift class per AUDIT.md section 10, each driven to a Copilot review on its head SHA and left for the maintainer to merge:
+
+- [#26](https://github.com/ptr727/PhotoCleaner/pull/26) the workspace extension set (`gruntfuggly.todo-tree` to `fanaticpythoner.better-todo-tree`)
+- [#27](https://github.com/ptr727/PhotoCleaner/pull/27) re-vendor the two stale verbatim carries
+- [#28](https://github.com/ptr727/PhotoCleaner/pull/28) the `AGENTS.md` and `GOVERNANCE.md` split, plus `Reviewing Carried Fleet Content`
+- [#29](https://github.com/ptr727/PhotoCleaner/pull/29) the `validate-release` entry gate and the re-vendored `github-release`
+- [#30](https://github.com/ptr727/PhotoCleaner/pull/30) the README and HISTORY structure
+- [#31](https://github.com/ptr727/PhotoCleaner/pull/31) drop the unused `nugetPackageVersion` block
 
 ## Proposed Registry / Spec Updates
 
-- Refresh the stale `driftNotes`: the repo is no longer pre-CI (PR gate + linters live). The current gaps are rulesets, `repo-config/`, `version.json`, governance docs, `dependabot.yml`, and the release pipeline. Applied in the same change as this report.
-- `releaseTrigger: none` remains accurate until a publisher exists.
+- Refresh the `driftNotes`: the second note asserted this report predated the docker and release wiring, which it no longer does. Applied in the same change.
+
+## Escalations
+
+Five spec questions this audit surfaced, raised rather than resolved, per AUDIT.md section 9.
+
+1. **The `HISTORY.md` mirror rule has no carried home.** `spec/readme-structure.md` owns it and the audit enforces it, but that file is hub-only, so a downstream repo cannot point at the rule it is measured against. PhotoCleaner kept the rule as repo-local prose in `CODESTYLE.md` for want of a destination. Either promote it into a carried section, or accept that mechanical-only enforcement is the intent.
+2. **The hub's own `.github/copilot-instructions.md` still describes the pre-split file.** `Reviewing Carried Fleet Content` says "Most of `AGENTS.md` is universal fleet law: every section that states a rule, as opposed to the two that describe this repository's own directory tree and devcontainer". After the split those sections live in `GOVERNANCE.md`, and `AGENTS.md` carries exactly two verbatim sections and no repo-specific ones. Every repo carrying this section downstream inherits the stale description.
+3. **`CODESTYLE.md` contradicts `.markdownlint-cli2.jsonc` on MD033.** The Markdown-linting item says "HTML elements are flagged", but the canonical config now sets `MD033: { allowed_elements: ["details", "summary"] }`. The prose was not swept when the config changed.
+4. **`spec/readme-structure.md` assumes a public repository.** PhotoCleaner is private, so shields.io cannot read its GitHub release, build, or commit data and every GitHub-sourced badge renders broken. The Build Status and Releases sub-sections state no behavior for a private repo, and the pre-existing License shield was already broken for this reason.
+5. **`WORKFLOW.md` D2.2 "skipped on smoke" is ambiguous, and a reviewer misread it.** The phrase names the validation, and scenario S1 confirms it (`validate-release **skipped (smoke), succeeds**`), but a Copilot review read it as the GitHub job status and proposed a job-level `if: !inputs.smoke` that would have coupled `github-release` to smoke through its `needs`. Worth disambiguating in the D-guarantee text.
+
+A sixth question is about the repo rather than the spec, so it goes to the maintainer: the registry lists PhotoCleaner's `publish` channels as `docker` and `github-release` with `consumerModel: pull`, but the repository is **private**, so its GitHub Releases are not pullable by anyone but the maintainer while its Docker image is public. Either the visibility or the declared channel is wrong.
