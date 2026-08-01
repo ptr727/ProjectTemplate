@@ -2,7 +2,8 @@
 
 Running backlog for this repo, kept in a committed file so the guidance survives across environments where agent memory does not.
 
-- Populate [reports/][reports] for the cataloged repos that still have no audit, since a registry `status` of `cataloged` asserts a result that only a committed report evidences. Eight repos have one.
+- Populate [reports/][reports] for the cataloged repos that still have no audit, since a registry `status` of `cataloged` asserts a result that only a committed report evidences. Eight repos have one. This is paced by maintainer capacity rather than blocked on anything, since repos are brought up to spec as they are worked on, so the entry records the outstanding set rather than a defect.
+- Revisit automating the audit, which was explored and deliberately deferred, recorded here so the reasoning is not re-derived from scratch. Three shapes were considered: a scheduled hub-driven audit publishing each report as a workflow artifact, the same thing committing the report back the way the codegen bot updates its own files, and a pull-request hook in each downstream repo that audits itself against the current hub. Three things blocked all of them. Until the fleet reaches stasis with every repo onboarded, a scheduled run reports mostly noise, since a repo mid-onboarding is expected to be non-conformant. The hub has to be stable before downstreams can audit against it, because a hub change lands as fleet-wide findings the same day. And the downstream half is a catch-22, since a self-auditing pull-request hook is CI instrumentation the repos that most need it do not yet carry. The agreed outcome was the on-demand audit that [`AUDIT.md`][audit-doc] describes today. Worth reopening once the fleet is onboarded and the hub goes a stretch without carried-content changes, and the artifact shape is the one to try first, since it produces evidence without committing anything and so cannot generate review load while the noise level is still unknown.
 - Canonicalize Python linter-config placement on `pyproject.toml` (one cataloged repo uses standalone `.ruff.toml` + `pyrightconfig.json`), track as a drift finding, fix downstream.
 - Consider renaming this repo to reflect the audit-catalog identity (updates badge and link URLs across the fleet).
 - Adopt the OCI annotation keys (`org.opencontainers.image.*`) for Docker image metadata across the Docker repos, replacing the ad-hoc and `org.label-schema.*` labels (from #363).
@@ -21,6 +22,7 @@ Running backlog for this repo, kept in a committed file so the guidance survives
 <!-- Repo -->
 
 [audit]: ./spec/audit.py
+[audit-doc]: ./AUDIT.md
 [matrix]: ./reports/conformance-matrix.md
 [readme-structure]: ./spec/readme-structure.md
 [reports]: ./reports/
