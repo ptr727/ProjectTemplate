@@ -11,6 +11,7 @@ The primary shapes are stood up as whole repos; the **composable targets** (`nug
 | Shape | Reference repo | Cold-standup | Last audited | First gap / notes |
 |---|---|---|---|---|
 | `python` + `source-only` | Financial-Modeling | not-tested | - | Reference for the source-release (dispatch-only) profile; the downstream standup issue is open. |
+| `source-only` + `release` | Blog | not-tested | - | Hugo static site (#456), the next standup and the first cold test of `STANDUP.md` step 0. Its deploy target has no declared type yet, so `releaseTrigger` is `none` and `publish[]` is empty until a deploy has actually run. |
 | `csharp` + `console` | - | not-tested | - | |
 | `csharp` + `docker` | - | not-tested | - | |
 | `csharp` + `python` | PlexCleaner | not-tested | - | First mixed-language shape (#339). Python is a stdlib-only `uvx` **scripts** profile subtree (`RegressionTests/`): no `uv.lock`, `pyproject.toml` lint/type config only, mypy checker, `python.uvlock.pinned` + `python.coverage.codecov` N/A; `codecov.yml` stays required for the C# side. Both language rule-sets apply (CODESTYLE.md "Two profiles"). |
@@ -19,7 +20,7 @@ The primary shapes are stood up as whole repos; the **composable targets** (`nug
 | `upstream-wrapper` | - | not-tested | - | Tag from a committed state file, not SemVer2. |
 | `codegen` | - | not-tested | - | Deterministic matrix over both branches. |
 | `docs` | ProjectTemplate | not-tested | - | Governance hub; CI is lint-only. |
-| `operational` config | - | not-tested | - | `workflowModel: operational`, direct signed commits to `develop`, promotion-PR gate. Carries a required `OPERATIONS.md` (`appliesTo: ["operational"]`, presence-checked) for its runbooks. Blog (#456) is the next standup and the first cold test of `STANDUP.md` step 0. |
+| `operational` config | - | not-tested | - | `workflowModel: operational`, direct signed commits to `develop`, promotion-PR gate. Its `develop` ruleset carries no `pull_request` rule, so the branch discipline rests on the instruction rather than the gate. |
 
 ## Composable Targets
 
