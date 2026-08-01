@@ -32,7 +32,7 @@ nuget, pypi, python: N/A (no packaging, no Python).
 ## Defects (most severe first)
 
 1. **The agent instruction set predates the router split.** `GOVERNANCE.md` is absent (the only LETTER-class file finding) and `AGENTS.md` still carries the ten topical rule sections inline, so no verbatim region can be compared and every section reads as undeclared. A downstream agent reading this repo gets rule text that no longer tracks the canonical.
-2. **README intro over the cap, and the two description mirrors no longer match it.** The intro is 150 characters against the 100-character Docker Hub cap, and the Docker Hub short description (`Pre-process media files for import into photo management systems.`) no longer matches it, so the repo carries two different canonical sentences.
+2. **README intro over the cap, and the Docker Hub mirror diverged from it.** The intro is 150 characters against the 100-character Docker Hub cap, so it overruns the tightest surface it feeds. Of the two mirrors GOVERNANCE.md "Repository Details" names, the GitHub About panel still matched the README exactly and only the Docker Hub short description had diverged (`Pre-process media files for import into photo management systems.`), so the repo carried two different canonical sentences.
 
 ## Drift Findings
 
