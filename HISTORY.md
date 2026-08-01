@@ -1,6 +1,6 @@
 # ProjectTemplate
 
-Agent enablement for a fleet of repositories: the guardrails that let AI coding agents work autonomously and productively, at repeatable quality, without causing harm.
+Agent enablement for a fleet of repositories: autonomy and repeatable quality inside guardrails.
 
 ## Release History
 
