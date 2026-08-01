@@ -1,6 +1,6 @@
 # ProjectTemplate <!-- omit from toc -->
 
-Governance, agent-orchestration, and workflow-audit hub for a fleet of related repositories.
+Agent enablement for a fleet of repositories: autonomy and repeatable quality inside guardrails.
 
 ## Build and Distribution <!-- omit from toc -->
 
@@ -24,7 +24,7 @@ Governance, agent-orchestration, and workflow-audit hub for a fleet of related r
 
 **Summary**:
 
-- Governance, agent-orchestration, and workflow-audit hub for the fleet: shared rules, a machine-readable spec, a fleet registry, per-repo audit reports, and an audit-agent instruction set. Ships no application code.
+- Agent enablement for the fleet: shared rules, a machine-readable spec, a fleet registry, per-repo audit reports, and an audit-agent instruction set, so an agent works autonomously inside guardrails that prove the result. Ships no application code.
 
 See [Release History][history] for the full history.
 
@@ -47,7 +47,13 @@ See [Release History][history] for the full history.
 
 ## What This Repo Is
 
-This repo is the single home for the shared rules the fleet follows, a machine-readable spec those rules are checked against, a registry of the projects, and an audit-agent instruction set. It ships no application code. Each project owns its own implementation and is **audited** against the ground truth here - to the letter (exact file, section, or config) or to intent (an equivalent outcome).
+**The purpose is agent enablement.** An AI coding agent is fast and inconsistent, so a fleet built by one drifts a different way in every repository, and the drift stays invisible until something breaks where it matters. What this repo makes repeatable is the outcome: an agent stands a repository up, changes it, and releases it on its own, and lands in the same known-good shape every time. The guardrails are what make granting that autonomy sound rather than reckless.
+
+**Guardrails here enable rather than restrain.** A rule earns its place by removing a decision an agent would otherwise make differently every time, or by making a failure loud that would otherwise pass green. Write safety bounds what an agent can reach outside the project in front of it, the review loop closes before anything merges, and the audit proves the result instead of accepting the agent's report of it. Autonomy extends exactly as far as the verification reaches.
+
+**Nothing here is finished.** Every rule traces to a specific failure, nearly all of them observed in this fleet rather than imagined, and a procedure that lets a new one through is corrected as part of the work that found it. The ground truth improves by being used.
+
+This repo is the single home for those rules, a machine-readable spec they are checked against, a registry of the projects, and an audit-agent instruction set. It ships no application code. Each project owns its own implementation and is **audited** against the ground truth here, to the letter (exact file, section, or config) or to intent (an equivalent outcome).
 
 - **[AGENTS.md][agents]** - the agent entry point: context and delegation rules, plus the map from a task to the section that governs it.
 - **[GOVERNANCE.md][governance]** - cross-cutting rules for AI coding agents: git, branching, release model, doc style, the recurring-violation rules (comments, ASCII charset, US spelling, line endings), PR review etiquette, and workflow YAML conventions.
