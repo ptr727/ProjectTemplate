@@ -59,13 +59,14 @@ The set of sections, and each section's fidelity, is itself governed.
 
 ## Where repo-specific content goes
 
-A repo's own content is not carried and is not declared here, so extraction needs a predictable destination rather than a judgment call per repo. Three topical docs take it, chosen by what the content *is*:
+A repo's own content is not carried and is not declared here, so extraction needs a predictable destination rather than a judgment call per repo. Four topical docs take it, chosen by what the content *is*:
 
 - [`CODESTYLE.md`][codestyle]: a repo's language and formatting conventions beyond the carried rules.
 - `ARCHITECTURE.md`: how a code repo is built, its module layout, data flow, and design decisions.
-- `OPERATIONS.md`: how a repo is run, covering runbooks, backup, log and debug procedures, tool-usage notes, and config layout. It is the operational analogue of `ARCHITECTURE.md`, and it is where an `AGENTS.md` split puts the repo-specific half.
+- `OPERATIONS.md`: how a repo is run, under the headings `Runbooks`, `Backup and Recovery`, `Logs and Debugging`, `Tool Usage`, and `Configuration Layout`. It is the operational analogue of `ARCHITECTURE.md`, and it is where an `AGENTS.md` split puts the repo-specific half.
+- `TODO.md`: the repo's running backlog, which keeps open work out of the README's section order where it does not belong and changes on a different cadence from everything around it.
 
-**`OPERATIONS.md` is required for every repo**, declared in [`files.json`][files] as `appliesTo: "*"` and checked for presence only, the same footing as `README.md` and `HISTORY.md`, so its content is entirely the repo's own. It is mandatory rather than advisory because the convention was already emerging unevenly: of the four operational-model repos, two wrote one unprompted and the others scattered the same material across ad-hoc names, which is the improvisation these destinations exist to prevent. That reasoning never depended on the workflow model. Every repo has operational surface, since publishing to a package registry needs trusted-publisher setup, shipping an image needs registry credentials, and serving a site needs a deploy path and a staging story. A repo with nothing to say still carries the file as a stub, meaning the headings named above with no content under them, because a stub names the destination and its shape where a blank file names only the destination.
+**`OPERATIONS.md` is required for every repo**, declared in [`files.json`][files] as `appliesTo: "*"` and checked for presence only, the same footing as `README.md` and `HISTORY.md`, so its content is entirely the repo's own. It is mandatory rather than advisory because the convention was already emerging unevenly: of the four operational-model repos, two wrote one unprompted and the others scattered the same material across ad-hoc names, which is the improvisation these destinations exist to prevent. That reasoning never depended on the workflow model. Every repo has operational surface, since publishing to a package registry needs trusted-publisher setup, shipping an image needs registry credentials, and serving a site needs a deploy path and a staging story. A repo with nothing to say still carries the file as a stub, meaning those five headings with no content under them, because a stub names the destination and its shape where a blank file names only the destination. This repo's own [`OPERATIONS.md`][operations] is the worked example.
 
 **The workflow model and the need for this file are unrelated axes.** `operational` as a `workflowModel` describes where config lives and how a change reaches `develop`, not whether the repo has runbooks. Keying the file to that selector read a sufficient condition as a necessary one, since an operational-model repo certainly has runbooks while a release repo has them too. Reclassifying a repo between models does not change how much operational surface it has, which is the test that showed the selector was wrong.
 
@@ -93,4 +94,5 @@ A repo that carried its governance inside `AGENTS.md` before the router split ho
 [fidelity-model]: ./fidelity-model.md
 [files]: ./files.json
 [governance]: ../GOVERNANCE.md
+[operations]: ../OPERATIONS.md
 [validate]: ./validate.py

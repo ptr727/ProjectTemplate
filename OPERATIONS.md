@@ -17,7 +17,7 @@ python3 scripts/repo_gate.py
 python3 scripts/prose_lint.py . --check charset --check dupword --check spelling
 python3 scripts/prose_lint.py . --check charset-unknown --check semicolon --check dash --check comment-wrap --check comment-case --summary
 python3 spec/validate.py
-docker run --rm --pull=always -v "$PWD:/check" mstruebing/editorconfig-checker:latest ec
+docker run --rm --pull=always -v "$PWD":/check --workdir /check mstruebing/editorconfig-checker:latest
 ```
 
 Run the `editorconfig-checker` line before pushing any new file. This repository defaults to CRLF, most tooling writes LF, and a new file therefore fails that check on its first CI run rather than locally.
