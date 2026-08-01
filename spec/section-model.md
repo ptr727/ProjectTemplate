@@ -59,7 +59,7 @@ The set of sections, and each section's fidelity, is itself governed.
 
 ## Where repo-specific content goes
 
-A repo's own content is not carried and is not declared here, so extraction needs a predictable destination rather than a judgment call per repo. Four topical docs take it, chosen by what the content *is*:
+A repo's own content is not carried, and the hub declares where it goes rather than what it says, so extraction needs a predictable destination rather than a judgment call per repo. Four topical docs take it, chosen by what the content *is*:
 
 - [`CODESTYLE.md`][codestyle]: a repo's language and formatting conventions beyond the carried rules.
 - `ARCHITECTURE.md`: how a code repo is built, its module layout, data flow, and design decisions.

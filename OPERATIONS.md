@@ -6,7 +6,7 @@ How this repository is run. It ships no application code, so its operations are 
 
 ### Run the gates the way CI runs them
 
-CI passes explicit `--check` lists, and a bare `prose_lint.py <file>` runs `DEFAULT_RULES`, which omits `comment-wrap`, `comment-case` and `sentence-split`. A bare run therefore under-reports and a clean result from it proves less than it appears to. Run the CI invocations:
+CI passes explicit `--check` lists, and a bare `python3 scripts/prose_lint.py <file>` runs `DEFAULT_RULES`, which omits `comment-wrap`, `comment-case` and `sentence-split`. A bare run therefore under-reports and a clean result from it proves less than it appears to. Run the CI invocations:
 
 ```sh
 python3 scripts/test_prose_lint.py
@@ -16,6 +16,7 @@ python3 spec/audit.py --selftest
 python3 scripts/repo_gate.py
 python3 scripts/prose_lint.py . --check charset --check dupword --check spelling
 python3 scripts/prose_lint.py . --check charset-unknown --check semicolon --check dash --check comment-wrap --check comment-case --summary
+for f in registry/*.json spec/*.json repo-config/*.json; do jq empty "$f"; done
 python3 spec/validate.py
 docker run --rm --pull=always -v "$PWD":/check --workdir /check mstruebing/editorconfig-checker:latest
 ```
@@ -30,7 +31,7 @@ Scope a run to what changed, which matches the correct-as-next-edited rule:
 python3 scripts/prose_lint.py . --diff origin/develop
 ```
 
-Whole-tree discovery reads only files git tracks, so `prose_lint.py .` and `--diff` do not see a new file until it is staged, and a clean whole-tree run proves nothing about an unstaged one. An explicit path is always read, tracked or not, so name a new file directly to check it before staging.
+Whole-tree discovery reads only files git tracks, so `python3 scripts/prose_lint.py .` and `--diff` do not see a new file until it is staged, and a clean whole-tree run proves nothing about an unstaged one. An explicit path is always read, tracked or not, so name a new file directly to check it before staging.
 
 ### Audit the fleet
 
@@ -48,6 +49,8 @@ Findings are a point-in-time snapshot read live over the API. Re-run before acti
 repo-config/configure.sh check <owner>/<repo> <release|operational>
 repo-config/configure.sh apply <owner>/<repo> <release|operational>
 ```
+
+**Always pass the command.** A bare `repo-config/configure.sh` with no arguments defaults to `apply` against the current repo, so an invocation meant to test whether the script runs performs a live write instead. Never run it without a command.
 
 `check` is read-only and exits non-zero on drift. `apply` is idempotent and drives entirely from the committed payloads, so it is a no-op on a conformant repo.
 
@@ -88,7 +91,7 @@ The `editorconfig-checker` action is setup-only. Using it alone silently skips t
 
 Two `gh` limitations on the current host, both worked around rather than fixed:
 
-- `gh pr checks --json` does not exist before `gh` 2.50, so a watcher built on it prints nothing and a quiet result reads as a passing one.
+- `gh pr checks` carries no `--json` flag on the installed `gh` 2.46.0, so a watcher built on it prints nothing and a quiet result reads as a passing one. Read the checks from `gh pr view --json statusCheckRollup` instead.
 - `gh pr edit --base` fails with a Projects-classic deprecation error. Use `gh api --method PATCH repos/<owner>/<repo>/pulls/<number> -f base=<branch>` instead.
 
 ## Configuration Layout
