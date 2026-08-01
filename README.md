@@ -4,8 +4,8 @@ Agent enablement for a fleet of repositories: autonomy and repeatable quality in
 
 ## Build and Distribution <!-- omit from toc -->
 
-- **Source Code**: [GitHub][projecttemplate-link] - source, issues, discussions, and CI/CD pipelines.
-- **Versioned Releases**: [GitHub Releases][releases-link] - version-tagged source archives.
+- **Source Code**: [GitHub][projecttemplate-link] for source, issues, discussions, and CI/CD pipelines.
+- **Versioned Releases**: [GitHub Releases][releases-link] for version-tagged source archives.
 
 ### Build Status <!-- omit from toc -->
 
@@ -91,10 +91,10 @@ Keeping a fleet of repositories consistent has always been a tax paid in review 
 
 ProjectTemplate follows the same model it documents, and audits its own rules against itself (it classifies as the source-only project type in [WORKFLOW.md][workflow]).
 
-- **Branching.** Persistent `main` and `develop`, each with its own ruleset. This repo uses the default `release` workflow model: commit on feature branches only, feature branch to `develop` is squash-merged, `develop` to `main` is a merge commit, and `develop` is forward-only (no `main -> develop` back-merges). Live-service config repos instead use the `operational` model (registry `workflowModel`) - direct signed commits to `develop`, promoted to `main` by an occasional PR. See [GOVERNANCE.md "Branching Model"][governance-branching-model].
-- **CI is lint-only.** There is no build or unit test; the PR gate runs markdownlint, cspell, JSON validation (`jq` parses `registry/`, `spec/`, and `repo-config/`, plus the `spec/validate.py` cross-reference and shape checks), and actionlint, and exposes the ruleset-bound `Check pull request workflow status job` aggregator. The same lint configs (`.markdownlint-cli2.jsonc`, `cspell.json`) drive the editor extensions, the CLI, and CI.
+- **Branching.** Persistent `main` and `develop`, each with its own ruleset. This repo uses the default `release` workflow model: commit on feature branches only, feature branch to `develop` is squash-merged, `develop` to `main` is a merge commit, and `develop` is forward-only (no `main -> develop` back-merges). Live-service config repos instead use the `operational` model (registry `workflowModel`), with direct signed commits to `develop`, promoted to `main` by an occasional PR. See [GOVERNANCE.md "Branching Model"][governance-branching-model].
+- **CI is lint-only.** There is no build or unit test. The PR gate runs markdownlint, cspell, JSON validation (`jq` parses `registry/`, `spec/`, and `repo-config/`, plus the `spec/validate.py` cross-reference and shape checks), and actionlint, and exposes the ruleset-bound `Check pull request workflow status job` aggregator. The same lint configs (`.markdownlint-cli2.jsonc`, `cspell.json`) drive the editor extensions, the CLI, and CI.
 - **Review loop.** Every PR is reviewed by GitHub Copilot, and the agent drives the review loop to green and merges only with explicit maintainer permission. See [GOVERNANCE.md "PR Review Etiquette"][governance-pr-review-etiquette].
-- **Release.** A `develop -> main` merge is promoted through a GitHub release (tag plus a source zip, README, and LICENSE); versioning is NBGV-driven from [version.json][version]. See [WORKFLOW.md][workflow].
+- **Release.** A `develop -> main` merge is promoted through a GitHub release (tag plus a source zip, README, and LICENSE). Versioning is NBGV-driven from [version.json][version]. See [WORKFLOW.md][workflow].
 
 ## Rules
 
@@ -103,23 +103,23 @@ A human-readable index of the rules agents enforce, implement, and audit. The au
 ### Always
 
 - Sign every commit (SSH or GPG).
-- Branch feature -> develop (squash) -> main (merge commit); develop is forward-only.
+- Branch feature -> develop (squash) -> main (merge commit), and develop is forward-only.
 - Drive every PR through the Copilot review loop and merge only with maintainer approval.
 - Write US English and ASCII only (no em-dash, straight quotes).
-- Write docs and comments in the present tense, describing only the current state - never as a change from a prior one.
+- Write docs and comments in the present tense, describing only the current state, never as a change from a prior one.
 - Keep comments concise and only for the non-obvious, and never grow them on edit.
 - Follow `.editorconfig` line endings (CRLF default, LF for shell and Docker) and preserve a file's endings on edit.
 - One logical paragraph per line, with a trailing `\` for an intentional hard break.
 - Pin every GitHub Action to a commit SHA with a version comment.
 - Share one lint config per tool across the editor, the CLI, and CI.
 - Run the repo's whole lint gate before pushing, not just the parts that look relevant.
-- Make gates fail loud - a gate that stops gating must error or annotate, never pass silently.
+- Make gates fail loud, since a gate that stops gating must error or annotate, never pass silently.
 - Favor VS Code tasks and launch configs for building, running, and testing over ad-hoc shell scripts.
 
 ### Never
 
 - Never force-push or rewrite shared history.
-- Never treat a merge as a release; publishing is a separate, explicit step.
+- Never treat a merge as a release. Publishing is a separate, explicit step.
 - Never blanket-delete a workflow run's artifacts.
 - Never store a static key when OIDC Trusted Publishing is available.
 
@@ -129,11 +129,11 @@ A human-readable index of the rules agents enforce, implement, and audit. The au
 
 ### If a Python Project
 
-- Configure ruff and a type checker in `pyproject.toml` - pyright strict, or mypy in CI with pyright editor-only; whichever runs in CI is the gate.
+- Configure ruff and a type checker in `pyproject.toml`, either pyright strict or mypy in CI with pyright editor-only. Whichever runs in CI is the gate.
 
 ### If Both C# and Python
 
-- Both sections above apply; a repo can be both (a C# app plus a Python subtree). The Python is either a full uv project (`uv.lock`, `uv run`) or a stdlib-only `uvx` scripts subtree (no `uv.lock`, `pyproject.toml` carries lint/type config only). See [CODESTYLE.md][codestyle] "Two profiles".
+- Both sections above apply, and a repo can be both (a C# app plus a Python subtree). The Python is either a full uv project (`uv.lock`, `uv run`) or a stdlib-only `uvx` scripts subtree (no `uv.lock`, `pyproject.toml` carries lint/type config only). See [CODESTYLE.md][codestyle] "Two profiles".
 
 ### If Publishing a Package (NuGet or PyPI)
 
