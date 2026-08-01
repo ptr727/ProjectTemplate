@@ -50,6 +50,6 @@ The rule lives in [`CODESTYLE.md`][codestyle] "Markdown and Spelling", which eve
 
 Docker Hub has two text fields: a **short description** (the tagline, capped near 100 characters) that mirrors the README intro line (item 1), and the longer **overview**. A repo that publishes a Docker image keeps a **separate** `Docker/README.md` for the overview: Docker Hub's description has a much smaller size limit than a project README, so it carries a trimmed overview, not the full README. It is published by the docker-readme workflow task, not copied from the root README.
 
-<!-- Internal -->
+<!-- Repo -->
 
 [codestyle]: ../CODESTYLE.md
