@@ -13,12 +13,12 @@
 # Root config
 root = true
 
-# Defaults - CRLF is the default; only the LF exceptions below are declared. Most LF pins are shared with
-# `.gitattributes` (git-enforced): `*.sh`, the husky pre-commit shebang, `spec/validate.py`, `uv.lock`, and Dockerfiles.
-# The workflow-YAML pins (`.github/workflows/*` and the catalog snippet workflows) are `.editorconfig`-only -
-# git stays passive on them (`* -text`) and CI (editorconfig-checker) enforces LF. Keep the `[*]`
-# `end_of_line = crlf` default - it is required for the Windows-GUI/WSL-engine
-# workflow (Windows tooling misbehaves on LF) and every uncovered file type relies on it.
+# Defaults: CRLF is the default, and only the LF exceptions below are declared.
+# Most LF pins are shared with `.gitattributes`, which git enforces: `*.sh`, the husky pre-commit shebang, `spec/validate.py`, `uv.lock`, and Dockerfiles.
+# The workflow-YAML pins (`.github/workflows/*` and the catalog snippet workflows) are `.editorconfig`-only.
+# There git stays passive (`* -text`) and CI (editorconfig-checker) enforces LF.
+# Keep the `[*]` `end_of_line = crlf` default, which the Windows-GUI and WSL-engine workflow requires because Windows tooling misbehaves on LF.
+# Every uncovered file type relies on that default too.
 [*]
 charset = utf-8
 end_of_line = crlf
@@ -39,17 +39,18 @@ indent_size = 2
 [*.{yml,yaml}]
 indent_size = 2
 
-# Workflow YAML is LF: Dependabot and Actions rewrite it with LF, so declaring LF keeps it consistent instead of
-# mixed. git still leaves endings alone (`* -text`); this and CI (editorconfig-checker) enforce it. Other YAML is CRLF.
+# Workflow YAML is LF, because Dependabot and Actions rewrite it with LF, so declaring LF keeps it consistent instead of mixed.
+# Endings are still left alone by git (`* -text`), and this file plus CI (editorconfig-checker) enforce it.
+# Other YAML stays CRLF.
 [.github/workflows/*.{yml,yaml}]
 end_of_line = lf
 
-# Catalog snippet workflows mirror real workflow files (LF above); keep the snippets LF so a copied snippet
-# lands compliant instead of needing conversion.
+# Catalog snippet workflows mirror the real workflow files pinned LF above.
+# Keep the snippets LF, so a copied snippet lands compliant instead of needing conversion.
 [catalog/snippets/workflows/*.{yml,yaml}]
 end_of_line = lf
 
-# The husky pre-commit snippet is a shebang script; keep it LF so a copied snippet runs (a CRLF shebang breaks).
+# The husky pre-commit snippet is a shebang script, so keep it LF and a copied snippet runs, where a CRLF shebang breaks.
 [catalog/snippets/husky/pre-commit]
 end_of_line = lf
 
@@ -57,42 +58,41 @@ end_of_line = lf
 [*.sh]
 end_of_line = lf
 
-# Python is CRLF by the `[*]` default (universal newlines; commonly edited on Windows). Pin LF
-# only for a `.py` executed directly via its shebang, by path - here the CI validation entry point
-# and the fleet-audit runner.
+# Python is CRLF by the `[*]` default, since universal newlines accept it and it is commonly edited on Windows.
+# Pin LF only for a `.py` executed directly via its shebang, by path.
+# Here that is the CI validation entry point and the fleet-audit runner.
 [spec/{validate,audit,fidelity_honesty}.py]
 end_of_line = lf
 
-# The agent-safety kit's Python is shebang-executable tooling run by path (the PreToolUse hook and its
-# installer), so pin LF for the same reason as the entry points above - a CRLF shebang breaks direct
-# execution on a Unix host.
+# The agent-safety kit's Python is shebang-executable tooling run by path, being the PreToolUse hook and its installer.
+# Pin LF for the same reason as the entry points above, because a CRLF shebang breaks direct execution on a Unix host.
 [host-setup/agent-safety/*.py]
 end_of_line = lf
 
-# The repo lint/review scripts are shebang-executable tooling run by path, so a CRLF shebang would
-# break direct execution on a Unix host. Pinned in .gitattributes to match.
+# The repo lint and review scripts are shebang-executable tooling run by path, so a CRLF shebang would break direct execution on a Unix host.
+# They are pinned in .gitattributes to match.
 [scripts/*.py]
 end_of_line = lf
 
-# uv regenerates uv.lock with LF on every platform, so pin it or an EOL check (editorconfig-checker/CI)
-# reds on every `uv lock`/`uv sync` until the file is manually reconverted - same rationale as the
-# shebang/Dockerfile pins (a tool owns the ending). A Python repo on the CRLF default carries this; a repo
-# with no lockfile is unaffected.
+# The uv tool regenerates uv.lock with LF on every platform, so pin it here.
+# Without the pin an EOL check (editorconfig-checker or CI) reds on every `uv lock` or `uv sync` until the file is manually reconverted.
+# The rationale matches the shebang and Dockerfile pins, where a tool owns the ending.
+# A Python repo on the CRLF default carries this, and a repo with no lockfile is unaffected.
 [uv.lock]
 end_of_line = lf
 
-# Dockerfiles - CRLF breaks RUN heredocs and line continuations
+# Dockerfiles are LF, because CRLF breaks RUN heredocs and line continuations.
 [{Dockerfile,*.Dockerfile}]
 end_of_line = lf
 
-# --- .NET-only below: C# and ReSharper style. Everything above is the line-ending
-# governance every derived repo carries; a non-.NET repo may drop from here down. ---
+# .NET-only below, covering C# and ReSharper style.
+# Everything above is the line-ending governance every derived repo carries, and a non-.NET repo may drop from here down.
 
 # C# files
 [*.cs]
-# Suppressions follow CODESTYLE.md "Analyzer Diagnostics and Suppressions": prefer a
-# [SuppressMessage] attribute or the owning project's .editorconfig; relax a rule
-# repo-wide here only when it applies to every project (never a brownfield batch).
+# Suppressions follow CODESTYLE.md "Analyzer Diagnostics and Suppressions".
+# Prefer a [SuppressMessage] attribute, or the owning project's .editorconfig.
+# Relax a rule repo-wide here only when it applies to every project, never for a brownfield batch.
 dotnet_diagnostic.IDE0055.severity = none
 csharp_indent_block_contents = true
 csharp_indent_braces = false
