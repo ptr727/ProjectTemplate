@@ -25,14 +25,14 @@ Supersedes the 2026-07-23 snapshot, which predated the release pipeline. Everyth
 | recurring-violations | pass | pass | pass | ASCII clean across the carried docs, and `.gitattributes` is fleet-standard with the LF pins |
 | readme-structure | fail | fail | defect | Intro line 150 characters against the 100-character cap (`README.md:3`), and the Docker Hub short description does not mirror it. No Build and Distribution block, no Table of Contents, no Questions or Issues, and the Development-Environment-Setup slot is filled by `Development Tooling` (`README.md:482`) |
 | workflow (WORKFLOW.md 5A/5B) | fail | pass | drift | The publisher, build tasks, and PR gate satisfy the D-guarantees, **except** that `build-release-task.yml` carries no `validate-release` job, so D2.2 (branch matches version classification) is unimplemented and scenarios S1, S4, and S10 bind to a job name that does not exist. The `github-release` job body matches no hub revision |
-| agent-instruction set | fail | fail | defect | `GOVERNANCE.md` absent, and `AGENTS.md` is the pre-split single file, so neither verbatim region can be compared and all ten of its sections read as undeclared. `.github/copilot-instructions.md` lacks `Reviewing Carried Fleet Content` |
+| agent-instruction-set | fail | fail | defect | `GOVERNANCE.md` absent, and `AGENTS.md` is the pre-split single file, so neither verbatim region can be compared and all ten of its sections read as undeclared. `.github/copilot-instructions.md` lacks `Reviewing Carried Fleet Content` |
 
 nuget, pypi, python: N/A (no packaging, no Python).
 
 ## Defects (most severe first)
 
 1. **The agent instruction set predates the router split.** `GOVERNANCE.md` is absent (the only LETTER-class file finding) and `AGENTS.md` still carries the ten topical rule sections inline, so no verbatim region can be compared and every section reads as undeclared. A downstream agent reading this repo gets rule text that no longer tracks the canonical.
-2. **README intro over the cap, and the description mirrors diverged.** The intro is 150 characters against the 100-character Docker Hub cap, and the Docker Hub short description (`Pre-process media files for import into photo management systems.`) no longer matches it, so the repo carries two different canonical sentences.
+2. **README intro over the cap, and the two description mirrors no longer match it.** The intro is 150 characters against the 100-character Docker Hub cap, and the Docker Hub short description (`Pre-process media files for import into photo management systems.`) no longer matches it, so the repo carries two different canonical sentences.
 
 ## Drift Findings
 
