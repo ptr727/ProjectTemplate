@@ -90,10 +90,10 @@ _FIELD_ASSIGN = re.compile(r"""(?:-F|-f|--field|--raw-field)\s+[A-Za-z_][\w]*=(?
 # short form `-Rx`. A form left out is not a near-miss, it is a silent bypass of the whole repository
 # scope, so the separator is matched rather than assumed to be a space. The look-behind requires the flag
 # to start a shell token (whitespace before it, or the string start), which is where a real flag always
-# sits, so a value that opens a quoted span (`--title "-Rowner/repo"`) is not read as a target. It does
-# not reach a mention inside prose (`--title "use -Rowner/repo"`), which is preceded by a space like a
-# real flag: rule 3 reads the raw string, so telling a flag from text needs argv-position parsing, the
-# way _push_targets does it for git push.
+# sits, so a value that opens a quoted span (`--title "-Rowner/repo"`) is not read as a target.
+# A mention inside prose (`--title "use -Rowner/repo"`) IS still read as a target and still denies.
+# A space precedes it exactly as one precedes a real flag, so no look-behind can separate the two.
+# Telling a flag from text needs argv-position parsing, the way _push_targets does it for git push.
 _EXPLICIT_REPO = re.compile(r"(?<![^\s])(?:--repo[=\s]+|-R[=\s]*)(?P<q>['\"]?)(?P<r>[^\s'\"]+)(?P=q)")
 _API_REPO_PATH = re.compile(r"\bgh\s+api\b[^\n|]*?\brepos/(?P<owner>[A-Za-z0-9_.\-]+)/(?P<repo>[A-Za-z0-9_.\-]+)")
 
