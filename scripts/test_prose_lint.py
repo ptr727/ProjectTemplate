@@ -374,6 +374,33 @@ class TestCommentWrap(BaitCase):
             with self.subTest(file=name):
                 self.assertEqual([], self.flag(name, text))
 
+    def test_a_comment_that_is_only_a_uri_is_a_reference_not_a_sentence(self) -> None:
+        """It cannot be capitalized or restructured without corrupting the address it carries.
+
+        A reference block opening a config file is the ordinary shape, so before this exemption
+        every repo carrying one inherited a finding no edit could answer.
+        """
+        for name, text in (('a.yml', '# https://docs.github.com/en/code-security/dependabot\n'),
+                           ('.editorconfig', '; https://editorconfig.org\n'),
+                           ('a.cs', '// http://example.com/a_b.c\n'),
+                           ('a.xml', '<!-- https://example.com/schema -->\n'),
+                           ('a.yml', '# <https://example.com/bracketed>\n'),
+                           ('a.sh', '# ftp://example.com/pub\n')):
+            with self.subTest(file=name, comment=text.strip()):
+                self.assertEqual([], self.flag(name, text))
+
+    def test_a_uri_block_does_not_make_the_next_line_a_continuation(self) -> None:
+        """Consecutive reference lines are separate addresses, not one sentence wrapping."""
+        self.assertEqual([], self.flag('a.yml', '# https://example.com/one\n'
+                                                '# https://example.com/two\n'))
+
+    def test_a_uri_inside_a_sentence_is_still_prose(self) -> None:
+        """The whole body has to be the address, or the exemption would swallow real prose."""
+        self.assertEqual(['comment-wrap'],
+                         self.flag('a.yml', f'# See https://example.com. {self.RUN_ON}\n'))
+        self.assertEqual(['comment-case'],
+                         self.flag('a.yml', '# see https://example.com for the options\n'))
+
     def test_a_documentation_comment_is_left_to_codestyle(self) -> None:
         """An XML doc comment and a docstring may run to paragraphs, which CODESTYLE governs."""
         self.assertEqual([], self.flag('a.cs', f'/// <summary>{self.RUN_ON}</summary>\n'))

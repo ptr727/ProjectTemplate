@@ -517,6 +517,11 @@ NOT_PROSE = re.compile(r'^(!|\s*[-=#*/<>]+\s*$)|noqa|type:\s*ignore|pylint|ruff:
                        r'|cSpell|markdownlint|omit from toc|prettier|eslint|SPDX|Copyright'
                        r'|^v\d+(\.\d+)*$')
 
+# A comment that is only a URI is a reference, not a sentence, so neither case nor wrap applies.
+# It cannot be capitalized or restructured without corrupting the address it exists to carry.
+# A URI inside a sentence is still prose, so the whole body has to be the address and nothing else.
+BARE_URI = re.compile(r'^<?(https?|ftp)://\S+>?$')
+
 # Two sentences on one line, guarded against an abbreviation, an initial, or a dotted identifier.
 # The initial guard anchors on a word boundary, so `J. Smith` reads as one name.
 # A sentence ending in an acronym such as CI is two sentences and has to be caught.
@@ -755,7 +760,7 @@ def comment_wrap_findings(path: Path, raw: str, lines: list[str]) -> list[tuple[
     prev_body = ''
     prev_no = 0
     for n, body, leading in comments:
-        if not body or NOT_PROSE.search(body):
+        if not body or NOT_PROSE.search(body) or BARE_URI.match(body.strip()):
             prev_body = ''
             continue
         if RUN_ON.search(strip_inline_code(body)):
