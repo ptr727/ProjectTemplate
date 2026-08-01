@@ -20,7 +20,7 @@ Agent enablement for a fleet of repositories: autonomy and repeatable quality in
 
 ### Release Notes <!-- omit from toc -->
 
-**Version: 2.0**:
+**Version**: 2.0
 
 **Summary**:
 
