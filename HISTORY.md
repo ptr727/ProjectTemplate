@@ -1,6 +1,6 @@
 # ProjectTemplate
 
-Governance, agent-orchestration, and workflow-audit hub for a fleet of related repositories.
+Agent enablement for a fleet of repositories: the guardrails that let AI coding agents work autonomously and productively, at repeatable quality, without causing harm.
 
 ## Release History
 

@@ -1,6 +1,6 @@
 # Instructions for AI Coding Agents
 
-**ProjectTemplate** is a governance, agent-orchestration, and workflow-audit repo for a fleet of related projects. It holds the portable rules those projects follow, a machine-readable ground-truth spec ([`spec/`](./spec/)), a registry of the projects ([`registry/repos.json`](./registry/repos.json)), and an audit-agent instruction set ([`AUDIT.md`](./AUDIT.md)). It ships no sample application code.
+**ProjectTemplate** is the agent-enablement hub for a fleet of related projects. It exists so an agent can work across them autonomously and productively, at repeatable quality, inside guardrails that keep the autonomy from doing harm. It holds the portable rules those projects follow, a machine-readable ground-truth spec ([`spec/`](./spec/)), a registry of the projects ([`registry/repos.json`](./registry/repos.json)), and an audit-agent instruction set ([`AUDIT.md`](./AUDIT.md)). It ships no sample application code.
 
 This file is the entry point every coding agent reads first, and it holds only two things: the rules for managing context and delegation, which apply to every task, and a map of where every other rule lives. The rule text itself is in [`GOVERNANCE.md`](./GOVERNANCE.md), one section per topic. Code style lives in [`CODESTYLE.md`](./CODESTYLE.md) (a General section plus per-language sections for .NET and Python), and the CI/CD workflow contract in [`WORKFLOW.md`](./WORKFLOW.md).
 
