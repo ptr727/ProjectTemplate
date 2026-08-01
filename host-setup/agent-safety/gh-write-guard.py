@@ -86,7 +86,11 @@ _QUOTED_SPAN = re.compile(r'"(?:\\.|[^"\\])*"' r"|'[^']*'")
 _NODE_ID_LITERAL = re.compile(r'^(?:[A-Z]{1,5}_[A-Za-z0-9_\-]{12,}|MD[A-Za-z0-9]{12,})$')
 # -F/-f name=VALUE, capturing the value - handles "quoted" and bare
 _FIELD_ASSIGN = re.compile(r"""(?:-F|-f|--field|--raw-field)\s+[A-Za-z_][\w]*=(?P<v>'[^']*'|"[^"]*"|\S+)""")
-_EXPLICIT_REPO = re.compile(r"(?:-R|--repo)\s+(?P<q>['\"]?)(?P<r>[^\s'\"]+)(?P=q)")
+# Every spelling gh accepts for the target flag: `--repo x`, `--repo=x`, `-R x`, `-R=x`, and the attached
+# short form `-Rx`. A form left out is not a near-miss, it is a silent bypass of the whole repository
+# scope, so the separator is matched rather than assumed to be a space. The leading look-behind keeps
+# `-R` from matching inside a longer token.
+_EXPLICIT_REPO = re.compile(r"(?<![\w\-])(?:--repo[=\s]+|-R[=\s]*)(?P<q>['\"]?)(?P<r>[^\s'\"]+)(?P=q)")
 _API_REPO_PATH = re.compile(r"\bgh\s+api\b[^\n|]*?\brepos/(?P<owner>[A-Za-z0-9_.\-]+)/(?P<repo>[A-Za-z0-9_.\-]+)")
 
 
@@ -470,14 +474,17 @@ def classify(cmd, cwd=None, origin=None, current_branch=None, rules_lookup=None,
                     "'Repository Boundaries and Write Safety'."
                 )
 
-    # 3. explicit target outside origin
+    # 3. explicit target outside the origin's owner
     if origin is None:
         origin = _origin_owner_repo(cwd)
     targets = []
-    mr = _EXPLICIT_REPO.search(cmd)
-    if mr and "/" in mr.group("r") and "<" not in mr.group("r"):
-        o, r = mr.group("r").split("/", 1)
-        targets.append((o.lower(), r.lower()))
+    # Every occurrence, not the first: a compound command carries one target per invocation, and reading
+    # only the first checks the harmless one while the write after `&&` goes unexamined.
+    for mr in _EXPLICIT_REPO.finditer(cmd):
+        val = mr.group("r")
+        if "/" in val and "<" not in val:
+            o, r = val.split("/", 1)
+            targets.append((o.lower(), r.lower()))
     for m in _API_REPO_PATH.finditer(cmd):
         if "<" not in m.group("owner"):
             targets.append((m.group("owner").lower(), m.group("repo").lower()))
@@ -543,6 +550,13 @@ _SCOPE_CASES = [
     ("gh issue comment 5 -R mankatcheung/job-finder --body hi", {_ALLOW_ENV: "esphome/*"}, "deny", "the incident: a grant for one owner does not reach another"),
     ("gh issue create --repo esphome/esphome --title x", {_ALLOW_ENV: "not-an-owner-repo"}, "deny", "a malformed grant grants nothing"),
     ("GH_WRITE_GUARD_ALLOW=esphome/esphome gh issue create --repo esphome/esphome --title x", {}, "deny", "an inline env prefix is part of the command, not the hook's environment"),
+    # Every spelling of the target flag. A form the extraction misses is a silent bypass of rule 3, not a
+    # near-miss, so each is asserted against a foreign owner that must deny.
+    ("gh issue create --repo=esphome/esphome --title x", {}, "deny", "--repo=value equals form"),
+    ("gh issue create -R=esphome/esphome --title x", {}, "deny", "-R=value equals form"),
+    ("gh issue create -Resphome/esphome --title x", {}, "deny", "-Rvalue attached short form"),
+    ("gh issue create --repo ptr727/PhotoCleaner --title x && gh issue create --repo esphome/esphome --title y", {}, "deny", "a foreign target in the second invocation of a compound is read"),
+    ("gh issue create --repo=ptr727/PhotoCleaner --title x", {}, "allow", "equals form to a sibling owner still allows"),
 ]
 
 # Rule-4 (branch-rule bypass) cases. Each carries its own branch->rules map so the run is deterministic
