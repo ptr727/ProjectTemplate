@@ -1,6 +1,6 @@
 # Audit: PhotoCleaner
 
-- **Audited branch:** main (`15b9b5b`)
+- **Audited branch:** main (`15b9b5b7411bbba43b8bff8044c4b651355c10a4`)
 - **Types:** csharp, console, docker (from registry)
 - **Verdict:** not operational
 - **Date:** 2026-08-01
