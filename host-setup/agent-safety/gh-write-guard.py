@@ -14,7 +14,10 @@ maintainer's admin bypass. The denied shapes:
   1. a state-changing gh call whose output is discarded or forced to success
      (>/dev/null, 2>/dev/null, &>/dev/null, || true, || :, || echo)
   2. a GraphQL mutation passing a literal GitHub node id (PRRT_/PR_/BOT_/...) instead of a $variable
-  3. a gh write with an explicit -R/--repo/repos/<owner>/<repo> target outside the checkout's origin
+  3. a gh write with an explicit -R/--repo/repos/<owner>/<repo> target under an owner other than the
+     checkout origin's, unless the maintainer granted that target in GH_WRITE_GUARD_ALLOW. Sibling
+     repositories under the same owner are allowed, since the harm this guards is reaching a stranger's
+     repository, not working across your own fleet in one session.
   4. a git operation that would only land by bypassing an active branch rule: a direct push to a branch
      whose rules require a pull request, a force-push where history is protected, a delete where deletion
      is blocked, or an explicit-bypass flag (`gh pr merge --admin`, `git commit/push --no-verify`). The
@@ -110,6 +113,38 @@ def _origin_owner_repo(cwd):
         return None
     m = re.search(r"[:/]([A-Za-z0-9_.\-]+)/([A-Za-z0-9_.\-]+?)(?:\.git)?/?$", url)
     return (m.group(1).lower(), m.group(2).lower()) if m else None
+
+
+_ALLOW_ENV = "GH_WRITE_GUARD_ALLOW"
+
+
+def _granted_targets(environ=None):
+    """Maintainer-granted write targets, as {(owner, repo)} with repo '*' meaning any repo of that owner.
+
+    Read from the environment the agent's session was launched with, which is the one channel the agent
+    cannot set for itself: a hook runs as its own process, so an inline `VAR=x cmd` prefix or an `export`
+    in a Bash call never reaches here. Granting is therefore a deliberate maintainer act taken outside the
+    session, not something an agent can do to get past a block it just hit.
+    """
+    out = set()
+    raw = (environ if environ is not None else os.environ).get(_ALLOW_ENV, "")
+    for tok in re.split(r"[,\s]+", raw):
+        if "/" not in tok:
+            continue
+        owner, repo = tok.split("/", 1)
+        owner, repo = owner.strip().lower(), repo.strip().lower()
+        if owner and repo:
+            out.add((owner, repo))
+    return out
+
+
+def _target_permitted(target, origin, granted):
+    """True when a write to target is in scope for a checkout whose origin is origin."""
+    # Same owner covers the origin itself and every sibling repository, which is the case the maintainer
+    # works in daily. A different owner is the incident shape and needs the grant.
+    if target[0] == origin[0]:
+        return True
+    return target in granted or (target[0], "*") in granted
 
 
 def _live_branch_rules(owner, repo, branch):
@@ -381,13 +416,14 @@ def _check_push_bypass(cmd, cwd, origin, current_branch=None, rules_lookup=None)
     return "allow", ""
 
 
-def classify(cmd, cwd=None, origin=None, current_branch=None, rules_lookup=None):
+def classify(cmd, cwd=None, origin=None, current_branch=None, rules_lookup=None, environ=None):
     """Return (decision, reason). decision is 'allow' or 'deny'.
 
     origin, when given, is a (owner, repo) tuple used instead of resolving from cwd - the self-test
-    passes it for a deterministic, offline run. current_branch and rules_lookup are likewise test seams:
-    current_branch stands in for the git resolution of a bare push, and rules_lookup(branch) stands in
-    for the live branch-rules query.
+    passes it for a deterministic, offline run. current_branch, rules_lookup and environ are likewise
+    test seams: current_branch stands in for the git resolution of a bare push, rules_lookup(branch)
+    stands in for the live branch-rules query, and environ stands in for the process environment the
+    maintainer's grant is read from.
     """
     # Fold shell line-continuations so a multi-line Bash invocation (`gh pr merge 5 \<newline> --admin`)
     # parses as one command; only backslash-newline is joined, so a real newline between commands still
@@ -449,13 +485,19 @@ def classify(cmd, cwd=None, origin=None, current_branch=None, rules_lookup=None)
     # compare an explicit target against, so this check is skipped and rules 1-2 still apply. A node-id
     # target is invisible here regardless - that is what rule 2 guards.
     if origin:
+        granted = _granted_targets(environ)
         for t in targets:
-            if t != origin:
+            if not _target_permitted(t, origin, granted):
                 return "deny", (
-                    f"This write targets {t[0]}/{t[1]}, which is not this checkout's origin "
-                    f"({origin[0]}/{origin[1]}). Write only to the current project's own repository. "
-                    "Another repository needs explicit per-session permission. See GOVERNANCE.md "
-                    "'Repository Boundaries and Write Safety'."
+                    f"This write targets {t[0]}/{t[1]}, under a different owner than this checkout's "
+                    f"origin ({origin[0]}/{origin[1]}). Writes reach the origin and its sibling "
+                    f"repositories under {origin[0]}, and a different owner is the shape that caused a "
+                    f"stray comment on a stranger's repository. Ask the maintainer to grant it in "
+                    f"{_ALLOW_ENV} (\"{t[0]}/{t[1]}\", or \"{t[0]}/*\" for that whole owner) before the "
+                    "session starts, and do not set it yourself, since a permission the agent grants "
+                    "itself is not a permission. See GOVERNANCE.md 'Repository Boundaries and Write "
+                    "Safety', or the same section of the user-level CLAUDE.md where the repo has no "
+                    "GOVERNANCE.md."
                 )
 
     return "allow", ""
@@ -486,6 +528,21 @@ _CASES = [
     ("gh pr comment 5 --body x || echo done", "deny", "force-success echo tail on a write"),
     ("gh api graphql -f query='mutation{addPullRequestReviewThreadReply(input:{pullRequestReviewThreadId:$t,body:$b}){comment{id}}}' -F t=\"$TID\" -F b=\"fixed_the_underscore_bug_here\"", "allow", "underscored reply body is not a node id"),
     ("gh api graphql -f query='mutation{resolveReviewThread(input:{threadId:$t}){thread{isResolved}}}' -F t=\"TODO_fixit\"", "allow", "short all-caps token is not a node id"),
+]
+
+# Rule-3 (repository scope) cases. Each carries the environment the grant is read from, so the run never
+# depends on the environment the self-test happens to inherit. Origin is ptr727/plexcleaner throughout.
+_SCOPE_CASES = [
+    # (command, environ, expected_decision, label)
+    ("gh issue create --repo ptr727/PhotoCleaner --title x --body y", {}, "allow", "sibling repo under the same owner"),
+    ("gh api repos/ptr727/PhotoCleaner/issues -f title=x", {}, "allow", "sibling repo via an explicit API path"),
+    ("gh issue create --repo esphome/esphome --title x --body y", {}, "deny", "different owner with no grant"),
+    ("gh issue create --repo esphome/esphome --title x --body y", {_ALLOW_ENV: "esphome/esphome"}, "allow", "different owner named in the grant"),
+    ("gh issue create --repo esphome/esphome --title x --body y", {_ALLOW_ENV: "esphome/*"}, "allow", "different owner granted by owner wildcard"),
+    ("gh issue create --repo esphome/aioesphomeapi --title x", {_ALLOW_ENV: "esphome/esphome"}, "deny", "a repo grant does not extend to that owner's other repos"),
+    ("gh issue comment 5 -R mankatcheung/job-finder --body hi", {_ALLOW_ENV: "esphome/*"}, "deny", "the incident: a grant for one owner does not reach another"),
+    ("gh issue create --repo esphome/esphome --title x", {_ALLOW_ENV: "not-an-owner-repo"}, "deny", "a malformed grant grants nothing"),
+    ("GH_WRITE_GUARD_ALLOW=esphome/esphome gh issue create --repo esphome/esphome --title x", {}, "deny", "an inline env prefix is part of the command, not the hook's environment"),
 ]
 
 # Rule-4 (branch-rule bypass) cases. Each carries its own branch->rules map so the run is deterministic
@@ -555,13 +612,22 @@ def _selftest():
     origin = ("ptr727", "plexcleaner")
     ok = True
     for cmd, want, label in _CASES:
-        got, _ = classify(cmd, origin=origin, current_branch="feature/x", rules_lookup=lambda br: set())
+        got, _ = classify(cmd, origin=origin, current_branch="feature/x", rules_lookup=lambda br: set(),
+                          environ={})
+        mark = "ok  " if got == want else "FAIL"
+        if got != want:
+            ok = False
+        print(f"  {mark} [{got:5}] want={want:5} {label}")
+    for cmd, env, want, label in _SCOPE_CASES:
+        got, _ = classify(cmd, origin=origin, current_branch="feature/x", rules_lookup=lambda br: set(),
+                          environ=env)
         mark = "ok  " if got == want else "FAIL"
         if got != want:
             ok = False
         print(f"  {mark} [{got:5}] want={want:5} {label}")
     for cmd, cur, rmap, want, label in _GIT_CASES:
-        got, _ = classify(cmd, origin=origin, current_branch=cur, rules_lookup=lambda br, _m=rmap: _m.get(br))
+        got, _ = classify(cmd, origin=origin, current_branch=cur, rules_lookup=lambda br, _m=rmap: _m.get(br),
+                          environ={})
         mark = "ok  " if got == want else "FAIL"
         if got != want:
             ok = False
