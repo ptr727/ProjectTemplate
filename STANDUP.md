@@ -92,13 +92,14 @@ Implement the Actions that satisfy [`WORKFLOW.md`][workflow] for the repo's type
 
 ## 4. Apply Settings, Rulesets, and Secrets
 
-**Assert the remote before running anything in this step**, since this is the first step that needs one and every step before it passes without one:
+**Assert that the repository exists and that this checkout points at it**, since this is the first step needing either and every step before it passes without both:
 
 ```shell
+git remote get-url origin                                  # expect a URL, not an error
 gh repo view <owner>/<repo> --json nameWithOwner,visibility
 ```
 
-An absent repository fails here as a resolution error against whatever `configure.sh` calls first, which reads as a permissions or naming problem rather than as the missing prerequisite it is. Checking it directly turns a confusing stall into a specific one, and a repository the maintainer has not created yet is step 0A's escalation rather than something to work around.
+They fail independently, so both are checked. A checkout with no `origin` has nothing to push to even where the repository exists, and it is the state a local-only standup reaches with every step reporting success. An absent repository instead fails as a resolution error against whatever `configure.sh` calls first, which reads as a permissions or naming problem rather than as the missing prerequisite it is. Either one turns a confusing stall into a specific one, and either one missing is step 0A's escalation rather than something to work around.
 
 Run `repo-config/configure.sh apply [owner/repo] [release|operational]` (the repo defaults to the current one, the model to the registry lookup or, absent a registry, to the carried payload) to apply the fleet settings, the Dependabot security features, and the two rulesets idempotently (import the JSON, never hand-build it, per [`docs/repo-config-carry.md`][repo-config-carry]), then `repo-config/configure.sh check [owner/repo] [release|operational]` to validate the repo and exit non-zero on any drift. Configure every required secret per [`spec/secrets.json`][secrets] (the registry `requiredSecrets[]` list plus the implicit baseline) in the right store(s), meaning Actions plus Dependabot where the mechanism needs it, and confirm no forbidden secret is present. The required check binds by name (`Check pull request workflow status job`) and turns green only after the PR workflow has run once, which is why this step follows step 3 rather than preceding it. A ruleset requiring a name no run has ever reported leaves the first pull request waiting on a status nothing produces, and on an operational repo the `develop -> main` promotion is a pull request too, so the same wait applies there.
 
