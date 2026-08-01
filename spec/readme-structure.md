@@ -24,6 +24,8 @@ The preferred `README.md` shape for a fleet project. The audit's `readme-structu
 
 Shields are not a top-level section. They live under **Build and Distribution** as the **Build Status** and **Releases** sub-sections. Each shield is a reference-style link, with the definitions grouped under `<!-- Shields -->` at the bottom of the file. Stack a group's badges by ending each line except the last with a trailing backslash.
 
+**Repository visibility does not change the structure.** A private repo carries the same sections and the same shield set as a public one, written in full. A private repo cannot be read by shields.io, so its GitHub-sourced badges render broken until it goes public, and that is accepted rather than worked around. The alternative, writing a reduced README while private and adding the missing shields at the visibility flip, makes the shape depend on a property that is temporary by design, since a repo is usually private precisely **while** it is being made presentable, which is exactly when its README is written. Carrying the full shape means going public is a visibility change and nothing else, with no README work owed at the flip and no second shape for the audit to accept.
+
 ## Style
 
 - Write in the current state, present tense, so the reader needs no knowledge beyond what they are reading (GOVERNANCE.md Documentation Style).
@@ -42,8 +44,12 @@ The file is the declared destination rather than a required file, the same footi
 
 ## HISTORY.md
 
-`HISTORY.md` is the maintainer-curated changelog and opens as the README's twin: the same `# <Title>` (without the README's ToC-omit comment) and the same intro paragraph, copied verbatim, then a `## Release History` section. The mirrored opening keeps the project identity consistent for a reader who lands on the changelog directly, and the audit checks that the title and intro match the README (HTML comments stripped).
+The rule lives in [`CODESTYLE.md`][codestyle] "Markdown and Spelling", which every repo carries, so a repo can read the rule it is measured against. This file states only what the audit does with it: the `readme-structure` dimension checks that the `HISTORY.md` title and intro match the README's, with HTML comments stripped.
 
 ## Docker Hub README
 
 Docker Hub has two text fields: a **short description** (the tagline, capped near 100 characters) that mirrors the README intro line (item 1), and the longer **overview**. A repo that publishes a Docker image keeps a **separate** `Docker/README.md` for the overview: Docker Hub's description has a much smaller size limit than a project README, so it carries a trimmed overview, not the full README. It is published by the docker-readme workflow task, not copied from the root README.
+
+<!-- Repo -->
+
+[codestyle]: ../CODESTYLE.md
