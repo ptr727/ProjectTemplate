@@ -34,6 +34,19 @@ git config --local --get user.email || true    # expect no output
 
 After the first commit, confirm it took with `git log -1 --format='%G? author=%an <%ae> committer=%cn <%ce>'`, so the passing result is `G` plus the expected `noreply` address in **both** identities. Read both rather than the author alone: the rule governs the `author` and the `committer` together, GitHub verifies the signature against the **committer**, and a rebase, amend, or cherry-pick rewrites the committer while leaving the author untouched, which is exactly the case an author-only check passes and should not. `git verify-commit HEAD` is the pass/fail form, exiting non-zero on a bad signature and writing its "Good signature" line to stderr rather than emitting a status letter.
 
+## 0A. Hand Over What Only the Maintainer Can Supply
+
+**Nothing in this procedure creates the GitHub repository.** Creating one is an outward-facing write that [GOVERNANCE.md "Repository Boundaries and Write Safety"][governance-repository-boundaries-and-write-safety] puts behind explicit per-session permission, so the agent asks for it rather than assuming it exists. Hand this list over before step 1, so it is a checklist at the start rather than a discovery at step 4:
+
+- **The repository**, with its owner, name, and visibility.
+- **The GitHub App installed on it.** An App that is created but not installed does not work, per [`repo-config/README.md`][repo-config-readme].
+- **The App secret values**, in the Actions and Dependabot stores both.
+- **Every publish credential and environment the repo's mechanisms declare** in [`spec/secrets.json`][secrets], including any environment a deploy gates on.
+
+**A repo with no remote is not partially stood up. It is not started.** Steps 0 through 3 complete locally and report progress with no repository in existence, so local progress is not evidence of onboarding progress. [`AUDIT.md`][audit] is the check that would catch it, and it reads a live repo, so the one instrument that detects this condition is unavailable exactly while it holds.
+
+**Escalate a blocking prerequisite the moment it is found, rather than carrying it.** In a task list a pending task and a blocking prerequisite look identical, and the second quietly becomes the first as work continues around it. Stop at the step that needs the missing input and say which input it is.
+
 ## 1. Classify and Catalog
 
 Resolve the repo's type(s) with the [`AUDIT.md`][audit] section 2 detection rules, then write or repair its [`registry/repos.json`][repos] entry: `status`, `types[]`, `groundTruthBranch`, `hasDevelop`, `publish[]`, `requiredSecrets[]`, `consumerModel`, `releaseTrigger`, `workflowModel` (omit to take the `release` default), `configLayout`, and `driftNotes` that describe what the repo **actually is**. Run [`spec/validate.py`][validate] to confirm it classifies cleanly. The registry is ground truth about reality, not intent, and a `validate.py`-clean entry is still false if it disagrees with the live repo.
@@ -79,7 +92,15 @@ Implement the Actions that satisfy [`WORKFLOW.md`][workflow] for the repo's type
 
 ## 4. Apply Settings, Rulesets, and Secrets
 
-Run `repo-config/configure.sh apply [owner/repo] [release|operational]` (the repo defaults to the current one, the model to the registry lookup or, absent a registry, to the carried payload) to apply the fleet settings, the Dependabot security features, and the two rulesets idempotently (import the JSON, never hand-build it, per [`docs/repo-config-carry.md`][repo-config-carry]), then `repo-config/configure.sh check [owner/repo] [release|operational]` to validate the repo and exit non-zero on any drift. Configure every required secret per [`spec/secrets.json`][secrets] (the registry `requiredSecrets[]` list plus the implicit baseline) in the right store(s), meaning Actions plus Dependabot where the mechanism needs it, and confirm no forbidden secret is present. The required check binds by name (`Check pull request workflow status job`) and turns green only after the PR workflow has run once.
+**Assert the remote before running anything in this step**, since this is the first step that needs one and every step before it passes without one:
+
+```shell
+gh repo view <owner>/<repo> --json nameWithOwner,visibility
+```
+
+An absent repository fails here as a resolution error against whatever `configure.sh` calls first, which reads as a permissions or naming problem rather than as the missing prerequisite it is. Checking it directly turns a confusing stall into a specific one, and a repository the maintainer has not created yet is step 0A's escalation rather than something to work around.
+
+Run `repo-config/configure.sh apply [owner/repo] [release|operational]` (the repo defaults to the current one, the model to the registry lookup or, absent a registry, to the carried payload) to apply the fleet settings, the Dependabot security features, and the two rulesets idempotently (import the JSON, never hand-build it, per [`docs/repo-config-carry.md`][repo-config-carry]), then `repo-config/configure.sh check [owner/repo] [release|operational]` to validate the repo and exit non-zero on any drift. Configure every required secret per [`spec/secrets.json`][secrets] (the registry `requiredSecrets[]` list plus the implicit baseline) in the right store(s), meaning Actions plus Dependabot where the mechanism needs it, and confirm no forbidden secret is present. The required check binds by name (`Check pull request workflow status job`) and turns green only after the PR workflow has run once, which is why this step follows step 3 rather than preceding it. A ruleset requiring a name no run has ever reported leaves the first pull request waiting on a status nothing produces, and on an operational repo the `develop -> main` promotion is a pull request too, so the same wait applies there.
 
 ## 5. Verify: Run the Audit
 
@@ -116,11 +137,13 @@ The same [`AUDIT.md`][audit] run is the on-demand audit for any known repo, and 
 [files]: ./spec/files.json
 [governance]: ./GOVERNANCE.md
 [governance-git-and-commit-rules]: ./GOVERNANCE.md#git-and-commit-rules
+[governance-repository-boundaries-and-write-safety]: ./GOVERNANCE.md#repository-boundaries-and-write-safety
 [host-setup]: ./docs/host-setup.md
 [matrix]: ./reports/conformance-matrix.md
 [project-types]: ./spec/project-types.json
 [repo-config]: ./repo-config/
 [repo-config-carry]: ./docs/repo-config-carry.md
+[repo-config-readme]: ./repo-config/README.md
 [repos]: ./registry/repos.json
 [scope-model]: ./spec/scope-model.md
 [secrets]: ./spec/secrets.json
