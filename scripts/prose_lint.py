@@ -522,7 +522,8 @@ NOT_PROSE = re.compile(r'^(!|\s*[-=#*/<>]+\s*$)|noqa|type:\s*ignore|pylint|ruff:
 # A URI inside a sentence is still prose, so the whole body has to be the address and nothing else.
 # The angle brackets are matched as a pair or not at all.
 # One bracket alone is a typo, and exempting it would hide the typo rather than report it.
-BARE_URI = re.compile(r'^(?:<(?:https?|ftp)://[^>\s]+>|(?:https?|ftp)://[^>\s]+)$')
+# The scheme is case-insensitive per RFC 3986, so an uppercase one is the same reference.
+BARE_URI = re.compile(r'^(?:<(?:https?|ftp)://[^>\s]+>|(?:https?|ftp)://[^>\s]+)$', re.IGNORECASE)
 
 # Two sentences on one line, guarded against an abbreviation, an initial, or a dotted identifier.
 # The initial guard anchors on a word boundary, so `J. Smith` reads as one name.

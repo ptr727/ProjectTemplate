@@ -394,6 +394,16 @@ class TestCommentWrap(BaitCase):
         self.assertEqual([], self.flag('a.yml', '# https://example.com/one\n'
                                                 '# https://example.com/two\n'))
 
+    def test_the_scheme_is_case_insensitive(self) -> None:
+        """RFC 3986 makes the scheme case-insensitive, so an uppercase one is the same reference.
+
+        The continuation case is the one that matters: a scheme the exemption misses puts the
+        reference line back in the wrap logic, which is the false positive this exemption removes.
+        """
+        self.assertEqual([], self.flag('a.yml', '# HTTPS://example.com/one\n'
+                                                '# Describes the format.\n'))
+        self.assertEqual([], self.flag('a.yml', '# Https://example.com/one\n'))
+
     def test_an_unbalanced_angle_bracket_is_not_a_delimited_uri(self) -> None:
         """One bracket is a typo rather than a delimiter, so it is reported instead of exempted."""
         for body in ('<https://example.com/one', 'https://example.com/one>'):
