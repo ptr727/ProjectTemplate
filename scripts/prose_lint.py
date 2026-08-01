@@ -788,10 +788,11 @@ def check_file(path: Path, rules: set[str]) -> list[tuple[int, str, str]]:
     lines = raw.split('\n')
     if {'comment-wrap', 'comment-case'} & rules:
         out.extend(f for f in comment_wrap_findings(path, raw, lines) if f[1] in rules)
-    # Outside markdown the prose lives in the comments, and the rule judges prose rather than code.
-    # Reading the source line itself would flag an identifier, or in this file the rule's own table.
+    # Outside markdown the prose lives in the comments, and both rules judge prose, not code.
+    # A source line holds identifiers and literals, and an attribute value may legally repeat.
+    # Reading it rejects correct work, `class="gallery gallery-cols-1"` being the reported case.
     comments: dict[int, list[str]] = {}
-    if 'spelling' in rules and path.suffix != '.md':
+    if {'spelling', 'dupword'} & rules and path.suffix != '.md':
         for ln, text, _ in extracted_comments(path, lines):
             comments.setdefault(ln, []).append(text)
     in_fence = False
@@ -837,10 +838,15 @@ def check_file(path: Path, rules: set[str]) -> list[tuple[int, str, str]]:
                                 'spaced hyphen -> a comma, two sentences, or parentheses'))
 
         if 'dupword' in rules:
-            for m in DUPWORD.finditer(prose):
-                if m.group(0).lower() in DUP_ALLOW:
-                    continue
-                out.append((i, 'dupword', f"duplicated word '{m.group(1)}'"))
+            # Each comment on the line is judged on its own rather than joined with its neighbors.
+            # Joining them would read the second's opening word as a repeat of the first's last.
+            texts = ([prose] if path.suffix == '.md'
+                     else [strip_inline_code(c) for c in comments.get(i, [])])
+            for text in texts:
+                for m in DUPWORD.finditer(text):
+                    if m.group(0).lower() in DUP_ALLOW:
+                        continue
+                    out.append((i, 'dupword', f"duplicated word '{m.group(1)}'"))
 
         if 'spelling' in rules:
             texts = [prose] if path.suffix == '.md' else comments.get(i, [])

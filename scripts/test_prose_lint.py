@@ -21,6 +21,9 @@ GOVERNANCE = REPO / 'GOVERNANCE.md'
 # A file full of rejected input would otherwise report itself.
 DUP = 'the ' + 'the'
 SPLICE_BAIT = 'It runs on push; ' + 'it gates the merge'
+# Attribute values whose repetition is correct authoring, assembled for the same reason.
+DUP_CLASS = 'gallery ' + 'gallery-cols-1'
+DUP_REL = 'nofollow ' + 'nofollow-ugc'
 
 
 class BaitCase(unittest.TestCase):
@@ -166,6 +169,13 @@ class TestGovernanceCoupling(unittest.TestCase):
 
 
 class TestDupword(BaitCase):
+    """A doubled word, read from markdown prose and from the comments of every other syntax.
+
+    The scope matters more here than for the other prose rules, because this one gates CI. Outside
+    markdown a repeated token is far more often correct code than a typo: `class="gallery
+    gallery-cols-1"` is the ordinary HTML idiom, and no edit fixes it without changing the page.
+    """
+
     def test_every_allowlist_entry_is_permitted(self) -> None:
         for phrase in prose_lint.DUP_ALLOW:
             with self.subTest(phrase=phrase):
@@ -180,6 +190,55 @@ class TestDupword(BaitCase):
         """"either/or or" is a phrase followed by a conjunction, not a doubled word."""
         self.assertEqual([], self.kinds('either/or or must-pair inputs\n', {'dupword'}))
         self.assertEqual([], self.kinds('a must-pair pair of inputs\n', {'dupword'}))
+
+    def test_a_repetition_in_a_comment_is_flagged_in_every_syntax(self) -> None:
+        """Narrowing the rule to comments has to leave it enforcing in all of them."""
+        for name, comment in (('bait.py', f'# {DUP.capitalize()} thing.'),
+                              ('bait.sh', f'# {DUP.capitalize()} thing.'),
+                              ('bait.yml', f'# {DUP.capitalize()} thing.'),
+                              ('bait.cs', f'// {DUP.capitalize()} thing.'),
+                              ('bait.cs', f'/* {DUP.capitalize()} thing. */'),
+                              ('bait.html', f'<!-- {DUP.capitalize()} thing. -->')):
+            with self.subTest(file=name, comment=comment):
+                self.assertEqual(['dupword'], self.kinds(f'{comment}\n', {'dupword'}, name=name))
+
+    def test_a_trailing_comment_is_read_and_the_code_before_it_is_not(self) -> None:
+        """The comment is prose wherever it sits on the line, and the statement stays code."""
+        self.assertEqual(['dupword'],
+                         self.kinds(f'x = 1  # {DUP.capitalize()} thing.\n', {'dupword'},
+                                    name='bait.py'))
+
+    def test_code_is_not_prose_outside_markdown(self) -> None:
+        """A repeated token in code is the author's, and often the only spelling that works.
+
+        The class attribute is the reported case: two class names sharing a prefix is how CSS is
+        written, and `rel`, `srcset` and `data-*` all take value lists with the same shape.
+        """
+        for name, line in (('bait.html', f'<div class="{DUP_CLASS}">'),
+                           ('bait.html', f'<a rel="{DUP_REL}" href="#">x</a>'),
+                           ('bait.html', f'<p>{DUP} thing</p>'),
+                           ('bait.py', f'x = "{DUP}"'),
+                           ('bait.yml', f'key: {DUP}'),
+                           ('bait.json', f'{{ "a": "{DUP}" }}')):
+            with self.subTest(file=name, line=line):
+                self.assertEqual([], self.kinds(f'{line}\n', {'dupword'}, name=name))
+
+    def test_two_comments_on_one_line_are_judged_separately(self) -> None:
+        """Joining them would read the second comment's opening word as a repeat of the first's."""
+        word = DUP.split()[0]
+        pair = f'<!-- Ends with {word} --><!-- {word.capitalize()} opens -->\n'
+        self.assertEqual([], self.kinds(pair, {'dupword'}, name='bait.html'))
+
+    def test_inline_code_is_not_prose(self) -> None:
+        """A backticked token is quoted, the same exemption every other prose rule takes."""
+        self.assertEqual([], self.kinds(f'The `{DUP}` field.\n', {'dupword'}))
+        self.assertEqual([], self.kinds(f'# The `{DUP}` field.\n', {'dupword'}, name='bait.py'))
+
+    def test_the_repo_is_clean_of_duplicated_words(self) -> None:
+        """The rule gates in CI, so the tree it gates has to pass it today and not eventually."""
+        found = [f'{prose_lint.rel(p)}:{ln}' for p in prose_lint.discover(['.'])
+                 for ln, kind, _ in prose_lint.check_file(p, {'dupword'}) if kind == 'dupword']
+        self.assertEqual([], found)
 
 
 class TestSemicolon(BaitCase):
