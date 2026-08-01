@@ -44,8 +44,12 @@ The file is the declared destination rather than a required file, the same footi
 
 ## HISTORY.md
 
-`HISTORY.md` is the maintainer-curated changelog and opens as the README's twin: the same `# <Title>` (without the README's ToC-omit comment) and the same intro paragraph, copied verbatim, then a `## Release History` section. The mirrored opening keeps the project identity consistent for a reader who lands on the changelog directly, and the audit checks that the title and intro match the README (HTML comments stripped).
+The rule lives in [`CODESTYLE.md`][codestyle] "Markdown and Spelling", which every repo carries, so a repo can read the rule it is measured against. This file states only what the audit does with it: the `readme-structure` dimension checks that the `HISTORY.md` title and intro match the README's, with HTML comments stripped.
 
 ## Docker Hub README
 
 Docker Hub has two text fields: a **short description** (the tagline, capped near 100 characters) that mirrors the README intro line (item 1), and the longer **overview**. A repo that publishes a Docker image keeps a **separate** `Docker/README.md` for the overview: Docker Hub's description has a much smaller size limit than a project README, so it carries a trimmed overview, not the full README. It is published by the docker-readme workflow task, not copied from the root README.
+
+<!-- Internal -->
+
+[codestyle]: ../CODESTYLE.md
