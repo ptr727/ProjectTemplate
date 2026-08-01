@@ -2,8 +2,7 @@
 
 Running backlog for this repo, kept in a committed file so the guidance survives across environments where agent memory does not.
 
-- Run the first per-repo audits and populate [reports/][reports] for the seven cataloged repos.
-- Classify the standardization-backlog repos in [registry/repos.json][repos] (marked `classificationPending`) on first audit.
+- Populate [reports/][reports] for the cataloged repos that still have no audit, since a registry `status` of `cataloged` asserts a result that only a committed report evidences. Eight repos have one.
 - Canonicalize Python linter-config placement on `pyproject.toml` (one cataloged repo uses standalone `.ruff.toml` + `pyrightconfig.json`), track as a drift finding, fix downstream.
 - Consider renaming this repo to reflect the audit-catalog identity (updates badge and link URLs across the fleet).
 - Adopt the OCI annotation keys (`org.opencontainers.image.*`) for Docker image metadata across the Docker repos, replacing the ad-hoc and `org.label-schema.*` labels (from #363).
@@ -19,5 +18,4 @@ Running backlog for this repo, kept in a committed file so the guidance survives
 <!-- Repo -->
 
 [matrix]: ./reports/conformance-matrix.md
-[repos]: ./registry/repos.json
 [reports]: ./reports/
