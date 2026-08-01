@@ -1,6 +1,6 @@
 # ProjectTemplate
 
-Governance, agent-orchestration, and workflow-audit hub for a fleet of related repositories.
+Agent enablement for a fleet of repositories: autonomy and repeatable quality inside guardrails.
 
 ## Release History
 
