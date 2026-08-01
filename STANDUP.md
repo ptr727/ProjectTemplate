@@ -34,6 +34,19 @@ git config --local --get user.email || true    # expect no output
 
 After the first commit, confirm it took with `git log -1 --format='%G? author=%an <%ae> committer=%cn <%ce>'`, so the passing result is `G` plus the expected `noreply` address in **both** identities. Read both rather than the author alone: the rule governs the `author` and the `committer` together, GitHub verifies the signature against the **committer**, and a rebase, amend, or cherry-pick rewrites the committer while leaving the author untouched, which is exactly the case an author-only check passes and should not. `git verify-commit HEAD` is the pass/fail form, exiting non-zero on a bad signature and writing its "Good signature" line to stderr rather than emitting a status letter.
 
+## 0A. Hand Over What Only the Maintainer Can Supply
+
+**Nothing in this procedure creates the GitHub repository.** Creating one is an outward-facing write that [GOVERNANCE.md "Repository Boundaries and Write Safety"][governance-repository-boundaries-and-write-safety] puts behind explicit per-session permission, so the agent asks for it rather than assuming it exists. Hand this list over before step 1, so it is a checklist at the start rather than a discovery at step 4:
+
+- **The repository**, with its owner, name, and visibility.
+- **The GitHub App installed on it.** An App that is created but not installed does not work, per [`repo-config/README.md`][repo-config-readme].
+- **The App secret values**, in the Actions and Dependabot stores both.
+- **Every publish credential and environment the repo's mechanisms declare** in [`spec/secrets.json`][secrets], including any environment a deploy gates on.
+
+**A repo with no remote is not partially stood up. It is not started.** Steps 0 through 3 complete locally and report progress with no repository in existence, so local progress is not evidence of onboarding progress. [`AUDIT.md`][audit] is the check that would catch it, and it reads a live repo, so the one instrument that detects this condition is unavailable exactly while it holds.
+
+**Escalate a blocking prerequisite the moment it is found, rather than carrying it.** In a task list a pending task and a blocking prerequisite look identical, and the second quietly becomes the first as work continues around it. Stop at the step that needs the missing input and say which input it is.
+
 ## 1. Classify and Catalog
 
 Resolve the repo's type(s) with the [`AUDIT.md`][audit] section 2 detection rules, then write or repair its [`registry/repos.json`][repos] entry: `status`, `types[]`, `groundTruthBranch`, `hasDevelop`, `publish[]`, `requiredSecrets[]`, `consumerModel`, `releaseTrigger`, `workflowModel` (omit to take the `release` default), `configLayout`, and `driftNotes` that describe what the repo **actually is**. Run [`spec/validate.py`][validate] to confirm it classifies cleanly. The registry is ground truth about reality, not intent, and a `validate.py`-clean entry is still false if it disagrees with the live repo.
@@ -72,13 +85,14 @@ Copy every [`spec/files.json`][files] entry whose `appliesTo` matches the repo's
 
 **This decision is effectively one-way, which is why it belongs here.** Once a repo publishes against a floor, lowering it regresses the released version order, so a floor that was never chosen is kept rather than corrected. Inherited floors are the observed failure, not a hypothetical one: four operational config repos run on a floor none of them picked and have released against it.
 
-**Repo-specific content has a declared destination, not a judgment call.** The baseline is what a repo *carries*. Anything the repo knows that the fleet does not needs somewhere to live, and improvising a location per repo is what the destinations in [`spec/section-model.md`][section-model] exist to prevent. Three topical docs take it, chosen by what the content **is**:
+**Repo-specific content has a declared destination, not a judgment call.** The baseline is what a repo *carries*. Anything the repo knows that the fleet does not needs somewhere to live, and improvising a location per repo is what the destinations in [`spec/section-model.md`][section-model] exist to prevent. Four topical docs take it, chosen by what the content **is**:
 
 - [`CODESTYLE.md`][codestyle]: the repo's language and formatting conventions beyond the carried rules.
 - `ARCHITECTURE.md`: how a code repo is built, its module layout, data flow, and design decisions.
 - `OPERATIONS.md`: how an operational repo is run, covering runbooks, backup, log and debug procedures, tool-usage notes, and config layout.
+- `TODO.md`: the repo's running backlog, per [`spec/readme-structure.md`][readme-structure]. It keeps open work out of the README's section order, where it does not belong and changes on a different cadence from everything around it.
 
-**`OPERATIONS.md` is required on an `operational` repo**, not optional, so it appears in the baseline above with `appliesTo: ["operational"]`. It is presence-checked only, the same footing as `README.md` and `HISTORY.md`, so its content is entirely the repo's own and a repo with little to say still carries the file. It is the operational-repo analogue of `ARCHITECTURE.md`, and it is where an `AGENTS.md` split puts the repo-specific half, so real runbooks (a deploy procedure, a rollback, a retention policy, a credential rotation) go there rather than into a carried file. It is agent-instruction content, so it takes the inline-link exception the markdown rules name rather than the reference-style default. `ARCHITECTURE.md` stays advisory and is not required by any selector.
+**`OPERATIONS.md` is required on an `operational` repo**, not optional, so it appears in the baseline above with `appliesTo: ["operational"]`. It is presence-checked only, the same footing as `README.md` and `HISTORY.md`, so its content is entirely the repo's own and a repo with little to say still carries the file. It is the operational-repo analogue of `ARCHITECTURE.md`, and it is where an `AGENTS.md` split puts the repo-specific half, so real runbooks (a deploy procedure, a rollback, a retention policy, a credential rotation) go there rather than into a carried file. It is agent-instruction content, so it takes the inline-link exception the markdown rules name rather than the reference-style default. `ARCHITECTURE.md` and `TODO.md` stay advisory and are required by no selector, so a repo with nothing to say in one carries no file rather than an empty one.
 
 Choose the destination while scaffolding rather than after. Repo-specific content left in a carried file is drift, which the audit lists as an undeclared section to reconcile, and reconciling it later means moving prose that downstream readers have already started trusting in the wrong place.
 
@@ -88,7 +102,24 @@ Implement the Actions that satisfy [`WORKFLOW.md`][workflow] for the repo's type
 
 ## 4. Apply Settings, Rulesets, and Secrets
 
-Run `repo-config/configure.sh apply [owner/repo] [release|operational]` (the repo defaults to the current one, the model to the registry lookup or, absent a registry, to the carried payload) to apply the fleet settings, the Dependabot security features, and the two rulesets idempotently (import the JSON, never hand-build it, per [`docs/repo-config-carry.md`][repo-config-carry]), then `repo-config/configure.sh check [owner/repo] [release|operational]` to validate the repo and exit non-zero on any drift. Configure every required secret per [`spec/secrets.json`][secrets] (the registry `requiredSecrets[]` list plus the implicit baseline) in the right store(s), meaning Actions plus Dependabot where the mechanism needs it, and confirm no forbidden secret is present. The required check binds by name (`Check pull request workflow status job`) and turns green only after the PR workflow has run once.
+**Read the remote and the repository before running anything else here**, since this is the first step needing either and every step before it passes without both:
+
+```shell
+git remote get-url origin                                 # expect a URL, not an error
+gh repo view "<owner>/<repo>" --json nameWithOwner,visibility
+```
+
+The placeholder is quoted because an unquoted `<` is input redirection, so the line fails on paste against a file rather than against the repository.
+
+Three conditions fail here, and the two commands together are what separate them:
+
+- **No `origin`.** The checkout has nowhere to push even where the repository exists, and it is the state a local-only standup reaches with every step reporting success.
+- **No repository.** It surfaces as a resolution error against whatever `configure.sh` calls first, which reads as a permissions or naming problem rather than as the missing prerequisite it is.
+- **The two disagree.** Neither command checks this, so compare the `origin` URL against `nameWithOwner` and confirm they name the same repository.
+
+Each is step 0A's escalation rather than something to work around.
+
+Run `repo-config/configure.sh apply [owner/repo] [release|operational]` (the repo defaults to the current one, the model to the registry lookup or, absent a registry, to the carried payload) to apply the fleet settings, the Dependabot security features, and the two rulesets idempotently (import the JSON, never hand-build it, per [`docs/repo-config-carry.md`][repo-config-carry]), then `repo-config/configure.sh check [owner/repo] [release|operational]` to validate the repo and exit non-zero on any drift. Configure every required secret per [`spec/secrets.json`][secrets] (the registry `requiredSecrets[]` list plus the implicit baseline) in the right store(s), meaning Actions plus Dependabot where the mechanism needs it, and confirm no forbidden secret is present. The required check binds by name (`Check pull request workflow status job`) and turns green only after the PR workflow has run once, which is why this step follows step 3 rather than preceding it. A ruleset requiring a name no run has ever reported leaves the first pull request waiting on a status nothing produces, and on an operational repo the `develop -> main` promotion is a pull request too, so the same wait applies there.
 
 ## 5. Verify: Run the Audit
 
@@ -125,11 +156,14 @@ The same [`AUDIT.md`][audit] run is the on-demand audit for any known repo, and 
 [files]: ./spec/files.json
 [governance]: ./GOVERNANCE.md
 [governance-git-and-commit-rules]: ./GOVERNANCE.md#git-and-commit-rules
+[governance-repository-boundaries-and-write-safety]: ./GOVERNANCE.md#repository-boundaries-and-write-safety
 [host-setup]: ./docs/host-setup.md
 [matrix]: ./reports/conformance-matrix.md
 [project-types]: ./spec/project-types.json
+[readme-structure]: ./spec/readme-structure.md
 [repo-config]: ./repo-config/
 [repo-config-carry]: ./docs/repo-config-carry.md
+[repo-config-readme]: ./repo-config/README.md
 [repos]: ./registry/repos.json
 [scope-model]: ./spec/scope-model.md
 [secrets]: ./spec/secrets.json
