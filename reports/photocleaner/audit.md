@@ -58,7 +58,7 @@ Six pull requests opened 2026-08-01 against `develop`, one per drift class per A
 
 ## Escalations
 
-Five spec questions this audit surfaced, raised rather than resolved, per AUDIT.md section 9.
+Five spec questions this audit surfaced, raised rather than resolved, per AUDIT.md section 9. Filed as issue [#509](https://github.com/ptr727/ProjectTemplate/issues/509).
 
 1. **The `HISTORY.md` mirror rule has no carried home.** `spec/readme-structure.md` owns it and the audit enforces it, but that file is hub-only, so a downstream repo cannot point at the rule it is measured against. PhotoCleaner kept the rule as repo-local prose in `CODESTYLE.md` for want of a destination. Either promote it into a carried section, or accept that mechanical-only enforcement is the intent.
 2. **The hub's own `.github/copilot-instructions.md` still describes the pre-split file.** `Reviewing Carried Fleet Content` says "Most of `AGENTS.md` is universal fleet law: every section that states a rule, as opposed to the two that describe this repository's own directory tree and devcontainer". After the split those sections live in `GOVERNANCE.md`, and `AGENTS.md` carries exactly two verbatim sections and no repo-specific ones. Every repo carrying this section downstream inherits the stale description.
