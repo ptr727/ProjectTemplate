@@ -63,13 +63,14 @@ Capture the source, verify the capture **against the source**, and hold the veri
 
 Copy every [`spec/files.json`][files] entry whose `appliesTo` matches the repo's **selector set**, **adapted, not cloned**. The selector set is the repo's `types` plus its `workflowModel`, `releaseTrigger`, and `consumerModel`, so filtering on type alone silently drops the entries a non-type selector carries ([`spec/scope-model.md`][scope-model] defines the four namespaces and how they resolve). The prose files (`CODESTYLE.md`, `README.md`, and the like) describe the repo's own toolchain, so adapt them to reality rather than propagating template specifics verbatim (see the "Adapt before propagating" callout in [`CODESTYLE.md`][codestyle], since a verbatim copy that misdescribes the repo is rejected in review). The baseline covers `WORKFLOW.md`, `version.json`, the two rulesets, `.github/dependabot.yml`, `.editorconfig`, `.gitattributes`, the linter configs, and the per-type files (`.vscode/tasks.json` from the language's snippet, `codecov.yml`, `.dockerignore`, `Docker/README.md`). **Every repo carries `repo-config/main.json`**, and only the `develop` payload varies by workflow model: `repo-config/develop.json` for a release repo, `repo-config/operational/develop.json` for an operational one.
 
-**Repo-specific content has a declared destination, not a judgment call.** The baseline is what a repo *carries*. Anything the repo knows that the fleet does not needs somewhere to live, and improvising a location per repo is what the destinations in [`spec/section-model.md`][section-model] exist to prevent. Three topical docs take it, chosen by what the content **is**:
+**Repo-specific content has a declared destination, not a judgment call.** The baseline is what a repo *carries*. Anything the repo knows that the fleet does not needs somewhere to live, and improvising a location per repo is what the destinations in [`spec/section-model.md`][section-model] exist to prevent. Four topical docs take it, chosen by what the content **is**:
 
 - [`CODESTYLE.md`][codestyle]: the repo's language and formatting conventions beyond the carried rules.
 - `ARCHITECTURE.md`: how a code repo is built, its module layout, data flow, and design decisions.
 - `OPERATIONS.md`: how an operational repo is run, covering runbooks, backup, log and debug procedures, tool-usage notes, and config layout.
+- `TODO.md`: the repo's running backlog, per [`spec/readme-structure.md`][readme-structure]. It keeps open work out of the README's section order, where it does not belong and changes on a different cadence from everything around it.
 
-**`OPERATIONS.md` is required on an `operational` repo**, not optional, so it appears in the baseline above with `appliesTo: ["operational"]`. It is presence-checked only, the same footing as `README.md` and `HISTORY.md`, so its content is entirely the repo's own and a repo with little to say still carries the file. It is the operational-repo analogue of `ARCHITECTURE.md`, and it is where an `AGENTS.md` split puts the repo-specific half, so real runbooks (a deploy procedure, a rollback, a retention policy, a credential rotation) go there rather than into a carried file. It is agent-instruction content, so it takes the inline-link exception the markdown rules name rather than the reference-style default. `ARCHITECTURE.md` stays advisory and is not required by any selector.
+**`OPERATIONS.md` is required on an `operational` repo**, not optional, so it appears in the baseline above with `appliesTo: ["operational"]`. It is presence-checked only, the same footing as `README.md` and `HISTORY.md`, so its content is entirely the repo's own and a repo with little to say still carries the file. It is the operational-repo analogue of `ARCHITECTURE.md`, and it is where an `AGENTS.md` split puts the repo-specific half, so real runbooks (a deploy procedure, a rollback, a retention policy, a credential rotation) go there rather than into a carried file. It is agent-instruction content, so it takes the inline-link exception the markdown rules name rather than the reference-style default. `ARCHITECTURE.md` and `TODO.md` stay advisory and are required by no selector, so a repo with nothing to say in one carries no file rather than an empty one.
 
 Choose the destination while scaffolding rather than after. Repo-specific content left in a carried file is drift, which the audit lists as an undeclared section to reconcile, and reconciling it later means moving prose that downstream readers have already started trusting in the wrong place.
 
@@ -119,6 +120,7 @@ The same [`AUDIT.md`][audit] run is the on-demand audit for any known repo, and 
 [host-setup]: ./docs/host-setup.md
 [matrix]: ./reports/conformance-matrix.md
 [project-types]: ./spec/project-types.json
+[readme-structure]: ./spec/readme-structure.md
 [repo-config]: ./repo-config/
 [repo-config-carry]: ./docs/repo-config-carry.md
 [repos]: ./registry/repos.json

@@ -42,7 +42,6 @@ See [Release History][history] for the full history.
   - [For a README or Human-Facing Doc](#for-a-readme-or-human-facing-doc)
   - [For Workflows](#for-workflows)
 - [Development Environment Setup](#development-environment-setup)
-- [TODO](#todo)
 - [License](#license)
 
 ## What This Repo Is
@@ -127,21 +126,6 @@ A human-readable index of the rules agents enforce, implement, and audit. The au
 ## Development Environment Setup
 
 Contributors sign every commit. See [docs/ssh-signing.md][ssh-signing] for SSH commit-signing setup, [docs/host-setup.md][host-setup] for host prerequisites, and [docs/devcontainer.md][devcontainer] for devcontainer SSH-agent forwarding. Run the linters before pushing (see [GOVERNANCE.md "Running the Linters Locally"][governance-running-the-linters-locally-known-working-invocations]).
-
-## TODO
-
-Running backlog (kept here, in a committed file, so the guidance survives across environments where agent memory does not).
-
-- Run the first per-repo audits and populate [reports/][reports] for the seven cataloged repos.
-- Classify the standardization-backlog repos in [registry/repos.json][repos] (marked `classificationPending`) on first audit.
-- Canonicalize Python linter-config placement on `pyproject.toml` (one cataloged repo uses standalone `.ruff.toml` + `pyrightconfig.json`); track as a drift finding, fix downstream.
-- Consider renaming this repo to reflect the audit-catalog identity (updates badge and link URLs across the fleet).
-- Adopt the OCI annotation keys (`org.opencontainers.image.*`) for Docker image metadata across the Docker repos, replacing the ad-hoc and `org.label-schema.*` labels (from #363).
-- Sweep `ManagePackageVersionsCentrally` placement to `Directory.Packages.props` fleet-wide (PlexCleaner sets it in `Directory.Build.props`, off the CODESTYLE canonical).
-- Finish onboarding hardening (from #310): make the `AUDIT.md` audit a required onboarding step and run the per-type cold-start self-tests tracked in `reports/conformance-matrix.md` (`STANDUP.md` is already in place).
-- Refresh the README (it has gone stale) and evaluate a lower-maintenance structure - for example a per-section index that points into each doc with a one-line description, keeping the README as the adoption and audit-instruction entry point with pointers to the other docs. A per-section index trades brevity for a sync obligation: it must track what the docs contain.
-- Add a linter-only Python project type for codegen/boilerplate Python - code that runs during another tool's build to emit generated source (e.g. ESPHome codegen that produces enriched C++ at compile time), so it ships no unit tests and no coverage and needs only the linter. Keep it distinct from the existing `python` type, which is utility code that can and should carry unit tests and coverage (as in PlexCleaner). Until it exists, ESPHome-Config stays `source-only` and its `+python` reclassification is deferred - accept its one outstanding validation finding meanwhile.
-- Add a fleet-standard clang-format config for the `cpp` type: a catalog snippet plus a CODESTYLE C++ section defining the style, the C++ analogue of the shared ruff config, so the `cpp` clang-format check references one canonical style rather than each repo inventing its own. Base it on the ESPHome-Config agent's proposed `.clang-format`.
 
 ## License
 
