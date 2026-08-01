@@ -30,7 +30,7 @@ Scope a run to what changed, which matches the correct-as-next-edited rule:
 python3 scripts/prose_lint.py . --diff origin/develop
 ```
 
-`prose_lint.py` reads only files git tracks, so a new file reports clean until it is staged. The first clean run on an unstaged file is vacuous.
+Whole-tree discovery reads only files git tracks, so `prose_lint.py .` and `--diff` do not see a new file until it is staged, and a clean whole-tree run proves nothing about an unstaged one. An explicit path is always read, tracked or not, so name a new file directly to check it before staging.
 
 ### Audit the fleet
 
