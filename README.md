@@ -76,14 +76,14 @@ Keeping a fleet of repositories consistent has always been a tax paid in review 
 - **Feedback loops that close on the procedure, not the instance.** [AUDIT.md][audit] reads a live repo and reports drift, the per-repo reports in [reports/][reports] record it, and a repo that cannot be stood up from the docs alone is a documentation defect tracked in the [conformance matrix][matrix]. When a downstream agent hits something the procedure did not cover, the fix lands in the procedure so the next repo never meets it.
 - **Onboarding a new language or deployment target is a spec change.** Thirteen project types are declared today in [spec/project-types.json][project-types]. Adding one means declaring its detection, its checks, and the files it carries, then proving a context-free agent can stand it up cold. No fleet-wide rewrite, and no per-repo improvisation.
 - **Re-deployment that is measured and traceable.** Versions come from git history through NBGV rather than a hand-edited number, a release is always a deliberate act and never a side effect of a merge, and staleness is detected by **content hash against the hub's own past revisions**, so the audit can say whether a repo is behind the canonical or has forked it. A version stamp is a claim a repo can keep while editing the content underneath, so it is never trusted for that answer.
-- **Every carried unit declares how much freedom it grants.** This is the distinction that makes the whole thing tolerable to work in, and it is declared per unit in [spec/files.json][files] rather than left to be inferred:
+- **Every carried unit declares how much freedom it grants.** This is the distinction that makes the whole thing tolerable to work in, and it is a field on each [spec/files.json][files] entry rather than something a reader infers from the file's shape. An entry that names no level takes `presence`, the most permissive one, so silence grants freedom rather than withholding it:
 
-| Level | The obligation | Who owns the content |
-| --- | --- | --- |
-| `verbatim` | Byte-identical to canonical, after governed normalization | The hub. A paraphrase is a defect, not an adaptation. |
-| `interface` | Honor a named contract, checked by name and wiring | The repo owns the body entirely. |
-| `intent` | Reach the same outcome, judged by meaning | The repo owns the wording and shape. |
-| `presence` | The unit exists | The repo owns all of it. |
+  | Level | The obligation | Who owns the content |
+  | --- | --- | --- |
+  | `verbatim` | Byte-identical to canonical, after governed normalization | The hub. A paraphrase is a defect, not an adaptation. |
+  | `interface` | Honor a named contract, checked by name and wiring | The repo owns the body entirely. |
+  | `intent` | Reach the same outcome, judged by meaning | The repo owns the wording and shape. |
+  | `presence` | The unit exists | The repo owns all of it. |
 
 - **The human contributes where domain expertise is decisive, and only there.** The maintainer keeps what an agent cannot know or must not decide: creating a repository, granting a write outside the owner boundary, changing a ruleset, approving every merge, and every judgment about the domain a repo actually serves. The agent takes the mechanical scale-out, which is the part that does not benefit from human attention and degrades under it. A repo's own knowledge also has a declared destination rather than an improvised one, chosen by what the content is: `CODESTYLE.md` for conventions beyond the carried rules, `ARCHITECTURE.md` for how a code repo is built, `OPERATIONS.md` for how a live-service repo is run, and `TODO.md` for its backlog. Which of those a repo carries follows from what it is, so this hub holds the two that apply to it. Domain expertise therefore lands somewhere declared instead of being diluted into a carried file that the next re-vendor overwrites.
 
