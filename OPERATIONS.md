@@ -22,7 +22,7 @@ docker run --rm --pull=always -v "$PWD":/check --workdir /check mstruebing/edito
 
 Run the `editorconfig-checker` line before pushing any new file. This repository defaults to CRLF, most tooling writes LF, and a new file therefore fails that check on its first CI run rather than locally.
 
-The first prose invocation gates. The second is warn-only and reports the backlog that is corrected as each file is next edited.
+The first prose invocation gates. The second reports the backlog that is corrected as each file is next edited, and it exits non-zero locally whenever findings exist. It is warn-only in CI because the workflow step sets `continue-on-error: true`, not because the command is lenient, so a non-zero exit locally is the expected result rather than a problem.
 
 Scope a run to what changed, which matches the correct-as-next-edited rule:
 
@@ -78,9 +78,11 @@ A local gate reproduces a CI failure exactly, because CI runs the same commands 
 The Docker linters pull `:latest` deliberately, so a local run matches whatever CI resolved:
 
 ```sh
-docker run --rm --pull=always -v "$PWD:/workdir" davidanson/markdownlint-cli2:latest "**/*.md"
-docker run --rm --pull=always -v "$PWD:/workdir" ghcr.io/streetsidesoftware/cspell:latest --no-progress "**/*.md"
+docker run --rm --pull=always -v "$PWD":/workdir --workdir /workdir davidanson/markdownlint-cli2:latest "**/*.md"
+docker run --rm --pull=always -v "$PWD":/workdir --workdir /workdir ghcr.io/streetsidesoftware/cspell:latest --no-progress README.md HISTORY.md
 ```
+
+Both commands are the canonical invocations from [GOVERNANCE.md](./GOVERNANCE.md). markdownlint reads every markdown file, while cspell reads `README.md` and `HISTORY.md` only. That narrower spelling scope is deliberate, since gating every markdown file would mean padding `cspell.json` with technical terms without end, and broad live spell-check is the editor extension's job. Widening it here produces noise that no gate acts on.
 
 The `editorconfig-checker` action is setup-only. Using it alone silently skips the check, so CI invokes the checker itself rather than relying on the action.
 
