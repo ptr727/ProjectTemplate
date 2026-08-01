@@ -517,6 +517,14 @@ NOT_PROSE = re.compile(r'^(!|\s*[-=#*/<>]+\s*$)|noqa|type:\s*ignore|pylint|ruff:
                        r'|cSpell|markdownlint|omit from toc|prettier|eslint|SPDX|Copyright'
                        r'|^v\d+(\.\d+)*$')
 
+# A comment that is only a URI is a reference, not a sentence, so neither case nor wrap applies.
+# It cannot be capitalized or restructured without corrupting the address it exists to carry.
+# A URI inside a sentence is still prose, so the whole body has to be the address and nothing else.
+# The angle brackets are matched as a pair or not at all.
+# One bracket alone is a typo, and exempting it would hide the typo rather than report it.
+# The scheme is case-insensitive per RFC 3986, so an uppercase one is the same reference.
+BARE_URI = re.compile(r'^(?:<(?:https?|ftp)://[^>\s]+>|(?:https?|ftp)://[^>\s]+)$', re.IGNORECASE)
+
 # Two sentences on one line, guarded against an abbreviation, an initial, or a dotted identifier.
 # The initial guard anchors on a word boundary, so `J. Smith` reads as one name.
 # A sentence ending in an acronym such as CI is two sentences and has to be caught.
@@ -755,7 +763,7 @@ def comment_wrap_findings(path: Path, raw: str, lines: list[str]) -> list[tuple[
     prev_body = ''
     prev_no = 0
     for n, body, leading in comments:
-        if not body or NOT_PROSE.search(body):
+        if not body or NOT_PROSE.search(body) or BARE_URI.match(body.strip()):
             prev_body = ''
             continue
         if RUN_ON.search(strip_inline_code(body)):
@@ -788,10 +796,11 @@ def check_file(path: Path, rules: set[str]) -> list[tuple[int, str, str]]:
     lines = raw.split('\n')
     if {'comment-wrap', 'comment-case'} & rules:
         out.extend(f for f in comment_wrap_findings(path, raw, lines) if f[1] in rules)
-    # Outside markdown the prose lives in the comments, and the rule judges prose rather than code.
-    # Reading the source line itself would flag an identifier, or in this file the rule's own table.
+    # Outside markdown the prose lives in the comments, and both rules judge prose, not code.
+    # A source line holds identifiers and literals, and an attribute value may legally repeat.
+    # Reading it rejects correct work, `class="gallery gallery-cols-1"` being the reported case.
     comments: dict[int, list[str]] = {}
-    if 'spelling' in rules and path.suffix != '.md':
+    if {'spelling', 'dupword'} & rules and path.suffix != '.md':
         for ln, text, _ in extracted_comments(path, lines):
             comments.setdefault(ln, []).append(text)
     in_fence = False
@@ -837,10 +846,15 @@ def check_file(path: Path, rules: set[str]) -> list[tuple[int, str, str]]:
                                 'spaced hyphen -> a comma, two sentences, or parentheses'))
 
         if 'dupword' in rules:
-            for m in DUPWORD.finditer(prose):
-                if m.group(0).lower() in DUP_ALLOW:
-                    continue
-                out.append((i, 'dupword', f"duplicated word '{m.group(1)}'"))
+            # Each comment on the line is judged on its own rather than joined with its neighbors.
+            # Joining them would read the second's opening word as a repeat of the first's last.
+            texts = ([prose] if path.suffix == '.md'
+                     else [strip_inline_code(c) for c in comments.get(i, [])])
+            for text in texts:
+                for m in DUPWORD.finditer(text):
+                    if m.group(0).lower() in DUP_ALLOW:
+                        continue
+                    out.append((i, 'dupword', f"duplicated word '{m.group(1)}'"))
 
         if 'spelling' in rules:
             texts = [prose] if path.suffix == '.md' else comments.get(i, [])

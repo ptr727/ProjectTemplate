@@ -21,6 +21,9 @@ GOVERNANCE = REPO / 'GOVERNANCE.md'
 # A file full of rejected input would otherwise report itself.
 DUP = 'the ' + 'the'
 SPLICE_BAIT = 'It runs on push; ' + 'it gates the merge'
+# Attribute values whose repetition is correct authoring, assembled for the same reason.
+DUP_CLASS = 'gallery ' + 'gallery-cols-1'
+DUP_REL = 'nofollow ' + 'nofollow-ugc'
 
 
 class BaitCase(unittest.TestCase):
@@ -166,6 +169,13 @@ class TestGovernanceCoupling(unittest.TestCase):
 
 
 class TestDupword(BaitCase):
+    """A doubled word, read from markdown prose and from the comments of every other syntax.
+
+    The scope matters more here than for the other prose rules, because this one gates CI. Outside
+    markdown a repeated token is far more often correct code than a typo: `class="gallery
+    gallery-cols-1"` is the ordinary HTML idiom, and no edit fixes it without changing the page.
+    """
+
     def test_every_allowlist_entry_is_permitted(self) -> None:
         for phrase in prose_lint.DUP_ALLOW:
             with self.subTest(phrase=phrase):
@@ -180,6 +190,55 @@ class TestDupword(BaitCase):
         """"either/or or" is a phrase followed by a conjunction, not a doubled word."""
         self.assertEqual([], self.kinds('either/or or must-pair inputs\n', {'dupword'}))
         self.assertEqual([], self.kinds('a must-pair pair of inputs\n', {'dupword'}))
+
+    def test_a_repetition_in_a_comment_is_flagged_in_every_syntax(self) -> None:
+        """Narrowing the rule to comments has to leave it enforcing in all of them."""
+        for name, comment in (('bait.py', f'# {DUP.capitalize()} thing.'),
+                              ('bait.sh', f'# {DUP.capitalize()} thing.'),
+                              ('bait.yml', f'# {DUP.capitalize()} thing.'),
+                              ('bait.cs', f'// {DUP.capitalize()} thing.'),
+                              ('bait.cs', f'/* {DUP.capitalize()} thing. */'),
+                              ('bait.html', f'<!-- {DUP.capitalize()} thing. -->')):
+            with self.subTest(file=name, comment=comment):
+                self.assertEqual(['dupword'], self.kinds(f'{comment}\n', {'dupword'}, name=name))
+
+    def test_a_trailing_comment_is_read_and_the_code_before_it_is_not(self) -> None:
+        """The comment is prose wherever it sits on the line, and the statement stays code."""
+        self.assertEqual(['dupword'],
+                         self.kinds(f'x = 1  # {DUP.capitalize()} thing.\n', {'dupword'},
+                                    name='bait.py'))
+
+    def test_code_is_not_prose_outside_markdown(self) -> None:
+        """A repeated token in code is the author's, and often the only spelling that works.
+
+        The class attribute is the reported case: two class names sharing a prefix is how CSS is
+        written, and `rel`, `srcset` and `data-*` all take value lists with the same shape.
+        """
+        for name, line in (('bait.html', f'<div class="{DUP_CLASS}">'),
+                           ('bait.html', f'<a rel="{DUP_REL}" href="#">x</a>'),
+                           ('bait.html', f'<p>{DUP} thing</p>'),
+                           ('bait.py', f'x = "{DUP}"'),
+                           ('bait.yml', f'key: {DUP}'),
+                           ('bait.json', f'{{ "a": "{DUP}" }}')):
+            with self.subTest(file=name, line=line):
+                self.assertEqual([], self.kinds(f'{line}\n', {'dupword'}, name=name))
+
+    def test_two_comments_on_one_line_are_judged_separately(self) -> None:
+        """Joining them would read the second comment's opening word as a repeat of the first's."""
+        word = DUP.split()[0]
+        pair = f'<!-- Ends with {word} --><!-- {word.capitalize()} opens -->\n'
+        self.assertEqual([], self.kinds(pair, {'dupword'}, name='bait.html'))
+
+    def test_inline_code_is_not_prose(self) -> None:
+        """A backticked token is quoted, the same exemption every other prose rule takes."""
+        self.assertEqual([], self.kinds(f'The `{DUP}` field.\n', {'dupword'}))
+        self.assertEqual([], self.kinds(f'# The `{DUP}` field.\n', {'dupword'}, name='bait.py'))
+
+    def test_the_repo_is_clean_of_duplicated_words(self) -> None:
+        """The rule gates in CI, so the tree it gates has to pass it today and not eventually."""
+        found = [f'{prose_lint.rel(p)}:{ln}' for p in prose_lint.discover(['.'])
+                 for ln, kind, _ in prose_lint.check_file(p, {'dupword'}) if kind == 'dupword']
+        self.assertEqual([], found)
 
 
 class TestSemicolon(BaitCase):
@@ -314,6 +373,50 @@ class TestCommentWrap(BaitCase):
                            ('a.py', 'u = "http://x/#f. G"\n')):
             with self.subTest(file=name):
                 self.assertEqual([], self.flag(name, text))
+
+    def test_a_comment_that_is_only_a_uri_is_a_reference_not_a_sentence(self) -> None:
+        """It cannot be capitalized or restructured without corrupting the address it carries.
+
+        A reference block opening a config file is the ordinary shape, so before this exemption
+        every repo carrying one inherited a finding no edit could answer.
+        """
+        for name, text in (('a.yml', '# https://docs.github.com/en/code-security/dependabot\n'),
+                           ('.editorconfig', '; https://editorconfig.org\n'),
+                           ('a.cs', '// http://example.com/a_b.c\n'),
+                           ('a.xml', '<!-- https://example.com/schema -->\n'),
+                           ('a.yml', '# <https://example.com/bracketed>\n'),
+                           ('a.sh', '# ftp://example.com/pub\n')):
+            with self.subTest(file=name, comment=text.strip()):
+                self.assertEqual([], self.flag(name, text))
+
+    def test_a_uri_block_does_not_make_the_next_line_a_continuation(self) -> None:
+        """Consecutive reference lines are separate addresses, not one sentence wrapping."""
+        self.assertEqual([], self.flag('a.yml', '# https://example.com/one\n'
+                                                '# https://example.com/two\n'))
+
+    def test_the_scheme_is_case_insensitive(self) -> None:
+        """RFC 3986 makes the scheme case-insensitive, so an uppercase one is the same reference.
+
+        The continuation case is the one that matters: a scheme the exemption misses puts the
+        reference line back in the wrap logic, which is the false positive this exemption removes.
+        """
+        self.assertEqual([], self.flag('a.yml', '# HTTPS://example.com/one\n'
+                                                '# Describes the format.\n'))
+        self.assertEqual([], self.flag('a.yml', '# Https://example.com/one\n'))
+
+    def test_an_unbalanced_angle_bracket_is_not_a_delimited_uri(self) -> None:
+        """One bracket is a typo rather than a delimiter, so it is reported instead of exempted."""
+        for body in ('<https://example.com/one', 'https://example.com/one>'):
+            with self.subTest(body=body):
+                self.assertFalse(prose_lint.BARE_URI.match(body))
+        self.assertTrue(prose_lint.BARE_URI.match('<https://example.com/one>'))
+
+    def test_a_uri_inside_a_sentence_is_still_prose(self) -> None:
+        """The whole body has to be the address, or the exemption would swallow real prose."""
+        self.assertEqual(['comment-wrap'],
+                         self.flag('a.yml', f'# See https://example.com. {self.RUN_ON}\n'))
+        self.assertEqual(['comment-case'],
+                         self.flag('a.yml', '# see https://example.com for the options\n'))
 
     def test_a_documentation_comment_is_left_to_codestyle(self) -> None:
         """An XML doc comment and a docstring may run to paragraphs, which CODESTYLE governs."""
