@@ -621,12 +621,15 @@ def audit_repo(entry, spec, branch=None):
             findings.append(("DRIFT", f"secrets: {name} in the {store} store is claimed by no applicable mechanism (stale?)"))
 
     # --- Carried files must not reference the template repo ---
-    # The template is private, so a reference 404s for this repo's users and exposes machinery they cannot
-    # follow. Checks the agent-instruction files, where a stale "report drift upstream" paragraph spread.
-    for path in ("AGENTS.md", "GOVERNANCE.md", ".github/copilot-instructions.md"):
-        doc = gh(f"repos/{slug}/contents/{path}?ref={ground}", ok404=True)
-        if doc and doc.get("content") and HUB_NAME.lower() in base64.b64decode(doc["content"]).decode("utf-8", "replace").lower():
-            findings.append(("DRIFT", f"carried: {path} references the template repo by name or link (private - 404s for this repo's readers; state the behavior, not the destination)"))
+    # The coordination flow is machinery a consumer should not see, so a carried file states the behavior rather than the destination.
+    # This checks the agent-instruction files, where a stale "report drift upstream" paragraph once spread.
+    # Skip the hub itself, whose own carried files are the source, where naming the repo they live in is correct.
+    # A downstream repo naming it is still flagged, which is the point.
+    if entry.get("name") != HUB_NAME:
+        for path in ("AGENTS.md", "GOVERNANCE.md", ".github/copilot-instructions.md"):
+            doc = gh(f"repos/{slug}/contents/{path}?ref={ground}", ok404=True)
+            if doc and doc.get("content") and HUB_NAME.lower() in base64.b64decode(doc["content"]).decode("utf-8", "replace").lower():
+                findings.append(("DRIFT", f"carried: {path} references the template repo by name or link (the coordination flow is machinery this repo's readers should not see; state the behavior, not the destination)"))
 
     # --- Dependabot ecosystem coverage ---
     # A repo's tree implies Dependabot ecosystems it must track: github-actions when it ships workflows
