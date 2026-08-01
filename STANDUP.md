@@ -38,6 +38,21 @@ After the first commit, confirm it took with `git log -1 --format='%G? author=%a
 
 Resolve the repo's type(s) with the [`AUDIT.md`][audit] section 2 detection rules, then write or repair its [`registry/repos.json`][repos] entry: `status`, `types[]`, `groundTruthBranch`, `hasDevelop`, `publish[]`, `requiredSecrets[]`, `consumerModel`, `releaseTrigger`, `workflowModel` (omit to take the `release` default), `configLayout`, and `driftNotes` that describe what the repo **actually is**. Run [`spec/validate.py`][validate] to confirm it classifies cleanly. The registry is ground truth about reality, not intent, and a `validate.py`-clean entry is still false if it disagrees with the live repo.
 
+## 1A. Carry the Instruction Set, Before Authoring Anything
+
+**Stop here until the instruction set is present and read.** The baseline in step 2 is one list, but it holds two kinds of file, and this kind is not a deliverable. `AGENTS.md`, `GOVERNANCE.md`, `CODESTYLE.md` and `WORKFLOW.md` are **the rules for producing every other file in the repo**, so carrying them late means everything authored beforehand was authored against unknown rules. The cost of that is rework rather than a warning, and it scales with how much got written first.
+
+This is the same shape as step 0. Signing has to be live before the first commit rather than retrofitted, and governance has to be loaded before the first authored file for the same reason: the window closes quietly, and the repair is expensive out of proportion to the prevention.
+
+Carry these before writing any repo content of your own:
+
+- [`AGENTS.md`][agents], [`GOVERNANCE.md`][governance], [`CODESTYLE.md`][codestyle], [`WORKFLOW.md`][workflow] and [`AUDIT.md`][audit], adapted rather than cloned for the ones that describe a repo.
+- **`.markdownlint-cli2.jsonc` and `cspell.json`**, which are the mechanical half. A rule nothing checks drifts silently, so a repo that carries the prose authorities without the linter configs has guidance and no gate. Scope a linter's **file set in the workflow** rather than relaxing either config, since `.markdownlint-cli2.jsonc` is carried `verbatim`.
+
+Then **read** `CODESTYLE.md` and the `GOVERNANCE.md` documentation-style rules, rather than only placing the files. Comment shape, one sentence per line, US spelling and the character rules all govern the code and config you are about to write, and none of them are recoverable cheaply afterwards.
+
+**A caution about learning house style from the carried files.** Some carried configuration still holds comment blocks that predate the current rules, so read the rule text as the authority and do not infer style from a file's existing formatting. Where a carried file and the rules disagree, the rules win and the file is a backlog item for the hub.
+
 ## 2. Carry the Baseline Files
 
 Copy every [`spec/files.json`][files] entry whose `appliesTo` matches the repo's **selector set**, **adapted, not cloned**. The selector set is the repo's `types` plus its `workflowModel`, `releaseTrigger`, and `consumerModel`, so filtering on type alone silently drops the entries a non-type selector carries ([`spec/scope-model.md`][scope-model] defines the four namespaces and how they resolve). The prose files (`CODESTYLE.md`, `README.md`, and the like) describe the repo's own toolchain, so adapt them to reality rather than propagating template specifics verbatim (see the "Adapt before propagating" callout in [`CODESTYLE.md`][codestyle], since a verbatim copy that misdescribes the repo is rejected in review). The baseline covers `WORKFLOW.md`, `version.json`, the two rulesets, `.github/dependabot.yml`, `.editorconfig`, `.gitattributes`, the linter configs, and the per-type files (`.vscode/tasks.json` from the language's snippet, `codecov.yml`, `.dockerignore`, `Docker/README.md`). **Every repo carries `repo-config/main.json`**, and only the `develop` payload varies by workflow model: `repo-config/develop.json` for a release repo, `repo-config/operational/develop.json` for an operational one.
@@ -88,6 +103,7 @@ The same [`AUDIT.md`][audit] run is the on-demand audit for any known repo, and 
 
 <!-- Repo -->
 
+[agents]: ./AGENTS.md
 [audit]: ./AUDIT.md
 [codestyle]: ./CODESTYLE.md
 [files]: ./spec/files.json
