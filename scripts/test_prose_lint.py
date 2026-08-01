@@ -8,7 +8,7 @@ rather than restating it: a proof that restates the gated data proves only that 
 Run as `python3 scripts/test_prose_lint.py`, or under `python3 -m unittest discover -s scripts`.
 """
 from __future__ import annotations
-import contextlib, io, re, subprocess, sys, tempfile, unittest
+import contextlib, io, json, re, subprocess, sys, tempfile, unittest
 from pathlib import Path
 from unittest import mock
 
@@ -1134,6 +1134,49 @@ class TestSpelling(BaitCase):
         found = [f'{prose_lint.rel(p)}:{ln}' for p in prose_lint.discover(['.'])
                  for ln, kind, _ in prose_lint.check_file(p, {'spelling'}) if kind == 'spelling']
         self.assertEqual([], found)
+
+
+class TestCarriedContent(unittest.TestCase):
+    """Content the fleet copies byte-matched, which only the hub can ever correct.
+
+    GOVERNANCE "Character Set" states the obligation: correct-as-you-next-edit assumes someone
+    able to edit the file, and a downstream repo cannot edit a verbatim one, since its copy is
+    byte-matched against the hub's. So the hub sweeps the class and re-vendors. That makes a
+    finding in a verbatim file different in kind from the tree-wide backlog: it is not a
+    correction owed by whoever next edits the file, it is one no downstream repo can make at all.
+    """
+
+    def verbatim_paths(self) -> list[Path]:
+        """Every `verbatim` entry in the carry manifest, read live rather than restated here."""
+        def entries(node: object):
+            if isinstance(node, dict):
+                if 'path' in node:
+                    yield node
+                for value in node.values():
+                    yield from entries(value)
+            elif isinstance(node, list):
+                for value in node:
+                    yield from entries(value)
+
+        manifest = json.loads((REPO / 'spec' / 'files.json').read_text(encoding='utf-8'))
+        seen = {e['path'] for e in entries(manifest) if e.get('fidelity') == 'verbatim'}
+        return sorted(REPO / p for p in seen)
+
+    def test_the_manifest_still_declares_verbatim_content(self) -> None:
+        """A manifest that stopped declaring any would make the sweep below vacuously pass."""
+        self.assertNotEqual([], self.verbatim_paths())
+
+    def test_every_verbatim_carried_file_is_comment_clean(self) -> None:
+        """A downstream repo cannot fix one of these, so the hub may not leave one behind."""
+        found = [f'{prose_lint.rel(p.relative_to(REPO))}:{ln}: {kind}'
+                 for p in self.verbatim_paths() if p.exists()
+                 for ln, kind, _ in prose_lint.check_file(p, {'comment-wrap', 'comment-case'})]
+        self.assertEqual([], found)
+
+    def test_every_declared_verbatim_file_exists(self) -> None:
+        """A manifest naming a file the hub does not carry would exempt it by absence."""
+        self.assertEqual([], [str(p.relative_to(REPO)) for p in self.verbatim_paths()
+                              if not p.exists()])
 
 
 class TestSyntaxDispatch(unittest.TestCase):
