@@ -6,7 +6,7 @@ How this repository is run. It ships no application code, so its operations are 
 
 ### Run the gates the way CI runs them
 
-CI passes explicit `--check` lists, and a bare `python3 scripts/prose_lint.py <file>` runs `DEFAULT_RULES`, which omits `comment-wrap`, `comment-case` and `sentence-split`. A bare run therefore under-reports and a clean result from it proves less than it appears to. Run the CI invocations:
+CI passes explicit `--check` lists, and a bare `python3 scripts/prose_lint.py <file>` runs `DEFAULT_RULES`, which omits `comment-wrap` and `comment-case`. A bare run therefore under-reports against what CI checks, and a clean result from it proves less than it appears to. Run the CI invocations:
 
 ```sh
 python3 scripts/test_prose_lint.py
@@ -20,6 +20,8 @@ for f in registry/*.json spec/*.json repo-config/*.json; do jq empty "$f"; done
 python3 spec/validate.py
 docker run --rm --pull=always -v "$PWD":/check --workdir /check mstruebing/editorconfig-checker:latest
 ```
+
+Two gaps in that list are CI's rather than this runbook's, reproduced here so a local run matches CI rather than quietly exceeding it. The `jq` glob covers `repo-config/*.json` and does not reach `repo-config/operational/develop.json`, so a malformed operational payload passes. And `sentence-split` is implemented and tested but named by no invocation, so nothing runs it.
 
 Run the `editorconfig-checker` line before pushing any new file. This repository defaults to CRLF, most tooling writes LF, and a new file therefore fails that check on its first CI run rather than locally.
 
