@@ -53,6 +53,12 @@ Then **read** `CODESTYLE.md` and the `GOVERNANCE.md` documentation-style rules, 
 
 **A caution about learning house style from the carried files.** Some carried configuration still holds comment blocks that predate the current rules, so read the rule text as the authority and do not infer style from a file's existing formatting. Where a carried file and the rules disagree, the rules win and the file is a backlog item for the hub.
 
+## 1B. Capture the Source, Before It Changes
+
+**This step applies only when the repo's content comes from a live external system the repo replaces.** The capture is independent of every other step here and runs as early as the source is reachable, ahead of scaffolding where the source is paid for, rented, or scheduled for shutdown. It is the same window-closes shape as steps 0 and 1A, with a harder edge: a source system is not under version control, so nothing about it can be re-derived once it stops serving.
+
+Capture the source, verify the capture **against the source**, and hold the verification artifacts (a golden URL list, an export manifest of content hashes) as the before-snapshot, then convert from that rather than from the live system. [`docs/content-import.md`][content-import] holds the three failures that make a capture look complete when it is not: an export that omits externally hosted media, a sitemap that is not the URL contract, and an HTTP fetch that returns a derivative rather than the original. Each reconciles cleanly against the artifact the source hands you, which is why the verification has to read the rendered pages, a live crawl, and content hashes instead.
+
 ## 2. Carry the Baseline Files
 
 Copy every [`spec/files.json`][files] entry whose `appliesTo` matches the repo's **selector set**, **adapted, not cloned**. The selector set is the repo's `types` plus its `workflowModel`, `releaseTrigger`, and `consumerModel`, so filtering on type alone silently drops the entries a non-type selector carries ([`spec/scope-model.md`][scope-model] defines the four namespaces and how they resolve). The prose files (`CODESTYLE.md`, `README.md`, and the like) describe the repo's own toolchain, so adapt them to reality rather than propagating template specifics verbatim (see the "Adapt before propagating" callout in [`CODESTYLE.md`][codestyle], since a verbatim copy that misdescribes the repo is rejected in review). The baseline covers `WORKFLOW.md`, `version.json`, the two rulesets, `.github/dependabot.yml`, `.editorconfig`, `.gitattributes`, the linter configs, and the per-type files (`.vscode/tasks.json` from the language's snippet, `codecov.yml`, `.dockerignore`, `Docker/README.md`). **Every repo carries `repo-config/main.json`**, and only the `develop` payload varies by workflow model: `repo-config/develop.json` for a release repo, `repo-config/operational/develop.json` for an operational one.
@@ -106,6 +112,7 @@ The same [`AUDIT.md`][audit] run is the on-demand audit for any known repo, and 
 [agents]: ./AGENTS.md
 [audit]: ./AUDIT.md
 [codestyle]: ./CODESTYLE.md
+[content-import]: ./docs/content-import.md
 [files]: ./spec/files.json
 [governance]: ./GOVERNANCE.md
 [governance-git-and-commit-rules]: ./GOVERNANCE.md#git-and-commit-rules
