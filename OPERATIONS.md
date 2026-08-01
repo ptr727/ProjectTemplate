@@ -6,7 +6,7 @@ How this repository is run. It ships no application code, so its operations are 
 
 ### Run the gates the way CI runs them
 
-CI passes explicit `--check` lists, and a bare `python3 scripts/prose_lint.py <file>` runs `DEFAULT_RULES`, which omits `comment-wrap` and `comment-case`. A bare run therefore under-reports against what CI checks, and a clean result from it proves less than it appears to. Run the CI invocations:
+CI passes explicit `--check` lists, and a bare `python3 scripts/prose_lint.py [file]` runs `DEFAULT_RULES`, which omits `comment-wrap` and `comment-case`. A bare run therefore under-reports against what CI checks, and a clean result from it proves less than it appears to. Run the CI invocations:
 
 ```sh
 python3 scripts/test_prose_lint.py
@@ -39,8 +39,8 @@ Whole-tree discovery reads only files git tracks, so `python3 scripts/prose_lint
 
 ```sh
 python3 spec/audit.py                 # every cataloged repo
-python3 spec/audit.py <RepoName>      # one repo
-python3 spec/audit.py --issue <RepoName>
+python3 spec/audit.py [RepoName]      # one repo
+python3 spec/audit.py --issue [RepoName]
 ```
 
 Findings are a point-in-time snapshot read live over the API. Re-run before acting on one, and quote the run stamp in any issue derived from it. The deterministic subset lives here, and the full letter-and-intent verdict is [AUDIT.md](./AUDIT.md).
@@ -48,8 +48,8 @@ Findings are a point-in-time snapshot read live over the API. Re-run before acti
 ### Apply or verify repository configuration
 
 ```sh
-repo-config/configure.sh check <owner>/<repo> <release|operational>
-repo-config/configure.sh apply <owner>/<repo> <release|operational>
+repo-config/configure.sh check [owner/repo] [release|operational]
+repo-config/configure.sh apply [owner/repo] [release|operational]
 ```
 
 **Always pass the command.** A bare `repo-config/configure.sh` with no arguments defaults to `apply` against the current repo, so an invocation meant to test whether the script runs performs a live write instead. Never run it without a command.
@@ -67,14 +67,14 @@ The repository is the record, and GitHub holds it. Nothing here keeps state outs
 A deleted branch is recoverable from any full clone that still has the commit, which is the recovery path when a branch is deleted while another pull request is based on it:
 
 ```sh
-git push origin <sha>:refs/heads/<branch>
+git push origin [sha]:refs/heads/[branch]
 ```
 
 Never use `--depth 1` on a clone that will amend or force-push, because a shallow clone severs the merge base and orphans the branch.
 
 ## Logs and Debugging
 
-Workflow runs are the log. `gh run list --branch <branch>` and `gh run view <id> --log-failed` reach them.
+Workflow runs are the log. `gh run list --branch [branch]` and `gh run view [id] --log-failed` reach them.
 
 A local gate reproduces a CI failure exactly, because CI runs the same commands listed under Runbooks against the same committed configuration. Reproduce locally before reading workflow logs.
 
@@ -94,7 +94,7 @@ The `editorconfig-checker` action is setup-only. Using it alone silently skips t
 Two `gh` limitations on the current host, both worked around rather than fixed:
 
 - `gh pr checks` carries no `--json` flag on the installed `gh` 2.46.0, so a watcher built on it prints nothing and a quiet result reads as a passing one. Read the checks from `gh pr view --json statusCheckRollup` instead.
-- `gh pr edit --base` fails with a Projects-classic deprecation error. Use `gh api --method PATCH repos/<owner>/<repo>/pulls/<number> -f base=<branch>` instead.
+- `gh pr edit --base` fails with a Projects-classic deprecation error. Use `gh api --method PATCH repos/[owner/repo]/pulls/[number] -f base=[branch]` instead.
 
 ## Configuration Layout
 
