@@ -59,15 +59,20 @@ The set of sections, and each section's fidelity, is itself governed.
 
 ## Where repo-specific content goes
 
-A repo's own content is not carried and is not declared here, so extraction needs a predictable destination rather than a judgment call per repo. Three topical docs take it, chosen by what the content *is*:
+A repo's own content is not carried, and the hub declares where it goes rather than what it says, so extraction needs a predictable destination rather than a judgment call per repo. Four topical docs take it, chosen by what the content *is*:
 
 - [`CODESTYLE.md`][codestyle]: a repo's language and formatting conventions beyond the carried rules.
 - `ARCHITECTURE.md`: how a code repo is built, its module layout, data flow, and design decisions.
-- `OPERATIONS.md`: how an operational repo is run, covering runbooks, backup, log and debug procedures, tool-usage notes, and config layout. This is the operational-repo analogue of `ARCHITECTURE.md`, and it is where an `AGENTS.md` split puts the repo-specific half.
+- `OPERATIONS.md`: how a repo is run, under the headings `Runbooks`, `Backup and Recovery`, `Logs and Debugging`, `Tool Usage`, and `Configuration Layout`. It is the operational analogue of `ARCHITECTURE.md`, and it is where an `AGENTS.md` split puts the repo-specific half.
+- `TODO.md`: the repo's running backlog, which keeps open work out of the README's section order where it does not belong and changes on a different cadence from everything around it.
 
-**`OPERATIONS.md` is required for an `operational` repo**, declared in [`files.json`][files] as `appliesTo: ["operational"]` and checked for presence only, the same footing as `README.md` and `HISTORY.md`, so its content is entirely the repo's own. It is mandatory rather than advisory because the convention was already emerging unevenly: of the four operational repos, two wrote one unprompted and the others scattered the same material across ad-hoc names, which is the improvisation these destinations exist to prevent. A repo with nothing to say in it still carries it, since an empty file that names the destination is cheaper than rediscovering the destination.
+**`OPERATIONS.md` is required for every repo**, declared in [`files.json`][files] as `appliesTo: "*"` and checked for presence only, the same footing as `README.md` and `HISTORY.md`, so its content is entirely the repo's own. It is mandatory rather than advisory because the convention was already emerging unevenly: of the four operational-model repos, two wrote one unprompted and the others scattered the same material across ad-hoc names, which is the improvisation these destinations exist to prevent. That reasoning never depended on the workflow model. Every repo has operational surface, since publishing to a package registry needs trusted-publisher setup, shipping an image needs registry credentials, and serving a site needs a deploy path and a staging story. A repo with nothing to say still carries the file as a stub, meaning those five headings with no content under them, because a stub names the destination and its shape where a blank file names only the destination. This repo's own [`OPERATIONS.md`][operations] is the worked example.
 
-`CODESTYLE.md` is carried by every repo already. `ARCHITECTURE.md` stays **advisory**, deliberately: "a code repo" is not one selector token, and mandating it would produce empty files in repos whose design needs no separate document. Promote it if the same unprompted-convention evidence appears for it.
+**The workflow model and the need for this file are unrelated axes.** `operational` as a `workflowModel` describes where config lives and how a change reaches `develop`, not whether the repo has runbooks. Keying the file to that selector read a sufficient condition as a necessary one, since an operational-model repo certainly has runbooks while a release repo has them too. Reclassifying a repo between models does not change how much operational surface it has, which is the test that showed the selector was wrong.
+
+**A destination is declared when its content class recurs across repos.** Software architecture recurs, because every code repo has one, so `ARCHITECTURE.md` is declared. A home-device inventory does not recur, so it stays the repo's own file, neither declared nor mandated. The scattering these destinations prevent is the same material landing under different names in different repos, and that has no force for content existing in exactly one repo. Declaring a destination for a one-repo need would grow this list without bound and still lag whatever the next repo invents.
+
+`CODESTYLE.md` is carried by every repo already. `ARCHITECTURE.md` stays **declared but advisory**: every code repo has an architecture, and how much of it earns a separate document is contextual, so mandating it would produce empty files where the design needs none. Declared and required are separate questions, and only a universal need answers both.
 
 `OPERATIONS.md` is agent-instruction content, so it takes the inline-link exception the markdown rules name, not the reference-style default. `ARCHITECTURE.md` is not on that closed list and follows the reference-style rule.
 
@@ -89,4 +94,5 @@ A repo that carried its governance inside `AGENTS.md` before the router split ho
 [fidelity-model]: ./fidelity-model.md
 [files]: ./files.json
 [governance]: ../GOVERNANCE.md
+[operations]: ../OPERATIONS.md
 [validate]: ./validate.py
