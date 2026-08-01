@@ -394,6 +394,13 @@ class TestCommentWrap(BaitCase):
         self.assertEqual([], self.flag('a.yml', '# https://example.com/one\n'
                                                 '# https://example.com/two\n'))
 
+    def test_an_unbalanced_angle_bracket_is_not_a_delimited_uri(self) -> None:
+        """One bracket is a typo rather than a delimiter, so it is reported instead of exempted."""
+        for body in ('<https://example.com/one', 'https://example.com/one>'):
+            with self.subTest(body=body):
+                self.assertFalse(prose_lint.BARE_URI.match(body))
+        self.assertTrue(prose_lint.BARE_URI.match('<https://example.com/one>'))
+
     def test_a_uri_inside_a_sentence_is_still_prose(self) -> None:
         """The whole body has to be the address, or the exemption would swallow real prose."""
         self.assertEqual(['comment-wrap'],
