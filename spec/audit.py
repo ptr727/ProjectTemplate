@@ -622,7 +622,7 @@ def audit_repo(entry, spec, branch=None):
 
     # --- Carried files must not reference the template repo ---
     # The coordination flow is machinery a consumer should not see, so a carried file states the behavior rather than the destination.
-    # This checks the agent-instruction files, where a stale "report drift upstream" paragraph once spread.
+    # This reads AGENTS.md, GOVERNANCE.md and .github/copilot-instructions.md, where a stale "report drift upstream" paragraph once spread.
     # Skip the hub itself, whose own carried files are the source, where naming the repo they live in is correct.
     # A downstream repo naming it is still flagged, which is the point.
     if entry.get("name") != HUB_NAME:
