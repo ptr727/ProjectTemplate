@@ -16,7 +16,7 @@ root = true
 # Defaults: CRLF is the default, and only the LF exceptions below are declared.
 # Most LF pins are shared with `.gitattributes`, which git enforces: `*.sh`, the husky pre-commit shebang, `spec/validate.py`, `uv.lock`, and Dockerfiles.
 # The workflow-YAML pins (`.github/workflows/*` and the catalog snippet workflows) are `.editorconfig`-only.
-# There git stays passive (`* -text`) and CI (editorconfig-checker) enforces LF.
+# For those, git stays passive (`* -text`) and CI (editorconfig-checker) enforces LF.
 # Keep the `[*]` `end_of_line = crlf` default, which the Windows-GUI and WSL-engine workflow requires because Windows tooling misbehaves on LF.
 # Every uncovered file type relies on that default too.
 [*]
@@ -50,7 +50,8 @@ end_of_line = lf
 [catalog/snippets/workflows/*.{yml,yaml}]
 end_of_line = lf
 
-# The husky pre-commit snippet is a shebang script, so keep it LF and a copied snippet runs, where a CRLF shebang breaks.
+# The husky pre-commit snippet is a shebang script, so keep it LF.
+# A copied snippet then runs, where a CRLF shebang would break it.
 [catalog/snippets/husky/pre-commit]
 end_of_line = lf
 
@@ -64,7 +65,7 @@ end_of_line = lf
 [spec/{validate,audit,fidelity_honesty}.py]
 end_of_line = lf
 
-# The agent-safety kit's Python is shebang-executable tooling run by path, being the PreToolUse hook and its installer.
+# The agent-safety kit's Python is shebang-executable tooling run by path, namely the PreToolUse hook and its installer.
 # Pin LF for the same reason as the entry points above, because a CRLF shebang breaks direct execution on a Unix host.
 [host-setup/agent-safety/*.py]
 end_of_line = lf
@@ -75,7 +76,7 @@ end_of_line = lf
 end_of_line = lf
 
 # The uv tool regenerates uv.lock with LF on every platform, so pin it here.
-# Without the pin an EOL check (editorconfig-checker or CI) reds on every `uv lock` or `uv sync` until the file is manually reconverted.
+# Without the pin an EOL check (editorconfig-checker or CI) fails on every `uv lock` or `uv sync` until the file is manually reconverted.
 # The rationale matches the shebang and Dockerfile pins, where a tool owns the ending.
 # A Python repo on the CRLF default carries this, and a repo with no lockfile is unaffected.
 [uv.lock]
