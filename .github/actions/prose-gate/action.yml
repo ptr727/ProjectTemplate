@@ -1,0 +1,68 @@
+# Fleet prose gate, consumed by downstream repos so the rules live here rather than in 20 copies.
+# Pin this action to a commit SHA per GOVERNANCE.md "Action pinning".
+# The pin is one literal, identical on both branches.
+# `uses:` takes no expressions, so a per-branch ref would diverge at every promotion.
+# Branch-dependent behavior therefore lives here, where expressions are legal.
+name: Fleet prose gate
+description: Check the lines a change touches against the fleet prose rules.
+
+inputs:
+  base:
+    description: Ref to diff against, so only lines the change touches are reported.
+    required: true
+  paths:
+    description: Paths to scan.
+    required: false
+    default: .
+  rules-ref:
+    description: >-
+      Hub ref supplying the rules.
+      Empty selects develop for a develop-targeted run and the pinned action version otherwise.
+    required: false
+    default: ''
+
+runs:
+  using: composite
+  steps:
+    # A develop-targeted run reads the rules from hub develop.
+    # That exercises an unpromoted rule change fleet-wide before it reaches main.
+    # Every other run uses the copy bundled at this action's pinned SHA.
+    # A released repo's gate is then reproducible, and a hub commit cannot fail a re-run.
+    - name: Resolve the rules source step
+      id: rules
+      shell: bash
+      env:
+        REQUESTED: ${{ inputs.rules-ref }}
+        TARGET: ${{ github.base_ref || github.ref_name }}
+      run: |
+        set -Eeuo pipefail
+        ref="${REQUESTED:-}"
+        if [ -z "$ref" ] && [ "$TARGET" = "develop" ]; then ref="develop"; fi
+        if [ -z "$ref" ]; then
+          # Three levels up from the action directory is the repository root of this pinned checkout.
+          bundled="$GITHUB_ACTION_PATH/../../../scripts/prose_lint.py"
+          if [ ! -f "$bundled" ]; then
+            echo "::error::Bundled prose_lint.py not found at $bundled" >&2
+            exit 1
+          fi
+          echo "script=$bundled" >>"$GITHUB_OUTPUT"
+          echo "Rules source: bundled at this action's pinned version"
+        else
+          dst="$RUNNER_TEMP/prose_lint.py"
+          url="https://raw.githubusercontent.com/ptr727/ProjectTemplate/$ref/scripts/prose_lint.py"
+          # Fail loudly rather than skipping the gate, since a silent skip reports a clean pass.
+          curl -fsSL "$url" -o "$dst"
+          echo "script=$dst" >>"$GITHUB_OUTPUT"
+          echo "Rules source: hub $ref"
+        fi
+
+    # The caller checks out with fetch-depth 0, because a diff against the base needs its history.
+    - name: Check prose step
+      shell: bash
+      env:
+        SCRIPT: ${{ steps.rules.outputs.script }}
+        BASE: ${{ inputs.base }}
+        PATHS: ${{ inputs.paths }}
+      run: |
+        set -Eeuo pipefail
+        python3 "$SCRIPT" $PATHS --diff "$BASE"

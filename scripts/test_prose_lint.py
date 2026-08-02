@@ -580,6 +580,26 @@ class TestCommentWrap(BaitCase):
         self.assertEqual(['comment-wrap'],
                          self.flag('a.md', 'Prose.\n\n<!-- One thing. Another thing. -->\n'))
 
+    def test_an_unpunctuated_markdown_marker_is_a_label_not_a_sentence(self) -> None:
+        """A tool matches these verbatim, so a capital or a split would break what reads them.
+
+        The reference-link group headers, the ToC-omit directive, and the `agent-safety` install
+        markers all open lowercase or sit adjacent, which reads as a sentence that failed to
+        start or as one wrapping into the next.
+        """
+        for marker in ('<!-- omit from toc -->', '<!-- agent-safety v1 start -->',
+                       '<!-- Shields -->'):
+            with self.subTest(marker=marker):
+                self.assertEqual([], self.flag('a.md', f'Prose.\n\n{marker}\n'))
+        # Adjacent markers must not read as one sentence wrapping into the next.
+        self.assertEqual([], self.flag(
+            'a.md', 'Prose.\n\n<!-- Shields -->\n<!-- agent-safety v1 start -->\n'))
+        # A punctuated HTML comment is commentary, so it stays judged as prose.
+        self.assertEqual(['comment-wrap'],
+                         self.flag('a.md', 'Prose.\n\n<!-- One thing. Another thing. -->\n'))
+        # Outside markdown the carve-out does not apply, since there the marker case does not arise.
+        self.assertEqual(['comment-case'], self.flag('a.py', '# lowercase opening\n'))
+
     def test_a_block_opener_inside_a_line_comment_is_text(self) -> None:
         """Read as a real opener it opens a block, and the code lines below are linted as prose.
 
@@ -1015,6 +1035,29 @@ class TestDiscovery(unittest.TestCase):
             found = prose_lint.discover([str(self.tmp)], ('drop.md',))
         self.assertEqual(['keep.md'], [p.name for p in found])
 
+    def test_a_generated_tree_is_skipped_when_a_wider_scan_expands_into_it(self) -> None:
+        """Its prose is the generator's, so a finding there names no edit an author can make."""
+        (self.tmp / 'authored.md').write_text('fine\n', encoding='utf-8')
+        generated = self.tmp / 'reports'
+        generated.mkdir()
+        (generated / 'audit.md').write_text('fine\n', encoding='utf-8')
+        with mock.patch.object(prose_lint, 'tracked_paths', return_value=None), \
+                contextlib.redirect_stderr(io.StringIO()):
+            found = prose_lint.discover([str(self.tmp)])
+        self.assertEqual(['authored.md'], [p.name for p in found])
+
+    def test_naming_a_generated_tree_directly_still_reads_it(self) -> None:
+        """The skip keeps a wide scan honest, and must not make the tree uncheckable."""
+        generated = self.tmp / 'reports'
+        generated.mkdir()
+        (generated / 'audit.md').write_text('fine\n', encoding='utf-8')
+        with mock.patch.object(prose_lint, 'tracked_paths', return_value=None), \
+                contextlib.redirect_stderr(io.StringIO()):
+            found = prose_lint.discover([str(generated)])
+        self.assertEqual(['audit.md'], [p.name for p in found])
+        loose = generated / 'audit.md'
+        self.assertEqual([loose], prose_lint.discover([str(loose)]))
+
     def test_an_unreadable_root_is_not_a_file_set(self) -> None:
         """`tracked_paths` answers None on the error paths, never an empty list read as clean."""
         with mock.patch.object(prose_lint.subprocess, 'run', side_effect=OSError):
@@ -1288,6 +1331,21 @@ class TestCli(unittest.TestCase):
 
     def test_default_rules_are_a_subset_of_the_declared_rules(self) -> None:
         self.assertLessEqual(set(prose_lint.DEFAULT_RULES), set(prose_lint.RULES))
+
+    def test_a_bare_run_checks_comment_shape(self) -> None:
+        """Comment shape is the most regressed rule, so a run nobody parameterized must catch it.
+
+        It sat outside DEFAULT_RULES, so `prose_lint.py .` reported clean on a wrapped comment
+        and the rule read as enforced while nothing ran it.
+        """
+        for rule in ('comment-wrap', 'comment-case'):
+            with self.subTest(rule=rule):
+                self.assertIn(rule, prose_lint.DEFAULT_RULES)
+        bait = self.tmp / 'bait.py'
+        bait.write_text('# A sentence that wraps\n# across two comment lines.\n',
+                        encoding='utf-8')
+        with mock.patch.object(prose_lint, 'discover', return_value=[bait]):
+            self.assertEqual(1, prose_lint.main([]))
 
     def test_diff_scope_reports_only_the_changed_lines(self) -> None:
         """A finding on an untouched line is the backlog, which the diff run must not attribute."""

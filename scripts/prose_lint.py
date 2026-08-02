@@ -33,7 +33,14 @@ RULES = {
     'spelling': 'a British spelling where the repo convention is US English',
 }
 DEFAULT_RULES = frozenset({'charset', 'charset-unknown', 'semicolon', 'dash', 'dupword',
-                           'spelling'})
+                           'spelling', 'comment-wrap', 'comment-case'})
+
+# Trees this repo generates rather than authors, skipped when a wider scan expands into them.
+# The gate then measures hand-written prose.
+# `spec/audit.py` writes `reports/`, so a finding there is the engine's phrasing, not an author's.
+# No edit to that tree can fix one.
+# Naming one of these paths directly still reads it, so nothing becomes uncheckable.
+GENERATED_TREES = frozenset({'reports'})
 
 # Produced rather than authored trees, consulted only on the no-git fallback path.
 # Where git can answer, its own ignore rules are the better answer.
@@ -125,10 +132,12 @@ def discover(paths: list[str], excludes: tuple[str, ...] = ()) -> list[Path]:
     An explicit file argument bypasses discovery, so a single file can always be checked directly.
     """
     found: list[Path] = []
+    explicit: set[Path] = set()
     for raw in paths:
         p = Path(raw)
         if p.is_file():
             found.append(p)
+            explicit.add(p)
             continue
         root = p if p.is_dir() else Path('.')
         tracked = tracked_paths(root)
@@ -136,9 +145,14 @@ def discover(paths: list[str], excludes: tuple[str, ...] = ()) -> list[Path]:
             print(f'warning: git cannot describe {root}, falling back to a filesystem walk',
                   file=sys.stderr)
             tracked = walk_paths(root)
+        # Naming a generated tree, or a path inside one, asks for it deliberately.
+        if not GENERATED_TREES.isdisjoint(Path(rel(root)).parts):
+            explicit.update(tracked)
         found.extend(tracked)
     keep = [p for p in found
-            if not any(x in rel(p) for x in excludes) and p.is_file() and is_text(p)]
+            if not any(x in rel(p) for x in excludes)
+            and (p in explicit or GENERATED_TREES.isdisjoint(Path(rel(p)).parts))
+            and p.is_file() and is_text(p)]
     return sorted(set(keep))
 
 
@@ -764,6 +778,14 @@ def comment_wrap_findings(path: Path, raw: str, lines: list[str]) -> list[tuple[
     prev_no = 0
     for n, body, leading in comments:
         if not body or NOT_PROSE.search(body) or BARE_URI.match(body.strip()):
+            prev_body = ''
+            continue
+        # An unpunctuated markdown HTML comment is a structural marker, not commentary.
+        # It is a label, so it takes neither a capital nor a sentence split.
+        # A tool matches each one verbatim, so rewriting it breaks whatever reads it.
+        # Group headers, the ToC-omit directive, and the agent-safety markers are the cases.
+        # A comment that does punctuate a sentence is prose and is judged as prose.
+        if path.suffix == '.md' and not SENT_END.search(body):
             prev_body = ''
             continue
         if RUN_ON.search(strip_inline_code(body)):
