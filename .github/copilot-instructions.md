@@ -44,10 +44,17 @@ Auto-review on push is configured (via the branch ruleset's `copilot_code_review
 gh api repos/<owner>/<repo>/pulls/<N>/reviews --jq \
   '.[] | select(.body | test("Suppressed comments|low confidence")) | .body'
 
-# Scope it to the current head, so an answered finding from an earlier round does not re-open.
+# Read every round, not only the head. A suppressed finding has no resolved state, so a push
+# does not retire it: it simply stops appearing in a head-scoped query while still unanswered.
+# Head-scoping this query is how four rounds went unanswered across three pull requests in a day.
+gh api repos/<owner>/<repo>/pulls/<N>/reviews --jq \
+  '[.[] | select(.body | test("Suppressed comments|low confidence"))] | length'
+
+# Mark which round each came from, since a finding on an older round may since be moot.
 PR_HEAD=$(gh pr view <N> --json headRefOid --jq '.headRefOid')
 gh api repos/<owner>/<repo>/pulls/<N>/reviews --jq \
-  "[.[] | select(.commit_id==\"$PR_HEAD\") | select(.body | test(\"Suppressed comments|low confidence\"))] | length"
+  "[.[] | select(.body | test(\"Suppressed comments|low confidence\"))
+     | {round: (if .commit_id == \"$PR_HEAD\" then \"head\" else \"earlier\" end), id}]"
 ```
 
 **Round 1 is normally auto-seeded, so poll for it before trying to self-trigger.** Auto-review-on-open supplies the first review with no `botIds` call needed, but it can lag one to three minutes. After opening a PR (or the first push), **poll** for a Copilot review on the head SHA (see [Verify Review Covered Current Head](#verify-review-covered-current-head)) before concluding none ran. The `requestReviews` mutation below is for **re-requesting on later pushes** (a new head SHA). By then a prior review exists, so its bot node id is readable. A missing bot node id on round 1 therefore means "the auto-review has not landed yet - wait and poll," **not** "ask the maintainer to kick it off."
