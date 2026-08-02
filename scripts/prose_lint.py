@@ -947,14 +947,11 @@ def main(argv: list[str] | None = None) -> int:
     a = ap.parse_args(argv)
 
     rules = set(a.checks or DEFAULT_RULES)
-    files = discover(a.paths or ['.'], tuple(a.exclude))
 
-    if a.list_files:
-        for f in files:
-            print(rel(f))
-        return 0
-
-    if a.diff:
+    # Checked before discovery, which reads every tracked file to classify it as text.
+    # A run this rejects would otherwise pay that cost and throw the result away.
+    # `--list-files` is exempt, since it reports the scan scope and never consults the diff.
+    if a.diff and not a.list_files:
         # `git diff` runs in the current directory while the paths may name another checkout.
         # Scanning one repository and diffing another intersects to nothing.
         # The run then reports clean, which is the false clean this gate exists to prevent.
@@ -968,6 +965,13 @@ def main(argv: list[str] | None = None) -> int:
                       'elsewhere scopes every finding away and reports a false clean.',
                       file=sys.stderr)
                 return 2
+
+    files = discover(a.paths or ['.'], tuple(a.exclude))
+
+    if a.list_files:
+        for f in files:
+            print(rel(f))
+        return 0
 
     scope = changed_lines(a.diff) if a.diff else None
     if a.diff and scope is None:

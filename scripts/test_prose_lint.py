@@ -1372,8 +1372,20 @@ class TestCli(unittest.TestCase):
         directory and three when run from its own, and the zero was believed.
         """
         with mock.patch.object(prose_lint, 'repo_root',
-                               side_effect=lambda p: '/hub' if str(p) == '.' else '/other'):
+                               side_effect=lambda p: '/hub' if str(p) == '.' else '/other'), \
+                mock.patch.object(prose_lint, 'discover') as disc:
             self.assertEqual(2, prose_lint.main(['--diff', 'HEAD', '/other/tree']))
+        # Refused before discovery, which reads every tracked file to classify it as text.
+        disc.assert_not_called()
+
+    def test_list_files_still_reports_scope_across_repositories(self) -> None:
+        """It reports the scan scope and never consults the diff, so the guard must not stop it."""
+        clean = self.tmp / 'clean.md'
+        clean.write_text('fine\n', encoding='utf-8')
+        with mock.patch.object(prose_lint, 'repo_root',
+                               side_effect=lambda p: '/hub' if str(p) == '.' else '/other'), \
+                mock.patch.object(prose_lint, 'discover', return_value=[clean]):
+            self.assertEqual(0, prose_lint.main(['--list-files', '--diff', 'HEAD', '/other/tree']))
 
     def test_a_matching_repository_is_not_refused(self) -> None:
         """The guard must not reject the ordinary case it sits in front of."""
