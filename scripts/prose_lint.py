@@ -86,6 +86,21 @@ def changed_lines(base: str) -> dict[str, set[int]] | None:
     return out
 
 
+def repo_prefix(root: Path) -> str:
+    """Where `root` sits inside its repository, as a posix prefix, or '' when git cannot say.
+
+    The generated-tree decision has to be made against the repository-relative path. Reading the
+    filesystem path instead lets a directory *above* the checkout decide it, so a repository
+    cloned under a parent named `reports` had its own `reports/` tree scanned as authored.
+    """
+    try:
+        r = subprocess.run(['git', '-C', str(root), 'rev-parse', '--show-prefix'],
+                           capture_output=True, text=True)
+    except (OSError, ValueError):
+        return ''
+    return r.stdout.strip() if r.returncode == 0 else ''
+
+
 def tracked_paths(root: Path) -> list[Path] | None:
     """Paths git tracks under `root`, or None when git cannot answer.
 
@@ -145,14 +160,23 @@ def discover(paths: list[str], excludes: tuple[str, ...] = ()) -> list[Path]:
             print(f'warning: git cannot describe {root}, falling back to a filesystem walk',
                   file=sys.stderr)
             tracked = walk_paths(root)
-        # Naming a generated tree, or a path inside one, asks for it deliberately.
-        if not GENERATED_TREES.isdisjoint(Path(rel(root)).parts):
-            explicit.update(tracked)
-        found.extend(tracked)
+        # Judge against the repository-relative path, never the filesystem one.
+        # A directory above the checkout must not decide whether a file is generated.
+        # An absolute argument otherwise carried its whole parent chain into the test.
+        prefix = repo_prefix(root)
+        for q in tracked:
+            try:
+                inside = Path(prefix) / q.relative_to(root)
+            except ValueError:
+                inside = Path(q.name)
+            if GENERATED_TREES.isdisjoint(inside.parts):
+                found.append(q)
+            elif not GENERATED_TREES.isdisjoint(Path(prefix).parts):
+                # The root named is itself inside a generated tree, so it was asked for.
+                found.append(q)
+                explicit.add(q)
     keep = [p for p in found
-            if not any(x in rel(p) for x in excludes)
-            and (p in explicit or GENERATED_TREES.isdisjoint(Path(rel(p)).parts))
-            and p.is_file() and is_text(p)]
+            if not any(x in rel(p) for x in excludes) and p.is_file() and is_text(p)]
     return sorted(set(keep))
 
 

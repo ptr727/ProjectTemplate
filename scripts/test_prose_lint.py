@@ -1046,6 +1046,23 @@ class TestDiscovery(unittest.TestCase):
             found = prose_lint.discover([str(self.tmp)])
         self.assertEqual(['authored.md'], [p.name for p in found])
 
+    def test_a_parent_directory_above_the_checkout_does_not_decide_generated(self) -> None:
+        """The decision is repository-relative, so the filesystem path above it cannot leak in.
+
+        Judged on the absolute path, a checkout under a parent named `reports` carried that
+        parent into every file's parts, which read the whole scan as deliberately requested and
+        put the repository's own generated tree back into an ordinary sweep.
+        """
+        repo = self.tmp / 'reports' / 'checkout'
+        (repo / 'reports').mkdir(parents=True)
+        (repo / 'authored.md').write_text('fine\n', encoding='utf-8')
+        (repo / 'reports' / 'audit.md').write_text('fine\n', encoding='utf-8')
+        with mock.patch.object(prose_lint, 'tracked_paths', return_value=None), \
+                mock.patch.object(prose_lint, 'repo_prefix', return_value=''), \
+                contextlib.redirect_stderr(io.StringIO()):
+            found = prose_lint.discover([str(repo)])
+        self.assertEqual(['authored.md'], [p.name for p in found])
+
     def test_naming_a_generated_tree_directly_still_reads_it(self) -> None:
         """The skip keeps a wide scan honest, and must not make the tree uncheckable."""
         generated = self.tmp / 'reports'
