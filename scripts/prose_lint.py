@@ -956,11 +956,15 @@ def main(argv: list[str] | None = None) -> int:
         # Scanning one repository and diffing another intersects to nothing.
         # The run then reports clean, which is the false clean this gate exists to prevent.
         # It cost a real verification once, where a branch read zero from the wrong directory.
+        # A path under no repository at all fails the same way, and more quietly.
+        # Discovery walks the filesystem, then every absolute key misses the repo-relative ones.
+        # Requiring the same root covers both, where testing for a different one did not.
         here = repo_root(Path('.'))
         for raw in (a.paths or ['.']):
             there = repo_root(Path(raw))
-            if here and there and here != there:
-                print(f'error: --diff resolves against {here}, but {raw} is in {there}. '
+            if here and there != here:
+                where = there or 'no git repository'
+                print(f'error: --diff resolves against {here}, but {raw} is in {where}. '
                       'Run the gate from the repository being scanned, since a diff taken '
                       'elsewhere scopes every finding away and reports a false clean.',
                       file=sys.stderr)

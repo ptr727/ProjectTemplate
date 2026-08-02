@@ -1378,6 +1378,19 @@ class TestCli(unittest.TestCase):
         # Refused before discovery, which reads every tracked file to classify it as text.
         disc.assert_not_called()
 
+    def test_a_path_under_no_repository_is_refused_too(self) -> None:
+        """It fails the same way as a different repository, and more quietly.
+
+        Discovery falls back to a filesystem walk, then every absolute key misses the diff's
+        repository-relative ones, so the scope drops every file and the run exits 0. Testing for
+        a *different* root missed this, because there is no root to differ from.
+        """
+        with mock.patch.object(prose_lint, 'repo_root',
+                               side_effect=lambda p: '/hub' if str(p) == '.' else ''), \
+                contextlib.redirect_stderr(io.StringIO()) as err:
+            self.assertEqual(2, prose_lint.main(['--diff', 'HEAD', '/tmp/loose']))
+        self.assertIn('no git repository', err.getvalue())
+
     def test_list_files_still_reports_scope_across_repositories(self) -> None:
         """It reports the scan scope and never consults the diff, so the guard must not stop it."""
         clean = self.tmp / 'clean.md'
