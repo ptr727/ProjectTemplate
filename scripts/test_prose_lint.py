@@ -1364,6 +1364,26 @@ class TestCli(unittest.TestCase):
         with mock.patch.object(prose_lint, 'discover', return_value=[bait]):
             self.assertEqual(1, prose_lint.main([]))
 
+    def test_diffing_one_repository_while_scanning_another_is_refused(self) -> None:
+        """The intersection is empty, so it reports a clean run over an unchecked tree.
+
+        `git diff` runs in the current directory while the paths may name another checkout.
+        A PhotoCleaner branch reported zero findings when the gate was run from the hub's
+        directory and three when run from its own, and the zero was believed.
+        """
+        with mock.patch.object(prose_lint, 'repo_root',
+                               side_effect=lambda p: '/hub' if str(p) == '.' else '/other'):
+            self.assertEqual(2, prose_lint.main(['--diff', 'HEAD', '/other/tree']))
+
+    def test_a_matching_repository_is_not_refused(self) -> None:
+        """The guard must not reject the ordinary case it sits in front of."""
+        clean = self.tmp / 'clean.md'
+        clean.write_text('Nothing here breaks a rule.\n', encoding='utf-8')
+        with mock.patch.object(prose_lint, 'repo_root', return_value='/hub'), \
+                mock.patch.object(prose_lint, 'discover', return_value=[clean]), \
+                mock.patch.object(prose_lint, 'changed_lines', return_value={}):
+            self.assertEqual(0, prose_lint.main(['--check', 'dupword', '--diff', 'HEAD']))
+
     def test_diff_scope_reports_only_the_changed_lines(self) -> None:
         """A finding on an untouched line is the backlog, which the diff run must not attribute."""
         bait = self.tmp / 'bait.md'

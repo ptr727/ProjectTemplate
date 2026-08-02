@@ -101,6 +101,17 @@ def repo_prefix(root: Path) -> str:
     return r.stdout.strip() if r.returncode == 0 else ''
 
 
+def repo_root(path: Path) -> str:
+    """The repository top level containing `path`, or '' when git cannot say."""
+    start = path if path.is_dir() else path.parent
+    try:
+        r = subprocess.run(['git', '-C', str(start), 'rev-parse', '--show-toplevel'],
+                           capture_output=True, text=True)
+    except (OSError, ValueError):
+        return ''
+    return r.stdout.strip() if r.returncode == 0 else ''
+
+
 def tracked_paths(root: Path) -> list[Path] | None:
     """Paths git tracks under `root`, or None when git cannot answer.
 
@@ -942,6 +953,21 @@ def main(argv: list[str] | None = None) -> int:
         for f in files:
             print(rel(f))
         return 0
+
+    if a.diff:
+        # `git diff` runs in the current directory while the paths may name another checkout.
+        # Scanning one repository and diffing another intersects to nothing.
+        # The run then reports clean, which is the false clean this gate exists to prevent.
+        # It cost a real verification once, where a branch read zero from the wrong directory.
+        here = repo_root(Path('.'))
+        for raw in (a.paths or ['.']):
+            there = repo_root(Path(raw))
+            if here and there and here != there:
+                print(f'error: --diff resolves against {here}, but {raw} is in {there}. '
+                      'Run the gate from the repository being scanned, since a diff taken '
+                      'elsewhere scopes every finding away and reports a false clean.',
+                      file=sys.stderr)
+                return 2
 
     scope = changed_lines(a.diff) if a.diff else None
     if a.diff and scope is None:
