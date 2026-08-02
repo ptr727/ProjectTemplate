@@ -65,4 +65,8 @@ runs:
         PATHS: ${{ inputs.paths }}
       run: |
         set -Eeuo pipefail
-        python3 "$SCRIPT" $PATHS --diff "$BASE"
+        # Split on whitespace into an array, so several paths stay several arguments.
+        # Passing the array quoted keeps each element literal.
+        # An unquoted expansion would instead glob, and a path holding `*` would scan the match.
+        read -ra scan <<<"$PATHS"
+        python3 "$SCRIPT" "${scan[@]}" --diff "$BASE"
