@@ -154,8 +154,15 @@ def digest(owner: str, repo: str, num: int, seen: set[str] | None = None) -> tup
     for n, b in blocks:
         # Printed whole where a thread body is truncated: a thread can be re-read at its id,
         # while a suppressed finding has no thread, so this digest is the only place it appears.
+        # GraphQL returns a null commit for a pending or partial review.
+        # An empty sha rendered as "raised on , earlier round", losing what traces the finding.
         sha = ((n.get('commit') or {}).get('oid') or '')[:8]
-        where = 'on head' if sha == head[:8] else f'raised on {sha}, earlier round'
+        if not sha:
+            where = 'commit unknown, treat as outstanding'
+        elif sha == head[:8]:
+            where = 'on head'
+        else:
+            where = f'raised on {sha}, earlier round'
         lines.append(f'  SUPPRESSED ({where}): no thread to resolve, '
                      'answer it in the PR conversation quoting the finding')
         # Indentation is kept, since a block carries fenced code a flattened line would garble.

@@ -148,6 +148,19 @@ class TestSuppressed(GqlCase):
                 out, _ = pr_review.digest('o', 'r', 7)
                 self.assertIn(f'suppressed={want}', out)
 
+    def test_a_block_on_a_review_with_no_commit_names_that_rather_than_an_empty_sha(self) -> None:
+        """GraphQL returns a null commit for a pending review, and the sha is what traces it.
+
+        Rendered from an empty string it read "raised on , earlier round", which loses the round
+        and reads as a formatting glitch rather than as a finding that still needs an answer.
+        """
+        self.answer(payload([review(body=collapsed()) | {'commit': None}]))
+        out, _ = pr_review.digest('o', 'r', 7)
+        self.assertIn('commit unknown, treat as outstanding', out)
+        self.assertNotIn('raised on ,', out)
+        # It still counts, since an unknown round is not a reason to drop a finding.
+        self.assertIn('suppressed=1', out)
+
     def test_a_block_on_an_earlier_round_is_still_reported(self) -> None:
         """A suppressed finding has no resolved state, so a push must not retire it.
 
