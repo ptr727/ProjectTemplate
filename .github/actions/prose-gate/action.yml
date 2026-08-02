@@ -17,7 +17,7 @@ inputs:
   rules-ref:
     description: >-
       Hub ref supplying the rules.
-      Empty selects develop for a develop-targeted run and the pinned action version otherwise.
+      Empty selects develop on every branch except main, which takes the pinned action version.
     required: false
     default: ''
 
@@ -91,4 +91,7 @@ runs:
           exit 1
         fi
         echo "Scanning ${#scan[@]} path(s): ${scan[*]}"
-        python3 "$SCRIPT" "${scan[@]}" --diff "$BASE"
+        # Options first, then `--`, so every remaining token is read as a literal path.
+        # A path-shaped token beginning with a dash would otherwise parse as an option, and
+        # `--list-files` in that position turns the gate into a file listing that exits 0.
+        python3 "$SCRIPT" --diff "$BASE" -- "${scan[@]}"

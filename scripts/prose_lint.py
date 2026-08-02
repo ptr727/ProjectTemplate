@@ -147,12 +147,10 @@ def discover(paths: list[str], excludes: tuple[str, ...] = ()) -> list[Path]:
     An explicit file argument bypasses discovery, so a single file can always be checked directly.
     """
     found: list[Path] = []
-    explicit: set[Path] = set()
     for raw in paths:
         p = Path(raw)
         if p.is_file():
             found.append(p)
-            explicit.add(p)
             continue
         root = p if p.is_dir() else Path('.')
         tracked = tracked_paths(root)
@@ -174,7 +172,6 @@ def discover(paths: list[str], excludes: tuple[str, ...] = ()) -> list[Path]:
             elif not GENERATED_TREES.isdisjoint(Path(prefix).parts):
                 # The root named is itself inside a generated tree, so it was asked for.
                 found.append(q)
-                explicit.add(q)
     keep = [p for p in found
             if not any(x in rel(p) for x in excludes) and p.is_file() and is_text(p)]
     return sorted(set(keep))
