@@ -1367,13 +1367,22 @@ class TestCli(unittest.TestCase):
                 mock.patch.object(prose_lint, 'changed_lines', return_value={'other.md': {1}}):
             self.assertEqual(0, prose_lint.main(['--check', 'dupword', '--diff', 'HEAD']))
 
-    def test_a_failed_diff_falls_back_to_the_whole_tree(self) -> None:
-        """Scoping to nothing would report a clean run, so an unusable diff widens instead."""
+    def test_a_failed_diff_is_an_error_rather_than_a_wider_or_narrower_scan(self) -> None:
+        """An unusable diff has three answers, and only one of them is honest.
+
+        Scoping to nothing reports a clean run, which is a false pass. Widening to the whole tree
+        reports the existing backlog as though this change introduced it, which is what a CI
+        adoption hits first: an unresolvable base turned PhotoCleaner's first run into 420
+        findings its branch never touched. Failing names the cause and asserts neither.
+
+        The exit code is distinct from a findings exit, so a caller can tell "the gate could not
+        run" from "the gate ran and found something".
+        """
         bait = self.tmp / 'bait.md'
         bait.write_text(f'{DUP} thing\n', encoding='utf-8')
         with mock.patch.object(prose_lint, 'discover', return_value=[bait]), \
                 mock.patch.object(prose_lint, 'changed_lines', return_value=None):
-            self.assertEqual(1, prose_lint.main(['--check', 'dupword', '--diff', 'HEAD']))
+            self.assertEqual(2, prose_lint.main(['--check', 'dupword', '--diff', 'HEAD']))
 
     def test_list_files_prints_the_scope_and_reports_nothing(self) -> None:
         """The audit path for the sweep scope exits 0 even on a tree full of findings."""

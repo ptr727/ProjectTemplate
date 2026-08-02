@@ -924,7 +924,15 @@ def main(argv: list[str] | None = None) -> int:
 
     scope = changed_lines(a.diff) if a.diff else None
     if a.diff and scope is None:
-        print('warning: git diff failed; falling back to whole-tree scan', file=sys.stderr)
+        # Widening to the whole tree answers a different question, and answers it silently.
+        # A caller scoping to a change gets the backlog reported as though the change made it.
+        # A CI adoption hits this first, where an unresolvable base walls off the first run.
+        # Scoping to nothing instead would report a false clean, so neither default is honest.
+        print(f'error: cannot diff against {a.diff!r}, so the run cannot be scoped to changed '
+              'lines. Refusing to scan the whole tree instead, since that reports the existing '
+              'backlog as though this change introduced it. Check the ref exists and that the '
+              'checkout carries its history.', file=sys.stderr)
+        return 2
     if scope is not None:
         files = [f for f in files if rel(f) in scope]
 

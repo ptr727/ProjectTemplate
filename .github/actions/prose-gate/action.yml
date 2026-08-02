@@ -33,11 +33,15 @@ runs:
       shell: bash
       env:
         REQUESTED: ${{ inputs.rules-ref }}
+        # `base_ref` is set only on a pull_request event, and a fleet repo gates on push instead.
+        # The branch name is the reliable signal, so it is read whenever `base_ref` is empty.
         TARGET: ${{ github.base_ref || github.ref_name }}
       run: |
         set -Eeuo pipefail
         ref="${REQUESTED:-}"
-        if [ -z "$ref" ] && [ "$TARGET" = "develop" ]; then ref="develop"; fi
+        # Only main is pinned, since it is the released tier and a re-run of it must not change.
+        # Every other branch merges into develop, so it tracks develop and exercises rules early.
+        if [ -z "$ref" ] && [ "$TARGET" != "main" ]; then ref="develop"; fi
         if [ -z "$ref" ]; then
           # Three levels up from the action directory is the repository root of this pinned checkout.
           bundled="$GITHUB_ACTION_PATH/../../../scripts/prose_lint.py"
@@ -65,6 +69,14 @@ runs:
         PATHS: ${{ inputs.paths }}
       run: |
         set -Eeuo pipefail
+        # Check the base resolves before scanning, so an empty or absent ref fails naming itself.
+        # Unresolvable, the run would report the repository's whole backlog against this change.
+        # A shallow checkout is the usual cause, so the caller fetches full history.
+        if ! git rev-parse --verify --quiet "$BASE^{commit}" >/dev/null; then
+          echo "::error::Diff base '$BASE' does not resolve in this checkout." >&2
+          echo "::error::Check the ref name and that the job checks out with fetch-depth 0." >&2
+          exit 1
+        fi
         # Split on whitespace into an array, so several paths stay several arguments.
         # Passing the array quoted keeps each element literal.
         # An unquoted expansion would instead glob, and a path holding `*` would scan the match.
