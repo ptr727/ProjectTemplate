@@ -177,7 +177,11 @@ def discover(paths: list[str], excludes: tuple[str, ...] = ()) -> list[Path]:
             try:
                 inside = Path(prefix) / q.relative_to(root)
             except ValueError:
-                inside = Path(q.name)
+                # Unreachable while both come from the same root, and kept safe rather than tidy.
+                # With no repository-relative path there is nothing to judge, so scan the file.
+                # Skipping on doubt is how a gate reports clean over what it never read.
+                found.append(q)
+                continue
             if GENERATED_TREES.isdisjoint(inside.parts):
                 found.append(q)
             elif not GENERATED_TREES.isdisjoint(Path(prefix).parts):
