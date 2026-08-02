@@ -54,8 +54,10 @@ runs:
         else
           dst="$RUNNER_TEMP/prose_lint.py"
           url="https://raw.githubusercontent.com/ptr727/ProjectTemplate/$ref/scripts/prose_lint.py"
+          # Retry a transient network failure, since it would otherwise fail a correct change.
+          # A non-200 still fails the step, because -f keeps the trust model unchanged.
           # Fail loudly rather than skipping the gate, since a silent skip reports a clean pass.
-          curl -fsSL "$url" -o "$dst"
+          curl -fsSL --retry 3 --retry-delay 2 --retry-all-errors "$url" -o "$dst"
           echo "script=$dst" >>"$GITHUB_OUTPUT"
           echo "Rules source: hub $ref"
         fi
@@ -77,8 +79,16 @@ runs:
           echo "::error::Check the ref name and that the job checks out with fetch-depth 0." >&2
           exit 1
         fi
-        # Split on whitespace into an array, so several paths stay several arguments.
-        # Passing the array quoted keeps each element literal.
-        # An unquoted expansion would instead glob, and a path holding `*` would scan the match.
-        read -ra scan <<<"$PATHS"
+        # A caller may write paths as a multi-line YAML block, and `read -ra` stops at a newline.
+        # Fold newlines into spaces first, so every path is read.
+        # Left unfolded it scans only the first path and reports the rest clean.
+        # That is a silent under-scan, the one failure a gate must never have.
+        # Splitting on whitespace keeps several paths as several arguments.
+        # Passing the array quoted keeps each element literal, where an unquoted one would glob.
+        read -ra scan <<<"$(printf '%s' "$PATHS" | tr '\n' ' ')"
+        if [ "${#scan[@]}" -eq 0 ]; then
+          echo "::error::No paths to scan after parsing the paths input." >&2
+          exit 1
+        fi
+        echo "Scanning ${#scan[@]} path(s): ${scan[*]}"
         python3 "$SCRIPT" "${scan[@]}" --diff "$BASE"

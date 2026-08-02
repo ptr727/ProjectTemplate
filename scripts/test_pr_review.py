@@ -148,19 +148,29 @@ class TestSuppressed(GqlCase):
                 out, _ = pr_review.digest('o', 'r', 7)
                 self.assertIn(f'suppressed={want}', out)
 
-    def test_a_block_on_a_stale_round_is_not_reported_again(self) -> None:
-        """Scoped to the head, so a finding answered before a push does not re-open after it."""
+    def test_a_block_on_an_earlier_round_is_still_reported(self) -> None:
+        """A suppressed finding has no resolved state, so a push must not retire it.
+
+        Head-scoping read "superseded by a push" as "answered", and the two are not the same:
+        a finding nobody replied to left the digest the moment the branch moved, and the run
+        then reported zero. Four rounds of findings went unanswered across three pull requests
+        that way in a single day, each one discovered by the maintainer rather than the gate.
+
+        The round is marked instead, since a finding on an older round may be moot and deciding
+        that is the reader's judgment rather than something the count should make for them.
+        """
         self.answer(payload([review(oid=OLD, body=collapsed()), review()]))
         out, _ = pr_review.digest('o', 'r', 7)
-        self.assertIn('suppressed=0', out)
-        self.assertNotIn('SUPPRESSED', out)
+        self.assertIn('suppressed=1', out)
+        self.assertIn('earlier=1', out)
+        self.assertIn('earlier round', out)
 
     def test_the_finding_prints_whole_under_a_marker_naming_the_answer(self) -> None:
         """A thread can be re-read at its id and truncates for that reason, and this cannot."""
         finding = 'a.py:12 ' + ('the same clause repeated. ' * 20).strip()
         self.answer(payload([review(body=collapsed(finding=finding))]))
         out, _ = pr_review.digest('o', 'r', 7)
-        self.assertIn('SUPPRESSED: no thread to resolve, answer it in the PR conversation', out)
+        self.assertIn('no thread to resolve, answer it in the PR conversation', out)
         self.assertIn(finding, out)
         # The `<details>` wrapper is markup around the finding, not part of it.
         self.assertNotIn('<summary>', out)

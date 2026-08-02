@@ -119,14 +119,23 @@ def digest(owner: str, repo: str, num: int, seen: set[str] | None = None) -> tup
                   and ((t.get('comments') or {}).get('nodes') or [{}])[0]
                   .get('author', {}).get('login') == REVIEWER]
 
-    # Scoped to the head, so a finding answered in an earlier round does not re-open.
-    blocks = [b for n in on_head for b in suppressed_blocks(n.get('body') or '')]
+    # Every round, not just the head, because a suppressed finding has no resolved state to read.
+    # Head-scoping treated "superseded by a push" as "answered", and the two are not the same.
+    # A finding nobody replied to left the digest the moment the branch moved, reporting zero.
+    # That is how four rounds went unanswered across three pull requests in one day.
+    # The head is still marked per block, since a finding on an older round may be moot.
+    # Deciding that is the reader's call rather than one the count makes for them.
+    blocks = [(n, b) for n in revs for b in suppressed_blocks(n.get('body') or '')]
+    on_head_blocks = [b for n, b in blocks if (n.get('commit') or {}).get('oid') == head]
+    stale = sum(finding_count(b) for n, b in blocks) - sum(
+        finding_count(b) for b in on_head_blocks)
 
     lines = [
         f'pr={num} head={head[:8]} rounds={len(revs)} '
         f'review_on_head={"yes" if on_head else "NO"} '
         f'threads={len(threads)} unresolved={len(unresolved)} '
-        f'suppressed={sum(finding_count(b) for b in blocks)} '
+        f'suppressed={sum(finding_count(b) for n, b in blocks)} '
+        f'(on_head={sum(finding_count(b) for b in on_head_blocks)} earlier={stale}) '
         f'merge={pr.get("mergeStateStatus")}'
     ]
     new = 0
@@ -142,10 +151,13 @@ def digest(owner: str, repo: str, num: int, seen: set[str] | None = None) -> tup
             new += 1
         body = ' '.join((c.get('body') or '').split())
         lines.append(f'  {mark}{tid} {c.get("path")}:{c.get("line")} {body[:160]}')
-    for b in blocks:
+    for n, b in blocks:
         # Printed whole where a thread body is truncated: a thread can be re-read at its id,
         # while a suppressed finding has no thread, so this digest is the only place it appears.
-        lines.append('  SUPPRESSED: no thread to resolve, answer it in the PR conversation')
+        sha = ((n.get('commit') or {}).get('oid') or '')[:8]
+        where = 'on head' if sha == head[:8] else f'raised on {sha}, earlier round'
+        lines.append(f'  SUPPRESSED ({where}): no thread to resolve, '
+                     'answer it in the PR conversation quoting the finding')
         # Indentation is kept, since a block carries fenced code a flattened line would garble.
         lines += [f'    {ln.rstrip()}' for ln in TAGS.sub('', b).splitlines() if ln.strip()]
     if seen is not None:
