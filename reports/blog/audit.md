@@ -14,7 +14,7 @@ First audit of this repo. It was stood up on 2026-08-01 and reached a proven rel
 
 ## Already Owed by the Hub's Own Develop
 
-This audit reads hub `main` (`3a7cc64`), which AUDIT.md section 1 makes the ground truth. Re-running it from a tree at hub `develop` (`362aec8`) reports two additional re-vendors and two DEFECTs, all four from [#545][pr-545] taking `bypass_actors` out of the three ruleset payloads about an hour before this run. They are recorded here rather than counted, because measuring a repo against un-promoted hub content reports work in flight as a conformance failure, and the same four will appear against every fleet repo the moment that change promotes:
+This audit reads hub `main` (`3a7cc64`), which AUDIT.md section 1 makes the ground truth. Re-running it from a tree at hub `develop` (`362aec8`) reports two additional re-vendors and two DEFECTs, all four from [#545][pr-545] taking `bypass_actors` out of the three ruleset payloads about an hour before this run. They are recorded here rather than counted, because measuring a repo against un-promoted hub content reports work in flight as a conformance failure. What the re-run observed was:
 
 - `repo-config/develop.json` and `repo-config/main.json` become stale carries, re-vendored the same mechanical way as the rest.
 - The live `develop` and `main` rulesets then diverge from the payloads, because both still carry the `RepositoryRole` admin bypass the new payloads no longer declare. Closing that is a repository-settings change on a protected branch, so it is the maintainer's to apply, not an agent's.
