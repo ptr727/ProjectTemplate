@@ -88,9 +88,11 @@ def timeline(owner: str, repo: str, num: int) -> list[tuple[str, str]]:
     GraphQL carries no `copilot_work_started`, so this is the one REST reader here.
     `--jq` projects inside gh rather than after it, since `--paginate` without one emits a
     concatenated array per page that is not valid JSON on every gh a fleet machine may carry.
+    `per_page` is the page size the pagination actually costs, and the default of 30 turns a
+    long-running pull request into six requests a reading where the maximum makes it two.
     """
     r = subprocess.run(
-        ['gh', 'api', '--paginate', f'repos/{owner}/{repo}/issues/{num}/timeline',
+        ['gh', 'api', '--paginate', f'repos/{owner}/{repo}/issues/{num}/timeline?per_page=100',
          '--jq', '.[] | select(.event == "copilot_work_started" or .event == "review_requested")'
                  ' | "\\(.event) \\(.created_at)"'],
         capture_output=True, text=True)

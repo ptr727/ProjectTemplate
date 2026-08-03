@@ -566,6 +566,27 @@ class TestContract(unittest.TestCase):
         self.assertEqual(4, source.count('pageInfo{ hasPreviousPage }'))
         self.assertEqual(4, len(re.findall(r'(?:comments|reviews)\(last:\d+\)', source)))
 
+    def test_the_timeline_reader_asks_for_the_largest_page(self) -> None:
+        """The page size is what pagination costs, and the default of 30 triples the requests."""
+        done = subprocess.CompletedProcess(args=[], returncode=0, stdout='', stderr='')
+        with mock.patch.object(pr_review.subprocess, 'run', return_value=done) as run:
+            pr_review.timeline('o', 'r', 7)
+        argv = run.call_args.args[0]
+        self.assertIn('repos/o/r/issues/7/timeline?per_page=100', argv)
+        self.assertIn('--paginate', argv)
+        # A read, and the guard against a write creeping into the one REST call here.
+        self.assertEqual(['gh', 'api'], argv[:2])
+        self.assertFalse({'-X', '--method'} & set(argv))
+
+    def test_a_failed_timeline_read_raises_rather_than_reading_as_no_events(self) -> None:
+        """An empty list reads as no request pending, which is the false clean one level up."""
+        failed = subprocess.CompletedProcess(args=[], returncode=1, stdout='', stderr='boom')
+        with mock.patch.object(pr_review.subprocess, 'run', return_value=failed), \
+                contextlib.redirect_stderr(io.StringIO()) as err:
+            with self.assertRaises(SystemExit):
+                pr_review.timeline('o', 'r', 7)
+        self.assertIn('boom', err.getvalue())
+
     def test_the_backoff_is_bounded_and_non_decreasing(self) -> None:
         """A wait that sleeps zero seconds is a busy loop, and one that shrinks polls harder later."""
         source = (REPO / 'scripts' / 'pr_review.py').read_text(encoding='utf-8')
