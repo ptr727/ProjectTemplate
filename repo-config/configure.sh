@@ -239,7 +239,15 @@ check_ruleset() { # payload-file - the live ruleset must match the committed pol
     # Dropping that would turn array order into false drift.
     # A scalar array sorts directly, and required_status_checks sorts by context, its identifying field.
     local ptypes norm
-    norm='def n: walk(if type=="array" then (if length==0 then . elif (all(.[]; type=="string" or type=="number")) then sort elif (all(.[]; type=="object" and has("context"))) then sort_by(.context) else . end) else . end); n'
+    # The walk/1 builtin arrived in jq 1.6, so it is defined here rather than called.
+    # A host on jq 1.5 would otherwise not degrade, it would fail to compile the filter.
+    # The check_ruleset function would then report drift on every parameterized rule it never actually compared.
+    # That is the inverse of the false clean this comparison was written to close, so the portable definition is worth its length.
+    norm='def w(f): . as $in
+            | if type == "object" then reduce keys_unsorted[] as $k ({}; . + { ($k): ($in[$k] | w(f)) }) | f
+              elif type == "array" then map(w(f)) | f
+              else f end;
+          def n: w(if type=="array" then (if length==0 then . elif (all(.[]; type=="string" or type=="number")) then sort elif (all(.[]; type=="object" and has("context"))) then sort_by(.context) else . end) else . end); n'
     ptypes="$(jq -r '[.rules[] | select(has("parameters")) | .type] | .[]' "$file")"
     while IFS= read -r t; do
         [ -z "$t" ] && continue
