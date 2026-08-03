@@ -59,7 +59,7 @@ gh api repos/<owner>/<repo>/pulls/<N>/reviews --jq \
 
 **Round 1 is normally auto-seeded, so poll for it before trying to self-trigger.** Auto-review-on-open supplies the first review with no `botIds` call needed, but it can lag one to three minutes. After opening a PR (or the first push), **poll** for a Copilot review on the head SHA (see [Verify Review Covered Current Head](#verify-review-covered-current-head)) before concluding none ran. The `requestReviews` mutation below is for **re-requesting on later pushes** (a new head SHA). By then a prior review exists, so its bot node id is readable. A missing bot node id on round 1 therefore means "the auto-review has not landed yet - wait and poll," **not** "ask the maintainer to kick it off."
 
-> **The reviewer login differs by API.** In **GraphQL** (`gh api graphql` and `gh pr view --json reviews`, which is GraphQL-backed) the `Bot.login` is `copilot-pull-request-reviewer`, with **no `[bot]` suffix**. In the **REST** API (`gh api repos/.../issues|pulls/...`) the same account's `user.login` is `copilot-pull-request-reviewer[bot]`, **with** the suffix. Each query below uses the correct form for its API, so match the API, not a single spelling, when adapting them.
+> **The reviewer login differs by API, in three forms rather than two.** In **GraphQL** (`gh api graphql` and `gh pr view --json reviews`, which is GraphQL-backed) the `Bot.login` is `copilot-pull-request-reviewer`, with **no `[bot]` suffix**. In the **REST** API (`gh api repos/.../issues|pulls/...`) the same account's `user.login` is `copilot-pull-request-reviewer[bot]`, **with** the suffix. In a REST **timeline** `review_requested` event the `requested_reviewer` is a third spelling again, login `Copilot` with `type` `Bot`, so a filter written against either of the other two selects nothing there and reports a pull request with requests as having none. Match on the type plus a loose login test rather than on any one spelling, and each query below uses the correct form for its API.
 
 ```sh
 # 1. PR node id + the Copilot reviewer's bot node id (read from any existing
@@ -116,7 +116,8 @@ Known non-working request paths (don't rely on them, and use the `requestReviews
 - `copilot-pull-request-reviewer` as a requested reviewer slug returns 422.
 - `requestReviews` with the reviewer's bot node id in **`userIds`** fails with `Could not resolve to User node`, because the Copilot reviewer is a **Bot**, so its node id goes in **`botIds`** (as in the mutation above), never `userIds`.
 - `suggestedActors(capabilities: [CAN_BE_ASSIGNED])` lists `copilot-swe-agent` (the coding agent), not `copilot-pull-request-reviewer`, so do not source the reviewer's bot node id there. Read it from an existing review per step 1 above.
-- There is no `removePullRequestFromReviewRequest` mutation, and removing the reviewer to force a fresh pass is unnecessary anyway, since `requestReviews` with `union: true` re-fires the review on the current head.
+- There is no `removePullRequestFromReviewRequest` mutation, but removal is not therefore impossible: `requestReviews` **replaces** the reviewer set when `union` is false (the schema describes `union` as "add users to the set rather than replace"), so an empty `botIds` with `union: false` removes the pending request. Reach for it only in the stuck case below, since `union: true` re-fires a review on the current head without it.
+- `gh pr view --json reviewRequests` **omits a Bot reviewer entirely**, reporting an empty set while Copilot sits in it. Read the pending set through GraphQL `reviewRequests`, which returns the `Bot` node, because the REST-backed projection makes a pending request read as no request at all.
 
 ### Verify Review Covered Current Head
 
@@ -149,6 +150,44 @@ This path is only for a **genuinely missing** review, meaning no Copilot review 
 **A slow review is pending, not missing, so poll with backoff and never escalate on a timeout alone.** Copilot can lag far beyond the usual one-to-three minutes when it has been re-requested many times in quick succession, because it throttles under load, and a re-review landing tens of minutes after the request is normal. A poll that times out is therefore evidence only that the review has not landed *yet*, not that Copilot is done or unresponsive. Report the status as "review still pending" and keep polling on a widening interval (for example 20s steps, then a few minutes) rather than stopping. Enter the escalation step below only when the `requestReviews` mutation itself no-ops or errors, or after a genuinely long wait with the request confirmed accepted, never merely because one fixed poll window elapsed.
 
 **Bound each wait, and read what Copilot actually posted before opening another one.** A poll that widens forever is indistinguishable from a poll that has stopped, and "still pending" is the honest report for exactly as long as evidence supports it. Two readings decide whether waiting again is warranted. Compare the request's timestamp against the newest Copilot activity of **any** kind on the pull request, since a reviewer that has already answered on a later head, or that posted an issue comment instead of a formal review, is not a reviewer running late, and a wait that keeps reporting "pending" against a landed review is a broken wait rather than a slow reviewer. Then read that newest response, because a Copilot answer naming a quota or a rate limit is a **terminal** outcome rather than a pending one: no formal review will land, so path (1) never matches the head and path (2) is correctly never confirmed, both paths behave exactly as specified, and the agent waits for something that is not coming. The fix is account-side and re-requesting does not change it, so report it to the maintainer and stop waiting. Where the newest response is neither a review nor a refusal you recognize, that too goes to the maintainer with its text, rather than being waited through.
+
+**A pending request nothing picked up is a third state, and it is the one that looks most like patience.** Copilot raises a `copilot_work_started` timeline event within about half a minute of accepting a request, and submits its review a few minutes later. A request that never draws one is not a slow review, it is a request nothing is acting on, and it stays that way indefinitely: one sat for thirteen and a half hours while the pull request read as waiting on the reviewer. Elapsed time cannot tell the two apart, since a genuinely slow round also shows no review, so read the event rather than the clock. `copilot_work_started` appears in the REST timeline only, and no GraphQL timeline item carries it:
+
+```sh
+# The pending set (GraphQL, since the `gh pr view` projection cannot see a Bot reviewer).
+gh api graphql -f query='
+{ repository(owner:"<owner>",name:"<repo>"){ pullRequest(number:<N>){
+    reviewRequests(first:10){ totalCount
+      nodes{ requestedReviewer{ __typename ... on Bot{login} ... on User{login} } } } } } }'
+
+# The request and pickup events, newest last. A `review_requested` with no later
+# `copilot_work_started` is the stuck state. Requests are filtered to the reviewer's own,
+# since a human requested afterwards is a different request and reading it as this one
+# reports a picked-up review as never picked up. `per_page` is the pagination cost.
+gh api --paginate 'repos/<owner>/<repo>/issues/<N>/timeline?per_page=100' \
+  --jq '.[] | select(.event == "copilot_work_started" or (.event == "review_requested"
+        and .requested_reviewer.type == "Bot"
+        and ((.requested_reviewer.login // "") | ascii_downcase | test("copilot"))))
+        | "\(.event) \(.created_at)"'
+```
+
+**Recover it by clearing the request and requesting again**, because the pull request UI offers no re-request control while a request is pending, and `requestReviews` with `union: true` adds a reviewer already in the set, which changes nothing. Read the pending set first, since `union: false` replaces the whole set and would drop a human reviewer requested alongside the bot. Where the clear-and-request does not draw a `copilot_work_started` within a minute or so, push a commit instead, since a new head raises a fresh request rather than poking a stale one.
+
+```sh
+PR_NODE=$(gh pr view <N> --json id --jq '.id')
+# 1. Clear. `union: false` replaces the set, so an empty botIds removes the pending request.
+gh api graphql -f query='
+mutation($pr: ID!) {
+  requestReviews(input: { pullRequestId: $pr, botIds: [], union: false }) {
+    pullRequest { reviewRequests(first: 10) { totalCount } } }
+}' -F pr="$PR_NODE"
+# 2. Request again, against a now-empty set, with $BOT_ID read as in "Triggering and Polling".
+gh api graphql -f query='
+mutation($pr: ID!, $bot: ID!) {
+  requestReviews(input: { pullRequestId: $pr, botIds: [$bot], union: true }) {
+    pullRequest { reviewRequests(first: 10) { totalCount } } }
+}' -F pr="$PR_NODE" -F bot="$BOT_ID"
+```
 
 If a review did not run on the current head, retry:
 
