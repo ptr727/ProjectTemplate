@@ -45,6 +45,11 @@ indent_size = 2
 [.github/workflows/*.{yml,yaml}]
 end_of_line = lf
 
+# Composite action metadata is Actions-owned like the workflows above, and Dependabot rewrites the
+# `uses:` pins inside it with LF exactly as it does theirs, so declaring LF keeps it consistent.
+[.github/actions/**/*.{yml,yaml}]
+end_of_line = lf
+
 # Catalog snippet workflows mirror the real workflow files pinned LF above.
 # Keep the snippets LF, so a copied snippet lands compliant instead of needing conversion.
 [catalog/snippets/workflows/*.{yml,yaml}]

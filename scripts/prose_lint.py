@@ -33,7 +33,14 @@ RULES = {
     'spelling': 'a British spelling where the repo convention is US English',
 }
 DEFAULT_RULES = frozenset({'charset', 'charset-unknown', 'semicolon', 'dash', 'dupword',
-                           'spelling'})
+                           'spelling', 'comment-wrap', 'comment-case'})
+
+# Trees this repo generates rather than authors, skipped when a wider scan expands into them.
+# The gate then measures hand-written prose.
+# `spec/audit.py` writes `reports/`, so a finding there is the engine's phrasing, not an author's.
+# No edit to that tree can fix one.
+# Naming one of these paths directly still reads it, so nothing becomes uncheckable.
+GENERATED_TREES = frozenset({'reports'})
 
 # Produced rather than authored trees, consulted only on the no-git fallback path.
 # Where git can answer, its own ignore rules are the better answer.
@@ -77,6 +84,32 @@ def changed_lines(base: str) -> dict[str, set[int]] | None:
                 count = int(m.group(2) or 1)
                 out[cur].update(range(start, start + count))
     return out
+
+
+def repo_prefix(root: Path) -> str:
+    """Where `root` sits inside its repository, as a posix prefix, or '' when git cannot say.
+
+    The generated-tree decision has to be made against the repository-relative path. Reading the
+    filesystem path instead lets a directory *above* the checkout decide it, so a repository
+    cloned under a parent named `reports` had its own `reports/` tree scanned as authored.
+    """
+    try:
+        r = subprocess.run(['git', '-C', str(root), 'rev-parse', '--show-prefix'],
+                           capture_output=True, text=True)
+    except (OSError, ValueError):
+        return ''
+    return r.stdout.strip() if r.returncode == 0 else ''
+
+
+def repo_root(path: Path) -> str:
+    """The repository top level containing `path`, or '' when git cannot say."""
+    start = path if path.is_dir() else path.parent
+    try:
+        r = subprocess.run(['git', '-C', str(start), 'rev-parse', '--show-toplevel'],
+                           capture_output=True, text=True)
+    except (OSError, ValueError):
+        return ''
+    return r.stdout.strip() if r.returncode == 0 else ''
 
 
 def tracked_paths(root: Path) -> list[Path] | None:
@@ -136,7 +169,24 @@ def discover(paths: list[str], excludes: tuple[str, ...] = ()) -> list[Path]:
             print(f'warning: git cannot describe {root}, falling back to a filesystem walk',
                   file=sys.stderr)
             tracked = walk_paths(root)
-        found.extend(tracked)
+        # Judge against the repository-relative path, never the filesystem one.
+        # A directory above the checkout must not decide whether a file is generated.
+        # An absolute argument otherwise carried its whole parent chain into the test.
+        prefix = repo_prefix(root)
+        for q in tracked:
+            try:
+                inside = Path(prefix) / q.relative_to(root)
+            except ValueError:
+                # Unreachable while both come from the same root, and kept safe rather than tidy.
+                # With no repository-relative path there is nothing to judge, so scan the file.
+                # Skipping on doubt is how a gate reports clean over what it never read.
+                found.append(q)
+                continue
+            if GENERATED_TREES.isdisjoint(inside.parts):
+                found.append(q)
+            elif not GENERATED_TREES.isdisjoint(Path(prefix).parts):
+                # The root named is itself inside a generated tree, so it was asked for.
+                found.append(q)
     keep = [p for p in found
             if not any(x in rel(p) for x in excludes) and p.is_file() and is_text(p)]
     return sorted(set(keep))
@@ -766,6 +816,14 @@ def comment_wrap_findings(path: Path, raw: str, lines: list[str]) -> list[tuple[
         if not body or NOT_PROSE.search(body) or BARE_URI.match(body.strip()):
             prev_body = ''
             continue
+        # An unpunctuated markdown HTML comment is a structural marker, not commentary.
+        # It is a label, so it takes neither a capital nor a sentence split.
+        # A tool matches each one verbatim, so rewriting it breaks whatever reads it.
+        # Group headers, the ToC-omit directive, and the agent-safety markers are the cases.
+        # A comment that does punctuate a sentence is prose and is judged as prose.
+        if path.suffix == '.md' and not SENT_END.search(body):
+            prev_body = ''
+            continue
         if RUN_ON.search(strip_inline_code(body)):
             out.append((n, 'comment-wrap', 'two sentences on one comment line -> split them'))
         # A continuation is the very next line: two comments with code between them are separate.
@@ -893,6 +951,29 @@ def main(argv: list[str] | None = None) -> int:
     a = ap.parse_args(argv)
 
     rules = set(a.checks or DEFAULT_RULES)
+
+    # Checked before discovery, which reads every tracked file to classify it as text.
+    # A run this rejects would otherwise pay that cost and throw the result away.
+    # `--list-files` is exempt, since it reports the scan scope and never consults the diff.
+    if a.diff and not a.list_files:
+        # `git diff` runs in the current directory while the paths may name another checkout.
+        # Scanning one repository and diffing another intersects to nothing.
+        # The run then reports clean, which is the false clean this gate exists to prevent.
+        # It cost a real verification once, where a branch read zero from the wrong directory.
+        # A path under no repository at all fails the same way, and more quietly.
+        # Discovery walks the filesystem, then every absolute key misses the repo-relative ones.
+        # Requiring the same root covers both, where testing for a different one did not.
+        here = repo_root(Path('.'))
+        for raw in (a.paths or ['.']):
+            there = repo_root(Path(raw))
+            if here and there != here:
+                where = there or 'no git repository'
+                print(f'error: --diff resolves against {here}, but {raw} is in {where}. '
+                      'Run the gate from the repository being scanned, since a diff taken '
+                      'elsewhere scopes every finding away and reports a false clean.',
+                      file=sys.stderr)
+                return 2
+
     files = discover(a.paths or ['.'], tuple(a.exclude))
 
     if a.list_files:
@@ -902,7 +983,15 @@ def main(argv: list[str] | None = None) -> int:
 
     scope = changed_lines(a.diff) if a.diff else None
     if a.diff and scope is None:
-        print('warning: git diff failed; falling back to whole-tree scan', file=sys.stderr)
+        # Widening to the whole tree answers a different question, and answers it silently.
+        # A caller scoping to a change gets the backlog reported as though the change made it.
+        # A CI adoption hits this first, where an unresolvable base walls off the first run.
+        # Scoping to nothing instead would report a false clean, so neither default is honest.
+        print(f'error: cannot diff against {a.diff!r}, so the run cannot be scoped to changed '
+              'lines. Refusing to scan the whole tree instead, since that reports the existing '
+              'backlog as though this change introduced it. Check the ref exists and that the '
+              'checkout carries its history.', file=sys.stderr)
+        return 2
     if scope is not None:
         files = [f for f in files if rel(f) in scope]
 
