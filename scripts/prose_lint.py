@@ -580,6 +580,11 @@ BARE_URI = re.compile(r'^(?:<(?:https?|ftp)://[^>\s]+>|(?:https?|ftp)://[^>\s]+)
 # A sentence ending in an acronym such as CI is two sentences and has to be caught.
 # The second sentence may open in either case, since a lowercase opening is still a second sentence.
 RUN_ON = re.compile(r'(?<!\b[A-Z])(?<!\be\.g)(?<!\bi\.e)(?<!\bvs)(?<!\betc)[.!?]\s+(?=[A-Za-z])')
+
+# A step marker opening a comment is a label on the sentence that follows, not a sentence of its own.
+# `# 1. Deploy the hook.` is one sentence, and reading the marker's dot as a terminator made it two.
+# It is stripped before the sentence checks so both the run-on and the opening-case test see the prose.
+ENUM_PREFIX = re.compile(r'^\d+[.)]\s+')
 CODE_FENCE = re.compile(r'^\s*(```|~~~)')
 
 # Both are correct English. `the the` is always a typo, so it is not here.
@@ -824,6 +829,7 @@ def comment_wrap_findings(path: Path, raw: str, lines: list[str]) -> list[tuple[
         if path.suffix == '.md' and not SENT_END.search(body):
             prev_body = ''
             continue
+        body = ENUM_PREFIX.sub('', body)
         if RUN_ON.search(strip_inline_code(body)):
             out.append((n, 'comment-wrap', 'two sentences on one comment line -> split them'))
         # A continuation is the very next line: two comments with code between them are separate.
