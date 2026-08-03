@@ -524,6 +524,53 @@ class TestCli(GqlCase):
         self.assertGreaterEqual(seen.call_count, 1)
         self.assertLessEqual(seen.call_count, 1200 // 300 + 1)
 
+    def test_a_review_landing_during_the_last_read_wins_over_the_stalled_code(self) -> None:
+        """The digest and the exit code come from one payload, or they describe different PRs.
+
+        An automated reader resolves a digest saying covered against a code saying stalled by
+        believing the code, so the review it just printed is the thing that gets dropped.
+        """
+        self.answer(payload([review(oid=OLD)], pending=True), payload([review()], pending=True))
+        with mock.patch.object(pr_review, 'timeline',
+                               return_value=[('review_requested', LATE)]), \
+                mock.patch.object(pr_review.time, 'sleep'):
+            self.assertEqual(0, pr_review.main(
+                ['wait', '7', '--pickup-grace', '0', '--timeout', '0']))
+        out = self.out.getvalue()
+        self.assertIn('review_on_head=yes', out)
+        self.assertNotIn('status=REQUEST_NOT_PICKED_UP', out)
+
+    def test_a_review_landing_during_the_last_read_wins_over_the_timeout(self) -> None:
+        """Same disagreement at the other exit: printing coverage and returning PENDING."""
+        self.answer(payload([review(oid=OLD)]), payload([review()]))
+        with mock.patch.object(pr_review.time, 'sleep'):
+            self.assertEqual(0, pr_review.main(['wait', '7', '--timeout', '0']))
+        out = self.out.getvalue()
+        self.assertIn('review_on_head=yes', out)
+        self.assertNotIn('status=PENDING', out)
+
+    def test_a_request_picked_up_after_the_loop_read_it_is_not_reported_as_stalled(self) -> None:
+        """The stall is re-read at the end, or a request taken up since still reports as dead."""
+        self.answer(payload([review(oid=OLD)], pending=True))
+        picked_up = [('review_requested', EARLY), ('copilot_work_started', LATE)]
+        with mock.patch.object(pr_review, 'timeline',
+                               side_effect=[[('review_requested', LATE)], picked_up]), \
+                mock.patch.object(pr_review.time, 'sleep'):
+            self.assertEqual(30, pr_review.main(
+                ['wait', '7', '--pickup-grace', '0', '--timeout', '0']))
+        out = self.out.getvalue()
+        self.assertNotIn('status=REQUEST_NOT_PICKED_UP', out)
+        self.assertNotIn('REQUEST NOT PICKED UP', out)
+
+    def test_an_answer_outranks_a_stall_when_both_are_true(self) -> None:
+        """The reviewer saying something outranks it saying nothing, and the digest shows both."""
+        self.answer(payload([review(oid=OLD)], comments=[comment()], pending=True))
+        with mock.patch.object(pr_review, 'timeline',
+                               return_value=[('review_requested', LATE)]), \
+                mock.patch.object(pr_review.time, 'sleep'):
+            self.assertEqual(40, pr_review.main(
+                ['wait', '7', '--pickup-grace', '0', '--timeout', '0']))
+
     def test_the_repo_argument_splits_into_owner_and_name(self) -> None:
         self.answer(payload([review()]))
         with mock.patch.object(pr_review, 'digest', return_value=('x', 0)) as dig:

@@ -181,6 +181,18 @@ def window_blind(pr: dict, field: str) -> bool:
     return bool(older) and not reviewer_nodes(pr, field)
 
 
+def stall_of(owner: str, repo: str, num: int, pr: dict) -> str:
+    """The stalled request's timestamp for this payload, or the empty string where none.
+
+    Derived from the payload it is reported beside, since a stall read earlier describes a
+    pull request that has since moved: a request picked up after the reading still reports as
+    picked up by nothing. A covered head or no pending request settles it without a REST call.
+    """
+    if reviewed_head(pr) or not reviewer_requested(pr):
+        return ''
+    return never_picked_up(timeline(owner, repo, num))
+
+
 def reviewed_head(pr: dict) -> bool:
     """True where one of the reviewer's own reviews carries the current head's commit."""
     head = pr['headRefOid']
@@ -225,8 +237,17 @@ def finding_count(block: str) -> int:
     return max(int(m.group(1)), 1) if m else 1
 
 
-def digest(owner: str, repo: str, num: int, seen: set[str] | None = None) -> tuple[str, int]:
-    pr = gql(Q_FULL, owner, repo, num)
+def digest(owner: str, repo: str, num: int, seen: set[str] | None = None,
+           pr: dict | None = None, stalled: str | None = None) -> tuple[str, int]:
+    """Render the digest, from a caller's payload and stall reading where those are given.
+
+    The caller passes its own readings when the exit code has to agree with what was printed,
+    since a review landing between two reads makes a fresh fetch describe a different pull
+    request than the one the code was decided from. Passing the stall also spends one REST
+    call between the caller and the digest rather than one each.
+    """
+    pr = gql(Q_FULL, owner, repo, num) if pr is None else pr
+    stalled = stall_of(owner, repo, num, pr) if stalled is None else stalled
     head = pr['headRefOid']
     revs = reviewer_nodes(pr, 'reviews')
     on_head = [n for n in revs if (n.get('commit') or {}).get('oid') == head]
@@ -262,11 +283,9 @@ def digest(owner: str, repo: str, num: int, seen: set[str] | None = None) -> tup
         f'requested={"yes" if reviewer_requested(pr) else "no"} '
         f'merge={pr.get("mergeStateStatus")}'
     ]
-    if reviewer_requested(pr) and not on_head:
-        stalled = never_picked_up(timeline(owner, repo, num))
-        if stalled:
-            lines.append(f'  REQUEST NOT PICKED UP (requested {stalled}, no copilot_work_started '
-                         'since): clear the request and re-request, per the runbook')
+    if stalled:
+        lines.append(f'  REQUEST NOT PICKED UP (requested {stalled}, no copilot_work_started '
+                     'since): clear the request and re-request, per the runbook')
     if blind:
         lines.append(f'  BEHIND THE WINDOW ({" and ".join(blind)}): the newest {WINDOW} carry '
                      'none from the reviewer and older ones exist, so this cannot decide')
@@ -352,31 +371,40 @@ def main(argv: list[str] | None = None) -> int:
             if stalled:
                 break
         if elapsed > a.timeout:
-            # The timeout is where the digest's one extra call is worth most.
-            # A bare PENDING line reports a broken wait and a slow reviewer identically.
-            out, _ = digest(owner, repo, a.number)
-            print(out)
-            print(f'status=PENDING waited={int(elapsed)}s')
-            return 30
+            break
         time.sleep(delays[min(i, len(delays) - 1)])
         i += 1
         # Re-read head each iteration: a push during the wait moves it.
         pr = gql(Q_LIVE, owner, repo, a.number)
         done, answer = reviewed_head(pr), answered_outside_review(pr)
-    out, _ = digest(owner, repo, a.number)
+
+    # One payload decides the digest and the exit code together.
+    # Read separately, a review landing between them prints coverage and returns a stalled code.
+    # A reader resolves that by believing the code, dropping the review it was just shown.
+    # The digest also earns its call at the timeout.
+    # A bare PENDING line reports a broken wait and a slow reviewer identically.
+    final = gql(Q_FULL, owner, repo, a.number)
+    # The stall is re-read here rather than carried out of the loop.
+    # A request picked up since that reading would still report as picked up by nothing.
+    stalled = stall_of(owner, repo, a.number, final)
+    out, _ = digest(owner, repo, a.number, pr=final, stalled=stalled)
     print(out)
     print(f'waited={int(time.monotonic()-start)}s')
-    if stalled and not done:
-        print(f'status=REQUEST_NOT_PICKED_UP requested {stalled} and no copilot_work_started '
-              'followed it, so nothing is working on this and waiting on will not start it: '
-              'clear the request and re-request, per the runbook')
-        return 50
-    if not done:
+    if reviewed_head(final):
+        return 0
+    # An answer before a stall, because the reviewer saying something outranks it saying nothing.
+    if answered_outside_review(final):
         print('status=ANSWERED_OUTSIDE_REVIEW the reviewer answered without reviewing, '
               'so read the comment above and decide, since where it declines or names a limit '
               'no review follows and re-requesting does not clear it')
         return 40
-    return 0
+    if stalled:
+        print(f'status=REQUEST_NOT_PICKED_UP requested {stalled} and no copilot_work_started '
+              'followed it, so nothing is working on this and waiting on will not start it: '
+              'clear the request and re-request, per the runbook')
+        return 50
+    print('status=PENDING')
+    return 30
 
 
 if __name__ == '__main__':
