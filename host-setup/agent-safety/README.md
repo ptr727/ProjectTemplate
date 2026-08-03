@@ -45,7 +45,8 @@ On Windows PowerShell:
 
 ```powershell
 py -3 "$env:USERPROFILE\.claude\hooks\gh-write-guard.py" --selftest    # all cases pass
-(Select-String 'agent-safety v' "$env:USERPROFILE\.claude\CLAUDE.md").Count   # expect 2
+(Select-String 'agent-safety v' "$env:USERPROFILE\.claude\CLAUDE.md").Count      # expect 2
+(Select-String 'fleet-bootstrap v' "$env:USERPROFILE\.claude\CLAUDE.md").Count   # expect 2
 ```
 
 Live end-to-end (in any repo): attempt a discarded-output write and confirm the Bash tool is blocked:
