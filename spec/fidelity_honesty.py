@@ -118,7 +118,10 @@ def fidelity_pass(spec):
         # A verbatim candidate has NO hand-modified copy ("differs") and at least one confirmed match with
         # the current canonical. Stale copies do not disqualify it - verbatim would flag them "stale ->
         # re-vendor", which is the point. A unit that is entirely stale/unavailable is not confirmed uniform.
-        if fid == "intent" and spread["match"] and not spread["differs"] and not spread["absent"]:
+        # An absent section does not disqualify it either, for the same reason an unavailable file does not.
+        # Neither is evidence that a repo decided something locally, and only such evidence argues against promotion.
+        # Treating absence as disqualifying would be the same conflation this bucket was split out to end.
+        if fid == "intent" and spread["match"] and not spread["differs"]:
             promote.append((unit, spread))
         if fid == "verbatim" and spread["differs"]:
             mislabel.append((unit, spread))
