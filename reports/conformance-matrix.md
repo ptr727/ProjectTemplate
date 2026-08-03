@@ -11,7 +11,7 @@ The primary shapes are stood up as whole repos; the **composable targets** (`nug
 | Shape | Reference repo | Cold-standup | Last audited | First gap / notes |
 |---|---|---|---|---|
 | `python` + `source-only` | Financial-Modeling | not-tested | - | Reference for the source-release (dispatch-only) profile; the downstream standup issue is open. |
-| `source-only` + `release` | Blog | not-tested | - | Hugo static site (#456), the next standup and the first cold test of `STANDUP.md` step 0. Its deploy target has no declared type yet, so `releaseTrigger` is `none` and `publish[]` is empty until a deploy has actually run. |
+| `source-only` + `release` | Blog | not-tested | 2026-08-03 | Hugo static site (#456), stood up 2026-08-01 and cataloged 2026-08-03. It cut release `1.0.11` from a dispatch-only publisher, so `releaseTrigger` is `dispatch-only` and `publish[]` carries the GitHub release, both recorded from what ran rather than from what was predicted. The VPS deploy has still not run, so its target has no declared type yet. |
 | `csharp` + `console` | - | not-tested | - | |
 | `csharp` + `docker` | - | not-tested | - | |
 | `csharp` + `python` | PlexCleaner | not-tested | - | First mixed-language shape (#339). Python is a stdlib-only `uvx` **scripts** profile subtree (`RegressionTests/`): no `uv.lock`, `pyproject.toml` lint/type config only, mypy checker, `python.uvlock.pinned` + `python.coverage.codecov` N/A; `codecov.yml` stays required for the C# side. Both language rule-sets apply (CODESTYLE.md "Two profiles"). |

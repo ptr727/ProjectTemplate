@@ -304,6 +304,22 @@
             "consumerModel": "pull",
             "releaseTrigger": "none",
             "driftNotes": ["xLights show sequences/models (asset repo).", "main is near-empty - all content lives on develop; promote to main.", "No CI/governance scaffolding."]
+        },
+        {
+            "name": "Blog",
+            "url": "https://github.com/ptr727/Blog",
+            "status": "cataloged",
+            "types": ["source-only"],
+            "groundTruthBranch": "main",
+            "workflowModel": "release",
+            "lineEndings": "lf",
+            "hasDevelop": true,
+            "publish": [{ "target": "github-release", "mechanism": "none" }],
+            "requiredSecrets": [],
+            "consumerModel": "pull",
+            "releaseTrigger": "dispatch-only",
+            "configLayout": { "rulesetsDir": "repo-config", "pythonConfig": null },
+            "driftNotes": ["Hugo static site migrated off WordPress.com, stood up 2026-08-01; release model with a dispatch-only publisher that cuts the tag and a source archive.", "lineEndings lf on a release repo, where the rule grants the native-platform default to operational repos only: every consumer is Linux (the Hugo build, the Caddy container, and the rsync deploy).", "types source-only rather than the docs the hub proposed, because both docs predicates are false for a repo that builds a site and gates a URL contract. Interim until the static-site-generator type lands, which #456 is holding for Blog's measured deploy shape.", "content/ is an imported WordPress archive, so the prose, spelling, and style gates are scoped to exclude it.", "The VPS deploy does not exist yet, so the publish target is the GitHub release only. Revisit publish[] once deploy-site.yml is proven."]
         }
     ]
 }
