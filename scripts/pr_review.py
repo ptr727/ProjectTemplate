@@ -11,7 +11,10 @@ Subcommands
   status   One digest line, any unresolved threads, and any suppressed findings. Read-only.
   wait     Poll until Copilot's review lands on the current head, then print the digest.
            The loop runs in-process, so a 45-minute wait costs one agent turn, not 90.
-           Exit 0 = review present, 30 = still pending at timeout (pending is not failure).
+           Exit 0 = review present, 30 = still pending at timeout (pending is not failure),
+           40 = Copilot answered outside a formal review, so read the printed body.
+           A quota or rate-limit refusal is terminal: no review lands and waiting on
+           makes no difference, so 40 ends the wait rather than extending it.
 
 Read-only by design. Mutations (re-request review, reply, resolve thread) are
 deliberately NOT implemented here - they are state-changing calls that must stay
@@ -24,22 +27,25 @@ import argparse, json, re, subprocess, sys, time
 REVIEWER = 'copilot-pull-request-reviewer'
 
 # A review body can carry a collapsed block of findings withheld from the inline threads.
-# Those appear nowhere in `reviewThreads`, so polling threads alone reports a clean pass while
-# they stand. The alternation is the runbook's, because the heading wording has changed once
-# already, and matching one phrasing alone reports zero on a review that has them.
+# Those appear nowhere in `reviewThreads`, so polling threads alone reports a clean pass.
+# The alternation is the runbook's, since the heading wording has changed once already.
+# Matching one phrasing alone reports zero on a review that has them.
 SUPPRESSED = re.compile(r'Suppressed comments|low confidence', re.IGNORECASE)
 DETAILS = re.compile(r'<details>(.*?)</details>', re.DOTALL | re.IGNORECASE)
 SUMMARY = re.compile(r'<summary>(.*?)</summary>', re.DOTALL | re.IGNORECASE)
 TAGS = re.compile(r'</?(?:details|summary)>', re.IGNORECASE)
 COUNT = re.compile(r'\((\d+)\)')
 
-# Liveness query: two scalars only, no comment bodies.
+# Liveness query: timestamps and ids only, no comment or review bodies.
 # A liveness check does not need the finding text, and re-fetching bodies was 76% of polls.
+# It does need the reviewer's non-review answers.
+# A wait reading formal reviews alone treats a refusal as an unmet condition.
 Q_LIVE = """
 query($o:String!,$r:String!,$n:Int!){
   repository(owner:$o,name:$r){ pullRequest(number:$n){
     headRefOid
-    reviews(last:20){ nodes{ author{login} state commit{oid} } }
+    reviews(last:20){ nodes{ author{login} state commit{oid} submittedAt } }
+    comments(last:5){ nodes{ author{login} createdAt } }
   }}}
 """
 
@@ -51,6 +57,7 @@ query($o:String!,$r:String!,$n:Int!){
     reviews(last:20){ nodes{ author{login} state commit{oid} submittedAt body } }
     reviewThreads(first:100){ nodes{ id isResolved
       comments(first:1){ nodes{ author{login} path line body } } }}
+    comments(last:5){ nodes{ author{login} createdAt body } }
   }}}
 """
 
@@ -66,14 +73,36 @@ def gql(query: str, owner: str, repo: str, num: int) -> dict:
     return json.loads(r.stdout)['data']['repository']['pullRequest']
 
 
-def live_state(owner: str, repo: str, num: int) -> tuple[str, bool]:
-    """Return (head_sha, copilot_reviewed_current_head)."""
+def reviewer_nodes(pr: dict, field: str) -> list[dict]:
+    """The reviewer's own nodes under `field`, oldest first as the API returns them."""
+    return [n for n in ((pr.get(field) or {}).get('nodes') or [])
+            if (n.get('author') or {}).get('login') == REVIEWER]
+
+
+def answered_outside_review(pr: dict) -> dict | None:
+    """The reviewer's newest plain comment, where it postdates its newest formal review.
+
+    Copilot answers a request with a comment rather than a review when it will not review at all,
+    a quota refusal among them, and that answer satisfies no coverage check by design.
+    Reading it as an unmet condition is what turns a refusal into a wait with nothing at its end.
+    A comment older than the newest review is spent, since the review it preceded did land.
+    """
+    comments = reviewer_nodes(pr, 'comments')
+    if not comments:
+        return None
+    newest = max(comments, key=lambda n: n.get('createdAt') or '')
+    reviews = reviewer_nodes(pr, 'reviews')
+    latest_review = max((n.get('submittedAt') or '' for n in reviews), default='')
+    return newest if (newest.get('createdAt') or '') > latest_review else None
+
+
+def live_state(owner: str, repo: str, num: int) -> tuple[str, bool, dict | None]:
+    """Return (head_sha, copilot_reviewed_current_head, copilot_answer_outside_a_review)."""
     pr = gql(Q_LIVE, owner, repo, num)
     head = pr['headRefOid']
-    done = any((n.get('author') or {}).get('login') == REVIEWER
-               and (n.get('commit') or {}).get('oid') == head
-               for n in pr['reviews']['nodes'])
-    return head, done
+    done = any((n.get('commit') or {}).get('oid') == head
+               for n in reviewer_nodes(pr, 'reviews'))
+    return head, done, answered_outside_review(pr)
 
 
 def heading_of(block: str) -> str:
@@ -110,8 +139,7 @@ def finding_count(block: str) -> int:
 def digest(owner: str, repo: str, num: int, seen: set[str] | None = None) -> tuple[str, int]:
     pr = gql(Q_FULL, owner, repo, num)
     head = pr['headRefOid']
-    revs = [n for n in pr['reviews']['nodes']
-            if (n.get('author') or {}).get('login') == REVIEWER]
+    revs = reviewer_nodes(pr, 'reviews')
     on_head = [n for n in revs if (n.get('commit') or {}).get('oid') == head]
     threads = pr['reviewThreads']['nodes']
     unresolved = [t for t in threads
@@ -130,14 +158,24 @@ def digest(owner: str, repo: str, num: int, seen: set[str] | None = None) -> tup
     stale = sum(finding_count(b) for n, b in blocks) - sum(
         finding_count(b) for b in on_head_blocks)
 
+    answer = answered_outside_review(pr)
     lines = [
         f'pr={num} head={head[:8]} rounds={len(revs)} '
         f'review_on_head={"yes" if on_head else "NO"} '
         f'threads={len(threads)} unresolved={len(unresolved)} '
         f'suppressed={sum(finding_count(b) for n, b in blocks)} '
         f'(on_head={sum(finding_count(b) for b in on_head_blocks)} earlier={stale}) '
+        f'answered_outside_review={"yes" if answer else "no"} '
         f'merge={pr.get("mergeStateStatus")}'
     ]
+    if answer:
+        # Printed whole for the same reason a suppressed finding is, since it reaches no thread.
+        # Its wording is the only thing separating a refusal from an ordinary remark.
+        lines.append(f'  COPILOT COMMENT ({answer.get("createdAt")}, newer than any review): '
+                     'read it before waiting again, since a quota or rate-limit refusal is '
+                     'terminal and no review follows it')
+        lines += [f'    {ln.rstrip()}' for ln in (answer.get('body') or '').splitlines()
+                  if ln.strip()]
     new = 0
     for t in unresolved:
         c = (t.get('comments') or {}).get('nodes', [{}])[0]
@@ -152,8 +190,8 @@ def digest(owner: str, repo: str, num: int, seen: set[str] | None = None) -> tup
         body = ' '.join((c.get('body') or '').split())
         lines.append(f'  {mark}{tid} {c.get("path")}:{c.get("line")} {body[:160]}')
     for n, b in blocks:
-        # Printed whole where a thread body is truncated: a thread can be re-read at its id,
-        # while a suppressed finding has no thread, so this digest is the only place it appears.
+        # Printed whole where a thread body is truncated, since a thread can be re-read at its id.
+        # A suppressed finding has none, so this digest is the only place it appears.
         # GraphQL returns a null commit for a pending or partial review.
         # An empty sha rendered as "raised on , earlier round", losing what traces the finding.
         sha = ((n.get('commit') or {}).get('oid') or '')[:8]
@@ -189,20 +227,27 @@ def main(argv: list[str] | None = None) -> int:
     # In-process backoff, so the whole wait costs one agent turn.
     delays = [15, 20, 30, 45, 60, 120]
     start = time.monotonic()
-    head0, done = live_state(owner, repo, a.number)
+    _, done, answer = live_state(owner, repo, a.number)
     i = 0
-    while not done:
+    while not done and not answer:
         if time.monotonic() - start > a.timeout:
-            print(f'pr={a.number} head={head0[:8]} review_on_head=NO '
-                  f'status=PENDING waited={int(time.monotonic()-start)}s')
+            # The timeout is where the digest's one extra call is worth most.
+            # A bare PENDING line reports a broken wait and a slow reviewer identically.
+            out, _ = digest(owner, repo, a.number)
+            print(out)
+            print(f'status=PENDING waited={int(time.monotonic()-start)}s')
             return 30
         time.sleep(delays[min(i, len(delays) - 1)])
         i += 1
         # Re-read head each iteration: a push during the wait moves it.
-        head0, done = live_state(owner, repo, a.number)
+        _, done, answer = live_state(owner, repo, a.number)
     out, _ = digest(owner, repo, a.number)
     print(out)
     print(f'waited={int(time.monotonic()-start)}s')
+    if not done:
+        print('status=ANSWERED_OUTSIDE_REVIEW read the comment above, '
+              'a quota or rate-limit refusal is terminal and re-requesting does not clear it')
+        return 40
     return 0
 
 
