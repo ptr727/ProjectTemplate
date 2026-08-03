@@ -25,7 +25,7 @@ host-setup/agent-safety/install.sh
 .\host-setup\agent-safety\install.ps1
 ```
 
-Both are thin wrappers around `install.py`, so every OS runs one tested code path. The installer self-tests the hook before registering it, merges the settings.json entry without clobbering other keys, and updates the CLAUDE.md block in place (marker-delimited) rather than duplicating it.
+Both are thin wrappers around `install.py`, so every OS runs one tested code path. The installer self-tests the hook before registering it, merges the settings.json entry without clobbering other keys, and updates each CLAUDE.md block in place by its own markers rather than duplicating it, so the two blocks move independently.
 
 **Restart Claude Code sessions on the machine afterward** so the new hook and CLAUDE.md load.
 
