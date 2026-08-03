@@ -47,8 +47,9 @@ SETTINGS_KEYS = [
 # That was a field the fleet config had deliberately stopped managing.
 # Two tools comparing one field under opposite policies is the defect, rather than the field's value.
 RULESET_SUBSET = ["name", "target", "enforcement", "conditions", "rules"]
-# Phrases in a registry driftNote that assert work still outstanding. Deliberately specific: a note
-# recording a permanent deviation ("no get-version-task; relies on validate-task") must not match.
+# Phrases in a registry driftNote that assert work is still outstanding.
+# Deliberately specific, so a note recording a permanent deviation must not match.
+# An example of one that must not match is a note reading that there is no get-version-task and validate-task is relied on instead.
 PENDING_MARKERS = ["pending", "not yet", "owed", "todo", "still", "behind", "missing", "absent"]
 
 
