@@ -36,7 +36,7 @@ SUMMARY = re.compile(r'<summary>(.*?)</summary>', re.DOTALL | re.IGNORECASE)
 TAGS = re.compile(r'</?(?:details|summary)>', re.IGNORECASE)
 COUNT = re.compile(r'\((\d+)\)')
 
-# How many of the newest comments both queries read, and the number the saturation guard tests.
+# How many of the newest comments both queries read.
 # A narrow window drops the reviewer's answer behind ordinary discussion, reporting no answer.
 # A test holds this equal to the number the queries carry, since a drift between them reads clean.
 COMMENT_WINDOW = 100
@@ -50,7 +50,7 @@ query($o:String!,$r:String!,$n:Int!){
   repository(owner:$o,name:$r){ pullRequest(number:$n){
     headRefOid
     reviews(last:20){ nodes{ author{login} state commit{oid} submittedAt } }
-    comments(last:100){ nodes{ author{login} createdAt } }
+    comments(last:100){ nodes{ author{login} createdAt } pageInfo{ hasPreviousPage } }
   }}}
 """
 
@@ -62,7 +62,7 @@ query($o:String!,$r:String!,$n:Int!){
     reviews(last:20){ nodes{ author{login} state commit{oid} submittedAt body } }
     reviewThreads(first:100){ nodes{ id isResolved
       comments(first:1){ nodes{ author{login} path line body } } }}
-    comments(last:100){ nodes{ author{login} createdAt body } }
+    comments(last:100){ nodes{ author{login} createdAt body } pageInfo{ hasPreviousPage } }
   }}}
 """
 
@@ -102,16 +102,17 @@ def answered_outside_review(pr: dict) -> dict | None:
 
 
 def answer_window_saturated(pr: dict) -> bool:
-    """True where the window is full and carries no reviewer comment, the one unreadable case.
+    """True where comments sit behind the window and none in view are the reviewer's.
 
     The query reads the newest comments rather than the reviewer's, so ordinary discussion is
     what pushes an answer out of reach. Comments arrive in creation order, so anything behind
     the window is older than everything inside it: one reviewer comment in view, spent against
     a later review, proves every hidden one is spent too, and that reads as no rather than as
-    unknown. Only a full window with none of the reviewer's own leaves the question open.
+    unknown. `hasPreviousPage` is what says anything is back there at all, since a full window
+    and a window holding every comment the pull request has are the same length.
     """
-    comments = (pr.get('comments') or {}).get('nodes') or []
-    return len(comments) >= COMMENT_WINDOW and not reviewer_nodes(pr, 'comments')
+    older = ((pr.get('comments') or {}).get('pageInfo') or {}).get('hasPreviousPage')
+    return bool(older) and not reviewer_nodes(pr, 'comments')
 
 
 def live_state(owner: str, repo: str, num: int) -> tuple[str, bool, dict | None]:
@@ -190,8 +191,8 @@ def digest(owner: str, repo: str, num: int, seen: set[str] | None = None) -> tup
         f'merge={pr.get("mergeStateStatus")}'
     ]
     if answered == 'unknown':
-        lines.append(f'  COMMENT WINDOW FULL: the newest {COMMENT_WINDOW} comments carry none '
-                     'from the reviewer, so an older answer cannot be ruled out from here')
+        lines.append(f'  COMMENTS BEHIND THE WINDOW: the newest {COMMENT_WINDOW} carry none from '
+                     'the reviewer and older ones exist, so an answer cannot be ruled out here')
     if answer:
         # Printed whole for the same reason a suppressed finding is, since it reaches no thread.
         # Its wording is the only thing separating a refusal from an ordinary remark.

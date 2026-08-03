@@ -51,10 +51,11 @@ def thread(tid: str, resolved: bool = False, login: str = pr_review.REVIEWER,
 
 
 def payload(reviews: list[dict], threads: list[dict] | None = None,
-            merge: str = 'CLEAN', comments: list[dict] | None = None) -> dict:
+            merge: str = 'CLEAN', comments: list[dict] | None = None,
+            older: bool = False) -> dict:
     return {'headRefOid': HEAD, 'mergeable': 'MERGEABLE', 'mergeStateStatus': merge,
             'reviews': {'nodes': reviews}, 'reviewThreads': {'nodes': threads or []},
-            'comments': {'nodes': comments or []}}
+            'comments': {'nodes': comments or [], 'pageInfo': {'hasPreviousPage': older}}}
 
 
 class GqlCase(unittest.TestCase):
@@ -121,17 +122,23 @@ class TestAnsweredOutsideReview(unittest.TestCase):
             payload([review(oid=OLD, at=EARLY)], comments=[comment(at=LATE)] + chatter))
         self.assertIsNotNone(found)
 
-    def test_a_full_window_is_unknown_rather_than_no_answer(self) -> None:
-        """Finding nothing and having nothing to find are one reading once the window fills."""
+    def test_comments_behind_the_window_are_unknown_rather_than_no_answer(self) -> None:
+        """Finding nothing and having nothing to find are one reading once an answer can hide."""
         full = [comment(login='ptr727') for _ in range(pr_review.COMMENT_WINDOW)]
-        self.assertTrue(pr_review.answer_window_saturated(payload([review()], comments=full)))
-        self.assertFalse(pr_review.answer_window_saturated(payload([review()], comments=full[:-1])))
+        self.assertTrue(
+            pr_review.answer_window_saturated(payload([review()], comments=full, older=True)))
 
-    def test_one_spent_reviewer_comment_in_view_settles_a_full_window(self) -> None:
+    def test_a_window_holding_every_comment_is_not_a_gap(self) -> None:
+        """A full window and a window holding the lot are the same length, so length cannot say."""
+        full = [comment(login='ptr727') for _ in range(pr_review.COMMENT_WINDOW)]
+        self.assertFalse(
+            pr_review.answer_window_saturated(payload([review()], comments=full, older=False)))
+
+    def test_one_spent_reviewer_comment_in_view_settles_the_question(self) -> None:
         """Comments arrive in creation order, so a hidden one is older than the spent one in view."""
         full = ([comment(at=EARLY)]
                 + [comment(login='ptr727') for _ in range(pr_review.COMMENT_WINDOW - 1)])
-        pr = payload([review(at=LATE)], comments=full)
+        pr = payload([review(at=LATE)], comments=full, older=True)
         self.assertIsNone(pr_review.answered_outside_review(pr))
         self.assertFalse(pr_review.answer_window_saturated(pr))
 
@@ -311,14 +318,14 @@ class TestDigestReportsTheAnswer(GqlCase):
         out, _ = pr_review.digest('o', 'r', 7)
         self.assertIn('answered_outside_review=no', out)
 
-    def test_a_full_window_reports_unknown_and_names_why(self) -> None:
-        """Reporting `no` off a saturated window is the false clean this field exists to avoid."""
-        self.answer(payload([review()],
+    def test_an_unreadable_window_reports_unknown_and_names_why(self) -> None:
+        """Reporting `no` off a window an answer can hide behind is the false clean to avoid."""
+        self.answer(payload([review()], older=True,
                             comments=[comment(login='ptr727')
                                       for _ in range(pr_review.COMMENT_WINDOW)]))
         out, _ = pr_review.digest('o', 'r', 7)
         self.assertIn('answered_outside_review=unknown', out)
-        self.assertIn('COMMENT WINDOW FULL', out)
+        self.assertIn('COMMENTS BEHIND THE WINDOW', out)
 
 
 class TestGqlTransport(unittest.TestCase):
@@ -437,6 +444,9 @@ class TestContract(unittest.TestCase):
         windows = set(re.findall(r'comments\(last:(\d+)\)', source))
         self.assertEqual({str(pr_review.COMMENT_WINDOW)}, windows)
         self.assertEqual(2, source.count(f'comments(last:{pr_review.COMMENT_WINDOW})'))
+        # The guard reads `hasPreviousPage`, so a query that stops asking reports no, not unknown.
+        # That is the silent narrowing this holds both queries against.
+        self.assertEqual(2, source.count('pageInfo{ hasPreviousPage }'))
 
     def test_the_backoff_is_bounded_and_non_decreasing(self) -> None:
         """A wait that sleeps zero seconds is a busy loop, and one that shrinks polls harder later."""
