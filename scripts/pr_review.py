@@ -43,6 +43,18 @@ COUNT = re.compile(r'\((\d+)\)')
 # A test holds this equal to the number the queries carry, since a drift between them reads clean.
 WINDOW = 100
 
+# The timeline spells the reviewer a third way, as login `Copilot` with type `Bot`.
+# GraphQL says `copilot-pull-request-reviewer`, and REST user objects add a `[bot]` suffix.
+# The predicate is the type plus a loose login match rather than any one spelling.
+# Requests are the reviewer's own, since a human requested later is a different request.
+# Reading one as the newest reports a picked-up review as never picked up.
+TIMELINE_JQ = (
+    '.[] | select(.event == "copilot_work_started" or (.event == "review_requested"'
+    ' and .requested_reviewer.type == "Bot"'
+    ' and ((.requested_reviewer.login // "") | ascii_downcase | test("copilot"))))'
+    ' | "\\(.event) \\(.created_at)"'
+)
+
 # Liveness query: timestamps and ids only, no comment or review bodies.
 # A liveness check does not need the finding text, and re-fetching bodies was 76% of polls.
 # It does need the reviewer's non-review answers.
@@ -93,8 +105,7 @@ def timeline(owner: str, repo: str, num: int) -> list[tuple[str, str]]:
     """
     r = subprocess.run(
         ['gh', 'api', '--paginate', f'repos/{owner}/{repo}/issues/{num}/timeline?per_page=100',
-         '--jq', '.[] | select(.event == "copilot_work_started" or .event == "review_requested")'
-                 ' | "\\(.event) \\(.created_at)"'],
+         '--jq', TIMELINE_JQ],
         capture_output=True, text=True)
     if r.returncode != 0:
         sys.stderr.write(r.stderr[:800])
@@ -310,6 +321,10 @@ def main(argv: list[str] | None = None) -> int:
     ap.add_argument('--pickup-grace', type=int, default=300,
                     help='seconds before the first pickup read, and between reads (default 5m)')
     a = ap.parse_args(argv)
+    # A negative grace leaves the next reading permanently behind the clock.
+    # That is the per-poll REST pattern the interval exists to prevent.
+    if a.pickup_grace < 0:
+        ap.error('--pickup-grace cannot be negative')
     owner, repo = a.repo.split('/', 1)
 
     if a.cmd == 'status':

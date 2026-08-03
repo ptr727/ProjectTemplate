@@ -578,6 +578,40 @@ class TestContract(unittest.TestCase):
         self.assertEqual(['gh', 'api'], argv[:2])
         self.assertFalse({'-X', '--method'} & set(argv))
 
+    def test_the_timeline_filter_takes_the_reviewer_s_own_requests_only(self) -> None:
+        """A human requested later is not this request, and reading it as one reports a stall.
+
+        The filter runs inside gh, so this drives the real `jq` over a crafted timeline rather
+        than asserting on the filter's text, which would pass on a filter that matches nothing.
+        The timeline spells the reviewer `Copilot` with type `Bot`, a third form after GraphQL's
+        `copilot-pull-request-reviewer` and REST's `[bot]` suffix on that, so a filter keyed to
+        either of those two selects nothing here and the whole state reads as no request at all.
+        """
+        events = [
+            {'event': 'review_requested', 'created_at': '01', 'requested_reviewer':
+             {'login': 'Copilot', 'type': 'Bot'}},
+            {'event': 'copilot_work_started', 'created_at': '02'},
+            {'event': 'review_requested', 'created_at': '03', 'requested_reviewer':
+             {'login': 'ptr727', 'type': 'User'}},
+            {'event': 'review_requested', 'created_at': '04', 'requested_reviewer':
+             {'login': 'some-other-bot', 'type': 'Bot'}},
+            {'event': 'commented', 'created_at': '05'},
+        ]
+        run = subprocess.run(['jq', '-r', pr_review.TIMELINE_JQ],
+                             input=json.dumps(events), capture_output=True, text=True)
+        self.assertEqual(0, run.returncode, run.stderr)
+        self.assertEqual(['review_requested 01', 'copilot_work_started 02'],
+                         run.stdout.split('\n')[:-1])
+        # The reading that matters: the human request must not become the newest request.
+        parsed = [(ln.split(' ', 1)[0], ln.split(' ', 1)[1]) for ln in run.stdout.splitlines()]
+        self.assertEqual('', pr_review.never_picked_up(parsed))
+
+    def test_a_negative_pickup_grace_is_rejected_rather_than_read_as_every_poll(self) -> None:
+        """It leaves the next reading behind the clock, which is the per-poll pattern returning."""
+        with contextlib.redirect_stderr(io.StringIO()):
+            with self.assertRaises(SystemExit):
+                pr_review.main(['wait', '7', '--pickup-grace', '-1'])
+
     def test_a_failed_timeline_read_raises_rather_than_reading_as_no_events(self) -> None:
         """An empty list reads as no request pending, which is the false clean one level up."""
         failed = subprocess.CompletedProcess(args=[], returncode=1, stdout='', stderr='boom')

@@ -59,7 +59,7 @@ gh api repos/<owner>/<repo>/pulls/<N>/reviews --jq \
 
 **Round 1 is normally auto-seeded, so poll for it before trying to self-trigger.** Auto-review-on-open supplies the first review with no `botIds` call needed, but it can lag one to three minutes. After opening a PR (or the first push), **poll** for a Copilot review on the head SHA (see [Verify Review Covered Current Head](#verify-review-covered-current-head)) before concluding none ran. The `requestReviews` mutation below is for **re-requesting on later pushes** (a new head SHA). By then a prior review exists, so its bot node id is readable. A missing bot node id on round 1 therefore means "the auto-review has not landed yet - wait and poll," **not** "ask the maintainer to kick it off."
 
-> **The reviewer login differs by API.** In **GraphQL** (`gh api graphql` and `gh pr view --json reviews`, which is GraphQL-backed) the `Bot.login` is `copilot-pull-request-reviewer`, with **no `[bot]` suffix**. In the **REST** API (`gh api repos/.../issues|pulls/...`) the same account's `user.login` is `copilot-pull-request-reviewer[bot]`, **with** the suffix. Each query below uses the correct form for its API, so match the API, not a single spelling, when adapting them.
+> **The reviewer login differs by API, in three forms rather than two.** In **GraphQL** (`gh api graphql` and `gh pr view --json reviews`, which is GraphQL-backed) the `Bot.login` is `copilot-pull-request-reviewer`, with **no `[bot]` suffix**. In the **REST** API (`gh api repos/.../issues|pulls/...`) the same account's `user.login` is `copilot-pull-request-reviewer[bot]`, **with** the suffix. In a REST **timeline** `review_requested` event the `requested_reviewer` is a third spelling again, login `Copilot` with `type` `Bot`, so a filter written against either of the other two selects nothing there and reports a pull request with requests as having none. Match on the type plus a loose login test rather than on any one spelling, and each query below uses the correct form for its API.
 
 ```sh
 # 1. PR node id + the Copilot reviewer's bot node id (read from any existing
@@ -161,9 +161,13 @@ gh api graphql -f query='
       nodes{ requestedReviewer{ __typename ... on Bot{login} ... on User{login} } } } } } }'
 
 # The request and pickup events, newest last. A `review_requested` with no later
-# `copilot_work_started` is the stuck state.
-gh api --paginate repos/<owner>/<repo>/issues/<N>/timeline \
-  --jq '.[] | select(.event == "copilot_work_started" or .event == "review_requested")
+# `copilot_work_started` is the stuck state. Requests are filtered to the reviewer's own,
+# since a human requested afterwards is a different request and reading it as this one
+# reports a picked-up review as never picked up. `per_page` is the pagination cost.
+gh api --paginate 'repos/<owner>/<repo>/issues/<N>/timeline?per_page=100' \
+  --jq '.[] | select(.event == "copilot_work_started" or (.event == "review_requested"
+        and .requested_reviewer.type == "Bot"
+        and ((.requested_reviewer.login // "") | ascii_downcase | test("copilot"))))
         | "\(.event) \(.created_at)"'
 ```
 
