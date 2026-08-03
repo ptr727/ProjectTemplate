@@ -221,6 +221,7 @@ The checks that separate work actually done from work that merely reports succes
 - **Never edit source through a shell heredoc when the text carries backslash escapes.** The shell consumes the escape and writes an invisible control character in its place, so a `\b` inside a regex becomes a backspace and the pattern silently matches nothing while every test still passes. Use a file-editing tool for such text. When a check inspects text for control characters, use `str.isprintable()` rather than a codepoint floor, since DEL and the Unicode format characters sit above 32 and are equally invisible in a diff.
 - **Never edit an active `.code-workspace` file.** A workspace file rewritten on disk can make VS Code reload the window, and a reload destroys the running agent session's context, so the work in flight is lost with nothing to catch it, and the trigger is not fully characterized (an agent's edit has caused the reload where a human's identical edit did not). Surface the needed change for the maintainer to apply by hand.
 - **A green check is not evidence the work happened.** A skipped job and a passing job are indistinguishable in the aggregated required check. When a job exists to exercise something, confirm from its log that it ran and produced the output it promises.
+- **A launched process is not a result, and a cause nobody observed is not a diagnosis.** "The watcher is armed" names a process rather than a finding, so what gets reported is the output that process produced, and where it produced none, that absence is the report. The failure it prevents is an agent standing still on a condition that was met half an hour earlier, having announced the wait and never read it. Naming an external cause for such a stall afterwards, a throttle or a quota that appears nowhere in the record, turns a local defect into a story about someone else and closes the investigation on the wrong party, so read the record for the cause before naming one, and where the record does not carry it, report the cause as unknown.
 - **A workflow change is only fully exercised by CI.** Extracting a `run:` block and executing it locally validates the script and nothing else, because `secrets: inherit`, `permissions:`, `needs:` wiring, and reusable-workflow inputs resolve only in a real run.
 - **A review flags an instance, so fix the class.** When a reviewer cites one stale claim, one silent-narrowing pattern, or one mis-worded contract, sweep for its siblings before replying. Reviewers sample rather than enumerate.
 
@@ -257,6 +258,16 @@ Drive the loop to green, meaning a review confirmed on the latest head SHA and e
 
 For provider-specific mechanics (how to request review, query review state, post replies, resolve threads), see the **GitHub Copilot Review Runbook** in [.github/copilot-instructions.md](./.github/copilot-instructions.md). This file owns the contract, and that file owns the mechanics.
 
+### Every Finding Ends in an Action
+
+**A finding is closed by one of five outcomes, and a round count is never one of them.** The loop runs until no finding stands, however many rounds that takes, because the number of rounds measures how much was found rather than whether the work is done. A finding parked, waited out, or superseded by a push is still open.
+
+1. **It is real, so fix it.** Reply with the fixing commit SHA.
+2. **It is not real, so disprove it in the thread**, with the command and its output, the code path that makes it impossible, or the rule that governs it. The proof is addressed to the reviewer as much as to the maintainer, since a decline it can read is what stops it raising the same thing next round. An assertion is not a proof and does not close a finding.
+3. **It is real and deliberately not being fixed, which is the maintainer's call and not the agent's.** Say what the finding is, why the fix is unwanted, and get an explicit answer. Never suppress one by silence, by resolving the thread, or by an answer that reads as a decline while conceding the point.
+4. **It is real and worth doing later, so file the issue first and reply with its link.** A deferral recorded only in a thread is lost the moment the pull request merges, so the issue is what carries it and the link is what proves it exists rather than being intended. This is for work the change did not create: an adjacent defect the reviewer noticed in passing, or a fix too large to ride along. It does not cover a defect in the change under review, because filing an issue about a bug you are about to merge is outcome 3 in other clothes, and that one is the maintainer's to decide.
+5. **It keeps coming back, so fix the class rather than the instance.** A finding raised repeatedly against correct code is a defect in what the code communicates, not in the reviewer. Give it what it lacks: the non-obvious *why* as a comment where the code cannot state it, a clearer name, a narrower interface, or the rule change where the rule is what is wrong. A comment written for this earns its place under the comment rules like any other, so it states the why, stays short, and never cites a rule or addresses the reviewer. Making the noise stop is worth doing well, because a reviewer that repeats itself trains the reader to skim it, and skimming is how a real finding gets missed.
+
 ### Triaging Review Comments
 
 **A low-confidence finding is not a low-value one.** Copilot collapses the findings it is least sure of into the review body instead of raising a thread, and in this fleet's experience those are right the large majority of the time. Judge each one against the code, never against its confidence label. They are also the easiest to lose, because they appear in no thread, so a loop that polls threads alone reports a clean pass while they stand (see the Merge Gate, condition 3).
@@ -266,7 +277,7 @@ For each comment, classify before responding:
 - **Bug** - wrong behavior, missing test coverage, or a real divergence between code and docs. Fix it. Reply with the fixing commit SHA when done.
 - **Style/convention** - the comment cites a rule from this file or a language-specific style guide. Two cases:
   - The cited rule matches what the existing codebase already does -> fix the offending code.
-  - The cited rule contradicts what's in the tree, or industry norm -> **update the rule instead of the code**. The rule is wrong, not the code. Bouncing the same code across rounds is the symptom of a wrong rule. Heuristic: three rounds on the same style category means the rule needs adjusting and the user should authorize the rule change.
+  - The cited rule contradicts what's in the tree, or industry norm -> **update the rule instead of the code**. The rule is wrong, not the code. Bouncing the same code across rounds is the symptom of a wrong rule, so treat the recurrence itself as the finding and take it to the user for the rule change (outcome 5 above), rather than counting rounds until some threshold licenses it.
 - **Architectural opinion** - the comment proposes a different design ("constrain this to disabled-by-default", "move it elsewhere", "add a runtime guardrail"). This is judgment, not a bug. Surface it to the user with a recommendation, and don't apply it unilaterally.
 
 ### Responding and Resolution Expectations
@@ -286,7 +297,8 @@ After the final push on a PR, sweep older threads from earlier rounds whose code
 Bring the user in when:
 
 - **Genuine design trade-off** surfaces (fail-open vs fail-closed, narrow vs broad refactor scope, "should we add a guardrail or trust the docstring"). Triage, recommend, ask.
-- **Repeated friction** across rounds without convergence, which is the rule-needs-updating signal. Stop, summarize the pattern, and let the user authorize the rule change.
+- **A recurring finding** the code keeps attracting, which is the fix-the-class signal. Summarize the pattern and bring the remedy, whether that is the rule change or what the code has to say differently to stop earning it.
+- **A finding you judge real but do not want fixed**, which is outcome 3 above and is never the agent's call to make quietly.
 - **Architectural redesign** is requested rather than a bug fix. Surface with a recommendation, and never apply it unilaterally.
 
 Anti-pattern: don't keep flipping the code on the same style point. Flip the rule once and stick to the rule.

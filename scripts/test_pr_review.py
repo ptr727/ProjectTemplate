@@ -9,7 +9,7 @@ GraphQL payload and asserts the reading, with `gql` replaced so no case reaches 
 Run as `python3 scripts/test_pr_review.py`, or under `python3 -m unittest discover -s scripts`.
 """
 from __future__ import annotations
-import contextlib, io, json, subprocess, sys, unittest
+import contextlib, io, json, re, subprocess, sys, unittest
 from pathlib import Path
 from unittest import mock
 
@@ -22,9 +22,19 @@ HEAD = 'a' * 40
 OLD = 'b' * 40
 
 
-def review(login: str = pr_review.REVIEWER, oid: str = HEAD, body: str = '') -> dict:
+EARLY = '2026-08-02T10:00:00Z'
+LATE = '2026-08-02T11:00:00Z'
+
+
+def review(login: str = pr_review.REVIEWER, oid: str = HEAD, body: str = '',
+           at: str = EARLY) -> dict:
     return {'author': {'login': login}, 'state': 'COMMENTED', 'commit': {'oid': oid},
-            'body': body}
+            'body': body, 'submittedAt': at}
+
+
+def comment(login: str = pr_review.REVIEWER, at: str = LATE,
+            body: str = 'I have reached my quota limit and cannot review this now.') -> dict:
+    return {'author': {'login': login}, 'createdAt': at, 'body': body}
 
 
 def collapsed(heading: str = 'Comments suppressed due to low confidence (1)',
@@ -41,9 +51,12 @@ def thread(tid: str, resolved: bool = False, login: str = pr_review.REVIEWER,
 
 
 def payload(reviews: list[dict], threads: list[dict] | None = None,
-            merge: str = 'CLEAN') -> dict:
+            merge: str = 'CLEAN', comments: list[dict] | None = None,
+            older: bool = False, older_reviews: bool = False) -> dict:
     return {'headRefOid': HEAD, 'mergeable': 'MERGEABLE', 'mergeStateStatus': merge,
-            'reviews': {'nodes': reviews}, 'reviewThreads': {'nodes': threads or []}}
+            'reviews': {'nodes': reviews, 'pageInfo': {'hasPreviousPage': older_reviews}},
+            'reviewThreads': {'nodes': threads or []},
+            'comments': {'nodes': comments or [], 'pageInfo': {'hasPreviousPage': older}}}
 
 
 class GqlCase(unittest.TestCase):
@@ -71,12 +84,83 @@ class TestLiveState(GqlCase):
         ):
             with self.subTest(case=label):
                 self.answer(payload(reviews))
-                self.assertEqual((HEAD, want), pr_review.live_state('o', 'r', 1))
+                self.assertEqual((HEAD, want, None), pr_review.live_state('o', 'r', 1))
 
     def test_a_null_author_or_commit_does_not_raise(self) -> None:
         """GraphQL returns null for a deleted account, and a crash there stalls the whole wait."""
         self.answer(payload([{'author': None, 'state': 'COMMENTED', 'commit': None}]))
-        self.assertEqual((HEAD, False), pr_review.live_state('o', 'r', 1))
+        self.assertEqual((HEAD, False, None), pr_review.live_state('o', 'r', 1))
+
+
+class TestAnsweredOutsideReview(unittest.TestCase):
+    """A refusal answers the request without covering the head, so a wait cannot read it as pending."""
+
+    def test_a_reviewer_comment_newer_than_every_review_is_the_answer(self) -> None:
+        answer = pr_review.answered_outside_review(
+            payload([review(oid=OLD, at=EARLY)], comments=[comment(at=LATE)]))
+        self.assertIsNotNone(answer)
+        self.assertEqual(LATE, (answer or {}).get('createdAt'))
+
+    def test_an_answer_the_reviewer_then_superseded_is_spent(self) -> None:
+        """The review it preceded did land, so the comment is history rather than a stop signal."""
+        self.assertIsNone(pr_review.answered_outside_review(
+            payload([review(at=LATE)], comments=[comment(at=EARLY)])))
+
+    def test_another_account_s_comment_is_not_the_reviewer_answering(self) -> None:
+        """A maintainer note and a codecov post both postdate the review and mean nothing here."""
+        for login in ('ptr727', 'codecov[bot]', 'copilot-swe-agent'):
+            with self.subTest(login=login):
+                self.assertIsNone(pr_review.answered_outside_review(
+                    payload([review(oid=OLD)], comments=[comment(login=login)])))
+
+    def test_no_comments_at_all_reads_as_no_answer(self) -> None:
+        self.assertIsNone(pr_review.answered_outside_review(payload([review(oid=OLD)])))
+
+    def test_ordinary_discussion_does_not_push_the_answer_out_of_the_window(self) -> None:
+        """The window reads the newest comments, not the reviewer's, so others crowd it."""
+        chatter = [comment(login='ptr727', at=LATE) for _ in range(pr_review.WINDOW - 1)]
+        found = pr_review.answered_outside_review(
+            payload([review(oid=OLD, at=EARLY)], comments=[comment(at=LATE)] + chatter))
+        self.assertIsNotNone(found)
+
+    def test_comments_behind_the_window_are_unknown_rather_than_no_answer(self) -> None:
+        """Finding nothing and having nothing to find are one reading once an answer can hide."""
+        full = [comment(login='ptr727') for _ in range(pr_review.WINDOW)]
+        self.assertTrue(
+            pr_review.window_blind(payload([review()], comments=full, older=True), 'comments'))
+
+    def test_a_window_holding_every_comment_is_not_a_gap(self) -> None:
+        """A full window and a window holding the lot are the same length, so length cannot say."""
+        full = [comment(login='ptr727') for _ in range(pr_review.WINDOW)]
+        self.assertFalse(
+            pr_review.window_blind(payload([review()], comments=full, older=False), 'comments'))
+
+    def test_reviews_behind_the_window_report_nothing_rather_than_a_false_answer(self) -> None:
+        """No reviewer review in view dates every comment as newer, so each reads as an answer.
+
+        Reporting nothing keeps the wait polling, where a wrong answer ends it outright on a
+        pull request whose review landed and simply sits behind a busier review history.
+        """
+        pr = payload([review(login='ptr727') for _ in range(pr_review.WINDOW)],
+                     comments=[comment(at=LATE)], older_reviews=True)
+        self.assertTrue(pr_review.window_blind(pr, 'reviews'))
+        self.assertIsNone(pr_review.answered_outside_review(pr))
+
+    def test_one_reviewer_review_in_view_is_a_baseline_the_answer_can_be_dated_against(self) -> None:
+        """Reviews arrive in creation order too, so a hidden one is older than the one in view."""
+        pr = payload([review(at=EARLY, oid=OLD)]
+                     + [review(login='ptr727') for _ in range(pr_review.WINDOW - 1)],
+                     comments=[comment(at=LATE)], older_reviews=True)
+        self.assertFalse(pr_review.window_blind(pr, 'reviews'))
+        self.assertIsNotNone(pr_review.answered_outside_review(pr))
+
+    def test_one_spent_reviewer_comment_in_view_settles_the_question(self) -> None:
+        """Comments arrive in creation order, so a hidden one is older than the spent one in view."""
+        full = ([comment(at=EARLY)]
+                + [comment(login='ptr727') for _ in range(pr_review.WINDOW - 1)])
+        pr = payload([review(at=LATE)], comments=full, older=True)
+        self.assertIsNone(pr_review.answered_outside_review(pr))
+        self.assertFalse(pr_review.window_blind(pr, 'comments'))
 
 
 class TestDigest(GqlCase):
@@ -98,6 +182,15 @@ class TestDigest(GqlCase):
         self.answer(payload([review(oid=OLD)]))
         out, _ = pr_review.digest('o', 'r', 7)
         self.assertIn('review_on_head=NO', out)
+
+    def test_a_thread_from_a_deleted_account_does_not_crash_the_digest(self) -> None:
+        """GraphQL sends `author` present and null, which a defaulted lookup returns as None."""
+        orphan = thread('T1')
+        orphan['comments']['nodes'][0]['author'] = None
+        self.answer(payload([review()], [orphan, thread('T2')]))
+        out, unresolved = pr_review.digest('o', 'r', 7)
+        self.assertEqual(1, unresolved)
+        self.assertIn('T2', out)
 
     def test_only_the_reviewer_s_own_unresolved_threads_are_listed(self) -> None:
         """A maintainer's own open thread is not a review finding to answer."""
@@ -229,6 +322,32 @@ class TestSuppressed(GqlCase):
         self.assertIn('suppressed=0', out)
 
 
+class TestDigestReportsTheAnswer(GqlCase):
+    def test_the_comment_prints_whole_under_a_marker_naming_it_terminal(self) -> None:
+        """Its wording is what separates a refusal from a remark, so it is not truncated."""
+        text = 'Copilot has reached its quota limit.\nTry again after the window resets.'
+        self.answer(payload([review(oid=OLD)], comments=[comment(body=text)]))
+        out, _ = pr_review.digest('o', 'r', 7)
+        self.assertIn('answered_outside_review=yes', out)
+        self.assertIn('COPILOT COMMENT', out)
+        for line in text.splitlines():
+            self.assertIn(line, out)
+
+    def test_a_pull_request_with_no_such_answer_says_so_rather_than_staying_silent(self) -> None:
+        self.answer(payload([review()]))
+        out, _ = pr_review.digest('o', 'r', 7)
+        self.assertIn('answered_outside_review=no', out)
+
+    def test_an_unreadable_window_reports_unknown_and_names_why(self) -> None:
+        """Reporting `no` off a window an answer can hide behind is the false clean to avoid."""
+        self.answer(payload([review()], older=True,
+                            comments=[comment(login='ptr727')
+                                      for _ in range(pr_review.WINDOW)]))
+        out, _ = pr_review.digest('o', 'r', 7)
+        self.assertIn('answered_outside_review=unknown', out)
+        self.assertIn('BEHIND THE WINDOW (comments)', out)
+
+
 class TestGqlTransport(unittest.TestCase):
     def test_a_failed_call_raises_rather_than_returning_an_empty_reading(self) -> None:
         """Returning nothing on failure would read as a PR with no reviews and no threads."""
@@ -279,6 +398,35 @@ class TestCli(GqlCase):
             self.assertEqual(30, pr_review.main(['wait', '7', '--timeout', '0']))
         self.assertIn('status=PENDING', self.out.getvalue())
 
+    def test_the_timeout_carries_the_digest_rather_than_a_bare_pending_line(self) -> None:
+        """A wait that ends with no evidence reports a slow reviewer and a broken poll alike."""
+        self.answer(payload([review(oid=OLD)], [thread('T1')]))
+        with mock.patch.object(pr_review.time, 'sleep'):
+            self.assertEqual(30, pr_review.main(['wait', '7', '--timeout', '0']))
+        out = self.out.getvalue()
+        self.assertIn('review_on_head=NO', out)
+        self.assertIn('unresolved=1', out)
+
+    def test_wait_ends_on_an_answer_outside_a_review_instead_of_waiting_it_out(self) -> None:
+        """A refusal covers no head, so polling on for the timeout waits for nothing.
+
+        The zero timeout is what this case fails on rather than hangs on: an answer read as
+        pending spins the loop for the whole default wait, and a case that hangs gates nothing.
+        """
+        self.answer(payload([review(oid=OLD)], comments=[comment()]))
+        with mock.patch.object(pr_review.time, 'sleep') as slept:
+            self.assertEqual(40, pr_review.main(['wait', '7', '--timeout', '0']))
+        slept.assert_not_called()
+        out = self.out.getvalue()
+        self.assertIn('status=ANSWERED_OUTSIDE_REVIEW', out)
+        self.assertIn('quota', out)
+
+    def test_a_landed_review_wins_over_an_older_answer(self) -> None:
+        """Coverage is the success case, and a spent comment does not downgrade it to 40."""
+        self.answer(payload([review(at=LATE)], comments=[comment(at=EARLY)]))
+        with mock.patch.object(pr_review.time, 'sleep'):
+            self.assertEqual(0, pr_review.main(['wait', '7']))
+
     def test_the_repo_argument_splits_into_owner_and_name(self) -> None:
         self.answer(payload([review()]))
         with mock.patch.object(pr_review, 'digest', return_value=('x', 0)) as dig:
@@ -309,6 +457,17 @@ class TestContract(unittest.TestCase):
                      '-X DELETE', 'gh pr merge', 'gh pr review'):
             with self.subTest(verb=verb):
                 self.assertFalse(verb in source, f'{verb!r} is a state-changing call in a read-only script')
+
+    def test_the_guard_tests_the_window_the_queries_actually_read(self) -> None:
+        """A guard measuring one number while the query fetches another reads clean on drift."""
+        source = (REPO / 'scripts' / 'pr_review.py').read_text(encoding='utf-8')
+        windows = set(re.findall(r'(?:comments|reviews)\(last:(\d+)\)', source))
+        self.assertEqual({str(pr_review.WINDOW)}, windows)
+        # The guard reads `hasPreviousPage`, so a connection that stops asking reports no.
+        # That is the silent narrowing this holds every window against.
+        # Four: reviews and comments, in each of the two queries.
+        self.assertEqual(4, source.count('pageInfo{ hasPreviousPage }'))
+        self.assertEqual(4, len(re.findall(r'(?:comments|reviews)\(last:\d+\)', source)))
 
     def test_the_backoff_is_bounded_and_non_decreasing(self) -> None:
         """A wait that sleeps zero seconds is a busy loop, and one that shrinks polls harder later."""
