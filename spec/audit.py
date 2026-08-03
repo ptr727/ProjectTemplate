@@ -39,12 +39,13 @@ SETTINGS_KEYS = [
     "has_wiki", "has_projects", "allow_merge_commit", "allow_squash_merge",
     "allow_rebase_merge", "allow_auto_merge", "allow_update_branch", "delete_branch_on_merge",
 ]
-# bypass_actors is deliberately absent. Who may bypass a ruleset is a per-repository human decision
-# taken in the UI, and repo-config/configure.sh neither grants nor revokes it: apply writes the live
-# list back unchanged and check reports it without asserting. Comparing it here would contradict that,
-# and did: once the payloads stopped declaring a bypass list, every repo whose live ruleset still had
-# one reported a ruleset DEFECT for a field the fleet config had deliberately stopped managing.
-# Two tools comparing one field under opposite policies is the defect, not the field's value.
+# The bypass_actors field is deliberately absent from this list.
+# Who may bypass a ruleset is a per-repository human decision taken in the UI.
+# The configure.sh script in repo-config treats it that way, since apply writes the live list back unchanged and check reports it without asserting.
+# Comparing it here would contradict that, and did.
+# Once the payloads stopped declaring a bypass list, every repo whose live ruleset still had one reported a ruleset DEFECT.
+# That was a field the fleet config had deliberately stopped managing.
+# Two tools comparing one field under opposite policies is the defect, rather than the field's value.
 RULESET_SUBSET = ["name", "target", "enforcement", "conditions", "rules"]
 # Phrases in a registry driftNote that assert work still outstanding. Deliberately specific: a note
 # recording a permanent deviation ("no get-version-task; relies on validate-task") must not match.
