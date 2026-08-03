@@ -39,7 +39,13 @@ SETTINGS_KEYS = [
     "has_wiki", "has_projects", "allow_merge_commit", "allow_squash_merge",
     "allow_rebase_merge", "allow_auto_merge", "allow_update_branch", "delete_branch_on_merge",
 ]
-RULESET_SUBSET = ["name", "target", "enforcement", "bypass_actors", "conditions", "rules"]
+# bypass_actors is deliberately absent. Who may bypass a ruleset is a per-repository human decision
+# taken in the UI, and repo-config/configure.sh neither grants nor revokes it: apply writes the live
+# list back unchanged and check reports it without asserting. Comparing it here would contradict that,
+# and did: once the payloads stopped declaring a bypass list, every repo whose live ruleset still had
+# one reported a ruleset DEFECT for a field the fleet config had deliberately stopped managing.
+# Two tools comparing one field under opposite policies is the defect, not the field's value.
+RULESET_SUBSET = ["name", "target", "enforcement", "conditions", "rules"]
 # Phrases in a registry driftNote that assert work still outstanding. Deliberately specific: a note
 # recording a permanent deviation ("no get-version-task; relies on validate-task") must not match.
 PENDING_MARKERS = ["pending", "not yet", "owed", "todo", "still", "behind", "missing", "absent"]
@@ -102,8 +108,6 @@ def normalize_ruleset(payload):
     sub = {k: payload.get(k) for k in RULESET_SUBSET}
     if isinstance(sub.get("rules"), list):
         sub["rules"] = sorted(sub["rules"], key=lambda r: json.dumps(r, sort_keys=True))
-    if isinstance(sub.get("bypass_actors"), list):
-        sub["bypass_actors"] = sorted(sub["bypass_actors"], key=lambda a: (str(a.get("actor_type")), str(a.get("actor_id"))))
     return json.dumps(sub, sort_keys=True)
 
 
