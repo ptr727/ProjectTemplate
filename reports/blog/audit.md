@@ -6,7 +6,7 @@
 - **Date:** 2026-08-03
 - **Run stamp:** `audit run 2026-08-03T22:34:03Z | hub 3a7cc64`
 
-First audit of this repo. It was stood up on 2026-08-01 and reached a proven release path the same day, but it was never added to [`registry/repos.json`][repos], so no hub tool had measured it until now and [`reports/divergences.md`][divergences] under-reported the fleet by exactly this repo. The registry entry lands with this report. Nothing here is a defect: every finding is the hub advancing after the carry, which is the propagation job [#536][issue-536] exists to make possible.
+First audit of this repo. It was stood up on 2026-08-01 and reached a proven release path the same day, but it was never added to [`registry/repos.json`][repos], so no hub tool had measured it until now and [`reports/divergences.md`][divergences] under-reported the fleet by exactly this repo. The registry entry lands with this report. Nothing here is a defect: every finding is the hub advancing after the carry, which is the propagation job [#536][pr-536] exists to make possible.
 
 ## Develop Drift
 
@@ -41,14 +41,14 @@ None.
 
 **Carried content behind the canonical.** Six of these are stale copies and two never arrived, and the distinction matters because a stale copy still states the rule in an older form while an absent one states nothing at all:
 
-1. `AGENTS.md > Fleet Bootstrap` is **absent**. Added by [#536][issue-536] after this repo carried its baseline, so the repo holds no statement of where the canonical rules live or how to route by its own state.
+1. `AGENTS.md > Fleet Bootstrap` is **absent**. Added by [#536][pr-536] after this repo carried its baseline, so the repo holds no statement of where the canonical rules live or how to route by its own state.
 2. `GOVERNANCE.md > Representative Data in Agent-Authored Text` is **absent**. The rule against agent-authored text quoting the maintainer's own data is not present in this repo in any form.
 3. `AGENTS.md > Context and Delegation Discipline` is stale. Missing the rule that a wait separates three outcomes and says which one it reached.
 4. `AGENTS.md > Where the Rules Live` is stale. Missing the table row routing to `Representative Data in Agent-Authored Text`, consistent with finding 2.
 5. `GOVERNANCE.md > Git and Commit Rules` is stale. Missing "Commit means commit and push".
 6. `GOVERNANCE.md > Verification Discipline` is stale. Missing "A launched process is not a result, and a cause nobody observed is not a diagnosis".
 7. `GOVERNANCE.md > PR Review Etiquette` is stale. Missing the whole `### Every Finding Ends in an Action` subsection, so the repo carries the review loop without the five outcomes that close a finding.
-8. `repo-config/configure.sh` is stale. It predates the payload-driven check mode ([#540][issue-540], [#543][issue-543]), so its check mode compares the pull-request merge methods and the required-status-check contexts by name rather than comparing every parameterized rule's whole parameters object in both directions. It passes clean over drift the current canonical would catch.
+8. `repo-config/configure.sh` is stale. It predates the payload-driven check mode ([#540][pr-540], [#543][pr-543]), so its check mode compares the pull-request merge methods and the required-status-check contexts by name rather than comparing every parameterized rule's whole parameters object in both directions. It passes clean over drift the current canonical would catch.
 
 **Undeclared section.** `AGENTS.md > Project Conventions` (`AGENTS.md:9`) is not a section [`spec/files.json`][files] declares. Its four rules are genuinely repo-specific (the append-only URL contract, never populating media over HTTP, `content/` as an archive, and a gate proving itself by failing) and none duplicates a verbatim section. Left in place pending the spec question raised below, which is what the section model asks for when reconciliation is not obvious.
 
@@ -74,8 +74,8 @@ Two spec questions, raised rather than resolved, per AUDIT.md section 9.
 [section-model]: ../../spec/section-model.md
 
 <!-- External -->
-[pr-545]: https://github.com/ptr727/ProjectTemplate/pull/545
 [issue-456]: https://github.com/ptr727/ProjectTemplate/issues/456
-[issue-536]: https://github.com/ptr727/ProjectTemplate/pull/536
-[issue-540]: https://github.com/ptr727/ProjectTemplate/pull/540
-[issue-543]: https://github.com/ptr727/ProjectTemplate/pull/543
+[pr-536]: https://github.com/ptr727/ProjectTemplate/pull/536
+[pr-540]: https://github.com/ptr727/ProjectTemplate/pull/540
+[pr-543]: https://github.com/ptr727/ProjectTemplate/pull/543
+[pr-545]: https://github.com/ptr727/ProjectTemplate/pull/545
