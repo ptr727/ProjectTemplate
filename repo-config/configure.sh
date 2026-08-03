@@ -111,7 +111,7 @@ ruleset_id() {
 
 # =============================== apply ===============================
 apply_ruleset() { # payload-file - create-or-update the ruleset by name
-    local file="$1" rname id
+    local file="$1" rname id live_bypass body
     if [ ! -e "$file" ]; then
         echo "Ruleset payload $file not found. Aborting to avoid a partially-applied configuration." >&2
         exit 1
@@ -124,9 +124,23 @@ apply_ruleset() { # payload-file - create-or-update the ruleset by name
     id="$(ruleset_id "$rname")"
     if [ -n "$id" ]; then
         echo "Updating ruleset '$rname' (id $id) on $repo"
-        gh api --method PUT "repos/$repo/rulesets/$id" --input "$file" >/dev/null
+        # The bypass list is a human decision, so this script neither grants nor revokes it.
+        # A PUT replaces the whole document, so omitting the field would delete the live list rather than leave it alone.
+        # The live value is therefore read and written back unchanged, which is what "hands off" has to mean against a replacing API.
+        # A read failure aborts rather than proceeding, since applying without it would silently clear the list.
+        if ! live_bypass="$(gh api "repos/$repo/rulesets/$id" --jq '.bypass_actors // []')"; then
+            echo "Could not read the live bypass list for ruleset '$rname' on $repo. Aborting rather than applying a payload that would clear it." >&2
+            exit 1
+        fi
+        if ! body="$(jq --argjson b "$live_bypass" '.bypass_actors = $b' "$file")"; then
+            echo "Could not compose the ruleset payload for '$rname'. Aborting." >&2
+            exit 1
+        fi
+        gh api --method PUT "repos/$repo/rulesets/$id" --input - <<<"$body" >/dev/null
     else
         echo "Creating ruleset '$rname' on $repo"
+        # No bypass list is sent on create, so a new ruleset starts with GitHub's own empty default.
+        # Nothing is deleted here, because nothing existed to delete.
         gh api --method POST "repos/$repo/rulesets" --input "$file" >/dev/null
     fi
 }
@@ -210,6 +224,12 @@ check_ruleset() { # payload-file - the live ruleset must match the committed pol
     if [ -z "$want_types" ]; then fail "ruleset payload $file declares no rules"; return; fi
     got_types="$(jq -r '[.rules[].type] | sort | join(",")' <<<"$live")"
     assert "'$rname' rule set = $want_types" test "$got_types" = "$want_types"
+    # The bypass list is reported and never asserted, because no payload declares one.
+    # Who may bypass a ruleset is a human decision taken in the UI, so code states what is there and judges nothing.
+    # It is surfaced on every run rather than left invisible, since it is the field that decides who the rules do not apply to.
+    local bypass
+    bypass="$(jq -r '[.bypass_actors[]? | "\(.actor_type) \(.actor_id) \(.bypass_mode)"] | join("; ")' <<<"$live")"
+    note "ruleset '$rname' bypass list: ${bypass:-none} (not managed by this script)"
     # Every parameterized rule is compared on its whole parameters object rather than on selected fields.
     # Naming fields one at a time meant a payload could declare a parameter the check never read.
     # Review-thread resolution, stale-review dismissal, and the status-check policy flags all went unverified that way.
