@@ -524,6 +524,31 @@ class TestCli(GqlCase):
         self.assertGreaterEqual(seen.call_count, 1)
         self.assertLessEqual(seen.call_count, 1200 // 300 + 1)
 
+    def test_a_review_landing_during_the_last_read_wins_over_the_stalled_code(self) -> None:
+        """The digest and the exit code come from one payload, or they describe different PRs.
+
+        An automated reader resolves a digest saying covered against a code saying stalled by
+        believing the code, so the review it just printed is the thing that gets dropped.
+        """
+        self.answer(payload([review(oid=OLD)], pending=True), payload([review()], pending=True))
+        with mock.patch.object(pr_review, 'timeline',
+                               return_value=[('review_requested', LATE)]), \
+                mock.patch.object(pr_review.time, 'sleep'):
+            self.assertEqual(0, pr_review.main(
+                ['wait', '7', '--pickup-grace', '0', '--timeout', '0']))
+        out = self.out.getvalue()
+        self.assertIn('review_on_head=yes', out)
+        self.assertNotIn('status=REQUEST_NOT_PICKED_UP', out)
+
+    def test_a_review_landing_during_the_last_read_wins_over_the_timeout(self) -> None:
+        """Same disagreement at the other exit: printing coverage and returning PENDING."""
+        self.answer(payload([review(oid=OLD)]), payload([review()]))
+        with mock.patch.object(pr_review.time, 'sleep'):
+            self.assertEqual(0, pr_review.main(['wait', '7', '--timeout', '0']))
+        out = self.out.getvalue()
+        self.assertIn('review_on_head=yes', out)
+        self.assertNotIn('status=PENDING', out)
+
     def test_the_repo_argument_splits_into_owner_and_name(self) -> None:
         self.answer(payload([review()]))
         with mock.patch.object(pr_review, 'digest', return_value=('x', 0)) as dig:
