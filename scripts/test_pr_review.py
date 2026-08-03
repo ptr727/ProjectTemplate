@@ -10,6 +10,7 @@ Run as `python3 scripts/test_pr_review.py`, or under `python3 -m unittest discov
 """
 from __future__ import annotations
 import contextlib, io, json, re, subprocess, sys, unittest
+from itertools import count
 from pathlib import Path
 from unittest import mock
 
@@ -505,6 +506,23 @@ class TestCli(GqlCase):
             self.assertEqual(0, pr_review.main(
                 ['wait', '7', '--pickup-grace', '9999', '--timeout', '600']))
         seen.assert_not_called()
+
+    def test_the_pickup_read_runs_on_its_own_interval_once_the_grace_is_out(self) -> None:
+        """Every poll past the grace is what the comment ruled out and the code did anyway.
+
+        The clock advances a fixed step per reading, so the interval is counted rather than
+        waited: a long wait must not turn one REST reader into one per poll.
+        """
+        picked_up = [('review_requested', EARLY), ('copilot_work_started', LATE)]
+        self.answer(payload([review(oid=OLD)], pending=True))
+        with mock.patch.object(pr_review.time, 'monotonic', side_effect=count(0, 30)), \
+                mock.patch.object(pr_review, 'timeline', return_value=picked_up) as seen, \
+                mock.patch.object(pr_review.time, 'sleep'):
+            self.assertEqual(30, pr_review.main(
+                ['wait', '7', '--pickup-grace', '300', '--timeout', '1200']))
+        # Roughly one read per grace interval over the wait, never one per poll.
+        self.assertGreaterEqual(seen.call_count, 1)
+        self.assertLessEqual(seen.call_count, 1200 // 300 + 1)
 
     def test_the_repo_argument_splits_into_owner_and_name(self) -> None:
         self.answer(payload([review()]))

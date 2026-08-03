@@ -306,7 +306,7 @@ def main(argv: list[str] | None = None) -> int:
     ap.add_argument('--repo', default='ptr727/ProjectTemplate')
     ap.add_argument('--timeout', type=int, default=2700, help='seconds (default 45m)')
     ap.add_argument('--pickup-grace', type=int, default=300,
-                    help='seconds before a pending request is read for pickup (default 5m)')
+                    help='seconds before the first pickup read, and between reads (default 5m)')
     a = ap.parse_args(argv)
     owner, repo = a.repo.split('/', 1)
 
@@ -322,13 +322,15 @@ def main(argv: list[str] | None = None) -> int:
     done, answer = reviewed_head(pr), answered_outside_review(pr)
     stalled = ''
     i = 0
+    next_pickup = a.pickup_grace
     while not done and not answer:
         elapsed = time.monotonic() - start
         # Read the pickup before the clock, so a request nothing acted on reports as itself.
         # Running the clock out instead would report it exactly as a slow reviewer.
-        # The read costs a second call, so it waits out the grace rather than running per poll.
-        # Inside the grace a pending request is simply a review being worked on.
-        if elapsed > a.pickup_grace and reviewer_requested(pr):
+        # The read costs a second call over REST, so it runs on its own interval, not per poll.
+        # One reading settles the current request, and the next covers a request a push raises.
+        if elapsed > next_pickup and reviewer_requested(pr):
+            next_pickup = elapsed + a.pickup_grace
             stalled = never_picked_up(timeline(owner, repo, a.number))
             if stalled:
                 break
