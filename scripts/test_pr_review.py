@@ -9,7 +9,7 @@ GraphQL payload and asserts the reading, with `gql` replaced so no case reaches 
 Run as `python3 scripts/test_pr_review.py`, or under `python3 -m unittest discover -s scripts`.
 """
 from __future__ import annotations
-import contextlib, io, json, subprocess, sys, unittest
+import contextlib, io, json, re, subprocess, sys, unittest
 from pathlib import Path
 from unittest import mock
 
@@ -113,6 +113,19 @@ class TestAnsweredOutsideReview(unittest.TestCase):
 
     def test_no_comments_at_all_reads_as_no_answer(self) -> None:
         self.assertIsNone(pr_review.answered_outside_review(payload([review(oid=OLD)])))
+
+    def test_ordinary_discussion_does_not_push_the_answer_out_of_the_window(self) -> None:
+        """The window reads the newest comments, not the reviewer's, so others crowd it."""
+        chatter = [comment(login='ptr727', at=LATE) for _ in range(pr_review.COMMENT_WINDOW - 1)]
+        found = pr_review.answered_outside_review(
+            payload([review(oid=OLD, at=EARLY)], comments=[comment(at=LATE)] + chatter))
+        self.assertIsNotNone(found)
+
+    def test_a_full_window_is_unknown_rather_than_no_answer(self) -> None:
+        """Finding nothing and having nothing to find are one reading once the window fills."""
+        full = [comment(login='ptr727') for _ in range(pr_review.COMMENT_WINDOW)]
+        self.assertTrue(pr_review.answer_window_saturated(payload([review()], comments=full)))
+        self.assertFalse(pr_review.answer_window_saturated(payload([review()], comments=full[:-1])))
 
 
 class TestDigest(GqlCase):
@@ -281,6 +294,15 @@ class TestDigestReportsTheAnswer(GqlCase):
         out, _ = pr_review.digest('o', 'r', 7)
         self.assertIn('answered_outside_review=no', out)
 
+    def test_a_full_window_reports_unknown_and_names_why(self) -> None:
+        """Reporting `no` off a saturated window is the false clean this field exists to avoid."""
+        self.answer(payload([review()],
+                            comments=[comment(login='ptr727')
+                                      for _ in range(pr_review.COMMENT_WINDOW)]))
+        out, _ = pr_review.digest('o', 'r', 7)
+        self.assertIn('answered_outside_review=unknown', out)
+        self.assertIn('COMMENT WINDOW FULL', out)
+
 
 class TestGqlTransport(unittest.TestCase):
     def test_a_failed_call_raises_rather_than_returning_an_empty_reading(self) -> None:
@@ -391,6 +413,13 @@ class TestContract(unittest.TestCase):
                      '-X DELETE', 'gh pr merge', 'gh pr review'):
             with self.subTest(verb=verb):
                 self.assertFalse(verb in source, f'{verb!r} is a state-changing call in a read-only script')
+
+    def test_the_guard_tests_the_window_the_queries_actually_read(self) -> None:
+        """A guard measuring one number while the query fetches another reads clean on drift."""
+        source = (REPO / 'scripts' / 'pr_review.py').read_text(encoding='utf-8')
+        windows = set(re.findall(r'comments\(last:(\d+)\)', source))
+        self.assertEqual({str(pr_review.COMMENT_WINDOW)}, windows)
+        self.assertEqual(2, source.count(f'comments(last:{pr_review.COMMENT_WINDOW})'))
 
     def test_the_backoff_is_bounded_and_non_decreasing(self) -> None:
         """A wait that sleeps zero seconds is a busy loop, and one that shrinks polls harder later."""

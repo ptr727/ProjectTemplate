@@ -36,6 +36,11 @@ SUMMARY = re.compile(r'<summary>(.*?)</summary>', re.DOTALL | re.IGNORECASE)
 TAGS = re.compile(r'</?(?:details|summary)>', re.IGNORECASE)
 COUNT = re.compile(r'\((\d+)\)')
 
+# How many of the newest comments both queries read, and the number the saturation guard tests.
+# A narrow window drops the reviewer's answer behind ordinary discussion, reporting no answer.
+# A test holds this equal to the number the queries carry, since a drift between them reads clean.
+COMMENT_WINDOW = 100
+
 # Liveness query: timestamps and ids only, no comment or review bodies.
 # A liveness check does not need the finding text, and re-fetching bodies was 76% of polls.
 # It does need the reviewer's non-review answers.
@@ -45,7 +50,7 @@ query($o:String!,$r:String!,$n:Int!){
   repository(owner:$o,name:$r){ pullRequest(number:$n){
     headRefOid
     reviews(last:20){ nodes{ author{login} state commit{oid} submittedAt } }
-    comments(last:5){ nodes{ author{login} createdAt } }
+    comments(last:100){ nodes{ author{login} createdAt } }
   }}}
 """
 
@@ -57,7 +62,7 @@ query($o:String!,$r:String!,$n:Int!){
     reviews(last:20){ nodes{ author{login} state commit{oid} submittedAt body } }
     reviewThreads(first:100){ nodes{ id isResolved
       comments(first:1){ nodes{ author{login} path line body } } }}
-    comments(last:5){ nodes{ author{login} createdAt body } }
+    comments(last:100){ nodes{ author{login} createdAt body } }
   }}}
 """
 
@@ -94,6 +99,16 @@ def answered_outside_review(pr: dict) -> dict | None:
     reviews = reviewer_nodes(pr, 'reviews')
     latest_review = max((n.get('submittedAt') or '' for n in reviews), default='')
     return newest if (newest.get('createdAt') or '') > latest_review else None
+
+
+def answer_window_saturated(pr: dict) -> bool:
+    """True where the window is full, so an answer sitting behind it cannot be ruled out.
+
+    The query reads the newest comments rather than the reviewer's, so ordinary discussion is
+    what pushes an answer out of reach, and a full window is the one case where finding nothing
+    and having nothing to find are the same reading.
+    """
+    return len(((pr.get('comments') or {}).get('nodes') or [])) >= COMMENT_WINDOW
 
 
 def live_state(owner: str, repo: str, num: int) -> tuple[str, bool, dict | None]:
@@ -159,15 +174,19 @@ def digest(owner: str, repo: str, num: int, seen: set[str] | None = None) -> tup
         finding_count(b) for b in on_head_blocks)
 
     answer = answered_outside_review(pr)
+    answered = 'yes' if answer else ('unknown' if answer_window_saturated(pr) else 'no')
     lines = [
         f'pr={num} head={head[:8]} rounds={len(revs)} '
         f'review_on_head={"yes" if on_head else "NO"} '
         f'threads={len(threads)} unresolved={len(unresolved)} '
         f'suppressed={sum(finding_count(b) for n, b in blocks)} '
         f'(on_head={sum(finding_count(b) for b in on_head_blocks)} earlier={stale}) '
-        f'answered_outside_review={"yes" if answer else "no"} '
+        f'answered_outside_review={answered} '
         f'merge={pr.get("mergeStateStatus")}'
     ]
+    if answered == 'unknown':
+        lines.append(f'  COMMENT WINDOW FULL: the newest {COMMENT_WINDOW} comments carry none '
+                     'from the reviewer, so an older answer cannot be ruled out from here')
     if answer:
         # Printed whole for the same reason a suppressed finding is, since it reaches no thread.
         # Its wording is the only thing separating a refusal from an ordinary remark.
