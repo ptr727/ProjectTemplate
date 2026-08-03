@@ -13,8 +13,8 @@ Subcommands
            The loop runs in-process, so a 45-minute wait costs one agent turn, not 90.
            Exit 0 = review present, 30 = still pending at timeout (pending is not failure),
            40 = Copilot answered outside a formal review, so read the printed body.
-           A quota or rate-limit refusal is terminal: no review lands and waiting on
-           makes no difference, so 40 ends the wait rather than extending it.
+           40 reports the shape of that answer and reads nothing of its cause: an answer
+           carrying no commit covers no head, so the wait ends and the reader decides.
 
 Read-only by design. Mutations (re-request review, reply, resolve thread) are
 deliberately NOT implemented here - they are state-changing calls that must stay
@@ -87,9 +87,9 @@ def reviewer_nodes(pr: dict, field: str) -> list[dict]:
 def answered_outside_review(pr: dict) -> dict | None:
     """The reviewer's newest plain comment, where it postdates its newest formal review.
 
-    Copilot answers a request with a comment rather than a review when it will not review at all,
-    a quota refusal among them, and that answer satisfies no coverage check by design.
-    Reading it as an unmet condition is what turns a refusal into a wait with nothing at its end.
+    The test is the shape of the answer rather than its cause, which this reads nothing of:
+    a comment carries no commit, so it satisfies no coverage check whatever it says.
+    Treating that shape as an unmet condition is what leaves a wait with nothing at its end.
     A comment older than the newest review is spent, since the review it preceded did land.
     """
     comments = reviewer_nodes(pr, 'comments')
@@ -157,10 +157,12 @@ def digest(owner: str, repo: str, num: int, seen: set[str] | None = None) -> tup
     revs = reviewer_nodes(pr, 'reviews')
     on_head = [n for n in revs if (n.get('commit') or {}).get('oid') == head]
     threads = pr['reviewThreads']['nodes']
+    # A deleted account leaves `author` present and null, which `.get('author', {})` returns as
+    # None rather than as the default, so the chained lookup crashes the whole digest.
     unresolved = [t for t in threads
                   if not t['isResolved']
-                  and ((t.get('comments') or {}).get('nodes') or [{}])[0]
-                  .get('author', {}).get('login') == REVIEWER]
+                  and ((((t.get('comments') or {}).get('nodes') or [{}])[0]
+                        .get('author') or {}).get('login') == REVIEWER)]
 
     # Every round, not just the head, because a suppressed finding has no resolved state to read.
     # Head-scoping treated "superseded by a push" as "answered", and the two are not the same.
@@ -191,8 +193,8 @@ def digest(owner: str, repo: str, num: int, seen: set[str] | None = None) -> tup
         # Printed whole for the same reason a suppressed finding is, since it reaches no thread.
         # Its wording is the only thing separating a refusal from an ordinary remark.
         lines.append(f'  COPILOT COMMENT ({answer.get("createdAt")}, newer than any review): '
-                     'read it before waiting again, since a quota or rate-limit refusal is '
-                     'terminal and no review follows it')
+                     'the reviewer answered without reviewing, so read the body below and '
+                     'decide, since a refusal is terminal and a remark is not')
         lines += [f'    {ln.rstrip()}' for ln in (answer.get('body') or '').splitlines()
                   if ln.strip()]
     new = 0
@@ -264,8 +266,9 @@ def main(argv: list[str] | None = None) -> int:
     print(out)
     print(f'waited={int(time.monotonic()-start)}s')
     if not done:
-        print('status=ANSWERED_OUTSIDE_REVIEW read the comment above, '
-              'a quota or rate-limit refusal is terminal and re-requesting does not clear it')
+        print('status=ANSWERED_OUTSIDE_REVIEW the reviewer answered without reviewing, '
+              'so read the comment above and decide, since where it declines or names a limit '
+              'no review follows and re-requesting does not clear it')
         return 40
     return 0
 

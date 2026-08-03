@@ -97,7 +97,7 @@ class TestAnsweredOutsideReview(unittest.TestCase):
         answer = pr_review.answered_outside_review(
             payload([review(oid=OLD, at=EARLY)], comments=[comment(at=LATE)]))
         self.assertIsNotNone(answer)
-        self.assertEqual(LATE, answer['createdAt'])
+        self.assertEqual(LATE, (answer or {}).get('createdAt'))
 
     def test_an_answer_the_reviewer_then_superseded_is_spent(self) -> None:
         """The review it preceded did land, so the comment is history rather than a stop signal."""
@@ -147,6 +147,15 @@ class TestDigest(GqlCase):
         self.answer(payload([review(oid=OLD)]))
         out, _ = pr_review.digest('o', 'r', 7)
         self.assertIn('review_on_head=NO', out)
+
+    def test_a_thread_from_a_deleted_account_does_not_crash_the_digest(self) -> None:
+        """GraphQL sends `author` present and null, which a defaulted lookup returns as None."""
+        orphan = thread('T1')
+        orphan['comments']['nodes'][0]['author'] = None
+        self.answer(payload([review()], [orphan, thread('T2')]))
+        out, unresolved = pr_review.digest('o', 'r', 7)
+        self.assertEqual(1, unresolved)
+        self.assertIn('T2', out)
 
     def test_only_the_reviewer_s_own_unresolved_threads_are_listed(self) -> None:
         """A maintainer's own open thread is not a review finding to answer."""
