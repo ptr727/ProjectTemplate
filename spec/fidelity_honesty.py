@@ -88,7 +88,7 @@ def fidelity_pass(spec):
             region = t if extract is None else extract(t)
             if region is not None:
                 history.add(audit.content_hash(region))
-        spread = {"match": [], "stale": [], "differs": [], "unavailable": []}
+        spread = {"match": [], "stale": [], "differs": [], "absent": [], "unavailable": []}
         for r in repos:
             sel = audit.repo_selectors(r, defaults)
             if not (audit.applies(ent_ap, sel) and audit.applies(sec_ap, sel)):
@@ -98,8 +98,14 @@ def fidelity_pass(spec):
                 spread["unavailable"].append(r["name"])
                 continue
             region = text if extract is None else extract(text)
-            if region is None:  # a verbatim section whose heading is absent downstream
-                spread["differs"].append(r["name"])
+            if region is None:
+                # The file is carried but the section's heading is not there at all.
+                # That is a section the repo never received rather than one it edited.
+                # The two want opposite responses, since an edit is reconciled and an absence is carried.
+                # Bucketing it with "differs" reported seventeen repos as hand-modified for a section they were never given.
+                # A newly added section reads that way in every repo on the day it lands.
+                # An absent section contributes nothing to `history` either, so it can never read as stale.
+                spread["absent"].append(r["name"])
                 continue
             dh = audit.content_hash(region)
             if dh == canon_hash:
@@ -112,6 +118,9 @@ def fidelity_pass(spec):
         # A verbatim candidate has NO hand-modified copy ("differs") and at least one confirmed match with
         # the current canonical. Stale copies do not disqualify it - verbatim would flag them "stale ->
         # re-vendor", which is the point. A unit that is entirely stale/unavailable is not confirmed uniform.
+        # An absent section does not disqualify it either, for the same reason an unavailable file does not.
+        # Neither is evidence that a repo decided something locally, and only such evidence argues against promotion.
+        # Treating absence as disqualifying would be the same conflation this bucket was split out to end.
         if fid == "intent" and spread["match"] and not spread["differs"]:
             promote.append((unit, spread))
         if fid == "verbatim" and spread["differs"]:
@@ -186,7 +195,7 @@ def render_report(spreads, promote, gaps, ledger):
         sp = spread_by_path.get(path)
         if not sp:
             return set(), set(), set()
-        return set(sp["differs"]) | set(sp["stale"]), set(sp["match"]), set(sp["unavailable"])
+        return set(sp["differs"]) | set(sp["stale"]) | set(sp["absent"]), set(sp["match"]), set(sp["unavailable"])
 
     # Keep only well-formed entries so --report degrades cleanly on a hand-malformed ledger instead of
     # raising KeyError/TypeError downstream. validate.py reports the malformation loudly in CI.
@@ -206,12 +215,16 @@ def render_report(spreads, promote, gaps, ledger):
     # Verbatim-only by design: an intent unit's byte diff is expected (judged by meaning), so only a verbatim
     # hand-modification with no recorded disposition is a genuine anomaly worth surfacing.
     untriaged_files = []
+    untriaged_absent = []
     for e, sp in spreads:
         if sp is None or e["fidelity"] != "verbatim":
             continue
         rest = sorted(set(sp["differs"]) - covered.get(e["path"], set()))
         if rest:
             untriaged_files.append((e["path"], rest))
+        gone = sorted(set(sp["absent"]) - covered.get(e["path"], set()))
+        if gone:
+            untriaged_absent.append((e["path"], gone))
     untriaged_gaps = [g for g in gaps if g not in gap_disp]
 
     order = ["re-vendor", "upstream-candidate", "investigate", "track", "accepted"]
@@ -261,12 +274,14 @@ def render_report(spreads, promote, gaps, ledger):
 
     w("## Untriaged - add a disposition to `spec/divergences.json`")
     w("")
-    if not untriaged_files and not untriaged_gaps:
+    if not untriaged_files and not untriaged_absent and not untriaged_gaps:
         w("_None - every live divergence has a recorded disposition._")
         w("")
     else:
         for path, repos in untriaged_files:
             w(f"- **{path}** - hand-modified in {_fmt(repos)} (verbatim canonical)")
+        for path, repos in untriaged_absent:
+            w(f"- **{path}** - **not carried** by {_fmt(repos)}, so the section never arrived rather than being edited (verbatim canonical)")
         for g in untriaged_gaps:
             w(f"- **{g}** - carried by the reference adopter but not in the manifest")
         w("")
@@ -330,13 +345,14 @@ def main():
         return 0
 
     print("== Per-unit fleet spread (ground-truth branch per repo) ==")
-    print("   fidelity path :: match / stale / differs / unavailable (absent or non-inline)")
+    print("   fidelity path :: match / stale / differs / absent-section / file-unavailable")
     for e, spread in spreads:
         if spread is None:
             print(f"   {e.get('fidelity'):8} {e['path']} :: canonical unreadable at hub - skipped")
             continue
         print(f"   {e['fidelity']:8} {e['path']} :: "
-              f"{len(spread['match'])} / {len(spread['stale'])} / {len(spread['differs'])} / {len(spread['unavailable'])}")
+              f"{len(spread['match'])} / {len(spread['stale'])} / {len(spread['differs'])} / "
+              f"{len(spread['absent'])} / {len(spread['unavailable'])}")
 
     print("\n== INTENT units with no divergent copy (verbatim-appropriate) -> candidates to promote to VERBATIM ==")
     print("   (>=1 confirmed match, 0 hand-modified. Any stale/unavailable copy is shown per unit and would")
