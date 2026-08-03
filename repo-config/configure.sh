@@ -213,8 +213,8 @@ check_ruleset() { # payload-file - the live ruleset must match the committed pol
     # Review-thread resolution, stale-review dismissal, and the status-check policy flags all went unverified that way.
     # Comparing the object keeps the check payload-driven: a parameter added to a payload is audited with no code change.
     # Keys are sorted on both sides, so key order from the API cannot read as drift.
-    # Set-like arrays are sorted too, since the API returns no guaranteed order and the previous
-    # per-field comparison sorted them explicitly. Dropping that would turn array order into false drift.
+    # Set-like arrays are sorted too, since the API guarantees no order and the previous per-field comparison sorted them explicitly.
+    # Dropping that would turn array order into false drift.
     # A scalar array sorts directly, and required_status_checks sorts by context, its identifying field.
     local ptypes norm
     norm='def n: walk(if type=="array" then (if length==0 then . elif (all(.[]; type=="string" or type=="number")) then sort elif (all(.[]; type=="object" and has("context"))) then sort_by(.context) else . end) else . end); n'
