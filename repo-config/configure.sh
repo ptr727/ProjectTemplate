@@ -17,13 +17,15 @@
 # The develop ruleset is develop.json where the model is PR-gated, or operational/develop.json for direct signed pushes.
 # Applying the same configuration twice changes nothing, so the mode is idempotent.
 #
-# The check mode is the read-only inverse, and what it verifies is exactly what the payloads declare.
-# The ruleset and settings assertions are driven by the committed payloads, so they stay repo-agnostic.
+# The check mode is the read-only inverse, and it verifies the same three groups apply writes.
+# The ruleset and static-settings assertions are driven by the committed payloads, so they stay repo-agnostic.
 # A ruleset is checked on enforcement, on the rule-type set compared in both directions, and on the whole parameters object of every parameterized rule.
 # Comparing the parameters object rather than named fields means a parameter added to a payload is audited with no change here.
 # Both directions matter, since a rule added live that the payload never declared is drift this catches.
 # That still survives the GitHub API normalizing a stored ruleset, since the comparison is over parsed JSON with sorted keys rather than a byte diff.
-# What it does not verify is anything the payloads do not declare, so a setting absent from settings.json is unaudited by construction.
+# The derived settings apply computes are asserted by name rather than from a payload, meaning has_discussions and default_branch.
+# The two Dependabot security features are asserted the same way, since apply enables them and no payload declares them.
+# What is unaudited is a static setting absent from settings.json, since only that group is payload-driven.
 # Secrets are per-repo (see spec/secrets.json) and not checkable from a standalone carry, so they are a manual-verify note.
 set -Eeuo pipefail
 
