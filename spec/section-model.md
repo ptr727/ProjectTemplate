@@ -28,6 +28,7 @@ A section is one of the following. Fidelity is declared in [files.json][files], 
 | Foundational Principles | `GOVERNANCE.md` | verbatim | the governing rationale, universal |
 | Durable Knowledge and Self-Improvement | `GOVERNANCE.md` | verbatim | universal meta-rule: durable knowledge belongs in the committed docs and agents keep them current |
 | Repository Boundaries and Write Safety | `GOVERNANCE.md` | verbatim | universal write-safety law |
+| Representative Data in Agent-Authored Text | `GOVERNANCE.md` | verbatim | universal law on what agent-authored text may quote |
 | Git and Commit Rules | `GOVERNANCE.md` | verbatim | universal git law |
 | Branching Model | `GOVERNANCE.md` | verbatim | universal (repo-specific history SHAs removed so it can carry) |
 | Release Model | `GOVERNANCE.md` | verbatim | universal release contract, all target shapes described inline |

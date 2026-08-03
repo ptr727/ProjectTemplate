@@ -56,6 +56,7 @@ Every rule below is a level-two section of [`GOVERNANCE.md`](./GOVERNANCE.md). R
 | Why the rules are shaped this way | `Foundational Principles` |
 | Recording a durable lesson or updating governance | `Durable Knowledge and Self-Improvement` |
 | Any push, API mutation, comment, label, or merge | `Repository Boundaries and Write Safety` |
+| Quoting data into a comment, commit, test, or doc | `Representative Data in Agent-Authored Text` |
 | Committing, signing, rebasing, force-pushing | `Git and Commit Rules` |
 | Branch choice, promotion, keeping branches in sync | `Branching Model` |
 | Releasing, version bumps, publishing | `Release Model` |
