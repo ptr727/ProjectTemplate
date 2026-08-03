@@ -360,6 +360,29 @@ class TestCommentWrap(BaitCase):
             with self.subTest(file=name, syntax=text.strip()[:12]):
                 self.assertEqual(['comment-wrap'], self.flag(name, text))
 
+    def test_a_step_marker_is_not_a_sentence_terminator(self) -> None:
+        """A numbered step opening a comment is a label on the sentence after it, not a sentence.
+
+        Reading the marker's dot as a terminator made `# 1. Deploy the hook.` two sentences, so
+        every numbered step in the fleet's scripts reported as a run-on. The marker is stripped
+        before the sentence checks, which also lets comment-case see the real opening word.
+        """
+        for marker in ('1.', '2.', '10.', '1)', '3)'):
+            with self.subTest(marker=marker):
+                self.assertEqual([], self.flag('a.sh', f'# {marker} Deploy the hook.\n'))
+
+    def test_a_step_marker_does_not_hide_a_real_run_on(self) -> None:
+        """Stripping the marker must not stop the rule seeing what follows it."""
+        self.assertEqual(['comment-wrap'], self.flag('a.sh', f'# 1. {self.RUN_ON}\n'))
+
+    def test_a_step_marker_does_not_hide_a_lowercase_opening(self) -> None:
+        """Before the strip, the digit read as the opening character, so comment-case never fired."""
+        self.assertEqual(['comment-case'], self.flag('a.sh', '# 1. deploy the hook.\n'))
+
+    def test_a_decimal_is_not_a_step_marker(self) -> None:
+        """The marker pattern requires trailing whitespace, so a version or decimal is untouched."""
+        self.assertEqual([], self.flag('a.sh', '# 3.13 is the pinned interpreter.\n'))
+
     def test_json_carries_comments_because_jsonc_is_what_ships(self) -> None:
         """VS Code tasks, devcontainer, and workspace files ship comments under a plain .json name."""
         for name in ('a.json', 'a.code-workspace', 'a.jsonc'):

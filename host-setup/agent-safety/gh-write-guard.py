@@ -452,8 +452,9 @@ def classify(cmd, cwd=None, origin=None, current_branch=None, rules_lookup=None,
     if not _is_gh_write(cmd):
         return "allow", ""
 
-    # 1. suppressed output on a write - scan with quoted argument values removed so a --body/--title
-    #    that only mentions a suppression token as text does not false-deny a legitimate write.
+    # 1. Suppressed output on a write.
+    #    Quoted argument values are removed before the scan.
+    #    That way a --body/--title only mentioning a suppression token as text does not false-deny a legitimate write.
     if _SUPPRESS.search(_QUOTED_SPAN.sub("", cmd)):
         return "deny", (
             "This is a GitHub write with its output discarded or forced to success "
@@ -463,7 +464,7 @@ def classify(cmd, cwd=None, origin=None, current_branch=None, rules_lookup=None,
             "the response. See GOVERNANCE.md 'Repository Boundaries and Write Safety'."
         )
 
-    # 2. literal node id in a mutation
+    # 2. Literal node id in a mutation
     if _GRAPHQL.search(cmd) and _MUTATION.search(cmd):
         for m in _FIELD_ASSIGN.finditer(cmd):
             val = m.group("v").strip("'\"")
@@ -478,7 +479,7 @@ def classify(cmd, cwd=None, origin=None, current_branch=None, rules_lookup=None,
                     "'Repository Boundaries and Write Safety'."
                 )
 
-    # 3. explicit target outside the origin's owner
+    # 3. Explicit target outside the origin's owner
     if origin is None:
         origin = _origin_owner_repo(cwd)
     targets = []

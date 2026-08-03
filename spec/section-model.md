@@ -23,6 +23,7 @@ A section is one of the following. Fidelity is declared in [files.json][files], 
 
 | Section | File | Fidelity | Reason |
 | --- | --- | --- | --- |
+| Fleet Bootstrap | `AGENTS.md` | verbatim | names the hub and routes by the repo's actual state, so it must survive adaptation |
 | Context and Delegation Discipline | `AGENTS.md` | verbatim | universal cost law: session scope, reading, commands, delegation |
 | Where the Rules Live | `AGENTS.md` | verbatim | the map from a task to the section that governs it |
 | Foundational Principles | `GOVERNANCE.md` | verbatim | the governing rationale, universal |

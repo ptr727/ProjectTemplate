@@ -17,9 +17,15 @@
 # The develop ruleset is develop.json where the model is PR-gated, or operational/develop.json for direct signed pushes.
 # Applying the same configuration twice changes nothing, so the mode is idempotent.
 #
-# The check mode is the read-only inverse, where every applied ruleset, setting, and security feature must match.
-# The ruleset and settings assertions are driven by the committed payloads, so they stay repo-agnostic.
-# That also survives the GitHub API normalizing a stored ruleset, comparing rule presence, merge methods and required checks rather than a byte diff.
+# The check mode is the read-only inverse, and it verifies the same three groups apply writes.
+# The ruleset and static-settings assertions are driven by the committed payloads, so they stay repo-agnostic.
+# A ruleset is checked on enforcement, on the rule-type set compared in both directions, and on the whole parameters object of every parameterized rule.
+# Comparing the parameters object rather than named fields means a parameter added to a payload is audited with no change here.
+# Both directions matter, since a rule added live that the payload never declared is drift this catches.
+# That still survives the GitHub API normalizing a stored ruleset, since the comparison is over parsed JSON with sorted keys rather than a byte diff.
+# The derived settings apply computes are asserted by name rather than from a payload, meaning has_discussions and default_branch.
+# The two Dependabot security features are asserted the same way, since apply enables them and no payload declares them.
+# What is unaudited is a static setting absent from settings.json, since only that group is payload-driven.
 # Secrets are per-repo (see spec/secrets.json) and not checkable from a standalone carry, so they are a manual-verify note.
 set -Eeuo pipefail
 
@@ -185,7 +191,7 @@ jq_has() { jq -e "$@" >/dev/null 2>&1; }
 gh_ok() { gh api "$@" >/dev/null 2>&1; }
 
 check_ruleset() { # payload-file - the live ruleset must match the committed policy, driven by the payload
-    local file="$1" rname id live t want got wantc gotc want_enf
+    local file="$1" rname id live t want got want_enf
     if [ ! -e "$file" ]; then fail "ruleset payload $file missing"; return; fi
     rname="$(jq -r '.name // empty' "$file")"
     if [ -z "$rname" ]; then fail "ruleset payload $file has no name"; return; fi
@@ -194,23 +200,35 @@ check_ruleset() { # payload-file - the live ruleset must match the committed pol
     if ! live="$(gh api "repos/$repo/rulesets/$id")"; then fail "ruleset '$rname' - could not read live state"; return; fi
     want_enf="$(jq -r '.enforcement' "$file")"
     assert "ruleset '$rname' enforcement = $want_enf" test "$(jq -r '.enforcement' <<<"$live")" = "$want_enf"
-    # Every rule type the committed payload declares must be present live (payload-driven, so repo-agnostic).
+    # The live rule-type set must equal the payload's, compared in both directions.
+    # Checking only that each payload type is present live misses a rule someone added by hand.
+    # That is drift this script exists to catch, and it passed as clean before.
+    local want_types got_types
+    if ! want_types="$(jq -r '[.rules[].type] | sort | join(",")' "$file")"; then
+        fail "ruleset payload $file did not parse"; return
+    fi
+    if [ -z "$want_types" ]; then fail "ruleset payload $file declares no rules"; return; fi
+    got_types="$(jq -r '[.rules[].type] | sort | join(",")' <<<"$live")"
+    assert "'$rname' rule set = $want_types" test "$got_types" = "$want_types"
+    # Every parameterized rule is compared on its whole parameters object rather than on selected fields.
+    # Naming fields one at a time meant a payload could declare a parameter the check never read.
+    # Review-thread resolution, stale-review dismissal, and the status-check policy flags all went unverified that way.
+    # Comparing the object keeps the check payload-driven: a parameter added to a payload is audited with no code change.
+    # Keys are sorted on both sides, so key order from the API cannot read as drift.
+    # Set-like arrays are sorted too, since the API guarantees no order and the previous per-field comparison sorted them explicitly.
+    # Dropping that would turn array order into false drift.
+    # A scalar array sorts directly, and required_status_checks sorts by context, its identifying field.
+    local ptypes norm
+    norm='def n: walk(if type=="array" then (if length==0 then . elif (all(.[]; type=="string" or type=="number")) then sort elif (all(.[]; type=="object" and has("context"))) then sort_by(.context) else . end) else . end); n'
+    ptypes="$(jq -r '[.rules[] | select(has("parameters")) | .type] | .[]' "$file")"
     while IFS= read -r t; do
+        [ -z "$t" ] && continue
         # shellcheck disable=SC2016  # $t is a jq --arg variable, not a shell expansion
-        assert "'$rname' enforces rule '$t'" jq_has --arg t "$t" '.rules[] | select(.type==$t)' <<<"$live"
-    done < <(jq -r '.rules[].type' "$file")
-    # For pull_request, the live merge methods must match the payload, which is the develop=squash and main=merge policy.
-    if jq_has '.rules[] | select(.type=="pull_request")' "$file"; then
-        want="$(jq -c '[.rules[]|select(.type=="pull_request").parameters.allowed_merge_methods[]]|sort' "$file")"
-        got="$(jq -c '[.rules[]|select(.type=="pull_request").parameters.allowed_merge_methods[]]|sort' <<<"$live")"
-        assert "'$rname' merge methods = $want" test "$got" = "$want"
-    fi
-    # For required_status_checks, the live required contexts must match the payload.
-    if jq_has '.rules[] | select(.type=="required_status_checks")' "$file"; then
-        wantc="$(jq -c '[.rules[]|select(.type=="required_status_checks").parameters.required_status_checks[].context]|sort' "$file")"
-        gotc="$(jq -c '[.rules[]|select(.type=="required_status_checks").parameters.required_status_checks[].context]|sort' <<<"$live")"
-        assert "'$rname' required checks = $wantc" test "$gotc" = "$wantc"
-    fi
+        want="$(jq -S -c --arg t "$t" "[.rules[] | select(.type==\$t) | .parameters] | first | $norm" "$file")"
+        # shellcheck disable=SC2016
+        got="$(jq -S -c --arg t "$t" "[.rules[] | select(.type==\$t) | .parameters] | first | $norm" <<<"$live")"
+        assert "'$rname' rule '$t' parameters match the payload" test "$got" = "$want"
+    done <<<"$ptypes"
 }
 
 check_settings() {
@@ -219,11 +237,20 @@ check_settings() {
     if ! live="$(gh api "repos/$repo")"; then fail "could not read repository settings"; return; fi
     # Static settings are driven from settings.json, so the check never drifts from the file.
     # Add a key there and it is audited here automatically.
+    # The payload is parsed into a variable before the loop rather than streamed from a process substitution.
+    # A jq failure inside `done < <(...)` leaves the loop body unexecuted without tripping set -e.
+    # Every static setting would then report as checked and passing while nothing was compared, a false clean.
+    local pairs
+    if ! pairs="$(jq -r 'to_entries[] | "\(.key)\t\(.value)"' "$settings_file")"; then
+        fail "settings payload $settings_file did not parse"; return
+    fi
+    # A payload that parses to nothing is a floor failure rather than a clean run, so it is asserted.
+    if [ -z "$pairs" ]; then fail "settings payload $settings_file declares no keys"; return; fi
     while IFS=$'\t' read -r key want; do
         # shellcheck disable=SC2016  # $k is a jq --arg variable, not a shell expansion
         got="$(jq -r --arg k "$key" '.[$k]' <<<"$live")"
         assert "setting $key = $want" test "$got" = "$want"
-    done < <(jq -r 'to_entries[] | "\(.key)\t\(.value)"' "$settings_file")
+    done <<<"$pairs"
     # Dynamic settings apply sets: has_discussions (public repos only), default_branch (main, if it exists).
     private="$(jq -r '.private' <<<"$live")"
     wantdisc=true; [ "$private" = "true" ] && wantdisc=false
