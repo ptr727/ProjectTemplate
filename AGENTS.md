@@ -2,9 +2,22 @@
 
 **ProjectTemplate** exists for agent enablement across a fleet of related projects, so an agent works over all of them autonomously and productively, at repeatable quality, inside guardrails that keep the autonomy from doing harm. It holds the portable rules those projects follow, a machine-readable ground-truth spec ([`spec/`](./spec/)), a registry of the projects ([`registry/repos.json`](./registry/repos.json)), and an audit-agent instruction set ([`AUDIT.md`](./AUDIT.md)). It ships no sample application code.
 
-This file is the entry point every coding agent reads first, and it holds only two things: the rules for managing context and delegation, which apply to every task, and a map of where every other rule lives. The rule text itself is in [`GOVERNANCE.md`](./GOVERNANCE.md), one section per topic. Code style lives in [`CODESTYLE.md`](./CODESTYLE.md) (a General section plus per-language sections for .NET and Python), and the CI/CD workflow contract in [`WORKFLOW.md`](./WORKFLOW.md).
+This file is the entry point every coding agent reads first, and it holds only three things: the bootstrap that says where the canonical rules live and which procedure to follow for the state this repository is actually in, the rules for managing context and delegation, which apply to every task, and a map of where every other rule lives. The rule text itself is in [`GOVERNANCE.md`](./GOVERNANCE.md), one section per topic. Code style lives in [`CODESTYLE.md`](./CODESTYLE.md) (a General section plus per-language sections for .NET and Python), and the CI/CD workflow contract in [`WORKFLOW.md`](./WORKFLOW.md).
 
 Treat this file and `GOVERNANCE.md` as authoritative for cross-cutting rules, and do not restate their rules elsewhere. A project's **project-specific conventions and public-API/behavioral contracts** (e.g. a "Library API Conventions" section) live in that project's own `AGENTS.md`, **not** in [`.github/copilot-instructions.md`](./.github/copilot-instructions.md), because that file targets GitHub Copilot / VS Code specifically, while this file and `GOVERNANCE.md` are the agent-agnostic ones every coding agent is directed to read, so any rule a reviewer must honor has to live in one of those two files to be provider-independent.
+
+## Fleet Bootstrap
+
+This repository is governed by a shared template, and the canonical rules, machine-readable spec, and procedures live in `github.com/ptr727/ProjectTemplate`. Fetch that repository before acting on anything about conformance, carried content, repository settings, or standing a repository up, because a carried copy here can be stale or absent and the hub is the only authority on what this repository is supposed to hold. This section is byte-locked across every repository in the fleet, so it reads identically wherever it is found, and it is the entry point whenever nothing else present says where the rules are.
+
+Route by what this repository currently holds rather than by what it is expected to hold, since the two differ exactly when this section matters most.
+
+- **No repository yet, or a local tree with no remote.** Follow the hub's `STANDUP.md` from section 0. That file is hub-only and deliberately not carried, because a repository needing it cannot be relied on to hold a current copy. Note that nothing in it creates the GitHub repository, which is an outward-facing write requiring explicit permission, so section 0A is the list handed to the maintainer before anything else starts.
+- **A repository with no carried instruction set, or a partial one.** Carry the baseline per the hub's `STANDUP.md` sections 1A and 2, which resolve what this repository is owed from its declared types and workflow model. Absent files are not drift to re-vendor, they are a baseline that never arrived, and the two are fixed differently.
+- **A repository with the instruction set, current or stale.** Follow the hub's `AUDIT.md` end to end, then apply what it finds per its section 10. An audit that reports drift and stops is half the procedure.
+- **A repository that believes it is conformant.** Run the audit anyway and commit the report, because conformance asserted without a report is conformance nobody can check. This is the same procedure as the case above and is listed separately only because it is the one most often skipped.
+
+Two rules bound every path above. **Read the hub's `main` branch as ground truth**, since that is the promoted and gated state, and read `develop` only to detect divergence. And **the audit is read-only**: it produces a report and never edits the repository it measures, so a fix is a separate, reviewable change.
 
 ## Context and Delegation Discipline
 
