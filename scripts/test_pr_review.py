@@ -52,9 +52,10 @@ def thread(tid: str, resolved: bool = False, login: str = pr_review.REVIEWER,
 
 def payload(reviews: list[dict], threads: list[dict] | None = None,
             merge: str = 'CLEAN', comments: list[dict] | None = None,
-            older: bool = False) -> dict:
+            older: bool = False, older_reviews: bool = False) -> dict:
     return {'headRefOid': HEAD, 'mergeable': 'MERGEABLE', 'mergeStateStatus': merge,
-            'reviews': {'nodes': reviews}, 'reviewThreads': {'nodes': threads or []},
+            'reviews': {'nodes': reviews, 'pageInfo': {'hasPreviousPage': older_reviews}},
+            'reviewThreads': {'nodes': threads or []},
             'comments': {'nodes': comments or [], 'pageInfo': {'hasPreviousPage': older}}}
 
 
@@ -117,30 +118,49 @@ class TestAnsweredOutsideReview(unittest.TestCase):
 
     def test_ordinary_discussion_does_not_push_the_answer_out_of_the_window(self) -> None:
         """The window reads the newest comments, not the reviewer's, so others crowd it."""
-        chatter = [comment(login='ptr727', at=LATE) for _ in range(pr_review.COMMENT_WINDOW - 1)]
+        chatter = [comment(login='ptr727', at=LATE) for _ in range(pr_review.WINDOW - 1)]
         found = pr_review.answered_outside_review(
             payload([review(oid=OLD, at=EARLY)], comments=[comment(at=LATE)] + chatter))
         self.assertIsNotNone(found)
 
     def test_comments_behind_the_window_are_unknown_rather_than_no_answer(self) -> None:
         """Finding nothing and having nothing to find are one reading once an answer can hide."""
-        full = [comment(login='ptr727') for _ in range(pr_review.COMMENT_WINDOW)]
+        full = [comment(login='ptr727') for _ in range(pr_review.WINDOW)]
         self.assertTrue(
-            pr_review.answer_window_saturated(payload([review()], comments=full, older=True)))
+            pr_review.window_blind(payload([review()], comments=full, older=True), 'comments'))
 
     def test_a_window_holding_every_comment_is_not_a_gap(self) -> None:
         """A full window and a window holding the lot are the same length, so length cannot say."""
-        full = [comment(login='ptr727') for _ in range(pr_review.COMMENT_WINDOW)]
+        full = [comment(login='ptr727') for _ in range(pr_review.WINDOW)]
         self.assertFalse(
-            pr_review.answer_window_saturated(payload([review()], comments=full, older=False)))
+            pr_review.window_blind(payload([review()], comments=full, older=False), 'comments'))
+
+    def test_reviews_behind_the_window_report_nothing_rather_than_a_false_answer(self) -> None:
+        """No reviewer review in view dates every comment as newer, so each reads as an answer.
+
+        Reporting nothing keeps the wait polling, where a wrong answer ends it outright on a
+        pull request whose review landed and simply sits behind a busier review history.
+        """
+        pr = payload([review(login='ptr727') for _ in range(pr_review.WINDOW)],
+                     comments=[comment(at=LATE)], older_reviews=True)
+        self.assertTrue(pr_review.window_blind(pr, 'reviews'))
+        self.assertIsNone(pr_review.answered_outside_review(pr))
+
+    def test_one_reviewer_review_in_view_is_a_baseline_the_answer_can_be_dated_against(self) -> None:
+        """Reviews arrive in creation order too, so a hidden one is older than the one in view."""
+        pr = payload([review(at=EARLY, oid=OLD)]
+                     + [review(login='ptr727') for _ in range(pr_review.WINDOW - 1)],
+                     comments=[comment(at=LATE)], older_reviews=True)
+        self.assertFalse(pr_review.window_blind(pr, 'reviews'))
+        self.assertIsNotNone(pr_review.answered_outside_review(pr))
 
     def test_one_spent_reviewer_comment_in_view_settles_the_question(self) -> None:
         """Comments arrive in creation order, so a hidden one is older than the spent one in view."""
         full = ([comment(at=EARLY)]
-                + [comment(login='ptr727') for _ in range(pr_review.COMMENT_WINDOW - 1)])
+                + [comment(login='ptr727') for _ in range(pr_review.WINDOW - 1)])
         pr = payload([review(at=LATE)], comments=full, older=True)
         self.assertIsNone(pr_review.answered_outside_review(pr))
-        self.assertFalse(pr_review.answer_window_saturated(pr))
+        self.assertFalse(pr_review.window_blind(pr, 'comments'))
 
 
 class TestDigest(GqlCase):
@@ -322,10 +342,10 @@ class TestDigestReportsTheAnswer(GqlCase):
         """Reporting `no` off a window an answer can hide behind is the false clean to avoid."""
         self.answer(payload([review()], older=True,
                             comments=[comment(login='ptr727')
-                                      for _ in range(pr_review.COMMENT_WINDOW)]))
+                                      for _ in range(pr_review.WINDOW)]))
         out, _ = pr_review.digest('o', 'r', 7)
         self.assertIn('answered_outside_review=unknown', out)
-        self.assertIn('COMMENTS BEHIND THE WINDOW', out)
+        self.assertIn('BEHIND THE WINDOW (comments)', out)
 
 
 class TestGqlTransport(unittest.TestCase):
@@ -441,12 +461,13 @@ class TestContract(unittest.TestCase):
     def test_the_guard_tests_the_window_the_queries_actually_read(self) -> None:
         """A guard measuring one number while the query fetches another reads clean on drift."""
         source = (REPO / 'scripts' / 'pr_review.py').read_text(encoding='utf-8')
-        windows = set(re.findall(r'comments\(last:(\d+)\)', source))
-        self.assertEqual({str(pr_review.COMMENT_WINDOW)}, windows)
-        self.assertEqual(2, source.count(f'comments(last:{pr_review.COMMENT_WINDOW})'))
-        # The guard reads `hasPreviousPage`, so a query that stops asking reports no, not unknown.
-        # That is the silent narrowing this holds both queries against.
-        self.assertEqual(2, source.count('pageInfo{ hasPreviousPage }'))
+        windows = set(re.findall(r'(?:comments|reviews)\(last:(\d+)\)', source))
+        self.assertEqual({str(pr_review.WINDOW)}, windows)
+        # The guard reads `hasPreviousPage`, so a connection that stops asking reports no.
+        # That is the silent narrowing this holds every window against.
+        # Four: reviews and comments, in each of the two queries.
+        self.assertEqual(4, source.count('pageInfo{ hasPreviousPage }'))
+        self.assertEqual(4, len(re.findall(r'(?:comments|reviews)\(last:\d+\)', source)))
 
     def test_the_backoff_is_bounded_and_non_decreasing(self) -> None:
         """A wait that sleeps zero seconds is a busy loop, and one that shrinks polls harder later."""

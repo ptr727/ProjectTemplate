@@ -36,10 +36,10 @@ SUMMARY = re.compile(r'<summary>(.*?)</summary>', re.DOTALL | re.IGNORECASE)
 TAGS = re.compile(r'</?(?:details|summary)>', re.IGNORECASE)
 COUNT = re.compile(r'\((\d+)\)')
 
-# How many of the newest comments both queries read.
+# How many of the newest reviews and comments both queries read.
 # A narrow window drops the reviewer's answer behind ordinary discussion, reporting no answer.
 # A test holds this equal to the number the queries carry, since a drift between them reads clean.
-COMMENT_WINDOW = 100
+WINDOW = 100
 
 # Liveness query: timestamps and ids only, no comment or review bodies.
 # A liveness check does not need the finding text, and re-fetching bodies was 76% of polls.
@@ -49,7 +49,7 @@ Q_LIVE = """
 query($o:String!,$r:String!,$n:Int!){
   repository(owner:$o,name:$r){ pullRequest(number:$n){
     headRefOid
-    reviews(last:20){ nodes{ author{login} state commit{oid} submittedAt } }
+    reviews(last:100){ nodes{ author{login} state commit{oid} submittedAt } pageInfo{ hasPreviousPage } }
     comments(last:100){ nodes{ author{login} createdAt } pageInfo{ hasPreviousPage } }
   }}}
 """
@@ -59,7 +59,7 @@ Q_FULL = """
 query($o:String!,$r:String!,$n:Int!){
   repository(owner:$o,name:$r){ pullRequest(number:$n){
     headRefOid mergeable mergeStateStatus
-    reviews(last:20){ nodes{ author{login} state commit{oid} submittedAt body } }
+    reviews(last:100){ nodes{ author{login} state commit{oid} submittedAt body } pageInfo{ hasPreviousPage } }
     reviewThreads(first:100){ nodes{ id isResolved
       comments(first:1){ nodes{ author{login} path line body } } }}
     comments(last:100){ nodes{ author{login} createdAt body } pageInfo{ hasPreviousPage } }
@@ -93,7 +93,10 @@ def answered_outside_review(pr: dict) -> dict | None:
     A comment older than the newest review is spent, since the review it preceded did land.
     """
     comments = reviewer_nodes(pr, 'comments')
-    if not comments:
+    # A blind review window leaves no honest baseline to date a comment against.
+    # An empty one dates every comment as newer, so each reads as an answer.
+    # Reporting nothing keeps the wait polling, where a wrong answer ends it outright.
+    if not comments or window_blind(pr, 'reviews'):
         return None
     newest = max(comments, key=lambda n: n.get('createdAt') or '')
     reviews = reviewer_nodes(pr, 'reviews')
@@ -101,18 +104,18 @@ def answered_outside_review(pr: dict) -> dict | None:
     return newest if (newest.get('createdAt') or '') > latest_review else None
 
 
-def answer_window_saturated(pr: dict) -> bool:
-    """True where comments sit behind the window and none in view are the reviewer's.
+def window_blind(pr: dict, field: str) -> bool:
+    """True where the reviewer's own nodes can sit behind the window, so the view cannot decide.
 
-    The query reads the newest comments rather than the reviewer's, so ordinary discussion is
-    what pushes an answer out of reach. Comments arrive in creation order, so anything behind
-    the window is older than everything inside it: one reviewer comment in view, spent against
-    a later review, proves every hidden one is spent too, and that reads as no rather than as
-    unknown. `hasPreviousPage` is what says anything is back there at all, since a full window
-    and a window holding every comment the pull request has are the same length.
+    Each query reads the newest nodes rather than the reviewer's, so ordinary traffic is what
+    pushes theirs out of reach. Nodes arrive in creation order, so anything behind the window is
+    older than everything inside it: one of the reviewer's in view bounds every hidden one as
+    older still, which settles the question rather than leaving it open. `hasPreviousPage` is
+    what says anything is back there at all, since a full window and a window holding the lot
+    are the same length.
     """
-    older = ((pr.get('comments') or {}).get('pageInfo') or {}).get('hasPreviousPage')
-    return bool(older) and not reviewer_nodes(pr, 'comments')
+    older = ((pr.get(field) or {}).get('pageInfo') or {}).get('hasPreviousPage')
+    return bool(older) and not reviewer_nodes(pr, field)
 
 
 def live_state(owner: str, repo: str, num: int) -> tuple[str, bool, dict | None]:
@@ -180,7 +183,8 @@ def digest(owner: str, repo: str, num: int, seen: set[str] | None = None) -> tup
         finding_count(b) for b in on_head_blocks)
 
     answer = answered_outside_review(pr)
-    answered = 'yes' if answer else ('unknown' if answer_window_saturated(pr) else 'no')
+    blind = [f for f in ('reviews', 'comments') if window_blind(pr, f)]
+    answered = 'yes' if answer else ('unknown' if blind else 'no')
     lines = [
         f'pr={num} head={head[:8]} rounds={len(revs)} '
         f'review_on_head={"yes" if on_head else "NO"} '
@@ -190,9 +194,9 @@ def digest(owner: str, repo: str, num: int, seen: set[str] | None = None) -> tup
         f'answered_outside_review={answered} '
         f'merge={pr.get("mergeStateStatus")}'
     ]
-    if answered == 'unknown':
-        lines.append(f'  COMMENTS BEHIND THE WINDOW: the newest {COMMENT_WINDOW} carry none from '
-                     'the reviewer and older ones exist, so an answer cannot be ruled out here')
+    if blind:
+        lines.append(f'  BEHIND THE WINDOW ({" and ".join(blind)}): the newest {WINDOW} carry '
+                     'none from the reviewer and older ones exist, so this cannot decide')
     if answer:
         # Printed whole for the same reason a suppressed finding is, since it reaches no thread.
         # Its wording is the only thing separating a refusal from an ordinary remark.
