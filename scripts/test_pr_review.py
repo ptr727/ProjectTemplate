@@ -127,6 +127,14 @@ class TestAnsweredOutsideReview(unittest.TestCase):
         self.assertTrue(pr_review.answer_window_saturated(payload([review()], comments=full)))
         self.assertFalse(pr_review.answer_window_saturated(payload([review()], comments=full[:-1])))
 
+    def test_one_spent_reviewer_comment_in_view_settles_a_full_window(self) -> None:
+        """Comments arrive in creation order, so a hidden one is older than the spent one in view."""
+        full = ([comment(at=EARLY)]
+                + [comment(login='ptr727') for _ in range(pr_review.COMMENT_WINDOW - 1)])
+        pr = payload([review(at=LATE)], comments=full)
+        self.assertIsNone(pr_review.answered_outside_review(pr))
+        self.assertFalse(pr_review.answer_window_saturated(pr))
+
 
 class TestDigest(GqlCase):
     def test_the_summary_line_counts_what_it_names(self) -> None:

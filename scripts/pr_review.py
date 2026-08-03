@@ -102,13 +102,16 @@ def answered_outside_review(pr: dict) -> dict | None:
 
 
 def answer_window_saturated(pr: dict) -> bool:
-    """True where the window is full, so an answer sitting behind it cannot be ruled out.
+    """True where the window is full and carries no reviewer comment, the one unreadable case.
 
     The query reads the newest comments rather than the reviewer's, so ordinary discussion is
-    what pushes an answer out of reach, and a full window is the one case where finding nothing
-    and having nothing to find are the same reading.
+    what pushes an answer out of reach. Comments arrive in creation order, so anything behind
+    the window is older than everything inside it: one reviewer comment in view, spent against
+    a later review, proves every hidden one is spent too, and that reads as no rather than as
+    unknown. Only a full window with none of the reviewer's own leaves the question open.
     """
-    return len(((pr.get('comments') or {}).get('nodes') or [])) >= COMMENT_WINDOW
+    comments = (pr.get('comments') or {}).get('nodes') or []
+    return len(comments) >= COMMENT_WINDOW and not reviewer_nodes(pr, 'comments')
 
 
 def live_state(owner: str, repo: str, num: int) -> tuple[str, bool, dict | None]:
