@@ -52,11 +52,14 @@ def thread(tid: str, resolved: bool = False, login: str = pr_review.REVIEWER,
 
 def payload(reviews: list[dict], threads: list[dict] | None = None,
             merge: str = 'CLEAN', comments: list[dict] | None = None,
-            older: bool = False, older_reviews: bool = False) -> dict:
+            older: bool = False, older_reviews: bool = False, pending: bool = False) -> dict:
+    requested = ([{'requestedReviewer': {'__typename': 'Bot', 'login': pr_review.REVIEWER}}]
+                 if pending else [])
     return {'headRefOid': HEAD, 'mergeable': 'MERGEABLE', 'mergeStateStatus': merge,
             'reviews': {'nodes': reviews, 'pageInfo': {'hasPreviousPage': older_reviews}},
             'reviewThreads': {'nodes': threads or []},
-            'comments': {'nodes': comments or [], 'pageInfo': {'hasPreviousPage': older}}}
+            'comments': {'nodes': comments or [], 'pageInfo': {'hasPreviousPage': older}},
+            'reviewRequests': {'nodes': requested}}
 
 
 class GqlCase(unittest.TestCase):
@@ -161,6 +164,47 @@ class TestAnsweredOutsideReview(unittest.TestCase):
         pr = payload([review(at=LATE)], comments=full, older=True)
         self.assertIsNone(pr_review.answered_outside_review(pr))
         self.assertFalse(pr_review.window_blind(pr, 'comments'))
+
+
+class TestPickup(unittest.TestCase):
+    """A request nothing acted on and a review being worked on are one reading from the reviews."""
+
+    def test_a_request_with_no_pickup_after_it_is_named_by_its_timestamp(self) -> None:
+        """The shape that sat thirteen hours reading as pending: requested, never started."""
+        events = [('review_requested', '2026-08-02T22:58:15Z'),
+                  ('copilot_work_started', '2026-08-02T22:58:45Z'),
+                  ('review_requested', '2026-08-03T00:15:00Z')]
+        self.assertEqual('2026-08-03T00:15:00Z', pr_review.never_picked_up(events))
+
+    def test_a_request_the_reviewer_took_up_is_not_stalled(self) -> None:
+        """Slow is not stuck, and only the pickup event tells them apart."""
+        events = [('review_requested', '2026-08-03T13:09:19Z'),
+                  ('copilot_work_started', '2026-08-03T13:09:54Z')]
+        self.assertEqual('', pr_review.never_picked_up(events))
+
+    def test_an_earlier_pickup_does_not_cover_a_later_request(self) -> None:
+        """Answering the last request is not answering this one, and order is what says so."""
+        events = [('copilot_work_started', '2026-08-02T22:58:45Z'),
+                  ('review_requested', '2026-08-02T23:31:44Z')]
+        self.assertEqual('2026-08-02T23:31:44Z', pr_review.never_picked_up(events))
+
+    def test_no_request_at_all_is_not_a_stall(self) -> None:
+        self.assertEqual('', pr_review.never_picked_up(
+            [('copilot_work_started', '2026-08-02T22:58:45Z')]))
+        self.assertEqual('', pr_review.never_picked_up([]))
+
+    def test_the_pending_set_is_read_where_a_bot_reviewer_is_visible(self) -> None:
+        """`gh pr view --json reviewRequests` omits a Bot outright and reports an empty set."""
+        pending = {'reviewRequests': {'nodes': [
+            {'requestedReviewer': {'__typename': 'Bot', 'login': pr_review.REVIEWER}}]}}
+        self.assertTrue(pr_review.reviewer_requested(pending))
+        human = {'reviewRequests': {'nodes': [
+            {'requestedReviewer': {'__typename': 'User', 'login': 'ptr727'}}]}}
+        self.assertFalse(pr_review.reviewer_requested(human))
+        self.assertFalse(pr_review.reviewer_requested({'reviewRequests': {'nodes': []}}))
+        # A null reviewer is what a deleted account leaves behind, and it must not raise.
+        self.assertFalse(pr_review.reviewer_requested(
+            {'reviewRequests': {'nodes': [{'requestedReviewer': None}]}}))
 
 
 class TestDigest(GqlCase):
@@ -426,6 +470,41 @@ class TestCli(GqlCase):
         self.answer(payload([review(at=LATE)], comments=[comment(at=EARLY)]))
         with mock.patch.object(pr_review.time, 'sleep'):
             self.assertEqual(0, pr_review.main(['wait', '7']))
+
+    def test_wait_stops_on_a_request_nothing_picked_up(self) -> None:
+        """Waiting on cannot start a request nothing is acting on, so the wait says so and ends.
+
+        The zero timeout is what this fails on rather than hangs on, and it also pins the order:
+        the pickup is read before the clock, so the stall reports as itself instead of as PENDING.
+        """
+        self.answer(payload([review(oid=OLD)], pending=True))
+        with mock.patch.object(pr_review, 'timeline',
+                               return_value=[('review_requested', LATE)]), \
+                mock.patch.object(pr_review.time, 'sleep'):
+            self.assertEqual(50, pr_review.main(
+                ['wait', '7', '--pickup-grace', '0', '--timeout', '0']))
+        out = self.out.getvalue()
+        self.assertIn('status=REQUEST_NOT_PICKED_UP', out)
+        self.assertIn(LATE, out)
+
+    def test_a_request_being_worked_on_is_not_stopped_on(self) -> None:
+        """A slow round is the case the grace exists for, and stopping on it loses the review."""
+        self.answer(payload([review(oid=OLD)], pending=True), payload([review()], pending=True))
+        with mock.patch.object(pr_review, 'timeline',
+                               return_value=[('review_requested', EARLY),
+                                             ('copilot_work_started', LATE)]), \
+                mock.patch.object(pr_review.time, 'sleep'):
+            self.assertEqual(0, pr_review.main(
+                ['wait', '7', '--pickup-grace', '0', '--timeout', '600']))
+
+    def test_the_pickup_read_waits_out_the_grace_rather_than_running_per_poll(self) -> None:
+        """It costs a second call, and inside the grace a pending request is just work in flight."""
+        self.answer(payload([review(oid=OLD)], pending=True), payload([review()], pending=True))
+        with mock.patch.object(pr_review, 'timeline', return_value=[]) as seen, \
+                mock.patch.object(pr_review.time, 'sleep'):
+            self.assertEqual(0, pr_review.main(
+                ['wait', '7', '--pickup-grace', '9999', '--timeout', '600']))
+        seen.assert_not_called()
 
     def test_the_repo_argument_splits_into_owner_and_name(self) -> None:
         self.answer(payload([review()]))

@@ -15,6 +15,8 @@ Subcommands
            40 = Copilot answered outside a formal review, so read the printed body.
            40 reports the shape of that answer and reads nothing of its cause: an answer
            carrying no commit covers no head, so the wait ends and the reader decides.
+           50 = the request is pending and nothing picked it up, which no amount of
+           waiting changes. Recovery is two mutations, and they stay in the runbook.
 
 Read-only by design. Mutations (re-request review, reply, resolve thread) are
 deliberately NOT implemented here - they are state-changing calls that must stay
@@ -51,6 +53,7 @@ query($o:String!,$r:String!,$n:Int!){
     headRefOid
     reviews(last:100){ nodes{ author{login} state commit{oid} submittedAt } pageInfo{ hasPreviousPage } }
     comments(last:100){ nodes{ author{login} createdAt } pageInfo{ hasPreviousPage } }
+    reviewRequests(first:10){ nodes{ requestedReviewer{ __typename ... on Bot{login} ... on User{login} } } }
   }}}
 """
 
@@ -63,6 +66,7 @@ query($o:String!,$r:String!,$n:Int!){
     reviewThreads(first:100){ nodes{ id isResolved
       comments(first:1){ nodes{ author{login} path line body } } }}
     comments(last:100){ nodes{ author{login} createdAt body } pageInfo{ hasPreviousPage } }
+    reviewRequests(first:10){ nodes{ requestedReviewer{ __typename ... on Bot{login} ... on User{login} } } }
   }}}
 """
 
@@ -76,6 +80,52 @@ def gql(query: str, owner: str, repo: str, num: int) -> dict:
         sys.stderr.write(r.stderr[:800])
         raise SystemExit(f'gh graphql failed rc={r.returncode}')
     return json.loads(r.stdout)['data']['repository']['pullRequest']
+
+
+def timeline(owner: str, repo: str, num: int) -> list[tuple[str, str]]:
+    """The request and pickup events, oldest first, as (event, timestamp).
+
+    GraphQL carries no `copilot_work_started`, so this is the one REST reader here.
+    `--jq` projects inside gh rather than after it, since `--paginate` without one emits a
+    concatenated array per page that is not valid JSON on every gh a fleet machine may carry.
+    """
+    r = subprocess.run(
+        ['gh', 'api', '--paginate', f'repos/{owner}/{repo}/issues/{num}/timeline',
+         '--jq', '.[] | select(.event == "copilot_work_started" or .event == "review_requested")'
+                 ' | "\\(.event) \\(.created_at)"'],
+        capture_output=True, text=True)
+    if r.returncode != 0:
+        sys.stderr.write(r.stderr[:800])
+        raise SystemExit(f'gh timeline failed rc={r.returncode}')
+    return [(ln.split(' ', 1)[0], ln.split(' ', 1)[1])
+            for ln in r.stdout.splitlines() if ' ' in ln]
+
+
+def never_picked_up(events: list[tuple[str, str]]) -> str:
+    """The newest request's timestamp where no pickup followed it, otherwise the empty string.
+
+    A request the reviewer accepts raises `copilot_work_started` within about half a minute, so
+    a request with no pickup after it is not a slow review, it is a request nothing is acting on.
+    The two states look identical from the reviews alone, which is how one sat for thirteen hours
+    reading as pending. Elapsed time cannot separate them either, since a genuinely slow round
+    also produces no review, and only the pickup event says whether anything is working.
+    """
+    requested = [t for e, t in events if e == 'review_requested']
+    started = [t for e, t in events if e == 'copilot_work_started']
+    if not requested:
+        return ''
+    newest = max(requested)
+    return '' if any(t >= newest for t in started) else newest
+
+
+def reviewer_requested(pr: dict) -> bool:
+    """True where the reviewer sits in the pending request set.
+
+    Read from GraphQL rather than `gh pr view --json reviewRequests`, which omits a Bot
+    reviewer entirely and reports an empty set while the reviewer is sitting in it.
+    """
+    return any((n.get('requestedReviewer') or {}).get('login') == REVIEWER
+               for n in ((pr.get('reviewRequests') or {}).get('nodes') or []))
 
 
 def reviewer_nodes(pr: dict, field: str) -> list[dict]:
@@ -118,13 +168,17 @@ def window_blind(pr: dict, field: str) -> bool:
     return bool(older) and not reviewer_nodes(pr, field)
 
 
+def reviewed_head(pr: dict) -> bool:
+    """True where one of the reviewer's own reviews carries the current head's commit."""
+    head = pr['headRefOid']
+    return any((n.get('commit') or {}).get('oid') == head
+               for n in reviewer_nodes(pr, 'reviews'))
+
+
 def live_state(owner: str, repo: str, num: int) -> tuple[str, bool, dict | None]:
     """Return (head_sha, copilot_reviewed_current_head, copilot_answer_outside_a_review)."""
     pr = gql(Q_LIVE, owner, repo, num)
-    head = pr['headRefOid']
-    done = any((n.get('commit') or {}).get('oid') == head
-               for n in reviewer_nodes(pr, 'reviews'))
-    return head, done, answered_outside_review(pr)
+    return pr['headRefOid'], reviewed_head(pr), answered_outside_review(pr)
 
 
 def heading_of(block: str) -> str:
@@ -192,8 +246,14 @@ def digest(owner: str, repo: str, num: int, seen: set[str] | None = None) -> tup
         f'suppressed={sum(finding_count(b) for n, b in blocks)} '
         f'(on_head={sum(finding_count(b) for b in on_head_blocks)} earlier={stale}) '
         f'answered_outside_review={answered} '
+        f'requested={"yes" if reviewer_requested(pr) else "no"} '
         f'merge={pr.get("mergeStateStatus")}'
     ]
+    if reviewer_requested(pr) and not on_head:
+        stalled = never_picked_up(timeline(owner, repo, num))
+        if stalled:
+            lines.append(f'  REQUEST NOT PICKED UP (requested {stalled}, no copilot_work_started '
+                         'since): clear the request and re-request, per the runbook')
     if blind:
         lines.append(f'  BEHIND THE WINDOW ({" and ".join(blind)}): the newest {WINDOW} carry '
                      'none from the reviewer and older ones exist, so this cannot decide')
@@ -245,6 +305,8 @@ def main(argv: list[str] | None = None) -> int:
     ap.add_argument('number', type=int)
     ap.add_argument('--repo', default='ptr727/ProjectTemplate')
     ap.add_argument('--timeout', type=int, default=2700, help='seconds (default 45m)')
+    ap.add_argument('--pickup-grace', type=int, default=300,
+                    help='seconds before a pending request is read for pickup (default 5m)')
     a = ap.parse_args(argv)
     owner, repo = a.repo.split('/', 1)
 
@@ -256,23 +318,40 @@ def main(argv: list[str] | None = None) -> int:
     # In-process backoff, so the whole wait costs one agent turn.
     delays = [15, 20, 30, 45, 60, 120]
     start = time.monotonic()
-    _, done, answer = live_state(owner, repo, a.number)
+    pr = gql(Q_LIVE, owner, repo, a.number)
+    done, answer = reviewed_head(pr), answered_outside_review(pr)
+    stalled = ''
     i = 0
     while not done and not answer:
-        if time.monotonic() - start > a.timeout:
+        elapsed = time.monotonic() - start
+        # Read the pickup before the clock, so a request nothing acted on reports as itself.
+        # Running the clock out instead would report it exactly as a slow reviewer.
+        # The read costs a second call, so it waits out the grace rather than running per poll.
+        # Inside the grace a pending request is simply a review being worked on.
+        if elapsed > a.pickup_grace and reviewer_requested(pr):
+            stalled = never_picked_up(timeline(owner, repo, a.number))
+            if stalled:
+                break
+        if elapsed > a.timeout:
             # The timeout is where the digest's one extra call is worth most.
             # A bare PENDING line reports a broken wait and a slow reviewer identically.
             out, _ = digest(owner, repo, a.number)
             print(out)
-            print(f'status=PENDING waited={int(time.monotonic()-start)}s')
+            print(f'status=PENDING waited={int(elapsed)}s')
             return 30
         time.sleep(delays[min(i, len(delays) - 1)])
         i += 1
         # Re-read head each iteration: a push during the wait moves it.
-        _, done, answer = live_state(owner, repo, a.number)
+        pr = gql(Q_LIVE, owner, repo, a.number)
+        done, answer = reviewed_head(pr), answered_outside_review(pr)
     out, _ = digest(owner, repo, a.number)
     print(out)
     print(f'waited={int(time.monotonic()-start)}s')
+    if stalled and not done:
+        print(f'status=REQUEST_NOT_PICKED_UP requested {stalled} and no copilot_work_started '
+              'followed it, so nothing is working on this and waiting on will not start it: '
+              'clear the request and re-request, per the runbook')
+        return 50
     if not done:
         print('status=ANSWERED_OUTSIDE_REVIEW the reviewer answered without reviewing, '
               'so read the comment above and decide, since where it declines or names a limit '
