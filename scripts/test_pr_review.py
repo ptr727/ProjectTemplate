@@ -44,6 +44,22 @@ def collapsed(heading: str = 'Comments suppressed due to low confidence (1)',
             f'{finding}\n\n</details>\n')
 
 
+def nested(heading: str = '### Suppressed comments (2)',
+           finding: str = '**a.py:12**\n* The retry count is off by one.') -> str:
+    """The section as a markdown heading nested inside the `Review details` wrapper.
+
+    The live shape as of 2026-08-05: the section is no longer its own `<details>` wrapper with a
+    matching `<summary>`, it is a markdown heading inside the wrapper that also carries the
+    round's file and effort metadata, which trails the findings rather than preceding them.
+    """
+    return ('### Ready to approve\n\nThe change is narrow.\n\n'
+            '<details>\n<summary>File summaries</summary>\n\n'
+            '| File | Description |\n\n</details>\n\n'
+            f'<details>\n<summary>Review details</summary>\n\n{heading}\n\n{finding}\n\n'
+            '- **Files reviewed:** 1/1 changed files\n'
+            '- **Review effort level:** Lite\n</details>\n')
+
+
 def thread(tid: str, resolved: bool = False, login: str = pr_review.REVIEWER,
            body: str = 'A finding.', path: str = 'a.py', line: int = 1) -> dict:
     return {'id': tid, 'isResolved': resolved,
@@ -360,6 +376,47 @@ class TestSuppressed(GqlCase):
         out, _ = pr_review.digest('o', 'r', 7)
         self.assertIn('suppressed=0', out)
         self.assertNotIn('SUPPRESSED', out)
+
+    def test_a_heading_nested_inside_the_review_details_wrapper_reports(self) -> None:
+        """The shape that reported `suppressed=0` over a body carrying two findings.
+
+        The reviewer moved the section inside the `Review details` wrapper as a markdown heading,
+        so the wrapper's summary reads `Review details` and matches nothing, and the fallback that
+        exists for a moved wrapper scans the body with every wrapper deleted, which deletes the
+        region the heading now sits in. The two misses compound into a clean round over findings
+        no thread will ever carry, which is the one failure this whole digest exists to prevent.
+        """
+        self.answer(payload([review(body=nested())]))
+        out, _ = pr_review.digest('o', 'r', 7)
+        self.assertIn('suppressed=2', out)
+        self.assertIn('The retry count is off by one.', out)
+
+    def test_the_nested_count_is_the_heading_s_own_rather_than_the_wrapper_s(self) -> None:
+        """The wrapper's summary carries no count, so reading it floors two findings to one."""
+        self.answer(payload([review(body=nested(heading='### Suppressed comments (3)'))]))
+        out, _ = pr_review.digest('o', 'r', 7)
+        self.assertIn('suppressed=3', out)
+        # The block starts at its own heading, so the wrapper's summary is not the finding's header.
+        self.assertNotIn('Review details', out)
+
+    def test_both_the_wrapper_shape_and_the_nested_shape_report_in_one_run(self) -> None:
+        """Both appear across the rounds of a single pull request, so neither replaces the other.
+
+        Retargeting the parse from the old shape to the new one would report the same false clean
+        one round later, on whichever shape the reviewer happened not to emit that time.
+        """
+        self.answer(payload([review(oid=OLD, body=collapsed(heading='Suppressed comments (2)')),
+                             review(body=nested())]))
+        out, _ = pr_review.digest('o', 'r', 7)
+        self.assertIn('suppressed=4', out)
+        self.assertIn('(on_head=2 earlier=2)', out)
+
+    def test_the_file_summary_wrapper_beside_a_nested_section_is_still_not_a_finding(self) -> None:
+        """A body carries several wrappers, and scanning them all must not read the table as one."""
+        self.answer(payload([review(body=nested())]))
+        out, _ = pr_review.digest('o', 'r', 7)
+        self.assertNotIn('File summaries', out)
+        self.assertNotIn('| File | Description |', out)
 
     def test_a_human_review_carrying_the_phrase_is_not_a_copilot_finding(self) -> None:
         self.answer(payload([review(login='ptr727', body=collapsed()), review()]))
