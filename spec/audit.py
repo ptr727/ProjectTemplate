@@ -159,7 +159,7 @@ def driftnote_findings(entry, spec, open_count):
             elif owner and owner not in entry.get("types", []):
                 out.append(("DRIFT", f"registry: driftNote names check '{cid}', whose type '{owner}' this repo does not declare: {quoted}"))
             else:
-                out.append(("DRIFT", f"registry: driftNote names check '{cid}', which this audit does not evaluate (no per-type check is mechanized, AUDIT.md section 4) - judge it by hand and delete the note once it passes: {quoted}"))
+                out.append(("DRIFT", f"registry: driftNote names check '{cid}', which this audit does not evaluate by id (AUDIT.md section 4) - judge it by hand and delete the note once it passes: {quoted}"))
         marker = next((w for w in PENDING_MARKERS if re.search(rf"\b{re.escape(w)}\b", note, re.I)), None)
         if marker and not open_count:
             out.append(("DRIFT", f"registry: driftNote says '{marker}' but the audit is clean - verify and reconcile: {quoted}"))
@@ -1171,8 +1171,8 @@ def render_issue(entry, findings, ground, audited_sha, run_utc, hub_sha):
     w(f"Generated from the hub audit of `{name}` ({types}). Run stamp `audit run {run_utc} | hub {hub_sha}`, "
       f"against `@ {stamp}` (the format AUDIT.md section 8 says a derived artifact quotes). Regenerate with "
       f"`spec/audit.py --issue {name}`. Findings are a point-in-time snapshot - re-run the audit before acting. "
-      f"This lists what the audit mechanically detects. No per-type check in `spec/project-types.json` is run here, "
-      f"so nothing below is evidence about one; the full letter and intent verdict is judged by hand per AUDIT.md section 4.")
+      f"This lists what the audit mechanically detects. No check belonging to a project type in `spec/project-types.json` is run "
+      f"here, and the cross-cutting dimensions are covered only in part, so the full letter and intent verdict is AUDIT.md section 4's.")
     w("")
     if not findings:
         w("The deterministic checks are clean - nothing to converge.")
@@ -1278,7 +1278,7 @@ def main(argv=None):
         stamp = f" @ {ground}@{audited_sha[:7]}" if audited_sha else ""
         print(f"== {entry['name']} ({', '.join(entry.get('types', []))}; {model}){stamp} ==")
         if not findings:
-            print("  clean (deterministic checks only; no per-type check in spec/project-types.json is run here - AUDIT.md section 4 is judged by hand)")
+            print("  clean (deterministic checks only; no project-type check in spec/project-types.json runs here, and the cross-cutting ones are covered only in part - AUDIT.md section 4)")
         for kind, text in findings:
             print(f"  {kind:6} {text}")
             if kind in ("DEFECT", "LETTER", "ERROR"):
