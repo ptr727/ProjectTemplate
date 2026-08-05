@@ -90,11 +90,16 @@ jobs:
 
       # Derived once and used three times: the directory name, the stamp in the shipped server config, and the value the live check expects.
       # Deriving it twice yields ids seconds apart, and the check then asserts a version nothing installed.
+      #
+      # The run id and attempt make it unique by construction rather than by argument.
+      # A bare second-resolution timestamp is unique here only because a multi-minute install precedes this step and the concurrency group serializes an environment, which are both incidental.
+      # Reordering this step earlier, an obvious refactor, would silently make two ids collide, and a colliding id is the one value the live check cannot tell apart.
+      # The timestamp stays the prefix, so the id reads chronologically and a name-sorted prune keeps working.
       - name: Resolve release id step
         id: release
         run: |
           set -Eeuo pipefail
-          echo "id=$(date -u +%Y%m%d-%H%M%S)" >> "$GITHUB_OUTPUT"
+          echo "id=$(date -u +%Y%m%d-%H%M%S)-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}" >> "$GITHUB_OUTPUT"
 
       # Assembled to a scratch path, since the environment's deploy root is on the far host.
       - name: Assemble release bundle step
