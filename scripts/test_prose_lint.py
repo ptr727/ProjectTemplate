@@ -169,10 +169,10 @@ class TestGovernanceCoupling(unittest.TestCase):
 
 
 class TestDupword(BaitCase):
-    """A doubled word, read from markdown prose and from the comments of every other syntax.
+    """A doubled word, read from Markdown prose and from the comments of every other syntax.
 
     The scope matters more here than for the other prose rules, because this one gates CI. Outside
-    markdown a repeated token is far more often correct code than a typo: `class="gallery
+    Markdown a repeated token is far more often correct code than a typo: `class="gallery
     gallery-cols-1"` is the ordinary HTML idiom, and no edit fixes it without changing the page.
     """
 
@@ -620,7 +620,7 @@ class TestCommentWrap(BaitCase):
         # A punctuated HTML comment is commentary, so it stays judged as prose.
         self.assertEqual(['comment-wrap'],
                          self.flag('a.md', 'Prose.\n\n<!-- One thing. Another thing. -->\n'))
-        # Outside markdown the carve-out does not apply, since there the marker case does not arise.
+        # Outside Markdown the carve-out does not apply, since there the marker case does not arise.
         self.assertEqual(['comment-case'], self.flag('a.py', '# lowercase opening\n'))
 
     def test_a_block_opener_inside_a_line_comment_is_text(self) -> None:
@@ -1116,7 +1116,7 @@ class TestDiscovery(unittest.TestCase):
 
 
 class TestSentenceSplit(BaitCase):
-    """One sentence per line, the markdown counterpart of the comment-wrap rule."""
+    """One sentence per line, the Markdown counterpart of the comment-wrap rule."""
 
     def test_a_sentence_continuing_onto_the_next_line_is_flagged(self) -> None:
         self.assertEqual(['sentence-split'],
@@ -1152,7 +1152,7 @@ class TestSentenceSplit(BaitCase):
 
 
 class TestSpelling(BaitCase):
-    """US English, read from markdown prose and from the comments of every other syntax.
+    """US English, read from Markdown prose and from the comments of every other syntax.
 
     The rule runs on whatever file it is handed, README and HISTORY included. It complements the
     cspell gate rather than dividing the tree with it: cspell reads those two files and this reads

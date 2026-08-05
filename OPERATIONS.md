@@ -87,7 +87,7 @@ docker run --rm --pull=always -v "$PWD":/workdir --workdir /workdir davidanson/m
 docker run --rm --pull=always -v "$PWD":/workdir --workdir /workdir ghcr.io/streetsidesoftware/cspell:latest --no-progress README.md HISTORY.md
 ```
 
-Both commands are the canonical invocations from [GOVERNANCE.md](./GOVERNANCE.md). markdownlint reads every markdown file, while cspell reads `README.md` and `HISTORY.md` only. That narrower spelling scope is deliberate, since gating every markdown file would mean padding `cspell.json` with technical terms without end, and broad live spell-check is the editor extension's job. Widening it here produces noise that no gate acts on.
+Both commands are the canonical invocations from [GOVERNANCE.md](./GOVERNANCE.md). markdownlint reads every Markdown file, while cspell reads `README.md` and `HISTORY.md` only. That narrower spelling scope is deliberate, since gating every Markdown file would mean padding `cspell.json` with technical terms without end, and broad live spell-check is the editor extension's job. Widening it here produces noise that no gate acts on.
 
 The `editorconfig-checker` action is setup-only. Using it alone silently skips the check, so CI invokes the checker itself rather than relying on the action.
 
