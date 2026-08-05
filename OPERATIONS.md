@@ -43,7 +43,7 @@ python3 spec/audit.py [RepoName]      # one repo
 python3 spec/audit.py --issue [RepoName]
 ```
 
-Findings are a point-in-time snapshot read live over the API. Re-run before acting on one, and quote the run stamp in any issue derived from it. The deterministic subset lives here, and the full letter-and-intent verdict is [AUDIT.md](./AUDIT.md).
+Findings are a point-in-time snapshot read live over the API. Re-run before acting on one, and quote the run stamp in any issue derived from it. The deterministic subset lives here, and the full letter-and-intent verdict is [AUDIT.md](./AUDIT.md). No per-type check in `spec/project-types.json` runs here, so a clean run is not evidence about any of them.
 
 ### Apply or verify repository configuration
 
