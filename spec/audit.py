@@ -125,7 +125,9 @@ def check_id_owner(spec, cid):
     The catalog is a required input rather than an optional one: resolving against an absent
     catalog would report every id as undefined, which is a louder failure than reporting none.
     """
-    types = spec["types"]
+    types = spec.get("types")
+    if not types:
+        raise KeyError("spec['types'] (spec/project-types.json) is required to resolve a driftNote check id")
     for name, t in types.get("types", {}).items():
         if any(c.get("id") == cid for c in t.get("checks", [])):
             return name, True
@@ -1127,6 +1129,21 @@ def _selftest():
         else:
             print(f"  ok   driftNote {label}: {len(texts)} finding(s)")
 
+    # A spec with no catalog and an entry with a check-id note fails loudly and names what is missing.
+    # No live caller pairs the two, since main() always loads the catalog.
+    # The pairing stays an error rather than becoming a fallback, because resolving ids against an absent catalog reports every one of them undefined.
+    # That is a work list which destroys correct notes.
+    try:
+        driftnote_findings({"types": ["hugo"], "driftNotes": ["A note (hugo.build.strict)."]}, {"registry": {}}, 0)
+        ok = False
+        print("  FAIL missing catalog: no error raised")
+    except KeyError as e:
+        if "project-types.json" not in str(e):
+            ok = False
+            print(f"  FAIL missing catalog: error does not name the file -> {e}")
+        else:
+            print("  ok   missing catalog: raises and names spec/project-types.json")
+
     # A ground-truth branch that does not resolve is one error, not a baseline's worth of letters.
     # Every `?ref=` read would 404 and report each carried file absent, describing the ref, not the repo.
     # The branch facts are already read at that point, so they are reported rather than dropped.
@@ -1172,7 +1189,7 @@ def render_issue(entry, findings, ground, audited_sha, run_utc, hub_sha):
       f"against `@ {stamp}` (the format AUDIT.md section 8 says a derived artifact quotes). Regenerate with "
       f"`spec/audit.py --issue {name}`. Findings are a point-in-time snapshot - re-run the audit before acting. "
       f"This lists what the audit mechanically detects. No check belonging to a project type in `spec/project-types.json` is run "
-      f"here, and the cross-cutting dimensions are covered only in part, so the full letter and intent verdict is AUDIT.md section 4's.")
+      f"here, and the cross-cutting dimensions are covered only in part, so the full letter and intent verdict lives in AUDIT.md section 4.")
     w("")
     if not findings:
         w("The deterministic checks are clean - nothing to converge.")
