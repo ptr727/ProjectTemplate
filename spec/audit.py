@@ -269,6 +269,28 @@ def extract_section(text, heading):
 TEMPLATE_REF_SCANNED = ("AGENTS.md", "GOVERNANCE.md", ".github/copilot-instructions.md")
 
 
+def strip_sections(text, names):
+    """`text` with each named `## <heading>` region removed, located by position rather than by content.
+
+    Region rules match extract_section (a fenced `## ` is not a boundary, a sibling H2 ends the region), so
+    the two agree on where a section starts and stops.
+    Positional removal is the point: deleting the extracted text instead would also delete an identical
+    passage anywhere else in the document, including one quoted inside the prose the caller means to read.
+    That failure is silent and it fails open, since the removed duplicate takes its content out of the scan.
+    """
+    want = {n.strip().lower() for n in names}
+    out, dropping, fenced = [], False, False
+    for ln in normalize(text).split("\n"):
+        stripped = ln.strip()
+        if stripped.startswith("```") or stripped.startswith("~~~"):
+            fenced = not fenced
+        elif not fenced and stripped.startswith("## "):
+            dropping = stripped[2:].strip().lower() in want  # a sibling H2 always ends the previous region
+        if not dropping:
+            out.append(ln)
+    return "\n".join(out)
+
+
 def template_ref_outside_verbatim(text, verbatim_names, hub_name):
     """True when `hub_name` appears in `text` outside every one of its verbatim sections.
 
@@ -280,12 +302,7 @@ def template_ref_outside_verbatim(text, verbatim_names, hub_name):
     regions before scanning keeps the check pointed at the prose a repo actually owns. A hub reference that
     reaches a verbatim section is the hub's defect to fix once in the canonical, never each repo's to clear.
     """
-    scanned = normalize(text)
-    for name in sorted(verbatim_names):
-        block = extract_section(scanned, name)
-        if block:
-            scanned = scanned.replace(block, "")
-    return hub_name.lower() in scanned.lower()
+    return hub_name.lower() in strip_sections(text, verbatim_names).lower()
 
 
 def heading_texts(markdown):
@@ -1054,6 +1071,12 @@ def _selftest():
         ("CRLF document excises the same way", clean_doc.replace("\n", "\r\n"), {"Fleet Bootstrap"}, False),
         ("a re-cased verbatim heading still excises", clean_doc.replace("## Fleet Bootstrap", "## fleet bootstrap"), {"Fleet Bootstrap"}, False),
         ("no hub reference at all", "# AGENTS\n\n## Where the Rules Live\n\nNothing to see.\n", {"Fleet Bootstrap"}, False),
+        # A second region under the same heading is excised by name, which is right: both are that section.
+        ("the heading appearing twice excises both", "# AGENTS\n\n" + boot + "\n## Notes\n\n" + boot, {"Fleet Bootstrap"}, False),
+        # A fenced copy is not a heading, so it is prose the repo owns and the reference in it must flag.
+        # This is the case that made positional excision necessary, because removing the extracted text instead would delete the fenced copy along with the real region and the scan would fail open.
+        # That is the one arrangement a repo could otherwise use to carry the reference in a document it owns.
+        ("a fenced copy of the section is prose, not the section", "# AGENTS\n\n## Notes\n\n```\n" + boot + "```\n\n" + boot, {"Fleet Bootstrap"}, True),
     ]
     tref_ok = True
     for label, doc, verb, want in tref:
