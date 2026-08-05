@@ -153,10 +153,16 @@ jobs:
             "${RUNNER_TEMP}/bundle/current" \
             "${DEPLOY_SSH_USER}@${DEPLOY_SSH_HOST}:/${ENVIRONMENT}/"
 
-      # The count is asserted after the prune rather than trusted (WORKFLOW.md D5.6).
+      # Retention is bounded and owned, and this step is only one of the two shapes D5.6 accepts.
+      # It applies where the deploy credential can observe the destination, so the count can be asserted after pruning and the deploy fails when it does not converge.
       # A prune whose pattern stops matching reports success while the disk fills, which is the same shape as a gate that stops gating.
       # The release current resolves to is never a candidate, whatever the sort order says.
       # This destination is durable, so no artifact retention backstop expires it.
+      #
+      # Delete this step where the credential is confined write-only, as a forced rsync command with no send capability is.
+      # Such a key can neither delete nor read back, and widening it to satisfy a check would trade a real confinement boundary for the check.
+      # There the prune belongs to a host-side timer, and D5.6 is met by recording that ownership on the host side of the repo's runbook rather than by a step here.
+      # What D5.6 rejects is neither side owning it, since each then assumes the other prunes.
       - name: Prune old releases step
         env:
           DEPLOY_SSH_USER: ${{ vars.DEPLOY_SSH_USER }}
