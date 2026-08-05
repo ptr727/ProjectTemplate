@@ -129,8 +129,8 @@ Run [`AUDIT.md`][audit] end to end. The repo is stood up only when it is **opera
 
 When a repo matches no existing type, the work is onboarding a **type**, not just a repo:
 
-1. Add the type to [`spec/project-types.json`][project-types] (`detect[]`, plus `checks` with verdict tiers and intent refs) and any per-type files to [`spec/files.json`][files], then add its publish mechanism to [`spec/secrets.json`][secrets] if new.
-2. Add the reference workflow leaf to [`catalog/snippets/workflows/`][workflows] and document the type's [`WORKFLOW.md`][workflow] walkthrough.
+1. Add the type to [`spec/project-types.json`][project-types] (`detect[]`, plus `checks` with verdict tiers and intent refs) and any per-type files to [`spec/files.json`][files], then add its publish mechanism to [`spec/secrets.json`][secrets] if new. Add the type's token to [`spec/scope-model.md`][scope-model] and the type itself to [`spec/type-model.md`][type-model] in the same change, which that file's own rule requires. A type publishing to a **new destination** also needs the target added to the closed `target` enum in [`registry/repos.schema.json`][repos-schema] and mapped in `targetMechanisms`, or the first repo declaring it fails `spec/validate.py` with an unknown-target error.
+2. Add the reference workflow leaf to [`catalog/snippets/workflows/`][workflows] and document the type's [`WORKFLOW.md`][workflow] walkthrough. A leaf must not be named `build-*-task.yml` unless the type really is a build target, since `source-only.detect` is literally "no `build-*-task.yml`" and the name alone would make that declaration false for any repo carrying both.
 3. Add the type to the [conformance matrix][matrix] and run the cold-start self-test until a context-free agent stands it up to operational.
 
 ## Self-Test: Cold-Start Conformance
@@ -165,9 +165,11 @@ The same [`AUDIT.md`][audit] run is the on-demand audit for any known repo, and 
 [repo-config-carry]: ./docs/repo-config-carry.md
 [repo-config-readme]: ./repo-config/README.md
 [repos]: ./registry/repos.json
+[repos-schema]: ./registry/repos.schema.json
 [scope-model]: ./spec/scope-model.md
 [secrets]: ./spec/secrets.json
 [section-model]: ./spec/section-model.md
 [spec]: ./spec/
+[type-model]: ./spec/type-model.md
 [validate]: ./spec/validate.py
 [workflow]: ./WORKFLOW.md

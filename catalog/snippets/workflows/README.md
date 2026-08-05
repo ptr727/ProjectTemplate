@@ -13,6 +13,8 @@ The reusable build/publish workflow tasks a code-shipping repo runs. They are **
 | `build-docker-task.yml` | Multi-arch image build + push, registry layer cache | D4.4, D6, D9.4; section 6 Docker walkthrough |
 | `build-datebadge-task.yml` | BYOB date/last-build badge on the default branch | D4; section 3 Release Model |
 | `publish-docker-readme-task.yml` | Push the size-limited Docker Hub overview | D2.4; section 6 Docker walkthrough |
+| `deploy-site.yml` | Dispatch entry point for a site deploy: environment choice, per-environment concurrency, ref gate, shared validation | D2.1, D2.3, D7.1 |
+| `deploy-site-task.yml` | Build a site and ship it to a filesystem on a host the project owns, then verify against the running host | D4.6, D5.6, D7.2 (section 6 static-site walkthrough) |
 | `check-upstream-version-task.yml` | Upstream-version tracker for wrapper repos | D3.5, D8.3 |
 | `run-codegen-pull-request-task.yml` | Deterministic codegen executor (per-branch PR) | D8.2 |
 | `run-periodic-codegen-pull-request.yml` | Scheduled codegen trigger over both branches | D8.2 |

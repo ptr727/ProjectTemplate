@@ -48,6 +48,14 @@ Language types carry the style and type-check requirements for their language, g
 
 - **cpp** - C/C++ present for style only. The check of record is **clang-format** (a shared config driving the editor, the CLI, and CI, a `parity.lang` arm), feeding the operational lint CI. Deeper semantic and static analysis is intentionally out of scope here - for a codegen or config repo the C++ is scaffolded and completed by its downstream toolchain (an ESPHome compile), which does the compilation-time checking, and clang-tidy would need a compile database the repo does not have. A repo's `.h` is read as C++ by context (Arduino/ESPHome), since the extension alone is ambiguous.
 
+## Generators
+
+A **generator** type is what a repo builds its deliverable *with*, where the deliverable is not code: a static-site generator, a documentation builder. It is named for the generator (`hugo`) rather than for the transport that ships the result, because what a repo builds and where the result lands are separate axes. The destination lives in the registry `publish[]` entry (`{ target, mechanism }`), so a repo changes transport without changing type, and a second transport is a new **mechanism** rather than a new type. Baking the transport into the type is what makes the set explode combinatorially: one generator over two transports would otherwise need two types.
+
+There is no `static-site` to `hugo` hierarchy while the type has one member. Instead each check's `assert` is phrased without naming the generator wherever the requirement generalizes (the URL-contract gate and its length floor, the rendered output never committed, the generator pinned by version and digest, vendored-dependency provenance), and names it only where a generator-specific construct *is* the letter, such as a build flag. When a second generator joins the fleet, promoting the generic checks to a shared type is then a registry edit rather than a rewrite, which is the property the phrasing rule exists to preserve. Paying for that abstraction at one member would be the more expensive mistake.
+
+A generator type declares no `profiles`. Build versus lint-only is a depth of *language* presence, so a profile on a generator type would assert nothing, and `spec/validate.py` rejects a declared profile whose type does not define one.
+
 ## Changing the type set carries review weight
 
 The set of types, their profiles, and each type's checks is governed, like the section and fidelity models.

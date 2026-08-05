@@ -1,0 +1,180 @@
+name: Deploy site task
+
+# Reusable deploy of a built site to a filesystem on a host the project owns.
+# It is a separate dispatch from the release, so a redeploy of an unchanged commit mints no tag.
+# That matters because redeploying is routine: a host rebuild, a rollback, or proving a branch on a non-production environment.
+#
+# The transport here is rsync over SSH, but the transport is not the guarantee.
+# What the contract fixes is the dispatch gate, the per-environment GitHub Environment credentials, and that success is asserted against what the host serves rather than against the transport's exit status.
+# See WORKFLOW.md D4.6 and D5.6.
+#
+# Two steps call repo-owned scripts instead of inlining their work.
+# The bundle assembly builds the site, gates it on the repo's URL contract, precompresses, and stamps the release id into the server configuration it ships.
+# The live verification asserts the golden-list floors, the environment, the release id, and then the URL contract.
+# Both are long, both are repo-specific, and both have to be runnable by hand outside CI.
+
+on:
+  workflow_call:
+    inputs:
+      # Selects the GitHub Environment, and is also the path segment the release lands under on the host.
+      environment:
+        description: The GitHub Environment to deploy to.
+        required: true
+        type: string
+    outputs:
+      # The caller records what shipped; without this a rollback has to read the host to find out.
+      release-id:
+        value: ${{ jobs.deploy.outputs.release-id }}
+      site-url:
+        value: ${{ jobs.deploy.outputs.site-url }}
+
+# Pinned by version and by checksum, because the site is reproducible only if the generator is.
+# A floating installer action defeats the point, and a minor bump changes rendered output.
+# Update both values together, and keep them equal to the pin the validation task installs.
+env:
+  HUGO_VERSION: 0.164.0
+  HUGO_SHA256: 8325f3653032d0fc536503691f4833dc4eb6c6be02ee62466758f3f37a7f2fcd
+
+jobs:
+
+  # A job of its own, because the environment binding on the deploy job resolves before any step runs.
+  # A workflow_call caller is not bound by the dispatch choice list a human sees, so an unknown name would otherwise bind nothing and run anyway.
+  assert-environment:
+    name: Assert environment name job
+    runs-on: ubuntu-latest
+    permissions: {}
+
+    steps:
+
+      - name: Assert environment is known step
+        env:
+          ENVIRONMENT: ${{ inputs.environment }}
+        run: |
+          set -Eeuo pipefail
+          case "$ENVIRONMENT" in
+          production | staging) ;;
+          *)
+            echo "::error::environment must be production or staging, got '$ENVIRONMENT'."
+            exit 1
+            ;;
+          esac
+
+  # Every host-specific value comes from the environment, so this file names no host, path, or address.
+  deploy:
+    name: Deploy site job
+    runs-on: ubuntu-latest
+    needs: [assert-environment]
+    environment: ${{ inputs.environment }}
+    permissions:
+      contents: read
+    outputs:
+      release-id: ${{ steps.release.outputs.id }}
+      site-url: ${{ vars.SITE_BASE_URL }}
+
+    steps:
+
+      # Full history, because a shallow clone silently changes page metadata where the generator reads git info.
+      - name: Checkout code step
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          fetch-depth: 0
+
+      - name: Install generator step
+        run: |
+          set -Eeuo pipefail
+          deb="hugo_extended_${HUGO_VERSION}_linux-amd64.deb"
+          curl -sSLf -o "$deb" "https://github.com/gohugoio/hugo/releases/download/v${HUGO_VERSION}/${deb}"
+          echo "${HUGO_SHA256}  ${deb}" | sha256sum --check --strict
+          sudo dpkg --install "$deb"
+          hugo version
+
+      # Derived once and used three times: the directory name, the stamp in the shipped server config, and the value the live check expects.
+      # Deriving it twice yields ids seconds apart, and the check then asserts a version nothing installed.
+      - name: Resolve release id step
+        id: release
+        run: |
+          set -Eeuo pipefail
+          echo "id=$(date -u +%Y%m%d-%H%M%S)" >> "$GITHUB_OUTPUT"
+
+      # Assembled to a scratch path, since the environment's deploy root is on the far host.
+      - name: Assemble release bundle step
+        env:
+          SITE_BASE_URL: ${{ vars.SITE_BASE_URL }}
+        run: |
+          set -Eeuo pipefail
+          deploy/make-release.sh "${RUNNER_TEMP}/bundle" "${{ steps.release.outputs.id }}"
+
+      # The known-hosts value is a variable rather than a secret: it is integrity-critical but not confidential, and a variable keeps it diff-visible.
+      # StrictHostKeyChecking is never disabled.
+      - name: Install deploy key step
+        env:
+          DEPLOY_SSH_PRIVATE_KEY: ${{ secrets.DEPLOY_SSH_PRIVATE_KEY }}
+          DEPLOY_SSH_KNOWN_HOSTS: ${{ vars.DEPLOY_SSH_KNOWN_HOSTS }}
+        run: |
+          set -Eeuo pipefail
+          mkdir -p ~/.ssh
+          chmod 700 ~/.ssh
+          printf '%s\n' "$DEPLOY_SSH_PRIVATE_KEY" > ~/.ssh/deploy
+          chmod 600 ~/.ssh/deploy
+          printf '%s\n' "$DEPLOY_SSH_KNOWN_HOSTS" > ~/.ssh/known_hosts
+          chmod 600 ~/.ssh/known_hosts
+
+      # The destination is anchored at the key's confinement root, so no host path appears here.
+      # The hard-link source points at current, which still resolves to the previous release until the flip, so CI carries no state.
+      # A missing target is a warning rather than an error, so a first deploy into a fresh environment needs no special case.
+      # The mkpath flag creates the releases parent, which the transport will not create on its own.
+      # No delete flag: at an environment root it silently removes the releases a rollback needs.
+      - name: Upload release step
+        env:
+          DEPLOY_SSH_USER: ${{ vars.DEPLOY_SSH_USER }}
+          DEPLOY_SSH_HOST: ${{ vars.DEPLOY_SSH_HOST }}
+          RELEASE_ID: ${{ steps.release.outputs.id }}
+          ENVIRONMENT: ${{ inputs.environment }}
+        run: |
+          set -Eeuo pipefail
+          rsync -az --mkpath --no-g --chmod=D2755,F644 \
+            --link-dest="/${ENVIRONMENT}/current/" \
+            -e "ssh -i ~/.ssh/deploy -o IdentitiesOnly=yes" \
+            "${RUNNER_TEMP}/bundle/releases/${RELEASE_ID}/" \
+            "${DEPLOY_SSH_USER}@${DEPLOY_SSH_HOST}:/${ENVIRONMENT}/releases/${RELEASE_ID}/"
+
+      # A separate step from the upload, so a failed transfer cannot half-publish a site.
+      # The pointer is relative, so one bundle works at any remote root.
+      # The transport replaces a symlink through a temporary and a rename, so it is never absent to a request in flight.
+      - name: Flip current step
+        env:
+          DEPLOY_SSH_USER: ${{ vars.DEPLOY_SSH_USER }}
+          DEPLOY_SSH_HOST: ${{ vars.DEPLOY_SSH_HOST }}
+          ENVIRONMENT: ${{ inputs.environment }}
+        run: |
+          set -Eeuo pipefail
+          rsync -a --no-recursive \
+            -e "ssh -i ~/.ssh/deploy -o IdentitiesOnly=yes" \
+            "${RUNNER_TEMP}/bundle/current" \
+            "${DEPLOY_SSH_USER}@${DEPLOY_SSH_HOST}:/${ENVIRONMENT}/"
+
+      # The count is asserted after the prune rather than trusted (WORKFLOW.md D5.6).
+      # A prune whose pattern stops matching reports success while the disk fills, which is the same shape as a gate that stops gating.
+      # The release current resolves to is never a candidate, whatever the sort order says.
+      # This destination is durable, so no artifact retention backstop expires it.
+      - name: Prune old releases step
+        env:
+          DEPLOY_SSH_USER: ${{ vars.DEPLOY_SSH_USER }}
+          DEPLOY_SSH_HOST: ${{ vars.DEPLOY_SSH_HOST }}
+          ENVIRONMENT: ${{ inputs.environment }}
+          KEEP_RELEASES: '10'
+        run: |
+          set -Eeuo pipefail
+          deploy/prune-releases.sh "${DEPLOY_SSH_USER}@${DEPLOY_SSH_HOST}" "${ENVIRONMENT}" "${KEEP_RELEASES}"
+
+      # The only step that observes the running site (WORKFLOW.md D4.6).
+      # An upload succeeds against a container serving nothing, and a flip succeeds against a server that never reloads its rules.
+      # The check asserts which environment answered, then which release its rules came from, then the URL contract.
+      # The release value is a response header the artifact stamps into its own served configuration, so it settles without parsing a payload and survives an auth gate in front of the site.
+      - name: Verify URL contract step
+        env:
+          EXPECT_SITE_ENV: ${{ inputs.environment }}
+          EXPECT_RELEASE: ${{ steps.release.outputs.id }}
+        run: |
+          set -Eeuo pipefail
+          checks/check-live-urls.sh "${{ vars.SITE_BASE_URL }}"

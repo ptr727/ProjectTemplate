@@ -1,0 +1,61 @@
+name: Deploy site action
+
+# Dispatch entry point for a site deploy, and deliberately not the release publisher.
+# A deploy ships an already-validated tree to one environment; the GitHub release is a separate dispatch that cuts the tag.
+# Splitting them means a redeploy of an unchanged commit mints no tag, which is what makes a rollback or a host rebuild cheap.
+
+on:
+  workflow_dispatch:
+    inputs:
+      # A choice rather than free text, so a typo cannot bind an environment that does not exist.
+      # The callee re-asserts the name anyway, since a workflow_call caller is not bound by this list.
+      environment:
+        description: Environment to deploy to.
+        required: true
+        type: choice
+        options:
+          - staging
+          - production
+
+# Keyed on the environment rather than the ref, so two environments deploy independently.
+# Runs queue rather than cancel, because a cancelled deploy leaves a release uploaded and unflipped.
+concurrency:
+  group: ${{ github.workflow }}-${{ inputs.environment }}
+  cancel-in-progress: false
+
+jobs:
+
+  # First, so a mis-dispatched production deploy fails before anything is installed or written.
+  # Production is constrained to the default branch; a non-production environment deploys from any ref, since proving a branch before it merges is what that environment is for.
+  assert-ref:
+    name: Assert deploy ref job
+    runs-on: ubuntu-latest
+    permissions: {}
+
+    steps:
+
+      - name: Assert production deploys from the default branch step
+        run: |
+          set -Eeuo pipefail
+          if [ "${{ inputs.environment }}" = "production" ] && [ "${{ github.ref_name }}" != "${{ github.event.repository.default_branch }}" ]; then
+            echo "::error::Deploy production from the default branch, got ${{ github.ref_name }}."
+            exit 1
+          fi
+
+  # The same reusable validation task the pull request gate runs, so a dispatch cannot deploy a ref that fails validation.
+  validate:
+    name: Validate job
+    needs: [assert-ref]
+    permissions:
+      contents: read
+    uses: ./.github/workflows/validate-task.yml
+
+  deploy:
+    name: Deploy job
+    needs: [validate]
+    permissions:
+      contents: read
+    uses: ./.github/workflows/deploy-site-task.yml
+    with:
+      environment: ${{ inputs.environment }}
+    secrets: inherit
