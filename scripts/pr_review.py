@@ -226,7 +226,7 @@ def suppressed_blocks(body: str) -> list[str]:
     """Return the review body's low-confidence sections, each sliced from its own heading.
 
     The section has worn three shapes so far: its own `<details>` wrapper, a bare heading in the
-    body, and a markdown heading nested inside the `Review details` wrapper. The wrapper is the
+    body, and a Markdown heading nested inside the `Review details` wrapper. The wrapper is the
     part that keeps moving, so each region is scanned line by line for the heading rather than
     read for a wrapper's summary: a nested heading is not a summary, and stripping the wrappers
     to look for it outside deletes the very region it sits in. That is the pair that reported

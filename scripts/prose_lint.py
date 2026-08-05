@@ -613,7 +613,7 @@ LABEL_COLON = re.compile(r'^\s*(?:[-*]|[0-9]+\.)\s+\*\*[^*]+\*\*\s*:')
 def list_spans(s: str) -> list[str]:
     """Split a line into the spans that each hold their own list.
 
-    A markdown table row is a record of fields rather than one sentence, so judging the row whole
+    A Markdown table row is a record of fields rather than one sentence, so judging the row whole
     let a comma in one column excuse a semicolon in another.
     """
     cells = s.strip().strip('|').split('|') if s.lstrip().startswith('|') else [s]
@@ -821,7 +821,7 @@ def comment_wrap_findings(path: Path, raw: str, lines: list[str]) -> list[tuple[
         if not body or NOT_PROSE.search(body) or BARE_URI.match(body.strip()):
             prev_body = ''
             continue
-        # An unpunctuated markdown HTML comment is a structural marker, not commentary.
+        # An unpunctuated Markdown HTML comment is a structural marker, not commentary.
         # It is a label, so it takes neither a capital nor a sentence split.
         # A tool matches each one verbatim, so rewriting it breaks whatever reads it.
         # Group headers, the ToC-omit directive, and the agent-safety markers are the cases.
@@ -860,7 +860,7 @@ def check_file(path: Path, rules: set[str]) -> list[tuple[int, str, str]]:
     lines = raw.split('\n')
     if {'comment-wrap', 'comment-case'} & rules:
         out.extend(f for f in comment_wrap_findings(path, raw, lines) if f[1] in rules)
-    # Outside markdown the prose lives in the comments, and both rules judge prose, not code.
+    # Outside Markdown the prose lives in the comments, and both rules judge prose, not code.
     # A source line holds identifiers and literals, and an attribute value may legally repeat.
     # Reading it rejects correct work, `class="gallery gallery-cols-1"` being the reported case.
     comments: dict[int, list[str]] = {}

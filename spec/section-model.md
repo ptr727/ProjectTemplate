@@ -76,7 +76,7 @@ A repo's own content is not carried, and the hub declares where it goes rather t
 
 `CODESTYLE.md` is carried by every repo already. `ARCHITECTURE.md` stays **declared but advisory**: every code repo has an architecture, and how much of it earns a separate document is contextual, so mandating it would produce empty files where the design needs none. Declared and required are separate questions, and only a universal need answers both.
 
-`OPERATIONS.md` is agent-instruction content, so it takes the inline-link exception the markdown rules name, not the reference-style default. `ARCHITECTURE.md` is not on that closed list and follows the reference-style rule.
+`OPERATIONS.md` is agent-instruction content, so it takes the inline-link exception the Markdown rules name, not the reference-style default. `ARCHITECTURE.md` is not on that closed list and follows the reference-style rule.
 
 ## Migrating a repo onto the split
 

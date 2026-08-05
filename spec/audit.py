@@ -4,7 +4,7 @@
 Compares each cataloged registry repo against the ground truth in this repo - general settings
 (repo-config/settings.json), branch rulesets (normalized diff vs the model's payloads), secret
 names (spec/secrets.json; values are never read), baseline/per-type file presence and per-scope
-markdown section presence on the ground-truth branch (spec/files.json, spec/scope-model.md), and
+Markdown section presence on the ground-truth branch (spec/files.json, spec/scope-model.md), and
 branch-model facts (main/develop existence, develop behind main). Owner-initiated: run it when
 onboarding a repo, when drift is suspected, or before fleet-wide changes. Read-only - it never
 modifies a target.
@@ -209,7 +209,7 @@ def extract_section(text, heading):
 
 
 def heading_texts(markdown):
-    """Lowercased heading texts in a markdown document, for case-insensitive section-presence matching."""
+    """Lowercased heading texts in a Markdown document, for case-insensitive section-presence matching."""
     return {m.group(1).strip().lower() for line in markdown.splitlines() for m in (_HEADING.match(line),) if m}
 
 
@@ -662,7 +662,7 @@ def audit_repo(entry, spec, branch=None):
     # --- File and section presence on the ground-truth branch ---
     # appliesTo is matched against the repo's full selector set (types + workflowModel + releaseTrigger +
     # consumerModel), so the release/operational develop ruleset is two data entries, not a code swap.
-    # Required sections union across same-path entries. A carried markdown file must contain each heading
+    # Required sections union across same-path entries. A carried Markdown file must contain each heading
     # scoped to this repo. A rename reads as missing and equivalence is judged by hand, so a missing section
     # is DRIFT (a hint to verify), never a LETTER.
     sel = repo_selectors(entry, spec["registry"].get("defaults", {}))
@@ -783,7 +783,7 @@ def audit_repo(entry, spec, branch=None):
             findings.append(("LETTER", "readme: no intro line after the H1 - the README opens with the title then a one-line description, which doubles as the About description (spec/readme-structure.md)"))
         else:
             if strip_md_links(intro_line) != intro_line:
-                findings.append(("LETTER", "readme: the intro line carries markdown links - keep it link-free plain text, it doubles as the repo About description (spec/readme-structure.md)"))
+                findings.append(("LETTER", "readme: the intro line carries Markdown links - keep it link-free plain text, it doubles as the repo About description (spec/readme-structure.md)"))
             want = strip_md_links(intro_line).strip()
             if len(want) > 100:
                 findings.append(("LETTER", f"readme: the intro line is {len(want)} characters, over the 100-char limit (Docker Hub's short-description cap, the tightest surface it feeds) - tighten it to one short sentence (spec/readme-structure.md)"))
@@ -995,7 +995,7 @@ def _selftest():
         ok = False
         print("  FAIL description: strip_md_links behavior")
     else:
-        print("  ok   description: markdown links reduce to their text, plain text passes through")
+        print("  ok   description: Markdown links reduce to their text, plain text passes through")
     # cspell duplication: a workspace cSpell word list is detected, and a mere cspell.json mention is not.
     ws_dup = '{ "settings": { "cSpell.words": ["foo"] } }'
     ws_ok = '{ "settings": { "editor.rulers": [100] }, "note": "words live in cspell.json" }'
