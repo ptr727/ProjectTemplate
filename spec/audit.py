@@ -265,6 +265,29 @@ def extract_section(text, heading):
     return "\n".join(out) if capturing else None
 
 
+# Carried files scanned for a coordination reference (GOVERNANCE.md "Documentation Style Conventions").
+TEMPLATE_REF_SCANNED = ("AGENTS.md", "GOVERNANCE.md", ".github/copilot-instructions.md")
+
+
+def template_ref_outside_verbatim(text, verbatim_names, hub_name):
+    """True when `hub_name` appears in `text` outside every one of its verbatim sections.
+
+    A verbatim section's bytes are the hub's canonical and are checked byte-for-byte elsewhere, so a hub
+    reference inside one cannot be removed downstream: the repo would have to fail the verbatim check to
+    clear this one. `AGENTS.md > Fleet Bootstrap` is the standing case, since naming the hub is that
+    section's entire function - it is the byte-locked entry point stating where the canonical rules live,
+    and a repo holding no current copy of anything else is exactly who reads it. Excising the verbatim
+    regions before scanning keeps the check pointed at the prose a repo actually owns. A hub reference that
+    reaches a verbatim section is the hub's defect to fix once in the canonical, never each repo's to clear.
+    """
+    scanned = normalize(text)
+    for name in sorted(verbatim_names):
+        block = extract_section(scanned, name)
+        if block:
+            scanned = scanned.replace(block, "")
+    return hub_name.lower() in scanned.lower()
+
+
 def heading_texts(markdown):
     """Lowercased heading texts in a Markdown document, for case-insensitive section-presence matching."""
     return {m.group(1).strip().lower() for line in markdown.splitlines() for m in (_HEADING.match(line),) if m}
@@ -683,17 +706,6 @@ def audit_repo(entry, spec, branch=None):
         for name in sorted(present - claimed_names):
             findings.append(("DRIFT", f"secrets: {name} in the {store} store is claimed by no applicable mechanism (stale?)"))
 
-    # --- Carried files must not reference the template repo ---
-    # The coordination flow is machinery a consumer should not see, so a carried file states the behavior rather than the destination.
-    # This reads AGENTS.md, GOVERNANCE.md and .github/copilot-instructions.md, where a stale "report drift upstream" paragraph once spread.
-    # Skip the hub itself, whose own carried files are the source, where naming the repo they live in is correct.
-    # A downstream repo naming it is still flagged, which is the point.
-    if entry.get("name") != HUB_NAME:
-        for path in ("AGENTS.md", "GOVERNANCE.md", ".github/copilot-instructions.md"):
-            doc = gh(f"repos/{slug}/contents/{path}?ref={ground}", ok404=True)
-            if doc and doc.get("content") and HUB_NAME.lower() in base64.b64decode(doc["content"]).decode("utf-8", "replace").lower():
-                findings.append(("DRIFT", f"carried: {path} references the template repo by name or link (the coordination flow is machinery this repo's readers should not see; state the behavior, not the destination)"))
-
     # --- Dependabot ecosystem coverage ---
     # A repo's tree implies Dependabot ecosystems it must track: github-actions when it ships workflows
     # (the action versions they reference otherwise go stale, and a merge-bot then has no PRs to auto-merge),
@@ -810,6 +822,19 @@ def audit_repo(entry, spec, branch=None):
                     h2s = {ln[3:].strip().lower() for ln in text.splitlines() if ln.startswith("## ")}
                     for h in sorted(h2s - declared):
                         findings.append(("DRIFT", f"section: '{h}' in {path} is not a declared section - reconcile it (a duplicate of a verbatim section, or repo-specific content that moves to a topical doc), or confirm it is intentional (spec/section-model.md)"))
+
+        # --- Carried files must not reference the template repo ---
+        # The coordination flow is machinery a consumer should not see, so a carried file states the behavior rather than the destination.
+        # A stale "report drift upstream" paragraph once spread this way.
+        # Skip the hub itself, whose own carried files are the source, where naming the repo they live in is correct.
+        # A downstream repo naming it in prose it owns is still flagged, which is the point.
+        # Verbatim sections are excised first, and template_ref_outside_verbatim carries why that is not a loophole.
+        # Sited here, in the file loop, so the scan reuses the content already fetched for the section checks and reads the same selector-resolved verbatim list they were judged against.
+        if path in TEMPLATE_REF_SCANNED and entry.get("name") != HUB_NAME:
+            if text is None:
+                findings.append(("DRIFT", f"carried: could not read {path} content on {ground} to scan for a coordination reference (no inline content returned); verify by hand"))
+            elif template_ref_outside_verbatim(text, verbatim_secs[path], HUB_NAME):
+                findings.append(("DRIFT", f"carried: {path} references the template repo by name or link outside its verbatim sections (the coordination flow is machinery this repo's readers should not see; state the behavior, not the destination)"))
 
     # --- HISTORY.md mirrors the README opening ---
     # spec/readme-structure.md "HISTORY.md": the changelog opens as the README's twin - same H1 title and the
@@ -1014,6 +1039,30 @@ def _selftest():
         print("  FAIL section: extract_section region/hash behavior")
     else:
         print("  ok   section: heading in region, fenced ## kept, sibling H2 ends, None if absent, whitespace-tolerant locate, re-cased heading rehashes")
+
+    # Coordination-reference scan: the hub name inside a verbatim section is exempt, outside one is not.
+    # The first case is the real AGENTS.md shape, where the byte-locked Fleet Bootstrap block must name the hub and a repo therefore cannot clear a finding against it.
+    # The CRLF case matters because extract_section normalizes EOLs while carried files are CRLF on this fleet, so excision must survive that.
+    boot = "## Fleet Bootstrap\n\nThe canonical rules live in `github.com/acme/Hub`.\n"
+    owned = "## Where the Rules Live\n\nReport a rule discrepancy to acme/Hub.\n"
+    clean_doc = "# AGENTS\n\n" + boot + "\n## Where the Rules Live\n\nState the behavior, not the destination.\n"
+    dirty_doc = "# AGENTS\n\n" + boot + "\n" + owned
+    tref = [
+        ("hub name only inside the verbatim section", clean_doc, {"Fleet Bootstrap"}, False),
+        ("hub name in prose the repo owns", dirty_doc, {"Fleet Bootstrap"}, True),
+        ("same document with nothing declared verbatim still flags", clean_doc, set(), True),
+        ("CRLF document excises the same way", clean_doc.replace("\n", "\r\n"), {"Fleet Bootstrap"}, False),
+        ("a re-cased verbatim heading still excises", clean_doc.replace("## Fleet Bootstrap", "## fleet bootstrap"), {"Fleet Bootstrap"}, False),
+        ("no hub reference at all", "# AGENTS\n\n## Where the Rules Live\n\nNothing to see.\n", {"Fleet Bootstrap"}, False),
+    ]
+    tref_ok = True
+    for label, doc, verb, want in tref:
+        got = template_ref_outside_verbatim(doc, verb, "acme/Hub")
+        if got != want:
+            ok = tref_ok = False
+            print(f"  FAIL template-ref: {label} (expected {want}, got {got})")
+    if tref_ok:
+        print(f"  ok   template-ref: {len(tref)} cases, verbatim regions excised before the hub-name scan")
 
     # Issue generator: findings land in the right buckets and the title carries the count.
     fe = {"name": "Widget", "types": ["python"]}
