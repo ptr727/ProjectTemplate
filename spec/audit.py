@@ -719,7 +719,7 @@ def audit_repo(entry, spec, branch=None):
                 findings.append(("DRIFT", f"verbatim: could not read {path} content on {ground} to compare (no inline content returned); verify by hand"))
             else:
                 findings.extend(check_verbatim(path, text, item.get("reference") or path))
-        # Heading-based presence is only meaningful for markdown. A "section" named on a non-md file (e.g. a
+        # Heading-based presence is only meaningful for Markdown. A "section" named on a non-md file (e.g. a
         # tasks.json task group) is an intent marker judged per AUDIT.md, not a heading grep.
         needed = wanted_sections[path]
         verbatim_needed = verbatim_secs[path]

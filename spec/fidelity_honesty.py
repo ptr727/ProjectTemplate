@@ -179,7 +179,7 @@ def _fmt(repos):
 
 
 def render_report(spreads, promote, gaps, ledger):
-    """Join the live passes against the curated ledger into the checked-in burn-down markdown.
+    """Join the live passes against the curated ledger into the checked-in burn-down Markdown.
 
     A recorded disposition still matching a live divergence is a burn-down row. A live divergence (a
     verbatim hand-modification, or a manifest gap) with no disposition reads UNTRIAGED. A disposition is

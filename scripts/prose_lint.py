@@ -885,7 +885,7 @@ def check_file(path: Path, rules: set[str]) -> list[tuple[int, str, str]]:
         txt = strip_inline_code(line)
         prose = strip_quoted(txt) if path.suffix == '.md' else txt
 
-        # Both prose rules are markdown-only until a comment can be told from code.
+        # Both prose rules are Markdown-only until a comment can be told from code.
         # A shell script carries 78 statement separators that are not prose at all.
         if path.suffix == '.md':
             if 'semicolon' in rules:
