@@ -29,7 +29,7 @@ The primary shapes are stood up as whole repos; the **composable targets** (`nug
 | `nuget` | a `csharp` library base | not-tested | OIDC Trusted Publishing; no stored key. |
 | `pypi` | a `python` library base | not-tested | OIDC; `environment: pypi`, `skip-existing: true`. |
 | `docker` | any base with a Dockerfile | not-tested | Registry layer cache; always re-push. |
-| `self-hosted` | a `hugo` base | not-tested | rsync over SSH into a per-environment release directory, with an atomic pointer flip and an asserted prune. Credentials are per-environment GitHub Environment secrets and variables rather than repository secrets, so `spec/secrets.json` declares the mechanism with an empty `requires` and the audit cannot see whether the environments are configured. |
+| `self-hosted` | a `hugo` base | not-tested | rsync over SSH into a per-environment release directory, with an atomic pointer flip. Retention takes either D5.6 shape: the deploy asserts the count where its credential can observe the destination, and the host owns it where that credential is confined write-only, which is the case on the first member. Credentials are per-environment GitHub Environment secrets and variables rather than repository secrets, so `spec/secrets.json` declares the mechanism with an empty `requires` and the audit cannot see whether the environments are configured. |
 
 ## Updating a Row
 
