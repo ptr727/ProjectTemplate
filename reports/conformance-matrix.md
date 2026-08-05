@@ -11,7 +11,7 @@ The primary shapes are stood up as whole repos; the **composable targets** (`nug
 | Shape | Reference repo | Cold-standup | Last audited | First gap / notes |
 |---|---|---|---|---|
 | `python` + `source-only` | Financial-Modeling | not-tested | - | Reference for the source-release (dispatch-only) profile; the downstream standup issue is open. |
-| `source-only` + `release` | Blog | not-tested | 2026-08-03 | Hugo static site (#456), stood up 2026-08-01 and cataloged 2026-08-03. It cut release `1.0.11` from a dispatch-only publisher, so `releaseTrigger` is `dispatch-only` and `publish[]` carries the GitHub release, both recorded from what ran rather than from what was predicted. The VPS deploy has still not run, so its target has no declared type yet. |
+| `hugo` + `source-only` + `release` | Blog | not-tested | 2026-08-03 | Hugo static site (#456, #558), stood up 2026-08-01 and cataloged 2026-08-03. Release and deploy are independent surfaces: a dispatch-only publisher cuts the tag, and a separate dispatch deploys to a `self-hosted` filesystem per environment. Reclassified off the interim `source-only`-alone declaration when the type landed. Two deviations found by the type's own checks are open against the repo (ptr727/Blog#28, ptr727/Blog#29): the vendored theme records no upstream ref, and the generator pin is duplicated across two workflows. It is also the case that shaped `hugo.deploy.retention`: its deploy credential is confined write-only, so the deploy can neither prune nor read the destination back, and the prune is a host-side timer its runbook records as host-owned. The first draft of that check demanded an in-pipeline assertion and would have pushed a correct design to widen a deliberately narrow credential. The audit report predates the deploy and is due a re-run. |
 | `csharp` + `console` | - | not-tested | - | |
 | `csharp` + `docker` | - | not-tested | - | |
 | `csharp` + `python` | PlexCleaner | not-tested | - | First mixed-language shape (#339). Python is a stdlib-only `uvx` **scripts** profile subtree (`RegressionTests/`): no `uv.lock`, `pyproject.toml` lint/type config only, mypy checker, `python.uvlock.pinned` + `python.coverage.codecov` N/A; `codecov.yml` stays required for the C# side. Both language rule-sets apply (CODESTYLE.md "Two profiles"). |
@@ -29,6 +29,7 @@ The primary shapes are stood up as whole repos; the **composable targets** (`nug
 | `nuget` | a `csharp` library base | not-tested | OIDC Trusted Publishing; no stored key. |
 | `pypi` | a `python` library base | not-tested | OIDC; `environment: pypi`, `skip-existing: true`. |
 | `docker` | any base with a Dockerfile | not-tested | Registry layer cache; always re-push. |
+| `self-hosted` | a `hugo` base | not-tested | rsync over SSH into a per-environment release directory, with an atomic pointer flip. Retention takes either D5.6 shape: the deploy asserts the count where its credential can observe the destination, and the host owns it where that credential is confined write-only, which is the case on the first member. Credentials are per-environment GitHub Environment secrets and variables rather than repository secrets, so `spec/secrets.json` declares the mechanism with an empty `requires` and the audit cannot see whether the environments are configured. |
 
 ## Updating a Row
 

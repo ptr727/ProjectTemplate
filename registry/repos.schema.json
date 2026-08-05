@@ -27,7 +27,7 @@
         "workflowModel": { "enum": ["release", "operational"] },
         "lineEndings": { "enum": ["lf", "crlf"] },
         "mechanism": { "enum": ["oidc", "static-secret", "none"] },
-        "target": { "enum": ["nuget", "pypi", "docker", "github-release"] },
+        "target": { "enum": ["nuget", "pypi", "docker", "github-release", "self-hosted"] },
         "repo": {
             "type": "object",
             "required": ["name", "url", "status"],
