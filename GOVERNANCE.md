@@ -316,6 +316,7 @@ Anti-pattern: don't keep flipping the code on the same style point. Flip the rul
 
 - **Reference every pull request as a clickable link.** When you mention a PR (in chat, a summary, or a report), render it as a markdown link to the PR (`[#123](https://github.com/OWNER/REPO/pull/123)`), never a bare `#123`. The same applies to issues and commits.
 - **Ask for input as a numbered list.** When you need the user to decide or answer, present the questions, and any options, as a numbered list so they can reply per number. A single inline question is fine, and two or more are always numbered.
+- **Raise work blocked on the user as a direct interactive prompt.** When progress needs a decision, an authorization, or an answer only the user can give, ask for it through the interface's own prompt mechanism, with the choices presented as selectable options, at the point the work stops. Never leave it as prose in a summary: a handoff buried in a paragraph is a handoff that did not happen, because a summary reads as a report of finished work and the one line still waiting on the user is the easiest in it to skim past. The blocked item is the message, not a closing remark on a message about something else. This supersedes the numbered-list rule above wherever an interactive prompt is available, and the numbered list is the fallback where none is.
 
 ## Workflow YAML Conventions
 
