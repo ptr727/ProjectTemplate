@@ -31,9 +31,21 @@ on:
 # Pinned by version and by checksum, because the site is reproducible only if the generator is.
 # A floating installer action defeats the point, and a minor bump changes rendered output.
 # Update both values together, and keep them equal to the pin the validation task installs.
+#
+# The transport's options are pinned rather than left to the runner's OpenSSH defaults, and declared once so two transfers cannot drift apart.
+# StrictHostKeyChecking=yes refuses an unknown or changed host key outright, where the default asks and a non-interactive runner then resolves that ambiguously.
+# UserKnownHostsFile names the file the deploy key step writes, so the check reads the pinned value rather than whatever the runner image happens to carry.
+# BatchMode=yes makes every prompt an immediate failure, so a credential problem surfaces as a failed step rather than as a job that hangs to its timeout.
+# IdentitiesOnly=yes stops the agent offering other keys, so the deploy authenticates as the confined account or not at all.
 env:
   HUGO_VERSION: 0.164.0
   HUGO_SHA256: 8325f3653032d0fc536503691f4833dc4eb6c6be02ee62466758f3f37a7f2fcd
+  SSH_TRANSPORT: >-
+    ssh -i ~/.ssh/deploy
+    -o IdentitiesOnly=yes
+    -o StrictHostKeyChecking=yes
+    -o UserKnownHostsFile=~/.ssh/known_hosts
+    -o BatchMode=yes
 
 jobs:
 
@@ -139,7 +151,7 @@ jobs:
           set -Eeuo pipefail
           rsync -az --mkpath --no-g --chmod=D2755,F644 \
             --link-dest="/${ENVIRONMENT}/current/" \
-            -e "ssh -i ~/.ssh/deploy -o IdentitiesOnly=yes" \
+            -e "$SSH_TRANSPORT" \
             "${RUNNER_TEMP}/bundle/releases/${RELEASE_ID}/" \
             "${DEPLOY_SSH_USER}@${DEPLOY_SSH_HOST}:/${ENVIRONMENT}/releases/${RELEASE_ID}/"
 
@@ -154,7 +166,7 @@ jobs:
         run: |
           set -Eeuo pipefail
           rsync -a --no-recursive \
-            -e "ssh -i ~/.ssh/deploy -o IdentitiesOnly=yes" \
+            -e "$SSH_TRANSPORT" \
             "${RUNNER_TEMP}/bundle/current" \
             "${DEPLOY_SSH_USER}@${DEPLOY_SSH_HOST}:/${ENVIRONMENT}/"
 
