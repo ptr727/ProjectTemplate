@@ -37,6 +37,10 @@ DETAILS = re.compile(r'<details>(.*?)</details>', re.DOTALL | re.IGNORECASE)
 SUMMARY = re.compile(r'<summary>(.*?)</summary>', re.DOTALL | re.IGNORECASE)
 TAGS = re.compile(r'</?(?:details|summary)>', re.IGNORECASE)
 COUNT = re.compile(r'\((\d+)\)')
+# What makes a line a heading rather than prose mentioning the phrase, in either markup.
+# A line that is neither still qualifies where it carries a count.
+# The section has appeared as a bare line too, and a count is what prose does not carry.
+HEADING = re.compile(r'\s*(?:#{1,6}\s|<summary)', re.IGNORECASE)
 
 # How many of the newest reviews and comments both queries read.
 # A narrow window drops the reviewer's answer behind ordinary discussion, reporting no answer.
@@ -207,28 +211,44 @@ def live_state(owner: str, repo: str, num: int) -> tuple[str, bool, dict | None]
 
 
 def heading_of(block: str) -> str:
-    """The block's `<summary>`, or its opening where the wrapper carries none."""
-    m = SUMMARY.search(block)
-    return m.group(1) if m else block[:200]
+    """The block's own heading, unwrapped from `<summary>` where it wears one.
+
+    A block starts at its heading, so the heading is the first line whatever markup it carries.
+    Reading further would let a finding's own text supply a count the heading never carried, and
+    a wrong count reads exactly like a right one.
+    """
+    head = block.lstrip()
+    m = SUMMARY.search(head)
+    return m.group(1) if m and head.lower().startswith('<summary') else head.split('\n', 1)[0]
 
 
 def suppressed_blocks(body: str) -> list[str]:
-    """Return the review body's low-confidence sections, matched on their heading.
+    """Return the review body's low-confidence sections, each sliced from its own heading.
+
+    The section has worn three shapes so far: its own `<details>` wrapper, a bare heading in the
+    body, and a markdown heading nested inside the `Review details` wrapper. The wrapper is the
+    part that keeps moving, so each region is scanned line by line for the heading rather than
+    read for a wrapper's summary: a nested heading is not a summary, and stripping the wrappers
+    to look for it outside deletes the very region it sits in. That is the pair that reported
+    `suppressed=0` over a body carrying `### Suppressed comments (2)`.
 
     The heading carries the match rather than the body text, since a review whose prose discusses
-    suppressed findings is not itself carrying any. The fallback covers the day the `<details>`
-    wrapper moves, and takes a heading with a count so ordinary prose is not read as one.
+    suppressed findings is not itself carrying any. A region ends the block, so a section is not
+    read on into the file table that follows it.
     """
     if not body:
         return []
-    blocks = [b for b in DETAILS.findall(body) if SUPPRESSED.search(heading_of(b))]
-    if blocks:
-        return blocks
-    outside = DETAILS.sub('', body).splitlines()
-    for i, line in enumerate(outside):
-        if SUPPRESSED.search(line) and COUNT.search(line):
-            return ['\n'.join(outside[i:])]
-    return []
+    # Each wrapper's contents, plus what is left outside them all, so a heading is found anywhere.
+    # The regions do not overlap, since what the sub deletes is exactly what the findall keeps.
+    regions = DETAILS.findall(body) + [DETAILS.sub('', body)]
+    blocks = []
+    for region in regions:
+        lines = region.splitlines()
+        for i, line in enumerate(lines):
+            if SUPPRESSED.search(line) and (HEADING.match(line) or COUNT.search(line)):
+                blocks.append('\n'.join(lines[i:]))
+                break
+    return blocks
 
 
 def finding_count(block: str) -> int:
