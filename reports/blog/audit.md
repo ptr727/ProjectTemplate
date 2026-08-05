@@ -5,6 +5,7 @@
 - **Verdict:** operational
 - **Date:** 2026-08-03
 - **Run stamp:** `audit run 2026-08-03T22:34:03Z | hub 3a7cc64`
+- **Partly superseded 2026-08-05, re-run owed.** This run graded the repo as `source-only` against a hub with no static-site type. Since then the deploy has run, the `hugo` type and the `self-hosted` target landed, and the registry declares `types: ["hugo", "source-only"]`, so the **Types** line above and every `hugo.*` dimension this report does not have are stale rather than wrong. What the run observed is left as it was observed, per the run-stamp discipline: the annotation under Proposed Registry / Spec Updates records what has since been applied, and the next full run replaces this file rather than editing it.
 
 First audit of this repo. It was stood up on 2026-08-01 and reached a proven release path the same day, but it was never added to [`registry/repos.json`][repos], so no hub tool had measured it until now and [`reports/divergences.md`][divergences] under-reported the fleet by exactly this repo. The registry entry lands with this report. Nothing here is a defect: every finding is the hub advancing after the carry, which is the propagation job [#536][pr-536] exists to make possible.
 
@@ -57,7 +58,7 @@ None.
 ## Proposed Registry / Spec Updates
 
 - Add the `Blog` registry entry. Applied in this change: `source-only`, `release` workflow model, `dispatch-only` release trigger, `lineEndings: "lf"`, and `driftNotes` recording the two declared deviations plus the interim classification.
-- Revisit `publish[]` once the VPS deploy exists. It declares the GitHub release only, because that is the only channel that currently ships. [#456][issue-456] holds the static-site type pending this repo's measured deploy shape.
+- Revisit `publish[]` once the VPS deploy exists. It declares the GitHub release only, because that is the only channel that currently ships. [#456][issue-456] holds the static-site type pending this repo's measured deploy shape. **Applied 2026-08-05**: the deploy has run, [#456][issue-456] and [#558][issue-558] are answered, the `hugo` type and the `self-hosted` target exist, and the registry entry now declares `types: ["hugo", "source-only"]` with both publish targets. The interim classification driftNotes are removed and three type checks are recorded against the repo instead, two of which are already fixed downstream.
 
 ## Escalations
 
@@ -75,6 +76,7 @@ Two spec questions, raised rather than resolved, per AUDIT.md section 9.
 
 <!-- External -->
 [issue-456]: https://github.com/ptr727/ProjectTemplate/issues/456
+[issue-558]: https://github.com/ptr727/ProjectTemplate/issues/558
 [pr-536]: https://github.com/ptr727/ProjectTemplate/pull/536
 [pr-540]: https://github.com/ptr727/ProjectTemplate/pull/540
 [pr-543]: https://github.com/ptr727/ProjectTemplate/pull/543
