@@ -169,10 +169,10 @@ class TestGovernanceCoupling(unittest.TestCase):
 
 
 class TestDupword(BaitCase):
-    """A doubled word, read from markdown prose and from the comments of every other syntax.
+    """A doubled word, read from Markdown prose and from the comments of every other syntax.
 
     The scope matters more here than for the other prose rules, because this one gates CI. Outside
-    markdown a repeated token is far more often correct code than a typo: `class="gallery
+    Markdown a repeated token is far more often correct code than a typo: `class="gallery
     gallery-cols-1"` is the ordinary HTML idiom, and no edit fixes it without changing the page.
     """
 
@@ -320,6 +320,56 @@ class TestSemicolon2(BaitCase):
         self.assertEqual(['semicolon'],
                          self.kinds('- **Async**: avoid blocking calls; use await, always\n',
                                     {'semicolon'}))
+
+    def test_a_colon_in_an_earlier_sentence_does_not_exempt_a_later_splice(self) -> None:
+        """The exemption belongs to the sentence, not the bullet, and the two were unrelated.
+
+        Read over the whole bullet, an enumeration in one sentence excused every semicolon after
+        it, so the gate went silent across 120 semicolons in the docs it exists to check.
+        """
+        self.assertEqual(['semicolon'], self.kinds(
+            '- **A rule.** The evidence is three things, and each matters: the first, the second, '
+            f'and the third. {SPLICE_BAIT}.\n', {'semicolon'}))
+
+    def test_a_sentence_closing_inside_emphasis_or_a_bracket_still_ends(self) -> None:
+        """`.**` and `.)` end a sentence, and reading a bare `. ` joined a whole bullet into one."""
+        for opener in ('- **A label: with a list, of two.**',
+                       'A label (with a list, of two.)'):
+            with self.subTest(opener=opener):
+                self.assertEqual(['semicolon'],
+                                 self.kinds(f'{opener} {SPLICE_BAIT}.\n', {'semicolon'}))
+
+    def test_a_series_in_one_sentence_does_not_exempt_the_next(self) -> None:
+        """The second-separator arm is scoped the same way, a series belonging to its sentence."""
+        self.assertEqual(['semicolon'], self.kinds(
+            'It covers each target, and excludes the rest; it runs on push; it gates. '
+            f'{SPLICE_BAIT}.\n', {'semicolon'}))
+
+    def test_a_colon_introduced_list_whose_items_carry_commas_keeps_its_semicolon(self) -> None:
+        """The colon arm earns its place: dropping it flagged this, the use the rule names.
+
+        Measured over the tree, dropping it reported 14 further lines, and the shapes below are
+        what they were, so the arm is scoped rather than removed.
+        """
+        for text in (('Match the heading style: title case with short bind words (a, an, the, of); '
+                      'hyphenated compounds capitalize both parts.\n'),
+                     ('- **Python** (the script profile): lint, format, and type check; '
+                      'format-on-save and import organization via the formatter.\n')):
+            with self.subTest(text=text.split(':')[0]):
+                self.assertEqual([], self.kinds(text, {'semicolon'}))
+
+    def test_a_bullet_label_colon_inside_the_emphasis_is_the_same_opener(self) -> None:
+        """`- **D3:**` and `- **D3**:` are one construct, and only one spelling was stripped."""
+        self.assertEqual(['semicolon'], self.kinds(
+            '- **D3:** each run builds one branch, so it classifies the version directly; the '
+            'gate literal, the expression, and the config all name the same branch.\n',
+            {'semicolon'}))
+
+    def test_an_abbreviation_does_not_end_a_sentence(self) -> None:
+        """Splitting at `e.g.` cuts a list in half and flags the separator the exemption protects."""
+        self.assertEqual([], self.kinds(
+            'Pinned by path: a script, a hook (e.g. a shebang); vanilla files stay as they are.\n',
+            {'semicolon'}))
 
     def test_prose_rules_do_not_reach_code_files(self) -> None:
         """A shell script carries statement separators, not prose, until comments can be extracted."""
@@ -620,7 +670,7 @@ class TestCommentWrap(BaitCase):
         # A punctuated HTML comment is commentary, so it stays judged as prose.
         self.assertEqual(['comment-wrap'],
                          self.flag('a.md', 'Prose.\n\n<!-- One thing. Another thing. -->\n'))
-        # Outside markdown the carve-out does not apply, since there the marker case does not arise.
+        # Outside Markdown the carve-out does not apply, since there the marker case does not arise.
         self.assertEqual(['comment-case'], self.flag('a.py', '# lowercase opening\n'))
 
     def test_a_block_opener_inside_a_line_comment_is_text(self) -> None:
@@ -1116,7 +1166,7 @@ class TestDiscovery(unittest.TestCase):
 
 
 class TestSentenceSplit(BaitCase):
-    """One sentence per line, the markdown counterpart of the comment-wrap rule."""
+    """One sentence per line, the Markdown counterpart of the comment-wrap rule."""
 
     def test_a_sentence_continuing_onto_the_next_line_is_flagged(self) -> None:
         self.assertEqual(['sentence-split'],
@@ -1152,7 +1202,7 @@ class TestSentenceSplit(BaitCase):
 
 
 class TestSpelling(BaitCase):
-    """US English, read from markdown prose and from the comments of every other syntax.
+    """US English, read from Markdown prose and from the comments of every other syntax.
 
     The rule runs on whatever file it is handed, README and HISTORY included. It complements the
     cspell gate rather than dividing the tree with it: cspell reads those two files and this reads

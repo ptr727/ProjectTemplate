@@ -6,7 +6,7 @@ How this repository is run. It ships no application code, so its operations are 
 
 ### Run the gates the way CI runs them
 
-CI passes explicit `--check` lists, and a bare `python3 scripts/prose_lint.py [file]` runs `DEFAULT_RULES`, which omits `comment-wrap` and `comment-case`. A bare run therefore under-reports against what CI checks, and a clean result from it proves less than it appears to. Run the CI invocations:
+CI passes explicit `--check` lists, and a bare `python3 scripts/prose_lint.py [file]` runs `DEFAULT_RULES`, which is those two lists together. What differs is the exit code rather than the coverage: CI gates on `charset`, `dupword` and `spelling` and reports the other five warn-only, where a bare run exits non-zero on any of the eight. `sentence-split` is in neither and is asked for by name. Run the CI invocations:
 
 ```sh
 python3 scripts/test_prose_lint.py
@@ -43,7 +43,7 @@ python3 spec/audit.py [RepoName]      # one repo
 python3 spec/audit.py --issue [RepoName]
 ```
 
-Findings are a point-in-time snapshot read live over the API. Re-run before acting on one, and quote the run stamp in any issue derived from it. The deterministic subset lives here, and the full letter-and-intent verdict is [AUDIT.md](./AUDIT.md).
+Findings are a point-in-time snapshot read live over the API. Re-run before acting on one, and quote the run stamp in any issue derived from it. The deterministic subset lives here, and the full letter-and-intent verdict is [AUDIT.md](./AUDIT.md). No project-type check in `spec/project-types.json` runs here, and the cross-cutting ones are covered only in part, so read a clean run as evidence for the subset above and not for AUDIT.md section 4.
 
 ### Apply or verify repository configuration
 
@@ -87,7 +87,7 @@ docker run --rm --pull=always -v "$PWD":/workdir --workdir /workdir davidanson/m
 docker run --rm --pull=always -v "$PWD":/workdir --workdir /workdir ghcr.io/streetsidesoftware/cspell:latest --no-progress README.md HISTORY.md
 ```
 
-Both commands are the canonical invocations from [GOVERNANCE.md](./GOVERNANCE.md). markdownlint reads every markdown file, while cspell reads `README.md` and `HISTORY.md` only. That narrower spelling scope is deliberate, since gating every markdown file would mean padding `cspell.json` with technical terms without end, and broad live spell-check is the editor extension's job. Widening it here produces noise that no gate acts on.
+Both commands are the canonical invocations from [GOVERNANCE.md](./GOVERNANCE.md). markdownlint reads every Markdown file, while cspell reads `README.md` and `HISTORY.md` only. That narrower spelling scope is deliberate, since gating every Markdown file would mean padding `cspell.json` with technical terms without end, and broad live spell-check is the editor extension's job. Widening it here produces noise that no gate acts on.
 
 The `editorconfig-checker` action is setup-only. Using it alone silently skips the check, so CI invokes the checker itself rather than relying on the action.
 

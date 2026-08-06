@@ -4,7 +4,7 @@
 Compares each cataloged registry repo against the ground truth in this repo - general settings
 (repo-config/settings.json), branch rulesets (normalized diff vs the model's payloads), secret
 names (spec/secrets.json; values are never read), baseline/per-type file presence and per-scope
-markdown section presence on the ground-truth branch (spec/files.json, spec/scope-model.md), and
+Markdown section presence on the ground-truth branch (spec/files.json, spec/scope-model.md), and
 branch-model facts (main/develop existence, develop behind main). Owner-initiated: run it when
 onboarding a repo, when drift is suspected, or before fleet-wide changes. Read-only - it never
 modifies a target.
@@ -51,6 +51,11 @@ RULESET_SUBSET = ["name", "target", "enforcement", "conditions", "rules"]
 # Deliberately specific, so a note recording a permanent deviation must not match.
 # An example of one that must not match is a note reading that there is no get-version-task and validate-task is relied on instead.
 PENDING_MARKERS = ["pending", "not yet", "owed", "todo", "still", "behind", "missing", "absent"]
+# A driftNote may name the check that would retire it, as a parenthesized id: "(hugo.generator.pinned)".
+# Deliberately unanchored.
+# Both notes this form was introduced for end the sentence after the paren, so an end-anchored pattern matches neither of the two it was written to catch.
+# That is the shape a matcher fails at silently: it reports nothing, and a fleet with no such note in it reports exactly the same.
+CHECK_ID_RE = re.compile(r"\(([a-z][a-z0-9-]*(?:\.[a-z0-9-]+)+)\)")
 
 
 def load(rel):
@@ -111,6 +116,58 @@ def normalize_ruleset(payload):
     if isinstance(sub.get("rules"), list):
         sub["rules"] = sorted(sub["rules"], key=lambda r: json.dumps(r, sort_keys=True))
     return json.dumps(sub, sort_keys=True)
+
+
+def check_id_owner(spec, cid):
+    """The project type owning a check id, and whether the catalog defines the id at all.
+
+    Returns (None, True) for a cross-cutting check, which every repo carries and no repo declares.
+    The catalog is a required input rather than an optional one: resolving against an absent
+    catalog would report every id as undefined, which is a louder failure than reporting none.
+    """
+    types = spec.get("types")
+    if not types:
+        raise KeyError("spec['types'] (spec/project-types.json) is required to resolve a driftNote check id")
+    for name, t in types.get("types", {}).items():
+        if any(c.get("id") == cid for c in t.get("checks", [])):
+            return name, True
+    for dim in types.get("crossCutting", {}).values():
+        if any(c.get("id") == cid for c in dim.get("checks", [])):
+            return None, True
+    return None, False
+
+
+def driftnote_findings(entry, spec, open_count):
+    """Freshness findings over one repo's registry driftNotes, given how many findings the audit already has.
+
+    Neither shape below is gated on the rest of the audit being clean, and the gate that used to wrap both
+    is the defect this replaces: one standing finding a repo cannot clear exempted its whole note list, so
+    the repo with open findings, where a stale note is most likely, was the one never checked.
+
+    A note naming a check id declares what would retire it, so it is surfaced on every run. What the audit
+    cannot do is decide it, since no per-type check is mechanized, so the id is resolved against the
+    catalog here and the check itself is left to the auditor. A pending-marker note is a prose claim that
+    work is outstanding, so a clean audit contradicts it outright while an unclean audit only asks which of
+    the open findings it means. Narrow markers keep a permanent-deviation note ("relies on validate-task")
+    from tripping.
+    """
+    out = []
+    for note in entry.get("driftNotes", []):
+        quoted = f"\"{note[:70]}{'...' if len(note) > 70 else ''}\""
+        for cid in CHECK_ID_RE.findall(note):
+            owner, known = check_id_owner(spec, cid)
+            if not known:
+                out.append(("DRIFT", f"registry: driftNote names check '{cid}', which spec/project-types.json does not define - fix the id or drop the note: {quoted}"))
+            elif owner and owner not in entry.get("types", []):
+                out.append(("DRIFT", f"registry: driftNote names check '{cid}', whose type '{owner}' this repo does not declare: {quoted}"))
+            else:
+                out.append(("DRIFT", f"registry: driftNote names check '{cid}', which this audit does not evaluate by id (AUDIT.md section 4) - judge it by hand and delete the note once it passes: {quoted}"))
+        marker = next((w for w in PENDING_MARKERS if re.search(rf"\b{re.escape(w)}\b", note, re.I)), None)
+        if marker and not open_count:
+            out.append(("DRIFT", f"registry: driftNote says '{marker}' but the audit is clean - verify and reconcile: {quoted}"))
+        elif marker:
+            out.append(("DRIFT", f"registry: driftNote says '{marker}' while {open_count} finding(s) are open - confirm it describes one of them rather than closed work: {quoted}"))
+    return out
 
 
 def repo_slug(entry):
@@ -208,8 +265,48 @@ def extract_section(text, heading):
     return "\n".join(out) if capturing else None
 
 
+# Carried files scanned for a coordination reference (GOVERNANCE.md "Documentation Style Conventions").
+TEMPLATE_REF_SCANNED = ("AGENTS.md", "GOVERNANCE.md", ".github/copilot-instructions.md")
+
+
+def strip_sections(text, names):
+    """`text` with each named `## <heading>` region removed, located by position rather than by content.
+
+    Region rules match extract_section (a fenced `## ` is not a boundary, a sibling H2 ends the region), so
+    the two agree on where a section starts and stops.
+    Positional removal is the point: deleting the extracted text instead would also delete an identical
+    passage anywhere else in the document, including one quoted inside the prose the caller means to read.
+    That failure is silent and it fails open, since the removed duplicate takes its content out of the scan.
+    """
+    want = {n.strip().lower() for n in names}
+    out, dropping, fenced = [], False, False
+    for ln in normalize(text).split("\n"):
+        stripped = ln.strip()
+        if stripped.startswith("```") or stripped.startswith("~~~"):
+            fenced = not fenced
+        elif not fenced and stripped.startswith("## "):
+            dropping = stripped[2:].strip().lower() in want  # a sibling H2 always ends the previous region
+        if not dropping:
+            out.append(ln)
+    return "\n".join(out)
+
+
+def template_ref_outside_verbatim(text, verbatim_names, hub_name):
+    """True when `hub_name` appears in `text` outside every one of its verbatim sections.
+
+    A verbatim section's bytes are the hub's canonical and are checked byte-for-byte elsewhere, so a hub
+    reference inside one cannot be removed downstream: the repo would have to fail the verbatim check to
+    clear this one. `AGENTS.md > Fleet Bootstrap` is the standing case, since naming the hub is that
+    section's entire function - it is the byte-locked entry point stating where the canonical rules live,
+    and a repo holding no current copy of anything else is exactly who reads it. Excising the verbatim
+    regions before scanning keeps the check pointed at the prose a repo actually owns. A hub reference that
+    reaches a verbatim section is the hub's defect to fix once in the canonical, never each repo's to clear.
+    """
+    return hub_name.lower() in strip_sections(text, verbatim_names).lower()
+
+
 def heading_texts(markdown):
-    """Lowercased heading texts in a markdown document, for case-insensitive section-presence matching."""
+    """Lowercased heading texts in a Markdown document, for case-insensitive section-presence matching."""
     return {m.group(1).strip().lower() for line in markdown.splitlines() for m in (_HEADING.match(line),) if m}
 
 
@@ -626,17 +723,6 @@ def audit_repo(entry, spec, branch=None):
         for name in sorted(present - claimed_names):
             findings.append(("DRIFT", f"secrets: {name} in the {store} store is claimed by no applicable mechanism (stale?)"))
 
-    # --- Carried files must not reference the template repo ---
-    # The coordination flow is machinery a consumer should not see, so a carried file states the behavior rather than the destination.
-    # This reads AGENTS.md, GOVERNANCE.md and .github/copilot-instructions.md, where a stale "report drift upstream" paragraph once spread.
-    # Skip the hub itself, whose own carried files are the source, where naming the repo they live in is correct.
-    # A downstream repo naming it is still flagged, which is the point.
-    if entry.get("name") != HUB_NAME:
-        for path in ("AGENTS.md", "GOVERNANCE.md", ".github/copilot-instructions.md"):
-            doc = gh(f"repos/{slug}/contents/{path}?ref={ground}", ok404=True)
-            if doc and doc.get("content") and HUB_NAME.lower() in base64.b64decode(doc["content"]).decode("utf-8", "replace").lower():
-                findings.append(("DRIFT", f"carried: {path} references the template repo by name or link (the coordination flow is machinery this repo's readers should not see; state the behavior, not the destination)"))
-
     # --- Dependabot ecosystem coverage ---
     # A repo's tree implies Dependabot ecosystems it must track: github-actions when it ships workflows
     # (the action versions they reference otherwise go stale, and a merge-bot then has no PRs to auto-merge),
@@ -662,7 +748,7 @@ def audit_repo(entry, spec, branch=None):
     # --- File and section presence on the ground-truth branch ---
     # appliesTo is matched against the repo's full selector set (types + workflowModel + releaseTrigger +
     # consumerModel), so the release/operational develop ruleset is two data entries, not a code swap.
-    # Required sections union across same-path entries. A carried markdown file must contain each heading
+    # Required sections union across same-path entries. A carried Markdown file must contain each heading
     # scoped to this repo. A rename reads as missing and equivalence is judged by hand, so a missing section
     # is DRIFT (a hint to verify), never a LETTER.
     sel = repo_selectors(entry, spec["registry"].get("defaults", {}))
@@ -719,7 +805,7 @@ def audit_repo(entry, spec, branch=None):
                 findings.append(("DRIFT", f"verbatim: could not read {path} content on {ground} to compare (no inline content returned); verify by hand"))
             else:
                 findings.extend(check_verbatim(path, text, item.get("reference") or path))
-        # Heading-based presence is only meaningful for markdown. A "section" named on a non-md file (e.g. a
+        # Heading-based presence is only meaningful for Markdown. A "section" named on a non-md file (e.g. a
         # tasks.json task group) is an intent marker judged per AUDIT.md, not a heading grep.
         needed = wanted_sections[path]
         verbatim_needed = verbatim_secs[path]
@@ -754,6 +840,19 @@ def audit_repo(entry, spec, branch=None):
                     for h in sorted(h2s - declared):
                         findings.append(("DRIFT", f"section: '{h}' in {path} is not a declared section - reconcile it (a duplicate of a verbatim section, or repo-specific content that moves to a topical doc), or confirm it is intentional (spec/section-model.md)"))
 
+        # --- Carried files must not reference the template repo ---
+        # The coordination flow is machinery a consumer should not see, so a carried file states the behavior rather than the destination.
+        # A stale "report drift upstream" paragraph once spread this way.
+        # Skip the hub itself, whose own carried files are the source, where naming the repo they live in is correct.
+        # A downstream repo naming it in prose it owns is still flagged, which is the point.
+        # Verbatim sections are excised first, and template_ref_outside_verbatim carries why that is not a loophole.
+        # Sited here, in the file loop, so the scan reuses the content already fetched for the section checks and reads the same selector-resolved verbatim list they were judged against.
+        if path in TEMPLATE_REF_SCANNED and entry.get("name") != HUB_NAME:
+            if text is None:
+                findings.append(("DRIFT", f"carried: could not read {path} content on {ground} to scan for a coordination reference (no inline content returned); verify by hand"))
+            elif template_ref_outside_verbatim(text, verbatim_secs[path], HUB_NAME):
+                findings.append(("DRIFT", f"carried: {path} references the template repo by name or link outside its verbatim sections (the coordination flow is machinery this repo's readers should not see; state the behavior, not the destination)"))
+
     # --- HISTORY.md mirrors the README opening ---
     # spec/readme-structure.md "HISTORY.md": the changelog opens as the README's twin - same H1 title and the
     # same intro paragraph. Checked only when both files were readable (absence is already a file LETTER above).
@@ -783,7 +882,7 @@ def audit_repo(entry, spec, branch=None):
             findings.append(("LETTER", "readme: no intro line after the H1 - the README opens with the title then a one-line description, which doubles as the About description (spec/readme-structure.md)"))
         else:
             if strip_md_links(intro_line) != intro_line:
-                findings.append(("LETTER", "readme: the intro line carries markdown links - keep it link-free plain text, it doubles as the repo About description (spec/readme-structure.md)"))
+                findings.append(("LETTER", "readme: the intro line carries Markdown links - keep it link-free plain text, it doubles as the repo About description (spec/readme-structure.md)"))
             want = strip_md_links(intro_line).strip()
             if len(want) > 100:
                 findings.append(("LETTER", f"readme: the intro line is {len(want)} characters, over the 100-char limit (Docker Hub's short-description cap, the tightest surface it feeds) - tighten it to one short sentence (spec/readme-structure.md)"))
@@ -821,13 +920,7 @@ def audit_repo(entry, spec, branch=None):
                 findings.append(("LETTER", f"cspell: {ws_name} carries a cSpell word list while cspell.json is the single source of truth - delete the workspace copy (CODESTYLE.md Markdown and Spelling)"))
 
     # --- Registry driftNotes freshness ---
-    # Gated on everything else passing: a clean repo has no outstanding work for a pending-marker note to
-    # describe. Narrow markers keep a permanent-deviation note ("relies on validate-task") from tripping.
-    if not findings:
-        for note in entry.get("driftNotes", []):
-            marker = next((w for w in PENDING_MARKERS if re.search(rf"\b{re.escape(w)}\b", note, re.I)), None)
-            if marker:
-                findings.append(("DRIFT", f"registry: driftNote says '{marker}' but the audit is clean - verify and reconcile: \"{note[:70]}{'...' if len(note) > 70 else ''}\""))
+    findings.extend(driftnote_findings(entry, spec, len(findings)))
 
     # Stamp the commit actually read for the ground-truth branch. Never fall back to another branch:
     # a stamp naming develop while carrying main's sha would misattribute every finding.
@@ -964,6 +1057,36 @@ def _selftest():
     else:
         print("  ok   section: heading in region, fenced ## kept, sibling H2 ends, None if absent, whitespace-tolerant locate, re-cased heading rehashes")
 
+    # Coordination-reference scan: the hub name inside a verbatim section is exempt, outside one is not.
+    # The first case is the real AGENTS.md shape, where the byte-locked Fleet Bootstrap block must name the hub and a repo therefore cannot clear a finding against it.
+    # The CRLF case matters because extract_section normalizes EOLs while carried files are CRLF on this fleet, so excision must survive that.
+    boot = "## Fleet Bootstrap\n\nThe canonical rules live in `github.com/acme/Hub`.\n"
+    owned = "## Where the Rules Live\n\nReport a rule discrepancy to acme/Hub.\n"
+    clean_doc = "# AGENTS\n\n" + boot + "\n## Where the Rules Live\n\nState the behavior, not the destination.\n"
+    dirty_doc = "# AGENTS\n\n" + boot + "\n" + owned
+    tref = [
+        ("hub name only inside the verbatim section", clean_doc, {"Fleet Bootstrap"}, False),
+        ("hub name in prose the repo owns", dirty_doc, {"Fleet Bootstrap"}, True),
+        ("same document with nothing declared verbatim still flags", clean_doc, set(), True),
+        ("CRLF document excises the same way", clean_doc.replace("\n", "\r\n"), {"Fleet Bootstrap"}, False),
+        ("a re-cased verbatim heading still excises", clean_doc.replace("## Fleet Bootstrap", "## fleet bootstrap"), {"Fleet Bootstrap"}, False),
+        ("no hub reference at all", "# AGENTS\n\n## Where the Rules Live\n\nNothing to see.\n", {"Fleet Bootstrap"}, False),
+        # A second region under the same heading is excised by name, which is right: both are that section.
+        ("the heading appearing twice excises both", "# AGENTS\n\n" + boot + "\n## Notes\n\n" + boot, {"Fleet Bootstrap"}, False),
+        # A fenced copy is not a heading, so it is prose the repo owns and the reference in it must flag.
+        # This is the case that made positional excision necessary, because removing the extracted text instead would delete the fenced copy along with the real region and the scan would fail open.
+        # That is the one arrangement a repo could otherwise use to carry the reference in a document it owns.
+        ("a fenced copy of the section is prose, not the section", "# AGENTS\n\n## Notes\n\n```\n" + boot + "```\n\n" + boot, {"Fleet Bootstrap"}, True),
+    ]
+    tref_ok = True
+    for label, doc, verb, want in tref:
+        got = template_ref_outside_verbatim(doc, verb, "acme/Hub")
+        if got != want:
+            ok = tref_ok = False
+            print(f"  FAIL template-ref: {label} (expected {want}, got {got})")
+    if tref_ok:
+        print(f"  ok   template-ref: {len(tref)} cases, verbatim regions excised before the hub-name scan")
+
     # Issue generator: findings land in the right buckets and the title carries the count.
     fe = {"name": "Widget", "types": ["python"]}
     it, ib = render_issue(fe, [("LETTER", "file: X absent"), ("DRIFT", "verbatim: Y differs"), ("ERROR", "gh failed")],
@@ -995,7 +1118,7 @@ def _selftest():
         ok = False
         print("  FAIL description: strip_md_links behavior")
     else:
-        print("  ok   description: markdown links reduce to their text, plain text passes through")
+        print("  ok   description: Markdown links reduce to their text, plain text passes through")
     # cspell duplication: a workspace cSpell word list is detected, and a mere cspell.json mention is not.
     ws_dup = '{ "settings": { "cSpell.words": ["foo"] } }'
     ws_ok = '{ "settings": { "editor.rulers": [100] }, "note": "words live in cspell.json" }'
@@ -1050,6 +1173,49 @@ def _selftest():
         else:
             print(f"  ok   ground branch: registry={entry.get('groundTruthBranch')} override={branch} -> {want}")
 
+    # The driftNote freshness rules, driven directly rather than through audit_repo.
+    # That exercises both the clean and the unclean audit without standing up a whole conformant repo to reach one branch.
+    note_spec = {"types": {"types": {"hugo": {"checks": [{"id": "hugo.generator.pinned"}]},
+                                     "docker": {"checks": [{"id": "docker.cache.registry"}]}},
+                           "crossCutting": {"setup": {"checks": [{"id": "setup.driftnotes.current"}]}}}}
+    note_cases = [
+        # The end-of-sentence period is the case an end-anchored pattern misses, and it is how both notes this form was introduced for are written.
+        ("check id followed by a period", ["hugo"], ["Pinned in two workflows (hugo.generator.pinned)."], 0, ["does not evaluate"]),
+        ("check id mid-sentence", ["hugo"], ["The pin (hugo.generator.pinned) is duplicated."], 0, ["does not evaluate"]),
+        ("cross-cutting id, which no repo declares", ["hugo"], ["Notes go stale (setup.driftnotes.current)."], 0, ["does not evaluate"]),
+        ("check id of an undeclared type", ["hugo"], ["Cache layer (docker.cache.registry)."], 0, ["this repo does not declare"]),
+        ("check id absent from the catalog", ["hugo"], ["Theme record (hugo.vendored.provenence)."], 0, ["does not define"]),
+        # A version string in parentheses is the false positive the id shape has to exclude.
+        ("parenthesized version, not a check id", ["hugo"], ["Generator held at (0.164.0) by the composite action."], 0, []),
+        ("permanent deviation, no marker and no id", ["hugo"], ["Relies on validate-task, having no get-version-task."], 0, []),
+        ("marker note on a clean audit", ["hugo"], ["The sibling doc is pending fleet ratification."], 0, ["but the audit is clean"]),
+        # The case the old gate suppressed outright: one unclearable finding, and the note never checked.
+        ("marker note with findings open", ["hugo"], ["The sibling doc is pending fleet ratification."], 1, ["while 1 finding(s) are open"]),
+    ]
+    for label, types, notes, open_count, wanted in note_cases:
+        got = driftnote_findings({"types": types, "driftNotes": notes}, note_spec, open_count)
+        texts = [t for _, t in got]
+        if len(texts) != len(wanted) or not all(w in t for w, t in zip(wanted, texts)):
+            ok = False
+            print(f"  FAIL driftNote {label} -> {texts}, want {wanted}")
+        else:
+            print(f"  ok   driftNote {label}: {len(texts)} finding(s)")
+
+    # A spec with no catalog and an entry with a check-id note fails loudly and names what is missing.
+    # No live caller pairs the two, since main() always loads the catalog.
+    # The pairing stays an error rather than becoming a fallback, because resolving ids against an absent catalog reports every one of them undefined.
+    # That is a work list which destroys correct notes.
+    try:
+        driftnote_findings({"types": ["hugo"], "driftNotes": ["A note (hugo.build.strict)."]}, {"registry": {}}, 0)
+        ok = False
+        print("  FAIL missing catalog: no error raised")
+    except KeyError as e:
+        if "project-types.json" not in str(e):
+            ok = False
+            print(f"  FAIL missing catalog: error does not name the file -> {e}")
+        else:
+            print("  ok   missing catalog: raises and names spec/project-types.json")
+
     # A ground-truth branch that does not resolve is one error, not a baseline's worth of letters.
     # Every `?ref=` read would 404 and report each carried file absent, describing the ref, not the repo.
     # The branch facts are already read at that point, so they are reported rather than dropped.
@@ -1094,7 +1260,8 @@ def render_issue(entry, findings, ground, audited_sha, run_utc, hub_sha):
     w(f"Generated from the hub audit of `{name}` ({types}). Run stamp `audit run {run_utc} | hub {hub_sha}`, "
       f"against `@ {stamp}` (the format AUDIT.md section 8 says a derived artifact quotes). Regenerate with "
       f"`spec/audit.py --issue {name}`. Findings are a point-in-time snapshot - re-run the audit before acting. "
-      f"This lists what the audit mechanically detects. The full letter and intent verdict lives in AUDIT.md.")
+      f"This lists what the audit mechanically detects. No check belonging to a project type in `spec/project-types.json` is run "
+      f"here, and the cross-cutting dimensions are covered only in part, so the full letter and intent verdict lives in AUDIT.md section 4.")
     w("")
     if not findings:
         w("The deterministic checks are clean - nothing to converge.")
@@ -1149,6 +1316,7 @@ def main(argv=None):
         "settings": load("repo-config/settings.json"),
         "secrets": load("spec/secrets.json"),
         "files": load("spec/files.json"),
+        "types": load("spec/project-types.json"),
     }
     issue_mode = a.issue
     wanted = {n.lower() for n in a.names}
@@ -1199,7 +1367,7 @@ def main(argv=None):
         stamp = f" @ {ground}@{audited_sha[:7]}" if audited_sha else ""
         print(f"== {entry['name']} ({', '.join(entry.get('types', []))}; {model}){stamp} ==")
         if not findings:
-            print("  clean (deterministic checks; the full letter+intent verdict is AUDIT.md's)")
+            print("  clean (deterministic checks only; no project-type check in spec/project-types.json runs here, and the cross-cutting ones are covered only in part - AUDIT.md section 4)")
         for kind, text in findings:
             print(f"  {kind:6} {text}")
             if kind in ("DEFECT", "LETTER", "ERROR"):

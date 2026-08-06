@@ -605,15 +605,35 @@ def strip_quoted(s: str) -> str:
     return re.sub(r'"[^"\n]*"', '""', s)
 
 
-# A bullet's `**Label**:` opens the text the same way `- **Label** -` does, so its colon
-# introduces the bullet rather than a list, and reading it as one excused the splice after it.
-LABEL_COLON = re.compile(r'^\s*(?:[-*]|[0-9]+\.)\s+\*\*[^*]+\*\*\s*:')
+# A bullet's `**Label**:` opens the text the same way `- **Label** -` does.
+# Its colon introduces the bullet rather than a list, and reading it as one excused the splice.
+# The colon is written inside the emphasis as often as outside it, and both spell one construct.
+# Matching `**Label**:` alone left `**Label:**` announcing a list it never announced.
+LABEL_COLON = re.compile(r'^\s*(?:[-*]|[0-9]+\.)\s+\*\*[^*]+?(?:\*\*\s*:|:\s*\*\*)')
+
+# A sentence boundary inside one line, so a list exemption is scoped to the sentence holding it.
+# The guards are the run-on rule's, so an initial or an abbreviation ends nothing.
+# The trailing class is the emphasis or bracket a Markdown sentence closes inside.
+# Reading a bare `. ` instead left `.**` and `.)` joining a bullet's every sentence into one span.
+SENTENCE_BREAK = re.compile(r'(?<!\b[A-Z])(?<!\be\.g)(?<!\bi\.e)(?<!\bvs)(?<!\betc)'
+                            r'[.!?][*_`"\')\]]*\s+')
+
+
+def sentences(span: str) -> list[str]:
+    """The span split at its sentence boundaries, empty pieces dropped.
+
+    A list lives inside one sentence, so the sentence is the unit an exemption may be judged on.
+    Judged over a whole bullet instead, a colon anywhere before the first semicolon marked the
+    bullet a list and exempted every semicolon after it, however plainly one joined two clauses.
+    The colon and the semicolon did not have to be near each other, or related at all.
+    """
+    return [s for s in SENTENCE_BREAK.split(span) if s.strip()]
 
 
 def list_spans(s: str) -> list[str]:
     """Split a line into the spans that each hold their own list.
 
-    A markdown table row is a record of fields rather than one sentence, so judging the row whole
+    A Markdown table row is a record of fields rather than one sentence, so judging the row whole
     let a comma in one column excuse a semicolon in another.
     """
     cells = s.strip().strip('|').split('|') if s.lstrip().startswith('|') else [s]
@@ -821,7 +841,7 @@ def comment_wrap_findings(path: Path, raw: str, lines: list[str]) -> list[tuple[
         if not body or NOT_PROSE.search(body) or BARE_URI.match(body.strip()):
             prev_body = ''
             continue
-        # An unpunctuated markdown HTML comment is a structural marker, not commentary.
+        # An unpunctuated Markdown HTML comment is a structural marker, not commentary.
         # It is a label, so it takes neither a capital nor a sentence split.
         # A tool matches each one verbatim, so rewriting it breaks whatever reads it.
         # Group headers, the ToC-omit directive, and the agent-safety markers are the cases.
@@ -860,7 +880,7 @@ def check_file(path: Path, rules: set[str]) -> list[tuple[int, str, str]]:
     lines = raw.split('\n')
     if {'comment-wrap', 'comment-case'} & rules:
         out.extend(f for f in comment_wrap_findings(path, raw, lines) if f[1] in rules)
-    # Outside markdown the prose lives in the comments, and both rules judge prose, not code.
+    # Outside Markdown the prose lives in the comments, and both rules judge prose, not code.
     # A source line holds identifiers and literals, and an attribute value may legally repeat.
     # Reading it rejects correct work, `class="gallery gallery-cols-1"` being the reported case.
     comments: dict[int, list[str]] = {}
@@ -885,22 +905,24 @@ def check_file(path: Path, rules: set[str]) -> list[tuple[int, str, str]]:
         txt = strip_inline_code(line)
         prose = strip_quoted(txt) if path.suffix == '.md' else txt
 
-        # Both prose rules are markdown-only until a comment can be told from code.
+        # Both prose rules are Markdown-only until a comment can be told from code.
         # A shell script carries 78 statement separators that are not prose at all.
         if path.suffix == '.md':
             if 'semicolon' in rules:
                 for span in list_spans(prose):
-                    # A list keeps its semicolons, announced by a colon or a second separator.
-                    # The comma is a property of the list rather than of one separator's position,
-                    # so an enumeration whose commas fall in a later item keeps every semicolon it
-                    # carries. Reading it positionally split such a list, flagging the openers of
-                    # the same series it then exempted the tail of.
-                    listish = span.count(';') > 1 or ':' in span.split(';')[0]
-                    if listish and ',' in span:
-                        continue
-                    for _ in SEMICOLON.finditer(span):
-                        out.append((i, 'semicolon',
-                                    'semicolon in prose -> a comma or two sentences'))
+                    # The sentence is the unit, since the list an exemption protects lives in one.
+                    # Judged over a whole bullet, one colon exempted every semicolon after it.
+                    for sentence in sentences(span):
+                        # A list keeps its semicolons, announced by a colon or a second separator.
+                        # The comma qualifies the list rather than one separator's position.
+                        # An enumeration whose commas fall in a later item keeps every semicolon.
+                        # Read positionally, it split one series and flagged that series' openers.
+                        listish = sentence.count(';') > 1 or ':' in sentence.split(';')[0]
+                        if listish and ',' in sentence:
+                            continue
+                        for _ in SEMICOLON.finditer(sentence):
+                            out.append((i, 'semicolon',
+                                        'semicolon in prose -> a comma or two sentences'))
             if 'dash' in rules:
                 skip = LABEL_DASH.match(prose)
                 for m in DASH.finditer(prose):

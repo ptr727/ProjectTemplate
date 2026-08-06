@@ -92,7 +92,7 @@ Copy every [`spec/files.json`][files] entry whose `appliesTo` matches the repo's
 - `OPERATIONS.md`: how the repo is run, under the headings `Runbooks`, `Backup and Recovery`, `Logs and Debugging`, `Tool Usage`, and `Configuration Layout`.
 - `TODO.md`: the repo's running backlog, per [`spec/readme-structure.md`][readme-structure]. It keeps open work out of the README's section order, where it does not belong and changes on a different cadence from everything around it.
 
-**`OPERATIONS.md` is required on every repo**, not optional, so it appears in the baseline above with `appliesTo: "*"`. It is presence-checked only, the same footing as `README.md` and `HISTORY.md`, so its content is entirely the repo's own and a repo with little to say still carries the file as a stub, meaning those five headings with no content under them, for which this repo's own `OPERATIONS.md` is the worked example. Do not read the `operational` workflow model into the requirement, because that selector describes where config lives rather than whether the repo has runbooks, and a repo that publishes to a package registry or deploys a site has operational surface under either model. It is the operational analogue of `ARCHITECTURE.md`, and it is where an `AGENTS.md` split puts the repo-specific half, so real runbooks (a deploy procedure, a rollback, a retention policy, a credential rotation) go there rather than into a carried file. It is agent-instruction content, so it takes the inline-link exception the markdown rules name rather than the reference-style default. `ARCHITECTURE.md` and `TODO.md` stay advisory and are required by no selector, so a repo with nothing to say in one carries no file rather than an empty one.
+**`OPERATIONS.md` is required on every repo**, not optional, so it appears in the baseline above with `appliesTo: "*"`. It is presence-checked only, the same footing as `README.md` and `HISTORY.md`, so its content is entirely the repo's own and a repo with little to say still carries the file as a stub, meaning those five headings with no content under them, for which this repo's own `OPERATIONS.md` is the worked example. Do not read the `operational` workflow model into the requirement, because that selector describes where config lives rather than whether the repo has runbooks, and a repo that publishes to a package registry or deploys a site has operational surface under either model. It is the operational analogue of `ARCHITECTURE.md`, and it is where an `AGENTS.md` split puts the repo-specific half, so real runbooks (a deploy procedure, a rollback, a retention policy, a credential rotation) go there rather than into a carried file. It is agent-instruction content, so it takes the inline-link exception the Markdown rules name rather than the reference-style default. `ARCHITECTURE.md` and `TODO.md` stay advisory and are required by no selector, so a repo with nothing to say in one carries no file rather than an empty one.
 
 Choose the destination while scaffolding rather than after. Repo-specific content left in a carried file is drift, which the audit lists as an undeclared section to reconcile, and reconciling it later means moving prose that downstream readers have already started trusting in the wrong place.
 
@@ -129,8 +129,8 @@ Run [`AUDIT.md`][audit] end to end. The repo is stood up only when it is **opera
 
 When a repo matches no existing type, the work is onboarding a **type**, not just a repo:
 
-1. Add the type to [`spec/project-types.json`][project-types] (`detect[]`, plus `checks` with verdict tiers and intent refs) and any per-type files to [`spec/files.json`][files], then add its publish mechanism to [`spec/secrets.json`][secrets] if new.
-2. Add the reference workflow leaf to [`catalog/snippets/workflows/`][workflows] and document the type's [`WORKFLOW.md`][workflow] walkthrough.
+1. Add the type to [`spec/project-types.json`][project-types] (`detect[]`, plus `checks` with verdict tiers and intent refs) and any per-type files to [`spec/files.json`][files], then add its publish mechanism to [`spec/secrets.json`][secrets] if new. Add the type's token to [`spec/scope-model.md`][scope-model] and the type itself to [`spec/type-model.md`][type-model] in the same change, which that file's own rule requires. A type publishing to a **new destination** also needs the target added to the closed `target` enum in [`registry/repos.schema.json`][repos-schema] and mapped in `targetMechanisms`, or the first repo declaring it fails `spec/validate.py` with an unknown-target error.
+2. Add the reference workflow leaf to [`catalog/snippets/workflows/`][workflows] and document the type's [`WORKFLOW.md`][workflow] walkthrough. A leaf must not be named `build-*-task.yml` unless the type really is a build target, since `source-only.detect` is literally "no `build-*-task.yml`" and the name alone would make that declaration false for any repo carrying both.
 3. Add the type to the [conformance matrix][matrix] and run the cold-start self-test until a context-free agent stands it up to operational.
 
 ## Self-Test: Cold-Start Conformance
@@ -165,9 +165,11 @@ The same [`AUDIT.md`][audit] run is the on-demand audit for any known repo, and 
 [repo-config-carry]: ./docs/repo-config-carry.md
 [repo-config-readme]: ./repo-config/README.md
 [repos]: ./registry/repos.json
+[repos-schema]: ./registry/repos.schema.json
 [scope-model]: ./spec/scope-model.md
 [secrets]: ./spec/secrets.json
 [section-model]: ./spec/section-model.md
 [spec]: ./spec/
+[type-model]: ./spec/type-model.md
 [validate]: ./spec/validate.py
 [workflow]: ./WORKFLOW.md
