@@ -362,7 +362,8 @@ def main(argv: list[str] | None = None) -> int:
     # The number resolves there, the digest renders, and nothing in the output disagrees.
     # Two runs read a pull request here while one in their own repository was the subject.
     ap.add_argument('--repo', required=True, metavar='OWNER/NAME',
-                    help='the repository holding the pull request, since a number resolves in any')
+                    help='the repository the pull request is in, since a pull '
+                         'request number identifies no repository on its own')
     ap.add_argument('--timeout', type=int, default=2700, help='seconds (default 45m)')
     ap.add_argument('--pickup-grace', type=int, default=300,
                     help='seconds before the first pickup read, and between reads (default 5m)')
