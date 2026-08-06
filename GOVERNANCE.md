@@ -260,12 +260,14 @@ The repo runs a review loop on every PR: local agent iteration plus remote autom
 
 **Do not merge, and do not enable auto-merge, unless ALL of these hold:**
 
-1. Required status checks are green (`mergeStateStatus: CLEAN`), **and**
+1. Required status checks are green (`mergeStateStatus: CLEAN`), and where they are not, the reason is **read** rather than inferred, because `BLOCKED` is one word for a failed check, a required check nothing is running, an unresolved thread, and a missing approval alike, so the response to it is decided from the check states and never from the word, **and**
 2. A Copilot review is confirmed on the **current head SHA** by matching the review's commit SHA to the head, not an earlier push, because a push makes required checks go green **before** the re-review lands, so a green merge-state can precede the current-head review and never signals readiness on its own, and the matched review is **read** rather than only counted, because Copilot declines a pull request it will not take on with a formal review carrying that same head SHA and no findings, which matches the SHA and covers nothing, **and**
 3. **Every** Copilot finding on that head SHA is closed out, with all review threads resolved, **and** any issue-level Copilot comments (which have no resolve action) triaged and replied to, **and** the low-confidence findings collapsed in the review body investigated and answered, since those appear in no thread and a loop that polls threads alone reports a clean pass while they stand, so zero outstanding findings remain, **and**
 4. The maintainer has given **explicit** permission to merge.
 
 `mergeStateStatus: CLEAN` reflects **only** required statuses, and never open bot review comments, so `CLEAN` alone is **never** sufficient to merge. A green/`CLEAN` PR with an unresolved Copilot finding fails this gate; treat it as "not mergeable" no matter what the merge-state field says. The agent never merges on its own (consistent with "default to staging"; merging is maintainer-authorized).
+
+**`BLOCKED` is not self-explaining either, and the remedy differs by cause.** A failed check is a defect to fix, an unresolved thread is a finding to close, and a required check sitting queued with no runner assigned is neither: it is hosted-runner capacity, which no re-request, rebase, or empty commit clears, and which a reader waiting on it cannot tell from patience. Report a blocked merge by naming the blocking check and its state rather than reporting the word, and where the cause is capacity, say so and stop rather than pushing at it, since the bypass is the maintainer's to run and a starved runner is not a reason to weaken a gate.
 
 **Merging is not releasing.** A merge to a release branch does **not** by itself publish. Publishing is a separate, explicitly configured step in the repo's release pipeline (e.g. a scheduled run, a manual dispatch, or an opted-in publish-on-merge trigger), not an automatic consequence of merging. Never describe a merge as cutting a release, and never trigger a publish without explicit maintainer instruction.
 

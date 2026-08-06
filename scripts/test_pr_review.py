@@ -10,6 +10,7 @@ Run as `python3 scripts/test_pr_review.py`, or under `python3 -m unittest discov
 """
 from __future__ import annotations
 import contextlib, io, json, re, subprocess, sys, unittest
+from datetime import datetime, timedelta, timezone
 from itertools import count
 from pathlib import Path
 from unittest import mock
@@ -72,16 +73,50 @@ def thread(tid: str, resolved: bool = False, login: str = pr_review.REVIEWER,
                                     'line': line, 'body': body}]}}
 
 
+# A fixed clock, so a case holds a check at a known age instead of at whatever the suite runs at.
+NOW = datetime(2026, 8, 6, 17, 0, 0, tzinfo=timezone.utc)
+
+
+def ago(seconds: int) -> str:
+    """A timestamp `seconds` before NOW, in the spelling GraphQL returns."""
+    return (NOW - timedelta(seconds=seconds)).strftime('%Y-%m-%dT%H:%M:%SZ')
+
+
+def check(name: str = 'Check pull request workflow status job', status: str = 'COMPLETED',
+          conclusion: str = 'SUCCESS', started: str | None = None) -> dict:
+    """One CheckRun rollup node, in the shape the live rollup returns.
+
+    The starved case this exists for was read off run 31118675530 in this repository: an aggregator
+    job dispatched the instant its dependency finished, left `QUEUED` with an empty runner name and
+    a `startedAt` stamped equal to its creation, which sat fifteen minutes and never ran. Its
+    healthy sibling on the next run wore `IN_PROGRESS` with a runner inside two minutes.
+    """
+    return {'__typename': 'CheckRun', 'name': name, 'status': status,
+            'conclusion': conclusion, 'startedAt': ago(60) if started is None else started}
+
+
+def status_context(context: str = 'ci/external', state: str = 'SUCCESS',
+                   created: str | None = None) -> dict:
+    """One StatusContext rollup node, which spells every field differently from a CheckRun."""
+    return {'__typename': 'StatusContext', 'context': context, 'state': state,
+            'createdAt': ago(60) if created is None else created}
+
+
 def payload(reviews: list[dict], threads: list[dict] | None = None,
             merge: str = 'CLEAN', comments: list[dict] | None = None,
-            older: bool = False, older_reviews: bool = False, pending: bool = False) -> dict:
+            older: bool = False, older_reviews: bool = False, pending: bool = False,
+            checks: list[dict] | None = None, rollup_oid: str | None = None) -> dict:
     requested = ([{'requestedReviewer': {'__typename': 'Bot', 'login': pr_review.REVIEWER}}]
                  if pending else [])
     return {'headRefOid': HEAD, 'mergeable': 'MERGEABLE', 'mergeStateStatus': merge,
             'reviews': {'nodes': reviews, 'pageInfo': {'hasPreviousPage': older_reviews}},
             'reviewThreads': {'nodes': threads or []},
             'comments': {'nodes': comments or [], 'pageInfo': {'hasPreviousPage': older}},
-            'reviewRequests': {'nodes': requested}}
+            'reviewRequests': {'nodes': requested},
+            'commits': {'nodes': [{'commit': {
+                'oid': rollup_oid or HEAD,
+                'statusCheckRollup': {'state': 'PENDING',
+                                      'contexts': {'nodes': checks}} if checks else None}}]}}
 
 
 class GqlCase(unittest.TestCase):
@@ -555,6 +590,175 @@ class TestDigestReportsTheAnswer(GqlCase):
         self.assertIn('BEHIND THE WINDOW (comments)', out)
 
 
+class TestCheckShapes(unittest.TestCase):
+    """`mergeStateStatus` folds every one of these into `BLOCKED`, and each wants its own answer.
+
+    The run this exists for polled `BLOCKED` for twenty-five minutes on a pull request whose only
+    unfinished check was a rollup job no runner ever took, and learned the cause from the
+    maintainer rather than from the digest.
+    """
+
+    def shape(self, node: dict, grace: float = 300, stall: float = 1800) -> str:
+        """Judged through the normalizer, since that is the only shape the digest ever feeds it.
+
+        Handing `check_shape` a raw rollup node instead reads every field as absent, which scores
+        a queued job as a failure. That was this helper's first version, and it failed eight cases
+        at once rather than one, which is what said the fault was in the helper.
+        """
+        normalized, = pr_review.check_nodes(payload([review()], checks=[node]))
+        return pr_review.check_shape(normalized, NOW, grace, stall)
+
+    def test_a_queued_check_is_starting_inside_the_grace_and_starved_past_it(self) -> None:
+        """The two are the same state, and only the clock separates them, so the grace decides."""
+        self.assertEqual('', self.shape(check(status='QUEUED', conclusion='', started=ago(90))))
+        self.assertEqual('NOT_PICKED_UP',
+                         self.shape(check(status='QUEUED', conclusion='', started=ago(900))))
+
+    def test_every_unstarted_spelling_counts_not_only_queued(self) -> None:
+        """Reading QUEUED alone reports a check held at a gate as one that is running."""
+        for state in ('QUEUED', 'WAITING', 'PENDING', 'REQUESTED'):
+            with self.subTest(state=state):
+                self.assertEqual('NOT_PICKED_UP', self.shape(
+                    check(status=state, conclusion='', started=ago(900))))
+
+    def test_an_expected_status_is_unposted_rather_than_failed(self) -> None:
+        """`EXPECTED` is a StatusContext state meaning nothing has posted the status yet.
+
+        It reaches the conclusion branch if it is left out of the unstarted set, where it matches
+        no pass and so reports a required status nobody has reported yet as a red check. Caught
+        reading this diff back rather than by a case, so the case exists now.
+        """
+        self.assertEqual('NOT_PICKED_UP',
+                         self.shape(status_context(state='EXPECTED', created=ago(900))))
+        self.assertEqual('', self.shape(status_context(state='EXPECTED', created=ago(60))))
+
+    def test_a_running_check_is_reported_only_past_the_stall_threshold(self) -> None:
+        """A lint job here legitimately runs eleven minutes, so the default must not flag it."""
+        self.assertEqual('', self.shape(check(status='IN_PROGRESS', conclusion='',
+                                              started=ago(11 * 60))))
+        self.assertEqual('RUNNING_LONG', self.shape(check(status='IN_PROGRESS', conclusion='',
+                                                          started=ago(40 * 60))))
+
+    def test_a_skipped_or_neutral_check_is_a_pass_not_a_blocker(self) -> None:
+        """This fleet's aggregator pattern skips the conditional jobs on every green run.
+
+        Four of the six checks on a passing pull request here are skips, so scoring a skip as
+        unfinished reports four blockers on a pull request with none.
+        """
+        for conclusion in ('SUCCESS', 'SKIPPED', 'NEUTRAL'):
+            with self.subTest(conclusion=conclusion):
+                self.assertEqual('', self.shape(check(conclusion=conclusion)))
+
+    def test_a_finished_check_that_did_not_pass_is_a_failure_including_an_unknown_verdict(self)\
+            -> None:
+        """An unrecognized conclusion is reported rather than passed over.
+
+        A new enum member read as a pass is a red check rendering as a green digest, which is the
+        false clean this whole script exists to prevent, one level down in the reading.
+        """
+        for conclusion in ('FAILURE', 'CANCELLED', 'TIMED_OUT', 'STARTUP_FAILURE',
+                           'ACTION_REQUIRED', 'STALE', 'SOMETHING_NEW'):
+            with self.subTest(conclusion=conclusion):
+                self.assertEqual('FAILED', self.shape(check(conclusion=conclusion)))
+
+    def test_an_unreadable_timestamp_reports_nothing_rather_than_an_age_of_zero(self) -> None:
+        """Zero would read as a check that just started, which is how one stuck for hours passes."""
+        for started in ('', 'not-a-timestamp'):
+            with self.subTest(started=started):
+                self.assertEqual('', self.shape(
+                    check(status='QUEUED', conclusion='', started=started)))
+
+    def test_a_finished_check_carrying_no_conclusion_yet_is_settling_not_failing(self) -> None:
+        """Reading an absent verdict as a failure invents a red check out of a race in the API.
+
+        Caught by this suite rather than in review: the first implementation fell straight through
+        to the unknown-conclusion branch, so a completed check whose conclusion had not been
+        written yet reported as FAILED.
+        """
+        self.assertEqual('', self.shape(check(conclusion='')))
+
+    def test_both_rollup_node_shapes_normalize_rather_than_one_reading_as_stateless(self) -> None:
+        """A StatusContext folds status and conclusion into one field and renames the label.
+
+        Reading a CheckRun's keys off it yields None for every one, which scores an external
+        status as a check in no state at all, so neither pending nor failed.
+        """
+        pr = payload([review()], checks=[check(name='job'), status_context(state='FAILURE')])
+        nodes = pr_review.check_nodes(pr)
+        self.assertEqual(['job', 'ci/external'], [n['name'] for n in nodes])
+        self.assertEqual('FAILED', self.shape(nodes[1]))
+
+    def test_a_pending_status_context_is_unstarted_rather_than_a_failure(self) -> None:
+        """PENDING is its not-started spelling, so it belongs with the queued states."""
+        self.assertEqual('NOT_PICKED_UP',
+                         self.shape(status_context(state='PENDING', created=ago(900))))
+
+    def test_a_pull_request_with_no_rollup_reads_as_no_checks_not_as_a_failure(self) -> None:
+        """A null rollup is a pull request nothing has run on yet, which blocks nothing here."""
+        self.assertEqual([], pr_review.check_nodes(payload([review()])))
+        self.assertEqual((0, 0), pr_review.checks_tally(payload([review()])))
+        self.assertEqual([], pr_review.checks_stuck(payload([review()]), NOW, 300, 1800))
+
+
+class TestDigestReportsChecks(GqlCase):
+    def digest(self, pr: dict) -> str:
+        out, _ = pr_review.digest('o', 'r', 7, pr=pr, stalled='', now=NOW)
+        return out
+
+    def test_the_tally_says_how_far_the_head_got_beside_the_merge_word(self) -> None:
+        """`merge=BLOCKED` names no cause, and this is what says which half is unfinished."""
+        out = self.digest(payload([review()], merge='BLOCKED', checks=[
+            check(name='lint'), check(name='gate', status='QUEUED', conclusion='',
+                                      started=ago(900))]))
+        self.assertIn('merge=BLOCKED checks=1/2', out)
+
+    def test_a_starved_check_is_named_with_its_queue_time_and_its_remedy(self) -> None:
+        """The remedy is the point: nothing agent-side starts a job no hosted runner took."""
+        out = self.digest(payload([review()], merge='BLOCKED', checks=[
+            check(name='gate', status='QUEUED', conclusion='', started=ago(15 * 60))]))
+        self.assertIn('stuck=NOT_PICKED_UP', out)
+        self.assertIn("CHECK NOT PICKED UP ('gate', queued 15m", out)
+        self.assertIn('re-run the workflow', out)
+
+    def test_a_long_running_check_is_reported_without_asserting_a_fault(self) -> None:
+        """Duration alone cannot separate hung from slow, so the wording must not claim it has."""
+        out = self.digest(payload([review()], merge='BLOCKED', checks=[
+            check(name='build', status='IN_PROGRESS', conclusion='', started=ago(45 * 60))]))
+        self.assertIn('stuck=RUNNING_LONG', out)
+        self.assertIn('it has a runner, so it is not starved', out)
+        self.assertIn('judgement against what this job normally costs', out)
+
+    def test_a_failed_check_is_named_as_a_verdict_rather_than_left_to_be_deduced(self) -> None:
+        out = self.digest(payload([review()], merge='BLOCKED',
+                                  checks=[check(name='lint', conclusion='FAILURE')]))
+        self.assertIn('stuck=FAILED', out)
+        self.assertIn("CHECK FAILED ('lint', COMPLETED/FAILURE)", out)
+
+    def test_a_green_pull_request_carries_no_stuck_field_at_all(self) -> None:
+        """A field reading `none` on every green run is one a reader skips on the run it matters."""
+        out = self.digest(payload([review()], checks=[check(), check(conclusion='SKIPPED')]))
+        self.assertIn('checks=2/2', out)
+        self.assertNotIn('stuck=', out)
+
+    def test_a_check_still_running_normally_is_not_stuck(self) -> None:
+        """Otherwise the field fires on every pull request mid-CI and so carries nothing."""
+        out = self.digest(payload([review()], merge='BLOCKED', checks=[
+            check(name='lint', status='IN_PROGRESS', conclusion='', started=ago(120))]))
+        self.assertIn('checks=0/1', out)
+        self.assertNotIn('stuck=', out)
+
+    def test_the_rollup_is_read_from_the_head_commit(self) -> None:
+        """A rollup off an earlier commit describes a push ago and every field in it renders.
+
+        The query asks `commits(last:1)` because a rollup hangs off a commit object, so this holds
+        that commit equal to `headRefOid` rather than trusting the connection's order.
+        """
+        pr = payload([review()], checks=[check()])
+        self.assertEqual(pr['headRefOid'], pr['commits']['nodes'][0]['commit']['oid'])
+        self.assertIn('headRefOid', pr_review.Q_FULL)
+        self.assertIn('statusCheckRollup', pr_review.Q_FULL)
+
+
 class TestGqlTransport(unittest.TestCase):
     def test_a_failed_call_raises_rather_than_returning_an_empty_reading(self) -> None:
         """Returning nothing on failure would read as a PR with no reviews and no threads."""
@@ -594,6 +798,45 @@ class TestCli(GqlCase):
             self.assertEqual(0, self.cli(['wait', '7']))
         slept.assert_not_called()
         self.assertIn('waited=', self.out.getvalue())
+
+    def test_wait_exits_forty_two_where_the_review_closed_but_a_check_is_starved(self) -> None:
+        """Exit 0 was saying the review loop closing is the merge gate, and it is not.
+
+        The age is read against the real clock here rather than the suite's fixed NOW, so the
+        timestamp is one whose age only grows: fifteen minutes at NOW and more on any later run,
+        which is past the five-minute grace under every clock this ever runs on.
+        """
+        self.answer(payload([review()], merge='BLOCKED', checks=[
+            check(name='gate', status='QUEUED', conclusion='', started=ago(900))]))
+        with mock.patch.object(pr_review.time, 'sleep'):
+            self.assertEqual(42, self.cli(['wait', '7']))
+        out = self.out.getvalue()
+        self.assertIn('status=CHECKS_NOT_MERGEABLE', out)
+        self.assertIn('CHECK NOT PICKED UP', out)
+
+    def test_wait_exits_zero_where_a_check_is_merely_still_running(self) -> None:
+        """A code that fires on every pull request mid-CI carries nothing, so this must be 0.
+
+        The wait returns the moment coverage lands, which on almost every pull request is while
+        the checks are still going, so a pending check taking 42 would make 42 the usual outcome.
+        The grace is passed rather than inferred, since a fixed timestamp's age only grows.
+        """
+        self.answer(payload([review()], merge='BLOCKED', checks=[
+            check(name='lint', status='QUEUED', conclusion='', started=ago(60))]))
+        with mock.patch.object(pr_review.time, 'sleep'):
+            self.assertEqual(0, self.cli(['wait', '7', '--check-grace', '100000000']))
+        self.assertNotIn('stuck=', self.out.getvalue())
+
+    def test_a_starved_check_does_not_pre_empt_a_review_that_never_landed(self) -> None:
+        """The review codes outrank it, since a missing review is the older and larger failure."""
+        self.answer(payload([review(oid=OLD)], merge='BLOCKED', checks=[
+            check(name='gate', status='QUEUED', conclusion='', started=ago(900))]))
+        with mock.patch.object(pr_review.time, 'sleep'):
+            self.assertEqual(30, self.cli(['wait', '7', '--timeout', '0']))
+        out = self.out.getvalue()
+        self.assertIn('status=PENDING', out)
+        # Reported in the digest regardless, since the reader still needs to know it is there.
+        self.assertIn('CHECK NOT PICKED UP', out)
 
     def test_wait_polls_again_after_a_pending_round(self) -> None:
         """Each iteration re-reads the head, since a push during the wait moves it."""
@@ -885,6 +1128,27 @@ class TestContract(unittest.TestCase):
                 pr_review.main(['wait', '7', '--repo', 'o/r', '--pickup-grace', '-1'])
         # The repository is named, or this exits on the missing argument and proves nothing.
         self.assertIn('pickup-grace', err.getvalue())
+
+    def test_a_negative_check_threshold_is_rejected_rather_than_firing_on_every_check(self) -> None:
+        """Below zero, every check in that state reports stuck from the first read.
+
+        A field that fires always is one a reader learns to skip, which costs the case it exists
+        for, so the parser refuses it by name rather than rendering a digest nobody trusts.
+        """
+        for flag in ('--check-grace', '--check-stall'):
+            with self.subTest(flag=flag):
+                with contextlib.redirect_stderr(io.StringIO()) as err:
+                    with self.assertRaises(SystemExit):
+                        pr_review.main(['wait', '7', '--repo', 'o/r', flag, '-1'])
+                self.assertIn(flag.lstrip('-'), err.getvalue())
+
+    def test_the_check_thresholds_are_ordered_so_a_queue_reads_before_a_run(self) -> None:
+        """A stall threshold under the grace would report a running job before a starved one.
+
+        The two measure different things, and the grace is short because a pickup is fast while
+        the stall is long because a build is not, so an inversion here inverts both readings.
+        """
+        self.assertLess(pr_review.CHECK_GRACE, pr_review.CHECK_STALL)
 
     def test_a_failed_timeline_read_raises_rather_than_reading_as_no_events(self) -> None:
         """An empty list reads as no request pending, which is the false clean one level up."""

@@ -16,6 +16,9 @@ Subcommands
            40 reports the shape of that answer and reads nothing of its cause: an answer
            carrying no commit covers no head, so the wait ends and the reader decides.
            41 = the review carrying the head says it did not review, so it covers nothing.
+           42 = the review loop closed but a required check is in a shape no wait clears:
+           queued with nothing acting on it, running far past what the job costs, or
+           failed. A check merely still running normally is not this, and exits 0.
            50 = the request is pending and nothing picked it up, which no amount of
            waiting changes. Recovery is two mutations, and they stay in the runbook.
 
@@ -26,8 +29,28 @@ visible to the gh-write-guard PreToolUse hook and to review. See
 """
 from __future__ import annotations
 import argparse, json, re, subprocess, sys, time
+from datetime import datetime, timezone
 
 REVIEWER = 'copilot-pull-request-reviewer'
+
+# A check that has not started, in every spelling the two rollup enums carry between them.
+# QUEUED is the one a starved job wears, and WAITING, PENDING and REQUESTED cover a gate.
+# EXPECTED is a StatusContext's, meaning a required status nothing has posted yet.
+# Reading QUEUED alone scores every one of those as running, and EXPECTED as a failure.
+NOT_STARTED = frozenset({'QUEUED', 'WAITING', 'PENDING', 'REQUESTED', 'EXPECTED'})
+# What counts as a check having passed, rather than as one still deciding or failed.
+# SKIPPED and NEUTRAL are passes, since the fleet aggregator pattern skips the conditional jobs.
+# Treating a skip as unfinished reports four blockers on every green pull request here.
+CHECK_OK = frozenset({'SUCCESS', 'SKIPPED', 'NEUTRAL'})
+# How long a queued check is simply a check starting.
+# Observed pickup on a healthy run here is one to two minutes.
+# This is the pickup grace's five minutes for the same reason that one is.
+CHECK_GRACE = 300
+# How long a running check runs before its duration is worth reporting.
+# Generous on purpose, since this repository's lint job legitimately takes eleven minutes.
+# A fleet repository building and testing .NET takes longer still.
+# A threshold that flags those trains the reader to skim the genuinely hung job too.
+CHECK_STALL = 1800
 
 # A review body can carry a collapsed block of findings withheld from the inline threads.
 # Those appear nowhere in `reviewThreads`, so polling threads alone reports a clean pass.
@@ -83,6 +106,9 @@ query($o:String!,$r:String!,$n:Int!){
 """
 
 # Full query: run once on transition, not per poll.
+# The rollup rides this query rather than a REST call, so reading the checks costs no round-trip.
+# It is asked of the last commit because a rollup hangs off a commit object.
+# A case holds that commit equal to `headRefOid`, since a rollup a push ago still renders whole.
 Q_FULL = """
 query($o:String!,$r:String!,$n:Int!){
   repository(owner:$o,name:$r){ pullRequest(number:$n){
@@ -92,6 +118,12 @@ query($o:String!,$r:String!,$n:Int!){
       comments(first:1){ nodes{ author{login} path line body } } }}
     comments(last:100){ nodes{ author{login} createdAt body } pageInfo{ hasPreviousPage } }
     reviewRequests(first:10){ nodes{ requestedReviewer{ __typename ... on Bot{login} ... on User{login} } } }
+    commits(last:1){ nodes{ commit{ oid statusCheckRollup{ state
+      contexts(first:100){ nodes{
+        __typename
+        ... on CheckRun{ name status conclusion startedAt }
+        ... on StatusContext{ context state createdAt }
+      }}}}}}
   }}}
 """
 
@@ -263,6 +295,101 @@ def reviewed_head(pr: dict) -> bool:
                for n in reviewer_nodes(pr, 'reviews'))
 
 
+def age(stamp: str, now: datetime) -> float | None:
+    """Seconds from `stamp` to `now`, or None where the stamp is absent or unparseable.
+
+    None is returned rather than zero or a raise, because every caller treats an unknown age as
+    "cannot judge this" and reports nothing. Zero would read as a check that just started, which
+    is the reading that reports a job stuck for hours as fresh.
+    """
+    if not stamp:
+        return None
+    try:
+        # `fromisoformat` reads the trailing Z only from 3.11, and a fleet machine may carry less.
+        return (now - datetime.fromisoformat(stamp.replace('Z', '+00:00'))).total_seconds()
+    except ValueError:
+        return None
+
+
+def check_nodes(pr: dict) -> list[dict]:
+    """The head commit's checks, each as {name, state, conclusion, started}.
+
+    A rollup carries two node shapes and they spell every field differently: a CheckRun has a
+    `name`, a `status` and a `conclusion`, while a StatusContext has a `context` and a single
+    `state` that folds both. Reading one shape's keys off the other yields None for all of them,
+    which scores an external status as a check in no state at all, so neither pending nor failed.
+    They are normalized here so one reading serves both.
+    """
+    commits = ((pr.get('commits') or {}).get('nodes') or [])
+    rollup = ((commits[0].get('commit') or {}) if commits else {}).get('statusCheckRollup') or {}
+    out = []
+    for n in ((rollup.get('contexts') or {}).get('nodes') or []):
+        if n.get('__typename') == 'CheckRun':
+            out.append({'name': n.get('name') or '', 'state': n.get('status') or '',
+                        'conclusion': n.get('conclusion') or '',
+                        'started': n.get('startedAt') or ''})
+        else:
+            # A StatusContext reports one field for both, so its state doubles as its conclusion.
+            # PENDING is its not-started spelling and belongs in NOT_STARTED for that reason.
+            state = n.get('state') or ''
+            out.append({'name': n.get('context') or '', 'state': state,
+                        'conclusion': state, 'started': n.get('createdAt') or ''})
+    return out
+
+
+def check_shape(node: dict, now: datetime, grace: float, stall: float) -> str:
+    """How this check is stuck, or the empty string where it is not.
+
+    Three shapes, because `mergeStateStatus` collapses all of them into `BLOCKED` and each wants
+    a different response. A run this session spent twenty-five minutes polling `BLOCKED` on a
+    pull request whose only unfinished check was a rollup job no runner ever took, and the cause
+    came from the maintainer rather than from any reading here.
+
+    NOT_PICKED_UP is the well-founded one: a job GitHub has dispatched but assigned no runner.
+    It is read from the queued state rather than from a runner name, which GraphQL does not carry,
+    and the state is sufficient because a job held behind a `needs:` dependency does not appear
+    in the rollup at all until that dependency finishes, so there is no dependency-blocked queue
+    to mistake for a starved one. Observed pickup on a healthy run is one to two minutes, so the
+    grace is the pickup grace for the same reason that one is five minutes: inside it, a queued
+    job is simply a job starting.
+
+    RUNNING_LONG is deliberately weaker and says so in its wording, because duration alone cannot
+    separate a stalled job from a slow one. This repository's own lint job legitimately runs nine
+    to eleven minutes while its aggregator is a single shell conditional, and a fleet repository
+    building and testing .NET runs longer still. So the threshold is generous, the elapsed time is
+    printed for the reader to judge against what the job costs, and nothing here asserts a fault.
+
+    FAILED is any finished check that did not pass, which is a definite answer rather than a stuck
+    one, and it is reported here so that a reader is never left deducing a red check from `BLOCKED`.
+    """
+    state, conclusion = node.get('state') or '', node.get('conclusion') or ''
+    elapsed = age(node.get('started') or '', now)
+    if state in NOT_STARTED:
+        return 'NOT_PICKED_UP' if elapsed is not None and elapsed > grace else ''
+    if state == 'IN_PROGRESS':
+        return 'RUNNING_LONG' if elapsed is not None and elapsed > stall else ''
+    # A finished check carrying no conclusion yet is still settling, so nothing is reported.
+    # Reading an absent verdict as a failure invents a red check out of a race in the API.
+    # An unrecognized state would reach the line below and produce that same false failure.
+    if not conclusion:
+        return ''
+    # A conclusion this does not recognize is reported rather than passed over.
+    # An unknown verdict blocking a merge is exactly what a reader needs told.
+    # A new enum member read as a pass is a red check rendering as a green digest.
+    return '' if conclusion in CHECK_OK else 'FAILED'
+
+
+def checks_stuck(pr: dict, now: datetime, grace: float, stall: float) -> list[tuple[dict, str]]:
+    """Every check in a stuck shape, as (node, shape), in the order the rollup returns them."""
+    return [(n, s) for n in check_nodes(pr) if (s := check_shape(n, now, grace, stall))]
+
+
+def checks_tally(pr: dict) -> tuple[int, int]:
+    """(checks that have passed, checks there are), so a bare count says how far the head is."""
+    nodes = check_nodes(pr)
+    return sum(1 for n in nodes if (n.get('conclusion') or '') in CHECK_OK), len(nodes)
+
+
 def live_state(owner: str, repo: str, num: int) -> tuple[str, bool, dict | None]:
     """Return (head_sha, copilot_reviewed_current_head, copilot_answer_outside_a_review)."""
     pr = gql(Q_LIVE, owner, repo, num)
@@ -317,16 +444,20 @@ def finding_count(block: str) -> int:
 
 
 def digest(owner: str, repo: str, num: int, seen: set[str] | None = None,
-           pr: dict | None = None, stalled: str | None = None) -> tuple[str, int]:
+           pr: dict | None = None, stalled: str | None = None, now: datetime | None = None,
+           grace: float = CHECK_GRACE, stall: float = CHECK_STALL) -> tuple[str, int]:
     """Render the digest, from a caller's payload and stall reading where those are given.
 
     The caller passes its own readings when the exit code has to agree with what was printed,
     since a review landing between two reads makes a fresh fetch describe a different pull
     request than the one the code was decided from. Passing the stall also spends one REST
-    call between the caller and the digest rather than one each.
+    call between the caller and the digest rather than one each. `now` is a parameter for the
+    same reason, so a case can hold a check at a known age rather than at whatever the clock
+    says when the suite runs.
     """
     pr = gql(Q_FULL, owner, repo, num) if pr is None else pr
     stalled = stall_of(owner, repo, num, pr) if stalled is None else stalled
+    now = datetime.now(timezone.utc) if now is None else now
     head = pr['headRefOid']
     revs = reviewer_nodes(pr, 'reviews')
     # A refusal carries the head and covers nothing, so it counts as a round and not as coverage.
@@ -359,6 +490,8 @@ def digest(owner: str, repo: str, num: int, seen: set[str] | None = None,
     refusal = None if on_head else refusing_review(pr)
     blind = [f for f in ('reviews', 'comments') if window_blind(pr, f)]
     answered = 'yes' if answer else ('unknown' if blind else 'no')
+    ok, total = checks_tally(pr)
+    stuck = checks_stuck(pr, now, grace, stall)
     lines = [
         # The repository leads the line, since a number alone reads as correct anywhere.
         # A digest of the wrong pull request is well-formed, so naming it is what shows the miss.
@@ -373,7 +506,15 @@ def digest(owner: str, repo: str, num: int, seen: set[str] | None = None,
         f'(on_head={sum(finding_count(b) for b in on_head_blocks)} earlier={stale}) '
         f'answered_outside_review={answered} '
         f'requested={"yes" if reviewer_requested(pr) else "no"} '
-        f'merge={pr.get("mergeStateStatus")}'
+        f'merge={pr.get("mergeStateStatus")} '
+        # `merge=BLOCKED` names no cause and is worn by every gate alike.
+        # A red check, a check nothing runs, an open thread, and a missing approval all read it.
+        # One run here polled that word for twenty-five minutes without learning which it was.
+        # The tally says how far the head got, and `checks=0/0` says the rollup carried nothing.
+        f'checks={ok}/{total}'
+        # Named only where there is one to name.
+        # A field reading `none` on every green run is one a reader skips when it finally says more.
+        + (f' stuck={",".join(sorted({s for _, s in stuck}))}' if stuck else '')
     ]
     if refusal:
         # Printed whole for the reason the comment below is, as the wording carries the remedy.
@@ -384,6 +525,23 @@ def digest(owner: str, repo: str, num: int, seen: set[str] | None = None,
                      'it, and the body below is what says which remedy applies')
         lines += [f'    {ln.rstrip()}' for ln in (refusal.get('body') or '').splitlines()
                   if ln.strip()]
+    for node, shape in stuck:
+        # Each shape carries its own remedy, which is the whole point of telling them apart.
+        # A reader handed one word for all three retries the wrong thing, or waits on a queue.
+        elapsed = age(node.get('started') or '', now)
+        mins = 'age unknown' if elapsed is None else f'{int(elapsed // 60)}m'
+        if shape == 'NOT_PICKED_UP':
+            lines.append(f'  CHECK NOT PICKED UP ({node["name"]!r}, queued {mins} with no '
+                         'runner assigned): nothing here starts it, because the runner pool is '
+                         'GitHub-hosted, so re-run the workflow or wait on that capacity')
+        elif shape == 'RUNNING_LONG':
+            lines.append(f'  CHECK RUNNING LONG ({node["name"]!r}, running {mins}): it has a '
+                         'runner, so it is not starved, and whether this is hung or merely slow '
+                         'is a judgement against what this job normally costs')
+        else:
+            lines.append(f'  CHECK FAILED ({node["name"]!r}, {node["state"]}/'
+                         f'{node["conclusion"]}): a verdict rather than a stuck check, so read '
+                         'the run and fix it, since no wait and no re-run clears a real failure')
     if stalled:
         lines.append(f'  REQUEST NOT PICKED UP (requested {stalled}, no copilot_work_started '
                      'since): clear the request and re-request, per the runbook')
@@ -446,11 +604,22 @@ def main(argv: list[str] | None = None) -> int:
     ap.add_argument('--timeout', type=int, default=2700, help='seconds (default 45m)')
     ap.add_argument('--pickup-grace', type=int, default=300,
                     help='seconds before the first pickup read, and between reads (default 5m)')
+    ap.add_argument('--check-grace', type=int, default=CHECK_GRACE,
+                    help='seconds a check may sit queued before it reads as unstarted '
+                         f'(default {CHECK_GRACE // 60}m)')
+    ap.add_argument('--check-stall', type=int, default=CHECK_STALL,
+                    help='seconds a check may run before its duration is reported '
+                         f'(default {CHECK_STALL // 60}m)')
     a = ap.parse_args(argv)
     # A negative grace leaves the next reading permanently behind the clock.
     # That is the per-poll REST pattern the interval exists to prevent.
     if a.pickup_grace < 0:
         ap.error('--pickup-grace cannot be negative')
+    # A negative threshold reports every check in that state, on every run, from the first read.
+    # A field that fires always is one a reader learns to skip, which costs the real case.
+    for name in ('check_grace', 'check_stall'):
+        if getattr(a, name) < 0:
+            ap.error(f'--{name.replace("_", "-")} cannot be negative')
     # A bare name is the near-miss a required argument still admits, and unpacking it raises a
     # ValueError traceback rather than saying which half is missing.
     owner, _, repo = a.repo.partition('/')
@@ -458,7 +627,7 @@ def main(argv: list[str] | None = None) -> int:
         ap.error(f'--repo takes OWNER/NAME, not {a.repo!r}')
 
     if a.cmd == 'status':
-        out, _ = digest(owner, repo, a.number)
+        out, _ = digest(owner, repo, a.number, grace=a.check_grace, stall=a.check_stall)
         print(out)
         return 0
 
@@ -498,10 +667,23 @@ def main(argv: list[str] | None = None) -> int:
     # The stall is re-read here rather than carried out of the loop.
     # A request picked up since that reading would still report as picked up by nothing.
     stalled = stall_of(owner, repo, a.number, final)
-    out, _ = digest(owner, repo, a.number, pr=final, stalled=stalled)
+    now = datetime.now(timezone.utc)
+    out, _ = digest(owner, repo, a.number, pr=final, stalled=stalled, now=now,
+                    grace=a.check_grace, stall=a.check_stall)
     print(out)
     print(f'waited={int(time.monotonic()-start)}s')
     if reviewed_head(final):
+        # The review loop closing is not the merge gate, and 0 alone was saying it was.
+        # A wait ends the moment coverage lands, which leaves the checks mid-flight nearly always.
+        # So a merely pending check is not this code, or the code would be the usual outcome.
+        # Only a shape no waiting clears earns it, which is what the stuck field already prints.
+        # It is read from the same payload the digest was, so the two can never disagree.
+        stuck = checks_stuck(final, now, a.check_grace, a.check_stall)
+        if stuck:
+            print('status=CHECKS_NOT_MERGEABLE the review loop is closed, and a required check '
+                  'is in a shape waiting does not clear: read the block above, since a starved '
+                  'check wants a re-run, a long one a judgement, and a failed one a fix')
+            return 42
         return 0
     # A refusal before an answer, since it names the round that declined where 40 names none.
     # The digest prints both bodies regardless, so the narrower code costs the reader nothing.
