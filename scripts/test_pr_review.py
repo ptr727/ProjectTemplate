@@ -667,7 +667,7 @@ class TestCheckShapes(unittest.TestCase):
             check(name='lint'),
             {'__typename': 'SomethingNew', 'label': 'future-gate', 'verdict': 'WHO_KNOWS'}])
         self.assertEqual(['lint'], [n['name'] for n in pr_review.check_nodes(pr)])
-        self.assertEqual((1, 1), pr_review.checks_tally(pr))
+        self.assertEqual((1, 1), pr_review.checks_tally(pr_review.check_nodes(pr)))
 
     def test_a_running_check_is_reported_only_past_the_stall_threshold(self) -> None:
         """A lint job here legitimately runs eleven minutes, so the default must not flag it."""
@@ -758,8 +758,10 @@ class TestCheckShapes(unittest.TestCase):
     def test_a_pull_request_with_no_rollup_reads_as_no_checks_not_as_a_failure(self) -> None:
         """A null rollup is a pull request nothing has run on yet, which blocks nothing here."""
         self.assertEqual([], pr_review.check_nodes(payload([review()])))
-        self.assertEqual((0, 0), pr_review.checks_tally(payload([review()])))
-        self.assertEqual([], pr_review.checks_stuck(payload([review()]), NOW, 300, 1800))
+        # Both readers take the normalized list, since the digest parses the rollup once.
+        self.assertEqual((0, 0), pr_review.checks_tally(pr_review.check_nodes(payload([review()]))))
+        self.assertEqual([], pr_review.checks_stuck(
+            pr_review.check_nodes(payload([review()])), NOW, 300, 1800))
 
 
 class TestDigestReportsChecks(GqlCase):
@@ -822,11 +824,42 @@ class TestDigestReportsChecks(GqlCase):
         pr = payload([review()], checks=[check(name='stale-run', conclusion='FAILURE')],
                      rollup_oid=OLD)
         self.assertEqual([], pr_review.check_nodes(pr))
-        self.assertEqual((0, 0), pr_review.checks_tally(pr))
+        self.assertEqual((0, 0), pr_review.checks_tally(pr_review.check_nodes(pr)))
         # No fallback to another commit's rollup, which is the same stale read by another route.
         # The absence is named rather than left to render as a fact about the head.
         self.assertTrue(pr_review.checks_unreadable(pr))
         self.assertIn('CHECKS UNREADABLE', self.digest(pr))
+
+    def test_a_rollup_past_the_window_says_so_rather_than_reporting_what_it_saw(self) -> None:
+        """The `window_blind` guard one connection along, and the same false clean it prevents.
+
+        A rollup past a hundred contexts drops the rest silently, so a required check among them
+        is missing from the tally and the stuck reading alike and the digest renders a clean pass
+        over a check it never saw. A fleet repository with a matrix build reaches a hundred long
+        before this one does. Raised in review here.
+        """
+        pr = payload([review()], merge='BLOCKED', checks=[check(name='lint')])
+        rollup = pr['commits']['nodes'][0]['commit']['statusCheckRollup']
+        rollup['contexts']['pageInfo'] = {'hasNextPage': True}
+        self.assertTrue(pr_review.checks_truncated(pr))
+        self.assertIn('CHECKS TRUNCATED', self.digest(pr))
+
+    def test_a_rollup_inside_the_window_is_not_reported_as_truncated(self) -> None:
+        """Otherwise the loudest line in the digest fires on every pull request that has checks."""
+        self.assertFalse(pr_review.checks_truncated(payload([review()], checks=[check()])))
+        self.assertNotIn('CHECKS TRUNCATED', self.digest(payload([review()], checks=[check()])))
+
+    def test_the_rollup_is_normalized_once_for_both_readers(self) -> None:
+        """Two calls parsed the same rollup twice a digest, and the parse is what this script pays.
+
+        Raised in review here. Held by counting the calls rather than by reading the output, since
+        the output is identical either way, which is what let the second call go unnoticed.
+        """
+        pr = payload([review()], merge='BLOCKED', checks=[check(name='lint'), check(name='gate')])
+        with mock.patch.object(pr_review, 'check_nodes',
+                               side_effect=pr_review.check_nodes) as parsed:
+            pr_review.digest('o', 'r', 7, pr=pr, stalled='', now=NOW)
+        self.assertEqual(1, parsed.call_count)
 
     def test_a_pull_request_with_no_commits_at_all_is_not_reported_as_unreadable(self) -> None:
         """Nothing to match against is not a failed match, or every payload without one says so."""
