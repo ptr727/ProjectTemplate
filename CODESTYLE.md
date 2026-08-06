@@ -52,8 +52,8 @@ This is the style guide for any **.NET projects** in this repo.
 **CRITICAL**: All builds must complete without warnings. The project enforces this through:
 
 1. **The `.NET Format` clean-compile task** (see [Clean-Compile Verification][clean-compile-verification])
-   - The .NET clean-compile is the **`.NET Format`** VS Code task, which chains `CSharpier Format` -> `.NET Build` -> `dotnet format style --verify-no-changes`. These three task definitions are carried verbatim in [`vscode-tasks.json`][vscode-tasks-link].
-   - After any code change it must pass before commit. Run the `.NET Format` task. To run it natively instead, reproduce that task chain from [`vscode-tasks.json`][vscode-tasks-link] exactly (`CSharpier Format`, then `.NET Build`, then the `dotnet format style --verify-no-changes --severity=info ...` verify) without dropping or loosening any argument (tasks.json is the canonical command spec). Bare `dotnet format` alone, skipping CSharpier or the build, is not sufficient.
+   - The .NET clean-compile is the **`.NET Format`** VS Code task, which chains `CSharpier Format` -> `.NET Build` -> `dotnet format style --verify-no-changes`. A repo carries those three definitions in its own `.vscode/tasks.json`, matching the canonical in [`vscode-tasks.json`][vscode-tasks-link].
+   - After any code change it must pass before commit. Run the `.NET Format` task. To run it natively instead, reproduce that task chain exactly (`CSharpier Format`, then `.NET Build`, then the `dotnet format style --verify-no-changes --severity=info ...` verify) without dropping or loosening any argument, reading it from [`vscode-tasks.json`][vscode-tasks-link], which is the canonical command spec a repo's own `tasks.json` is written against. Bare `dotnet format` alone, skipping CSharpier or the build, is not sufficient.
 
 2. **Analyzer configuration**
    - `<EnableNETAnalyzers>true</EnableNETAnalyzers>` with `<AnalysisLevel>latest-all</AnalysisLevel>` and `<AnalysisMode>All</AnalysisMode>` (full analyzer set enabled)
