@@ -1,8 +1,8 @@
 # Repo Scripts
 
-Local checks and tooling this repo runs by hand, with the deterministic ones also gating CI. Each one exists because the CI linters pass on the failure it catches: `markdownlint`, `cspell`, `actionlint`, and `editorconfig-checker` all report clean on prose that breaks a documented [`GOVERNANCE.md`][governance] rule. Doc linters stay out of the pre-commit hook, which runs language formatting only so it stays fast.
+The fleet's checks and review tooling, run by hand, with the deterministic ones also gating CI. Each one exists because the CI linters pass on the failure it catches: `markdownlint`, `cspell`, `actionlint`, and `editorconfig-checker` all report clean on prose that breaks a documented [`GOVERNANCE.md`][governance] rule. Doc linters stay out of the pre-commit hook, which runs language formatting only so it stays fast.
 
-**Hub-only, not carried.** These are not declared in [`spec/files.json`][files], so the audit does not expect a downstream repo to ship them, the same footing as `spec/audit.py`. Promoting one to fleet-carried is a deliberate act: declare it in the baseline and vendor it, per [`spec/section-model.md`][section-model].
+**Hosted here and reached, never carried.** These are not declared in [`spec/files.json`][files], so the audit does not expect a downstream repo to ship them, the same footing as `spec/audit.py`. That is the fleet model rather than an omission: a script holding no per-repo content is one copy for the fleet, run from a hub checkout against the repository named on the command line, per [GOVERNANCE.md "Hub-Hosted Tooling"][governance-hub-hosted-tooling]. A repository that cannot reach the hub reports the check as not run rather than reconstructing it, since a rebuilt gate encodes its author's reading of the rule and agrees with no other repository. CI reaches the same rules through the [`prose-gate`][prose-gate-action] composite action, which a caller pins to a commit SHA. It reads the copy bundled at that pin only where the run targets `main`, and takes the rules from hub `develop` on every other target, a feature-branch push included, so a released repo's gate is reproducible while every branch below it exercises a rule change before that change reaches `main`. A caller wanting one specific hub ref passes `rules-ref` and overrides both.
 
 Python only, standard library only, no third-party packages. Every script is read-only and exits non-zero on a finding.
 
@@ -117,4 +117,5 @@ The match is on the block's heading rather than anywhere in the body, and on the
 [files]: ../spec/files.json
 [gitattributes]: ../.gitattributes
 [governance]: ../GOVERNANCE.md
-[section-model]: ../spec/section-model.md
+[governance-hub-hosted-tooling]: ../GOVERNANCE.md#hub-hosted-tooling
+[prose-gate-action]: ../.github/actions/prose-gate/action.yml
