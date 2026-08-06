@@ -688,10 +688,20 @@ class TestCheckShapes(unittest.TestCase):
         self.assertEqual(['job', 'ci/external'], [n['name'] for n in nodes])
         self.assertEqual('FAILED', self.shape(nodes[1]))
 
-    def test_a_pending_status_context_is_unstarted_rather_than_a_failure(self) -> None:
-        """PENDING is its not-started spelling, so it belongs with the queued states."""
+    def test_a_pending_status_context_is_running_rather_than_unstarted(self) -> None:
+        """The same string is two states, and only the node shape says which.
+
+        A CheckRun's PENDING means dispatched and not begun, while a StatusContext's means the
+        posting system reported the run as under way. Read as unstarted, a long external build
+        reports as queued with no runner assigned, which names a cause it does not have on a
+        system that did pick it up. Raised in review on this change.
+        """
+        self.assertEqual('', self.shape(status_context(state='PENDING', created=ago(900))))
+        self.assertEqual('RUNNING_LONG',
+                         self.shape(status_context(state='PENDING', created=ago(40 * 60))))
+        # The CheckRun spelling keeps the opposite reading, which is what makes the shape decide.
         self.assertEqual('NOT_PICKED_UP',
-                         self.shape(status_context(state='PENDING', created=ago(900))))
+                         self.shape(check(status='PENDING', conclusion='', started=ago(900))))
 
     def test_a_pull_request_with_no_rollup_reads_as_no_checks_not_as_a_failure(self) -> None:
         """A null rollup is a pull request nothing has run on yet, which blocks nothing here."""
@@ -726,7 +736,7 @@ class TestDigestReportsChecks(GqlCase):
             check(name='build', status='IN_PROGRESS', conclusion='', started=ago(45 * 60))]))
         self.assertIn('stuck=RUNNING_LONG', out)
         self.assertIn('it has a runner, so it is not starved', out)
-        self.assertIn('judgement against what this job normally costs', out)
+        self.assertIn('judgment against what this job normally costs', out)
 
     def test_a_failed_check_is_named_as_a_verdict_rather_than_left_to_be_deduced(self) -> None:
         out = self.digest(payload([review()], merge='BLOCKED',
@@ -813,6 +823,22 @@ class TestCli(GqlCase):
         out = self.out.getvalue()
         self.assertIn('status=CHECKS_NOT_MERGEABLE', out)
         self.assertIn('CHECK NOT PICKED UP', out)
+
+    def test_a_stuck_check_nothing_requires_does_not_take_forty_two(self) -> None:
+        """A rollup carries checks the ruleset does not require, four of six on a green run here.
+
+        So the code borrows GitHub's own reading of which checks gate a merge, and `CLEAN` proves
+        no required gate is outstanding whatever else the rollup is doing. Without that, a stuck
+        check nothing requires returns 42 on a mergeable pull request. Raised in review on this
+        change. The digest still names the check, so the narrower code costs the reader nothing.
+        """
+        self.answer(payload([review()], merge='CLEAN', checks=[
+            check(name='optional-scan', status='QUEUED', conclusion='', started=ago(900))]))
+        with mock.patch.object(pr_review.time, 'sleep'):
+            self.assertEqual(0, self.cli(['wait', '7']))
+        out = self.out.getvalue()
+        self.assertIn('stuck=NOT_PICKED_UP', out)
+        self.assertNotIn('status=CHECKS_NOT_MERGEABLE', out)
 
     def test_wait_exits_zero_where_a_check_is_merely_still_running(self) -> None:
         """A code that fires on every pull request mid-CI carries nothing, so this must be 0.

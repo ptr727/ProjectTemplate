@@ -35,8 +35,10 @@ REVIEWER = 'copilot-pull-request-reviewer'
 
 # A check that has not started, in every spelling the two rollup enums carry between them.
 # QUEUED is the one a starved job wears, and WAITING, PENDING and REQUESTED cover a gate.
+# Those three are a CheckRun's, where PENDING means dispatched and not begun.
 # EXPECTED is a StatusContext's, meaning a required status nothing has posted yet.
-# Reading QUEUED alone scores every one of those as running, and EXPECTED as a failure.
+# A StatusContext's own PENDING is the opposite and is translated away in check_nodes.
+# Reading QUEUED alone scores every one of these as running, and EXPECTED as a failure.
 NOT_STARTED = frozenset({'QUEUED', 'WAITING', 'PENDING', 'REQUESTED', 'EXPECTED'})
 # What counts as a check having passed, rather than as one still deciding or failed.
 # SKIPPED and NEUTRAL are passes, since the fleet aggregator pattern skips the conditional jobs.
@@ -330,9 +332,14 @@ def check_nodes(pr: dict) -> list[dict]:
                         'started': n.get('startedAt') or ''})
         else:
             # A StatusContext reports one field for both, so its state doubles as its conclusion.
-            # PENDING is its not-started spelling and belongs in NOT_STARTED for that reason.
+            # Its PENDING means the posting system reported the run as under way.
+            # A CheckRun's PENDING means the opposite, dispatched and not begun.
+            # So the same string is two states, and the shape is knowable only here.
+            # Left alone, a long external build reports as queued with no runner assigned.
+            # That names a cause the run does not have, on a system that did pick it up.
             state = n.get('state') or ''
-            out.append({'name': n.get('context') or '', 'state': state,
+            out.append({'name': n.get('context') or '',
+                        'state': 'IN_PROGRESS' if state == 'PENDING' else state,
                         'conclusion': state, 'started': n.get('createdAt') or ''})
     return out
 
@@ -537,7 +544,7 @@ def digest(owner: str, repo: str, num: int, seen: set[str] | None = None,
         elif shape == 'RUNNING_LONG':
             lines.append(f'  CHECK RUNNING LONG ({node["name"]!r}, running {mins}): it has a '
                          'runner, so it is not starved, and whether this is hung or merely slow '
-                         'is a judgement against what this job normally costs')
+                         'is a judgment against what this job normally costs')
         else:
             lines.append(f'  CHECK FAILED ({node["name"]!r}, {node["state"]}/'
                          f'{node["conclusion"]}): a verdict rather than a stuck check, so read '
@@ -678,11 +685,17 @@ def main(argv: list[str] | None = None) -> int:
         # So a merely pending check is not this code, or the code would be the usual outcome.
         # Only a shape no waiting clears earns it, which is what the stuck field already prints.
         # It is read from the same payload the digest was, so the two can never disagree.
+        # A rollup carries checks the ruleset does not require, four of six on a green run here.
+        # So `BLOCKED` is required of the code as well, borrowing GitHub's own reading.
+        # That is cheaper than reading the ruleset's contexts over another call.
+        # Without it, a stuck check nothing requires returns 42 on a mergeable pull request.
+        # `CLEAN` proves no required gate is outstanding, whatever else the rollup is doing.
+        # The digest reports the check either way, so the narrower code costs the reader nothing.
         stuck = checks_stuck(final, now, a.check_grace, a.check_stall)
-        if stuck:
+        if stuck and final.get('mergeStateStatus') == 'BLOCKED':
             print('status=CHECKS_NOT_MERGEABLE the review loop is closed, and a required check '
                   'is in a shape waiting does not clear: read the block above, since a starved '
-                  'check wants a re-run, a long one a judgement, and a failed one a fix')
+                  'check wants a re-run, a long one a judgment, and a failed one a fix')
             return 42
         return 0
     # A refusal before an answer, since it names the round that declined where 40 names none.
