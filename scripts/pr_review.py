@@ -35,7 +35,7 @@ REVIEWER = 'copilot-pull-request-reviewer'
 # Matching one phrasing alone reports zero on a review that has them.
 SUPPRESSED = re.compile(r'Suppressed comments|low confidence', re.IGNORECASE)
 # A refusal declines the round as a formal review carrying the head and no threads.
-# That is the clean pass byte for byte, so every coverage check it fails to meet is met.
+# That is the clean pass byte for byte, so every coverage check passes over a round that never ran.
 # The alternation is the runbook's for the same reason the one above is.
 # One phrasing is one rewording away from reading a refusal as a review.
 # The dot covers the apostrophe in the typographic spelling and the ASCII one alike.
