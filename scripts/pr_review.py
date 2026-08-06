@@ -87,8 +87,9 @@ HEADING = re.compile(r'\s*(?:#{1,6}\s|<summary)', re.IGNORECASE)
 WINDOW = 100
 
 # How many rollup contexts the full query asks for, which is not the window above.
-# The truncation line quotes this, so one constant keeps the message and the query from drifting.
-# Borrowing WINDOW read correctly only while the two numbers happened to agree.
+# The query is built from this and the truncation line quotes it, so the two cannot drift.
+# Naming it beside a hard-coded literal only documented the literal, which a case then held.
+# A case is not the guarantee though, since it holds only where someone runs it.
 CHECKS_WINDOW = 100
 
 # The timeline spells the reviewer a third way, as login `Copilot` with type `Bot`.
@@ -131,13 +132,15 @@ query($o:String!,$r:String!,$n:Int!){
     comments(last:100){ nodes{ author{login} createdAt body } pageInfo{ hasPreviousPage } }
     reviewRequests(first:10){ nodes{ requestedReviewer{ __typename ... on Bot{login} ... on User{login} } } }
     commits(last:1){ nodes{ commit{ oid statusCheckRollup{ state
-      contexts(first:100){ pageInfo{ hasNextPage } nodes{
+      contexts(first:__CHECKS_WINDOW__){ pageInfo{ hasNextPage } nodes{
         __typename
         ... on CheckRun{ name status conclusion startedAt }
         ... on StatusContext{ context state createdAt }
       }}}}}}
   }}}
-"""
+""".replace('__CHECKS_WINDOW__', str(CHECKS_WINDOW))
+# Substituted rather than interpolated, because GraphQL is braces from end to end.
+# An f-string would need every one of them doubled, which is unreadable against the schema.
 
 
 def gql(query: str, owner: str, repo: str, num: int) -> dict:
@@ -370,11 +373,15 @@ def check_nodes(pr: dict) -> list[dict]:
             out.append({'name': n.get('context') or '',
                         'state': 'IN_PROGRESS' if state == 'PENDING' else state,
                         'conclusion': state, 'since': n.get('createdAt') or ''})
-        # A third union member is skipped rather than forced into the StatusContext shape.
-        # Forcing it reads a label off a node spelling it otherwise, so it renders nameless.
-        # It also reads a state that is not there, so it reports as a red check.
-        # Skipping loses a check this cannot read, where forcing invents a verdict for it.
-        # `checks_tally` counts what was read, so a skip shows up as a smaller total.
+        else:
+            # A third union member is skipped rather than forced into the StatusContext shape.
+            # Forcing it reads a label off a node spelling it otherwise, so it renders nameless.
+            # It also reads a state that is not there, so it reports as a red check.
+            # So skipping is right and skipping *quietly* is not, which review caught here.
+            # An unread check missing from the tally is this script's own core failure.
+            # The name carries the typename so the digest can say which member it could not read.
+            out.append({'name': '', 'state': '', 'conclusion': '', 'since': '',
+                        'unreadable': n.get('__typename') or 'an unnamed type'})
     return out
 
 
@@ -438,7 +445,8 @@ def checks_stuck(nodes: list[dict], now: datetime, grace: float,
     and this together. Two calls parsed the same rollup twice per digest, and this script's whole
     reason for existing is that the reading is the cost.
     """
-    return [(n, s) for n in nodes if (s := check_shape(n, now, grace, stall))]
+    return [(n, s) for n in nodes if not n.get('unreadable')
+            and (s := check_shape(n, now, grace, stall))]
 
 
 def checks_truncated(pr: dict) -> bool:
@@ -452,6 +460,18 @@ def checks_truncated(pr: dict) -> bool:
     """
     contexts = ((head_commit(pr).get('statusCheckRollup') or {}).get('contexts') or {})
     return bool((contexts.get('pageInfo') or {}).get('hasNextPage'))
+
+
+def checks_unread(nodes: list[dict]) -> list[str]:
+    """The rollup typenames this could not read, in the order they appeared.
+
+    A union member that is neither a CheckRun nor a StatusContext cannot be normalized, and it is
+    reported rather than dropped. Dropping it is the silent narrowing every other guard here
+    exists against: a check absent from the tally and from the stuck reading renders as a clean
+    pass over something never seen. Raised in review on this change, against the commit that
+    chose skipping over forcing, which was the right half of the answer on its own.
+    """
+    return [n['unreadable'] for n in nodes if n.get('unreadable')]
 
 
 def checks_unreadable(pr: dict) -> bool:
@@ -468,7 +488,8 @@ def checks_unreadable(pr: dict) -> bool:
 
 def checks_tally(nodes: list[dict]) -> tuple[int, int]:
     """(checks that have passed, checks there are), so a bare count says how far the head is."""
-    return sum(1 for n in nodes if (n.get('conclusion') or '') in CHECK_OK), len(nodes)
+    read = [n for n in nodes if not n.get('unreadable')]
+    return sum(1 for n in read if (n.get('conclusion') or '') in CHECK_OK), len(read)
 
 
 def live_state(owner: str, repo: str, num: int) -> tuple[str, bool, dict | None]:
@@ -616,23 +637,35 @@ def digest(owner: str, repo: str, num: int, seen: set[str] | None = None,
         # Each shape carries its own remedy, which is the whole point of telling them apart.
         # A reader handed one word for all three retries the wrong thing, or waits on a queue.
         elapsed = age(node.get('since') or '', now)
-        mins = 'age unknown' if elapsed is None else f'{int(elapsed // 60)}m'
+        # Clamped for display only, since a machine clock behind GitHub's renders `queued -3m`.
+        # A negative age reads as nonsense and hides how long the thing has actually waited.
+        # The comparison above keeps the raw value, so skew cannot make a stuck check report.
+        mins = 'age unknown' if elapsed is None else f'{int(max(elapsed, 0) // 60)}m'
+        # Read with `.get` for the reason `age` catches two exceptions.
+        # A caller handing this an odd node shape should cost a field, never the whole digest.
+        # Reporting the state is the one job here, so it must not be the thing that raises.
+        name = node.get('name') or 'unnamed'
         if shape == 'NOT_PICKED_UP':
-            lines.append(f'  CHECK NOT PICKED UP ({node["name"]!r}, queued {mins} with no '
+            lines.append(f'  CHECK NOT PICKED UP ({name!r}, queued {mins} with no '
                          'runner assigned): nothing here starts it, because the runner pool is '
                          'GitHub-hosted, so re-run the workflow or wait on that capacity')
         elif shape == 'NOT_POSTED':
-            lines.append(f'  CHECK NEVER POSTED ({node["name"]!r}, expected {mins} and not '
+            lines.append(f'  CHECK NEVER POSTED ({name!r}, expected {mins} and not '
                          'reported): a required status whose poster has not spoken, so no runner '
                          'is owed it and re-running a workflow here clears nothing')
         elif shape == 'RUNNING_LONG':
-            lines.append(f'  CHECK RUNNING LONG ({node["name"]!r}, running {mins}): it has a '
+            lines.append(f'  CHECK RUNNING LONG ({name!r}, running {mins}): it has a '
                          'runner, so it is not starved, and whether this is hung or merely slow '
                          'is a judgment against what this job normally costs')
         else:
-            lines.append(f'  CHECK FAILED ({node["name"]!r}, {node["state"]}/'
-                         f'{node["conclusion"]}): a verdict rather than a stuck check, so read '
+            lines.append(f'  CHECK FAILED ({name!r}, {node.get("state")}/'
+                         f'{node.get("conclusion")}): a verdict rather than a stuck check, so '
                          'the run and fix it, since no wait and no re-run clears a real failure')
+    unread = checks_unread(checks)
+    if unread:
+        lines.append(f'  CHECKS PARTIALLY UNREAD ({", ".join(sorted(set(unread)))}): the rollup '
+                     'carries a context type this cannot normalize, so it is absent from the '
+                     'tally and the stuck reading alike and neither speaks for it')
     if checks_truncated(pr):
         lines.append(f'  CHECKS TRUNCATED: the head carries more than the {CHECKS_WINDOW} contexts '
                      'this query asks for, so a check past the window is missing from the tally '
@@ -704,8 +737,8 @@ def main(argv: list[str] | None = None) -> int:
     ap.add_argument('--pickup-grace', type=int, default=300,
                     help='seconds before the first pickup read, and between reads (default 5m)')
     ap.add_argument('--check-grace', type=int, default=CHECK_GRACE,
-                    help='seconds a check may sit queued before it reads as unstarted '
-                         f'(default {CHECK_GRACE // 60}m)')
+                    help='seconds a check may sit queued, or a required status go unposted, '
+                         f'before either reads as unstarted (default {CHECK_GRACE // 60}m)')
     ap.add_argument('--check-stall', type=int, default=CHECK_STALL,
                     help='seconds a check may run before its duration is reported '
                          f'(default {CHECK_STALL // 60}m)')

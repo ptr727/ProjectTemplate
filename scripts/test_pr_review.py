@@ -126,8 +126,13 @@ def payload(reviews: list[dict], threads: list[dict] | None = None,
             'reviewRequests': {'nodes': requested},
             'commits': {'nodes': [{'commit': {
                 'oid': rollup_oid or HEAD,
+                # Compared against None, so an existing rollup carrying nothing is expressible.
+                # Reading `if checks` collapsed that onto a null rollup, and the two differ.
+                # An empty rollup is a pull request whose checks have not registered yet.
+                # A null one is a pull request that has none at all.
                 'statusCheckRollup': {'state': 'PENDING',
-                                      'contexts': {'nodes': checks}} if checks else None}}]}}
+                                      'contexts': {'nodes': checks}}
+                if checks is not None else None}}]}}
 
 
 class GqlCase(unittest.TestCase):
@@ -656,18 +661,41 @@ class TestCheckShapes(unittest.TestCase):
         self.assertIn('no runner is owed it', out)
         self.assertNotIn('CHECK NOT PICKED UP', out)
 
-    def test_an_unknown_rollup_member_is_skipped_rather_than_forced(self) -> None:
+    def test_an_unknown_rollup_member_is_neither_forced_nor_dropped_quietly(self) -> None:
         """Forcing a third union member into the StatusContext shape invents a verdict for it.
 
         It would render nameless, since the node spells its label something else, and report as a
-        red check, since the state read off it is not there. Skipping loses a check this cannot
-        read, which the smaller total shows, where forcing fabricates one. Raised in review here.
+        red check, since the state read off it is not there. So skipping is the right half of the
+        answer, and skipping *quietly* is the wrong half: an unread check absent from the tally
+        renders as a clean pass over something never seen, which is this script's core failure.
+        Both halves were raised in review here, the second against the fix for the first.
+
+        So it is carried as a marker rather than dropped, counted by neither reader, and named.
         """
         pr = payload([review()], checks=[
             check(name='lint'),
             {'__typename': 'SomethingNew', 'label': 'future-gate', 'verdict': 'WHO_KNOWS'}])
-        self.assertEqual(['lint'], [n['name'] for n in pr_review.check_nodes(pr)])
-        self.assertEqual((1, 1), pr_review.checks_tally(pr_review.check_nodes(pr)))
+        nodes = pr_review.check_nodes(pr)
+        self.assertEqual(['SomethingNew'], pr_review.checks_unread(nodes))
+        # Neither reader speaks for it, so the tally counts one check and no shape is judged.
+        self.assertEqual((1, 1), pr_review.checks_tally(nodes))
+        self.assertEqual([], pr_review.checks_stuck(
+            [n for n in nodes if n.get('unreadable')], NOW, 300, 1800))
+
+    def test_the_digest_names_the_context_type_it_could_not_read(self) -> None:
+        """A skip nobody is told about is the silent narrowing every other guard here prevents."""
+        out, _ = pr_review.digest('o', 'r', 7, now=NOW, stalled='', pr=payload(
+            [review()], merge='BLOCKED',
+            checks=[check(name='lint'),
+                    {'__typename': 'SomethingNew', 'label': 'x'}]))
+        self.assertIn('CHECKS PARTIALLY UNREAD (SomethingNew)', out)
+        self.assertIn('neither speaks for it', out)
+
+    def test_a_rollup_of_only_readable_members_says_nothing_about_unread_ones(self) -> None:
+        """Otherwise the line fires on every pull request and stops being read."""
+        out, _ = pr_review.digest('o', 'r', 7, now=NOW, stalled='', pr=payload(
+            [review()], checks=[check(name='lint'), status_context()]))
+        self.assertNotIn('CHECKS PARTIALLY UNREAD', out)
 
     def test_a_running_check_is_reported_only_past_the_stall_threshold(self) -> None:
         """A lint job here legitimately runs eleven minutes, so the default must not flag it."""
@@ -711,6 +739,37 @@ class TestCheckShapes(unittest.TestCase):
             with self.subTest(started=started):
                 self.assertEqual('', self.shape(
                     check(status='QUEUED', conclusion='', started=started)))
+
+    def test_a_stamp_ahead_of_the_clock_renders_zero_rather_than_a_negative_age(self) -> None:
+        """`queued -3m` reads as nonsense and hides how long the thing has actually waited.
+
+        Raised in review here, and the reachability is worth stating rather than assuming. Through
+        the CLI it is unreachable: a negative age cannot exceed a non-negative threshold, and the
+        parser rejects a negative one, so no shape is ever judged and `mins` never renders. The
+        library API takes the thresholds directly, which is the path this drives and the reason
+        the clamp is worth having. Display only, so the comparison still reads the raw value.
+        """
+        ahead = (NOW + timedelta(seconds=120)).strftime('%Y-%m-%dT%H:%M:%SZ')
+        pr = payload([review()], merge='BLOCKED',
+                     checks=[check(name='gate', status='QUEUED', conclusion='', started=ahead)])
+        out, _ = pr_review.digest('o', 'r', 7, pr=pr, stalled='', now=NOW, grace=-200)
+        self.assertIn('queued 0m', out)
+        self.assertNotIn('-2m', out)
+        # The CLI cannot reach it, since the parser refuses the threshold that would.
+        with contextlib.redirect_stderr(io.StringIO()):
+            with self.assertRaises(SystemExit):
+                pr_review.main(['status', '7', '--repo', 'o/r', '--check-grace', '-200'])
+
+    def test_a_caller_handing_the_digest_an_odd_node_costs_a_field_not_the_digest(self) -> None:
+        """The rendering path reads with `.get` for the reason `age` catches two exceptions.
+
+        A raw GraphQL node reaching it through `checks` would `KeyError` and take down the one
+        call whose whole job is to report the state. Raised in review here as mandatory.
+        """
+        raw = {'state': 'QUEUED', 'since': ago(900)}
+        out, _ = pr_review.digest('o', 'r', 7, stalled='', now=NOW, checks=[raw],
+                                  pr=payload([review()], merge='BLOCKED'))
+        self.assertIn("CHECK NOT PICKED UP ('unnamed'", out)
 
     def test_a_zone_less_stamp_returns_none_rather_than_raising(self) -> None:
         """The same guard at the function, since a digest that raises reports nothing at all."""
