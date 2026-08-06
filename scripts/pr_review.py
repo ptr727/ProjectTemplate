@@ -309,7 +309,11 @@ def age(stamp: str, now: datetime) -> float | None:
     try:
         # `fromisoformat` reads the trailing Z only from 3.11, and a fleet machine may carry less.
         return (now - datetime.fromisoformat(stamp.replace('Z', '+00:00'))).total_seconds()
-    except ValueError:
+    # ValueError is the unparseable stamp, and TypeError is the parseable one carrying no zone.
+    # A stamp with no offset parses to a naive datetime, which will not subtract from an aware now.
+    # Catching only the first lets that raise out of a reporting call and take the digest with it.
+    # A crash is the worst outcome here, since the whole point is to say what the state is.
+    except (ValueError, TypeError):
         return None
 
 
@@ -322,8 +326,17 @@ def check_nodes(pr: dict) -> list[dict]:
     which scores an external status as a check in no state at all, so neither pending nor failed.
     They are normalized here so one reading serves both.
     """
-    commits = ((pr.get('commits') or {}).get('nodes') or [])
-    rollup = ((commits[0].get('commit') or {}) if commits else {}).get('statusCheckRollup') or {}
+    # Selected by matching the head rather than taken as the first node.
+    # That is what the surrounding reasoning claimed and what the code did not do.
+    # A rollup off any other commit describes a push ago and renders every field.
+    # Reading position instead of identity is a review counted without being read.
+    # No match reports nothing rather than falling back to another commit's rollup.
+    # A fallback is that same stale reading reached by a different route.
+    # The absence is not silent either, and `checks_unreadable` is where the digest says it.
+    nodes = [c.get('commit') or {} for c in ((pr.get('commits') or {}).get('nodes') or [])]
+    head = pr.get('headRefOid') or ''
+    commit = next((c for c in nodes if c.get('oid') == head), {})
+    rollup = commit.get('statusCheckRollup') or {}
     out = []
     for n in ((rollup.get('contexts') or {}).get('nodes') or []):
         if n.get('__typename') == 'CheckRun':
@@ -389,6 +402,20 @@ def check_shape(node: dict, now: datetime, grace: float, stall: float) -> str:
 def checks_stuck(pr: dict, now: datetime, grace: float, stall: float) -> list[tuple[dict, str]]:
     """Every check in a stuck shape, as (node, shape), in the order the rollup returns them."""
     return [(n, s) for n in check_nodes(pr) if (s := check_shape(n, now, grace, stall))]
+
+
+def checks_unreadable(pr: dict) -> bool:
+    """True where the payload carries commits but none of them is the head.
+
+    `check_nodes` reports nothing in that case rather than reading another commit's rollup, and
+    nothing is indistinguishable from a pull request with no checks. So the state is named instead
+    of left to render as `checks=0/0`, which a reader would take as a fact about the head rather
+    than as this reading having failed. A silent narrowing is the failure mode this whole script
+    is built against, and it does not get an exception for its own newest field.
+    """
+    nodes = ((pr.get('commits') or {}).get('nodes') or [])
+    head = pr.get('headRefOid') or ''
+    return bool(nodes) and not any((c.get('commit') or {}).get('oid') == head for c in nodes)
 
 
 def checks_tally(pr: dict) -> tuple[int, int]:
@@ -549,6 +576,10 @@ def digest(owner: str, repo: str, num: int, seen: set[str] | None = None,
             lines.append(f'  CHECK FAILED ({node["name"]!r}, {node["state"]}/'
                          f'{node["conclusion"]}): a verdict rather than a stuck check, so read '
                          'the run and fix it, since no wait and no re-run clears a real failure')
+    if checks_unreadable(pr):
+        lines.append('  CHECKS UNREADABLE: the payload carries commits and none of them is the '
+                     'head, so no rollup here describes this head and `checks=0/0` is this '
+                     'reading failing rather than a pull request with no checks')
     if stalled:
         lines.append(f'  REQUEST NOT PICKED UP (requested {stalled}, no copilot_work_started '
                      'since): clear the request and re-request, per the runbook')
@@ -627,6 +658,12 @@ def main(argv: list[str] | None = None) -> int:
     for name in ('check_grace', 'check_stall'):
         if getattr(a, name) < 0:
             ap.error(f'--{name.replace("_", "-")} cannot be negative')
+    # The two thresholds mean opposite things and the readings invert if the order does.
+    # A stall under the grace reports a running check before it would report a starved one.
+    # A case held the constants ordered while the flags could still be passed either way.
+    if a.check_grace >= a.check_stall:
+        ap.error('--check-grace must be less than --check-stall, since a queued check is '
+                 f'judged sooner than a running one (got {a.check_grace} and {a.check_stall})')
     # A bare name is the near-miss a required argument still admits, and unpacking it raises a
     # ValueError traceback rather than saying which half is missing.
     owner, _, repo = a.repo.partition('/')

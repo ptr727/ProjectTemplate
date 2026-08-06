@@ -78,8 +78,19 @@ NOW = datetime(2026, 8, 6, 17, 0, 0, tzinfo=timezone.utc)
 
 
 def ago(seconds: int) -> str:
-    """A timestamp `seconds` before NOW, in the spelling GraphQL returns."""
+    """A timestamp `seconds` before NOW, in the spelling GraphQL returns.
+
+    For the cases that pass NOW in as the clock. A `wait` case cannot use this, since `main` reads
+    the real clock, and an age measured from a fixed point against a moving one is not the age the
+    case means: it grows on every later run and goes negative on any machine whose clock sits
+    before NOW. Those cases take `real_ago` instead.
+    """
     return (NOW - timedelta(seconds=seconds)).strftime('%Y-%m-%dT%H:%M:%SZ')
+
+
+def real_ago(seconds: int) -> str:
+    """A timestamp `seconds` before the real clock, for the `wait` path, which reads that clock."""
+    return (datetime.now(timezone.utc) - timedelta(seconds=seconds)).strftime('%Y-%m-%dT%H:%M:%SZ')
 
 
 def check(name: str = 'Check pull request workflow status job', status: str = 'COMPLETED',
@@ -662,11 +673,24 @@ class TestCheckShapes(unittest.TestCase):
                 self.assertEqual('FAILED', self.shape(check(conclusion=conclusion)))
 
     def test_an_unreadable_timestamp_reports_nothing_rather_than_an_age_of_zero(self) -> None:
-        """Zero would read as a check that just started, which is how one stuck for hours passes."""
-        for started in ('', 'not-a-timestamp'):
+        """Zero would read as a check that just started, which is how one stuck for hours passes.
+
+        The zone-less stamp is the one that has to be listed separately, since it *parses*. It
+        yields a naive datetime that will not subtract from an aware `now`, so catching only
+        `ValueError` lets a `TypeError` out of a reporting call and takes the whole digest with it.
+        A crash is the worst outcome here, because saying what the state is is the entire job.
+        Raised in review on this change.
+        """
+        for started in ('', 'not-a-timestamp', '2026-08-06T17:00:00', 'Thu Aug 6 2026'):
             with self.subTest(started=started):
                 self.assertEqual('', self.shape(
                     check(status='QUEUED', conclusion='', started=started)))
+
+    def test_a_zone_less_stamp_returns_none_rather_than_raising(self) -> None:
+        """The same guard at the function, since a digest that raises reports nothing at all."""
+        self.assertIsNone(pr_review.age('2026-08-06T17:00:00', NOW))
+        self.assertIsNone(pr_review.age('nonsense', NOW))
+        self.assertEqual(900.0, pr_review.age(ago(900), NOW))
 
     def test_a_finished_check_carrying_no_conclusion_yet_is_settling_not_failing(self) -> None:
         """Reading an absent verdict as a failure invents a red check out of a race in the API.
@@ -757,16 +781,39 @@ class TestDigestReportsChecks(GqlCase):
         self.assertIn('checks=0/1', out)
         self.assertNotIn('stuck=', out)
 
-    def test_the_rollup_is_read_from_the_head_commit(self) -> None:
-        """A rollup off an earlier commit describes a push ago and every field in it renders.
+    def test_the_rollup_is_selected_by_the_head_rather_than_by_position(self) -> None:
+        """A rollup off any other commit describes a push ago and renders every field.
 
-        The query asks `commits(last:1)` because a rollup hangs off a commit object, so this holds
-        that commit equal to `headRefOid` rather than trusting the connection's order.
+        The first version of this case asserted the *fixture's* commit equalled the head, which
+        tests the payload rather than the code, and the code was reading `commits[0]` regardless.
+        Raised in review on this change, and it is the sharper reading: position is not identity,
+        and trusting it is the same false-clean shape as counting a review without reading it.
+        This asserts the selection by giving the connection a rollup on a commit that is not the
+        head, which must be ignored rather than reported.
         """
-        pr = payload([review()], checks=[check()])
-        self.assertEqual(pr['headRefOid'], pr['commits']['nodes'][0]['commit']['oid'])
-        self.assertIn('headRefOid', pr_review.Q_FULL)
-        self.assertIn('statusCheckRollup', pr_review.Q_FULL)
+        pr = payload([review()], checks=[check(name='stale-run', conclusion='FAILURE')],
+                     rollup_oid=OLD)
+        self.assertEqual([], pr_review.check_nodes(pr))
+        self.assertEqual((0, 0), pr_review.checks_tally(pr))
+        # No fallback to another commit's rollup, which is the same stale read by another route.
+        # The absence is named rather than left to render as a fact about the head.
+        self.assertTrue(pr_review.checks_unreadable(pr))
+        self.assertIn('CHECKS UNREADABLE', self.digest(pr))
+
+    def test_a_pull_request_with_no_commits_at_all_is_not_reported_as_unreadable(self) -> None:
+        """Nothing to match against is not a failed match, or every payload without one says so."""
+        self.assertFalse(pr_review.checks_unreadable(payload([review()], checks=[check()])))
+        bare = payload([review()])
+        bare['commits'] = {'nodes': []}
+        self.assertFalse(pr_review.checks_unreadable(bare))
+        self.assertNotIn('CHECKS UNREADABLE', self.digest(bare))
+
+    def test_the_head_rollup_is_found_wherever_the_connection_puts_it(self) -> None:
+        """Selection is by oid, so an extra node ahead of the head's does not shadow it."""
+        pr = payload([review()], checks=[check(name='lint')])
+        head_node = pr['commits']['nodes'][0]
+        pr['commits']['nodes'] = [{'commit': {'oid': OLD, 'statusCheckRollup': None}}, head_node]
+        self.assertEqual(['lint'], [n['name'] for n in pr_review.check_nodes(pr)])
 
 
 class TestGqlTransport(unittest.TestCase):
@@ -812,12 +859,13 @@ class TestCli(GqlCase):
     def test_wait_exits_forty_two_where_the_review_closed_but_a_check_is_starved(self) -> None:
         """Exit 0 was saying the review loop closing is the merge gate, and it is not.
 
-        The age is read against the real clock here rather than the suite's fixed NOW, so the
-        timestamp is one whose age only grows: fifteen minutes at NOW and more on any later run,
-        which is past the five-minute grace under every clock this ever runs on.
+        `main` reads the real clock, so the timestamp comes from that clock rather than from the
+        suite's fixed NOW. Measured from NOW instead, the age grows on every later run and turns
+        negative on a machine whose clock sits before it, so the case would stop meaning what it
+        says. Raised in review on this change.
         """
         self.answer(payload([review()], merge='BLOCKED', checks=[
-            check(name='gate', status='QUEUED', conclusion='', started=ago(900))]))
+            check(name='gate', status='QUEUED', conclusion='', started=real_ago(900))]))
         with mock.patch.object(pr_review.time, 'sleep'):
             self.assertEqual(42, self.cli(['wait', '7']))
         out = self.out.getvalue()
@@ -833,7 +881,7 @@ class TestCli(GqlCase):
         change. The digest still names the check, so the narrower code costs the reader nothing.
         """
         self.answer(payload([review()], merge='CLEAN', checks=[
-            check(name='optional-scan', status='QUEUED', conclusion='', started=ago(900))]))
+            check(name='optional-scan', status='QUEUED', conclusion='', started=real_ago(900))]))
         with mock.patch.object(pr_review.time, 'sleep'):
             self.assertEqual(0, self.cli(['wait', '7']))
         out = self.out.getvalue()
@@ -845,18 +893,18 @@ class TestCli(GqlCase):
 
         The wait returns the moment coverage lands, which on almost every pull request is while
         the checks are still going, so a pending check taking 42 would make 42 the usual outcome.
-        The grace is passed rather than inferred, since a fixed timestamp's age only grows.
+        Inside the default grace on the real clock, which is what this reads, so no flag is needed.
         """
         self.answer(payload([review()], merge='BLOCKED', checks=[
-            check(name='lint', status='QUEUED', conclusion='', started=ago(60))]))
+            check(name='lint', status='QUEUED', conclusion='', started=real_ago(30))]))
         with mock.patch.object(pr_review.time, 'sleep'):
-            self.assertEqual(0, self.cli(['wait', '7', '--check-grace', '100000000']))
+            self.assertEqual(0, self.cli(['wait', '7']))
         self.assertNotIn('stuck=', self.out.getvalue())
 
     def test_a_starved_check_does_not_pre_empt_a_review_that_never_landed(self) -> None:
         """The review codes outrank it, since a missing review is the older and larger failure."""
         self.answer(payload([review(oid=OLD)], merge='BLOCKED', checks=[
-            check(name='gate', status='QUEUED', conclusion='', started=ago(900))]))
+            check(name='gate', status='QUEUED', conclusion='', started=real_ago(900))]))
         with mock.patch.object(pr_review.time, 'sleep'):
             self.assertEqual(30, self.cli(['wait', '7', '--timeout', '0']))
         out = self.out.getvalue()
@@ -1175,6 +1223,20 @@ class TestContract(unittest.TestCase):
         the stall is long because a build is not, so an inversion here inverts both readings.
         """
         self.assertLess(pr_review.CHECK_GRACE, pr_review.CHECK_STALL)
+
+    def test_an_inverted_pair_of_check_thresholds_is_rejected_at_the_flags_too(self) -> None:
+        """The case above held the constants ordered while the flags could still invert them.
+
+        Asserting the defaults and leaving the inputs open is the gap between a rule and its
+        check, one level down. Raised in review on this change.
+        """
+        for grace, stall in (('1800', '300'), ('600', '600')):
+            with self.subTest(grace=grace, stall=stall):
+                with contextlib.redirect_stderr(io.StringIO()) as err:
+                    with self.assertRaises(SystemExit):
+                        pr_review.main(['wait', '7', '--repo', 'o/r',
+                                        '--check-grace', grace, '--check-stall', stall])
+                self.assertIn('check-grace', err.getvalue())
 
     def test_a_failed_timeline_read_raises_rather_than_reading_as_no_events(self) -> None:
         """An empty list reads as no request pending, which is the false clean one level up."""
