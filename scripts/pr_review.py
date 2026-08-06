@@ -16,9 +16,12 @@ Subcommands
            40 reports the shape of that answer and reads nothing of its cause: an answer
            carrying no commit covers no head, so the wait ends and the reader decides.
            41 = the review carrying the head says it did not review, so it covers nothing.
-           42 = the review loop closed but a required check is in a shape no wait clears:
-           queued with nothing acting on it, running far past what the job costs, or
-           failed. A check merely still running normally is not this, and exits 0.
+           42 = the review loop closed, the merge reads BLOCKED, and a check is in a shape no
+           wait clears: queued with nothing acting on it, expected and never posted, running
+           far past what the job costs, or failed. A check merely still running normally is
+           not this and exits 0, and neither is a stuck check on a merge that is not BLOCKED,
+           since the rollup carries checks no ruleset requires. The digest reports the check
+           in both cases, so a shape outside 42 is still named rather than lost.
            50 = the request is pending and nothing picked it up, which no amount of
            waiting changes. Recovery is two mutations, and they stay in the runbook.
 
@@ -33,13 +36,15 @@ from datetime import datetime, timezone
 
 REVIEWER = 'copilot-pull-request-reviewer'
 
-# A check that has not started, in every spelling the two rollup enums carry between them.
-# QUEUED is the one a starved job wears, and WAITING, PENDING and REQUESTED cover a gate.
-# Those three are a CheckRun's, where PENDING means dispatched and not begun.
-# EXPECTED is a StatusContext's, meaning a required status nothing has posted yet.
-# A StatusContext's own PENDING is the opposite and is translated away in check_nodes.
-# Reading QUEUED alone scores every one of these as running, and EXPECTED as a failure.
-NOT_STARTED = frozenset({'QUEUED', 'WAITING', 'PENDING', 'REQUESTED', 'EXPECTED'})
+# A check dispatched to a runner and not begun, in the spellings a CheckRun carries.
+# PENDING here means dispatched and not begun, which a StatusContext's means the opposite of.
+# That one is translated away in check_nodes, where the node shape is still known.
+# Reading QUEUED alone scores the rest of these as running.
+NOT_STARTED = frozenset({'QUEUED', 'WAITING', 'PENDING', 'REQUESTED'})
+# A required status nothing has posted, which is a StatusContext's state and only ever that.
+# It is not a starved job and must not borrow that remedy, since no runner is owed it at all.
+# Left out of both sets it reaches the conclusion branch, where it reports as a red check.
+NOT_POSTED = frozenset({'EXPECTED'})
 # What counts as a check having passed, rather than as one still deciding or failed.
 # SKIPPED and NEUTRAL are passes, since the fleet aggregator pattern skips the conditional jobs.
 # Treating a skip as unfinished reports four blockers on every green pull request here.
@@ -343,7 +348,7 @@ def check_nodes(pr: dict) -> list[dict]:
             out.append({'name': n.get('name') or '', 'state': n.get('status') or '',
                         'conclusion': n.get('conclusion') or '',
                         'started': n.get('startedAt') or ''})
-        else:
+        elif n.get('__typename') == 'StatusContext':
             # A StatusContext reports one field for both, so its state doubles as its conclusion.
             # Its PENDING means the posting system reported the run as under way.
             # A CheckRun's PENDING means the opposite, dispatched and not begun.
@@ -354,16 +359,26 @@ def check_nodes(pr: dict) -> list[dict]:
             out.append({'name': n.get('context') or '',
                         'state': 'IN_PROGRESS' if state == 'PENDING' else state,
                         'conclusion': state, 'started': n.get('createdAt') or ''})
+        # A third union member is skipped rather than forced into the StatusContext shape.
+        # Forcing it reads a label off a node spelling it otherwise, so it renders nameless.
+        # It also reads a state that is not there, so it reports as a red check.
+        # Skipping loses a check this cannot read, where forcing invents a verdict for it.
+        # `checks_tally` counts what was read, so a skip shows up as a smaller total.
     return out
 
 
 def check_shape(node: dict, now: datetime, grace: float, stall: float) -> str:
     """How this check is stuck, or the empty string where it is not.
 
-    Three shapes, because `mergeStateStatus` collapses all of them into `BLOCKED` and each wants
+    Four shapes, because `mergeStateStatus` collapses all of them into `BLOCKED` and each wants
     a different response. A run this session spent twenty-five minutes polling `BLOCKED` on a
     pull request whose only unfinished check was a rollup job no runner ever took, and the cause
     came from the maintainer rather than from any reading here.
+
+    NOT_POSTED is a required status whose poster has not spoken, which is a StatusContext's
+    `EXPECTED` and only ever that. It is not a starved job and must not borrow that remedy: no
+    runner is owed a status nothing has posted, so re-running a workflow clears nothing, and
+    reported as NOT_PICKED_UP it sends a reader at the runner pool over a missing poster.
 
     NOT_PICKED_UP is the well-founded one: a job GitHub has dispatched but assigned no runner.
     It is read from the queued state rather than from a runner name, which GraphQL does not carry,
@@ -384,6 +399,11 @@ def check_shape(node: dict, now: datetime, grace: float, stall: float) -> str:
     """
     state, conclusion = node.get('state') or '', node.get('conclusion') or ''
     elapsed = age(node.get('started') or '', now)
+    if state in NOT_POSTED:
+        # Its own shape, because the starved remedy is wrong for it in both directions.
+        # No runner is owed a status nothing has posted, so re-running a workflow clears nothing.
+        # Reported under NOT_PICKED_UP it sent a reader at the runner pool over a missing poster.
+        return 'NOT_POSTED' if elapsed is not None and elapsed > grace else ''
     if state in NOT_STARTED:
         return 'NOT_PICKED_UP' if elapsed is not None and elapsed > grace else ''
     if state == 'IN_PROGRESS':
@@ -568,6 +588,10 @@ def digest(owner: str, repo: str, num: int, seen: set[str] | None = None,
             lines.append(f'  CHECK NOT PICKED UP ({node["name"]!r}, queued {mins} with no '
                          'runner assigned): nothing here starts it, because the runner pool is '
                          'GitHub-hosted, so re-run the workflow or wait on that capacity')
+        elif shape == 'NOT_POSTED':
+            lines.append(f'  CHECK NEVER POSTED ({node["name"]!r}, expected {mins} and not '
+                         'reported): a required status whose poster has not spoken, so no runner '
+                         'is owed it and re-running a workflow here clears nothing')
         elif shape == 'RUNNING_LONG':
             lines.append(f'  CHECK RUNNING LONG ({node["name"]!r}, running {mins}): it has a '
                          'runner, so it is not starved, and whether this is hung or merely slow '

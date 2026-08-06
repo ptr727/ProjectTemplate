@@ -632,16 +632,42 @@ class TestCheckShapes(unittest.TestCase):
                 self.assertEqual('NOT_PICKED_UP', self.shape(
                     check(status=state, conclusion='', started=ago(900))))
 
-    def test_an_expected_status_is_unposted_rather_than_failed(self) -> None:
+    def test_an_expected_status_is_its_own_shape_not_a_starved_job(self) -> None:
         """`EXPECTED` is a StatusContext state meaning nothing has posted the status yet.
 
-        It reaches the conclusion branch if it is left out of the unstarted set, where it matches
-        no pass and so reports a required status nobody has reported yet as a red check. Caught
-        reading this diff back rather than by a case, so the case exists now.
+        Left out of every set it reaches the conclusion branch, matches no pass, and reports a
+        required status nobody has reported as a red check. Folded in with the queued states it
+        gets the starved remedy instead, which is wrong in both directions: no runner is owed a
+        status nothing has posted, so re-running a workflow clears nothing, and a reader is sent
+        at the runner pool over a missing poster. Both readings were raised in review here, the
+        second on the fix for the first.
         """
-        self.assertEqual('NOT_PICKED_UP',
+        self.assertEqual('NOT_POSTED',
                          self.shape(status_context(state='EXPECTED', created=ago(900))))
         self.assertEqual('', self.shape(status_context(state='EXPECTED', created=ago(60))))
+
+    def test_the_unposted_message_does_not_borrow_the_starved_remedy(self) -> None:
+        """The remedy is the reason the shapes are told apart, so the wording has to differ too."""
+        out, _ = pr_review.digest('o', 'r', 7, now=NOW, stalled='', pr=payload(
+            [review()], merge='BLOCKED',
+            checks=[status_context(context='ci/external', state='EXPECTED', created=ago(900))]))
+        self.assertIn('stuck=NOT_POSTED', out)
+        self.assertIn("CHECK NEVER POSTED ('ci/external'", out)
+        self.assertIn('no runner is owed it', out)
+        self.assertNotIn('CHECK NOT PICKED UP', out)
+
+    def test_an_unknown_rollup_member_is_skipped_rather_than_forced(self) -> None:
+        """Forcing a third union member into the StatusContext shape invents a verdict for it.
+
+        It would render nameless, since the node spells its label something else, and report as a
+        red check, since the state read off it is not there. Skipping loses a check this cannot
+        read, which the smaller total shows, where forcing fabricates one. Raised in review here.
+        """
+        pr = payload([review()], checks=[
+            check(name='lint'),
+            {'__typename': 'SomethingNew', 'label': 'future-gate', 'verdict': 'WHO_KNOWS'}])
+        self.assertEqual(['lint'], [n['name'] for n in pr_review.check_nodes(pr)])
+        self.assertEqual((1, 1), pr_review.checks_tally(pr))
 
     def test_a_running_check_is_reported_only_past_the_stall_threshold(self) -> None:
         """A lint job here legitimately runs eleven minutes, so the default must not flag it."""
@@ -710,7 +736,9 @@ class TestCheckShapes(unittest.TestCase):
         pr = payload([review()], checks=[check(name='job'), status_context(state='FAILURE')])
         nodes = pr_review.check_nodes(pr)
         self.assertEqual(['job', 'ci/external'], [n['name'] for n in nodes])
-        self.assertEqual('FAILED', self.shape(nodes[1]))
+        # Judged directly rather than through `self.shape`, which normalizes a second time.
+        # A normalized node carries no typename, so that pass would skip it as unknown.
+        self.assertEqual('FAILED', pr_review.check_shape(nodes[1], NOW, 300, 1800))
 
     def test_a_pending_status_context_is_running_rather_than_unstarted(self) -> None:
         """The same string is two states, and only the node shape says which.
@@ -1215,6 +1243,21 @@ class TestContract(unittest.TestCase):
                     with self.assertRaises(SystemExit):
                         pr_review.main(['wait', '7', '--repo', 'o/r', flag, '-1'])
                 self.assertIn(flag.lstrip('-'), err.getvalue())
+
+    def test_the_documented_exit_codes_are_the_ones_the_code_returns(self) -> None:
+        """The 42 docstring claimed a failed check without naming the BLOCKED the code requires.
+
+        A failed *required* check does read BLOCKED, so the code was right and the doc was short
+        of it, which is the direction that costs a reader trust in the field. Raised in review
+        here. This holds the docstring to naming the condition rather than only the shapes.
+        """
+        doc = pr_review.__doc__ or ''
+        self.assertIn('42 =', doc)
+        self.assertIn('BLOCKED', doc)
+        # Every shape the digest can print is named where the code can return 42 for it.
+        for shape in ('queued', 'never posted', 'far past', 'failed'):
+            with self.subTest(shape=shape):
+                self.assertIn(shape, doc)
 
     def test_the_check_thresholds_are_ordered_so_a_queue_reads_before_a_run(self) -> None:
         """A stall threshold under the grace would report a running job before a starved one.
