@@ -473,16 +473,20 @@ class TestCli(GqlCase):
     def setUp(self) -> None:
         self.out = self.enterContext(contextlib.redirect_stdout(io.StringIO()))
 
+    def cli(self, argv: list[str]) -> int:
+        """Every run names its repository, since the parser supplies no default for one."""
+        return pr_review.main([*argv, '--repo', 'o/r'])
+
     def test_status_prints_the_digest_and_exits_zero(self) -> None:
         self.answer(payload([review()]))
-        self.assertEqual(0, pr_review.main(['status', '7']))
+        self.assertEqual(0, self.cli(['status', '7']))
         self.assertIn('pr=7', self.out.getvalue())
 
     def test_wait_returns_zero_once_the_review_lands_on_the_head(self) -> None:
         """The first poll already sees it, so the loop body never runs."""
         self.answer(payload([review()]))
         with mock.patch.object(pr_review.time, 'sleep') as slept:
-            self.assertEqual(0, pr_review.main(['wait', '7']))
+            self.assertEqual(0, self.cli(['wait', '7']))
         slept.assert_not_called()
         self.assertIn('waited=', self.out.getvalue())
 
@@ -490,21 +494,21 @@ class TestCli(GqlCase):
         """Each iteration re-reads the head, since a push during the wait moves it."""
         self.answer(payload([review(oid=OLD)]), payload([review()]))
         with mock.patch.object(pr_review.time, 'sleep') as slept:
-            self.assertEqual(0, pr_review.main(['wait', '7']))
+            self.assertEqual(0, self.cli(['wait', '7']))
         self.assertEqual(1, slept.call_count)
 
     def test_wait_exits_thirty_at_the_timeout_rather_than_reporting_success(self) -> None:
         """Pending is not failure and not success, so it takes a code of its own."""
         self.answer(payload([review(oid=OLD)]))
         with mock.patch.object(pr_review.time, 'sleep'):
-            self.assertEqual(30, pr_review.main(['wait', '7', '--timeout', '0']))
+            self.assertEqual(30, self.cli(['wait', '7', '--timeout', '0']))
         self.assertIn('status=PENDING', self.out.getvalue())
 
     def test_the_timeout_carries_the_digest_rather_than_a_bare_pending_line(self) -> None:
         """A wait that ends with no evidence reports a slow reviewer and a broken poll alike."""
         self.answer(payload([review(oid=OLD)], [thread('T1')]))
         with mock.patch.object(pr_review.time, 'sleep'):
-            self.assertEqual(30, pr_review.main(['wait', '7', '--timeout', '0']))
+            self.assertEqual(30, self.cli(['wait', '7', '--timeout', '0']))
         out = self.out.getvalue()
         self.assertIn('review_on_head=NO', out)
         self.assertIn('unresolved=1', out)
@@ -517,7 +521,7 @@ class TestCli(GqlCase):
         """
         self.answer(payload([review(oid=OLD)], comments=[comment()]))
         with mock.patch.object(pr_review.time, 'sleep') as slept:
-            self.assertEqual(40, pr_review.main(['wait', '7', '--timeout', '0']))
+            self.assertEqual(40, self.cli(['wait', '7', '--timeout', '0']))
         slept.assert_not_called()
         out = self.out.getvalue()
         self.assertIn('status=ANSWERED_OUTSIDE_REVIEW', out)
@@ -527,7 +531,7 @@ class TestCli(GqlCase):
         """Coverage is the success case, and a spent comment does not downgrade it to 40."""
         self.answer(payload([review(at=LATE)], comments=[comment(at=EARLY)]))
         with mock.patch.object(pr_review.time, 'sleep'):
-            self.assertEqual(0, pr_review.main(['wait', '7']))
+            self.assertEqual(0, self.cli(['wait', '7']))
 
     def test_wait_stops_on_a_request_nothing_picked_up(self) -> None:
         """Waiting on cannot start a request nothing is acting on, so the wait says so and ends.
@@ -539,7 +543,7 @@ class TestCli(GqlCase):
         with mock.patch.object(pr_review, 'timeline',
                                return_value=[('review_requested', LATE)]), \
                 mock.patch.object(pr_review.time, 'sleep'):
-            self.assertEqual(50, pr_review.main(
+            self.assertEqual(50, self.cli(
                 ['wait', '7', '--pickup-grace', '0', '--timeout', '0']))
         out = self.out.getvalue()
         self.assertIn('status=REQUEST_NOT_PICKED_UP', out)
@@ -552,7 +556,7 @@ class TestCli(GqlCase):
                                return_value=[('review_requested', EARLY),
                                              ('copilot_work_started', LATE)]), \
                 mock.patch.object(pr_review.time, 'sleep'):
-            self.assertEqual(0, pr_review.main(
+            self.assertEqual(0, self.cli(
                 ['wait', '7', '--pickup-grace', '0', '--timeout', '600']))
 
     def test_the_pickup_read_waits_out_the_grace_rather_than_running_per_poll(self) -> None:
@@ -560,7 +564,7 @@ class TestCli(GqlCase):
         self.answer(payload([review(oid=OLD)], pending=True), payload([review()], pending=True))
         with mock.patch.object(pr_review, 'timeline', return_value=[]) as seen, \
                 mock.patch.object(pr_review.time, 'sleep'):
-            self.assertEqual(0, pr_review.main(
+            self.assertEqual(0, self.cli(
                 ['wait', '7', '--pickup-grace', '9999', '--timeout', '600']))
         seen.assert_not_called()
 
@@ -575,7 +579,7 @@ class TestCli(GqlCase):
         with mock.patch.object(pr_review.time, 'monotonic', side_effect=count(0, 30)), \
                 mock.patch.object(pr_review, 'timeline', return_value=picked_up) as seen, \
                 mock.patch.object(pr_review.time, 'sleep'):
-            self.assertEqual(30, pr_review.main(
+            self.assertEqual(30, self.cli(
                 ['wait', '7', '--pickup-grace', '300', '--timeout', '1200']))
         # Roughly one read per grace interval over the wait, never one per poll.
         self.assertGreaterEqual(seen.call_count, 1)
@@ -591,7 +595,7 @@ class TestCli(GqlCase):
         with mock.patch.object(pr_review, 'timeline',
                                return_value=[('review_requested', LATE)]), \
                 mock.patch.object(pr_review.time, 'sleep'):
-            self.assertEqual(0, pr_review.main(
+            self.assertEqual(0, self.cli(
                 ['wait', '7', '--pickup-grace', '0', '--timeout', '0']))
         out = self.out.getvalue()
         self.assertIn('review_on_head=yes', out)
@@ -601,7 +605,7 @@ class TestCli(GqlCase):
         """Same disagreement at the other exit: printing coverage and returning PENDING."""
         self.answer(payload([review(oid=OLD)]), payload([review()]))
         with mock.patch.object(pr_review.time, 'sleep'):
-            self.assertEqual(0, pr_review.main(['wait', '7', '--timeout', '0']))
+            self.assertEqual(0, self.cli(['wait', '7', '--timeout', '0']))
         out = self.out.getvalue()
         self.assertIn('review_on_head=yes', out)
         self.assertNotIn('status=PENDING', out)
@@ -613,7 +617,7 @@ class TestCli(GqlCase):
         with mock.patch.object(pr_review, 'timeline',
                                side_effect=[[('review_requested', LATE)], picked_up]), \
                 mock.patch.object(pr_review.time, 'sleep'):
-            self.assertEqual(30, pr_review.main(
+            self.assertEqual(30, self.cli(
                 ['wait', '7', '--pickup-grace', '0', '--timeout', '0']))
         out = self.out.getvalue()
         self.assertNotIn('status=REQUEST_NOT_PICKED_UP', out)
@@ -625,7 +629,7 @@ class TestCli(GqlCase):
         with mock.patch.object(pr_review, 'timeline',
                                return_value=[('review_requested', LATE)]), \
                 mock.patch.object(pr_review.time, 'sleep'):
-            self.assertEqual(40, pr_review.main(
+            self.assertEqual(40, self.cli(
                 ['wait', '7', '--pickup-grace', '0', '--timeout', '0']))
 
     def test_the_repo_argument_splits_into_owner_and_name(self) -> None:
@@ -633,6 +637,33 @@ class TestCli(GqlCase):
         with mock.patch.object(pr_review, 'digest', return_value=('x', 0)) as dig:
             self.assertEqual(0, pr_review.main(['status', '7', '--repo', 'owner/name']))
         self.assertEqual(('owner', 'name', 7), dig.call_args.args)
+
+    def test_a_run_naming_no_repo_is_rejected_rather_than_sent_somewhere(self) -> None:
+        """A default would send it to one repository, and every number resolves there.
+
+        That is the failure this had twice: the digest rendered, nothing in it disagreed, and
+        the run was reading a pull request in a repository nobody had named.
+        """
+        self.answer(payload([review()]))
+        with contextlib.redirect_stderr(io.StringIO()) as err:
+            with self.assertRaises(SystemExit):
+                pr_review.main(['status', '7'])
+        self.assertIn('--repo', err.getvalue())
+
+    def test_a_repo_that_is_not_owner_slash_name_is_rejected_by_name(self) -> None:
+        """The near-miss a required argument still admits, and unpacking it is a bare traceback."""
+        for bad in ('ProjectTemplate', 'ptr727/', '/ProjectTemplate', 'a/b/c', ''):
+            with self.subTest(repo=bad):
+                with contextlib.redirect_stderr(io.StringIO()) as err:
+                    with self.assertRaises(SystemExit):
+                        pr_review.main(['status', '7', '--repo', bad])
+                self.assertIn('OWNER/NAME', err.getvalue())
+
+    def test_the_digest_names_the_repository_it_read(self) -> None:
+        """A digest of the wrong pull request is well-formed, so the line has to say which one."""
+        self.answer(payload([review()]))
+        self.assertEqual(0, self.cli(['status', '7']))
+        self.assertIn('repo=o/r pr=7', self.out.getvalue())
 
 
 class TestContract(unittest.TestCase):
@@ -712,9 +743,11 @@ class TestContract(unittest.TestCase):
 
     def test_a_negative_pickup_grace_is_rejected_rather_than_read_as_every_poll(self) -> None:
         """It leaves the next reading behind the clock, which is the per-poll pattern returning."""
-        with contextlib.redirect_stderr(io.StringIO()):
+        with contextlib.redirect_stderr(io.StringIO()) as err:
             with self.assertRaises(SystemExit):
-                pr_review.main(['wait', '7', '--pickup-grace', '-1'])
+                pr_review.main(['wait', '7', '--repo', 'o/r', '--pickup-grace', '-1'])
+        # The repository is named, or this exits on the missing argument and proves nothing.
+        self.assertIn('pickup-grace', err.getvalue())
 
     def test_a_failed_timeline_read_raises_rather_than_reading_as_no_events(self) -> None:
         """An empty list reads as no request pending, which is the false clean one level up."""
