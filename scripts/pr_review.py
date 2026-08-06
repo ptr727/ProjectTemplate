@@ -232,8 +232,12 @@ def refusing_review(pr: dict) -> dict | None:
 
     Head-scoped, unlike a suppressed finding, because a refusal is a statement about one commit:
     a push retires it, and the round the push raises either reviews that head or refuses it in
-    its own right. A refusal alongside a genuine review of the same head is spent too, which
-    `reviewed_head` settles ahead of this.
+    its own right.
+
+    A refusal alongside a genuine review of the same head is spent too, and that is the caller's
+    reading rather than this one's, since what spends it is coverage this cannot see from a
+    refusal alone. Both callers hold it: `main` returns 0 on `reviewed_head` before reaching
+    here, and the digest reports the field only where nothing covers the head.
     """
     head = pr['headRefOid']
     refusals = [n for n in reviewer_nodes(pr, 'reviews')
@@ -349,7 +353,10 @@ def digest(owner: str, repo: str, num: int, seen: set[str] | None = None,
         finding_count(b) for b in on_head_blocks)
 
     answer = answered_outside_review(pr)
-    refusal = refusing_review(pr)
+    # Spent where coverage of the same head landed, the precedence the exit codes already hold.
+    # Reported regardless, it prints `review_on_head=yes refusal=YES` over a reviewed head.
+    # That tells a reader to split a pull request the reviewer has just reviewed.
+    refusal = None if on_head else refusing_review(pr)
     blind = [f for f in ('reviews', 'comments') if window_blind(pr, f)]
     answered = 'yes' if answer else ('unknown' if blind else 'no')
     lines = [

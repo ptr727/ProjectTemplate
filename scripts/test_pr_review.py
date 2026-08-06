@@ -499,9 +499,29 @@ class TestRefusal(GqlCase):
         self.assertIn('refusal=no', out)
 
     def test_a_genuine_review_of_the_same_head_outranks_a_refusal_of_it(self) -> None:
-        """Coverage that landed is coverage, whatever an earlier round of the same head said."""
+        """Coverage that landed is coverage, whatever an earlier round of the same head said.
+
+        The digest has to agree with the exit codes here, which return 0 on that coverage and
+        never reach 41. Reported unconditionally the field read `review_on_head=yes refusal=YES`
+        on one line, which tells a reader to split a pull request that has just been reviewed,
+        and tells an automated one that a state it treats as actionable is outstanding.
+        """
         pr = payload([review(body=REFUSED, at=EARLY), review(at=LATE)])
         self.assertTrue(pr_review.reviewed_head(pr))
+        self.answer(pr)
+        out, _ = pr_review.digest('o', 'r', 7)
+        self.assertIn('review_on_head=yes', out)
+        self.assertIn('refusal=no', out)
+        self.assertNotIn('COPILOT REFUSED THIS ROUND', out)
+        self.assertNotIn(REFUSED, out)
+
+    def test_the_wait_returns_zero_where_coverage_followed_a_refusal_of_the_same_head(self) -> None:
+        """The digest and the exit code read one payload, so neither may spend it differently."""
+        self.answer(payload([review(body=REFUSED, at=EARLY), review(at=LATE)]))
+        with contextlib.redirect_stdout(io.StringIO()) as out, \
+                mock.patch.object(pr_review.time, 'sleep'):
+            self.assertEqual(0, pr_review.main(['wait', '7', '--repo', 'o/r']))
+        self.assertNotIn('status=REVIEW_IS_A_REFUSAL', out.getvalue())
 
     def test_a_human_review_carrying_the_wording_is_not_the_reviewer_refusing(self) -> None:
         self.answer(payload([review(login='ptr727', body=REFUSED), review(oid=OLD)]))
