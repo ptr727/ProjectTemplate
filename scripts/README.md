@@ -89,9 +89,11 @@ A stale-backticked-path check was built and **rejected**: a template repo legiti
 One compact digest of a pull request's Copilot review state, replacing a sequence of one-`gh`-call-per-turn polls. `status` prints the digest, and `wait` runs the backoff in-process so a long review wait costs one agent turn instead of one per poll. Read-only by design: the mutations (re-request, reply, resolve) stay as explicit `gh` calls so they remain visible to the `gh-write-guard` hook and to review, and their runbook is in [`.github/copilot-instructions.md`][copilot-instructions].
 
 ```sh
-python3 scripts/pr_review.py status 452
-python3 scripts/pr_review.py wait 452 --timeout 2700
+python3 scripts/pr_review.py status 452 --repo ptr727/ProjectTemplate
+python3 scripts/pr_review.py wait 452 --repo ptr727/ProjectTemplate --timeout 2700
 ```
+
+`--repo` is required and carries no default. A default names one repository, and a run from anywhere else resolves its number there instead: the digest renders, every field is well-formed, and nothing in the output disagrees. Two runs read this repository's pull requests while their own was the subject, each caught by the maintainer rather than by the run. The digest leads with `repo=OWNER/NAME` for the same reason, since a number alone reads as correct in any repository. A value that is not `OWNER/NAME` is rejected by name rather than raised as an unpacking traceback, that being the near-miss a required argument still admits.
 
 `wait` exits `30` when the review is still pending at the timeout, which is pending rather than failed. Its failure mode is a wrong answer rather than a crash, so the cases feed crafted GraphQL payloads: a review attributed to the wrong login, a review counted against a stale head, a maintainer's own thread read as a finding, and a wait that returns success while nothing landed. One case reads the reviewer login out of the runbook rather than restating it, since GraphQL drops the `[bot]` suffix REST carries, and another asserts no mutation has crept into a read-only script.
 

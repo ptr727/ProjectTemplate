@@ -294,7 +294,9 @@ def digest(owner: str, repo: str, num: int, seen: set[str] | None = None,
     blind = [f for f in ('reviews', 'comments') if window_blind(pr, f)]
     answered = 'yes' if answer else ('unknown' if blind else 'no')
     lines = [
-        f'pr={num} head={head[:8]} rounds={len(revs)} '
+        # The repository leads the line, since a number alone reads as correct anywhere.
+        # A digest of the wrong pull request is well-formed, so naming it is what shows the miss.
+        f'repo={owner}/{repo} pr={num} head={head[:8]} rounds={len(revs)} '
         f'review_on_head={"yes" if on_head else "NO"} '
         f'threads={len(threads)} unresolved={len(unresolved)} '
         f'suppressed={sum(finding_count(b) for n, b in blocks)} '
@@ -355,7 +357,13 @@ def main(argv: list[str] | None = None) -> int:
     ap = argparse.ArgumentParser()
     ap.add_argument('cmd', choices=['status', 'wait'])
     ap.add_argument('number', type=int)
-    ap.add_argument('--repo', default='ptr727/ProjectTemplate')
+    # No default, because the wrong repository is the failure this argument has actually had.
+    # A default names one repository, and every run from elsewhere silently reads that one.
+    # The number resolves there, the digest renders, and nothing in the output disagrees.
+    # Two runs read a pull request here while one in their own repository was the subject.
+    ap.add_argument('--repo', required=True, metavar='OWNER/NAME',
+                    help='the repository the pull request is in, since a pull '
+                         'request number identifies no repository on its own')
     ap.add_argument('--timeout', type=int, default=2700, help='seconds (default 45m)')
     ap.add_argument('--pickup-grace', type=int, default=300,
                     help='seconds before the first pickup read, and between reads (default 5m)')
@@ -364,7 +372,11 @@ def main(argv: list[str] | None = None) -> int:
     # That is the per-poll REST pattern the interval exists to prevent.
     if a.pickup_grace < 0:
         ap.error('--pickup-grace cannot be negative')
-    owner, repo = a.repo.split('/', 1)
+    # A bare name is the near-miss a required argument still admits, and unpacking it raises a
+    # ValueError traceback rather than saying which half is missing.
+    owner, _, repo = a.repo.partition('/')
+    if not owner or not repo or '/' in repo:
+        ap.error(f'--repo takes OWNER/NAME, not {a.repo!r}')
 
     if a.cmd == 'status':
         out, _ = digest(owner, repo, a.number)
