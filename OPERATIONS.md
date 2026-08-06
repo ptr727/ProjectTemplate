@@ -48,11 +48,11 @@ Findings are a point-in-time snapshot read live over the API. Re-run before acti
 ### Apply or verify repository configuration
 
 ```sh
-repo-config/configure.sh check [owner/repo] [release|operational]
-repo-config/configure.sh apply [owner/repo] [release|operational]
+repo-config/configure.sh check owner/repo release|operational
+repo-config/configure.sh apply owner/repo release|operational
 ```
 
-**Always pass the command, and always name the repository.** A bare `repo-config/configure.sh` with no arguments defaults to `apply` against the current repo, so an invocation meant to test whether the script runs performs a live write instead. Never run it without a command. The repository argument matters for the same reason now that the fleet runs this copy rather than its own: an omitted target resolves to this repository, and applying the fleet configuration to the hub while meaning to configure a downstream repo is a well-formed write to the wrong place.
+**Always pass the command, the repository, and the model.** A bare `repo-config/configure.sh` with no arguments defaults to `apply` against the current repo, so an invocation meant to test whether the script runs performs a live write instead. Never run it without a command. The repository argument matters for the same reason now that the fleet runs this copy rather than its own: an omitted target resolves to this repository, and applying the fleet configuration to the hub while meaning to configure a downstream repo is a well-formed write to the wrong place. The model is the third argument for the same reason. This checkout has the registry beside the script, so a repo the registry does not yet name resolves through `defaults.workflowModel` to `release` rather than aborting, and an operational repo then takes the release `develop` ruleset.
 
 `check` is read-only and exits non-zero on drift. `apply` is idempotent and drives entirely from the committed payloads, so it is a no-op on a conformant repo.
 
