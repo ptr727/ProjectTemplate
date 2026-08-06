@@ -861,6 +861,41 @@ class TestDigestReportsChecks(GqlCase):
             pr_review.digest('o', 'r', 7, pr=pr, stalled='', now=NOW)
         self.assertEqual(1, parsed.call_count)
 
+    def test_a_caller_that_parsed_the_rollup_is_not_made_to_parse_it_again(self) -> None:
+        """The first fix left `wait` parsing once to print and once to decide, which is the same
+        doubling one caller up. Raised in review here, on the commit that halved it."""
+        pr = payload([review()], merge='BLOCKED', checks=[check(name='lint')])
+        with mock.patch.object(pr_review, 'check_nodes',
+                               side_effect=pr_review.check_nodes) as parsed:
+            pr_review.digest('o', 'r', 7, pr=pr, stalled='', now=NOW,
+                             checks=pr_review.check_nodes(pr))
+        # The one call is the case's own, so the digest made none of its own.
+        self.assertEqual(1, parsed.call_count)
+
+    def test_the_truncation_line_quotes_the_window_the_query_actually_asks_for(self) -> None:
+        """The message borrowed WINDOW, which is the reviews and comments window and not this one.
+
+        It read correctly only while the two numbers happened to agree, so a change to either
+        would have made the line state a limit the query does not use. Raised in review here.
+        """
+        self.assertIn(f'contexts(first:{pr_review.CHECKS_WINDOW})', pr_review.Q_FULL)
+        pr = payload([review()], merge='BLOCKED', checks=[check()])
+        pr['commits']['nodes'][0]['commit']['statusCheckRollup']['contexts']['pageInfo'] = {
+            'hasNextPage': True}
+        self.assertIn(f'more than the {pr_review.CHECKS_WINDOW} contexts', self.digest(pr))
+
+    def test_one_reader_finds_the_head_commit_for_all_three_callers(self) -> None:
+        """Three traversals of one shape drift apart, and a payload change must be caught once.
+
+        Raised in review here. Each caller is held to the shared reader by giving the payload a
+        head that matches nothing, where all three must agree that there is no rollup to read.
+        """
+        pr = payload([review()], checks=[check()], rollup_oid=OLD)
+        self.assertEqual({}, pr_review.head_commit(pr))
+        self.assertEqual([], pr_review.check_nodes(pr))
+        self.assertFalse(pr_review.checks_truncated(pr))
+        self.assertTrue(pr_review.checks_unreadable(pr))
+
     def test_a_pull_request_with_no_commits_at_all_is_not_reported_as_unreadable(self) -> None:
         """Nothing to match against is not a failed match, or every payload without one says so."""
         self.assertFalse(pr_review.checks_unreadable(payload([review()], checks=[check()])))

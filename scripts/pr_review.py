@@ -86,6 +86,11 @@ HEADING = re.compile(r'\s*(?:#{1,6}\s|<summary)', re.IGNORECASE)
 # A test holds this equal to the number the queries carry, since a drift between them reads clean.
 WINDOW = 100
 
+# How many rollup contexts the full query asks for, which is not the window above.
+# The truncation line quotes this, so one constant keeps the message and the query from drifting.
+# Borrowing WINDOW read correctly only while the two numbers happened to agree.
+CHECKS_WINDOW = 100
+
 # The timeline spells the reviewer a third way, as login `Copilot` with type `Bot`.
 # GraphQL says `copilot-pull-request-reviewer`, and REST user objects add a `[bot]` suffix.
 # The predicate is the type plus a loose login match rather than any one spelling.
@@ -322,6 +327,19 @@ def age(stamp: str, now: datetime) -> float | None:
         return None
 
 
+def head_commit(pr: dict) -> dict:
+    """The commit object whose oid is the head's, or an empty dict where none is.
+
+    One reader, because three functions traversed this same shape in three slightly different
+    ways and a payload change would have had to be caught in all three. Selection is by oid
+    rather than by position, since a rollup off any other commit describes a push ago and renders
+    every field, which is a review counted without being read one field along.
+    """
+    head = pr.get('headRefOid') or ''
+    return next((c.get('commit') or {} for c in ((pr.get('commits') or {}).get('nodes') or [])
+                 if (c.get('commit') or {}).get('oid') == head), {})
+
+
 def check_nodes(pr: dict) -> list[dict]:
     """The head commit's checks, each as {name, state, conclusion, since}.
 
@@ -331,17 +349,10 @@ def check_nodes(pr: dict) -> list[dict]:
     which scores an external status as a check in no state at all, so neither pending nor failed.
     They are normalized here so one reading serves both.
     """
-    # Selected by matching the head rather than taken as the first node.
-    # That is what the surrounding reasoning claimed and what the code did not do.
-    # A rollup off any other commit describes a push ago and renders every field.
-    # Reading position instead of identity is a review counted without being read.
     # No match reports nothing rather than falling back to another commit's rollup.
     # A fallback is that same stale reading reached by a different route.
     # The absence is not silent either, and `checks_unreadable` is where the digest says it.
-    nodes = [c.get('commit') or {} for c in ((pr.get('commits') or {}).get('nodes') or [])]
-    head = pr.get('headRefOid') or ''
-    commit = next((c for c in nodes if c.get('oid') == head), {})
-    rollup = commit.get('statusCheckRollup') or {}
+    rollup = head_commit(pr).get('statusCheckRollup') or {}
     out = []
     for n in ((rollup.get('contexts') or {}).get('nodes') or []):
         if n.get('__typename') == 'CheckRun':
@@ -439,11 +450,7 @@ def checks_truncated(pr: dict) -> bool:
     That is the exact false clean the rest of this script exists to prevent, and a fleet repository
     with a large matrix build reaches a hundred contexts far sooner than this one does.
     """
-    nodes = ((pr.get('commits') or {}).get('nodes') or [])
-    head = pr.get('headRefOid') or ''
-    commit = next((c.get('commit') or {} for c in nodes
-                   if (c.get('commit') or {}).get('oid') == head), {})
-    contexts = ((commit.get('statusCheckRollup') or {}).get('contexts') or {})
+    contexts = ((head_commit(pr).get('statusCheckRollup') or {}).get('contexts') or {})
     return bool((contexts.get('pageInfo') or {}).get('hasNextPage'))
 
 
@@ -456,9 +463,7 @@ def checks_unreadable(pr: dict) -> bool:
     than as this reading having failed. A silent narrowing is the failure mode this whole script
     is built against, and it does not get an exception for its own newest field.
     """
-    nodes = ((pr.get('commits') or {}).get('nodes') or [])
-    head = pr.get('headRefOid') or ''
-    return bool(nodes) and not any((c.get('commit') or {}).get('oid') == head for c in nodes)
+    return bool(((pr.get('commits') or {}).get('nodes') or [])) and not head_commit(pr)
 
 
 def checks_tally(nodes: list[dict]) -> tuple[int, int]:
@@ -521,15 +526,17 @@ def finding_count(block: str) -> int:
 
 def digest(owner: str, repo: str, num: int, seen: set[str] | None = None,
            pr: dict | None = None, stalled: str | None = None, now: datetime | None = None,
-           grace: float = CHECK_GRACE, stall: float = CHECK_STALL) -> tuple[str, int]:
+           grace: float = CHECK_GRACE, stall: float = CHECK_STALL,
+           checks: list[dict] | None = None) -> tuple[str, int]:
     """Render the digest, from a caller's payload and stall reading where those are given.
 
     The caller passes its own readings when the exit code has to agree with what was printed,
     since a review landing between two reads makes a fresh fetch describe a different pull
     request than the one the code was decided from. Passing the stall also spends one REST
-    call between the caller and the digest rather than one each. `now` is a parameter for the
-    same reason, so a case can hold a check at a known age rather than at whatever the clock
-    says when the suite runs.
+    call between the caller and the digest rather than one each, and `checks` spends the rollup
+    parse the same way, since the wait decides an exit code from the reading it just printed.
+    `now` is a parameter for the same reason, so a case can hold a check at a known age rather
+    than at whatever the clock says when the suite runs.
     """
     pr = gql(Q_FULL, owner, repo, num) if pr is None else pr
     stalled = stall_of(owner, repo, num, pr) if stalled is None else stalled
@@ -566,9 +573,10 @@ def digest(owner: str, repo: str, num: int, seen: set[str] | None = None,
     refusal = None if on_head else refusing_review(pr)
     blind = [f for f in ('reviews', 'comments') if window_blind(pr, f)]
     answered = 'yes' if answer else ('unknown' if blind else 'no')
-    # Normalized once here and handed to both readers.
-    # The parse is the cost this whole script exists to spend once.
-    checks = check_nodes(pr)
+    # Normalized once and handed to both readers, since the parse is the cost here.
+    # The caller's own list wins where it has one, so the wait parses the rollup once.
+    # Without that it read once for what it prints and again for what it returns.
+    checks = check_nodes(pr) if checks is None else checks
     ok, total = checks_tally(checks)
     stuck = checks_stuck(checks, now, grace, stall)
     lines = [
@@ -626,9 +634,9 @@ def digest(owner: str, repo: str, num: int, seen: set[str] | None = None,
                          f'{node["conclusion"]}): a verdict rather than a stuck check, so read '
                          'the run and fix it, since no wait and no re-run clears a real failure')
     if checks_truncated(pr):
-        lines.append(f'  CHECKS TRUNCATED: the head carries more than the {WINDOW} contexts this '
-                     'query asks for, so a check past the window is missing from the tally and '
-                     'from the stuck reading alike, and neither reports on what it did not see')
+        lines.append(f'  CHECKS TRUNCATED: the head carries more than the {CHECKS_WINDOW} contexts '
+                     'this query asks for, so a check past the window is missing from the tally '
+                     'and from the stuck reading alike, and neither reports what it did not see')
     if checks_unreadable(pr):
         lines.append('  CHECKS UNREADABLE: the payload carries commits and none of them is the '
                      'head, so no rollup here describes this head and `checks=0/0` is this '
@@ -765,8 +773,12 @@ def main(argv: list[str] | None = None) -> int:
     # A request picked up since that reading would still report as picked up by nothing.
     stalled = stall_of(owner, repo, a.number, final)
     now = datetime.now(timezone.utc)
+    # Parsed here and handed down, so the digest and the exit code share one read of the rollup.
+    # Deriving the stuck shapes from that list costs no parse, which is what was doubled.
+    checks = check_nodes(final)
+    stuck = checks_stuck(checks, now, a.check_grace, a.check_stall)
     out, _ = digest(owner, repo, a.number, pr=final, stalled=stalled, now=now,
-                    grace=a.check_grace, stall=a.check_stall)
+                    grace=a.check_grace, stall=a.check_stall, checks=checks)
     print(out)
     print(f'waited={int(time.monotonic()-start)}s')
     if reviewed_head(final):
@@ -781,7 +793,6 @@ def main(argv: list[str] | None = None) -> int:
         # Without it, a stuck check nothing requires returns 42 on a mergeable pull request.
         # `CLEAN` proves no required gate is outstanding, whatever else the rollup is doing.
         # The digest reports the check either way, so the narrower code costs the reader nothing.
-        stuck = checks_stuck(check_nodes(final), now, a.check_grace, a.check_stall)
         if stuck and final.get('mergeStateStatus') == 'BLOCKED':
             # Worded as a coincidence rather than a cause.
             # Nothing here proves the stuck check is what blocks the merge.
