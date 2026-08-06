@@ -66,6 +66,15 @@ This repo is the single home for those rules, a machine-readable spec they are c
 - **[catalog/][catalog]** - reusable reference snippets (workflow tasks, config exemplars, devcontainers) the audit compares implementations against.
 - **[reports/][reports]** - per-repo audit output.
 
+**The words a request is phrased in are defined here.** A repository is asked to audit itself against the hub, or to close the review loop on a pull request, and the phrasing carries the whole instruction, so each term below names the file that answers it and a request using one is a complete instruction rather than a starting point for interpretation.
+
+- **The hub** - this repository. It is the single authority on what a fleet project is supposed to hold, and every rule naming the hub means this one.
+- **The fleet** - the projects listed in [registry/repos.json][repos], each audited downward against the ground truth here rather than negotiating its own.
+- **Stand a repository up** - carry the baseline a project is owed for its declared types and workflow model, per [STANDUP.md][standup]. An absent file is a baseline that never arrived rather than drift.
+- **Audit a repository** - read a live project against the spec and report its drift, per [AUDIT.md][audit]. The audit never edits what it measures, so a fix is a separate change.
+- **Close the review loop** - request a review on every push, confirm it covered the head commit, triage every finding, reply and resolve, and escalate when stuck, per [GOVERNANCE.md "PR Review Etiquette"][governance-pr-review-etiquette].
+- **Carried against reached** - a project carries the content it is audited against and reaches the machinery that is identical everywhere, per [GOVERNANCE.md "Hub-Hosted Tooling"][governance-hub-hosted-tooling].
+
 ## What It Achieves
 
 Keeping a fleet of repositories consistent has always been a tax paid in review attention, and it stops scaling at the point where one person can no longer hold every repo in their head. An agent changes that arithmetic in both directions at once. It can apply a convention across every repository in an afternoon, and it can spread a mistake exactly as fast. What makes the speed worth having is a ground truth an agent can read, a gate that proves the result rather than reporting it, and a boundary naming the decisions that are never the agent's to make. Each objective below is a standing capability, with the machinery that delivers it named so the claim is checkable.
@@ -177,6 +186,7 @@ See [LICENSE][license].
 [files]: ./spec/files.json
 [governance]: ./GOVERNANCE.md
 [governance-branching-model]: ./GOVERNANCE.md#branching-model
+[governance-hub-hosted-tooling]: ./GOVERNANCE.md#hub-hosted-tooling
 [governance-pr-review-etiquette]: ./GOVERNANCE.md#pr-review-etiquette
 [governance-running-the-linters-locally-known-working-invocations]: ./GOVERNANCE.md#running-the-linters-locally-known-working-invocations
 [history]: ./HISTORY.md
@@ -190,6 +200,7 @@ See [LICENSE][license].
 [repos]: ./registry/repos.json
 [spec]: ./spec/
 [ssh-signing]: ./docs/ssh-signing.md
+[standup]: ./STANDUP.md
 [version]: ./version.json
 [workflow]: ./WORKFLOW.md
 
