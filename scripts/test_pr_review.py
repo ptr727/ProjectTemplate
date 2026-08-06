@@ -60,6 +60,11 @@ def nested(heading: str = '### Suppressed comments (2)',
             '- **Review effort level:** Lite\n</details>\n')
 
 
+REFUSED = ("Copilot wasn't able to review this pull request because it exceeds the maximum "
+           'number of files (300). Try reducing the number of changed files and requesting a '
+           'review from Copilot again.')
+
+
 def thread(tid: str, resolved: bool = False, login: str = pr_review.REVIEWER,
            body: str = 'A finding.', path: str = 'a.py', line: int = 1) -> dict:
     return {'id': tid, 'isResolved': resolved,
@@ -424,6 +429,86 @@ class TestSuppressed(GqlCase):
         self.assertIn('suppressed=0', out)
 
 
+class TestRefusal(GqlCase):
+    """The review that says it did not review, which carries the head and covers nothing.
+
+    It is a formal review with the correct commit and no threads, so every check a clean pass
+    satisfies it satisfies too, and the digest it renders is the clean pass byte for byte. The
+    pull request it was observed on had 301 changed files, one over the reviewer's limit, and was
+    one command from merging on a round that never ran.
+    """
+
+    def test_a_refusal_on_the_head_is_not_coverage(self) -> None:
+        self.answer(payload([review(body=REFUSED)]))
+        out, _ = pr_review.digest('o', 'r', 7)
+        self.assertIn('review_on_head=NO', out)
+        self.assertIn('refusal=YES', out)
+        # It happened, so it is still a round.
+        # What it is not is a review of anything.
+        self.assertIn('rounds=1', out)
+        self.assertFalse(pr_review.reviewed_head(payload([review(body=REFUSED)])))
+
+    def test_the_body_prints_whole_under_a_marker_naming_the_remedy(self) -> None:
+        """Its wording is what separates a file-count refusal from a quota one, so it is not cut."""
+        self.answer(payload([review(body=REFUSED)]))
+        out, _ = pr_review.digest('o', 'r', 7)
+        self.assertIn('COPILOT REFUSED THIS ROUND', out)
+        self.assertIn(REFUSED, out)
+
+    def test_each_documented_phrasing_counts_including_the_typographic_apostrophe(self) -> None:
+        """One phrasing alone is one rewording away from reporting a refusal as a review."""
+        # The typographic apostrophe is an escape, since the charset rule governs this file too.
+        # The case is about the byte the reviewer sends rather than the character on screen.
+        for body in ("Copilot wasn't able to review this pull request because it is too large.",
+                     'Copilot wasn\u2019t able to review this pull request.',
+                     'Copilot was not able to review this pull request.',
+                     'Copilot is unable to review this pull request right now.'):
+            with self.subTest(body=body):
+                self.assertEqual(body, pr_review.refusal_of({'body': body}))
+
+    def test_a_clean_pass_and_an_ordinary_review_are_not_refusals(self) -> None:
+        for body in ('Reviewed 3 of 3 changed files and generated no comments.',
+                     collapsed(), nested(), ''):
+            with self.subTest(body=body[:40]):
+                self.assertEqual('', pr_review.refusal_of({'body': body}))
+
+    def test_a_review_quoting_the_wording_below_its_overview_is_not_a_refusal(self) -> None:
+        """This pull request's own review body is that quotation, and the shape has bitten once.
+
+        The suppressed matcher read the whole body and reported the review that discussed
+        suppressed findings as carrying them. The opening is the unit for that reason: a refusal
+        is the whole body, so a match further down is a review describing the wording.
+
+        This is also what fixes the unit at one line. The overview prose is the second line of
+        every review body, and reading two lines reports this review as a refusal of itself.
+        """
+        body = ('## Pull request overview\n\nThis PR treats a review that says Copilot '
+                "wasn't able to review a pull request as a terminal state rather than "
+                'as coverage.\n\n- The digest now reports `unable to review` separately.\n')
+        self.assertEqual('', pr_review.refusal_of({'body': body}))
+        self.answer(payload([review(body=body)]))
+        out, _ = pr_review.digest('o', 'r', 7)
+        self.assertIn('review_on_head=yes', out)
+        self.assertIn('refusal=no', out)
+
+    def test_a_refusal_from_an_earlier_round_is_spent(self) -> None:
+        """A refusal is a statement about one commit, so the push that changed it retires it."""
+        self.answer(payload([review(oid=OLD, body=REFUSED), review()]))
+        out, _ = pr_review.digest('o', 'r', 7)
+        self.assertIn('review_on_head=yes', out)
+        self.assertIn('refusal=no', out)
+
+    def test_a_genuine_review_of_the_same_head_outranks_a_refusal_of_it(self) -> None:
+        """Coverage that landed is coverage, whatever an earlier round of the same head said."""
+        pr = payload([review(body=REFUSED, at=EARLY), review(at=LATE)])
+        self.assertTrue(pr_review.reviewed_head(pr))
+
+    def test_a_human_review_carrying_the_wording_is_not_the_reviewer_refusing(self) -> None:
+        self.answer(payload([review(login='ptr727', body=REFUSED), review(oid=OLD)]))
+        out, _ = pr_review.digest('o', 'r', 7)
+        self.assertIn('refusal=no', out)
+
+
 class TestDigestReportsTheAnswer(GqlCase):
     def test_the_comment_prints_whole_under_a_marker_naming_it_terminal(self) -> None:
         """Its wording is what separates a refusal from a remark, so it is not truncated."""
@@ -526,6 +611,31 @@ class TestCli(GqlCase):
         out = self.out.getvalue()
         self.assertIn('status=ANSWERED_OUTSIDE_REVIEW', out)
         self.assertIn('quota', out)
+
+    def test_wait_exits_forty_one_on_a_review_that_says_it_did_not_review(self) -> None:
+        """Returning zero here is the failure: the digest is the clean pass byte for byte."""
+        self.answer(payload([review(body=REFUSED)]))
+        with mock.patch.object(pr_review.time, 'sleep') as slept:
+            self.assertEqual(41, self.cli(['wait', '7', '--timeout', '0']))
+        # Terminal, so it ends the wait rather than polling out the timeout against it.
+        slept.assert_not_called()
+        out = self.out.getvalue()
+        self.assertIn('status=REVIEW_IS_A_REFUSAL', out)
+        self.assertIn('review_on_head=NO', out)
+        self.assertIn(REFUSED, out)
+
+    def test_the_liveness_reading_ends_the_wait_and_the_full_read_refuses_it(self) -> None:
+        """The liveness query carries no bodies, so a refusal reads there as ordinary coverage.
+
+        That is what ends the loop, and nothing decides on it: the full read that follows every
+        wait carries the body and is where the exit code comes from.
+        """
+        bodyless = {k: v for k, v in review().items() if k != 'body'}
+        self.answer(payload([bodyless]), payload([review(body=REFUSED)]))
+        with mock.patch.object(pr_review.time, 'sleep') as slept:
+            self.assertEqual(41, self.cli(['wait', '7', '--timeout', '600']))
+        slept.assert_not_called()
+        self.assertIn('status=REVIEW_IS_A_REFUSAL', self.out.getvalue())
 
     def test_a_landed_review_wins_over_an_older_answer(self) -> None:
         """Coverage is the success case, and a spent comment does not downgrade it to 40."""
@@ -680,6 +790,13 @@ class TestContract(unittest.TestCase):
         """The heading wording has changed once, so the pattern tracks the runbook, not a memory."""
         text = RUNBOOK.read_text(encoding='utf-8')
         self.assertIn(f'test("{pr_review.SUPPRESSED.pattern}")', text)
+
+    def test_the_refusal_pattern_is_the_runbook_alternation(self) -> None:
+        """A refusal reworded once is a refusal read as coverage, so the pattern is not a memory."""
+        text = RUNBOOK.read_text(encoding='utf-8')
+        self.assertIn(f'test("{pr_review.REFUSAL.pattern}")', text)
+        # The published filter is single-quoted, which no spelling of the apostrophe survives.
+        self.assertNotIn("'", pr_review.REFUSAL.pattern)
 
     def test_no_mutation_reaches_this_script(self) -> None:
         """Mutations stay as explicit `gh` calls so the write-guard hook and review still see them."""

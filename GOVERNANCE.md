@@ -246,7 +246,7 @@ The repo runs a review loop on every PR: local agent iteration plus remote autom
 **Do not merge, and do not enable auto-merge, unless ALL of these hold:**
 
 1. Required status checks are green (`mergeStateStatus: CLEAN`), **and**
-2. A Copilot review is confirmed on the **current head SHA** by matching the review's commit SHA to the head, not an earlier push, because a push makes required checks go green **before** the re-review lands, so a green merge-state can precede the current-head review and never signals readiness on its own, **and**
+2. A Copilot review is confirmed on the **current head SHA** by matching the review's commit SHA to the head, not an earlier push, because a push makes required checks go green **before** the re-review lands, so a green merge-state can precede the current-head review and never signals readiness on its own, and the matched review is **read** rather than only counted, because Copilot declines a pull request it will not take on with a formal review carrying that same head SHA and no findings, which matches the SHA and covers nothing, **and**
 3. **Every** Copilot finding on that head SHA is closed out, with all review threads resolved, **and** any issue-level Copilot comments (which have no resolve action) triaged and replied to, **and** the low-confidence findings collapsed in the review body investigated and answered, since those appear in no thread and a loop that polls threads alone reports a clean pass while they stand, so zero outstanding findings remain, **and**
 4. The maintainer has given **explicit** permission to merge.
 
@@ -258,7 +258,7 @@ The repo runs a review loop on every PR: local agent iteration plus remote autom
 
 1. Push changes to the PR branch.
 2. Re-request a review for the **current head SHA**. Auto-trigger is unreliable, so request it explicitly via the `requestReviews` GraphQL mutation (reliable end-to-end, per the runbook). The UI is only a fallback.
-3. Wait for review activity on that head. A completed review that raises **no findings** is a valid terminal outcome for that head, so proceed. Do not re-trigger it or treat the absence of comments as a missing review.
+3. Wait for review activity on that head. A completed review that raises **no findings** is a valid terminal outcome for that head, so proceed. Do not re-trigger it or treat the absence of comments as a missing review. A review whose body says it did not review is the one exception, and it is terminal in the other direction: nothing follows it, re-requesting the same head repeats it, and the body names what has to change first.
 4. Triage findings.
 5. Apply fixes or write a rationale for declines.
 6. Reply to each thread and resolve what was addressed.
