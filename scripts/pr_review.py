@@ -15,6 +15,7 @@ Subcommands
            40 = Copilot answered outside a formal review, so read the printed body.
            40 reports the shape of that answer and reads nothing of its cause: an answer
            carrying no commit covers no head, so the wait ends and the reader decides.
+           41 = the review carrying the head says it did not review, so it covers nothing.
            50 = the request is pending and nothing picked it up, which no amount of
            waiting changes. Recovery is two mutations, and they stay in the runbook.
 
@@ -33,6 +34,14 @@ REVIEWER = 'copilot-pull-request-reviewer'
 # The alternation is the runbook's, since the heading wording has changed once already.
 # Matching one phrasing alone reports zero on a review that has them.
 SUPPRESSED = re.compile(r'Suppressed comments|low confidence', re.IGNORECASE)
+# A refusal declines the round as a formal review carrying the head and no threads.
+# That is the clean pass byte for byte, so every coverage check passes over a round that never ran.
+# The alternation is the runbook's for the same reason the one above is.
+# One phrasing is one rewording away from reading a refusal as a review.
+# The dot covers the apostrophe in the typographic spelling and the ASCII one alike.
+# It also keeps the published filter usable inside single quotes, which neither survives.
+REFUSAL = re.compile(r'wasn.t able to review|was not able to review|unable to review',
+                     re.IGNORECASE)
 DETAILS = re.compile(r'<details>(.*?)</details>', re.DOTALL | re.IGNORECASE)
 SUMMARY = re.compile(r'<summary>(.*?)</summary>', re.DOTALL | re.IGNORECASE)
 TAGS = re.compile(r'</?(?:details|summary)>', re.IGNORECASE)
@@ -197,10 +206,60 @@ def stall_of(owner: str, repo: str, num: int, pr: dict) -> str:
     return never_picked_up(timeline(owner, repo, num))
 
 
-def reviewed_head(pr: dict) -> bool:
-    """True where one of the reviewer's own reviews carries the current head's commit."""
+def refusal_of(node: dict) -> str:
+    """The review's body where its opening line says the reviewer did not review, otherwise empty.
+
+    Read over the opening rather than the whole body, because a refusal replaces the review and
+    is the only thing the body carries, where a review that merely quotes the wording carries it
+    below its own overview. This script and its documentation are that quotation, so a body-wide
+    match would report the pull request adding this check as a refusal, which is the false
+    positive the suppressed-block matcher already had once.
+
+    The opening is one line rather than two, and the second line is where the cost of widening
+    it shows: a review's first line is its heading and its second is the overview prose, which
+    is exactly where a review describing this check states the wording. Reading two lines passed
+    every case here except that one, which is the case that matters. A refusal introduced by a
+    heading would sit below the opening and be missed, and answering that shape means telling it
+    from an overview rather than reading one line further.
+    """
+    body = node.get('body') or ''
+    opening = next((ln for ln in body.splitlines() if ln.strip()), '')
+    return body if REFUSAL.search(opening) else ''
+
+
+def refusing_review(pr: dict) -> dict | None:
+    """The reviewer's newest refusal carrying the current head, where one is there.
+
+    Head-scoped, unlike a suppressed finding, because a refusal is a statement about one commit:
+    a push retires it, and the round the push raises either reviews that head or refuses it in
+    its own right.
+
+    A refusal alongside a genuine review of the same head is spent too, and that is the caller's
+    reading rather than this one's, since what spends it is coverage this cannot see from a
+    refusal alone. Both callers hold it: `main` returns 0 on `reviewed_head` before reaching
+    here, and the digest reports the field only where nothing covers the head.
+    """
     head = pr['headRefOid']
-    return any((n.get('commit') or {}).get('oid') == head
+    refusals = [n for n in reviewer_nodes(pr, 'reviews')
+                if (n.get('commit') or {}).get('oid') == head and refusal_of(n)]
+    return max(refusals, key=lambda n: n.get('submittedAt') or '') if refusals else None
+
+
+def reviewed_head(pr: dict) -> bool:
+    """True where one of the reviewer's own reviews covers the current head's commit.
+
+    A refusal is not coverage. It is a formal review, `state: COMMENTED`, carrying the head's
+    commit and raising no threads, so it satisfies every check a clean pass does and renders a
+    digest identical to one. That is how a pull request of 301 changed files, one over the
+    reviewer's limit, sat one command from merging on a review that never ran.
+
+    The liveness query carries no bodies, so a refusal reads there as ordinary coverage. That is
+    deliberate rather than a gap: it ends the wait, which is what a terminal outcome should do,
+    and the full read every wait finishes with is what tells the two apart. No exit code and no
+    merge decision is taken from the liveness reading.
+    """
+    head = pr['headRefOid']
+    return any((n.get('commit') or {}).get('oid') == head and not refusal_of(n)
                for n in reviewer_nodes(pr, 'reviews'))
 
 
@@ -270,7 +329,10 @@ def digest(owner: str, repo: str, num: int, seen: set[str] | None = None,
     stalled = stall_of(owner, repo, num, pr) if stalled is None else stalled
     head = pr['headRefOid']
     revs = reviewer_nodes(pr, 'reviews')
-    on_head = [n for n in revs if (n.get('commit') or {}).get('oid') == head]
+    # A refusal carries the head and covers nothing, so it counts as a round and not as coverage.
+    # Reading it as coverage prints `review_on_head=yes` over a review that says it did not run.
+    on_head = [n for n in revs
+               if (n.get('commit') or {}).get('oid') == head and not refusal_of(n)]
     threads = pr['reviewThreads']['nodes']
     # A deleted account leaves `author` present and null, which `.get('author', {})` returns as
     # None rather than as the default, so the chained lookup crashes the whole digest.
@@ -291,6 +353,10 @@ def digest(owner: str, repo: str, num: int, seen: set[str] | None = None,
         finding_count(b) for b in on_head_blocks)
 
     answer = answered_outside_review(pr)
+    # Spent where coverage of the same head landed, the precedence the exit codes already hold.
+    # Reported regardless, it prints `review_on_head=yes refusal=YES` over a reviewed head.
+    # That tells a reader to split a pull request the reviewer has just reviewed.
+    refusal = None if on_head else refusing_review(pr)
     blind = [f for f in ('reviews', 'comments') if window_blind(pr, f)]
     answered = 'yes' if answer else ('unknown' if blind else 'no')
     lines = [
@@ -298,6 +364,10 @@ def digest(owner: str, repo: str, num: int, seen: set[str] | None = None,
         # A digest of the wrong pull request is well-formed, so naming it is what shows the miss.
         f'repo={owner}/{repo} pr={num} head={head[:8]} rounds={len(revs)} '
         f'review_on_head={"yes" if on_head else "NO"} '
+        # A field of its own, since `rounds=1 review_on_head=NO` is also what a stale round is.
+        # The two want opposite responses, one a re-request and the other a split pull request.
+        # Upper-case for the reason `NO` is, as a state that blocks a merge is not one to skim.
+        f'refusal={"YES" if refusal else "no"} '
         f'threads={len(threads)} unresolved={len(unresolved)} '
         f'suppressed={sum(finding_count(b) for n, b in blocks)} '
         f'(on_head={sum(finding_count(b) for b in on_head_blocks)} earlier={stale}) '
@@ -305,6 +375,15 @@ def digest(owner: str, repo: str, num: int, seen: set[str] | None = None,
         f'requested={"yes" if reviewer_requested(pr) else "no"} '
         f'merge={pr.get("mergeStateStatus")}'
     ]
+    if refusal:
+        # Printed whole for the reason the comment below is, as the wording carries the remedy.
+        # A file-count refusal is cleared by splitting the pull request and a quota one by waiting.
+        # This reads neither cause, only that the round declined.
+        lines.append('  COPILOT REFUSED THIS ROUND: the review carrying the head says it did '
+                     'not review, so it covers nothing and re-requesting the same head repeats '
+                     'it, and the body below is what says which remedy applies')
+        lines += [f'    {ln.rstrip()}' for ln in (refusal.get('body') or '').splitlines()
+                  if ln.strip()]
     if stalled:
         lines.append(f'  REQUEST NOT PICKED UP (requested {stalled}, no copilot_work_started '
                      'since): clear the request and re-request, per the runbook')
@@ -424,6 +503,14 @@ def main(argv: list[str] | None = None) -> int:
     print(f'waited={int(time.monotonic()-start)}s')
     if reviewed_head(final):
         return 0
+    # A refusal before an answer, since it names the round that declined where 40 names none.
+    # The digest prints both bodies regardless, so the narrower code costs the reader nothing.
+    if refusing_review(final):
+        print('status=REVIEW_IS_A_REFUSAL the review carrying the head says it did not review, '
+              'so it covers nothing and no further review follows it: read the body above, '
+              'since a file-count refusal is cleared by splitting the pull request and a quota '
+              'one by waiting, and re-requesting this head clears neither')
+        return 41
     # An answer before a stall, because the reviewer saying something outranks it saying nothing.
     if answered_outside_review(final):
         print('status=ANSWERED_OUTSIDE_REVIEW the reviewer answered without reviewing, '
