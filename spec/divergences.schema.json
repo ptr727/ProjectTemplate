@@ -16,7 +16,7 @@
                 "properties": {
                     "path": { "type": "string" },
                     "repos": { "type": "array", "items": { "type": "string" }, "minItems": 1 },
-                    "disposition": { "enum": ["re-vendor", "track", "accepted", "upstream-candidate", "investigate"] },
+                    "disposition": { "enum": ["re-vendor", "track", "accepted", "upstream-candidate", "investigate", "retire"] },
                     "reason": { "type": "string" },
                     "tracking": { "type": ["string", "null"] }
                 }
@@ -30,7 +30,7 @@
                 "additionalProperties": false,
                 "properties": {
                     "path": { "type": "string" },
-                    "disposition": { "enum": ["re-vendor", "track", "accepted", "upstream-candidate", "investigate"] },
+                    "disposition": { "enum": ["re-vendor", "track", "accepted", "upstream-candidate", "investigate", "retire"] },
                     "reason": { "type": "string" },
                     "tracking": { "type": ["string", "null"] }
                 }

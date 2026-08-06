@@ -6,23 +6,22 @@ The **process** for carrying the `repo-config/` baseline to a fleet repo, applyi
 
 Every fleet repo carries the `repo-config/` directory. The hub keeps the canonical copy. Rules for the carried copy:
 
-- **Carry only your model's `develop` variant.** A `release` repo carries `develop.json`. An `operational` repo carries `operational/develop.json` instead. `main.json` and `settings.json` are shared by both models. `configure.sh` aborts when the payload its model needs is missing rather than applying a partial configuration.
+- **The payloads carry and the script does not.** A `release` repo carries `develop.json`, an `operational` repo carries `operational/develop.json` instead, and `main.json` and `settings.json` are shared by both models. `configure.sh` stays in the hub and is run from a hub checkout against the repo named on the command line, per [GOVERNANCE.md "Hub-Hosted Tooling"][governance-hub-hosted-tooling], because it holds nothing per-repo and a copy of it is only current until the next fix. A repo still holding a copy has it deleted as it is next visited. Note the split this leaves: an apply or check run from the hub reads the hub's payloads rather than the repo's own, which is the single source the model is for, and the repo's carried payloads remain what its own `AUDIT.md` diffs the live rulesets against.
 - **Carried files name no fleet repo as an illustrative example.** A carried file adds no template-repo reference and names no sibling fleet repo as an example (any fleet repo may be private, so such a link 404s in a public carrier, and it couples the repos). A contextually relevant link a reader of *this* repo's content needs is fine. See [GOVERNANCE.md "Documentation Style Conventions"][governance-documentation-style]. To point at a current good example, name it in the onboarding/conformance issue or the hub-only [`reports/conformance-matrix.md`][conformance-matrix].
 - **Adapted self-audit carry.** A downstream repo carries **locally adapted** `AUDIT.md` and `spec/secrets.json`, scoped to self-auditing its own rulesets, settings, and secrets against the committed `repo-config/` baseline - the standard shape, so the carried tooling is self-contained. The hub's fleet-wide audit remains authoritative. The adapted `AUDIT.md` is a settings diff, a normalized ruleset diff against the carried payloads (an operational carry swaps in `operational/develop.json`), and a names-only secrets check, all targeting the current repo - adapt this shape, don't invent. A current well-formed example is named in the onboarding/conformance issue.
 - **Adapted `spec/secrets.json` shape.** The repo-scoped adaptation carries `baseline` (the App pair, which every fleet repo needs for the merge-bot) plus a `mechanisms` entry for each publish mechanism the repo actually uses, and the `targetMechanisms` routing entries for those mechanisms. **A source-only repo whose publish targets all map to a null mechanism (nothing to route) carries just `baseline` (plus a `note`)** - it omits `targetMechanisms` and `mechanisms` entirely, because a lone `targetMechanisms` map with no `mechanisms` reads as a schema bug (the audit enumerates `baseline` + `mechanisms`, never `targetMechanisms`, so an all-null routing map is dead weight). A `release` repo that uses a real mechanism (e.g. `nuget-oidc`, `docker-hub`, `codecov`) carries that `mechanisms` entry **and** its `targetMechanisms`/`typeMechanisms` routing, which the audit then picks up.
-- **The regen snippet targets the current repo**, so it works unchanged in a carried copy.
 
 ## Applying the Config
 
 **Configure by importing the JSON payloads, never by hand-building the rules** (hand reconstruction has gone wrong on past setups). The result must be **exactly two rulesets named `develop` and `main`** - the names are load-bearing (`AGENTS.md` and the workflows reference them). Only the `develop` *content* varies by model.
 
-First remove all legacy classic branch-protection rules and any stray rulesets, then run `configure.sh apply` (which picks the `develop` payload from the repo's `workflowModel`, or infers it from the carried payload when no registry is present, and applies `settings.json` and the Dependabot security features alongside the rulesets):
+First remove all legacy classic branch-protection rules and any stray rulesets, then run `configure.sh apply` from a hub checkout, naming the target repo (the script picks the `develop` payload from that repo's `workflowModel`, or infers it from the carried payload when no registry is present, and applies `settings.json` and the Dependabot security features alongside the rulesets):
 
 ```sh
-repo-config/configure.sh apply [owner/repo] [release|operational]
+repo-config/configure.sh apply owner/repo [release|operational]
 ```
 
-Then validate the result with `repo-config/configure.sh check [owner/repo] [release|operational]`, which asserts every applied ruleset, setting, and security feature and exits non-zero on drift (the ruleset and settings checks are driven by the committed payloads, so they stay repo-agnostic). Or import each ruleset by hand with `gh api -X POST repos/<owner>/<repo>/rulesets --input repo-config/<name>.json` (operational repos use `operational/develop.json` for `develop`). `gh ruleset` is read-only, so creation goes through `gh api`. The required check binds by name and only turns green after the repo's PR workflow runs once. To edit a live ruleset, GET it, change the field, and PUT the whole writable subset back (a partial PUT `422`s).
+Then validate the result with `repo-config/configure.sh check owner/repo [release|operational]`, run from the same checkout, which asserts every applied ruleset, setting, and security feature and exits non-zero on drift (the ruleset and settings checks are driven by the committed payloads, so they stay repo-agnostic). Or import each ruleset by hand with `gh api -X POST repos/<owner>/<repo>/rulesets --input repo-config/<name>.json` (operational repos use `operational/develop.json` for `develop`). `gh ruleset` is read-only, so creation goes through `gh api`. The required check binds by name and only turns green after the repo's PR workflow runs once. To edit a live ruleset, GET it, change the field, and PUT the whole writable subset back (a partial PUT `422`s).
 
 ## Regenerating the Payloads
 
@@ -55,6 +54,7 @@ done
 <!-- Repo -->
 
 [conformance-matrix]: ../reports/conformance-matrix.md
+[governance-hub-hosted-tooling]: ../GOVERNANCE.md#hub-hosted-tooling
 [governance-documentation-style]: ../GOVERNANCE.md#documentation-style-conventions
 [governance-git-and-commit-rules]: ../GOVERNANCE.md#git-and-commit-rules
 [repo-config-readme]: ../repo-config/README.md

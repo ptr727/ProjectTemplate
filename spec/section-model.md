@@ -34,6 +34,7 @@ A section is one of the following. Fidelity is declared in [files.json][files], 
 | Branching Model | `GOVERNANCE.md` | verbatim | universal (repo-specific history SHAs removed so it can carry) |
 | Release Model | `GOVERNANCE.md` | verbatim | universal release contract, all target shapes described inline |
 | Operational Repositories | `GOVERNANCE.md` | verbatim | fleet context (the two workflow models), carried by all so the cross-references to it resolve |
+| Hub-Hosted Tooling | `GOVERNANCE.md` | verbatim | universal law on what a repo carries against what it reaches, and how a hub tool is run |
 | Pull Request Title and Commit Message Conventions | `GOVERNANCE.md` | verbatim | universal, with generic examples |
 | Documentation Style Conventions | `GOVERNANCE.md` | verbatim | all rule text, including the Line Endings *rule* (a repo's `.editorconfig` value is not here) |
 | Verification Discipline | `GOVERNANCE.md` | verbatim | universal verification law |

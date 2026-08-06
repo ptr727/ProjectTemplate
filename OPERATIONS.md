@@ -1,6 +1,6 @@
 # Operations
 
-How this repository is run. It ships no application code, so its operations are the fleet audit, the local gates that mirror CI, and the script that applies repository configuration.
+How this repository is run. It ships no application code, so its operations are the fleet audit, the gates that mirror CI, and the script that applies repository configuration. Those gates and that script serve the whole fleet from this checkout rather than being carried into each repository, per [GOVERNANCE.md "Hub-Hosted Tooling"](./GOVERNANCE.md#hub-hosted-tooling), so every run below is a run from here against a repository named on the command line.
 
 ## Runbooks
 
@@ -52,7 +52,7 @@ repo-config/configure.sh check [owner/repo] [release|operational]
 repo-config/configure.sh apply [owner/repo] [release|operational]
 ```
 
-**Always pass the command.** A bare `repo-config/configure.sh` with no arguments defaults to `apply` against the current repo, so an invocation meant to test whether the script runs performs a live write instead. Never run it without a command.
+**Always pass the command, and always name the repository.** A bare `repo-config/configure.sh` with no arguments defaults to `apply` against the current repo, so an invocation meant to test whether the script runs performs a live write instead. Never run it without a command. The repository argument matters for the same reason now that the fleet runs this copy rather than its own: an omitted target resolves to this repository, and applying the fleet configuration to the hub while meaning to configure a downstream repo is a well-formed write to the wrong place.
 
 `check` is read-only and exits non-zero on drift. `apply` is idempotent and drives entirely from the committed payloads, so it is a no-op on a conformant repo.
 
@@ -100,7 +100,7 @@ Two `gh` limitations on the current host, both worked around rather than fixed:
 
 - [spec/](./spec/) is the machine-readable ground truth, holding project types, the file and section baseline, and required or forbidden secrets.
 - [registry/repos.json](./registry/repos.json) is the fleet registry, naming every project with its types, publish mechanism, and status.
-- [repo-config/](./repo-config/) holds the branch rulesets and the apply script. It sits outside `.github/`, which is Actions-owned.
+- [repo-config/](./repo-config/) holds the branch rulesets, the fleet settings, and the apply script. The payloads carry to the fleet and the script is reached here. It sits outside `.github/`, which is Actions-owned.
 - [catalog/](./catalog/) holds reference snippets the audit compares implementations against.
 - [reports/](./reports/) holds per-repo audit output.
-- [scripts/](./scripts/) holds the gates that run in CI and locally.
+- [scripts/](./scripts/) holds the gates that run in CI and locally, and that every fleet repository reaches rather than carries.
