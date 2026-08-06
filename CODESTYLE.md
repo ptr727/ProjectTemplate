@@ -511,6 +511,6 @@ Before pushing or opening a PR:
 [pep-0257-link]: https://peps.python.org/pep-0257/
 [pyright-link]: https://microsoft.github.io/pyright/
 [ruff-link]: https://docs.astral.sh/ruff/
+[uv-link]: https://docs.astral.sh/uv/
 [vscode-tasks-link]: https://github.com/ptr727/ProjectTemplate/blob/main/catalog/snippets/configs/vscode-tasks.json
 [vscode-tasks-python-link]: https://github.com/ptr727/ProjectTemplate/blob/main/catalog/snippets/configs/vscode-tasks-python.json
-[uv-link]: https://docs.astral.sh/uv/

@@ -54,7 +54,7 @@ done
 <!-- Repo -->
 
 [conformance-matrix]: ../reports/conformance-matrix.md
-[governance-hub-hosted-tooling]: ../GOVERNANCE.md#hub-hosted-tooling
 [governance-documentation-style]: ../GOVERNANCE.md#documentation-style-conventions
 [governance-git-and-commit-rules]: ../GOVERNANCE.md#git-and-commit-rules
+[governance-hub-hosted-tooling]: ../GOVERNANCE.md#hub-hosted-tooling
 [repo-config-readme]: ../repo-config/README.md
