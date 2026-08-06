@@ -227,7 +227,7 @@ def render_report(spreads, promote, gaps, ledger):
             untriaged_absent.append((e["path"], gone))
     untriaged_gaps = [g for g in gaps if g not in gap_disp]
 
-    order = ["re-vendor", "upstream-candidate", "investigate", "track", "accepted"]
+    order = ["re-vendor", "upstream-candidate", "investigate", "track", "retire", "accepted"]
     by_disp = {k: [] for k in order}
     resolved = []
     for d in dispositions:

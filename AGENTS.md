@@ -75,6 +75,7 @@ Every rule below is a level-two section of [`GOVERNANCE.md`](./GOVERNANCE.md). R
 | Releasing, version bumps, publishing | `Release Model` |
 | A live config repo rather than a code repo | `Operational Repositories` |
 | Onboarding a repo or running a conformance sweep | `Repository Onboarding and Conformance` (hub only, not carried) |
+| Running a fleet gate, the review digest, or the config script | `Hub-Hosted Tooling` |
 | Writing a commit message or pull request title | `Pull Request Title and Commit Message Conventions` |
 | Any prose, comment, doc, or line-ending change | `Documentation Style Conventions` |
 | Proving work actually happened | `Verification Discipline` |

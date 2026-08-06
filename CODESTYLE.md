@@ -52,8 +52,8 @@ This is the style guide for any **.NET projects** in this repo.
 **CRITICAL**: All builds must complete without warnings. The project enforces this through:
 
 1. **The `.NET Format` clean-compile task** (see [Clean-Compile Verification][clean-compile-verification])
-   - The .NET clean-compile is the **`.NET Format`** VS Code task, which chains `CSharpier Format` -> `.NET Build` -> `dotnet format style --verify-no-changes`. These three task definitions are carried verbatim in [`.vscode/tasks.json`][vscode-tasks].
-   - After any code change it must pass before commit. Run the `.NET Format` task. To run it natively instead, reproduce that task chain from [`.vscode/tasks.json`][vscode-tasks] exactly (`CSharpier Format`, then `.NET Build`, then the `dotnet format style --verify-no-changes --severity=info ...` verify) without dropping or loosening any argument (tasks.json is the canonical command spec). Bare `dotnet format` alone, skipping CSharpier or the build, is not sufficient.
+   - The .NET clean-compile is the **`.NET Format`** VS Code task, which chains `CSharpier Format` -> `.NET Build` -> `dotnet format style --verify-no-changes`. A repo carries those three definitions in its own `.vscode/tasks.json`, matching the canonical in [`vscode-tasks.json`][vscode-tasks-link].
+   - After any code change it must pass before commit. Run the `.NET Format` task. To run it natively instead, reproduce that task chain exactly (`CSharpier Format`, then `.NET Build`, then the `dotnet format style --verify-no-changes --severity=info ...` verify) without dropping or loosening any argument, reading it from [`vscode-tasks.json`][vscode-tasks-link], which is the canonical command spec a repo's own `tasks.json` is written against. Bare `dotnet format` alone, skipping CSharpier or the build, is not sufficient.
 
 2. **Analyzer configuration**
    - `<EnableNETAnalyzers>true</EnableNETAnalyzers>` with `<AnalysisLevel>latest-all</AnalysisLevel>` and `<AnalysisMode>All</AnalysisMode>` (full analyzer set enabled)
@@ -361,7 +361,7 @@ This is the style guide for any **Python project(s)** in this repo.
 - **Dependency declaration** - `[dependency-groups]`, or PEP 621 `[project.optional-dependencies]` (dev tools installed with `uv sync --extra <group>`).
 - **Versioning / publishing** - a published package (`_version.py` + a version source + `uv build` + a PyPI publish step), or a **source-only** repo with a static `version` and no publish step (see [Versioning][versioning-section]).
 - **Disabled markdownlint rules** - repo-specific. `.markdownlint-cli2.jsonc` at the repo root is the source of truth, not any example rule named here.
-- **VS Code config home** - editor **settings/extensions** may live in `.vscode/*.json` **or** the `<Repo>.code-workspace`, while **tasks / launch / debug** configs can only be external `.vscode/*.json` (they cannot live in the workspace file). A `[vscode-tasks]` reference must point wherever the repo actually keeps `tasks.json`.
+- **VS Code config home** - editor **settings/extensions** may live in `.vscode/*.json` **or** the `<Repo>.code-workspace`, while **tasks / launch / debug** configs can only be external `.vscode/*.json` (they cannot live in the workspace file). The repo's own `tasks.json` sits wherever it keeps it, and the canonical task definitions it is written against are the hub snippet the [`vscode-tasks.json`][vscode-tasks-link] reference names, which resolves the same way from every repo.
 
 **Two profiles.** A repo's Python is one of two shapes, declared as the `build` or `lint-only` profile and validated against the `pyproject.toml` shape. The rest of this section (uv project, `uv.lock`, `uv run`, `src` layout, pytest coverage) describes the **Project** shape (the `build` profile). The two differ by whether the Python has **third-party runtime dependencies**, which shows up structurally in `pyproject.toml`, so the audit reads the shape there (`python.profile.detect`):
 
@@ -398,7 +398,7 @@ uv run pytest                    # run tests
 uv build                         # produce wheel + sdist in ./dist (published packages only)
 ```
 
-The Python clean-compile (see [Clean-Compile Verification][clean-compile-verification]) is `uv run ruff format` + `uv run ruff check` + the repo's type checker: `uv run pyright`, or `uv run mypy src` where mypy is the CI checker, or both where the repo runs both (see Type checking above); run it (plus `uv run pytest`) before committing. These are documented commands; an optional VS Code tasks mirror (all `type: process`, no `&&` shell chaining, so it runs the same on any task shell) is in [`vscode-tasks-python.json`][vscode-tasks-python]. CI runs the same clean-compile commands as the authoritative backstop. Git hooks are opt-in; wire `pre-commit` for `ruff` and the type checker yourself if you want local enforcement.
+The Python clean-compile (see [Clean-Compile Verification][clean-compile-verification]) is `uv run ruff format` + `uv run ruff check` + the repo's type checker: `uv run pyright`, or `uv run mypy src` where mypy is the CI checker, or both where the repo runs both (see Type checking above). Run it, plus `uv run pytest`, before committing. These are documented commands, and an optional VS Code tasks mirror (all `type: process`, no `&&` shell chaining, so it runs the same on any task shell) is in [`vscode-tasks-python.json`][vscode-tasks-python-link]. CI runs the same clean-compile commands as the authoritative backstop. Git hooks are opt-in, so wire `pre-commit` for `ruff` and the type checker yourself if you want local enforcement.
 
 ### Layout
 
@@ -502,8 +502,6 @@ Before pushing or opening a PR:
 [readme]: ./README.md
 [root]: ./.editorconfig
 [versioning-section]: #versioning
-[vscode-tasks]: ./catalog/snippets/configs/vscode-tasks.json
-[vscode-tasks-python]: ./catalog/snippets/configs/vscode-tasks-python.json
 
 <!-- External -->
 
@@ -514,3 +512,5 @@ Before pushing or opening a PR:
 [pyright-link]: https://microsoft.github.io/pyright/
 [ruff-link]: https://docs.astral.sh/ruff/
 [uv-link]: https://docs.astral.sh/uv/
+[vscode-tasks-link]: https://github.com/ptr727/ProjectTemplate/blob/main/catalog/snippets/configs/vscode-tasks.json
+[vscode-tasks-python-link]: https://github.com/ptr727/ProjectTemplate/blob/main/catalog/snippets/configs/vscode-tasks-python.json

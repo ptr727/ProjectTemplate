@@ -327,7 +327,7 @@ def main():
 
     # Validate the divergence ledger (spec/divergences.json) when present, so a mistyped repo name or
     # disposition fails CI instead of silently dropping a burn-down row.
-    dispositions = ("re-vendor", "track", "accepted", "upstream-candidate", "investigate")
+    dispositions = ("re-vendor", "track", "accepted", "upstream-candidate", "investigate", "retire")
     if (ROOT / "spec/divergences.json").exists():
         div = load("spec/divergences.json")
         repo_names = {r.get("name") for r in repos["repos"] if isinstance(r, dict)}
