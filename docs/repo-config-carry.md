@@ -54,7 +54,7 @@ done
 
 <!-- Repo -->
 
+[conformance-matrix]: ../reports/conformance-matrix.md
 [governance-documentation-style]: ../GOVERNANCE.md#documentation-style-conventions
 [governance-git-and-commit-rules]: ../GOVERNANCE.md#git-and-commit-rules
-[conformance-matrix]: ../reports/conformance-matrix.md
 [repo-config-readme]: ../repo-config/README.md

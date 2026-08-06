@@ -34,7 +34,7 @@ Shields are not a top-level section. They live under **Build and Distribution** 
 - US English and straight quotes. Judge a non-ASCII character against the three tiers in GOVERNANCE.md "Character Set", and restructure a sentence rather than joining its clauses with an em dash or with a spaced hyphen, which that section bans in the same terms.
 - Verify every quantitative claim (counts, versions, supported platforms) against current code.
 - A project README describes only that project, with no cross-repo references and no template or inheritance framing.
-- Reference-style links only: every URI is a reference link defined at the bottom of the file, grouped by type under an HTML-comment header (`<!-- Shields -->`, `<!-- Workflow -->`, `<!-- Repo -->`, `<!-- External -->`) and alphabetized within each group. The auto-generated Table of Contents is the one exception, keeping inline anchor links.
+- Reference-style links only: every URI is a reference link defined at the bottom of the file, grouped by type under an HTML-comment header (`<!-- Shields -->`, `<!-- Workflow -->`, `<!-- Repo -->`, `<!-- External -->`) and alphabetized within each group by the reference name alone, the text inside the brackets, so a shorter name sorts above one it prefixes (`[governance]` above `[governance-branching-model]`) rather than below it as sorting the whole definition line would put it. The auto-generated Table of Contents is the one exception, keeping inline anchor links.
 
 ## TODO.md
 

@@ -293,6 +293,6 @@ Each type maps the *applicable* S-scenarios onto its targets. The differences ar
 
 <!-- Repo -->
 
-[governance-branching-model]: ./GOVERNANCE.md#branching-model
 [codestyle]: ./CODESTYLE.md
+[governance-branching-model]: ./GOVERNANCE.md#branching-model
 [repo-config-readme]: ./repo-config/README.md
