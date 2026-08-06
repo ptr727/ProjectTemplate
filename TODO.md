@@ -1,89 +1,545 @@
 # TODO
 
-Running backlog for this repo, kept in a committed file so the guidance survives across environments where agent memory does not. Entries are grouped by the surface they change rather than by priority, since an entry's cost is mostly set by what it touches. Where an open issue covers the same ground it is named on the entry, so the two are read together rather than worked twice.
+Running backlog for this repo, kept in a committed file so the research survives across environments where agent memory does not. Entries are grouped by the change that ships them, so a `###` heading under "Work Clusters" is one pull request, and selecting work is reading the cluster headings rather than re-deriving the grouping from the entries. What each cluster touches and costs is a field on the cluster, since a cluster confined to one surface and a cluster spanning two are both legitimate and only the second needs saying.
 
-Every issue claim below was re-checked against `develop` at `1ed0cc8` on 2026-08-03, and the entries added from the onboarding-feedback pass were checked against `develop` at `b82c1a3` on 2026-08-05. An issue records the tree as it was on the day it was filed, so a claim in one is a starting point for a check rather than a finding to act on.
+An entry carries `Blocked by`, `Issue` and `Checked` exactly once each, in that order, and never omits one, because an omitted field reads as unknown rather than as none. `Open` states a decision the session doing the work makes, and `Settled` states a finding that is not re-derived, each carrying a number, a proper name, or a rejected alternative. `Checked` is the freshness anchor, naming the branch, the commit, and the date a claim was last read against the tree, so a claim older than the branch is a claim rather than a finding.
+
+A cluster's `State` is one of four. `ready` means every open question is answerable by the session doing the work. `blocked` names the cluster it waits on. `decision` needs the maintainer. `measure` means the first action is a count rather than an edit.
+
+## How to Select the Next Item
+
+The steps below are followed in order rather than sampled.
+
+1. Run `gh issue list --state open` and confirm every number it returns appears somewhere in this file. A number appearing nowhere is an entry that does not exist yet, so write it before selecting anything, because an invisible issue cannot be selected. Nothing mechanical enforces this, which is the honest limit of a hand-maintained file and the reason the step is first.
+2. Read the cluster headings and their `State` lines. A cluster is the unit of selection, so pick a cluster rather than an entry, and never carry two clusters in one pull request.
+3. Prefer a cluster whose state is `ready`. Select a `decision` cluster only when the maintainer is present to answer its open questions, select a `blocked` cluster only after the cluster it names has shipped, and select a `measure` cluster knowing its deliverable is a number rather than a behavior change.
+4. Re-verify every `Checked` line in the chosen cluster against current `develop` before writing anything, by reading the surface the anchor names rather than by re-reading the issue. An issue records the tree as it was on the day it was filed, so a claim in one is a starting point for a check rather than a finding to act on.
+5. Rewrite the `Checked` line with the branch, the short commit, and the date whenever a claim is confirmed, whether or not the work ships in the same session. A re-verification that leaves no anchor is a check the next session repeats.
+6. Move a claim the tree contradicts out of `Settled` and state what the tree carries instead. Where the tree answers a whole entry, move the entry to "Verified Complete, Awaiting Close" with the commit that answered it, and never delete it silently, since a deleted entry reads as work nobody recorded.
+7. Fold a new observation in under one of four dispositions, named on the pull request carrying it: `New entry`, `Amends "<entry title>"`, `Already covered`, or `Already shipped as #N`. A second observation of a surface an entry already reasons about strengthens that entry rather than opening a second one.
+8. An amendment adds a `Settled` bullet, shortens `Open`, and refreshes `Checked`. An observation that answers an open question deletes that question rather than annotating it.
+9. Delete a cluster heading when its pull request merges, and move anything the pull request did not carry into a new cluster with its own state.
+
+## Work Clusters
+
+### The Prose Gate Scope Floor
+
+One pull request making [`prose_lint.py`][prose-lint] assert a floor on its own scope, which every verdict below it depends on, since a gate that finds nothing is indistinguishable from a gate with nothing to find.
+
+**State** `ready`. **Touches** [`scripts/prose_lint.py`][prose-lint] and its test file. **Cost** one hub edit, hub-only, no sweep.
+
+- **Assert a floor on what a `--diff` run actually scanned.** A run that resolves a non-empty diff and then matches zero files has almost certainly failed to scope rather than found a clean change, so it says so instead of exiting 0.
+  - **Blocked by** - Nothing.
+  - **Issue** - None filed.
+  - **Checked** - `develop` at `1ed0cc8` on 2026-08-03, where four separate guards each close one route to the same false clean.
+  - **Open** - Nothing.
+  - **Settled** - Four routes to the same false clean are on record from one session, an unresolvable base widening to a whole-tree scan, a multi-line `paths` input read only to its first newline, a diff taken in one repository while scanning another, and a path under no repository at all.
+  - **Settled** - Per-route guards are the wrong shape, because the fifth route needs a fifth guard and gets found by a reviewer rather than by the gate, which is what a floor assertion covers.
+  - **Settled** - The honest limit is that a change touching only files the gate does not read, an image or a lock file, legitimately scopes to zero, so the assertion compares against the diff's own file list rather than against zero alone.
+  - **Settled** - `LEAST_PLAUSIBLE` at 60 is the existing floor on a whole-tree sweep, so the shape is already in the file and the `--diff` path is what lacks it.
+
+### The Representative-Data Path Check
+
+One pull request gating the pattern-detectable half of the representative-data rule, which is worth having only once the gate can prove it read something.
+
+**State** `blocked` on "The Prose Gate Scope Floor". **Touches** [`scripts/prose_lint.py`][prose-lint] and its test file. **Cost** one hub edit, hub-only, no sweep.
+
+- **Flag an absolute home path or a bare drive letter in committed prose, a comment, or a fixture.** [`GOVERNANCE.md`][governance] "Representative Data in Agent-Authored Text" states the rule and says why a check is a floor rather than an answer.
+  - **Blocked by** - The Prose Gate Scope Floor.
+  - **Issue** - None filed.
+  - **Checked** - `develop` at `1ed0cc8` on 2026-08-03, where the rule is stated and no check reads for it.
+  - **Open** - Whether a home path in an operational repo's runbook is a finding, since it may be the literal path an operator types, which is the repo's own content rather than an agent quoting the maintainer's environment, so the answer is a scope by file, by repo type, or left to the author.
+  - **Settled** - The shapes are `/home/<name>`, `/Users/<name>`, `C:\Users\<name>`, and a bare drive letter.
+  - **Settled** - The check is introduced as covering the easy half or it gets read as closing the rule, which is the specific way it would make things worse.
+  - **Settled** - The exemption carries the whole burden, since the rule's own wording, the [`host-setup/`][agent-safety] docs, and the audit's examples all quote path shapes in order to describe them, and a wrong exemption hands out a work list that damages correct documents.
+  - **Settled** - The leak that motivated the rule was in a pull request comment, which no committed-file linter reads, so the gate says what surface it covers rather than letting its name imply the rule.
+
+### The Prose Content Backlog
+
+One pull request clearing prose findings, leading with [`catalog/snippets/`][snippets] because a non-conformant snippet seeds its violations into every repo that adopts it and the downstream repo is then flagged for content it was handed.
+
+**State** `ready`. **Touches** [`catalog/snippets/`][snippets] first, then the hub's docs and spec. **Cost** one hub edit per batch, hub-only, and a snippet fix reaches the fleet only as repos re-adopt.
+
+- **Clear the [#519][issue-519] prose backlog, snippets first.** The whole-tree figure moves as readily with a fix to the gate as with a fix to the prose, so it is re-measured rather than quoted.
+  - **Blocked by** - Nothing, though a run after "The Prose Gate Scope Floor" ships is the one worth trusting.
+  - **Issue** - [#519][issue-519], whose headline numbers are stale and whose four planned changes are two-thirds landed.
+  - **Checked** - `develop` at `3d1a0b1` on 2026-08-06, where `python3 scripts/prose_lint.py --summary` reports 557 violations across 45 files, and `catalog/snippets` alone reports 184 across 19.
+  - **Open** - Whether the gate becomes a carried file rather than a hub-only one, which "Reducing the Carried Surface Further" asks from the other direction.
+  - **Settled** - `comment-wrap` and `comment-case` are in `DEFAULT_RULES` and `reports/` is exempt as a generated tree, which is why the figures differ from the 668 and 119 the issue records.
+  - **Settled** - `sentence-split` is defined but excluded from `DEFAULT_RULES`, so a sweep never reports it and a wrapped sentence in Markdown prose is not a finding.
+
+### Two Checks That Read What a Claim Points At
+
+One pull request adding two gates of the same shape, each confirming that a reference in a committed artifact still resolves, since both failures are silent and both are caught by a reviewer or not at all.
+
+**State** `ready`. **Touches** [`scripts/repo_gate.py`][repo-gate] and [`scripts/pr_review.py`][pr-review]. **Cost** one hub edit, hub-only, no sweep.
+
+- **Teach the `sha-pin` check to verify a pin resolves rather than that it is shaped like a SHA.** Forty hex characters is a format any fabricated string satisfies.
+  - **Blocked by** - Nothing.
+  - **Issue** - None filed.
+  - **Checked** - `develop` at `1ed0cc8` on 2026-08-03, where the check reads the shape and never the ref.
+  - **Open** - Nothing.
+  - **Settled** - An agent hand-writing a plausible SHA into a workflow is a real failure mode rather than a hypothetical one.
+  - **Settled** - Resolvability also catches the neighboring case, a pin whose commit was reachable only from a branch since squashed and deleted, which breaks a downstream gate long after the change that caused it.
+  - **Settled** - The network call is scoped to same-owner repositories, where the fleet's own actions live, and skips rather than fails when the host is offline so the local gate stays usable.
+  - **Settled** - The `gh-write-guard` hook cannot cover this, since it watches Bash and an editor tool writing the same string into a file never reaches it.
+
+- **Check that a pull request description does not contradict its own branch.** Extract the commits and `uses:` refs the body quotes and confirm each still appears in the head tree.
+  - **Blocked by** - Nothing.
+  - **Issue** - None filed.
+  - **Checked** - `develop` at `1ed0cc8` on 2026-08-03, where no check reads a description at all.
+  - **Open** - Nothing.
+  - **Settled** - Three stale descriptions in one session generated six review findings between them, each a reviewer noticing that the body named a commit, a branch, or a behavior the branch no longer carried.
+  - **Settled** - Prose claims stay out of scope, since judging those needs a similarity heuristic, which [`spec/section-model.md`][section-model] rejects for the reason it would fail here.
+
+### The Write-Guard Newline Defect
+
+One pull request fixing the argument-list split in the installed hook, plus the self-test case that locks it.
+
+**State** `ready`. **Touches** [`host-setup/agent-safety/gh-write-guard.py`][write-guard] and its self-tests. **Cost** one hub edit, and it reaches a machine only when the installer is re-run, so it rides the host visit in "Fleet Sweeps".
+
+- **End a `git push` argument list at a newline, not only at `&&`.** Every token on a later line of the same command is otherwise read as a refspec.
+  - **Blocked by** - Nothing.
+  - **Issue** - None filed, and [#365][issue-365] carries the rollout that delivers it.
+  - **Checked** - `develop` at `1ed0cc8` on 2026-08-03, measured against the installed hook.
+  - **Open** - Nothing.
+  - **Settled** - A lone `git push -u origin revendor/x` resolves to the one branch, while the same push followed by a newline and a `gh pr create` with a base of `develop` resolves to five, meaning `revendor/x`, `gh`, `pr`, `create`, and `develop`.
+  - **Settled** - The `&&` form resolves correctly, which is what isolates the defect to the newline case, and the existing suite covers only that form.
+  - **Settled** - The error direction is over-blocking rather than under-blocking, so it is a usability defect rather than a safety hole, and that is why it is worth fixing: the denial claims a direct push to a protected branch when the push targets an ordinary feature branch, and teaching a safety hook to cry wolf is how it stops being read.
+
+### The Reply-and-Resolve Helper
+
+One pull request moving a command that keeps failing the same way into a helper, rather than restating the rule it keeps failing against.
+
+**State** `ready`. **Touches** [`scripts/pr_review.py`][pr-review] and its test file. **Cost** one hub edit, hub-only, and it is runnable from every repository the day it lands.
+
+- **Add a reply-and-resolve helper that queries thread ids itself.** It takes a pull request number and a finding, and never puts an id anywhere a hand can type one.
+  - **Blocked by** - Nothing.
+  - **Issue** - [#580][issue-580], which carries the decision this implements.
+  - **Checked** - `develop` at `1ed0cc8` on 2026-08-03.
+  - **Open** - Nothing.
+  - **Settled** - Two failures are on record, a command run from the wrong working directory that returns a confident answer about a different tree, and a GitHub node id typed by hand into a mutation that the `gh-write-guard` hook correctly refused.
+  - **Settled** - The second is the instructive one, since the rule it broke is stated in [`GOVERNANCE.md`][governance] and in the host-level guidance, and an agent that had read both still reached for the literal, which says the shape of the operation fails rather than the agent's knowledge of the rule.
+  - **Settled** - The dependency is met, since [`GOVERNANCE.md`][governance] "Hub-Hosted Tooling" states how a repository reaches a hub script.
+
+### Reaching the Hub in Your Own Checkout
+
+One pull request stating how an agent reaches hub code and which checkout it works in, which are one change because a rule telling a repository to fetch the hub while staying silent on whose clone it fetches into licenses the failure it exists to prevent.
+
+**State** `ready`. **Touches** [`AGENTS.md`][agents] "Fleet Bootstrap", [`GOVERNANCE.md`][governance] "Repository Boundaries and Write Safety" and "Verification Discipline", [`.github/copilot-instructions.md`][copilot-instructions], and the fleet block under [`host-setup/agent-safety/`][agent-safety]. **Cost** one hub edit plus a carried-section re-vendor, which rides the visit in "Fleet Sweeps" rather than owing its own sweep.
+
+- **State that an agent works only in its own checkout, in its own directory, on its own feature branch.** The rule names the ordinary commands that cross the boundary rather than the reckless ones.
+  - **Blocked by** - Nothing.
+  - **Issue** - [#557][issue-557], which carries the swept agent's account, the recovery sequence, and its answers to both questions this rule would otherwise leave open.
+  - **Checked** - `develop` at `3d1a0b1` on 2026-08-06, where no committed file states the rule under any heading and it exists only here.
+  - **Open** - Which section it lands in, since "Repository Boundaries and Write Safety" scopes itself to a state-changing GitHub call while a blanket add in a foreign tree never reaches GitHub, so that section's opening sentence widens or the rule takes a section of its own.
+  - **Settled** - The rule is per task rather than per agent, on [#557][issue-557]'s evidence that one agent hit the hazard alone when a `git mv` intended for the hub landed in another repository.
+  - **Settled** - Three commands cross the boundary while being correct in isolation, a blanket `git add -A` that sweeps another agent's uncommitted work into the commit, a `git reset --hard` that deletes it, and a branch switch that carries it into an unrelated change.
+  - **Settled** - An agent that finds a foreign checkout leaves it and clones its own, which costs about a minute against an incident that cost the better part of an hour.
+  - **Settled** - The rule states what to do about a footprint already left, since leaving it alone arrives too late by then: save the work aside, restore only the touched files, verify the tree is clean, delete the branch from the other clone, then say plainly what was touched.
+  - **Settled** - Two signals mean another agent is live in the tree, a branch that changes when nothing you did changed it, and an edit of yours reverted with no conflict, and the response is to stop rather than to re-apply the edit, which is the default instinct and the wrong one.
+  - **Settled** - The mechanical habit pairs with the rule, that a mutating command takes an absolute path or a `cd` in the same invocation rather than the inherited working directory, because a read in the wrong directory is a wasted call and a write there is damage.
+  - **Settled** - A new level-two [`GOVERNANCE.md`][governance] section is not a local edit, since it needs a [`spec/files.json`][files] entry, a [`spec/section-model.md`][section-model] row, an [`AGENTS.md`][agents] table row, and a re-vendor, where bullets added to existing sections cost the re-vendor alone.
+
+- **Extend the same rule to reading.** A clone on disk is not the branch it names, it is whatever that clone was last fetched to, so reading it answers what that clone last saw.
+  - **Blocked by** - Nothing.
+  - **Issue** - None filed, and the entry above covers it.
+  - **Checked** - `develop` at `3d1a0b1` on 2026-08-06, where "Verification Discipline" states no rule about a local read.
+  - **Open** - Nothing.
+  - **Settled** - Two instances are on record from one session, a repository reported as still drifted on a file whose fix had merged because that clone's refs predated it, and a repository reported as missing a file it carries because the checkout sat on an older branch.
+  - **Settled** - The practice is to read the live ref through the API where a claim will be acted on, or to fetch immediately before reading, and to name the ref and commit in any finding taken from a local read.
+  - **Settled** - A local clone stays the right tool for anything needing history or a build, which an API read cannot give.
+  - **Settled** - "Verification Discipline" is the home, since its framing that every failure under it is green describes the stale-clone failure exactly, and [`GOVERNANCE.md`][governance] "Hub-Hosted Tooling" already owns the sentence that a clone is whatever it last fetched rather than the branch it names.
+
+- **Give the fleet its own vocabulary where a repository with no instruction set will find it.** The words a request is phrased in are defined nowhere it can read.
+  - **Blocked by** - Nothing, since [#552][issue-552] no longer holds the byte-locked section open.
+  - **Issue** - [#579][issue-579], which carries the count of undefined uses and the argument that the router is unreachable rather than wrong.
+  - **Checked** - `develop` at `3d1a0b1` on 2026-08-06, where "Fleet Bootstrap" names the hub repository and says to fetch it, with no mechanism, no fetch-before-use step, and nothing about whose checkout.
+  - **Open** - Where the definitions live, since the natural home is the byte-locked "Fleet Bootstrap" section and a repository with no carried instruction set is precisely the one that lacks it, which leaves this repo's own [`README.md`][readme] as the only surface a stranger to the fleet reads first.
+  - **Open** - Whether the entry point is named per task rather than per repository state, since the bootstrap section routes correctly by state and the gap is that "audit yourself against the hub" is a task whose reader already knows their state.
+  - **Settled** - `hub` carries the whole instruction and is defined in none of the 50 places it appears across the docs.
+  - **Settled** - [`GOVERNANCE.md`][governance] "Expected Review Loop" has the opposite shape of the same problem, stating the procedure precisely and never presenting its name as the way to ask for it, so every request improvises a phrasing and the scope an agent reads out of it moves with the wording.
+  - **Settled** - [`GOVERNANCE.md`][governance] "Hub-Hosted Tooling" is declared `verbatim` in [`spec/files.json`][files] and already carries the reach rules, that reaching the hub is a checkout rather than a copy of one file, that `main` is read and fetched immediately before running, and that an unreachable hub means the tool did not run.
+  - **Settled** - That section lands in [#588][pr-588], so no downstream repo carries it, and the four holding a `GOVERNANCE.md` the audit reads sections from, Blog, Financial-Modeling, HomeAutomation-Config and PhotoCleaner, each report it as a section that never arrived rather than as drift, measured on the ledger regenerated 2026-08-06.
+
+- **Point agents at the hub scripts from the file a reviewer reads.** [`.github/copilot-instructions.md`][copilot-instructions] names no hub script at all.
+  - **Blocked by** - Nothing.
+  - **Issue** - None filed.
+  - **Checked** - `develop` at `3d1a0b1` on 2026-08-06, where the file names none of `pr_review.py`, `prose_lint.py`, `repo_gate.py`, or `spec/audit.py`, and its "Reviewing Carried Fleet Content" section never mentions the hub-tool pointer exception.
+  - **Open** - Nothing.
+  - **Settled** - The measured cost is agents rebuilding worse versions of gates that already exist, which several sessions needed pointing at by hand.
+  - **Settled** - [`GOVERNANCE.md`][governance] "Documentation Style Conventions" carries the exception that permits a hub-tool pointer inside carried text, and the reviewing guidance not naming it means an agent has no in-file rule telling it a `scripts/prose_lint.py` reference is a hub pointer rather than a broken local path.
+  - **Settled** - The same file says [`AGENTS.md`][agents] carries two byte-locked sections while [`spec/files.json`][files] declares three, so the count is corrected in the same edit.
+
+### Three Rules That Leave the Recurring Case Unstated
+
+One pull request widening three carried [`GOVERNANCE.md`][governance] rules that each state their common case and go quiet on the case that recurs, filed together because they share that shape and land in one re-vendor.
+
+**State** `ready`. **Touches** [`GOVERNANCE.md`][governance] "Git and Commit Rules", "Communicating with the User", and "Operational Repositories". **Cost** one hub edit plus a carried-section re-vendor, which rides the visit in "Fleet Sweeps".
+
+- **Say when an issue is closed by hand, not only that the closing keyword belongs on the promotion.** The uncovered case is work complete on `develop` with no promotion imminent.
+  - **Blocked by** - Nothing.
+  - **Issue** - [#578][issue-578] item 1.
+  - **Checked** - `develop` at `b82c1a3` on 2026-08-05, where the rule licenses a hand-close only once a promotion has merged without the keyword.
+  - **Open** - Nothing.
+  - **Settled** - Downstream agents keep re-deriving the rule and reporting it as a discovery, which says it is being missed rather than that it is missing, so the discoverability half is not a wording fix.
+  - **Settled** - The widening says an issue is closed when the work is verifiably complete, citing the squash commit that completed it, and that the promotion keyword is the automation for the common case rather than the only permitted route.
+
+- **Say that the message carrying the clickable link comes before the prompt it accompanies.** A message emitted after the prompt is not read before the question is answered.
+  - **Blocked by** - Nothing.
+  - **Issue** - [#578][issue-578] item 2.
+  - **Checked** - `develop` at `b82c1a3` on 2026-08-05, where the rule says accompanying rather than preceding.
+  - **Open** - Nothing.
+  - **Settled** - The rule already gets the hard part right, that an interactive prompt renders neither a Markdown link nor a bare URL, so the reference inside it is a bare number and the link goes in the message.
+  - **Settled** - The recurrence is evidence that the wording does not reach the case rather than that the rule is ignored, which is the same diagnosis the entry above reaches.
+
+- **State that an operational repository still opens a pull request for a large or risky change.** The grant to commit direct to `develop` says nothing about when to decline it.
+  - **Blocked by** - Nothing.
+  - **Issue** - [#578][issue-578] item 3.
+  - **Checked** - `develop` at `3d1a0b1` on 2026-08-06, where `repo-config/operational/develop.json` carries exactly three rules, `deletion`, `non_fast_forward` and `required_signatures`.
+  - **Open** - What counts as large, stated as a shape rather than a line count, since the property that matters is whether the change can be read at a glance and reverted cleanly.
+  - **Settled** - The reason the grant exists is the one-line config edit that a review round costs more than it protects, and that reason stops applying well before a change gets large.
+  - **Settled** - This stays guidance by construction, because adding a `pull_request` rule to the operational ruleset would withdraw the direct-commit grant the model exists to give.
+
+### The Declared Repository Description
+
+One pull request moving the canonical short description into declared data, which settles the second-paragraph ambiguity by construction rather than by writing an extraction rule the same change then deletes.
+
+**State** `decision`. **Touches** [`registry/repos.json`][repos] and its schema, [`spec/audit.py`][audit], [`spec/readme-structure.md`][readme-structure], and [`CODESTYLE.md`][codestyle]. **Cost** one hub edit plus a carried re-vendor of the `CODESTYLE.md` item, and repos adopt the field one at a time.
+
+- **Declare the description in [`registry/repos.json`][repos] instead of deriving it by parsing the README.** Every check and every push then reads a field.
+  - **Blocked by** - Nothing.
+  - **Issue** - None filed, and the disposition is recorded on [#509][issue-509].
+  - **Checked** - `develop` at `3d1a0b1` on 2026-08-06, where neither `registry/repos.json` nor `registry/repos.schema.json` carries a `description` key.
+  - **Open** - Nothing beyond sequencing, which is that this leads and the README shape follows.
+  - **Settled** - PhotoCleaner#32 measures the cost of parsing, since a workflow step reading the intro at publish time needs nine guards against headings, block quotes, all four list markers, ordered lists, HTML, tables, code, links and the length cap, and every one of them fails the release rather than the tagline.
+  - **Settled** - The field makes the README intro a third mirror rather than the source, so the audit compares all three against one declared value and `repo-config/configure.sh` sets the About panel from the same field it already sets every other setting from.
+  - **Settled** - The 100-character cap stays, since Docker Hub's short description is the tightest surface.
+  - **Settled** - The field is optional at first so the audit falls back to the README intro while repos adopt it, and it needs a schema entry because `registry/repos.schema.json` sets `additionalProperties: false`.
+  - **Settled** - The ask on the Docker repos meanwhile is only that the parsing step is not propagated further.
+
+- **Let the README intro carry more than the tagline, and say which line the mirrors take.** The current pair of rules forbids a README from saying anything further about itself above the fold.
+  - **Blocked by** - The entry above, since taking this first means writing an extraction rule the registry change deletes.
+  - **Issue** - [#577][issue-577], which carries the three surfaces that change together.
+  - **Checked** - `develop` at `b82c1a3` on 2026-08-05, where [`spec/readme-structure.md`][readme-structure] item 1 reads as though the canonical description is the paragraph after the H1 and [`CODESTYLE.md`][codestyle] has `HISTORY.md` copy the same intro paragraph verbatim.
+  - **Open** - Nothing.
+  - **Settled** - The shape is that the first line after the H1 is the tagline, it alone carries the 100-character link-free rule, it alone mirrors to the GitHub About panel, the Docker Hub short description and the `HISTORY.md` opening, and any further paragraph is free prose no mirror reads.
+  - **Settled** - The audit changes with the rule, since it measures the first non-empty line and would otherwise report a legitimate second paragraph.
+  - **Settled** - The cap belongs to a mirror rather than to the reader, which is why declaring the field removes the parser that motivates it.
+
+### Content in the Wrong File
+
+One pull request teaching the audit to see content sitting in a file the section model assigns elsewhere, which is invisible today and reported as a missing file instead.
+
+**State** `decision`. **Touches** [`spec/audit.py`][audit] and possibly [`spec/files.json`][files]. **Cost** one hub edit, hub-only, and it changes what every repo's next audit reports.
+
+- **Compare an `intent` file's headings against the destinations the section model assigns.** Collect the level-two headings, subtract the ones the manifest declares for that file, and compare the remainder against the headings other destinations declare.
+  - **Blocked by** - Nothing.
+  - **Issue** - [#523][issue-523], which carries the four things to settle.
+  - **Checked** - `develop` at `1ed0cc8` on 2026-08-03, where the audit checks file presence, declared-section presence, verbatim hashes, and workflow interface conformance, and nothing that reads a heading against a destination.
+  - **Open** - Whether an undeclared heading is a finding at all, given a repo may legitimately add locally.
+  - **Open** - Whether the destination mapping becomes declared data rather than prose, and whether it reaches the advisory `ARCHITECTURE.md`.
+  - **Open** - How many repos are affected, measured before the check is designed rather than after it starts reporting.
+  - **Settled** - The case that found it is a repo whose `.github/copilot-instructions.md` carried 311 lines under nine headings assigned to `ARCHITECTURE.md` and `OPERATIONS.md`, reported as a missing-file letter while the misplacement that caused it was invisible.
+  - **Settled** - The similarity-based version is rejected by [`spec/section-model.md`][section-model], and a detector built on it produces findings whose remedy is to delete content.
+
+### Registry Membership Coverage
+
+One pull request asking the inverse question the fleet tools never ask, whether a repository that exists has a registry entry, since every tool iterates the registry and an omission at standup is permanent and silent.
+
+**State** `decision`. **Touches** [`spec/audit.py`][audit], [`registry/repos.json`][repos] and its schema, and [`STANDUP.md`][standup]. **Cost** one hub edit, hub-only.
+
+- **Report a non-fork repository under the owner that has no registry entry.** The reports read as complete while under-counting today.
+  - **Blocked by** - Nothing.
+  - **Issue** - [#550][issue-550], which carries the four repos the comparison found.
+  - **Checked** - `develop` at `362aec8`, per the issue, and unverified since.
+  - **Open** - How a deliberate exclusion is recorded, since without one the check becomes a permanent four-line complaint people learn to scroll past, and the candidates are a third `status` value or a separate list carrying a reason per entry.
+  - **Open** - Where the check runs, since neither `validate.py` in CI nor an owner-initiated audit catches an omission at the moment it is made, which is the standup itself and the moment the fix costs one line.
+  - **Settled** - The consequence is worse than a gap, because the reports are confidently wrong rather than silent: [reports/divergences.md][divergences-report] counted 19 repos owing `AGENTS.md` "Fleet Bootstrap" when the real number was 20.
+  - **Settled** - The procedure is not the gap, since [`STANDUP.md`][standup] section 1A already says to write the entry and names every field, and nothing verifies it happened.
+  - **Settled** - The reason matters more than the mechanism, since an unexplained exclusion is the same silent omission in a different file.
+  - **Settled** - Private repositories are outside the public listing the issue used, so the true count is a floor rather than a total.
+
+### Reducing the Carried Surface Further
+
+One pull request measuring the remaining carried surface against the carry-versus-reach test and moving whatever qualifies, now that the model is settled rather than open.
+
+**State** `decision`. **Touches** [`AUDIT.md`][audit-doc], [`spec/secrets.json`][secrets], [`spec/files.json`][files], and [`catalog/snippets/workflows/`][workflows]. **Cost** one hub edit plus a retirement per repo on its next visit.
+
+- **Measure carried [`AUDIT.md`][audit-doc] and [`spec/secrets.json`][secrets] against the test.** Each is adapted per repo today and the question is how much of each is genuinely per-repo.
+  - **Blocked by** - Nothing.
+  - **Issue** - None filed, and [#305][issue-305] covers the propagation half from the other direction.
+  - **Checked** - `develop` at `3d1a0b1` on 2026-08-06, where [`spec/files.json`][files] declares both at `intent` and no longer declares `repo-config/configure.sh` at all.
+  - **Open** - Which of the two moves, if either.
+  - **Settled** - The test is stated: a repository carries the content it is audited against and the configuration that describes it, and it reaches machinery whose content is identical in every repository.
+  - **Settled** - `repo-config/configure.sh` is the first file moved across, carrying the ledger's only `retire` disposition and naming six repos, NxWitness, aiopurpleair, homeassistant-purpleair, ESPHome-NonRoot, VSCode-Server-DotNetCore and LanguageTags.
+  - **Settled** - An unreachable hub means the tool did not run, reported as not run rather than worked around, since a hand-rolled substitute is the duplicated effort the model exists to end.
+
+- **Investigate replacing copy-pasted workflow content with cross-repo reuse.** A public repository's composite actions and reusable workflows are consumable by any other repository regardless of owner type, so the organization account this pattern was assumed to need is not needed.
+  - **Blocked by** - Nothing.
+  - **Issue** - None filed.
+  - **Checked** - `develop` at `3d1a0b1` on 2026-08-06, where [`.github/actions/prose-gate/action.yml`][prose-gate] is the worked example and has zero callers, in this repo or the fleet.
+  - **Open** - Which jobs are genuinely identical across repos against which only look similar, since a reusable workflow needing a long input list to cover per-repo variation is worse than the copy it replaces.
+  - **Settled** - The catalog under [`catalog/snippets/workflows/`][workflows] is copied into each repo, so a fix to a shared job is a fleet sweep rather than one edit, and it is the mechanism by which a defect in a snippet seeds itself into every repo that adopted it.
+  - **Settled** - The ref policy is settled rather than open, since CI reaches hub code as an action pinned to a commit SHA, which is the action-pinning rule applied unchanged.
+  - **Settled** - `uses:` accepts no expressions, so a per-branch ref cannot be selected in the workflow file and any branch-dependent behavior belongs inside the consumed action, which is what the prose gate action does.
+
+### The README Structure Rework
+
+One pull request reworking the README spec to the hand-crafted PlexCleaner shape the maintainer wants, and making the result auditable rather than advisory.
+
+**State** `decision`. **Touches** [`spec/readme-structure.md`][readme-structure] and the `readme-structure` dimension in [`spec/audit.py`][audit]. **Cost** one hub edit, and it re-grades every repo's README.
+
+- **Encode the distribution channel by deliverable rather than as one fixed label.** Four divergences are already identified against PlexCleaner and this repo.
+  - **Blocked by** - "The Declared Repository Description", since the mirrors settle first.
+  - **Issue** - None filed.
+  - **Checked** - `develop` at `1ed0cc8` on 2026-08-03.
+  - **Open** - Nothing.
+  - **Settled** - PlexCleaner ships executables and calls the channel Binary Releases, while the spec fixes the label as Versioned Releases for every repo, so the label belongs in a per-channel table.
+  - **Settled** - The license shield sits in the top Build Status block here and at the very bottom of PlexCleaner, inside a closing License section reading that the project is licensed under the MIT License, followed by the shield, immediately before the link definitions.
+  - **Settled** - The Release Notes section closes by pointing at the release history for complete release notes and older versions, which is the wanted form, and PlexCleaner writes that link inline, which the reference-style rule forbids, so the wording is adopted and the reference form kept.
+  - **Settled** - Channel bullets and shields vary by deliverable, meaning GitHub binaries, Docker Hub, NuGet and PyPI each carry a different bullet label and shield set, which is what a per-type table has to encode.
+
+- **Decide whether the canonical section order follows PlexCleaner.** This affects every repo plus the audit dimension.
+  - **Blocked by** - Nothing.
+  - **Issue** - None filed.
+  - **Checked** - `develop` at `1ed0cc8` on 2026-08-03.
+  - **Open** - The position of the sections the spec already names, since PlexCleaner places Questions or Issues immediately after the Table of Contents where the spec orders it ninth.
+  - **Settled** - PlexCleaner's Performance Considerations, Runtime Metrics, Custom Plugins, Testing, Development Tooling, Feature Ideas and Sample Media Files are correctly repo-specific under the recurrence rule in [`spec/section-model.md`][section-model] and stay undeclared.
+
+### Branch Bootstrap in the Standup
+
+One pull request giving [`STANDUP.md`][standup] the branch-creation step it lacks, so an agent stops committing onto whichever branch it finds.
+
+**State** `ready`. **Touches** [`STANDUP.md`][standup]. **Cost** one hub edit, hub-only, since the file is deliberately not carried.
+
+- **State the sequence that avoids every cleanup problem.** Nothing ever has to be cleaned off `main` or `develop`, because nothing reaches them without review.
+  - **Blocked by** - Nothing.
+  - **Issue** - [#490][issue-490] covered the human-gated half and is complete, so this is the remaining half rather than the whole gap.
+  - **Checked** - `develop` at `1ed0cc8` on 2026-08-03, where section 0A covers the prerequisites and nothing says how the branches come into being.
+  - **Open** - Nothing.
+  - **Settled** - The sequence is create `main` carrying nothing, create `develop` from it carrying nothing, create the first feature branch from `develop` and do the whole standup there, add the repo to GitHub and apply the config while still on that branch, then open a normal pull request to `develop`.
+  - **Settled** - A git branch cannot exist without a commit, so carrying nothing means exactly one signed empty root commit, and section 0's signing window applies to it like any other.
+  - **Settled** - Committing onto `develop` and squashing afterwards does not work, since `non_fast_forward` is set on both `develop` payloads, and Blog was correctly blocked when it tried.
+  - **Settled** - The protection is uneven, since a `release` repo's `develop` payload carries a `pull_request` rule that blocks a direct commit outright while the operational payload carries only three rules, so on an operational repo only the instruction stands between the agent and an unfixable history.
+  - **Settled** - It matters on a public repo because the exploratory standup history is where secrets and noise commits accumulate, and squashing the feature branch is the one chance to leave them out.
+
+### Two Project Types and a Shared C++ Style
+
+One pull request extending the type model with the two types the fleet already needs, plus the shared style the `cpp` type has no canonical for.
+
+**State** `ready`. **Touches** [`spec/project-types.json`][project-types], [`catalog/snippets/`][snippets], [`CODESTYLE.md`][codestyle]. **Cost** one hub edit plus a carried `CODESTYLE.md` re-vendor.
+
+- **Add a linter-only Python type for codegen and boilerplate Python.** Code that runs during another tool's build to emit generated source ships no unit tests and no coverage and needs only the linter.
+  - **Blocked by** - Nothing.
+  - **Issue** - None filed.
+  - **Checked** - `develop` at `1ed0cc8` on 2026-08-03.
+  - **Open** - Nothing.
+  - **Settled** - It stays distinct from the existing `python` type, which is utility code that can and should carry unit tests and coverage, as in PlexCleaner.
+  - **Settled** - ESPHome-Config stays `source-only` until it exists and its reclassification is deferred, so its one outstanding validation finding is accepted meanwhile.
+
+- **Add a fleet-standard clang-format config for the `cpp` type.** A catalog snippet plus a `CODESTYLE.md` C++ section, the analogue of the shared ruff config.
+  - **Blocked by** - Nothing.
+  - **Issue** - None filed.
+  - **Checked** - `develop` at `1ed0cc8` on 2026-08-03.
+  - **Open** - Nothing.
+  - **Settled** - It exists so the `cpp` clang-format check references one canonical style rather than each repo inventing its own, and the ESPHome-Config agent's proposed file is the base.
+
+### How a Hugo Repository Carries Its Theme
+
+One pull request deciding what the `hugo` type says about a theme, which it declares nothing about today.
+
+**State** `decision`. **Touches** [`spec/project-types.json`][project-types] and [`spec/type-model.md`][type-model]. **Cost** one hub edit, and it becomes the type's contract that a second generator inherits.
+
+- **Decide the theme carry mechanism as a question about the type rather than about Blog.** The candidates differ along the same axis the carried-content clusters are about.
+  - **Blocked by** - Nothing.
+  - **Issue** - None filed, and [#456][issue-456] and [#558][issue-558] carry the type's intake.
+  - **Checked** - `develop` at `b82c1a3` on 2026-08-05.
+  - **Open** - Which of three the type requires, the vendored copy Blog ships, a submodule pinned to an upstream ref, or a separate fleet-owned repository the site consumes.
+  - **Settled** - A vendored theme is a copy that goes stale with nothing detecting it, and a submodule is a pin Dependabot can see, which is the whole difference.
+  - **Settled** - Three details the intake predicted are wrong against what Blog runs, so planning from the prediction encodes requirements the repo does not meet: the theme is vendored with no recorded upstream ref rather than a Dependabot-tracked submodule, the generator is pinned by version and hash rather than run at latest, and the deploy is a separate dispatch rather than a tag cut last after the live check.
+  - **Settled** - What held is that the deploy is a publish, the type is named for the generator with the generic checks phrased so they do not name it, and the URL parity gate asserting a floor on the golden list length before comparing is the check of record.
+  - **Settled** - Promoting the generator-agnostic `hugo` checks to a shared type when a second generator arrives is a registry edit by construction, per [`spec/type-model.md`][type-model] "Generators".
+  - **Settled** - The `copilot_code_review` rule in both ruleset payloads gates no merge today, because gated Copilot review is an invite-only beta, which deserves a sentence near the merge gate so no repo reads the rule as the enforcement and relaxes the manual discipline holding the line.
+
+### Locally Required Secrets
+
+One pull request giving a repo a declared way to say what it needs at runtime, the way GitHub-stored secrets are already declared.
+
+**State** `decision`. **Touches** [`spec/secrets.json`][secrets] and its schema, [`spec/audit.py`][audit], and the hub's own `.gitignore`. **Cost** one hub edit plus adoption per repo that deploys.
+
+- **Make a gitignored secrets directory the fleet standard and declare its contents.** The required set is discoverable only by reading the deploy today.
+  - **Blocked by** - Nothing.
+  - **Issue** - None filed.
+  - **Checked** - `develop` at `1ed0cc8` on 2026-08-03, where [`spec/secrets.json`][secrets] covers only the Actions and Dependabot stores and the hub carries neither the directory nor a `.gitignore` entry for one.
+  - **Open** - Nothing on the local half, and the GitHub half below is the same axis rather than a separate problem.
+  - **Settled** - The pattern already runs in the fleet in two shapes, HomeAutomation-Config keeping a gitignored secrets directory of env files and Docker secret files, and ESPHome-Config keeping a gitignored `secrets.yaml` beside a committed `_secrets.yaml`.
+  - **Settled** - The committed file carries the required names with dummy values, so the shape of the requirement is in git while the values never are, which is the split the GitHub side already gets from `requiredSecrets`.
+  - **Settled** - Blog needs it immediately, since it deploys on the proxmox host through HomeAutomation-Config's Docker Compose stack and carries the copy destinations and the internal URI.
+  - **Settled** - Adopting it in the hub comes first, since the hub carries neither piece.
+  - **Settled** - The GitHub side has the same missing axis, surfaced by the `hugo` type, since a deploy's credentials are per-environment secrets and variables while `stores` is a closed enum of `actions` and `dependabot`, and [`spec/audit.py`][audit] seeds its map with those two keys and indexes it unguarded, so adding an `environments` value raises a key error for every repo whose publish maps to that mechanism.
+  - **Settled** - An optional `environments` block is legal in [`spec/secrets.schema.json`][secrets-schema] so a repo may declare its per-environment names, and no tool reads one where it exists, which is honest and is not a gate, so a clean audit says nothing about whether an environment is configured.
+
+### The Docker Image Freshness Rule
+
+One pull request stating that an agent never assumes a Docker image is present locally, however recently it pulled one.
+
+**State** `ready`. **Touches** [`GOVERNANCE.md`][governance], and [`OPERATIONS.md`][operations] if the mirrored one-liners move with it. **Cost** one hub edit, plus a carried re-vendor if the rule lands in a carried section.
+
+- **State the always-pull default and the explicit pull where the flag does not apply.** A background prune can remove an image between two commands of the same session.
+  - **Blocked by** - Nothing.
+  - **Issue** - None filed.
+  - **Checked** - `develop` at `1ed0cc8` on 2026-08-03, where the four documented lint invocations already carry the always-pull flag and no rule states why.
+  - **Open** - Where it lives, since "Running the Linters Locally" is scoped to the four lint tools while the rule covers any container an agent starts, and whether it is carried, since every repo runs the same images from the same instructions.
+  - **Settled** - What is missing is the rule rather than the one-liners, since an agent composing an ad-hoc `docker run` drops the flag precisely because it believes the image is cached.
+  - **Settled** - The honest limit stops the flag reading as the whole answer, since `docker run` against a registry tag re-pulls an absent image on its own, so the cases that break are a locally built tag with no registry to pull from, and any command that branches on the image being present such as `docker image inspect` or `docker images`.
+
+### The Merge-Bot Token Grants
+
+One pull request dropping the unused token grants from the highest-blast-radius workflow shape in the fleet.
+
+**State** `ready`. **Touches** [`.github/workflows/merge-bot-pull-request.yml`][merge-bot]. **Cost** one hub edit plus a re-vendor, since every repo carries the file.
+
+- **Drop the grants no step consumes.** Every write in the file authenticates with the App token.
+  - **Blocked by** - Nothing.
+  - **Issue** - [#521][issue-521].
+  - **Checked** - `develop` at `3d1a0b1` on 2026-08-06, where three jobs carry both `contents: write` and `pull-requests: write` and the fourth carries `pull-requests: write` alone, so the issue's claim that all four carry both is one job wide.
+  - **Open** - Whether to drop the job-level blocks or set an empty workflow-level permissions map.
+  - **Open** - Whether the audit compares permissions at all, given the file is `interface` fidelity with only a required-job-keys contract.
+  - **Settled** - The finding is least privilege on a `pull_request_target` workflow holding an App private key, where the grant is not exploitable today only because no step consumes it.
+  - **Settled** - [`spec/files.json`][files] declares this workflow at `appliesTo: "*"`, which closes the separate gap [#456][issue-456] raised, that the audit graded a file the file spec never required.
+
+### Review Cost and the Local Review Pass
+
+One pull request, after a measurement, stating what change size licenses and whether a local adversarial pass earns its place, which are one question because both are about where review cost goes.
+
+**State** `measure`. **Touches** [`GOVERNANCE.md`][governance] branching or review guidance, once the numbers exist. **Cost** a measurement first, then one hub edit plus a carried re-vendor.
+
+- **Measure review rounds against pull request size, and decide what the number licenses.** The data needs no new instrumentation, since the review history carries it.
+  - **Blocked by** - Nothing.
+  - **Issue** - None filed.
+  - **Checked** - `develop` at `1ed0cc8` on 2026-08-03.
+  - **Open** - The threshold, expressed as the size at which a change is split rather than as advice to keep changes small.
+  - **Settled** - For each recent pull request the record carries the diff size in files and lines, the number of rounds, and the findings per round, counting suppressed findings alongside threaded ones because they are the majority of what these loops produce.
+  - **Settled** - Two confounds bound any line drawn from the numbers, that a large change is usually also a novel one so size and unfamiliarity move together, and that a round finding something new is the reviewer working rather than evidence of a problem, so the metric is findings a smaller first cut would have surfaced earlier.
+
+- **Try local defensive-review subagents as a first pass, and measure what the pass is worth.** One agent per lens rather than one general reviewer.
+  - **Blocked by** - Nothing.
+  - **Issue** - None filed.
+  - **Checked** - `develop` at `b82c1a3` on 2026-08-05.
+  - **Open** - Whether the overlap is large enough to shorten the remote loop rather than to add a step in front of it, which is what running both for a stretch measures.
+  - **Settled** - The remote loop is where most of a session's tokens and wall-clock go, and it delivers findings one round at a time, which is the slowest available way to learn that a change had five problems.
+  - **Settled** - The trap is that a local pass finding nothing reads exactly like a clean change, and the next inference is that the remote review can be skipped, which is the one outcome the review contract exists to prevent, so the local pass is an input to the loop and never a substitute for the round the merge gate requires.
+
+### A Home for a Disproved Finding
+
+One pull request giving a disproved review finding somewhere the next round will read it, so the same proof is not built twice.
+
+**State** `ready`. **Touches** [`.github/copilot-instructions.md`][copilot-instructions]. **Cost** one hub edit plus a carried re-vendor, since the file is carried whole at `intent`.
+
+- **Record what was tested and against which revision, and delete an entry whose subject changes.** A disproof is true of one tree at one revision.
+  - **Blocked by** - Nothing.
+  - **Issue** - None filed.
+  - **Checked** - `develop` at `b82c1a3` on 2026-08-05, where the file says the reviewer is sometimes factually wrong, requires a decline to carry evidence, and keeps a list of known non-working request paths, with nowhere to put the finding itself.
+  - **Open** - Nothing.
+  - **Settled** - The worked example is the claim that `keys_unsorted` needs jq 1.6, disproved against a 1.5 binary on which `keys_unsorted` works and `walk` does not.
+  - **Settled** - This is not simply a list to append to, since an entry outliving the code it was proved against becomes a reason not to check, which is strictly worse than re-proving it.
+
+## Standalone Chores
+
+Small work with no research to preserve, selectable one bullet at a time.
+
+- **Reconsider whether the pre-commit hook runs the doc gates now that they are diff-scoped.** [`scripts/README.md`][scripts] records the current decision and its reason, that doc linters stay out of the hook so it stays fast, which was sound when the only mode was a whole-tree sweep, and a diff-scoped run finishes in about a second. The failure it would prevent is the most repeated one on record, comment sentences wrapped across lines caught after the commit rather than before it. Weigh it against the standing preference for a fast hook and against a hook that runs the gate from the wrong directory, which is its own false clean.
+- **Audit the fleet's shell surface by size and branching, and decide per script whether Python with unit tests is cheaper.** The evidence is the review record rather than a language preference, since a non-trivial shell script earns findings round after round while every gate under [`scripts/`][scripts] carries a test file beside it and converges in one or two. The measure is lines, branch count, and the review rounds each has cost. `repo-config/configure.sh` and the agent-safety installer are the two worth measuring, and a bootstrap script that needs the Python it exists to install is not a rewrite worth having, which protects the installer more than the config script.
+- **Make a table of contents standard for a long document rather than for the README alone.** [`spec/readme-structure.md`][readme-structure] fixes one at README position 4 and no other hub file carries one, which leaves the three longest documents without it, `CODESTYLE.md` at 516 lines, `GOVERNANCE.md` at 436 and `WORKFLOW.md` at 301, measured on `develop` at `3d1a0b1` on 2026-08-06. Settle the threshold in headings or lines so the audit can check it, and settle how it sits with the reference-link exception, since the four agent-instruction files keep inline links exactly because they are read one section at a time, which is the property that makes a contents list worth having in them. The mechanical constraint is that the list is filled by the Markdown All in One extension on save, so a file nobody opens in the editor grows a stale list, which is worse than absent because it is read as current.
+- **Adopt the OCI annotation keys for Docker image metadata across the Docker repos**, replacing the ad-hoc and label-schema keys, per [#363][issue-363].
+- **Sweep the central package-version property to `Directory.Packages.props` fleet-wide**, since PlexCleaner sets it in `Directory.Build.props`, off the [`CODESTYLE.md`][codestyle] canonical.
+- **Canonicalize Python linter-config placement on `pyproject.toml`**, since one cataloged repo uses a standalone ruff config plus a pyright config. Track it as a drift finding and fix it downstream.
+- **Populate [reports/][reports] for the cataloged repos that still have no audit**, since a registry `status` of `cataloged` asserts a result only a committed report evidences. Nine of 22 have one, measured on `develop` at `3d1a0b1` on 2026-08-06. This is paced by maintainer capacity rather than blocked, since repos are brought up to spec as they are worked on.
+- **Finish onboarding hardening**, from [#310][issue-310], making the [`AUDIT.md`][audit-doc] audit a required onboarding step and running the per-type cold-start self-tests tracked in [reports/conformance-matrix.md][matrix]. Every cold-standup cell reads not-tested today.
+- **Refresh the README, which has gone stale, and evaluate a lower-maintenance structure**, for example a per-section index pointing into each doc with a one-line description, keeping the README as the adoption and audit-instruction entry point. A per-section index trades brevity for a sync obligation, since it must track what the docs contain.
+- **Consider renaming this repo to reflect the audit-catalog identity**, which updates badge and link URLs across the fleet.
+- **Revisit automating the audit**, explored and deliberately deferred, recorded so the reasoning is not re-derived. Three shapes were considered, a scheduled hub-driven audit publishing each report as a workflow artifact, the same thing committing the report back, and a pull-request hook in each downstream repo auditing itself against the current hub. Three things block all of them: until the fleet reaches stasis a scheduled run reports mostly noise, since a repo mid-onboarding is expected to be non-conformant, the hub has to be stable before downstreams audit against it because a hub change lands as fleet-wide findings the same day, and the downstream half is a catch-22 since a self-auditing hook is CI instrumentation the repos that most need it do not carry. Worth reopening once the fleet is onboarded and the hub goes a stretch without carried-content changes, and the artifact shape is the one to try first since it produces evidence without committing anything.
+
+## Fleet Sweeps
+
+Work that lands on a downstream visit rather than as a hub pull request, so it is not selectable here. The fleet is caught up periodically rather than after every hub change, which means a carried-content edit landing in the hub does not owe an immediate sweep and this list is expected to carry several entries at once.
+
+Blog is the pilot. A sweep is proven there before any fleet-wide rollout, because it is the smallest tree, `hugo` plus `source-only` with no build to break, cataloged and audited on 2026-08-05, and one of only two repos carrying `AGENTS.md` "Fleet Bootstrap" today, so a carried-section change can be observed arriving there. The other carrier is HomeAutomation-Config, which is `operational` and therefore exercises the direct-to-`develop` path rather than the pull request one, which is the second visit worth making rather than the first.
+
+Regenerate [reports/divergences.md][divergences-report] before using it as the work list, since the committed copy predates the retirement decision and renders `repo-config/configure.sh` under a re-vendor disposition that no longer applies to it. A stale ledger is the same hazard as a stale exemption, in that it hands out a work list measured against a tree that no longer exists.
+
+- **Re-vendor the changed `verbatim` content, which is one sweep covering five files.** Every repo holding a copy of a changed section is byte-mismatched against the hub until it takes the new one, which the audit reports as stale rather than modified.
+  - **Hub state** - Done, verified `develop` at `3d1a0b1` on 2026-08-06.
+  - **Outstanding** - The whole fleet, pilot on Blog first.
+  - **Issue** - None filed, and it is the follow-through [#489][issue-489] and [#379][issue-379] wait on.
+  - **Rides with** - The `configure.sh` retirement and the `.editorconfig` line from [#353][issue-353], since all three are the same visit.
+  - **Detail** - In [`AGENTS.md`][agents], "Context and Delegation Discipline" carries the wait rule's failure clause and "Where the Rules Live" carries a row for "Hub-Hosted Tooling".
+  - **Detail** - In [`GOVERNANCE.md`][governance], "Verification Discipline" carries the rule that a launched process is not a result, "PR Review Etiquette" carries the five outcomes that close a finding, "Repository Boundaries and Write Safety" carries the rule that a refused write is reported rather than re-shaped, and both "Representative Data in Agent-Authored Text" and "Hub-Hosted Tooling" are entirely new carried sections no downstream repo holds, which the audit reports as sections that never arrived rather than as drift.
+  - **Detail** - Three further [`GOVERNANCE.md`][governance] sections differ by a single word each, "Documentation Style Conventions", "Communicating with the User" and "Repository Details", where a format name took the capitalization [`CODESTYLE.md`][codestyle] "Markdown and Spelling" states, so they are byte-mismatched for a reason a reader of the diff would otherwise call cosmetic.
+  - **Detail** - Two comment lines in [`.markdownlint-cli2.jsonc`][markdownlint] took the same capitalization, and that file is `verbatim` and `whole`, so every downstream copy is byte-mismatched on a config nothing else changed about.
+  - **Detail** - [`CODESTYLE.md`][codestyle] is the fifth file, at `intent` rather than `verbatim`, so it reaches the fleet as a rule each repo adopts in its own copy, and the same mixed spelling waits in every downstream tree.
+
+- **Retire the downstream `repo-config/configure.sh` copies.** Delete the copy as each repo is next worked on and run the hub's script against it by name.
+  - **Hub state** - Done, verified `develop` at `3d1a0b1` on 2026-08-06, where [`spec/files.json`][files] no longer declares the file and [`spec/divergences.json`][divergences] carries it under the `retire` disposition.
+  - **Outstanding** - Six repos, NxWitness, aiopurpleair, homeassistant-purpleair, ESPHome-NonRoot, VSCode-Server-DotNetCore and LanguageTags.
+  - **Issue** - None filed, and [#580][issue-580] carries the decision.
+  - **Rides with** - The `verbatim` re-vendor above.
+  - **Detail** - Nothing asks a repo for the file and nothing reports its absence, which makes this a visit-ordered chore rather than a gate.
+  - **Detail** - The six carried a fork predating the payload-driven check mode, which is the drift this removes rather than converges.
+
+- **Drop the `.editorconfig` analyzer relaxation across six C# repos.** The hub side is done and the tree confirms it.
+  - **Hub state** - Done, verified `develop` at `3d1a0b1` on 2026-08-06, where the analyzer severity property appears nowhere in `.editorconfig`.
+  - **Outstanding** - Six C# repos, sequenced in the issue so PhotoCleaner's 362 sites do not gate the other five.
+  - **Issue** - [#353][issue-353], which stays open on the downstream half alone.
+  - **Rides with** - The `verbatim` re-vendor above.
+
+- **Close out the two downstream acknowledgements that hold their issues open.** Neither is hub work.
+  - **Hub state** - Done, verified `develop` at `1ed0cc8` on 2026-08-03, where the manifest gap [#379][issue-379] raised is closed by `repo-config/settings.json` reaching [`spec/files.json`][files], and the `configure.sh` half has since been retired outright.
+  - **Outstanding** - Financial-Modeling's acknowledgement and re-vendor for [#379][issue-379], and the re-vendor [#489][issue-489] leaves.
+  - **Issue** - [#379][issue-379] and [#489][issue-489].
+  - **Rides with** - The `verbatim` re-vendor above.
+
+- **Widen the operational lint trigger to `develop` on four repos.** Each triggers on a pull request to `main` only and therefore runs nothing at all on a pull request into `develop`.
+  - **Hub state** - Done, verified `develop` at `b82c1a3` on 2026-08-05, where the change is prose and spec, so it fixes no downstream repo by itself.
+  - **Outstanding** - Four repos, HomeAutomation-Config, ESPHome-Config, HomeAssistant-Config and Vantage-Config, one line each.
+  - **Issue** - [#585][issue-585].
+  - **Rides with** - Nothing, since an operational repo takes its changes direct to `develop`.
+  - **Detail** - Confirm the workflow really does trigger on `main` alone before editing, because a repo already naming both is conformant and needs no change.
+  - **Detail** - Leave the ruleset alone, since the required check stays on `main` and nothing is added to `repo-config/operational/develop.json`.
+  - **Detail** - The evidence this is not hypothetical is HomeAutomation-Config PR 34, which merged into `develop` with an empty check list and a clean mergeable state.
+
+- **Finish the host rollout and fill the tooling matrix, which are one visit each.** The rollout needs the matrix to be repeatable and the matrix is only worth filling if the rollout uses it.
+  - **Hub state** - Done for the documentary half, verified `develop` at `1ed0cc8` on 2026-08-03.
+  - **Outstanding** - Four machines, WSL2 Ubuntu, the MacBook Air and both ThinkPads, plus any headless or cron environment running with the token. macOS needs someone on that platform, the Proxmox question is whether that host also runs containers which decides whether Docker is required there, and the engine-inside-the-distro variant of the WSL2 Docker cell is unverified.
+  - **Issue** - [#365][issue-365] and [#483][issue-483].
+  - **Rides with** - The write-guard newline fix, since only re-running the installer deploys it.
+  - **Detail** - A ticked row means the host-wide rules text and not the hook, since only running the installer deploys both layers, and the proxmox host proved that distinction by carrying the documentary half alone for eight days on the machine where the incident originated.
+  - **Detail** - Honor the issue's own rule when filling a cell, that an unverified install command is worse than a blank, because a blank prompts a question while a wrong command produces a broken host and a false sense that setup succeeded.
+  - **Detail** - The superseded safety section from [#364][issue-364] still sits above the canonical block in this host's rules file, so the two overlap. Removing it is a judgment call on a per-machine file, which is why it is surfaced rather than applied.
+
+## Recorded for the Maintainer
+
+Actions on issues that are the maintainer's to take, each carrying its evidence so it is one action rather than a re-derivation.
+
+- **Re-scope [#305][issue-305] to the push half, and make it the tracking issue for the fleet re-vendor sweep.** Most of what it asked for is built, since the fidelity model, the [`spec/files.json`][files] manifest, [`spec/divergences.json`][divergences] with its generated [reports/divergences.md][divergences-report], and [`AUDIT.md`][audit-doc] section 10 together give the canonical-versus-adapted split and the audit path it proposed. What is genuinely still missing is the push half, since every one of those detects drift while the sweep that fixes it is manual. Re-scoped, it carries the "Fleet Sweeps" visit manifest and Blog as the pilot. Closing it against the built machinery is the alternative, and it loses the only tracking issue the sweep would have.
+- **Comment on [#557][issue-557] that both its open questions are adopted.** The rule is per task rather than per agent, and an agent finding a foreign checkout leaves it and clones its own. It closes when "Reaching the Hub in Your Own Checkout" lands, so it stays open until then.
+- **Comment on [#577][issue-577] that it is decided together with the declared description.** Declaring the field in [`registry/repos.json`][repos] makes every mirror read a field rather than parse a paragraph, so taking [#577][issue-577] first means writing an extraction rule the registry change then deletes.
+- **Comment on [#579][issue-579] that its sequencing note is resolved.** It records that an edit to the byte-locked section lands with [#552][issue-552], and [#552][issue-552] is answered by [#572][pr-572], so the section is no longer held open.
 
 ## Verified Complete, Awaiting Close
 
-Each of these was checked line by line against the current tree and has nothing left to do here. Closing them is the maintainer's call, and each wants the evidence quoted in the closing comment rather than a bare close.
+Each was checked against the tree and has nothing left to do anywhere. Closing is the maintainer's call, and each wants the evidence quoted in the closing comment rather than a bare close.
 
-- [#509][issue-509] (PhotoCleaner spec questions) is complete on all five items. Item 1, `.github/copilot-instructions.md` now reads "Most of `GOVERNANCE.md` is universal fleet law" and describes `AGENTS.md` as the thin router carrying two byte-locked sections and no repository-specific ones. Item 2, `CODESTYLE.md` "Markdown and Spelling" now names `details` and `summary` as allowed, matching [`.markdownlint-cli2.jsonc`][markdownlint]. Item 3, [`spec/readme-structure.md`][readme-structure] now states the private-repository behavior outright, that the full shape is carried and the GitHub-sourced badges render broken until the flip, which is accepted rather than worked around. Item 4, the same file now says the `HISTORY.md` mirror rule lives in `CODESTYLE.md`, which every repo carries, so the rule has a carried home and the file states only what the audit does with it. Item 5, `WORKFLOW.md` D2.2 now reads "the check exits early while the job still reports success" and spells out why a job-level `if:` would couple the release to smoke through `needs:`.
-- [#490][issue-490] (STANDUP has no repo-creation step) is complete on all four suggestions. [`STANDUP.md`][standup] carries a new section 0A, "Hand Over What Only the Maintainer Can Supply", listing the repository, the installed App, the App secret values in both stores, and every declared publish credential and environment. It states that a repo with no remote is not partially stood up but not started, and that a blocking prerequisite is escalated the moment it is found rather than carried, which is the failure mode the issue diagnosed in the agent's own task list. Step 4 now opens with `gh repo view` and carries the ruleset ordering constraint that the issue asked for.
-- [#489][issue-489] (Blog carry findings) is closed on all six items by the maintainer's own status table, five fixed and one resolved as needing no change. The single piece of follow-through it leaves is the `repo-config/configure.sh` re-vendor, which is already carried by the re-vendor entry below rather than by this issue.
-- [#379][issue-379] (Financial-Modeling fidelity findings) is dispositioned on all six items, and the manifest gap the follow-up raised was fixed by adding `repo-config/configure.sh` and `repo-config/settings.json` to [`spec/files.json`][files]. What holds it open is a downstream acknowledgement and that repo's own re-vendor, neither of which is hub work.
-- [#353][issue-353] (`.editorconfig` relaxes all analyzers) is done hub-side, and the tree confirms it, since `dotnet_analyzer_diagnostic.severity` no longer appears in `.editorconfig`. What holds it open is the downstream re-vendor across six C# repos, sequenced in the issue so PhotoCleaner's 362 sites do not gate the other five. That is cross-repo work needing the maintainer to name the repos.
+- **[#509][issue-509], the PhotoCleaner spec questions.** Complete on all five items.
+  - **Fixed by** - Several changes, named per item.
+  - **Checked** - `develop` at `1ed0cc8` on 2026-08-03.
+  - **Closing evidence** - Item 1, [`.github/copilot-instructions.md`][copilot-instructions] reads that most of [`GOVERNANCE.md`][governance] is universal fleet law and describes [`AGENTS.md`][agents] as the thin router. Item 2, [`CODESTYLE.md`][codestyle] "Markdown and Spelling" names the two HTML detail elements as allowed, matching [`.markdownlint-cli2.jsonc`][markdownlint]. Item 3, [`spec/readme-structure.md`][readme-structure] states the private-repository behavior outright. Item 4, the same file says the `HISTORY.md` mirror rule lives in [`CODESTYLE.md`][codestyle], which every repo carries. Item 5, [`WORKFLOW.md`][workflow] D2.2 reads that the check exits early while the job still reports success, and spells out why a job-level condition would couple the release to smoke.
 
-## Gate Honesty
-
-The gates in [`scripts/`][scripts] are hub-only and are the fleet's main defense against agent-authored drift, so a gate that reports clean without having read anything is the worst failure available here. The `gh-write-guard` hook in [`host-setup/agent-safety/`][agent-safety] is grouped with them, since it is the same kind of instrument even though it ships per host rather than per repo. These entries are ordered so the scope floor lands before anything relies on a clean verdict.
-
-- Make [`prose_lint.py`][prose-lint] assert a floor on its own scope, applying to itself the rule [`GOVERNANCE.md`][governance] already states: a gate that finds nothing is indistinguishable from a gate with nothing to find. A `--diff` run that resolves a non-empty diff and then matches **zero** files has almost certainly failed to scope rather than found a clean change, so it should say so instead of exiting 0. One session produced four separate routes to that same false clean: an unresolvable base widening to a whole-tree scan, a multi-line `paths` input read only to its first newline, a diff taken in one repository while scanning another, and a path under no repository at all. Each was fixed with its own guard, which is the wrong shape, because the fifth route will need a fifth guard and will be found the same way the first four were, by a reviewer rather than by the gate. A floor assertion covers the family. Note the honest limit before building it: a change touching only files the gate does not read (an image, a lock file) legitimately scopes to zero, so the assertion compares against the diff's own file list rather than against zero alone. This lands first, because every entry below it produces verdicts that are only worth reading once the gate can prove it read something.
-- Clear the [#519][issue-519] prose backlog, starting with `catalog/snippets/**`. Two of the four changes that issue planned have already landed and its headline numbers are stale, so re-measure before quoting anything from it. `comment-wrap` and `comment-case` are now in `DEFAULT_RULES`, and `reports/` is now exempt as a generated tree, which is why the current figures are **559** whole-tree under the default rules and **184** under `catalog/snippets` alone rather than the 668 and 119 the issue records. The whole-tree figure is the one that moves, having been 534 when this entry was written and 520 by the time [#570][issue-570] scoped the semicolon exemption to the sentence it lives in, which reported 44 semicolons the rule had been silent on. Re-measure it rather than quoting it, since a fix to the gate moves it as readily as a fix to the prose does. The snippets lead the fix order for the reason the issue gives, that a non-conformant snippet seeds its violations into every repo that adopts it and the downstream repo is then flagged for content it was handed. What remains undecided is whether the gate itself becomes a carried file rather than a hub-only one, which is the same question the entry below on hub-only machinery asks from the other direction.
-- Gate the pattern-detectable half of the representative-data rule in [`prose_lint.py`][prose-lint], meaning an absolute home path (`/home/<name>`, `/Users/<name>`, `C:\Users\<name>`) or a bare drive letter sitting in committed prose, a code comment, or a fixture. [`GOVERNANCE.md`][governance] "Representative Data in Agent-Authored Text" states the rule and says why a check is a floor rather than an answer, so the check is introduced as covering the easy half or it gets read as closing the rule, which is the specific way it would make things worse. Three things to settle when writing it. The exemption carries the whole burden, since the rule's own wording, the `host-setup/` docs, and the audit's examples all quote path shapes in order to describe them, and a wrong exemption hands out a work list that damages correct documents. The leak that motivated the rule was in a pull request comment, which no committed-file linter reads at all, so say what surface the gate covers rather than letting its name imply the rule. And a home path in an operational repo's runbook may be the literal path an operator types, which is the repo's own content rather than an agent quoting the maintainer's environment, so decide whether the finding is scoped by file, by repo type, or left for the author to judge.
-- Teach the `sha-pin` check in [`repo_gate.py`][repo-gate] to verify a pin **resolves**, not merely that it is shaped like a SHA. Forty hex characters is a format any fabricated string satisfies, and an agent hand-writing a plausible SHA into a workflow is a real failure mode rather than a hypothetical one. A resolvability check also catches the neighboring case, a pin whose commit was reachable only from a branch that has since been squashed and deleted, which breaks a downstream gate long after the change that caused it. Scope the network call to same-owner repositories, where the fleet's own actions live, and skip rather than fail when the host is offline so the local gate stays usable. Note that the existing `gh-write-guard` hook cannot cover this, since it watches Bash and an editor tool writing the same string into a file never reaches it.
-- Add a check that a pull request's **description** does not contradict its own branch. Three stale descriptions in one session generated six review findings between them, each one a reviewer noticing that the body named a commit, a branch, or a behavior the branch no longer carried. The cheap and precise form is to extract SHAs and `uses:` refs quoted in the body and confirm each still appears in the head tree, since those are the claims that go stale silently and the ones a reviewer actually catches. Prose claims are out of scope, and deliberately so: judging those needs a similarity heuristic, which [`spec/section-model.md`][section-model] already rejects for exactly the reason it would fail here.
-- Reconsider whether the pre-commit hook should run the doc gates now that they are diff-scoped. [`scripts/README.md`][scripts] records the current decision and its reason, that doc linters stay out of the hook so it stays fast, and that reason was sound when the only mode was a whole-tree sweep. A `--diff` run reads the lines one commit touches and finishes in about a second, so the trade has moved. The failure it would prevent is the most repeated one on record: comment sentences wrapped across lines, caught by CI or by a reviewer after the commit rather than before it, over and over within a single session. Weigh it against the standing preference for a fast hook, and against the risk of a hook that runs the gate from the wrong directory, which is its own false clean.
-- Audit the fleet's shell surface by size and branching, and decide per script whether Python with unit tests is the cheaper form. The evidence is the review record rather than a language preference: a non-trivial shell script earns findings round after round, while every gate under [`scripts/`][scripts] carries a `test_<script>.py` beside it and converges in one or two. `repo-config/configure.sh` and `host-setup/agent-safety/install.sh` are the two worth measuring, and the measure is lines, branch count, and the review rounds each has actually cost, not a general claim about the two languages. Two constraints bound the answer before anything is rewritten. A bootstrap script runs before anything is installed, so an installer that needs the Python it exists to install is not a rewrite worth having, which protects `install.sh` more than it protects `configure.sh`. The constraint that used to bound `configure.sh` has lifted, since it is hub-hosted rather than carried and changing its form is now one edit rather than a fleet re-vendor, so it is the cheaper of the two to rewrite and no longer has to wait on a sweep.
-- Move the commands that keep failing the same way into helper functions, rather than restating the rule they keep failing against, per [#580][issue-580]. Two are on record. A command run from the wrong working directory, which does not error and instead returns a confident answer about a different tree. And a GitHub node id typed by hand into a mutation, which the `gh-write-guard` hook correctly refused because the id had not come from a query in that same command. The second is the instructive one, since the rule it broke is stated plainly in [`GOVERNANCE.md`][governance] and in the host-level guidance, and an agent that had read both still reached for the literal, which says the shape of the operation is what fails rather than the agent's knowledge of the rule. A reply-and-resolve helper in [`pr_review.py`][pr-review] would take a pull request number and a finding, query the thread ids itself, and never put an id anywhere a hand could type one, which removes the failure instead of detecting it. The dependency it was waiting on is met, since [`GOVERNANCE.md`][governance] "Hub-Hosted Tooling" states how a repository reaches a hub script, so a helper added here is runnable from every repository the day it lands.
-- Fix the newline parsing in [`gh-write-guard.py`][write-guard], where `_git_subcommand_arglists` ends a `git push` argument list at `&&` but not at a newline, so every token on a later line of the same command is read as a refspec. Measured against the installed hook, `git push -u origin revendor/x` alone resolves to the one branch, while the same push followed by a newline and `gh pr create` with a base of `develop` resolves to five, meaning `revendor/x`, `gh`, `pr`, `create`, and `develop`. The `&&` form resolves correctly, which is what isolates the defect to the newline case. The direction of the error is over-blocking rather than under-blocking, so it is a usability defect rather than a safety hole, and that is exactly why it is worth fixing rather than tolerating: the denial tells the agent it is attempting a direct push to a protected branch that only lands by bypassing a rule with admin power, when the push targets an ordinary feature branch. An agent that believes the message either escalates a push needing no escalation or goes looking for a way around the guard, and teaching a safety hook to cry wolf is how it stops being read. Note the fix reaches every host only when `host-setup/agent-safety/install.sh` is re-run, so it lands with the rollout work in [#365][issue-365] rather than ahead of it, and the entry to write alongside the fix is a self-test case for the newline form, since the existing suite covers the `&&` form and passed throughout.
-
-## Carried Content and Propagation
-
-Everything here changes a file the fleet holds a copy of, so each entry costs a hub edit plus a sweep, and the sweep is the part that gets skipped.
-
-- Re-vendor the changed `verbatim` content across the fleet, which is one sweep covering five files. `repo-config/configure.sh` is carried `verbatim` with `appliesTo: "*"` and the hub swept it to one sentence per line. In `AGENTS.md`, "Context and Delegation Discipline" carries the wait rule's failure clause and "Where the Rules Live" carries a row for the new section named below. In `GOVERNANCE.md`, "Verification Discipline" carries the rule that a launched process is not a result, "PR Review Etiquette" carries the five outcomes that close a finding, "Repository Boundaries and Write Safety" carries the rule that a refused write is reported rather than re-shaped, and "Representative Data in Agent-Authored Text" is an entirely new carried section that no downstream repo holds, which the audit reports as a missing section rather than as drift. Three further `GOVERNANCE.md` sections differ by a single word each, "Documentation Style Conventions", "Communicating with the User" and "Repository Details", where the format's name was capitalized to the convention `CODESTYLE.md` "Markdown and Spelling" now states, so they are byte-mismatched for a reason a reader of the diff would otherwise call cosmetic. Two comment lines in `.markdownlint-cli2.jsonc` took the same capitalization, and that file is `verbatim` and `whole`, so every downstream copy is byte-mismatched on a config nothing else changed about. `CODESTYLE.md` carries the new item and is the fifth file, at `intent` rather than `verbatim` fidelity, so it reaches the fleet as a rule each repo adopts in its own copy rather than as bytes to match, and the same mixed spelling is waiting in every downstream tree. Every repo already holding a copy of a changed section is byte-mismatched against the hub until it takes the new one, which the audit reports as stale rather than modified. This sweep is also the follow-through [#489][issue-489] and [#379][issue-379] were waiting on, and the `.editorconfig` line in [#353][issue-353] rides the same visit to each repo. Regenerate [reports/divergences.md][divergences-report] before using it as the work list, since the committed copy is dated 2026-07-22 and therefore predates the router split, which shows in it naming "Repository Boundaries and Write Safety", "Git and Commit Rules" and "Verification Discipline" as `AGENTS.md` sections when all three now live in `GOVERNANCE.md`. A stale ledger is the same hazard as a stale exemption, in that it hands out a work list measured against a tree that no longer exists.
-- Drop the unused `GITHUB_TOKEN` grants from the merge-bot workflow, per [#521][issue-521], which the tree confirms is still open, since all four jobs still carry `contents: write` and `pull-requests: write` while every write in the file authenticates with the App token. The finding is least privilege on the highest-blast-radius shape in the fleet, a `pull_request_target` workflow holding an App private key, where the grant is not exploitable today only because no step consumes it. Three things to settle: whether to drop the job-level blocks or set a workflow-level `permissions: {}`, whether the audit should compare permissions at all given the file is `interface` fidelity with only a `requiredJobKeys` contract, and the re-vendor, since every repo carries the file. Note that [`spec/files.json`][files] now declares this workflow at `appliesTo: "*"`, which closes the separate gap [#456][issue-456] raised, that D8.1 graded a file the file spec never required.
-- State the rule that an agent never assumes a Docker image is present locally, however recently it pulled one, because a background prune can remove an image between two commands of the same session and the run then fails on something that worked minutes earlier. The prescription is the always-pull flag by default, and an explicit `docker pull <image>:<tag>` before use where the flag does not apply. The four documented lint invocations already carry `--pull=always`, in [`GOVERNANCE.md`][governance] "Running the Linters Locally", mirrored in [`OPERATIONS.md`][operations] and both VS Code task snippets, so what is missing is the rule rather than the one-liners: an agent composing an ad-hoc `docker run` drops the flag precisely because it believes the image is already cached. Two things to settle when writing it. Where it lives, since that section is scoped to the four lint tools while the rule covers any container an agent starts, which argues for placing it with the Docker or verification guidance instead, and whether it is carried to the fleet, since every repo runs the same images from the same instructions. Note the limit before writing it, so the flag does not read as the whole answer: `docker run` against a registry tag re-pulls an absent image on its own, so the cases that actually break are a locally built tag with no registry to pull from, and any command that branches on the image being present (`docker image inspect`, `docker images`) rather than simply running it.
-- Retire the downstream `repo-config/configure.sh` copies, which is the sweep the [#580][issue-580] decision leaves. [`GOVERNANCE.md`][governance] "Hub-Hosted Tooling" settles where a carried file may name hub machinery, and it settles it in the third direction the entry below proposed rather than either of the two this entry originally offered: the hub hosts the tool, a carried rule names it as the hub's, and no repository holds a copy. The manifest entry is gone from [`spec/files.json`][files], so nothing asks a repo for the file and nothing reports its absence, which makes this a visit-ordered chore rather than a gate. Delete the copy as each repo is next worked on and run the hub's script against it by name. For the size of the sweep, regenerate [reports/divergences.md][divergences-report] rather than reading the committed copy, which predates this decision and splits the carriers into a matching set and a divergent one under a re-vendor disposition that no longer applies to either. The ledger entry in [`spec/divergences.json`][divergences] carries the per-repo detail under the new `retire` disposition.
-- Define the fleet's own vocabulary somewhere a repository with no history will find it, per [#579][issue-579], because the words a request is phrased in are defined nowhere it can read. **Hub** is used throughout these docs and in every request asking a repository to reconcile or audit itself against the canonical, and no file states that it means this repository, so a repository carrying no instruction set has to be told what the hub is, where it lives, and which file to open, by hand, each time. The review loop has the opposite shape of the same problem: [`GOVERNANCE.md`][governance] "Expected Review Loop" states the procedure precisely and never presents its name as the way to ask for it, so every request improvises a phrasing and the scope an agent reads out of it moves with the wording. A defined term is what makes "close the review loop on #123" a complete instruction. Two things to settle. Where the definitions live, since the natural home is the byte-locked Fleet Bootstrap section of [`AGENTS.md`][agents] and a repository with no carried instruction set is precisely the one that does not have it, which leaves the hub's own `README.md` as the only surface a stranger to the fleet reads first. And whether the entry point is named per task rather than per repository state, since the bootstrap section already routes correctly and the gap is that the router is unreachable rather than that it is wrong. Note that an edit to the byte-locked section lands with [#552][issue-552], which already holds that section open, rather than as a change of its own.
-- Revisit [#305][issue-305], which asks for a propagation path for the rule docs and is the oldest open issue here, because most of the machinery it asked for has since been built and the issue has not been re-scoped to match. The fidelity model, the `spec/files.json` manifest, [`spec/divergences.json`][divergences] with its generated [reports/divergences.md][divergences-report], and [`AUDIT.md`][audit-doc] section 10 together give the canonical-versus-adapted split and the audit path the issue proposed. What is genuinely still missing is the push half, since every one of those detects drift while the sweep that fixes it is manual, which is exactly the entry above. Either re-scope the issue to the push half or close it against the entry above and the audit-automation entry below.
-- Carry on reducing the surface that is copied downstream, now that the model is settled rather than open. [`GOVERNANCE.md`][governance] "Hub-Hosted Tooling" answers the three questions this entry held. What is vendored is the content a repository is audited against and the configuration that describes it, what is reached is machinery holding nothing per-repo. A tool is reached as a hub checkout read at `main` and fetched immediately before use, where CI reaches the same rules through a composite action pinned to a commit SHA, which is the action-pinning rule applied unchanged. And an unreachable hub means the tool did not run, which is reported as not run rather than worked around, since a hand-rolled substitute is the duplicated effort the model exists to end. `repo-config/configure.sh` is the first file moved across and the entry above is its sweep. What remains is the next candidate rather than the decision: the reusable-workflow entry below is the same model applied to CI, and the carried `AUDIT.md` and `spec/secrets.json` are the two remaining carried files worth measuring against the test, since each is adapted per repo today and the question is how much of each is genuinely per-repo.
-- Investigate replacing copy-pasted workflow content with cross-repo reuse, now that this repo is public. A public repository's composite actions and reusable workflows can be consumed by any other repository regardless of owner type, so the organization account this pattern was assumed to require is not needed, and the constraint that shaped the current vendor-everything model no longer holds. The catalog under [`catalog/snippets/workflows/`][workflows] is copied into each repo today, which means a fix to a shared job is a sweep across the fleet rather than one edit here, and it is the mechanism by which a defect in a snippet seeds itself into every repo that adopted it. Scope the investigation to which jobs are genuinely identical across repos against which only look similar, since a reusable workflow that needs a long input list to cover per-repo variation is worse than the copy it replaces. The ref policy is settled rather than open, since [`GOVERNANCE.md`][governance] "Hub-Hosted Tooling" states that CI reaches hub code as an action pinned to a commit SHA, which is "Action pinning" applied unchanged, and [`.github/actions/prose-gate/action.yml`][prose-gate] is the worked example of it. Note that `uses:` does not accept expressions, so a per-branch ref cannot be selected in the workflow file and any branch-dependent behavior belongs inside the consumed action instead.
-- Make a table of contents standard for a long document rather than for the README alone. [`spec/readme-structure.md`][readme-structure] fixes one at README position 4 and [`GOVERNANCE.md`][governance] states how it is generated and which headings it excludes, and no other file in the hub carries one, which leaves the three longest documents in the fleet without the thing that makes them navigable: `CODESTYLE.md` at 516 lines, `GOVERNANCE.md` at 421, and `WORKFLOW.md` at 298. Two things to settle. The threshold, stated in headings or lines rather than left to judgment, so the audit can check it and no repository is put in the position of arguing that its own document is short. And how it sits with the reference-link exception, since the four agent-instruction files keep inline links exactly because they are read one section at a time, which is the same property that makes a contents list worth having in them, and the generated list is already the one exception that rule carries. Note the mechanical constraint before adopting it, that the list is filled by the Markdown All in One extension on save, so a file nobody opens in the editor grows a stale contents list rather than none, and a stale one is worse than absent because it is read as current.
-- State that an operational repository still opens a pull request for a large or risky change, even though its model permits committing straight to `develop`, which is item 3 of [#578][issue-578]. [`GOVERNANCE.md`][governance] "Operational Repositories" grants the direct commit and says nothing about when to decline the grant, and `repo-config/operational/develop.json` carries only `deletion`, `non_fast_forward` and `required_signatures`, so nothing mechanical stands between an agent and a large unreviewed change landing on the live surface. The reason the grant exists is the one-line config edit that a review round costs more than it protects, and that reason stops applying well before a change gets large. Settle what counts as large, and prefer a stated shape over a line count, since the property that matters is whether the change can be read at a glance and reverted cleanly rather than how many lines it moved. Note that this stays guidance by construction, because adding a `pull_request` rule to the operational ruleset would withdraw the direct-commit grant that the whole model exists to give.
-- Say when an issue is closed by hand, not only that the closing keyword belongs on the promotion pull request, which is item 1 of [#578][issue-578]. [`GOVERNANCE.md`][governance] "Git and Commit Rules" already states that `Closes #N` fires only on a merge into the default branch and therefore goes on the `develop -> main` promotion, and downstream agents keep re-deriving that rule and reporting it as a discovery, which says it is being missed rather than that it is missing. What the rule genuinely does not cover is the case that produces the confusion, which is work complete on `develop` while a promotion is not imminent, leaving the issue open with nothing on it recording that it is done. The current text licenses a hand-close only once a promotion has merged without the keyword, which is the narrower case. Widen it to say that an issue is closed when the work is verifiably complete, citing the squash SHA that completed it, and that the promotion keyword is the automation for the common case rather than the only permitted route. [#552][issue-552] is the live example, fixed by the merge of [#572][pr-572] and open at the time of writing.
-- Say that the message carrying the clickable link comes **before** the prompt it accompanies, which is item 2 of [#578][issue-578] and which [`GOVERNANCE.md`][governance] "Communicating with the User" leaves unstated. The rule already gets the hard part right, that an interactive prompt renders neither a Markdown link nor a bare URL, so the reference inside it is a bare `#123` and the link goes in the message that accompanies it. It says accompanying rather than preceding, and a message emitted after the prompt is not read before the question is answered, which is the entire outcome the rule exists to produce. This keeps recurring in practice, so read the recurrence as the wording being underspecified rather than as the rule being ignored, which is the same diagnosis the entry above reaches about the closing keyword.
-
-## Audit and Spec Model
-
-- Teach the audit to see content sitting in the wrong file, per [#523][issue-523], which the tree confirms is untouched, since [`spec/audit.py`][audit] still checks file presence, declared-section presence, verbatim hashes, and workflow interface conformance and nothing that reads a heading against a destination. The case that found it is a repo whose `.github/copilot-instructions.md` carried 311 lines under nine headings that [`spec/section-model.md`][section-model] assigns to `ARCHITECTURE.md` and `OPERATIONS.md`, reported as a missing-file letter while the misplacement that caused it was invisible. The shape that fits the engine is structural, collecting the level-two headings of an `intent` file, subtracting the ones [`spec/files.json`][files] declares for it, and comparing the remainder against the headings other destinations declare. The similarity-based version is explicitly rejected by `section-model.md`, and a detector built on it produces findings whose remedy is to delete content. Four things to settle, all in the issue: whether an undeclared heading is a finding at all given a repo may add locally, whether the destination mapping becomes declared data rather than prose, whether it reaches the advisory `ARCHITECTURE.md`, and how many repos are affected, which is measured before the check is designed rather than after it starts reporting.
-- State what a `driftNote` may contain at the moment one is written, not only what happens to it once the deviation clears, and widen the check that guards it. [`AUDIT.md`][audit-doc] section 8 says a note records a current deviation and is deleted once resolved, which is a rule about a note's end of life and leaves an agent authoring one with no rule about its content. PhotoCleaner is the worked example, in [#537][pr-537]: asked to self-audit and reconcile its notes, the agent wrote a completion record ("baseline onboarding completed"), a historical fact (the date a past version first published), and a description of the repo conforming to the README spec. All three are prose about the past or about compliance rather than a current deviation, and none of them is what the field is for. Read that as an incomplete instruction rather than an agent ignoring one, since nothing it was given forbids any of the three. Two things to settle. The rule wants stating positively at authoring time, that a note names a deviation that is true right now and would still be true if nobody read it, so history, completion, and conformance are each out by construction, and a repo doing exactly what the spec requires earns no note at all. And the detector needs the same widening, because [`spec/audit.py`][audit] currently flags a stale note by matching words that assert *outstanding* work ("pending", "not yet", "missing", "behind"), which is the opposite polarity to all three of PhotoCleaner's notes, and it only runs that check when the repo audits clean, which PhotoCleaner did not until the round that found this. A guard that fires only on one polarity, and only in the state where the problem has already gone, cannot see the failure it exists to catch. Note the limit before building it, since it is the same limit the section model already records: judging whether a sentence describes a current deviation is a semantic call, so the honest target is the shapes that are mechanically recognizable, a past-tense completion verb and an explicit date among them, with the rest left to the rule.
-- Declare the canonical short description in [`registry/repos.json`][repos] instead of deriving it by parsing the README, which makes every check and every push deterministic. Today [`spec/audit.py`][audit] extracts the intro line after the H1 and compares the GitHub About panel and the Docker Hub short description against it, so the source of truth lives inside prose. That forces anything wanting the value to parse Markdown, and PhotoCleaner#32 shows the cost, since a workflow step that reads the intro at publish time needs nine guards against headings, block quotes, all four list markers, ordered lists, HTML, tables, code, links and the length cap, and every one of them fails the release rather than the tagline. Adding a `description` field turns the README intro into a third mirror rather than the source, so the audit compares all three against one declared value, the Docker workflow pushes a literal with no parser, and `repo-config/configure.sh` can set the GitHub About panel from the same field it already sets every other repository setting from. The 100-character cap stays, since Docker Hub's short description is still the tightest surface. Add the field to `registry/repos.schema.json` as well, which sets `additionalProperties: false`, and make it optional at first so the audit falls back to the README intro while repos adopt it one at a time. The disposition is recorded on [#509][issue-509], and the ask on the Docker repos is only that the parsing step is not propagated further while the field is pending.
-- Let the README intro carry more than the tagline, and say which line the mirrors actually take, per [#577][issue-577]. [`spec/readme-structure.md`][readme-structure] item 1 reads as though the canonical description **is** the paragraph after the H1, capped at 100 characters and link-free, and [`CODESTYLE.md`][codestyle] "Markdown and Spelling" then has `HISTORY.md` copy "the same intro paragraph" verbatim. Read together they forbid a README from saying anything further about itself above the fold, which is a real cost on a repository whose purpose needs a sentence of context, and the cap they enforce exists for Docker Hub's short description rather than for the reader. State the shape instead: the first line after the H1 is the tagline, it alone is bound by the 100-character link-free rule, and it alone mirrors to the GitHub About panel, the Docker Hub short description, and the `HISTORY.md` opening, with any further paragraph free prose that no mirror reads and no cap applies to. The audit changes with it, since it currently measures the first non-empty line and would otherwise start reporting a legitimate second paragraph. Note this is the same axis as the entry above, because declaring the description in [`registry/repos.json`][repos] makes every mirror read a field rather than parse a paragraph and settles the ambiguity by construction, so the two want deciding together rather than one after the other.
-- Rework [`spec/readme-structure.md`][readme-structure] to match the hand-crafted PlexCleaner README, which is the shape the maintainer wants, and make the result auditable rather than advisory. Four concrete divergences are already identified, measured against PlexCleaner `README.md`, this repo's `README.md`, and the current spec. First, the distribution bullet is labeled by deliverable: PlexCleaner ships executables and calls the channel **Binary Releases**, while the spec fixes the label as **Versioned Releases** for every repo, so the label belongs in a per-channel table rather than as one string. Second, the license shield sits in the top **Build Status** block here and at the very bottom of PlexCleaner, inside a closing `## License` section that reads `Licensed under the [MIT License]` followed by the shield, immediately before the link definitions. Third, the Release Notes section closes with `See Release History for complete release notes and older versions.` in PlexCleaner against `See Release History for the full history.` here, and the PlexCleaner form is the wanted one. Note that PlexCleaner writes that link inline, which the reference-style rule forbids, so adopt the wording and keep the reference form. Fourth, the channel bullets and their shields vary by deliverable, meaning GitHub binaries, Docker Hub, NuGet, and PyPI each carry a different bullet label and a different shield set, which is what a per-type table has to encode for the `readme-structure` audit dimension to check a repo against its own declared types.
-- Decide whether the canonical README section order follows PlexCleaner, which is a separate question from the four divergences above and affects every repo plus the `readme-structure` audit. PlexCleaner places **Questions or Issues** immediately after the Table of Contents, where the spec orders it ninth, and it carries sections the spec names nowhere, including Performance Considerations, Runtime Metrics, Custom Plugins, Testing, Development Tooling, Feature Ideas, and Sample Media Files. Under the recurrence rule in [`spec/section-model.md`][section-model] those last ones are correctly repo-specific and stay undeclared, so the open question is only the position of the sections the spec already names.
-- Declare locally-required secrets the way GitHub-stored ones are already declared, and make a gitignored `secrets/` directory the fleet standard that holds them. [`spec/secrets.json`][secrets] covers only the Actions and Dependabot stores, so a repo that deploys somewhere has no declared way to say what it needs at runtime, and the required set is discoverable only by reading the deploy. The pattern already runs in the fleet in two shapes: HomeAutomation-Config keeps a gitignored secrets directory of env files and Docker secret files, and ESPHome-Config keeps a gitignored `secrets.yaml` beside a committed `_secrets.yaml`. The committed file carries the required names with dummy values, so the shape of the requirement is in git while the values never are, which is the same split the GitHub side already gets from `requiredSecrets[]`. Blog needs it immediately, since it deploys on the proxmox host through HomeAutomation-Config's Docker Compose stack and carries the copy destinations and the internal URI. The hub carries neither the directory nor a `.gitignore` entry for one today, so adopting it here comes first. Note that the **GitHub** side has the same missing axis, surfaced by the `hugo` type: a deploy's credentials are per-environment GitHub Environment secrets and variables, `stores` is a closed enum of `actions` and `dependabot`, and `spec/audit.py` seeds `required_by_store` with those two keys and indexes it unguarded, so adding an `environments` value to the enum raises `KeyError` for every repo whose `publish[]` maps to that mechanism. The type landed with an optional `environments` block added to [`spec/secrets.schema.json`][secrets-schema] and described in `spec/secrets.json`'s note, so a repo that needs it may declare its per-environment names and the shape is legal rather than an invention. The hub's own `spec/secrets.json` carries no such block, having no environments of its own, and no tool reads one where it exists. That is honest but it is not a gate, so a clean audit says nothing about whether an environment is configured. Solving it properly means a store vocabulary that does not crash on an unknown key and a per-environment secrets and variables fetch, and it is the same axis as the local half above rather than a separate problem.
-- Canonicalize Python linter-config placement on `pyproject.toml`, since one cataloged repo uses a standalone `.ruff.toml` plus `pyrightconfig.json`. Track it as a drift finding and fix it downstream.
-- Populate [reports/][reports] for the cataloged repos that still have no audit, since a registry `status` of `cataloged` asserts a result that only a committed report evidences. Eight repos have one. This is paced by maintainer capacity rather than blocked on anything, since repos are brought up to spec as they are worked on, so the entry records the outstanding set rather than a defect.
-- Revisit automating the audit, which was explored and deliberately deferred, recorded here so the reasoning is not re-derived from scratch. Three shapes were considered: a scheduled hub-driven audit publishing each report as a workflow artifact, the same thing committing the report back the way the codegen bot updates its own files, and a pull-request hook in each downstream repo that audits itself against the current hub. Three things blocked all of them. Until the fleet reaches stasis with every repo onboarded, a scheduled run reports mostly noise, since a repo mid-onboarding is expected to be non-conformant. The hub has to be stable before downstreams can audit against it, because a hub change lands as fleet-wide findings the same day. And the downstream half is a catch-22, since a self-auditing pull-request hook is CI instrumentation the repos that most need it do not yet carry. The agreed outcome was the on-demand audit that [`AUDIT.md`][audit-doc] describes today. Worth reopening once the fleet is onboarded and the hub goes a stretch without carried-content changes, and the artifact shape is the one to try first, since it produces evidence without committing anything and so cannot generate review load while the noise level is still unknown.
-
-## Onboarding and New Types
-
-- Give [`STANDUP.md`][standup] an explicit branch-bootstrap step, because it currently says nothing about how `main` and `develop` come into being and an agent therefore commits onto whichever branch it finds. Note that section 0A now covers the human-gated prerequisites from [#490][issue-490], so this is the remaining half of that gap rather than the whole of it. The sequence that avoids every cleanup problem is: create `main` and leave it carrying nothing, create `develop` from `main` and leave it carrying nothing, create the first feature branch from `develop` and do the whole standup there, add the repo to GitHub and apply the repo config while still on that branch, then open a normal pull request to `develop` when the repo is ready. Nothing ever has to be cleaned off `main` or `develop`, because nothing ever reached them without review. Note the mechanical wrinkle when writing this up: a git branch cannot exist without a commit, so "carrying nothing" means exactly one signed empty root commit (`git commit --allow-empty`), and section 0's signing window applies to that commit like any other. The alternative of committing onto `develop` and squashing afterwards does not work: `non_fast_forward` is set on both `develop` payloads, so the history cannot be rewritten without disabling the ruleset, and Blog was correctly blocked when it tried. Worth stating that the protection is uneven, since a `release` repo's `repo-config/develop.json` carries a `pull_request` rule that blocks a direct commit outright, while `repo-config/operational/develop.json` carries only `deletion`, `non_fast_forward` and `required_signatures`, so on an operational repo a direct commit succeeds and only the instruction stands between the agent and an unfixable history. The reason it matters on a public repo is that the exploratory standup history is where PII, secrets and noise commits accumulate, and squashing a feature branch is the one chance to leave them out.
-- The static-site generator type from [#456][issue-456] and [#558][issue-558] has landed as `hugo`, with the deploy destination as the `self-hosted` publish target and the `deploy-ssh` mechanism. Correct the record while reading this, because three details the intake predicted are wrong against what Blog actually runs, and planning from the prediction would encode requirements the repo does not meet: the theme is **vendored with no recorded upstream ref**, not a Dependabot-tracked submodule; the generator is **pinned by version and SHA256**, not run at latest; and the deploy is a **separate dispatch** from the GitHub release, not a tag cut last after the live check. What was settled and did hold: the deploy is a publish, the type is named for the generator with the generic checks phrased so they do not name it, and the URL parity gate asserting a floor on the golden list length before comparing is the check of record. What remains: promote the generator-agnostic `hugo.*` checks to a shared type when a second generator arrives, which `spec/type-model.md` "Generators" makes a registry edit by construction, and decide how a `hugo` repository is meant to carry its theme at all, which the type declares nothing about today. The candidates are the vendored copy Blog actually ships, a submodule pinned to an upstream ref, and a separate fleet-owned repository the site consumes, and they differ along exactly the axis the carried-content entries above are about, since a vendored theme is a copy that goes stale with nothing detecting it and a submodule is a pin that Dependabot can see. Settle it as a question about the type rather than about Blog, because whatever is decided becomes the type's contract and the second generator inherits it. Also still true and stated nowhere else, the `copilot_code_review` rule in both ruleset payloads does not gate a merge today because gated Copilot review is an invite-only beta, which deserves a sentence near the merge gate so no repo reads the rule as the enforcement and relaxes the manual discipline actually holding the line.
-- Finish onboarding hardening (from [#310][issue-310]): make the [`AUDIT.md`][audit-doc] audit a required onboarding step and run the per-type cold-start self-tests tracked in [reports/conformance-matrix.md][matrix]. `STANDUP.md` is already in place.
-- Add a linter-only Python project type for codegen and boilerplate Python, code that runs during another tool's build to emit generated source (for example ESPHome codegen that produces enriched C++ at compile time), so it ships no unit tests and no coverage and needs only the linter. Keep it distinct from the existing `python` type, which is utility code that can and should carry unit tests and coverage, as in PlexCleaner. Until it exists, ESPHome-Config stays `source-only` and its `+python` reclassification is deferred, so accept its one outstanding validation finding meanwhile.
-- Add a fleet-standard clang-format config for the `cpp` type, a catalog snippet plus a CODESTYLE C++ section defining the style, the C++ analogue of the shared ruff config, so the `cpp` clang-format check references one canonical style rather than each repo inventing its own. Base it on the ESPHome-Config agent's proposed `.clang-format`.
-
-## Host and Environment
-
-- State the rule that an agent works only in its own checkout, in its own directory, on its own feature branch, and never writes to a repository because it happened to be on disk. A clone left in a scratch directory is convenient exactly when it is most dangerous, since the operations that cross the boundary are the ordinary ones rather than the reckless ones. A blanket `git add -A` sweeps another agent's uncommitted work into your commit, a `git reset --hard` deletes it outright, and a branch switch carries it along into a change it has nothing to do with. This session produced the first of those: a blanket add swept a second agent's in-progress registration work into an unrelated commit and pushed it, and the work survived only because it was rescued and restored by hand afterwards. Care does not make a shared working tree safe, because every one of those commands is correct in isolation and wrong only because of who else is in the directory. Two things to settle when writing it. Whether the rule is stated as one checkout per agent or one checkout per task, since a single agent moving between two repositories in one directory hits the same hazard as two agents sharing one. And what an agent does when it finds a foreign checkout anyway, where the answer is to leave it alone and clone its own rather than to work carefully in it.
-- Extend the same rule to **reading**, which is the more common case and the easier one to think is harmless. A clone on disk is not the branch it names. It is whatever that clone was last fetched to, so reading it to answer what a repository carries answers a different question, which is what that clone last saw. The failure is silent, because the read succeeds and returns a plausible answer. This session produced two instances. A detection pass over local clones reported one repository as still drifted on a file whose fix had already merged, because that clone's refs predated the merge, and the correction came from a fetch rather than from the read. A second pass then reported a repository as missing a file it does carry, because the local checkout sat on a branch behind the one being measured. State the working practice with the rule: read the live ref through the API where a claim will be acted on, or fetch immediately before reading, and name the ref and commit in any finding derived from a local read so a reader can tell what was actually measured. Note the exception worth keeping, which is that a local clone is the right tool for anything needing history or a build, since those are what an API read cannot give.
-
-- Finish the [#365][issue-365] rollout, which has two halves and one of them is invisible from here. Four machines are still unchecked, WSL2 Ubuntu, the MacBook Air, and both ThinkPads, plus any headless or cron environment that runs Claude Code with the token. A ticked row means the `CLAUDE.md` text and not the hook, since only running `host-setup/agent-safety/install.sh` deploys both layers, and the proxmox host proved that distinction the hard way by carrying the documentary half alone for eight days on the very machine where the incident originated. Note also the follow-up left open on this host and never applied, that the superseded `## Safety rules` section from [#364][issue-364] still sits above the canonical `agent-safety v1` block in `~/.claude/CLAUDE.md`, so the two overlap. Removing the superseded section is a judgment call on a per-machine file, which is why it was surfaced rather than applied.
-- Fill in the remaining cells of the [#483][issue-483] host tooling matrix, which is the reference that makes the per-machine chore above repeatable, so the two close together rather than either alone. Linux, Windows and WSL2 are filled in and verified. **macOS** needs someone on that platform, the **Proxmox** question is whether that host is a shell for agent work or also runs containers, which decides whether `docker` is required there at all, and the engine-inside-the-distro variant of the WSL2 `docker` cell is still unverified since that host only exercised the Docker Desktop integration. Honor the issue's own rule when filling a cell, that an unverified install command is worse than a blank, because a blank prompts a question while a wrong command produces a broken host and a false sense that setup succeeded.
-
-## Fleet Chores
-
-- Measure review rounds against pull request size, and decide what the number licenses. The recent loops suggest a large change earns a different finding every round while a small one converges in one or two, which would make change size the lever on review cost rather than the reviewer's thoroughness, and would argue for splitting a change before review rather than discovering it through five rounds of findings. The data needs no new instrumentation, since the review history already carries it: for each recent pull request, record the diff size in files and lines, the number of rounds, and the findings per round, counting suppressed findings alongside threaded ones because they are the majority of what these loops produce. The outcome worth having is a threshold [`GOVERNANCE.md`][governance] can state in the branching or review guidance, expressed as the size at which a change is split rather than as advice to keep changes small. Note two confounds before drawing a line from the numbers. A large change is usually also a novel one, so size and unfamiliarity move together and the record should note what kind of change each was. And a round that finds something new is not evidence of a problem by itself, since a round that finds something new is the reviewer working, so the metric to watch is findings that a smaller first cut would have surfaced earlier rather than findings per round on its own.
-- Try local defensive-review subagents as a first pass before the remote reviewer, and measure what the pass is worth. The remote loop is thorough and it is also where most of a session's tokens and wall-clock go, and it delivers its findings one round at a time, which is the slowest available way to learn that a change had five problems. A local pass prompted adversarially, one agent per lens rather than one general reviewer, would surface the mechanical half before the branch is even pushed. Scope the experiment to what it can actually prove: run both for a stretch, record which findings the local pass caught that the remote reviewer then raised anyway, and keep it only where that overlap is large enough to shorten the remote loop rather than to add a step in front of it. Note the trap that makes this worth designing carefully rather than just trying. A local pass that finds nothing reads exactly like a clean change, and the next inference from there is that the remote review can be skipped, which is the one outcome the review contract exists to prevent, so the local pass is an input to the loop and never a substitute for the round the merge gate requires.
-- Record a disproved review finding somewhere the next round will read it, so the same proof is not built twice. [`.github/copilot-instructions.md`][copilot-instructions] already says the reviewer is sometimes factually wrong, already requires a decline to carry evidence, and already keeps a list of known non-working request paths, which is the shape this wants. What it has nowhere to put is the finding itself, so a claim disproved against a downloaded binary in one session is argued from scratch in the next. The worked example is the claim that `keys_unsorted` needs jq 1.6, disproved against a 1.5 binary on which `keys_unsorted` works and `walk/1` does not. Note the reason this is not simply a list to append to, which is that a disproof is true of one tree at one revision, so an entry outliving the code it was proved against becomes a reason not to check, and that is strictly worse than re-proving it. Each entry therefore records what was tested and against which revision, and an entry whose subject changes is deleted rather than edited.
-- Refresh the README, which has gone stale, and evaluate a lower-maintenance structure, for example a per-section index that points into each doc with a one-line description, keeping the README as the adoption and audit-instruction entry point with pointers to the other docs. A per-section index trades brevity for a sync obligation, since it must track what the docs contain.
-- Apply the operational `pull_request` trigger fix from [#585][issue-585] to the four operational repos, `HomeAutomation-Config`, `ESPHome-Config`, `HomeAssistant-Config` and `Vantage-Config`, each of which currently triggers its lint workflow on `pull_request` to `main` only and therefore runs nothing at all on a PR into `develop`. The hub change is prose and spec, so it fixes no downstream repo by itself, and the downstream edit is one line per repo, widening the trigger to `branches: [ main, develop ]`. Two things to check per repo rather than assume, since the prescription is prose and each repo owns its YAML. Confirm the workflow really does trigger on `main` alone before editing, because a repo that already names both is conformant and needs no PR. And leave the ruleset alone: the required check stays on `main`, so nothing is added to `repo-config/operational/develop.json`. The evidence that this is not hypothetical is `HomeAutomation-Config` PR #34, which merged into `develop` with an empty check list and a `CLEAN` mergeable state. Cross-repo work, so it needs the maintainer to name the repos.
-- Adopt the OCI annotation keys (`org.opencontainers.image.*`) for Docker image metadata across the Docker repos, replacing the ad-hoc and `org.label-schema.*` labels (from [#363][issue-363]).
-- Sweep `ManagePackageVersionsCentrally` placement to `Directory.Packages.props` fleet-wide, since PlexCleaner sets it in `Directory.Build.props`, off the CODESTYLE canonical.
-- Consider renaming this repo to reflect the audit-catalog identity, which updates badge and link URLs across the fleet.
+- **[#490][issue-490], the standup having no repo-creation step.** Complete on all four suggestions.
+  - **Fixed by** - The section 0A addition.
+  - **Checked** - `develop` at `1ed0cc8` on 2026-08-03.
+  - **Closing evidence** - [`STANDUP.md`][standup] carries section 0A, "Hand Over What Only the Maintainer Can Supply", listing the repository, the installed App, the App secret values in both stores, and every declared publish credential and environment. It states that a repo with no remote is not partially stood up but not started, and that a blocking prerequisite is escalated the moment it is found. Step 4 opens with a repository read and carries the ruleset ordering constraint.
 
 <!-- Issues -->
 
@@ -102,9 +558,10 @@ Everything here changes a file the fleet holds a copy of, so each entry costs a 
 [issue-519]: https://github.com/ptr727/ProjectTemplate/issues/519
 [issue-521]: https://github.com/ptr727/ProjectTemplate/issues/521
 [issue-523]: https://github.com/ptr727/ProjectTemplate/issues/523
+[issue-550]: https://github.com/ptr727/ProjectTemplate/issues/550
 [issue-552]: https://github.com/ptr727/ProjectTemplate/issues/552
+[issue-557]: https://github.com/ptr727/ProjectTemplate/issues/557
 [issue-558]: https://github.com/ptr727/ProjectTemplate/issues/558
-[issue-570]: https://github.com/ptr727/ProjectTemplate/issues/570
 [issue-577]: https://github.com/ptr727/ProjectTemplate/issues/577
 [issue-578]: https://github.com/ptr727/ProjectTemplate/issues/578
 [issue-579]: https://github.com/ptr727/ProjectTemplate/issues/579
@@ -113,8 +570,8 @@ Everything here changes a file the fleet holds a copy of, so each entry costs a 
 
 <!-- Pull requests -->
 
-[pr-537]: https://github.com/ptr727/ProjectTemplate/pull/537
 [pr-572]: https://github.com/ptr727/ProjectTemplate/pull/572
+[pr-588]: https://github.com/ptr727/ProjectTemplate/pull/588
 
 <!-- Repo -->
 
@@ -130,10 +587,13 @@ Everything here changes a file the fleet holds a copy of, so each entry costs a 
 [governance]: ./GOVERNANCE.md
 [markdownlint]: ./.markdownlint-cli2.jsonc
 [matrix]: ./reports/conformance-matrix.md
+[merge-bot]: ./.github/workflows/merge-bot-pull-request.yml
 [operations]: ./OPERATIONS.md
 [pr-review]: ./scripts/pr_review.py
+[project-types]: ./spec/project-types.json
 [prose-gate]: ./.github/actions/prose-gate/action.yml
 [prose-lint]: ./scripts/prose_lint.py
+[readme]: ./README.md
 [readme-structure]: ./spec/readme-structure.md
 [repo-gate]: ./scripts/repo_gate.py
 [reports]: ./reports/
@@ -142,6 +602,9 @@ Everything here changes a file the fleet holds a copy of, so each entry costs a 
 [secrets]: ./spec/secrets.json
 [secrets-schema]: ./spec/secrets.schema.json
 [section-model]: ./spec/section-model.md
+[snippets]: ./catalog/snippets/
 [standup]: ./STANDUP.md
+[type-model]: ./spec/type-model.md
+[workflow]: ./WORKFLOW.md
 [workflows]: ./catalog/snippets/workflows/
 [write-guard]: ./host-setup/agent-safety/gh-write-guard.py

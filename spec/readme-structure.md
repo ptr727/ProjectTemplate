@@ -38,7 +38,7 @@ Shields are not a top-level section. They live under **Build and Distribution** 
 
 ## TODO.md
 
-A repo's running backlog lives in a root `TODO.md`, and **a README carries no backlog section**. The README is the adoption surface a reader lands on, so open work does not belong in its section order, and the backlog changes on a different cadence from everything around it. `TODO.md` opens with a `# TODO` heading and one line saying what it holds, then a flat bullet list, each item stating the work and the reason it is owed.
+A repo's running backlog lives in a root `TODO.md`, and **a README carries no backlog section**. The README is the adoption surface a reader lands on, so open work does not belong in its section order, and the backlog changes on a different cadence from everything around it. `TODO.md` opens with a `# TODO` heading and an intro saying what it holds, then a bullet list, each item stating the work and the reason it is owed. That is the minimum rather than the shape, so a backlog long enough that selecting from it is itself work groups its items under headings and says on each what it costs, and a short one stays a flat list. This repo's own `TODO.md` is the worked example of the grouped form and is not a template every repo adopts, since a five-line backlog needs no selection procedure.
 
 The file is the declared destination rather than a required file, the same footing as `ARCHITECTURE.md`. A repo with no backlog carries no `TODO.md`, and a repo with one puts it here rather than inventing a location. Work already tracked as an issue belongs in the issue, so an entry here is either not yet filed or is the local pointer to a filed one.
 
