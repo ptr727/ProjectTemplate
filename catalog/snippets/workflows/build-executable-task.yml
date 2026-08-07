@@ -8,13 +8,13 @@ on:
         required: false
         type: string
         default: ''
-      # Logical branch driving build configuration (`main` => Release, else Debug). Required (no fallback) so the
-      # develop leg of the publisher's matrix isn't mislabeled.
+      # Logical branch driving build configuration, where `main` gives Release and anything else Debug.
+      # It is required, with no fallback, so the develop leg of the publisher's matrix isn't mislabeled.
       branch:
         required: true
         type: string
-      # Smoke mode: build a runtime subset (linux-x64 + win-x64) instead of the full matrix and skip the zip /
-      # artifact aggregation, for fast PR feedback.
+      # Smoke mode: build a runtime subset (linux-x64 + win-x64) instead of the full matrix.
+      # It also skips the zip and artifact aggregation, for fast PR feedback.
       smoke:
         required: false
         type: boolean
@@ -65,8 +65,8 @@ jobs:
             -property:InformationalVersion=${{ needs.get-version.outputs.AssemblyInformationalVersion }} \
             -property:PackageVersion=${{ needs.get-version.outputs.SemVer2 }}
 
-      # Branch-suffixed so both branches can build in one run without colliding. Skipped on smoke: the aggregation
-      # job is `!smoke`, so the per-runtime output would have no consumer.
+      # Branch-suffixed so both branches can build in one run without colliding.
+      # It is skipped on smoke, since the aggregation job is `!smoke` and the per-runtime output would have no consumer.
       - name: Upload matrix build artifacts step
         if: ${{ !inputs.smoke }}
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
@@ -76,8 +76,8 @@ jobs:
           # Consumed within this run by the aggregation job; minimize artifact storage.
           retention-days: 1
 
-  # Smoke builds only need the per-runtime compile to succeed, so skip the zip aggregation; the release job never
-  # runs on smoke, so no `release-asset-*` artifact is needed.
+  # Smoke builds only need the per-runtime compile to succeed, so skip the zip aggregation.
+  # The release job never runs on smoke, so no `release-asset-*` artifact is needed.
   upload-build-artifacts:
     name: Upload matrix build artifacts job
     if: ${{ !inputs.smoke }}
@@ -96,8 +96,8 @@ jobs:
       - name: Zip build output step
         run: 7z a -t7z ${{ runner.temp }}/Console.7z ${{ runner.temp }}/publish/*
 
-      # GitHub-release asset, uploaded under the `release-asset-<branch>-*` pattern that the `github-release` job
-      # collects. Branch-suffixed so the publisher can build both branches in one run without colliding on the name.
+      # GitHub-release asset, uploaded under the `release-asset-<branch>-*` pattern that the `github-release` job collects.
+      # It is branch-suffixed so the publisher can build both branches in one run without colliding on the name.
       - name: Upload build artifacts step
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:

@@ -7,8 +7,9 @@ on:
     - cron: '0 4 * * *'
 
 concurrency:
-  # Workflow-only group (no `-${{ github.ref }}`): the task writes the fixed `codegen-main`/`codegen-develop`
-  # branches regardless of triggering ref, so a dispatch and the scheduled run must not race on them.
+  # Workflow-only group (no `-${{ github.ref }}`), since the task writes fixed branches.
+  # It writes `codegen-main` and `codegen-develop` regardless of the triggering ref.
+  # A dispatch and the scheduled run must therefore not race on them.
   group: ${{ github.workflow }}
   cancel-in-progress: true
 

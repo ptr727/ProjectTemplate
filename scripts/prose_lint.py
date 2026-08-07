@@ -676,6 +676,22 @@ RUN_ON = re.compile(r'(?<!\b[A-Z])(?<!\be\.g)(?<!\bi\.e)(?<!\bvs)(?<!\betc)[.!?]
 # `# 1. Deploy the hook.` is one sentence, and reading the marker's dot as a terminator made it two.
 # It is stripped before the sentence checks so both the run-on and the opening-case test see the prose.
 ENUM_PREFIX = re.compile(r'^\d+[.)]\s+')
+
+# A comment body that is one token closing on a colon is a key or a heading, not a sentence.
+# `# ignore:` above a commented-out block is disabled configuration.
+# Capitalizing it corrupts the key a reader uncomments, so the rule would damage the file.
+# The token count carries the test, since a colon ending real prose always has words before it.
+KEY_ONLY = re.compile(r'^\S+:$')
+
+# A label opening a definition names the thing being defined, so it is not the sentence's first word.
+# `#   publish - 'true' when ...` documents an output named `publish`.
+# Capitalizing it renames the output the workflow declares.
+# This is the comment spelling of the `- **Label** - text` construct LABEL_DASH exempts in Markdown.
+# It is tested where a line opens a definition, never where one continues a wrapped sentence.
+# A continuation whose first word is followed by a spaced dash is a parenthetical instead.
+# That is the construction the dash rule exists to catch, so exempting it would hide the violation.
+# Both live instances in the tree are continuations, which is what scoped this to the case branch.
+COMMENT_LABEL = re.compile(r'^[A-Za-z_][\w.-]*\s+-\s+')
 CODE_FENCE = re.compile(r'^\s*(```|~~~)')
 
 # Both are correct English. `the the` is always a typo, so it is not here.
@@ -929,7 +945,8 @@ def comment_wrap_findings(path: Path, raw: str, lines: list[str]) -> list[tuple[
     prev_body = ''
     prev_no = 0
     for n, body, leading in comments:
-        if not body or NOT_PROSE.search(body) or BARE_URI.match(body.strip()):
+        if (not body or NOT_PROSE.search(body) or BARE_URI.match(body.strip())
+                or KEY_ONLY.match(body)):
             prev_body = ''
             continue
         # An unpunctuated Markdown HTML comment is a structural marker, not commentary.
@@ -951,7 +968,8 @@ def comment_wrap_findings(path: Path, raw: str, lines: list[str]) -> list[tuple[
             out.append((prev_no, 'comment-wrap',
                         'comment sentence wraps into the next line -> one sentence per line'))
         # A lowercase opening that is not a continuation is a sentence that failed to start.
-        elif leading and body[:1].islower():
+        # A label opening a definition is exempt, since the lowercase word is the name being defined.
+        elif leading and body[:1].islower() and not COMMENT_LABEL.match(body):
             out.append((n, 'comment-case',
                         'comment sentence opens in lowercase -> capitalize, or restructure so it '
                         'does not open on a lowercase name'))
