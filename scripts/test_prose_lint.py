@@ -1582,7 +1582,7 @@ class TestHomePath(BaitCase):
             with self.subTest(text=text.strip()):
                 self.assertNotIn('home-path', self.kinds(text, {'home-path'}))
 
-    def test_a_container_account_is_not_a_persons_home(self) -> None:
+    def test_a_container_account_is_not_a_personal_home(self) -> None:
         """`/home/vscode` is a fixed name a devcontainer image ships, so it names no environment.
 
         Every one of this repository's 15 home-path hits is this shape, from the devcontainer
@@ -1615,6 +1615,23 @@ class TestHomePath(BaitCase):
         """`~/.ssh` names no account, which is the form the docs are supposed to use."""
         for text in ('Copy `~/.ssh/id_ed25519.pub` into place.\n',
                      f'The path `home/{BAIT_USER}` is relative.\n'):
+            with self.subTest(text=text.strip()):
+                self.assertNotIn('home-path', self.kinds(text, {'home-path'}))
+
+    def test_the_windows_branch_is_case_insensitive(self) -> None:
+        """Windows filesystems are case-insensitive, so a pasted path may be any casing."""
+        for form in (f'C:\\users\\{BAIT_USER}', f'c:\\USERS\\{BAIT_USER}'):
+            with self.subTest(form=form):
+                self.assertIn('home-path', self.kinds(f'See {form} here.\n', {'home-path'}))
+
+    def test_the_posix_branch_stays_case_sensitive(self) -> None:
+        """A lowercase `/users/` is the commonest REST path there is, and names no home.
+
+        This is why the case-insensitive fix is scoped to the drive-letter branch rather than
+        applied to the whole pattern: widening it would flag every API route in every doc.
+        """
+        for text in (f'GET https://api.example.com/users/{BAIT_USER} returns the record.\n',
+                     f'The route is `/users/{BAIT_USER}` in the API.\n'):
             with self.subTest(text=text.strip()):
                 self.assertNotIn('home-path', self.kinds(text, {'home-path'}))
 

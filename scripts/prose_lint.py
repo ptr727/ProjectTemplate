@@ -61,7 +61,11 @@ LEAST_PLAUSIBLE = 60
 # A bare drive letter is deliberately not a shape here.
 # Measured against this repo it matched 11 files and named a path in none of them.
 # An escaped newline after a word ending in a letter and a colon reads as a drive letter.
-HOME_PATH = re.compile(r'(?:/home/|/Users/|[A-Za-z]:\\Users\\)(?P<user>[A-Za-z][A-Za-z0-9._-]*)')
+# `Users` is matched case-insensitively on the Windows branch alone, since that filesystem is.
+# The POSIX branches stay case-sensitive, since a lowercase `/users/` is a common REST path.
+# An API route is not a home directory, and widening this would flag one in every doc.
+HOME_PATH = re.compile(
+    r'(?:/home/|/Users/|[A-Za-z]:\\(?i:users)\\)(?P<user>[A-Za-z][A-Za-z0-9._-]*)')
 
 # Accounts that belong to a container or a runner rather than to a person.
 # Every one is a fixed name an image ships, so a path under it names no environment.
