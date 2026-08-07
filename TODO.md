@@ -22,30 +22,6 @@ The steps below are followed in order rather than sampled.
 
 ## Work Clusters
 
-### The Prose Content Backlog
-
-One pull request clearing the prose findings the hub's own docs and spec still carry, now that [`catalog/snippets/`][snippets] is clear. The snippets led because a non-conformant snippet seeds its violations into every repo that adopts it, and the downstream repo is then flagged for content it was handed.
-
-**State** `ready`. **Touches** the hub's docs and spec. **Cost** one hub edit per batch, hub-only.
-
-- **Clear the remaining [#519][issue-519] prose backlog, outside the snippets.** The whole-tree figure moves as readily with a fix to the gate as with a fix to the prose, so it is re-measured rather than quoted.
-  - **Blocked by** - Nothing.
-  - **Issue** - [#519][issue-519], whose headline numbers are stale and whose four planned changes are two-thirds landed.
-  - **Checked** - `develop` at `c9c92dd` on 2026-08-07, where `python3 scripts/prose_lint.py --summary` reported 131 violations across 15 files, the comment batch having merged and made that figure the anchor's own rather than a branch's. The hub-only Markdown batch clears 90 of those across 9 files, leaving 41 across the 6 carried ones. The snippets sweep took the tree from 557 across 45, of which 184 across 19 were snippets, and the comment batch took it from 373 across 26.
-  - **Open** - Whether the gate becomes a carried file rather than a hub-only one, which "Reducing the Carried Surface Further" asks from the other direction.
-  - **Settled** - `comment-wrap` and `comment-case` are in `DEFAULT_RULES` and `reports/` is exempt as a generated tree, which is why the figures differ from the 668 and 119 the issue records.
-  - **Settled** - `sentence-split` is defined but excluded from `DEFAULT_RULES`, so a sweep never reports it and a wrapped sentence in Markdown prose is not a finding.
-  - **Settled** - The backlog splits by surface rather than by file, since `comment-wrap` and `comment-case` lived entirely in non-Markdown comments while `dash` and `semicolon` live entirely in Markdown prose. That split is what made the comment half one reviewable batch, and it is the batch boundary the remainder inherits.
-  - **Settled** - The comment batch cleared 241 findings across 11 files and moved both rules to the gating CI step, since a rule swept clean but left warn-only regresses on the next edit with nothing reporting it. The three largest files were [`spec/audit.py`][audit] at 99, [`gh-write-guard.py`][write-guard] at 52, and [`spec/validate.py`][validate] at 41, all Python comments rather than prose.
-  - **Settled** - An ellipsis read as a sentence terminator, so `RUN_ON` reported one schematic comment line as two sentences and the split it asked for would have broken the fragment the line exists to show. The guard is that a dot preceded by a dot never terminates, fixed and tested before any prose moved, and the verdict diff in both directions was that one finding and nothing else.
-  - **Settled** - A comment opening on a lowercase identifier was the bulk of what `comment-case` reported, and the rule intends those restructured rather than exempted, which is what the batch did rather than widening any exemption.
-  - **Settled** - The remainder is prose in Markdown, and six of the fifteen files are carried, being [`GOVERNANCE.md`][governance] at 14, [`WORKFLOW.md`][workflow] at 14, [`CODESTYLE.md`][codestyle] at 6, [`.github/copilot-instructions.md`][copilot-instructions] at 4, `repo-config/README.md` at 2 and [`HISTORY.md`][history] at 1. So the next batch splits again at that line, since the carried half rewrites byte-locked sections and owes a re-vendor while the hub-only half owes nothing.
-  - **Settled** - The hub-only Markdown batch cleared 90 findings across 9 files, 79 dash and 11 semicolon, the largest being [`docs/devcontainer.md`][devcontainer-doc] at 22, [`docs/ssh-signing.md`][ssh-signing] at 17 and [`spec/type-model.md`][type-model] at 17. Every dash finding in the tree was hub-only, so what the carried half now holds is 41 semicolons and no dash at all.
-  - **Settled** - The exemption pass raised two candidates and the corpus rejected both, so the checker is unchanged by this batch. `LABEL_DASH` exempts `- **Label** - text` and reaches neither a code-span label nor a paragraph-leading one, yet the tree already spells a code-span definition list with a colon in five files against four dash-spelled lines in one, and already spells a paragraph label as `**Label.** Sentence` against nine dash-spelled lines confined to two troubleshooting sections. Both were a file that had not adopted the tree's own convention rather than a construct the rule fails to describe, which is the same verdict the comment batch reached on a lowercase-opening comment.
-  - **Settled** - A bulleted list terminating its items with semicolons appeared in exactly one place tree-wide, and its own last item already ended in a period, so it was punctuation to make consistent rather than the list construction the semicolon exemption protects. A line-based checker cannot see a list spread across bullets in any case, since the unit it judges is the sentence within a line.
-  - **Settled** - Rewriting a file with a script rather than an editor converts every line ending in it, which took two files from CRLF to LF with every prose and Markdown gate still green and only `editorconfig-checker` reporting it. [`OPERATIONS.md`][operations] scoped that instruction to a new file, and this batch widens it to a scripted rewrite of an existing one.
-  - **Settled** - `home-path` is in `DEFAULT_RULES` and is named by neither CI list, so the pattern-detectable half of the representative-data rule runs on every bare local run and gates nothing in CI. It is clean tree-wide, so this is a hole rather than a backlog, and it is recorded in [`OPERATIONS.md`][operations] beside the two gaps already named there.
-
 ### Giving the Fleet's Own Pins Something to Resolve Against
 
 One pull request pointing a hub `uses:` at a hub-owned action, so that the resolvability pass added beside it has a reference under this owner to read. It is separated from that pass because it changes what a workflow runs, where the pass only changes what a gate reports.
@@ -358,8 +334,8 @@ Blog is the pilot. A sweep is proven there before any fleet-wide rollout, becaus
 
 Regenerate [reports/divergences.md][divergences-report] before using it as the work list, since the committed copy predates the retirement decision and renders `repo-config/configure.sh` under a re-vendor disposition that no longer applies to it. A stale ledger is the same hazard as a stale exemption, in that it hands out a work list measured against a tree that no longer exists.
 
-- **Re-vendor the changed `verbatim` content, which is one sweep covering five files.** Every repo holding a copy of a changed section is byte-mismatched against the hub until it takes the new one, which the audit reports as stale rather than modified.
-  - **Hub state** - Done, verified `develop` at `3d1a0b1` on 2026-08-06.
+- **Re-vendor the changed `verbatim` content, which is one sweep covering seven files.** Every repo holding a copy of a changed section is byte-mismatched against the hub until it takes the new one, which the audit reports as stale rather than modified.
+  - **Hub state** - Done, verified `develop` at `3d1a0b1` on 2026-08-06 for the sections below, with the prose batch adding five more [`GOVERNANCE.md`][governance] sections, verified `develop` at `d791930` on 2026-08-07.
   - **Outstanding** - The whole fleet, pilot on Blog first.
   - **Issue** - None filed, and it is the follow-through [#489][issue-489] and [#379][issue-379] wait on.
   - **Rides with** - The `configure.sh` retirement and the `.editorconfig` line from [#353][issue-353], since all three are the same visit.
@@ -369,6 +345,8 @@ Regenerate [reports/divergences.md][divergences-report] before using it as the w
   - **Detail** - Two comment lines in [`.markdownlint-cli2.jsonc`][markdownlint] took the same capitalization, and that file is `verbatim` and `whole`, so every downstream copy is byte-mismatched on a config nothing else changed about.
   - **Detail** - [`CODESTYLE.md`][codestyle] is the fifth file, at `intent` rather than `verbatim`, so it reaches the fleet as a rule each repo adopts in its own copy, and the same mixed spelling waits in every downstream tree.
   - **Detail** - [`.github/copilot-instructions.md`][copilot-instructions] is the sixth, also at `intent`, where "Reply and Thread Resolution Workflow" now leads with the hub's reply helper and keeps the hand-run mutations as the cross-owner and unreachable-hub path. A repo taking the old copy is not broken by it, since the mutations it documents still work, so this rides the visit rather than gating it.
+  - **Detail** - The prose batch rewrote punctuation in five `verbatim` [`GOVERNANCE.md`][governance] sections, "Branching Model", "Release Model", "Documentation Style Conventions", "PR Review Etiquette" and "Workflow YAML Conventions", so every downstream copy of those five is byte-mismatched and the audit reports it as stale. No rule changed meaning, so the re-vendor is a hash refresh rather than a propagation, and a repo taking the old copy is correct on the rule while wrong on the bytes.
+  - **Detail** - [`WORKFLOW.md`][workflow] is the seventh file and `repo-config/README.md` joins [`CODESTYLE.md`][codestyle] and [`.github/copilot-instructions.md`][copilot-instructions] at `intent`, where a punctuation-only edit produces no hash and therefore no audit finding at all. Nothing reports these, which is why they are recorded here rather than left to the run. `HISTORY.md` is `presence` and is each repo's own changelog, so its one fix owes nothing downstream.
 
 - **Carry the `Local Verification` heading into every repository's `OPERATIONS.md`.** The heading leads the file and states what verifying a change there requires, naming the part of the repo's contract CI structurally cannot exercise, and a repo whose gates are entirely in CI says that under it rather than omitting it.
   - **Hub state** - Done, verified `develop` at `8e10a2c` on 2026-08-06, where [`spec/section-model.md`][section-model] and [`STANDUP.md`][standup] declare six headings and this repo's own [`OPERATIONS.md`][operations] leads with the section.
@@ -428,6 +406,12 @@ Actions on issues that are the maintainer's to take, each carrying its evidence 
 
 Each was checked against the tree and has nothing left to do anywhere. Closing is the maintainer's call, and each wants the evidence quoted in the closing comment rather than a bare close.
 
+- **[#519][issue-519], the hub's own tree does not pass the prose gate it ships.** Complete on the prose and on both questions.
+  - **Fixed by** - `f7a6a13` (snippets), `c9c92dd` (comments), `d791930` (hub-only Markdown), and the carried batch on `prose/carried-semicolons`.
+  - **Checked** - `develop` at `d791930` on 2026-08-07, where `python3 scripts/prose_lint.py --summary` reported 41 across 6 files, and 0 across 0 with the carried batch applied.
+  - **Closing evidence** - The whole-tree figure went 557 across 45 to zero, in four batches split by surface, being 184 in `catalog/snippets/`, 241 in non-Markdown comments, 90 in hub-only Markdown and 41 in the six carried files. Question 1 is answered by `reports/` being exempt as a generated tree, and question 2 by the snippets leading, since a non-conformant snippet seeds its violations into every repo that adopts it.
+  - **Closing evidence** - The issue's claim that the governance files were clean, and that this was therefore not a carry problem, was true of the checker of the day and false of the tree. Today's checker reports 38 findings against the same six files as they stood at `69688ec`, the commit the issue measured, while that commit's own checker reports zero. Scoping the list exemption to a sentence rather than a whole bullet accounts for 37 of the 38, because a colon anywhere ahead of the first semicolon had exempted every semicolon after it. The carry problem was real throughout and invisible, which is the stale-exemption hazard running in the loose direction.
+
 - **[#557][issue-557], the agent-isolation rule and its two open questions.** Complete on the rule and on both questions.
   - **Fixed by** - `9d85941`.
   - **Checked** - `develop` at `9d85941` on 2026-08-06.
@@ -473,12 +457,10 @@ Each was checked against the tree and has nothing left to do anywhere. Closing i
 [audit-doc]: ./AUDIT.md
 [codestyle]: ./CODESTYLE.md
 [copilot-instructions]: ./.github/copilot-instructions.md
-[devcontainer-doc]: ./docs/devcontainer.md
 [divergences]: ./spec/divergences.json
 [divergences-report]: ./reports/divergences.md
 [files]: ./spec/files.json
 [governance]: ./GOVERNANCE.md
-[history]: ./HISTORY.md
 [markdownlint]: ./.markdownlint-cli2.jsonc
 [matrix]: ./reports/conformance-matrix.md
 [merge-bot]: ./.github/workflows/merge-bot-pull-request.yml
@@ -494,10 +476,8 @@ Each was checked against the tree and has nothing left to do anywhere. Closing i
 [secrets-schema]: ./spec/secrets.schema.json
 [section-model]: ./spec/section-model.md
 [snippets]: ./catalog/snippets/
-[ssh-signing]: ./docs/ssh-signing.md
 [standup]: ./STANDUP.md
 [type-model]: ./spec/type-model.md
-[validate]: ./spec/validate.py
 [workflow]: ./WORKFLOW.md
 [workflows]: ./catalog/snippets/workflows/
 [write-guard]: ./host-setup/agent-safety/gh-write-guard.py
