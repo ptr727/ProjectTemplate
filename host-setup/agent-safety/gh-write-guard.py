@@ -202,9 +202,9 @@ _GIT_GLOBAL_VALUE_OPTS = {"-C", "-c", "--git-dir", "--work-tree", "--namespace",
 # A newline ends a command exactly as `;` does, so it is an operator character here rather than whitespace.
 # Read as whitespace it vanishes when tokenizing, and every token on a later line of a multi-line command is then read as one more argument of the first line's command.
 # A backslash-newline continuation is folded to a space in `classify` before any of this runs, so every newline reaching the tokenizer is a real command separator.
-_SHELL_OP_CHARS = set("();<>|&\n")
-# The same operator set as a string, which is the form shlex takes it in.
+# The string is the form shlex takes the set in, and the set is derived from it so the two cannot drift apart.
 _PUNCTUATION_CHARS = "();<>|&\n"
+_SHELL_OP_CHARS = set(_PUNCTUATION_CHARS)
 
 
 def _shell_tokens(cmd):
@@ -643,6 +643,8 @@ _GIT_CASES = [
     ("git push origin feature/x\ngit push origin develop", None, {"feature/x": set(), "develop": _CODE_RULES}, "deny", "a second push on the next line is checked: develop denies"),
     ("git push \\\n  origin develop", None, {"develop": _CODE_RULES}, "deny", "a backslash-newline is a continuation, not a separator: develop still parsed"),
     ("gh issue comment 5 --body \"one line\ngit push origin develop\"", None, {"develop": _CODE_RULES}, "allow", "a newline inside a quoted body does not start a new command"),
+    # Unbalanced quoting is what actually reaches the degraded path, and the separator has to survive there too.
+    ("git push origin feature/x\ngit push origin develop 'unclosed", None, {"feature/x": set(), "develop": _CODE_RULES}, "deny", "the degraded path keeps the newline: a push on the next line is still read"),
 ]
 
 
