@@ -22,23 +22,6 @@ The steps below are followed in order rather than sampled.
 
 ## Work Clusters
 
-### The Representative-Data Path Check
-
-One pull request gating the pattern-detectable half of the representative-data rule, which is worth having only once the gate can prove it read something.
-
-**State** `ready`. **Touches** [`scripts/prose_lint.py`][prose-lint] and its test file. **Cost** one hub edit, hub-only, no sweep.
-
-- **Flag an absolute home path or a bare drive letter in committed prose, a comment, or a fixture.** [`GOVERNANCE.md`][governance] "Representative Data in Agent-Authored Text" states the rule and says why a check is a floor rather than an answer.
-  - **Blocked by** - Nothing, since the scope floor it waited on shipped.
-  - **Issue** - None filed.
-  - **Checked** - `develop` at `c8687c5` on 2026-08-06, where [`GOVERNANCE.md`][governance] states the rule and none of the gate's nine rules reads a path shape.
-  - **Open** - Whether a home path in an operational repo's runbook is a finding, since it may be the literal path an operator types, which is the repo's own content rather than an agent quoting the maintainer's environment, so the answer is a scope by file, by repo type, or left to the author.
-  - **Settled** - The dependency is met, since `c8687c5` gave the `--diff` path a floor assertion, so a run reporting no path findings has proved it read something rather than merely exited 0.
-  - **Settled** - The shapes are `/home/<name>`, `/Users/<name>`, `C:\Users\<name>`, and a bare drive letter.
-  - **Settled** - The check is introduced as covering the easy half or it gets read as closing the rule, which is the specific way it would make things worse.
-  - **Settled** - The exemption carries the whole burden, since the rule's own wording, the [`host-setup/`][agent-safety] docs, and the audit's examples all quote path shapes in order to describe them, and a wrong exemption hands out a work list that damages correct documents.
-  - **Settled** - The leak that motivated the rule was in a pull request comment, which no committed-file linter reads, so the gate says what surface it covers rather than letting its name imply the rule.
-
 ### The Prose Content Backlog
 
 One pull request clearing prose findings, leading with [`catalog/snippets/`][snippets] because a non-conformant snippet seeds its violations into every repo that adopts it and the downstream repo is then flagged for content it was handed.
@@ -520,7 +503,6 @@ Each was checked against the tree and has nothing left to do anywhere. Closing i
 [pr-review]: ./scripts/pr_review.py
 [project-types]: ./spec/project-types.json
 [prose-gate]: ./.github/actions/prose-gate/action.yml
-[prose-lint]: ./scripts/prose_lint.py
 [readme]: ./README.md
 [readme-structure]: ./spec/readme-structure.md
 [repo-gate]: ./scripts/repo_gate.py
