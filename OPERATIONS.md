@@ -15,6 +15,7 @@ python3 scripts/test_prose_lint.py
 python3 scripts/test_repo_gate.py
 python3 scripts/test_pr_review.py
 python3 spec/audit.py --selftest
+python3 host-setup/agent-safety/gh-write-guard.py --selftest
 python3 scripts/repo_gate.py
 python3 scripts/prose_lint.py . --check charset --check dupword --check spelling
 python3 scripts/prose_lint.py . --check charset-unknown --check semicolon --check dash --check comment-wrap --check comment-case --summary

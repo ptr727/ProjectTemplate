@@ -199,23 +199,36 @@ _PUSH_VALUE_FLAGS = {"-o", "--push-option", "--repo", "--receive-pack", "--exec"
 _GIT_GLOBAL_VALUE_OPTS = {"-C", "-c", "--git-dir", "--work-tree", "--namespace", "--exec-path", "--config-env"}
 
 
-_SHELL_OP_CHARS = set("();<>|&")
+# A newline ends a command exactly as `;` does, so it is an operator character here rather than whitespace.
+# Read as whitespace it vanishes when tokenizing, and every token on a later line of a multi-line command is then read as one more argument of the first line's command.
+# A backslash-newline continuation is folded to a space in `classify` before any of this runs, so every newline reaching the tokenizer is a real command separator.
+# The string is the form shlex takes the set in, and the set is derived from it so the two cannot drift apart.
+_PUNCTUATION_CHARS = "();<>|&\n"
+_SHELL_OP_CHARS = set(_PUNCTUATION_CHARS)
 
 
 def _shell_tokens(cmd):
-    """Tokenize like a shell, isolating operator runs (`|`, `&&`, `;`, `>`, `2>&1`, ...) as their own
-    tokens even when glued to a word - so a `>` inside a quoted value stays part of that token while a
-    real redirection is separated. Degrades gracefully if the quoting cannot be parsed.
+    """Tokenize like a shell, isolating operator runs (`|`, `&&`, `;`, newline, `>`, `2>&1`, ...) as
+    their own tokens even when glued to a word - so a `>` or a newline inside a quoted value stays part
+    of that token while a real redirection or line break is separated. Degrades gracefully if the
+    quoting cannot be parsed.
     """
     try:
-        lex = shlex.shlex(cmd, posix=True, punctuation_chars=True)
+        lex = shlex.shlex(cmd, posix=True, punctuation_chars=_PUNCTUATION_CHARS)
         lex.whitespace_split = True
+        lex.whitespace = lex.whitespace.replace("\n", "")  # A newline is an operator above rather than a gap between words.
         return list(lex)
     except (ValueError, TypeError):  # bad quoting, or punctuation_chars unsupported on old Python
-        try:
-            return shlex.split(cmd, posix=True)
-        except ValueError:
-            return cmd.split()
+        # Neither fallback isolates an operator, so the lines are split here to keep the one thing this path must not lose, that a newline ends the command before it.
+        toks = []
+        for i, line in enumerate(cmd.split("\n")):
+            if i:
+                toks.append("\n")
+            try:
+                toks.extend(shlex.split(line, posix=True))
+            except ValueError:
+                toks.extend(line.split())
+        return toks
 
 
 def _is_shell_op(tok):
@@ -227,7 +240,7 @@ def _is_redir_op(tok):
 
 
 def _is_separator(tok):
-    return _is_shell_op(tok) and ">" not in tok and "<" not in tok  # |, ||, &, &&, ;, (, )
+    return _is_shell_op(tok) and ">" not in tok and "<" not in tok  # |, ||, &, &&, ;, (, ), newline
 
 
 def _is_git_exe(tok):
@@ -243,7 +256,8 @@ def _git_subcommand_arglists(cmd, sub):
 
     Keying off a real `git`->`<sub>` token sequence (git's value-taking global options skipped, an
     absolute-path or .exe git recognized) means the same invocation named inside a quoted --body forms no
-    such sequence, and a compound `<sub> A && <sub> B` yields two independent arg lists so both are seen.
+    such sequence, and a compound `<sub> A && <sub> B` yields two independent arg lists so both are seen,
+    whether the two are joined by `&&` or written on their own lines.
     """
     toks = _shell_tokens(cmd)
     n = len(toks)
@@ -265,7 +279,7 @@ def _git_subcommand_arglists(cmd, sub):
             while k < n:
                 t = toks[k]
                 if _is_separator(t):
-                    break  # a command separator (|, &&, ;) ends this git invocation
+                    break  # a command separator (|, &&, ;, newline) ends this git invocation
                 if t.isdigit() and k + 1 < n and _is_redir_op(toks[k + 1]):
                     k += 1  # a file-descriptor number before a redirection is shell syntax, not git argv
                     continue
@@ -622,6 +636,15 @@ _GIT_CASES = [
     ("gh issue comment 5 --body \"first git push\" && git push origin develop", None, {"develop": _CODE_RULES}, "deny", "a quoted mention before a real push does not hide the real target"),
     ("git push >push.log 2>&1", "develop", {"develop": _CODE_RULES}, "deny", "redirection tokens are not a branch: bare push to develop still denies"),
     ("git push origin develop >push.log 2>&1", None, {"develop": _CODE_RULES}, "deny", "redirect after a real refspec does not hide the develop target"),
+    # A newline ends a command as `&&` does, and reading it as whitespace made every token on a later line an argument of the push.
+    # A feature-branch push followed by a `gh pr create` then denied as a direct push to the base branch that command named.
+    ("git push -u origin feature/x\ngh pr create --base develop --title x --body y", None, {"feature/x": set(), "develop": _CODE_RULES}, "allow", "a newline ends the push argv: the pr-create base is not a push target"),
+    ("cd /repo\ngit push origin develop", None, {"develop": _CODE_RULES}, "deny", "a push on a later line is still parsed as a push"),
+    ("git push origin feature/x\ngit push origin develop", None, {"feature/x": set(), "develop": _CODE_RULES}, "deny", "a second push on the next line is checked: develop denies"),
+    ("git push \\\n  origin develop", None, {"develop": _CODE_RULES}, "deny", "a backslash-newline is a continuation, not a separator: develop still parsed"),
+    ("gh issue comment 5 --body \"one line\ngit push origin develop\"", None, {"develop": _CODE_RULES}, "allow", "a newline inside a quoted body does not start a new command"),
+    # Unbalanced quoting is what actually reaches the degraded path, and the separator has to survive there too.
+    ("git push origin feature/x\ngit push origin develop 'unclosed", None, {"feature/x": set(), "develop": _CODE_RULES}, "deny", "the degraded path keeps the newline: a push on the next line is still read"),
 ]
 
 
