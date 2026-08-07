@@ -2,7 +2,9 @@
 
 How this repository is run. It ships no application code, so its operations are the fleet audit, the gates that mirror CI, and the script that applies repository configuration. Those gates and that script serve the whole fleet from this checkout rather than being carried into each repository, per [GOVERNANCE.md "Hub-Hosted Tooling"](./GOVERNANCE.md#hub-hosted-tooling), so every run below is a run from here against a repository named on the command line.
 
-## Runbooks
+## Local Verification
+
+What verifying a change here requires, including the part CI cannot perform. The gates below do run in CI, so a local run of them buys an earlier failure rather than a different one. The two verifications CI never performs are the fleet audit and the repository-configuration check, because each reads live state in another repository over the API and a pull request runner is given neither the credentials nor a target to read. `spec/audit.py --selftest` is what CI runs of the audit, which exercises the checker against its fixtures and reads no repository at all. So a change to [spec/](./spec/), [registry/](./registry/), [repo-config/](./repo-config/) or [AUDIT.md](./AUDIT.md) is verified by running the live audit and `configure.sh check` from this checkout before the pull request opens, per the two runbooks below. A green pipeline says nothing about either, and taking it as coverage is the failure this section exists to name.
 
 ### Run the gates the way CI runs them
 
@@ -34,6 +36,8 @@ python3 scripts/prose_lint.py . --diff origin/develop
 ```
 
 Whole-tree discovery reads only files git tracks, so `python3 scripts/prose_lint.py .` and `--diff` do not see a new file until it is staged, and a clean whole-tree run proves nothing about an unstaged one. An explicit path is always read, tracked or not, so name a new file directly to check it before staging.
+
+## Runbooks
 
 ### Audit the fleet
 

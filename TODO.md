@@ -394,10 +394,18 @@ Regenerate [reports/divergences.md][divergences-report] before using it as the w
   - **Issue** - None filed, and it is the follow-through [#489][issue-489] and [#379][issue-379] wait on.
   - **Rides with** - The `configure.sh` retirement and the `.editorconfig` line from [#353][issue-353], since all three are the same visit.
   - **Detail** - In [`AGENTS.md`][agents], "Context and Delegation Discipline" carries the wait rule's failure clause and "Where the Rules Live" carries a row for "Hub-Hosted Tooling".
-  - **Detail** - In [`GOVERNANCE.md`][governance], "Verification Discipline" carries the rule that a launched process is not a result, "PR Review Etiquette" carries the five outcomes that close a finding, "Repository Boundaries and Write Safety" carries the rule that a refused write is reported rather than re-shaped, and both "Representative Data in Agent-Authored Text" and "Hub-Hosted Tooling" are entirely new carried sections no downstream repo holds, which the audit reports as sections that never arrived rather than as drift.
+  - **Detail** - In [`GOVERNANCE.md`][governance], "Verification Discipline" carries the rule that a launched process is not a result and the rule that a change's checks are located before any is run, with CI's coverage not being that list, "PR Review Etiquette" carries the five outcomes that close a finding, "Repository Boundaries and Write Safety" carries the rule that a refused write is reported rather than re-shaped, and both "Representative Data in Agent-Authored Text" and "Hub-Hosted Tooling" are entirely new carried sections no downstream repo holds, which the audit reports as sections that never arrived rather than as drift.
   - **Detail** - Three further [`GOVERNANCE.md`][governance] sections differ by a single word each, "Documentation Style Conventions", "Communicating with the User" and "Repository Details", where a format name took the capitalization [`CODESTYLE.md`][codestyle] "Markdown and Spelling" states, so they are byte-mismatched for a reason a reader of the diff would otherwise call cosmetic.
   - **Detail** - Two comment lines in [`.markdownlint-cli2.jsonc`][markdownlint] took the same capitalization, and that file is `verbatim` and `whole`, so every downstream copy is byte-mismatched on a config nothing else changed about.
   - **Detail** - [`CODESTYLE.md`][codestyle] is the fifth file, at `intent` rather than `verbatim`, so it reaches the fleet as a rule each repo adopts in its own copy, and the same mixed spelling waits in every downstream tree.
+
+- **Carry the `Local Verification` heading into every repository's `OPERATIONS.md`.** The heading leads the file and states what verifying a change there requires, naming the part of the repo's contract CI structurally cannot exercise, and a repo whose gates are entirely in CI says that under it rather than omitting it.
+  - **Hub state** - Done, verified `develop` at `8e10a2c` on 2026-08-06, where [`spec/section-model.md`][section-model] and [`STANDUP.md`][standup] declare six headings and this repo's own [`OPERATIONS.md`][operations] leads with the section.
+  - **Outstanding** - Every repo carrying an `OPERATIONS.md`, which is every repo, since none holds the heading yet.
+  - **Issue** - [#597][issue-597], filed from a downstream repo whose pre-merge gate sat under a heading of its own invention and was skipped by an agent following every carried rule correctly.
+  - **Rides with** - The `verbatim` re-vendor above, since the carried [`GOVERNANCE.md`][governance] rule that points at the heading lands in the same visit and neither half works alone.
+  - **Detail** - The audit reports nothing here today, because `OPERATIONS.md` is presence-checked only, so a repo using none of the declared headings passes. The heading check is [#523][issue-523]'s cluster, "Content in the Wrong File", and until it ships this sweep is verified by reading each file rather than by a run.
+  - **Detail** - A repo that already documents a local gate has the content and not the location, so the visit is usually a re-heading rather than new prose, and the prose it does need is the sentence naming what CI cannot reach.
 
 - **Retire the downstream `repo-config/configure.sh` copies.** Delete the copy as each repo is next worked on and run the hub's script against it by name.
   - **Hub state** - Done, verified `develop` at `3d1a0b1` on 2026-08-06, where [`spec/files.json`][files] no longer declares the file and [`spec/divergences.json`][divergences] carries it under the `retire` disposition.
@@ -483,6 +491,7 @@ Each was checked against the tree and has nothing left to do anywhere. Closing i
 [issue-579]: https://github.com/ptr727/ProjectTemplate/issues/579
 [issue-580]: https://github.com/ptr727/ProjectTemplate/issues/580
 [issue-585]: https://github.com/ptr727/ProjectTemplate/issues/585
+[issue-597]: https://github.com/ptr727/ProjectTemplate/issues/597
 
 <!-- Repo -->
 
