@@ -115,9 +115,9 @@ def fidelity_pass(spec):
             else:
                 spread["differs"].append(r["name"])
         spreads.append((unit, spread))
-        # A verbatim candidate has NO hand-modified copy ("differs") and at least one confirmed match with
-        # the current canonical. Stale copies do not disqualify it - verbatim would flag them "stale ->
-        # re-vendor", which is the point. A unit that is entirely stale/unavailable is not confirmed uniform.
+        # A verbatim candidate has no hand-modified copy, meaning an empty "differs", and at least one confirmed match with the current canonical.
+        # Stale copies do not disqualify it, since verbatim would flag them as stale and owing a re-vendor, which is the point.
+        # A unit that is entirely stale or unavailable is not confirmed uniform.
         # An absent section does not disqualify it either, for the same reason an unavailable file does not.
         # Neither is evidence that a repo decided something locally, and only such evidence argues against promotion.
         # Treating absence as disqualifying would be the same conflation this bucket was split out to end.
@@ -136,8 +136,8 @@ def manifest_gap_pass(spec, ref_repo):
         return None, []
     slug = audit.repo_slug(entry)
     ground = entry.get("groundTruthBranch", "main")
-    # The git/trees endpoint takes a tree SHA, not a ref name, so resolve the branch to its tree SHA
-    # first (as audit.py does) - passing the branch name can 404 and silently drop the whole check.
+    # The git/trees endpoint takes a tree SHA rather than a ref name, so resolve the branch to its tree SHA first, as audit.py does.
+    # Passing the branch name can 404 and silently drop the whole check.
     # Fail loud on an unreadable reference adopter: an empty gaps list would report "none" (a false clean).
     br = audit.gh(f"repos/{slug}/branches/{ground}", ok404=True)
     if not br or "commit" not in br:
@@ -190,15 +190,15 @@ def render_report(spreads, promote, gaps, ledger):
     spread_by_path = {e["path"]: sp for e, sp in spreads if sp is not None}
 
     def buckets(path):
-        # (still divergent, confirmed match, unavailable) repo sets for a unit. Unavailable is held apart
-        # from match: an absent copy cannot confirm a divergence was fixed.
+        # The three repo sets for a unit, being still divergent, confirmed match, and unavailable.
+        # Unavailable is held apart from match, since an absent copy cannot confirm a divergence was fixed.
         sp = spread_by_path.get(path)
         if not sp:
             return set(), set(), set()
         return set(sp["differs"]) | set(sp["stale"]) | set(sp["absent"]), set(sp["match"]), set(sp["unavailable"])
 
-    # Keep only well-formed entries so --report degrades cleanly on a hand-malformed ledger instead of
-    # raising KeyError/TypeError downstream. validate.py reports the malformation loudly in CI.
+    # Keep only well-formed entries so --report degrades cleanly on a hand-malformed ledger rather than raising KeyError or TypeError downstream.
+    # The validate.py gate reports the malformation loudly in CI.
     dispositions = [d for d in ledger.get("dispositions", [])
                     if isinstance(d, dict) and isinstance(d.get("path"), str)
                     and isinstance(d.get("repos"), list) and isinstance(d.get("disposition"), str)
@@ -212,8 +212,8 @@ def render_report(spreads, promote, gaps, ledger):
         covered.setdefault(d["path"], set()).update(d["repos"])
 
     # Untriaged: verbatim hand-modifications with no disposition, and live gaps with no gap disposition.
-    # Verbatim-only by design: an intent unit's byte diff is expected (judged by meaning), so only a verbatim
-    # hand-modification with no recorded disposition is a genuine anomaly worth surfacing.
+    # Verbatim-only by design, since an intent unit's byte diff is expected and is judged by meaning.
+    # Only a verbatim hand-modification with no recorded disposition is therefore a genuine anomaly worth surfacing.
     untriaged_files = []
     untriaged_absent = []
     for e, sp in spreads:
@@ -338,8 +338,9 @@ def main():
 
     if report_mode:
         content = render_report(spreads, promote, gaps, load_ledger())
-        # CRLF to match the fleet default (reports/*.md is CRLF). Write bytes so the local platform does not
-        # re-translate. Git dates the file, so no timestamp is embedded (it would churn every regeneration).
+        # CRLF matches the fleet default, since reports/*.md is CRLF.
+        # Bytes are written so the local platform does not re-translate them.
+        # Git dates the file, so no timestamp is embedded, which would churn on every regeneration.
         (audit.ROOT / REPORT_PATH).write_bytes(content.replace("\n", "\r\n").encode("utf-8"))
         print(f"Wrote {REPORT_PATH} ({len(content.splitlines())} lines)")
         return 0

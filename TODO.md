@@ -31,12 +31,16 @@ One pull request clearing the prose findings the hub's own docs and spec still c
 - **Clear the remaining [#519][issue-519] prose backlog, outside the snippets.** The whole-tree figure moves as readily with a fix to the gate as with a fix to the prose, so it is re-measured rather than quoted.
   - **Blocked by** - Nothing.
   - **Issue** - [#519][issue-519], whose headline numbers are stale and whose four planned changes are two-thirds landed.
-  - **Checked** - `develop` at `a6d7a4b` on 2026-08-07, where `python3 scripts/prose_lint.py --summary` reports 373 violations across 26 files, and `catalog/snippets` reports 0. The snippets sweep took the tree from 557 across 45, of which 184 across 19 were snippets.
+  - **Checked** - `develop` at `c64e3e0` on 2026-08-07, where `python3 scripts/prose_lint.py --summary` reported 373 violations across 26 files and `catalog/snippets` reported 0. The 131 across 15 the comment batch leaves is a figure on the branch carrying that batch rather than on this anchor, and it becomes the anchor's own number when that branch merges. The snippets sweep took the tree from 557 across 45, of which 184 across 19 were snippets.
   - **Open** - Whether the gate becomes a carried file rather than a hub-only one, which "Reducing the Carried Surface Further" asks from the other direction.
   - **Settled** - `comment-wrap` and `comment-case` are in `DEFAULT_RULES` and `reports/` is exempt as a generated tree, which is why the figures differ from the 668 and 119 the issue records.
   - **Settled** - `sentence-split` is defined but excluded from `DEFAULT_RULES`, so a sweep never reports it and a wrapped sentence in Markdown prose is not a finding.
-  - **Settled** - The three largest files are not snippets and are Python comments rather than prose, being [`spec/audit.py`][audit] at 99, [`gh-write-guard.py`][write-guard] at 52, and [`spec/validate.py`][validate] at 41 when measured before the sweep.
-  - **Settled** - A comment opening on a lowercase identifier is the bulk of what `comment-case` still reports, and the rule intends those restructured rather than exempted. The exemptions the snippets sweep added cover a commented-out key and a definition label, and nothing wider.
+  - **Settled** - The backlog splits by surface rather than by file, since `comment-wrap` and `comment-case` lived entirely in non-Markdown comments while `dash` and `semicolon` live entirely in Markdown prose. That split is what made the comment half one reviewable batch, and it is the batch boundary the remainder inherits.
+  - **Settled** - The comment batch cleared 241 findings across 11 files and moved both rules to the gating CI step, since a rule swept clean but left warn-only regresses on the next edit with nothing reporting it. The three largest files were [`spec/audit.py`][audit] at 99, [`gh-write-guard.py`][write-guard] at 52, and [`spec/validate.py`][validate] at 41, all Python comments rather than prose.
+  - **Settled** - An ellipsis read as a sentence terminator, so `RUN_ON` reported one schematic comment line as two sentences and the split it asked for would have broken the fragment the line exists to show. The guard is that a dot preceded by a dot never terminates, fixed and tested before any prose moved, and the verdict diff in both directions was that one finding and nothing else.
+  - **Settled** - A comment opening on a lowercase identifier was the bulk of what `comment-case` reported, and the rule intends those restructured rather than exempted, which is what the batch did rather than widening any exemption.
+  - **Settled** - The remainder is prose in Markdown, and six of the fifteen files are carried, being [`GOVERNANCE.md`][governance] at 14, [`WORKFLOW.md`][workflow] at 14, [`CODESTYLE.md`][codestyle] at 6, [`.github/copilot-instructions.md`][copilot-instructions] at 4, `repo-config/README.md` at 2 and [`HISTORY.md`][history] at 1. So the next batch splits again at that line, since the carried half rewrites byte-locked sections and owes a re-vendor while the hub-only half owes nothing.
+  - **Settled** - `home-path` is in `DEFAULT_RULES` and is named by neither CI list, so the pattern-detectable half of the representative-data rule runs on every bare local run and gates nothing in CI. It is clean tree-wide, so this is a hole rather than a backlog, and it is recorded in [`OPERATIONS.md`][operations] beside the two gaps already named there.
 
 ### Giving the Fleet's Own Pins Something to Resolve Against
 
@@ -405,6 +409,7 @@ Regenerate [reports/divergences.md][divergences-report] before using it as the w
   - **Issue** - [#365][issue-365] and [#483][issue-483].
   - **Rides with** - Nothing on the hub, since the write-guard newline fix has landed on `develop` and a machine keeps running the old hook until the installer is re-run there.
   - **Detail** - A ticked row means the host-wide rules text and not the hook, since only running the installer deploys both layers, and the proxmox host proved that distinction by carrying the documentary half alone for eight days on the machine where the incident originated.
+  - **Detail** - The prose comment batch rewrote comments in [`gh-write-guard.py`][write-guard] and both installer wrappers, so every installed copy is now behind the hub by that much. The divergence is comment-only and changes no decision the hook takes, which the self-test confirms, so it is a re-run of the installer at the next visit rather than a correctness problem.
   - **Detail** - Honor the issue's own rule when filling a cell, that an unverified install command is worse than a blank, because a blank prompts a question while a wrong command produces a broken host and a false sense that setup succeeded.
   - **Detail** - The superseded safety section from [#364][issue-364] still sits above the canonical block in this host's rules file, so the two overlap. Removing it is a judgment call on a per-machine file, which is why it is surfaced rather than applied.
 
@@ -468,6 +473,7 @@ Each was checked against the tree and has nothing left to do anywhere. Closing i
 [divergences-report]: ./reports/divergences.md
 [files]: ./spec/files.json
 [governance]: ./GOVERNANCE.md
+[history]: ./HISTORY.md
 [markdownlint]: ./.markdownlint-cli2.jsonc
 [matrix]: ./reports/conformance-matrix.md
 [merge-bot]: ./.github/workflows/merge-bot-pull-request.yml
@@ -486,5 +492,6 @@ Each was checked against the tree and has nothing left to do anywhere. Closing i
 [standup]: ./STANDUP.md
 [type-model]: ./spec/type-model.md
 [validate]: ./spec/validate.py
+[workflow]: ./WORKFLOW.md
 [workflows]: ./catalog/snippets/workflows/
 [write-guard]: ./host-setup/agent-safety/gh-write-guard.py

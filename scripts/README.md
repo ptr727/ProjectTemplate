@@ -30,9 +30,9 @@ Run it scoped to changed lines, matching the standing rule that existing prose i
 python3 scripts/prose_lint.py . --diff origin/develop
 ```
 
-Whole-tree (`python3 scripts/prose_lint.py .`) reports the legacy backlog as well, which is informational rather than a gate. `charset`, `dupword` and `spelling` are clean tree-wide, so CI gates those three and reports the rest warn-only.
+Whole-tree (`python3 scripts/prose_lint.py .`) reports the legacy backlog as well, which is informational rather than a gate. `charset`, `dupword`, `spelling`, `comment-wrap` and `comment-case` are clean tree-wide, so CI gates those five and reports the rest warn-only.
 
-The default rule set covers comment shape (`comment-wrap` and `comment-case`) alongside the prose rules. It did not, which meant a run nobody parameterized reported clean on a wrapped comment while the rule read as enforced, and comment shape is the most frequently regressed rule in agent-authored work. Reading the backlog it exposes needs no flag now, and gating it still needs `--diff`, because the tree carries several hundred of them.
+The default rule set covers comment shape (`comment-wrap` and `comment-case`) alongside the prose rules. It did not, which meant a run nobody parameterized reported clean on a wrapped comment while the rule read as enforced, and comment shape is the most frequently regressed rule in agent-authored work. Reading the backlog it exposes needs no flag now, and gating it needed `--diff` while the tree carried several hundred of them. That backlog is cleared, so both comment rules gate whole-tree, and `--diff` is now about scoping a run rather than about surviving one.
 
 A wide scan skips the trees this repo generates rather than authors, currently `reports/`, which [`spec/audit.py`][audit] writes. A finding there is the audit engine's phrasing rather than an author's, so no edit to that tree can fix it, and leaving them in made the repo's own number mostly generated output. Naming such a path directly still reads it (`prose_lint.py reports`), so nothing becomes uncheckable.
 
@@ -72,7 +72,7 @@ A comment sentence also has to start with a capital, which `comment-case` checks
 
 **A comment whose whole body is a URI is a reference rather than a sentence**, and neither rule applies to it. It cannot be capitalized or restructured without corrupting the address it exists to carry, so before the exemption every repo carrying a reference block inherited a finding no edit could answer. Consecutive reference lines are separate addresses rather than one sentence wrapping, which is why the exemption also stops the line below a URI from reading as its continuation. A URI inside a sentence is still prose, so the exemption requires the whole body to be the address and nothing else.
 
-`charset` and `dupword` are clean tree-wide and gate CI. `charset-unknown`, `semicolon`, `dash`, `comment-wrap`, and `comment-case` run as one warn-only CI step, so the backlog is visible without blocking and is corrected as each file is next edited.
+`charset`, `dupword`, `spelling`, `comment-wrap`, and `comment-case` are clean tree-wide and gate CI. `charset-unknown`, `semicolon`, and `dash` run as one warn-only CI step, so the remaining backlog is visible without blocking and is corrected as each file is next edited, or cleared in a deliberate batch.
 
 ## `repo_gate.py`
 
