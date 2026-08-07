@@ -796,6 +796,200 @@ class TestCli(GqlCase):
         self.assertIn('repo=o/r pr=7', self.out.getvalue())
 
 
+def rthread(tid: str, body: str = 'The retry count is off by one.', path: str = 'a.py',
+            line: int = 12, resolved: bool = False,
+            login: str = pr_review.REVIEWER) -> dict:
+    """A thread as the reply query reads it, with `path` and `line` on the thread itself."""
+    return {'id': tid, 'isResolved': resolved, 'path': path, 'line': line,
+            'comments': {'nodes': [{'author': {'login': login}, 'body': body}]}}
+
+
+def page(threads: list[dict], more: bool = False, cursor: str | None = None) -> dict:
+    return {'nodes': threads, 'pageInfo': {'hasNextPage': more, 'endCursor': cursor}}
+
+
+LANDED = {'id': 'c1', 'url': 'https://github.com/o/r/pull/7#discussion_r1', 'body': 'Fixed in abc.'}
+
+
+class ReplyCase(unittest.TestCase):
+    """Base driving `reply` against crafted responses, so no case reaches the network."""
+
+    def setUp(self) -> None:
+        self.out = self.enterContext(contextlib.redirect_stdout(io.StringIO()))
+        self.enterContext(mock.patch.object(pr_review, 'origin_owner', return_value='o'))
+        self.docs: list[str] = []
+
+    def wire(self, *pages: dict, reply: dict | None = LANDED, resolved: bool = True) -> None:
+        """Answer the thread reads from `pages`, and each mutation from the given shape."""
+        queue = list(pages) or [page([])]
+
+        def fake(query: str, **variables: object) -> dict:
+            self.docs.append(query)
+            if 'reviewThreads' in query:
+                return {'repository': {'pullRequest': {'reviewThreads': queue.pop(0)}}}
+            if 'addPullRequestReviewThreadReply' in query:
+                return {'addPullRequestReviewThreadReply': {'comment': reply}}
+            if 'resolveReviewThread' in query:
+                return {'resolveReviewThread': {'thread': {'isResolved': resolved}}}
+            raise AssertionError(f'unexpected document: {query[:60]}')
+
+        self.enterContext(mock.patch.object(pr_review, 'gh_graphql', side_effect=fake))
+
+    def run_reply(self, *extra: str) -> int:
+        return pr_review.main(['reply', '7', '--repo', 'o/r', '--match', 'retry count',
+                               '--body', 'Fixed in abc.', *extra])
+
+    def wrote(self) -> bool:
+        return any('mutation' in d for d in self.docs)
+
+    def resolved_a_thread(self) -> bool:
+        return any('resolveReviewThread' in d for d in self.docs)
+
+
+class TestReplySelectsWithoutAnId(ReplyCase):
+    def test_the_matching_thread_is_answered_and_resolved(self) -> None:
+        self.wire(page([rthread('t1')]))
+        self.assertEqual(0, self.run_reply('--resolve'))
+        self.assertIn('REPLIED_AND_RESOLVED', self.out.getvalue())
+        self.assertIn(LANDED['url'], self.out.getvalue())
+
+    def test_the_id_comes_from_the_query_rather_than_the_caller(self) -> None:
+        """The whole point: the id each mutation carries is one this same run just read."""
+        ids = []
+
+        def capture(query: str, **variables: object) -> dict:
+            if 'reviewThreads' in query:
+                return {'repository': {'pullRequest':
+                                       {'reviewThreads': page([rthread('t-from-the-query')])}}}
+            ids.append(variables.get('threadId'))
+            if 'addPullRequestReviewThreadReply' in query:
+                return {'addPullRequestReviewThreadReply': {'comment': LANDED}}
+            return {'resolveReviewThread': {'thread': {'isResolved': True}}}
+
+        with mock.patch.object(pr_review, 'gh_graphql', side_effect=capture):
+            self.assertEqual(0, self.run_reply('--resolve'))
+        self.assertEqual(['t-from-the-query', 't-from-the-query'], ids)
+
+    def test_no_match_writes_nothing_and_lists_what_is_open(self) -> None:
+        """A no-match reads the same as an already-answered thread, so it stops rather than guesses."""
+        self.wire(page([rthread('t1', body='An unrelated finding about naming.')]))
+        self.assertEqual(60, self.run_reply('--resolve'))
+        self.assertFalse(self.wrote())
+        self.assertIn('NO_MATCH', self.out.getvalue())
+        # The open threads print, or the reader's next move is to go hunting for an id.
+        self.assertIn('unrelated finding', self.out.getvalue())
+
+    def test_two_matches_refuse_rather_than_take_the_first(self) -> None:
+        """`head -n 1` on an ambiguous match is how a reply lands on the wrong finding."""
+        self.wire(page([rthread('t1', path='a.py'), rthread('t2', path='b.py')]))
+        self.assertEqual(61, self.run_reply('--resolve'))
+        self.assertFalse(self.wrote())
+        self.assertIn('AMBIGUOUS', self.out.getvalue())
+        for path in ('a.py', 'b.py'):
+            self.assertIn(path, self.out.getvalue())
+
+    def test_path_narrows_an_otherwise_ambiguous_match(self) -> None:
+        self.wire(page([rthread('t1', path='a.py'), rthread('t2', path='b.py')]))
+        self.assertEqual(0, self.run_reply('--resolve', '--path', 'b.py'))
+        self.assertIn('b.py:12', self.out.getvalue())
+
+    def test_a_resolved_thread_is_not_a_candidate(self) -> None:
+        """It is answered, and replying again reopens a conversation nobody is reading."""
+        self.wire(page([rthread('t1', resolved=True)]))
+        self.assertEqual(60, self.run_reply('--resolve'))
+        self.assertFalse(self.wrote())
+
+    def test_the_match_follows_the_cursor_to_the_last_page(self) -> None:
+        """A first page read as the whole set reports no match on a thread further along."""
+        self.wire(page([rthread('t1', body='Something else.')], more=True, cursor='c1'),
+                  page([rthread('t2')]))
+        self.assertEqual(0, self.run_reply('--resolve'))
+        self.assertIn('REPLIED_AND_RESOLVED', self.out.getvalue())
+
+    def test_the_match_reads_the_finding_text_rather_than_a_line_number(self) -> None:
+        """A fix push moves the line, and every lookup keyed to one then misses."""
+        self.wire(page([rthread('t1', line=999, body='The RETRY COUNT is off by one.')]))
+        self.assertEqual(0, self.run_reply('--resolve'))
+        self.assertIn('REPLIED_AND_RESOLVED', self.out.getvalue())
+
+
+class TestReplyConfirmsBeforeResolving(ReplyCase):
+    def test_a_reply_returning_no_url_leaves_the_thread_open(self) -> None:
+        """Three replies posted empty and the resolves still succeeded, closing them unanswered."""
+        self.wire(page([rthread('t1')]), reply={'id': 'c1', 'url': None, 'body': ''})
+        self.assertEqual(62, self.run_reply('--resolve'))
+        self.assertFalse(self.resolved_a_thread())
+        self.assertIn('REPLY_NOT_CONFIRMED', self.out.getvalue())
+
+    def test_a_reply_whose_body_came_back_empty_leaves_the_thread_open(self) -> None:
+        """A url alone says a comment exists, not that it carries the answer."""
+        self.wire(page([rthread('t1')]), reply={'id': 'c1', 'url': LANDED['url'], 'body': '   '})
+        self.assertEqual(62, self.run_reply('--resolve'))
+        self.assertFalse(self.resolved_a_thread())
+
+    def test_a_resolve_that_does_not_confirm_is_reported_rather_than_assumed(self) -> None:
+        """The reply is already posted, so silence here leaves a thread open behind an answer."""
+        self.wire(page([rthread('t1')]), resolved=False)
+        self.assertEqual(63, self.run_reply('--resolve'))
+        self.assertIn('RESOLVE_NOT_CONFIRMED', self.out.getvalue())
+
+    def test_without_resolve_the_thread_is_answered_and_left_open(self) -> None:
+        """A decline is resolved once its evidence is in the thread, which is the reader's call."""
+        self.wire(page([rthread('t1')]))
+        self.assertEqual(0, self.run_reply())
+        self.assertFalse(self.resolved_a_thread())
+        self.assertIn('status=REPLIED', self.out.getvalue())
+
+
+class TestReplyStaysInScope(ReplyCase):
+    def test_a_target_under_another_owner_is_refused_before_anything_is_read(self) -> None:
+        """The incident shape: a write that lands on a stranger's repository."""
+        self.wire(page([rthread('t1')]))
+        code = pr_review.main(['reply', '7', '--repo', 'someone-else/r', '--match', 'retry',
+                               '--body', 'Fixed.', '--resolve'])
+        self.assertEqual(64, code)
+        self.assertEqual([], self.docs)
+        self.assertIn('OUT_OF_SCOPE', self.out.getvalue())
+
+    def test_an_unreadable_origin_refuses_rather_than_assuming_scope(self) -> None:
+        """An unverified scope is not a scope, and a check that cannot run reports itself."""
+        self.wire(page([rthread('t1')]))
+        with mock.patch.object(pr_review, 'origin_owner', return_value=None):
+            self.assertEqual(64, self.run_reply('--resolve'))
+        self.assertEqual([], self.docs)
+
+    def test_a_sibling_repository_under_the_same_owner_is_in_scope(self) -> None:
+        """The fleet is one owner, and that is the case the maintainer works in daily."""
+        self.wire(page([rthread('t1')]))
+        code = pr_review.main(['reply', '7', '--repo', 'o/some-other-repo', '--match',
+                               'retry count', '--body', 'Fixed in abc.', '--resolve'])
+        self.assertEqual(0, code)
+
+
+class TestReplyArguments(unittest.TestCase):
+    def err(self, argv: list[str]) -> str:
+        with contextlib.redirect_stderr(io.StringIO()) as err:
+            with self.assertRaises(SystemExit):
+                pr_review.main(argv)
+        return err.getvalue()
+
+    def test_an_empty_body_is_rejected_rather_than_posted(self) -> None:
+        """A thread resolved on an empty answer reads as addressed while carrying nothing."""
+        for body in ('', '   '):
+            with self.subTest(body=body):
+                self.assertIn('--body', self.err(
+                    ['reply', '7', '--repo', 'o/r', '--match', 'x', '--body', body]))
+
+    def test_a_missing_match_is_rejected_rather_than_matching_everything(self) -> None:
+        self.assertIn('--match', self.err(['reply', '7', '--repo', 'o/r', '--body', 'Fixed.']))
+
+    def test_a_writing_option_on_a_reading_command_is_an_error(self) -> None:
+        """Silently ignored, it reads as an option that took effect on a run that wrote nothing."""
+        for flag in (['--body', 'Fixed.'], ['--match', 'x'], ['--resolve'], ['--path', 'a.py']):
+            with self.subTest(flag=flag[0]):
+                self.assertIn(flag[0], self.err(['status', '7', '--repo', 'o/r', *flag]))
+
+
 class TestContract(unittest.TestCase):
     def test_the_reviewer_login_matches_the_runbook_graphql_form(self) -> None:
         """GraphQL drops the `[bot]` suffix REST carries, and this script is GraphQL-only.
@@ -818,14 +1012,54 @@ class TestContract(unittest.TestCase):
         # The published filter is single-quoted, which no spelling of the apostrophe survives.
         self.assertNotIn("'", pr_review.REFUSAL.pattern)
 
-    def test_no_mutation_reaches_this_script(self) -> None:
-        """Mutations stay as explicit `gh` calls so the write-guard hook and review still see them."""
+    def test_the_only_writes_are_the_two_the_reply_path_owns(self) -> None:
+        """One writing path, and everything else that changes state stays out of this script.
+
+        The read subcommands are the bulk of it and a mutation reaching them is a digest that
+        writes, so the whole-source guard stays and is narrowed to the two documents `reply`
+        needs rather than dropped when the first of them arrived.
+        """
         source = (REPO / 'scripts' / 'pr_review.py').read_text(encoding='utf-8')
-        # The GraphQL keyword is matched with its opening token, so naming the runbook is not a hit.
-        for verb in ('mutation(', 'mutation{', 'mutation {', '-X POST', '-X PATCH', '-X PUT',
-                     '-X DELETE', 'gh pr merge', 'gh pr review'):
+        for verb in ('-X POST', '-X PATCH', '-X PUT', '-X DELETE', '--method',
+                     'gh pr merge', 'gh pr review', 'gh pr edit', 'requestReviews'):
             with self.subTest(verb=verb):
-                self.assertFalse(verb in source, f'{verb!r} is a state-changing call in a read-only script')
+                self.assertNotIn(verb, source, f'{verb!r} is a state-changing call this script '
+                                               'has no reason to make')
+        # `mutation(` opens a document, so the count is the number of documents.
+        # A third arriving is a write nobody reviewed as one rather than a style drift.
+        self.assertEqual(2, source.count('mutation('))
+        self.assertIn('addPullRequestReviewThreadReply', source)
+        self.assertIn('resolveReviewThread', source)
+
+    def test_the_mutations_are_the_ones_the_runbook_publishes(self) -> None:
+        """A helper performing a different write than the documented one is undocumented."""
+        text = RUNBOOK.read_text(encoding='utf-8')
+        for name in ('addPullRequestReviewThreadReply', 'resolveReviewThread'):
+            with self.subTest(mutation=name):
+                self.assertIn(name, text)
+
+    def test_no_argument_accepts_a_thread_id(self) -> None:
+        """The failure is an id typed into a mutation, so the fix is having nowhere to type one.
+
+        A parser that takes an id restores the failing shape however plainly the docs discourage
+        it, which is the lesson the two prior instances taught: the rule was known and read.
+        """
+        source = (REPO / 'scripts' / 'pr_review.py').read_text(encoding='utf-8')
+        # A node id literal anywhere in the source is an example a hand copies out of it.
+        self.assertNotIn('PRRT_', source)
+        parser_options = re.findall(r"add_argument\('(--[a-z-]+)'", source)
+        for opt in parser_options:
+            with self.subTest(option=opt):
+                self.assertNotIn('id', opt.replace('--', '').split('-'))
+        # The selector is the finding's text, and it is required rather than defaulted.
+        self.assertIn("'--match'", source)
+
+    def test_no_write_suppresses_or_forces_its_own_result(self) -> None:
+        """A mutation whose output is discarded is a write nobody can say landed."""
+        source = (REPO / 'scripts' / 'pr_review.py').read_text(encoding='utf-8')
+        for tail in ('>/dev/null', '2>/dev/null', '&>/dev/null', '|| true', '|| :', 'shell=True'):
+            with self.subTest(tail=tail):
+                self.assertNotIn(tail, source)
 
     def test_the_guard_tests_the_window_the_queries_actually_read(self) -> None:
         """A guard measuring one number while the query fetches another reads clean on drift."""
