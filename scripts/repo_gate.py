@@ -115,7 +115,8 @@ def workflow_files(files: list[str]) -> list[str]:
 
 
 def check_sha_pin(root: Path, files: list[str]) -> list[str]:
-    """Every workflow `uses:` is a 40-hex SHA, and one under this owner is a SHA that resolves.
+    """Every `uses:` naming an action is a 40-hex SHA, and one under this owner is a SHA that
+    resolves. A ref into this repository's own tree names no action and is skipped.
 
     Resolution is scoped to the scanned repository's own owner, because that is where the fleet's
     own actions live and where the decay this catches comes from: a squash merge deletes the

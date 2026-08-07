@@ -78,7 +78,7 @@ A comment sentence also has to start with a capital, which `comment-case` checks
 
 Two deterministic checks:
 
-- `sha-pin`: every workflow `uses:` is a 40-hex commit SHA that resolves, with the one documented `dotnet/nbgv@master` exception allowed.
+- `sha-pin`: every workflow `uses:` naming an action is a 40-hex commit SHA that resolves, with the one documented `dotnet/nbgv@master` exception allowed. A local reusable workflow (`./.github/workflows/...`) names no action and carries no ref to pin, so it is skipped.
 - `eol`: every path pinned LF in [`.gitattributes`][gitattributes] has the matching [`.editorconfig`][editorconfig] override the line-ending rule requires, with EditorConfig brace syntax expanded. One direction only: an `.editorconfig` LF glob with no git pin is legitimate, since `.editorconfig` governs what the editor writes where git enforces a class it must not guess at.
 
 ```sh

@@ -990,7 +990,6 @@ class TestReplyArguments(unittest.TestCase):
                 self.assertIn(flag[0], self.err(['status', '7', '--repo', 'o/r', *flag]))
 
 
-HERE = 'ptr727/ProjectTemplate'
 PIN = 'actions/checkout@' + '9' * 40
 
 
