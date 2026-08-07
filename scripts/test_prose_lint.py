@@ -610,6 +610,44 @@ class TestCommentWrap(BaitCase):
         self.assertEqual(['comment-wrap'],
                          self.flag('a.py', '# A sentence that keeps\n# going onto the next line.\n'))
 
+    def test_a_commented_out_key_is_not_a_sentence(self) -> None:
+        """`# ignore:` heading a disabled block is configuration, and capitalizing it breaks the key.
+
+        The rule pointed at a codecov snippet whose commented-out `ignore:` block a repo uncomments,
+        so following the finding would have corrupted the file the exemption exists to protect.
+        """
+        for text in ('# ignore:\n#   - "Sandbox/**"\n', '# Outputs:\n'):
+            with self.subTest(text=text.splitlines()[0]):
+                self.assertEqual([], self.flag('a.yml', text))
+
+    def test_a_colon_ending_real_prose_is_still_judged(self) -> None:
+        """The exemption is one token wide, since prose closing on a colon has words before it."""
+        self.assertEqual(['comment-case'], self.flag('a.yml', '# the outputs are these:\n'))
+
+    def test_a_label_opening_a_definition_keeps_its_name(self) -> None:
+        """`publish` names the output being documented, so capitalizing it renames what ships."""
+        for text in ("#   publish - 'true' when this run should publish.\n",
+                     "#   stable  - 'true' when the target branch is main.\n",
+                     '# payload-file - create-or-update the ruleset by name.\n'):
+            with self.subTest(text=text.strip()[:30]):
+                self.assertEqual([], self.flag('a.yml', text))
+
+    def test_a_continuation_dash_is_not_read_as_a_label(self) -> None:
+        """A wrapped line whose first word takes a spaced dash is a parenthetical, not a definition.
+
+        Two live instances in the tree have this shape, and exempting them would have hidden the
+        very construction the dash rule exists to catch. The label test is scoped to a line that
+        opens a definition, so a continuation never reaches it.
+        """
+        self.assertEqual(['comment-wrap'],
+                         self.flag('a.yml', '# It needs every other\n'
+                                            '# build - a target disabled on a smoke PR - does not.\n'))
+
+    def test_a_label_does_not_hide_a_run_on(self) -> None:
+        """The exemption answers the opening word only, so the sentence checks still see the prose."""
+        self.assertEqual(['comment-wrap'],
+                         self.flag('a.yml', f'# publish - {self.RUN_ON}\n'))
+
     def test_a_capitalized_opening_and_a_code_token_are_both_accepted(self) -> None:
         """A backticked identifier does not open in lowercase, so it needs no restructuring."""
         for text in ('# The details element is allowed.\n', '# `ruff format` runs first.\n'):

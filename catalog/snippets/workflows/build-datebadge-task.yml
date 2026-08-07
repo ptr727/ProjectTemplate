@@ -1,7 +1,7 @@
 name: Build BYOB date badge task
 
-# Caller-gated: the publisher invokes this only when main is published - the badge has no per-branch context, it tracks
-# the last main build.
+# Caller-gated: the publisher invokes this only when main is published.
+# The badge has no per-branch context, so it tracks the last main build.
 
 on:
   workflow_call:

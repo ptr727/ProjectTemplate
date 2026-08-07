@@ -23,19 +23,21 @@ on:
         required: false
         type: string
         default: ''
-      # Logical branch driving config / tags / prerelease for every target. Required (no fallback) because each
-      # publish run builds a single branch (the trigger ref), so a silent fallback would mislabel the build.
+      # Logical branch driving config / tags / prerelease for every target.
+      # It is required, with no fallback, because each publish run builds a single branch (the trigger ref).
+      # A silent fallback would therefore mislabel the build.
       branch:
         required: true
         type: string
-      # Smoke mode: reduced, never-published build for fast PR feedback. Forwarded to every target and hard-disables
-      # every push below, so a smoke run can never publish regardless of the publish flags.
+      # Smoke mode: a reduced, never-published build for fast PR feedback.
+      # It is forwarded to every target and hard-disables every push below.
+      # A smoke run can therefore never publish regardless of the publish flags.
       smoke:
         required: false
         type: boolean
         default: false
-      # Per-target presence gates. Default true (build everything); a PR smoke run sets these from the paths-filter
-      # so only changed targets build.
+      # Per-target presence gates, defaulting to true so everything builds.
+      # A PR smoke run sets these from the paths-filter so only changed targets build.
       enable_docker:
         required: false
         type: boolean
@@ -52,8 +54,9 @@ on:
         required: false
         type: boolean
         default: true
-      # Set false for a repo that produces no release-asset-* files (e.g. Docker-only): the release is then just the
-      # tag + source zip + README + LICENSE; the artifact download is skipped and the unmatched-files guard relaxes.
+      # Set false for a repo that produces no release-asset-* files, such as a Docker-only one.
+      # The release is then just the tag + source zip + README + LICENSE.
+      # The artifact download is skipped and the unmatched-files guard relaxes.
       expect_release_assets:
         required: false
         type: boolean
@@ -68,10 +71,12 @@ jobs:
     with:
       ref: ${{ inputs.ref }}
 
-  # Entry gate: validate branch<->version consistency once, before the build jobs, so an NBGV mis-classification fails
-  # fast instead of after building and publishing. main must be a public release (no prerelease '-'); every other branch
-  # must carry a prerelease '-' (guards a develop leg being classified public and published as stable). Strip
-  # '+buildmetadata' first; a '-' there is legitimate, only a '-' in the core/prerelease segment marks a prerelease.
+  # Entry gate: validate branch<->version consistency once, before the build jobs.
+  # An NBGV mis-classification then fails fast instead of after building and publishing.
+  # The main branch must be a public release, carrying no prerelease '-'.
+  # Every other branch must carry a prerelease '-', which guards a develop leg being published as stable.
+  # Strip '+buildmetadata' first, since a '-' there is legitimate.
+  # Only a '-' in the core/prerelease segment marks a prerelease.
   validate-release:
     name: Validate release version job
     needs: [get-version]
@@ -115,8 +120,9 @@ jobs:
       # Skip the release-asset upload on smoke (nothing consumes it on a PR).
       smoke: ${{ inputs.smoke }}
 
-  # PyPI publishing happens in `publish-release.yml`, not here, so `id-token: write` is only granted at the
-  # entry-point job; this workflow just builds and uploads the artifact for that job to download.
+  # PyPI publishing happens in `publish-release.yml` rather than here.
+  # `id-token: write` is therefore only granted at the entry-point job.
+  # This workflow just builds and uploads the artifact for that job to download.
   build-pypilibrary:
     name: Build PyPI library job
     if: ${{ inputs.enable_pypi }}
@@ -142,12 +148,14 @@ jobs:
       branch: ${{ inputs.branch }}
       smoke: ${{ inputs.smoke }}
 
-  # Docker is the terminal registry push, so it must never push on a partial run. It needs every other build and
-  # guards with `!failure() && !cancelled()`: a *failed* build skips docker (no build, no push), while a *skipped*
-  # build - a target disabled on a smoke PR, or one this repo does not vendor - does not, so docker still builds
-  # the changed target on smoke. Plain `needs` cannot express this (a skipped need skips the dependent). The
-  # github-release job reaches the same intent more simply because it only runs on a publish (`!inputs.smoke`),
-  # where nothing is disabled. (A repo pushing a package alongside docker would need a build/publish split.)
+  # Docker is the terminal registry push, so it must never push on a partial run.
+  # It needs every other build and guards with `!failure() && !cancelled()`.
+  # A *failed* build skips docker, so there is no build and no push.
+  # A *skipped* build does not, so docker still builds the changed target on smoke.
+  # A skipped build is a target disabled on a smoke PR, or one this repo does not vendor.
+  # Plain `needs` cannot express this, since a skipped need skips the dependent.
+  # The github-release job reaches the same intent more simply, because it only runs on a publish (`!inputs.smoke`), where nothing is disabled.
+  # (A repo pushing a package alongside docker would need a build/publish split.)
   build-docker:
     name: Build Docker job
     if: ${{ inputs.enable_docker && !failure() && !cancelled() }}
@@ -178,11 +186,11 @@ jobs:
         with:
           ref: ${{ needs.get-version.outputs.GitCommitId }}
 
-      # Collect assets by the `release-asset-<branch>-*` pattern so this step is target-agnostic: subset releases by
-      # deleting the target, not `enable_*: false` (a skipped `needs` job would skip this release job too). The release
-      # step guards `fail_on_unmatched_files: true`, so at least one `release-asset-*` must match; a repo that drops
-      # every file-producing target (e.g. a Docker-only repo, whose release carries only source zip + README + LICENSE)
-      # relaxes that guard.
+      # Collect assets by the `release-asset-<branch>-*` pattern so this step is target-agnostic.
+      # Subset releases by deleting the target rather than by `enable_*: false`, since a skipped `needs` job would skip this release job too.
+      # The release step guards `fail_on_unmatched_files: true`, so at least one `release-asset-*` must match.
+      # A repo that drops every file-producing target relaxes that guard.
+      # A Docker-only repo is the case, its release carrying only the source zip + README + LICENSE.
       - name: Download release asset artifacts step
         if: ${{ inputs.expect_release_assets }}
         uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
@@ -191,8 +199,8 @@ jobs:
           merge-multiple: true
           path: ./Publish
 
-      # The weekly publisher re-runs even with no new commits, so the version may already be released. Skip the release
-      # step when a release for this tag already exists to avoid a no-op republish.
+      # The weekly publisher re-runs even with no new commits, so the version may already be released.
+      # Skip the release step when a release for this tag already exists, to avoid a no-op republish.
       - name: Check for existing release step
         id: release-exists
         env:
@@ -214,10 +222,10 @@ jobs:
       # `target_commitish` must be set explicitly: otherwise GitHub's REST API tags the release on the default branch.
       # Pin it to `GitCommitId` so the tag is on the exact built commit, consistent with the SemVer2 tag and artifacts.
       # Skip when the release already exists, but always let a manual `workflow_dispatch` through to refresh it.
-      # Every release (any branch, any target) is a tag on the built commit plus the auto-attached source zip, README,
-      # and LICENSE; targets amend it by uploading `release-asset-*` files (binaries/packages) or pushing elsewhere
-      # (image/registry). `fail_on_unmatched_files: true` fails loudly if a promised `release-asset-*` is missing or
-      # misnamed; a no-file-target repo relaxes it (see download step).
+      # Every release, on any branch and for any target, is a tag on the built commit plus the auto-attached source zip, README, and LICENSE.
+      # Targets amend it by uploading `release-asset-*` files (binaries/packages) or by pushing elsewhere (image/registry).
+      # `fail_on_unmatched_files: true` fails loudly if a promised `release-asset-*` is missing or misnamed.
+      # A no-file-target repo relaxes it (see download step).
       - name: Create GitHub release step
         if: ${{ steps.release-exists.outputs.exists == 'false' || github.event_name == 'workflow_dispatch' }}
         uses: softprops/action-gh-release@718ea10b132b3b2eba29c1007bb80653f286566b # v3.0.1
@@ -232,16 +240,17 @@ jobs:
             README.md
             ./Publish/*
 
-      # Surgical cleanup at the point of consumption: the release-asset-<branch>-* transfer artifacts now have durable
-      # copies on the release, so delete them by exact pattern to free the storage quota - scoped to this branch's
-      # assets, leaving diagnostics and any other artifacts. Gated to the same condition as the create step so it only
-      # deletes when a release was actually created/refreshed this run; on a skipped create (existing tag, no new
-      # commits) the fresh artifacts stay for the run, reaped by the retention-days: 1 backstop. Needs the caller to
-      # grant `actions: write` (publish-release's publish job does).
+      # Surgical cleanup at the point of consumption, since the release-asset-<branch>-* transfer artifacts now have durable copies on the release.
+      # Delete them by exact pattern to free the storage quota.
+      # The pattern is scoped to this branch's assets, leaving diagnostics and any other artifacts.
+      # It is gated to the same condition as the create step, so it only deletes when a release was actually created or refreshed this run.
+      # On a skipped create (an existing tag, no new commits) the fresh artifacts stay for the run, reaped by the retention-days: 1 backstop.
+      # It needs the caller to grant `actions: write`, which publish-release's publish job does.
       - name: Delete consumed release asset artifacts step
         if: ${{ inputs.expect_release_assets && (steps.release-exists.outputs.exists == 'false' || github.event_name == 'workflow_dispatch') }}
-        # Best-effort: the release is already published, so a listing/delete hiccup must never red the job; the
-        # retention-days: 1 backstop reaps anything missed. Deletes every matching id (a rerun can upload duplicates).
+        # Best-effort, since the release is already published, so a listing or delete hiccup must never red the job.
+        # The retention-days: 1 backstop reaps anything missed.
+        # It deletes every matching id, because a rerun can upload duplicates.
         continue-on-error: true
         env:
           GH_TOKEN: ${{ github.token }}

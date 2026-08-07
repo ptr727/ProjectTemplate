@@ -24,17 +24,19 @@ The steps below are followed in order rather than sampled.
 
 ### The Prose Content Backlog
 
-One pull request clearing prose findings, leading with [`catalog/snippets/`][snippets] because a non-conformant snippet seeds its violations into every repo that adopts it and the downstream repo is then flagged for content it was handed.
+One pull request clearing the prose findings the hub's own docs and spec still carry, now that [`catalog/snippets/`][snippets] is clear. The snippets led because a non-conformant snippet seeds its violations into every repo that adopts it, and the downstream repo is then flagged for content it was handed.
 
-**State** `ready`. **Touches** [`catalog/snippets/`][snippets] first, then the hub's docs and spec. **Cost** one hub edit per batch, hub-only, and a snippet fix reaches the fleet only as repos re-adopt.
+**State** `ready`. **Touches** the hub's docs and spec. **Cost** one hub edit per batch, hub-only.
 
-- **Clear the [#519][issue-519] prose backlog, snippets first.** The whole-tree figure moves as readily with a fix to the gate as with a fix to the prose, so it is re-measured rather than quoted.
+- **Clear the remaining [#519][issue-519] prose backlog, outside the snippets.** The whole-tree figure moves as readily with a fix to the gate as with a fix to the prose, so it is re-measured rather than quoted.
   - **Blocked by** - Nothing.
   - **Issue** - [#519][issue-519], whose headline numbers are stale and whose four planned changes are two-thirds landed.
-  - **Checked** - `develop` at `3d1a0b1` on 2026-08-06, where `python3 scripts/prose_lint.py --summary` reports 557 violations across 45 files, and `catalog/snippets` alone reports 184 across 19.
+  - **Checked** - `develop` at `a6d7a4b` on 2026-08-07, where `python3 scripts/prose_lint.py --summary` reports 373 violations across 26 files, and `catalog/snippets` reports 0. The snippets sweep took the tree from 557 across 45, of which 184 across 19 were snippets.
   - **Open** - Whether the gate becomes a carried file rather than a hub-only one, which "Reducing the Carried Surface Further" asks from the other direction.
   - **Settled** - `comment-wrap` and `comment-case` are in `DEFAULT_RULES` and `reports/` is exempt as a generated tree, which is why the figures differ from the 668 and 119 the issue records.
   - **Settled** - `sentence-split` is defined but excluded from `DEFAULT_RULES`, so a sweep never reports it and a wrapped sentence in Markdown prose is not a finding.
+  - **Settled** - The three largest files are not snippets and are Python comments rather than prose, being [`spec/audit.py`][audit] at 99, [`gh-write-guard.py`][write-guard] at 52, and [`spec/validate.py`][validate] at 41 when measured before the sweep.
+  - **Settled** - A comment opening on a lowercase identifier is the bulk of what `comment-case` still reports, and the rule intends those restructured rather than exempted. The exemptions the snippets sweep added cover a commented-out key and a definition label, and nothing wider.
 
 ### Two Checks That Read What a Claim Points At
 
@@ -510,5 +512,6 @@ Each was checked against the tree and has nothing left to do anywhere. Closing i
 [snippets]: ./catalog/snippets/
 [standup]: ./STANDUP.md
 [type-model]: ./spec/type-model.md
+[validate]: ./spec/validate.py
 [workflows]: ./catalog/snippets/workflows/
 [write-guard]: ./host-setup/agent-safety/gh-write-guard.py
