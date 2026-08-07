@@ -146,6 +146,8 @@ HTTP_STATUS = re.compile(r'\(HTTP (\d{3})\)')
 ABSENT = {'404', '422'}
 # What a reference reads as where GitHub never answered for it.
 UNREAD = 'unread'
+# Longer than the ordinary read's, since this one downloads a repository rather than a field.
+TARBALL_TIMEOUT = 120
 
 # Threads for the reply path, paginated.
 # A first page read as the whole set reports no match on a thread that is simply further along.
@@ -745,8 +747,14 @@ def head_carries(owner: str, repo: str, head: str, refs: list[str]) -> set[str] 
     the tree would report a ref as absent because it looked in the wrong place. One archive is
     also one request, where walking a listing costs a request per file and grows with the repo.
     """
-    proc = subprocess.run(['gh', 'api', f'repos/{owner}/{repo}/tarball/{head}'],
-                          capture_output=True)
+    # Read as bytes, so this cannot go through `gh_rest` and carries that helper's guards itself.
+    # An absent `gh` or a hung download reads as undecided, like every other unreadable answer.
+    # Raising instead would abort a run the caller is in the middle of.
+    try:
+        proc = subprocess.run(['gh', 'api', f'repos/{owner}/{repo}/tarball/{head}'],
+                              capture_output=True, timeout=TARBALL_TIMEOUT)
+    except (OSError, subprocess.SubprocessError):
+        return None
     if proc.returncode != 0:
         return None
     needles = {r: r.encode() for r in refs}

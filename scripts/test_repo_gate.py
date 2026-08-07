@@ -152,6 +152,28 @@ class TestShaPinResolves(ResolveCase):
                 self.tmp, self.pins(f'{self.OWNER}/Fleet@{PINNED}')))
         stub.assert_not_called()
 
+    def test_an_unreadable_owner_is_not_reported_as_another_owner(self) -> None:
+        """The two are different states, and this note exists to describe the narrowing exactly.
+
+        A pin under this owner skipped because the origin is unreadable is not a pin belonging to
+        somebody else, and saying so in the one line that reports coverage is the same false clean
+        the note was added to prevent.
+        """
+        self.answers({})
+        with mock.patch.object(repo_gate, 'origin_owner', return_value=None):
+            repo_gate.check_sha_pin(self.tmp, self.pins(f'{self.OWNER}/Fleet@{PINNED}'))
+        self.assertIn('0 under another owner', repo_gate.NOTES[0])
+        self.assertIn('1 whose owner could not be compared', repo_gate.NOTES[0])
+
+    def test_the_note_carries_every_count_including_the_zeroes(self) -> None:
+        """One fixed shape per run, so a zero in any position is as visible as a count."""
+        self.answers({f'repos/{self.OWNER}/Fleet/commits/{PINNED}': True})
+        repo_gate.check_sha_pin(self.tmp, self.pins(f'{self.OWNER}/Fleet@{PINNED}'))
+        for fragment in ('resolved 1 pin(s)', '0 under another owner',
+                         '0 whose owner could not be compared', '0 GitHub did not answer for'):
+            with self.subTest(fragment=fragment):
+                self.assertIn(fragment, repo_gate.NOTES[0])
+
     def test_a_pin_github_did_not_answer_for_is_skipped_rather_than_failed(self) -> None:
         """Offline, unauthenticated and rate-limited all read as nothing learned, not as absent."""
         self.answers({f'repos/{self.OWNER}/Fleet/commits/{PINNED}': None})
@@ -350,7 +372,7 @@ class TestCoverageFloors(unittest.TestCase):
 class TestHarness(unittest.TestCase):
     def test_this_module_collects_a_plausible_number_of_cases(self) -> None:
         loaded = unittest.defaultTestLoader.loadTestsFromModule(sys.modules[__name__])
-        self.assertGreaterEqual(loaded.countTestCases(), 42)
+        self.assertGreaterEqual(loaded.countTestCases(), 45)
 
 
 if __name__ == '__main__':

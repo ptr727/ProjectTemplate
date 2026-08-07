@@ -1175,6 +1175,27 @@ class TestClaimsIsReadOnly(unittest.TestCase):
             with mock.patch.object(pr_review.subprocess, 'run', return_value=outcome):
                 self.assertIsNone(pr_review.head_carries('ptr727', 'ProjectTemplate', HEAD, [PIN]))
 
+    def test_gh_being_absent_leaves_the_tree_undecided_rather_than_aborting_claims(self) -> None:
+        """This read cannot go through `gh_rest`, so it carries that helper's guards itself.
+
+        Raising here would abort a run mid-way, where every other unreadable answer in this
+        subcommand reports undecided and lets the caller see what was decided.
+        """
+        with mock.patch.object(pr_review.subprocess, 'run', side_effect=FileNotFoundError):
+            self.assertIsNone(pr_review.head_carries('ptr727', 'ProjectTemplate', HEAD, [PIN]))
+
+    def test_a_hung_download_times_out_rather_than_hanging_the_run(self) -> None:
+        with mock.patch.object(pr_review.subprocess, 'run',
+                               side_effect=subprocess.TimeoutExpired('gh', 1)):
+            self.assertIsNone(pr_review.head_carries('ptr727', 'ProjectTemplate', HEAD, [PIN]))
+
+    def test_the_archive_read_is_bounded_by_a_timeout(self) -> None:
+        """An unbounded read of a whole repository is a wait with no end and no message."""
+        with mock.patch.object(pr_review.subprocess, 'run') as run:
+            run.return_value = subprocess.CompletedProcess([], 1, b'', b'')
+            pr_review.head_carries('ptr727', 'ProjectTemplate', HEAD, [PIN])
+        self.assertEqual(pr_review.TARBALL_TIMEOUT, run.call_args.kwargs['timeout'])
+
     def test_an_archive_that_is_not_a_readable_tarball_is_undecided(self) -> None:
         proc = subprocess.CompletedProcess([], 0, b'not a gzip stream', b'')
         with mock.patch.object(pr_review.subprocess, 'run', return_value=proc):
@@ -1355,7 +1376,7 @@ class TestHarness(unittest.TestCase):
     def test_this_module_collects_a_plausible_number_of_cases(self) -> None:
         """A module whose cases fail to load still reports OK, which is a pass proving nothing."""
         loaded = unittest.defaultTestLoader.loadTestsFromModule(sys.modules[__name__])
-        self.assertGreaterEqual(loaded.countTestCases(), 45)
+        self.assertGreaterEqual(loaded.countTestCases(), 48)
 
 
 if __name__ == '__main__':

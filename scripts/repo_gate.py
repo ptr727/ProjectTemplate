@@ -128,7 +128,7 @@ def check_sha_pin(root: Path, files: list[str]) -> list[str]:
     bad = []
     owner = origin_owner(root)
     cache: dict[tuple[str, str], bool | None] = {}
-    resolved = foreign = unread = 0
+    resolved = foreign = unowned = unread = 0
     for rel in workflow_files(files):
         try:
             text = (root / rel).read_text(encoding='utf-8', errors='replace')
@@ -150,7 +150,13 @@ def check_sha_pin(root: Path, files: list[str]) -> list[str]:
                 continue
             # An action reference is `owner/repo` with an optional path to the action within it.
             nwo = '/'.join(action.split('/')[:2])
-            if owner is None or nwo.split('/')[0].lower() != owner:
+            # Counted apart from a known other owner, since the two are not the same state.
+            # The note exists to describe the narrowing exactly, so it must not merge them.
+            # A checkout with no readable origin skips every pin, this owner's own included.
+            if owner is None:
+                unowned += 1
+                continue
+            if nwo.split('/')[0].lower() != owner:
                 foreign += 1
                 continue
             state = pin_resolves(nwo, ver, cache)
@@ -161,9 +167,12 @@ def check_sha_pin(root: Path, files: list[str]) -> list[str]:
                 unread += 1
             else:
                 resolved += 1
-    if resolved or foreign or unread:
-        NOTES.append(f'resolved {resolved} pin(s) against GitHub; {foreign} under another owner '
-                     f'and {unread} GitHub did not answer for were read for shape only')
+    if resolved or foreign or unowned or unread:
+        # One fixed shape every run, so a zero in any position is as visible as a count.
+        NOTES.append(f'resolved {resolved} pin(s) against GitHub. Read for shape only: '
+                     f'{foreign} under another owner, {unowned} whose owner could not be '
+                     f"compared because this checkout's origin is unreadable, "
+                     f'{unread} GitHub did not answer for.')
     return bad
 
 
