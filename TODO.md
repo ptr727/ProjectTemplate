@@ -22,38 +22,6 @@ The steps below are followed in order rather than sampled.
 
 ## Work Clusters
 
-### The Prose Gate Scope Floor
-
-One pull request making [`prose_lint.py`][prose-lint] assert a floor on its own scope, which every verdict below it depends on, since a gate that finds nothing is indistinguishable from a gate with nothing to find.
-
-**State** `ready`. **Touches** [`scripts/prose_lint.py`][prose-lint] and its test file. **Cost** one hub edit, hub-only, no sweep.
-
-- **Assert a floor on what a `--diff` run actually scanned.** A run that resolves a non-empty diff and then matches zero files has almost certainly failed to scope rather than found a clean change, so it says so instead of exiting 0.
-  - **Blocked by** - Nothing.
-  - **Issue** - None filed.
-  - **Checked** - `develop` at `1ed0cc8` on 2026-08-03, where four separate guards each close one route to the same false clean.
-  - **Open** - Nothing.
-  - **Settled** - Four routes to the same false clean are on record from one session, an unresolvable base widening to a whole-tree scan, a multi-line `paths` input read only to its first newline, a diff taken in one repository while scanning another, and a path under no repository at all.
-  - **Settled** - Per-route guards are the wrong shape, because the fifth route needs a fifth guard and gets found by a reviewer rather than by the gate, which is what a floor assertion covers.
-  - **Settled** - The honest limit is that a change touching only files the gate does not read, an image or a lock file, legitimately scopes to zero, so the assertion compares against the diff's own file list rather than against zero alone.
-  - **Settled** - `LEAST_PLAUSIBLE` at 60 is the existing floor on a whole-tree sweep, so the shape is already in the file and the `--diff` path is what lacks it.
-
-### The Representative-Data Path Check
-
-One pull request gating the pattern-detectable half of the representative-data rule, which is worth having only once the gate can prove it read something.
-
-**State** `blocked` on "The Prose Gate Scope Floor". **Touches** [`scripts/prose_lint.py`][prose-lint] and its test file. **Cost** one hub edit, hub-only, no sweep.
-
-- **Flag an absolute home path or a bare drive letter in committed prose, a comment, or a fixture.** [`GOVERNANCE.md`][governance] "Representative Data in Agent-Authored Text" states the rule and says why a check is a floor rather than an answer.
-  - **Blocked by** - The Prose Gate Scope Floor.
-  - **Issue** - None filed.
-  - **Checked** - `develop` at `1ed0cc8` on 2026-08-03, where the rule is stated and no check reads for it.
-  - **Open** - Whether a home path in an operational repo's runbook is a finding, since it may be the literal path an operator types, which is the repo's own content rather than an agent quoting the maintainer's environment, so the answer is a scope by file, by repo type, or left to the author.
-  - **Settled** - The shapes are `/home/<name>`, `/Users/<name>`, `C:\Users\<name>`, and a bare drive letter.
-  - **Settled** - The check is introduced as covering the easy half or it gets read as closing the rule, which is the specific way it would make things worse.
-  - **Settled** - The exemption carries the whole burden, since the rule's own wording, the [`host-setup/`][agent-safety] docs, and the audit's examples all quote path shapes in order to describe them, and a wrong exemption hands out a work list that damages correct documents.
-  - **Settled** - The leak that motivated the rule was in a pull request comment, which no committed-file linter reads, so the gate says what surface it covers rather than letting its name imply the rule.
-
 ### The Prose Content Backlog
 
 One pull request clearing prose findings, leading with [`catalog/snippets/`][snippets] because a non-conformant snippet seeds its violations into every repo that adopts it and the downstream repo is then flagged for content it was handed.
@@ -535,7 +503,6 @@ Each was checked against the tree and has nothing left to do anywhere. Closing i
 [pr-review]: ./scripts/pr_review.py
 [project-types]: ./spec/project-types.json
 [prose-gate]: ./.github/actions/prose-gate/action.yml
-[prose-lint]: ./scripts/prose_lint.py
 [readme]: ./README.md
 [readme-structure]: ./spec/readme-structure.md
 [repo-gate]: ./scripts/repo_gate.py
