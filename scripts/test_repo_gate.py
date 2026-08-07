@@ -8,7 +8,7 @@ other half: a check whose scan matches nothing reports zero issues and reads exa
 Run as `python3 scripts/test_repo_gate.py`, or under `python3 -m unittest discover -s scripts`.
 """
 from __future__ import annotations
-import contextlib, io, re, shutil, sys, tempfile, unittest
+import contextlib, io, re, shutil, subprocess, sys, tempfile, unittest
 from pathlib import Path
 from unittest import mock
 
@@ -50,7 +50,7 @@ class TestChecksTable(TreeCase):
 
     def test_the_patterns_compile_and_carry_no_invisible_characters(self) -> None:
         """A shell heredoc turns a backslash escape into a control character no diff shows."""
-        for name in ('USES', 'PIN', 'WORKFLOW'):
+        for name in ('USES', 'PIN', 'WORKFLOW', 'HTTP_STATUS'):
             with self.subTest(pattern=name):
                 self.assertTrue(re.compile(getattr(repo_gate, name).pattern))
         for action in repo_gate.SHA_EXCEPTIONS:
@@ -87,6 +87,199 @@ class TestShaPin(TreeCase):
             with self.subTest(ref=ref):
                 files = self.workflow(f'jobs:\n  a:\n    uses: {ref}\n')
                 self.assertEqual([], repo_gate.check_sha_pin(self.tmp, files))
+
+
+class ResolveCase(TreeCase):
+    """Base for the resolvability pass, with the owner fixed and the network replaced.
+
+    No case here reaches GitHub. The point is what each answer is read as, and a case that made a
+    live call would report the fleet's current state rather than this script's reading of it.
+    """
+
+    OWNER = 'ptr727'
+
+    def setUp(self) -> None:
+        super().setUp()
+        repo_gate.NOTES.clear()
+        self.enterContext(mock.patch.object(repo_gate, 'origin_owner',
+                                            return_value=self.OWNER))
+
+    def pins(self, *refs: str) -> list[str]:
+        steps = ''.join(f'      - uses: {r}\n' for r in refs)
+        return self.workflow(f'jobs:\n  a:\n    steps:\n{steps}')
+
+    def answers(self, mapping: dict[str, bool | None]) -> mock.MagicMock:
+        """Replace the GitHub read with a table keyed on the API path it would have called."""
+        stub = mock.MagicMock(side_effect=lambda path: mapping.get(path))
+        self.enterContext(mock.patch.object(repo_gate, 'gh_exists', stub))
+        return stub
+
+
+class TestShaPinResolves(ResolveCase):
+    def test_a_forty_hex_pin_that_resolves_to_no_commit_is_flagged(self) -> None:
+        """The whole point: a fabricated pin satisfies the shape and fails the reference."""
+        self.answers({f'repos/{self.OWNER}/Fleet/commits/{"c" * 40}': False,
+                      f'repos/{self.OWNER}/Fleet': True})
+        hits = repo_gate.check_sha_pin(self.tmp, self.pins(f'{self.OWNER}/Fleet@{"c" * 40}'))
+        self.assertEqual(1, len(hits))
+        self.assertIn('resolves to no commit', hits[0])
+
+    def test_a_pin_that_resolves_is_accepted(self) -> None:
+        self.answers({f'repos/{self.OWNER}/Fleet/commits/{PINNED}': True})
+        self.assertEqual([], repo_gate.check_sha_pin(self.tmp,
+                                                     self.pins(f'{self.OWNER}/Fleet@{PINNED}')))
+
+    def test_an_action_path_within_a_repository_resolves_against_the_repository(self) -> None:
+        """`owner/repo/path/to/action@sha` is one repository, and the path is not part of it."""
+        stub = self.answers({f'repos/{self.OWNER}/Fleet/commits/{PINNED}': True})
+        ref = f'{self.OWNER}/Fleet/.github/actions/prose-gate@{PINNED}'
+        self.assertEqual([], repo_gate.check_sha_pin(self.tmp, self.pins(ref)))
+        stub.assert_called_once_with(f'repos/{self.OWNER}/Fleet/commits/{PINNED}')
+
+    def test_a_pin_under_another_owner_is_read_for_shape_and_never_fetched(self) -> None:
+        """The scope is a decision, so a case holds it rather than leaving it to the docstring."""
+        stub = self.answers({})
+        self.assertEqual([], repo_gate.check_sha_pin(self.tmp,
+                                                     self.pins(f'actions/checkout@{PINNED}')))
+        stub.assert_not_called()
+        self.assertIn('1 under another owner', repo_gate.NOTES[0])
+
+    def test_an_unreadable_owner_leaves_every_pin_on_shape_alone(self) -> None:
+        """A checkout with no origin cannot say which pins are the fleet's, so it fetches none."""
+        stub = self.answers({})
+        with mock.patch.object(repo_gate, 'origin_owner', return_value=None):
+            self.assertEqual([], repo_gate.check_sha_pin(
+                self.tmp, self.pins(f'{self.OWNER}/Fleet@{PINNED}')))
+        stub.assert_not_called()
+
+    def test_an_unreadable_owner_is_not_reported_as_another_owner(self) -> None:
+        """The two are different states, and this note exists to describe the narrowing exactly.
+
+        A pin under this owner skipped because the origin is unreadable is not a pin belonging to
+        somebody else, and saying so in the one line that reports coverage is the same false clean
+        the note was added to prevent.
+        """
+        self.answers({})
+        with mock.patch.object(repo_gate, 'origin_owner', return_value=None):
+            repo_gate.check_sha_pin(self.tmp, self.pins(f'{self.OWNER}/Fleet@{PINNED}'))
+        self.assertIn('0 under another owner', repo_gate.NOTES[0])
+        self.assertIn('1 whose owner could not be compared', repo_gate.NOTES[0])
+
+    def test_the_note_carries_every_count_including_the_zeroes(self) -> None:
+        """One fixed shape per run, so a zero in any position is as visible as a count."""
+        self.answers({f'repos/{self.OWNER}/Fleet/commits/{PINNED}': True})
+        repo_gate.check_sha_pin(self.tmp, self.pins(f'{self.OWNER}/Fleet@{PINNED}'))
+        for fragment in ('resolved 1 pin(s)', '0 under another owner',
+                         '0 whose owner could not be compared', '0 GitHub did not answer for'):
+            with self.subTest(fragment=fragment):
+                self.assertIn(fragment, repo_gate.NOTES[0])
+
+    def test_a_pin_github_did_not_answer_for_is_skipped_rather_than_failed(self) -> None:
+        """Offline, unauthenticated and rate-limited all read as nothing learned, not as absent."""
+        self.answers({f'repos/{self.OWNER}/Fleet/commits/{PINNED}': None})
+        self.assertEqual([], repo_gate.check_sha_pin(self.tmp,
+                                                     self.pins(f'{self.OWNER}/Fleet@{PINNED}')))
+        self.assertIn('1 GitHub did not answer for', repo_gate.NOTES[0])
+
+    def test_a_missing_commit_in_an_unreadable_repository_is_not_a_finding(self) -> None:
+        """A repository-scoped token 404s on a sibling, which is not the pin being wrong."""
+        self.answers({f'repos/{self.OWNER}/Fleet/commits/{PINNED}': False,
+                      f'repos/{self.OWNER}/Fleet': None})
+        self.assertEqual([], repo_gate.check_sha_pin(self.tmp,
+                                                     self.pins(f'{self.OWNER}/Fleet@{PINNED}')))
+        self.assertIn('1 GitHub did not answer for', repo_gate.NOTES[0])
+
+    def test_one_pin_named_twice_is_read_once(self) -> None:
+        """A pin repeats across workflows, and a gate that re-fetches it burns the rate limit."""
+        stub = self.answers({f'repos/{self.OWNER}/Fleet/commits/{PINNED}': True})
+        files = self.pins(f'{self.OWNER}/Fleet@{PINNED}')
+        files += self.workflow(f'jobs:\n  b:\n    steps:\n      - uses: {self.OWNER}/Fleet@{PINNED}\n',
+                               name='x.yml')
+        self.assertEqual([], repo_gate.check_sha_pin(self.tmp, files))
+        self.assertEqual(1, stub.call_count)
+
+    def test_a_floating_ref_is_never_fetched(self) -> None:
+        """The shape fails first, so a ref that is not a SHA costs no request."""
+        stub = self.answers({})
+        self.assertEqual(1, len(repo_gate.check_sha_pin(self.tmp,
+                                                        self.pins(f'{self.OWNER}/Fleet@v4'))))
+        stub.assert_not_called()
+
+    def test_the_documented_exception_is_never_fetched(self) -> None:
+        stub = self.answers({})
+        for action in repo_gate.SHA_EXCEPTIONS:
+            with self.subTest(exception=action):
+                self.assertEqual([], repo_gate.check_sha_pin(
+                    self.tmp, self.pins(f'{action}@master')))
+        stub.assert_not_called()
+
+
+class TestGitHubRead(unittest.TestCase):
+    """`gh_exists` decides absence from the status GitHub returned, never from a non-zero exit."""
+
+    def run_with(self, rc: int, stderr: str) -> bool | None:
+        proc = subprocess.CompletedProcess([], rc, '', stderr)
+        with mock.patch.object(repo_gate.subprocess, 'run', return_value=proc):
+            return repo_gate.gh_exists('repos/o/r/commits/deadbeef')
+
+    def test_a_successful_read_is_present(self) -> None:
+        self.assertIs(True, self.run_with(0, ''))
+
+    def test_the_two_absent_statuses_are_absent(self) -> None:
+        for status in sorted(repo_gate.ABSENT):
+            with self.subTest(status=status):
+                self.assertIs(False, self.run_with(1, f'gh: Not Found (HTTP {status})'))
+
+    def test_credentials_and_rate_limits_are_not_absence(self) -> None:
+        """Reading a 401 or a 403 as a missing commit fails a correct tree on a narrow token."""
+        for status in ('401', '403', '500', '502'):
+            with self.subTest(status=status):
+                self.assertIsNone(self.run_with(1, f'gh: (HTTP {status})'))
+
+    def test_a_network_error_carrying_no_status_is_not_absence(self) -> None:
+        self.assertIsNone(self.run_with(1, 'error connecting to api.github.com'))
+
+    def test_gh_being_absent_is_not_absence_and_does_not_raise(self) -> None:
+        """The gate stays usable on a machine with no `gh`, reporting shape only."""
+        with mock.patch.object(repo_gate.subprocess, 'run', side_effect=FileNotFoundError):
+            self.assertIsNone(repo_gate.gh_exists('repos/o/r'))
+
+    def test_a_hung_read_times_out_rather_than_holding_the_gate(self) -> None:
+        with mock.patch.object(repo_gate.subprocess, 'run',
+                               side_effect=subprocess.TimeoutExpired('gh', 1)):
+            self.assertIsNone(repo_gate.gh_exists('repos/o/r'))
+
+    def test_the_read_is_a_get_and_carries_no_state_changing_verb(self) -> None:
+        """A gate is read-only, so the one network call it makes is held to that."""
+        source = (REPO / 'scripts' / 'repo_gate.py').read_text(encoding='utf-8')
+        for verb in ('-X POST', '-X PATCH', '-X PUT', '-X DELETE', '--method', 'mutation'):
+            with self.subTest(verb=verb):
+                self.assertNotIn(verb, source)
+
+
+class TestNotes(TreeCase):
+    def test_a_note_prints_without_failing_the_run(self) -> None:
+        """A check that quietly did less than its name prints the same clean line as one that ran."""
+        def noting(root: Path, files: list[str]) -> list[str]:
+            repo_gate.NOTES.append('did less')
+            return []
+
+        with mock.patch.dict(repo_gate.CHECKS, {'sha-pin': noting}), \
+                contextlib.redirect_stdout(io.StringIO()) as out:
+            self.assertEqual(0, repo_gate.main(['--root', str(REPO), '--check', 'sha-pin']))
+        self.assertIn('note: did less', out.getvalue())
+
+    def test_a_note_from_one_check_is_not_reported_under_the_next(self) -> None:
+        repo_gate.NOTES.append('left over from a previous run')
+        with contextlib.redirect_stdout(io.StringIO()) as out:
+            self.assertEqual(0, repo_gate.main(['--root', str(REPO), '--check', 'eol']))
+        self.assertNotIn('left over', out.getvalue())
+
+    def test_this_repo_reports_what_its_resolvability_pass_covered(self) -> None:
+        """Today it covers nothing here, and a silent zero is what this refuses to ship."""
+        with contextlib.redirect_stdout(io.StringIO()) as out:
+            self.assertEqual(0, repo_gate.main(['--root', str(REPO), '--check', 'sha-pin']))
+        self.assertRegex(out.getvalue(), r'note: resolved \d+ pin\(s\) against GitHub')
 
 
 class TestEol(TreeCase):
@@ -179,7 +372,7 @@ class TestCoverageFloors(unittest.TestCase):
 class TestHarness(unittest.TestCase):
     def test_this_module_collects_a_plausible_number_of_cases(self) -> None:
         loaded = unittest.defaultTestLoader.loadTestsFromModule(sys.modules[__name__])
-        self.assertGreaterEqual(loaded.countTestCases(), 22)
+        self.assertGreaterEqual(loaded.countTestCases(), 45)
 
 
 if __name__ == '__main__':

@@ -8,6 +8,11 @@ invocation whose output is a few hundred bytes. See GOVERNANCE.md "Context and D
 Discipline" for the rule this implements.
 
 Subcommands
+  claims   Check the description against the branch it describes. A body claiming a commit or
+           quoting a `uses:` ref the head tree no longer carries is a silent failure caught by a
+           reviewer or not at all, and three stale descriptions in one session generated six
+           review findings between them. Read-only. Exit 0 = every reference resolves, 70 = one
+           does not, 71 = there were references and none could be read, so nothing was decided.
   status   One digest line, any unresolved threads, and any suppressed findings. Read-only.
   reply    Answer one thread selected by its text, and resolve it on request. The only
            writing path here, and it exists because the hand-run form keeps failing the
@@ -38,7 +43,7 @@ such failure and no id to hide. See .github/copilot-instructions.md for the runb
 GOVERNANCE.md "Repository Boundaries and Write Safety" for the rules `reply` enforces.
 """
 from __future__ import annotations
-import argparse, json, re, subprocess, sys, time
+import argparse, io, json, re, subprocess, sys, tarfile, time
 from pathlib import Path
 
 REVIEWER = 'copilot-pull-request-reviewer'
@@ -109,6 +114,40 @@ query($o:String!,$r:String!,$n:Int!){
   }}}
 """
 
+
+# The description and the branch it describes, read together so neither is stale against the other.
+# No review or comment connection here, since a description is neither.
+Q_CLAIMS = """
+query($o:String!,$r:String!,$n:Int!){
+  repository(owner:$o,name:$r){ pullRequest(number:$n){ headRefOid body }}}
+"""
+
+# A `uses:` reference quoted in a description, in the spelling a workflow writes it.
+BODY_USES = re.compile(r'uses:\s*(?P<ref>[A-Za-z0-9_.\-]+/[^\s`"\']+@[^\s`"\']+)')
+# A commit the description claims this branch carries, being a verb plus a SHA rather than a SHA.
+# The free scan was built first and the corpus rejected it outright.
+# Over 25 merged pull requests it raised four findings and every one was correct prose.
+# Those were a develop commit named as history, a SHA in quoted output, and two in another repo.
+# Nothing in the shape of a bare SHA separates one of those from a genuine claim.
+# Separating them by meaning is the similarity heuristic `spec/section-model.md` rejects.
+# The verb is what makes a SHA a claim about this branch rather than a mention of one.
+# This alternation raises exactly one reference over the same 25, and that one is true.
+# The vocabulary is an inclusion list, so a phrasing nobody thought of costs a detection.
+# Being incomplete in that direction is the safe one, since it never invents a finding.
+BODY_CLAIM = re.compile(
+    r'\b(?:fixed|landed|shipped|added|introduced|corrected|resolved|carried|amended)'
+    r'\s+(?:in|by|as)\s+`?(?P<sha>[0-9a-f]{7,40})`?', re.IGNORECASE)
+# What `gh` prints when GitHub answered, as opposed to when nothing was reached at all.
+HTTP_STATUS = re.compile(r'\(HTTP (\d{3})\)')
+# The two GitHub returns for an object that is not there.
+# A network error carries no status, and 401 and 403 are credentials and a rate limit.
+# Reading one of those as absence reports a correct description as stale.
+# Everything outside this set is therefore "not read" rather than "not there".
+ABSENT = {'404', '422'}
+# What a reference reads as where GitHub never answered for it.
+UNREAD = 'unread'
+# Longer than the ordinary read's, since this one downloads a repository rather than a field.
+TARBALL_TIMEOUT = 120
 
 # Threads for the reply path, paginated.
 # A first page read as the whole set reports no match on a thread that is simply further along.
@@ -543,7 +582,7 @@ def unresolved_threads(owner: str, repo: str, num: int) -> list[dict]:
     out: list[dict] = []
     after = None
     while True:
-        extra = {'after': after} if after else {}
+        extra: dict[str, str] = {'after': after} if after else {}
         conn = gh_graphql(Q_THREADS, o=owner, r=repo, n=num,
                           **extra)['repository']['pullRequest']['reviewThreads']
         out += [t for t in conn['nodes'] if not t['isResolved']]
@@ -639,9 +678,153 @@ def reply_to_thread(owner: str, repo: str, num: int, match: str, body: str,
     return 0
 
 
+def gh_rest(path: str, jq: str | None = None) -> subprocess.CompletedProcess:
+    """One REST read, returned whole so the caller can tell an absent object from an unread one.
+
+    Unlike `gh_graphql` this does not raise on a non-zero exit, because a 404 here is an answer
+    the caller acts on rather than a failure. Reads only: every path passed in is a GET.
+    """
+    argv = ['gh', 'api', path] + (['--jq', jq] if jq else [])
+    try:
+        return subprocess.run(argv, capture_output=True, text=True, timeout=30)
+    except (OSError, subprocess.SubprocessError):
+        return subprocess.CompletedProcess(argv, 1, '', 'gh could not be run')
+
+
+def answered_absent(proc: subprocess.CompletedProcess) -> bool:
+    """Whether GitHub said the object is not there, as opposed to nothing having been read."""
+    m = HTTP_STATUS.search(proc.stderr)
+    return bool(m) and m.group(1) in ABSENT
+
+
+def body_references(body: str) -> tuple[list[str], list[str]]:
+    """The `uses:` refs and the claimed commits a description quotes, de-duplicated and sorted.
+
+    A commit counts only where a verb claims this branch carries it. A SHA mentioned without one
+    is a mention of history, of another repository, or of quoted output, and the corpus above says
+    that is what a description's SHAs almost always are.
+
+    Prose claims stay out for the same reason the free SHA scan did. Judging those needs a
+    similarity heuristic, which `spec/section-model.md` rejects.
+
+    A claimed SHA still has to carry a digit, as a backstop on the vocabulary above: `accede` and
+    `defaced` inflect into all-hex English words, so a verb this list gains later cannot start
+    reading one of them as a commit. It costs about one real SHA in a thousand.
+    """
+    uses = sorted({m.group('ref') for m in BODY_USES.finditer(body)})
+    shas = sorted({m.group('sha') for m in BODY_CLAIM.finditer(body)
+                   if any(c.isdigit() for c in m.group('sha'))})
+    return uses, shas
+
+
+def commit_state(owner: str, repo: str, sha: str, head: str) -> str:
+    """The empty string where `head` carries `sha`, `UNREAD` where nothing was read, else why not.
+
+    Ancestry rather than membership of the branch's own commits, so a description may cite a
+    commit it inherited from the base branch. GitHub reports the comparison from the base's side,
+    so `identical` and `ahead` are the two readings that say the head carries it.
+    """
+    proc = gh_rest(f'repos/{owner}/{repo}/compare/{sha}...{head}', '.status')
+    if proc.returncode == 0:
+        status = proc.stdout.strip()
+        if status in ('identical', 'ahead'):
+            return ''
+        return (f'{owner}/{repo} carries the commit and this head does not descend from it '
+                f'({status})')
+    if answered_absent(proc):
+        return f'{owner}/{repo} carries no such commit'
+    return UNREAD
+
+
+def head_carries(owner: str, repo: str, head: str, refs: list[str]) -> set[str] | None:
+    """Which of `refs` appear anywhere in the tree at `head`, or None where nothing was read.
+
+    Read at the head commit rather than from a local checkout, because the branch being described
+    need not be fetched here and a working tree is not what a description is measured against.
+
+    The whole tree rather than a guessed set of workflow paths: this repo carries `uses:` lines in
+    catalog snippets and in documentation as well as under `.github/`, and a surface narrower than
+    the tree would report a ref as absent because it looked in the wrong place. One archive is
+    also one request, where walking a listing costs a request per file and grows with the repo.
+    """
+    # Read as bytes, so this cannot go through `gh_rest` and carries that helper's guards itself.
+    # An absent `gh` or a hung download reads as undecided, like every other unreadable answer.
+    # Raising instead would abort a run the caller is in the middle of.
+    try:
+        proc = subprocess.run(['gh', 'api', f'repos/{owner}/{repo}/tarball/{head}'],
+                              capture_output=True, timeout=TARBALL_TIMEOUT)
+    except (OSError, subprocess.SubprocessError):
+        return None
+    if proc.returncode != 0:
+        return None
+    needles = {r: r.encode() for r in refs}
+    found: set[str] = set()
+    try:
+        with tarfile.open(fileobj=io.BytesIO(proc.stdout), mode='r:gz') as archive:
+            for member in archive:
+                if not member.isfile():
+                    continue
+                handle = archive.extractfile(member)
+                if handle is None:
+                    continue
+                # Matched as bytes, so a file this cannot decode is searched rather than skipped.
+                # No encoding guess can then turn a present ref into an absent one.
+                blob = handle.read()
+                found |= {r for r, n in needles.items() if r not in found and n in blob}
+                if len(found) == len(needles):
+                    break
+    except (tarfile.TarError, OSError, EOFError):
+        return None
+    return found
+
+
+def check_claims(owner: str, repo: str, num: int) -> int:
+    """Report every reference the description makes that its own head tree does not carry."""
+    pr = gql(Q_CLAIMS, owner, repo, num)
+    head, body = pr['headRefOid'], pr.get('body') or ''
+    uses, shas = body_references(body)
+
+    stale, unread = [], 0
+    for sha in shas:
+        state = commit_state(owner, repo, sha, head)
+        if state == UNREAD:
+            unread += 1
+        elif state:
+            stale.append(f'STALE COMMIT `{sha}`: {state}, so the description points at something '
+                         'this branch does not have')
+
+    # One read for every ref together, since the archive it reads is the same one either way.
+    carried = head_carries(owner, repo, head, uses) if uses else set()
+    for ref in uses:
+        if carried is None:
+            unread += 1
+        elif ref not in carried:
+            stale.append(f'STALE USES `{ref}`: no file at this head carries that ref')
+
+    print(f'repo={owner}/{repo} pr={num} head={head[:8]} commits={len(shas)} uses={len(uses)} '
+          f'stale={len(stale)} unread={unread}')
+    for line in stale:
+        print(f'  {line}')
+    if stale:
+        # Named as the description's problem rather than the branch's.
+        # The branch is the ground truth here, and the body is what drifted away from it.
+        print('status=DESCRIPTION_CONTRADICTS_ITS_BRANCH update the body to what the head tree '
+              'carries, since a reference that resolves to nothing is caught by a reviewer or '
+              'not at all')
+        return 70
+    if unread and unread == len(shas) + len(uses):
+        # A check that decided nothing prints the same `stale=0` a clean one does.
+        print('status=NOTHING_WAS_READ every reference in the description was left undecided '
+              'because GitHub did not answer for any of them, so this reports no verdict')
+        return 71
+    if unread:
+        print(f'  NOTE: {unread} reference(s) were left undecided because GitHub did not answer')
+    return 0
+
+
 def main(argv: list[str] | None = None) -> int:
     ap = argparse.ArgumentParser()
-    ap.add_argument('cmd', choices=['status', 'reply', 'wait'])
+    ap.add_argument('cmd', choices=['claims', 'status', 'reply', 'wait'])
     ap.add_argument('number', type=int)
     # No default, because the wrong repository is the failure this argument has actually had.
     # A default names one repository, and every run from elsewhere silently reads that one.
@@ -689,6 +872,9 @@ def main(argv: list[str] | None = None) -> int:
     owner, _, repo = a.repo.partition('/')
     if not owner or not repo or '/' in repo:
         ap.error(f'--repo takes OWNER/NAME, not {a.repo!r}')
+
+    if a.cmd == 'claims':
+        return check_claims(owner, repo, a.number)
 
     if a.cmd == 'status':
         out, _ = digest(owner, repo, a.number)
