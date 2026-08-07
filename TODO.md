@@ -122,55 +122,6 @@ One pull request moving a command that keeps failing the same way into a helper,
   - **Settled** - The second is the instructive one, since the rule it broke is stated in [`GOVERNANCE.md`][governance] and in the host-level guidance, and an agent that had read both still reached for the literal, which says the shape of the operation fails rather than the agent's knowledge of the rule.
   - **Settled** - The dependency is met, since [`GOVERNANCE.md`][governance] "Hub-Hosted Tooling" states how a repository reaches a hub script.
 
-### Reaching the Hub in Your Own Checkout
-
-One pull request stating how an agent reaches hub code and which checkout it works in, which are one change because a rule telling a repository to fetch the hub while staying silent on whose clone it fetches into licenses the failure it exists to prevent.
-
-**State** `ready`. **Touches** [`AGENTS.md`][agents] "Fleet Bootstrap", [`GOVERNANCE.md`][governance] "Repository Boundaries and Write Safety" and "Verification Discipline", [`.github/copilot-instructions.md`][copilot-instructions], and the fleet block under [`host-setup/agent-safety/`][agent-safety]. **Cost** one hub edit plus a carried-section re-vendor, which rides the visit in "Fleet Sweeps" rather than owing its own sweep.
-
-- **State that an agent works only in its own checkout, in its own directory, on its own feature branch.** The rule names the ordinary commands that cross the boundary rather than the reckless ones.
-  - **Blocked by** - Nothing.
-  - **Issue** - [#557][issue-557], which carries the swept agent's account, the recovery sequence, and its answers to both questions this rule would otherwise leave open.
-  - **Checked** - `develop` at `3d1a0b1` on 2026-08-06, where no committed file states the rule under any heading and it exists only here.
-  - **Open** - Which section it lands in, since "Repository Boundaries and Write Safety" scopes itself to a state-changing GitHub call while a blanket add in a foreign tree never reaches GitHub, so that section's opening sentence widens or the rule takes a section of its own.
-  - **Settled** - The rule is per task rather than per agent, on [#557][issue-557]'s evidence that one agent hit the hazard alone when a `git mv` intended for the hub landed in another repository.
-  - **Settled** - Three commands cross the boundary while being correct in isolation, a blanket `git add -A` that sweeps another agent's uncommitted work into the commit, a `git reset --hard` that deletes it, and a branch switch that carries it into an unrelated change.
-  - **Settled** - An agent that finds a foreign checkout leaves it and clones its own, which costs about a minute against an incident that cost the better part of an hour.
-  - **Settled** - The rule states what to do about a footprint already left, since leaving it alone arrives too late by then: save the work aside, restore only the touched files, verify the tree is clean, delete the branch from the other clone, then say plainly what was touched.
-  - **Settled** - Two signals mean another agent is live in the tree, a branch that changes when nothing you did changed it, and an edit of yours reverted with no conflict, and the response is to stop rather than to re-apply the edit, which is the default instinct and the wrong one.
-  - **Settled** - The mechanical habit pairs with the rule, that a mutating command takes an absolute path or a `cd` in the same invocation rather than the inherited working directory, because a read in the wrong directory is a wasted call and a write there is damage.
-  - **Settled** - A new level-two [`GOVERNANCE.md`][governance] section is not a local edit, since it needs a [`spec/files.json`][files] entry, a [`spec/section-model.md`][section-model] row, an [`AGENTS.md`][agents] table row, and a re-vendor, where bullets added to existing sections cost the re-vendor alone.
-
-- **Extend the same rule to reading.** A clone on disk is not the branch it names, it is whatever that clone was last fetched to, so reading it answers what that clone last saw.
-  - **Blocked by** - Nothing.
-  - **Issue** - None filed, and the entry above covers it.
-  - **Checked** - `develop` at `3d1a0b1` on 2026-08-06, where "Verification Discipline" states no rule about a local read.
-  - **Open** - Nothing.
-  - **Settled** - Two instances are on record from one session, a repository reported as still drifted on a file whose fix had merged because that clone's refs predated it, and a repository reported as missing a file it carries because the checkout sat on an older branch.
-  - **Settled** - The practice is to read the live ref through the API where a claim will be acted on, or to fetch immediately before reading, and to name the ref and commit in any finding taken from a local read.
-  - **Settled** - A local clone stays the right tool for anything needing history or a build, which an API read cannot give.
-  - **Settled** - "Verification Discipline" is the home, since its framing that every failure under it is green describes the stale-clone failure exactly, and [`GOVERNANCE.md`][governance] "Hub-Hosted Tooling" already owns the sentence that a clone is whatever it last fetched rather than the branch it names.
-
-- **Give the fleet its own vocabulary where a repository with no instruction set will find it.** The words a request is phrased in are defined nowhere it can read.
-  - **Blocked by** - Nothing, since [#552][issue-552] no longer holds the byte-locked section open.
-  - **Issue** - [#579][issue-579], which carries the count of undefined uses and the argument that the router is unreachable rather than wrong.
-  - **Checked** - `develop` at `3d1a0b1` on 2026-08-06, where "Fleet Bootstrap" names the hub repository and says to fetch it, with no mechanism, no fetch-before-use step, and nothing about whose checkout.
-  - **Open** - Where the definitions live, since the natural home is the byte-locked "Fleet Bootstrap" section and a repository with no carried instruction set is precisely the one that lacks it, which leaves this repo's own [`README.md`][readme] as the only surface a stranger to the fleet reads first.
-  - **Open** - Whether the entry point is named per task rather than per repository state, since the bootstrap section routes correctly by state and the gap is that "audit yourself against the hub" is a task whose reader already knows their state.
-  - **Settled** - `hub` carries the whole instruction and is defined in none of the 50 places it appears across the docs.
-  - **Settled** - [`GOVERNANCE.md`][governance] "Expected Review Loop" has the opposite shape of the same problem, stating the procedure precisely and never presenting its name as the way to ask for it, so every request improvises a phrasing and the scope an agent reads out of it moves with the wording.
-  - **Settled** - [`GOVERNANCE.md`][governance] "Hub-Hosted Tooling" is declared `verbatim` in [`spec/files.json`][files] and already carries the reach rules, that reaching the hub is a checkout rather than a copy of one file, that `main` is read and fetched immediately before running, and that an unreachable hub means the tool did not run.
-  - **Settled** - That section lands in [#588][pr-588], so no downstream repo carries it, and the four holding a `GOVERNANCE.md` the audit reads sections from, Blog, Financial-Modeling, HomeAutomation-Config and PhotoCleaner, each report it as a section that never arrived rather than as drift, measured on the ledger regenerated 2026-08-06.
-
-- **Point agents at the hub scripts from the file a reviewer reads.** [`.github/copilot-instructions.md`][copilot-instructions] names no hub script at all.
-  - **Blocked by** - Nothing.
-  - **Issue** - None filed.
-  - **Checked** - `develop` at `3d1a0b1` on 2026-08-06, where the file names none of `pr_review.py`, `prose_lint.py`, `repo_gate.py`, or `spec/audit.py`, and its "Reviewing Carried Fleet Content" section never mentions the hub-tool pointer exception.
-  - **Open** - Nothing.
-  - **Settled** - The measured cost is agents rebuilding worse versions of gates that already exist, which several sessions needed pointing at by hand.
-  - **Settled** - [`GOVERNANCE.md`][governance] "Documentation Style Conventions" carries the exception that permits a hub-tool pointer inside carried text, and the reviewing guidance not naming it means an agent has no in-file rule telling it a `scripts/prose_lint.py` reference is a hub pointer rather than a broken local path.
-  - **Settled** - The same file says [`AGENTS.md`][agents] carries two byte-locked sections while [`spec/files.json`][files] declares three, so the count is corrected in the same edit.
-
 ### Three Rules That Leave the Recurring Case Unstated
 
 One pull request widening three carried [`GOVERNANCE.md`][governance] rules that each state their common case and go quiet on the case that recurs, filed together because they share that shape and land in one re-vendor.
@@ -523,23 +474,21 @@ Regenerate [reports/divergences.md][divergences-report] before using it as the w
 Actions on issues that are the maintainer's to take, each carrying its evidence so it is one action rather than a re-derivation.
 
 - **Re-scope [#305][issue-305] to the push half, and make it the tracking issue for the fleet re-vendor sweep.** Most of what it asked for is built, since the fidelity model, the [`spec/files.json`][files] manifest, [`spec/divergences.json`][divergences] with its generated [reports/divergences.md][divergences-report], and [`AUDIT.md`][audit-doc] section 10 together give the canonical-versus-adapted split and the audit path it proposed. What is genuinely still missing is the push half, since every one of those detects drift while the sweep that fixes it is manual. Re-scoped, it carries the "Fleet Sweeps" visit manifest and Blog as the pilot. Closing it against the built machinery is the alternative, and it loses the only tracking issue the sweep would have.
-- **Comment on [#557][issue-557] that both its open questions are adopted.** The rule is per task rather than per agent, and an agent finding a foreign checkout leaves it and clones its own. It closes when "Reaching the Hub in Your Own Checkout" lands, so it stays open until then.
 - **Comment on [#577][issue-577] that it is decided together with the declared description.** Declaring the field in [`registry/repos.json`][repos] makes every mirror read a field rather than parse a paragraph, so taking [#577][issue-577] first means writing an extraction rule the registry change then deletes.
-- **Comment on [#579][issue-579] that its sequencing note is resolved.** It records that an edit to the byte-locked section lands with [#552][issue-552], and [#552][issue-552] is answered by [#572][pr-572], so the section is no longer held open.
 
 ## Verified Complete, Awaiting Close
 
 Each was checked against the tree and has nothing left to do anywhere. Closing is the maintainer's call, and each wants the evidence quoted in the closing comment rather than a bare close.
 
-- **[#509][issue-509], the PhotoCleaner spec questions.** Complete on all five items.
-  - **Fixed by** - Several changes, named per item.
-  - **Checked** - `develop` at `1ed0cc8` on 2026-08-03.
-  - **Closing evidence** - Item 1, [`.github/copilot-instructions.md`][copilot-instructions] reads that most of [`GOVERNANCE.md`][governance] is universal fleet law and describes [`AGENTS.md`][agents] as the thin router. Item 2, [`CODESTYLE.md`][codestyle] "Markdown and Spelling" names the two HTML detail elements as allowed, matching [`.markdownlint-cli2.jsonc`][markdownlint]. Item 3, [`spec/readme-structure.md`][readme-structure] states the private-repository behavior outright. Item 4, the same file says the `HISTORY.md` mirror rule lives in [`CODESTYLE.md`][codestyle], which every repo carries. Item 5, [`WORKFLOW.md`][workflow] D2.2 reads that the check exits early while the job still reports success, and spells out why a job-level condition would couple the release to smoke.
+- **[#557][issue-557], the agent-isolation rule and its two open questions.** Complete on the rule and on both questions.
+  - **Fixed by** - `9d85941`.
+  - **Checked** - `develop` at `9d85941` on 2026-08-06.
+  - **Closing evidence** - [`GOVERNANCE.md`][governance] "Repository Boundaries and Write Safety" carries the rule that each task runs in its own checkout, in its own directory, on its own feature branch, scoped per task rather than per agent, which adopts the first open question. It names the three commands that cross the boundary while being correct in isolation, and it names the two signals that another task is live in a tree, whose stated response is to stop, which adopts the second. The rule reaches every machine through the same text in [`host-setup/agent-safety/`][agent-safety].
 
-- **[#490][issue-490], the standup having no repo-creation step.** Complete on all four suggestions.
-  - **Fixed by** - The section 0A addition.
-  - **Checked** - `develop` at `1ed0cc8` on 2026-08-03.
-  - **Closing evidence** - [`STANDUP.md`][standup] carries section 0A, "Hand Over What Only the Maintainer Can Supply", listing the repository, the installed App, the App secret values in both stores, and every declared publish credential and environment. It states that a repo with no remote is not partially stood up but not started, and that a blocking prerequisite is escalated the moment it is found. Step 4 opens with a repository read and carries the ruleset ordering constraint.
+- **[#579][issue-579], a repository with no instruction set cannot resolve its own vocabulary.** Complete on the term definitions and on the routing.
+  - **Fixed by** - `9d85941`.
+  - **Checked** - `develop` at `9d85941` on 2026-08-06.
+  - **Closing evidence** - [`AGENTS.md`][agents] "Fleet Bootstrap" names the hub as a defined term and carries the reach rule, and [`README.md`][readme] defines the six words a request is phrased in, the hub, the fleet, standing a repository up, auditing one, closing the review loop, and carried against reached, each naming the file that answers it. The host-wide block under [`host-setup/agent-safety/`][agent-safety] carries the same definition, which is what reaches a repository holding no instruction set at all.
 
 <!-- Issues -->
 
@@ -559,7 +508,6 @@ Each was checked against the tree and has nothing left to do anywhere. Closing i
 [issue-521]: https://github.com/ptr727/ProjectTemplate/issues/521
 [issue-523]: https://github.com/ptr727/ProjectTemplate/issues/523
 [issue-550]: https://github.com/ptr727/ProjectTemplate/issues/550
-[issue-552]: https://github.com/ptr727/ProjectTemplate/issues/552
 [issue-557]: https://github.com/ptr727/ProjectTemplate/issues/557
 [issue-558]: https://github.com/ptr727/ProjectTemplate/issues/558
 [issue-577]: https://github.com/ptr727/ProjectTemplate/issues/577
@@ -567,11 +515,6 @@ Each was checked against the tree and has nothing left to do anywhere. Closing i
 [issue-579]: https://github.com/ptr727/ProjectTemplate/issues/579
 [issue-580]: https://github.com/ptr727/ProjectTemplate/issues/580
 [issue-585]: https://github.com/ptr727/ProjectTemplate/issues/585
-
-<!-- Pull requests -->
-
-[pr-572]: https://github.com/ptr727/ProjectTemplate/pull/572
-[pr-588]: https://github.com/ptr727/ProjectTemplate/pull/588
 
 <!-- Repo -->
 
@@ -605,6 +548,5 @@ Each was checked against the tree and has nothing left to do anywhere. Closing i
 [snippets]: ./catalog/snippets/
 [standup]: ./STANDUP.md
 [type-model]: ./spec/type-model.md
-[workflow]: ./WORKFLOW.md
 [workflows]: ./catalog/snippets/workflows/
 [write-guard]: ./host-setup/agent-safety/gh-write-guard.py
