@@ -438,6 +438,17 @@ class TestCommentWrap(BaitCase):
         self.assertEqual(['comment-wrap'],
                          self.flag('a.py', '# Take the first ... and the rest. Another sentence.\n'))
 
+    def test_an_ellipsis_before_a_question_or_bang_still_terminates(self) -> None:
+        """The guard covers the dot alternative only, since `?` and `!` after an ellipsis do end a sentence.
+
+        Guarding the whole terminator class would have read these as one sentence, because the `?` and
+        the `!` are each preceded by the ellipsis' closing dot.
+        """
+        for terminator in ('?', '!'):
+            with self.subTest(terminator=terminator):
+                self.assertEqual(['comment-wrap'],
+                                 self.flag('a.py', f'# Really...{terminator} Yes it does.\n'))
+
     def test_a_step_marker_does_not_hide_a_lowercase_opening(self) -> None:
         """Before the strip, the digit read as the opening character, so comment-case never fired."""
         self.assertEqual(['comment-case'], self.flag('a.sh', '# 1. deploy the hook.\n'))
