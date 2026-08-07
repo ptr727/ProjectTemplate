@@ -98,7 +98,7 @@ The `editorconfig-checker` action is setup-only. Using it alone silently skips t
 Two `gh` limitations on the current host, both worked around rather than fixed:
 
 - `gh pr checks` carries no `--json` flag on the installed `gh` 2.46.0, so a watcher built on it prints nothing and a quiet result reads as a passing one. Read the checks from `gh pr view --json statusCheckRollup` instead.
-- `gh pr edit --base` fails with a Projects-classic deprecation error. Use `gh api --method PATCH repos/[owner/repo]/pulls/[number] -f base=[branch]` instead.
+- `gh pr edit` fails with a Projects-classic deprecation error whichever field it is given, `--base`, `--title` and `--body-file` alike, since the failure is in the mutation the command builds rather than in the field asked for. It exits non-zero without applying the change, so a stale pull request description survives review rounds. Use `gh api --method PATCH repos/[owner/repo]/pulls/[number]` with the field instead, `-f base=[branch]` or `-F body=@[file]`, and verify it took. [.github/copilot-instructions.md](./.github/copilot-instructions.md) carries the same limitation against the title and body under "PR Edits and Merge-State Gotchas".
 
 ## Configuration Layout
 

@@ -29,7 +29,7 @@ One pull request clearing prose findings, leading with [`catalog/snippets/`][sni
 **State** `ready`. **Touches** [`catalog/snippets/`][snippets] first, then the hub's docs and spec. **Cost** one hub edit per batch, hub-only, and a snippet fix reaches the fleet only as repos re-adopt.
 
 - **Clear the [#519][issue-519] prose backlog, snippets first.** The whole-tree figure moves as readily with a fix to the gate as with a fix to the prose, so it is re-measured rather than quoted.
-  - **Blocked by** - Nothing, though a run after "The Prose Gate Scope Floor" ships is the one worth trusting.
+  - **Blocked by** - Nothing.
   - **Issue** - [#519][issue-519], whose headline numbers are stale and whose four planned changes are two-thirds landed.
   - **Checked** - `develop` at `3d1a0b1` on 2026-08-06, where `python3 scripts/prose_lint.py --summary` reports 557 violations across 45 files, and `catalog/snippets` alone reports 184 across 19.
   - **Open** - Whether the gate becomes a carried file rather than a hub-only one, which "Reducing the Carried Surface Further" asks from the other direction.
@@ -74,21 +74,6 @@ One pull request fixing the argument-list split in the installed hook, plus the 
   - **Settled** - A lone `git push -u origin revendor/x` resolves to the one branch, while the same push followed by a newline and a `gh pr create` with a base of `develop` resolves to five, meaning `revendor/x`, `gh`, `pr`, `create`, and `develop`.
   - **Settled** - The `&&` form resolves correctly, which is what isolates the defect to the newline case, and the existing suite covers only that form.
   - **Settled** - The error direction is over-blocking rather than under-blocking, so it is a usability defect rather than a safety hole, and that is why it is worth fixing: the denial claims a direct push to a protected branch when the push targets an ordinary feature branch, and teaching a safety hook to cry wolf is how it stops being read.
-
-### The Reply-and-Resolve Helper
-
-One pull request moving a command that keeps failing the same way into a helper, rather than restating the rule it keeps failing against.
-
-**State** `ready`. **Touches** [`scripts/pr_review.py`][pr-review] and its test file. **Cost** one hub edit, hub-only, and it is runnable from every repository the day it lands.
-
-- **Add a reply-and-resolve helper that queries thread ids itself.** It takes a pull request number and a finding, and never puts an id anywhere a hand can type one.
-  - **Blocked by** - Nothing.
-  - **Issue** - [#580][issue-580], which carries the decision this implements.
-  - **Checked** - `develop` at `1ed0cc8` on 2026-08-03.
-  - **Open** - Nothing.
-  - **Settled** - Two failures are on record, a command run from the wrong working directory that returns a confident answer about a different tree, and a GitHub node id typed by hand into a mutation that the `gh-write-guard` hook correctly refused.
-  - **Settled** - The second is the instructive one, since the rule it broke is stated in [`GOVERNANCE.md`][governance] and in the host-level guidance, and an agent that had read both still reached for the literal, which says the shape of the operation fails rather than the agent's knowledge of the rule.
-  - **Settled** - The dependency is met, since [`GOVERNANCE.md`][governance] "Hub-Hosted Tooling" states how a repository reaches a hub script.
 
 ### Three Rules That Leave the Recurring Case Unstated
 
@@ -398,6 +383,7 @@ Regenerate [reports/divergences.md][divergences-report] before using it as the w
   - **Detail** - Three further [`GOVERNANCE.md`][governance] sections differ by a single word each, "Documentation Style Conventions", "Communicating with the User" and "Repository Details", where a format name took the capitalization [`CODESTYLE.md`][codestyle] "Markdown and Spelling" states, so they are byte-mismatched for a reason a reader of the diff would otherwise call cosmetic.
   - **Detail** - Two comment lines in [`.markdownlint-cli2.jsonc`][markdownlint] took the same capitalization, and that file is `verbatim` and `whole`, so every downstream copy is byte-mismatched on a config nothing else changed about.
   - **Detail** - [`CODESTYLE.md`][codestyle] is the fifth file, at `intent` rather than `verbatim`, so it reaches the fleet as a rule each repo adopts in its own copy, and the same mixed spelling waits in every downstream tree.
+  - **Detail** - [`.github/copilot-instructions.md`][copilot-instructions] is the sixth, also at `intent`, where "Reply and Thread Resolution Workflow" now leads with the hub's reply helper and keeps the hand-run mutations as the cross-owner and unreachable-hub path. A repo taking the old copy is not broken by it, since the mutations it documents still work, so this rides the visit rather than gating it.
 
 - **Carry the `Local Verification` heading into every repository's `OPERATIONS.md`.** The heading leads the file and states what verifying a change there requires, naming the part of the repo's contract CI structurally cannot exercise, and a repo whose gates are entirely in CI says that under it rather than omitting it.
   - **Hub state** - Done, verified `develop` at `8e10a2c` on 2026-08-06, where [`spec/section-model.md`][section-model] and [`STANDUP.md`][standup] declare six headings and this repo's own [`OPERATIONS.md`][operations] leads with the section.
