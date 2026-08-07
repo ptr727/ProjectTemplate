@@ -62,21 +62,6 @@ One pull request adding two gates of the same shape, each confirming that a refe
   - **Settled** - Three stale descriptions in one session generated six review findings between them, each a reviewer noticing that the body named a commit, a branch, or a behavior the branch no longer carried.
   - **Settled** - Prose claims stay out of scope, since judging those needs a similarity heuristic, which [`spec/section-model.md`][section-model] rejects for the reason it would fail here.
 
-### The Write-Guard Newline Defect
-
-One pull request fixing the argument-list split in the installed hook, plus the self-test case that locks it.
-
-**State** `ready`. **Touches** [`host-setup/agent-safety/gh-write-guard.py`][write-guard] and its self-tests. **Cost** one hub edit, and it reaches a machine only when the installer is re-run, so it rides the host visit in "Fleet Sweeps".
-
-- **End a `git push` argument list at a newline, not only at `&&`.** Every token on a later line of the same command is otherwise read as a refspec.
-  - **Blocked by** - Nothing.
-  - **Issue** - None filed, and [#365][issue-365] carries the rollout that delivers it.
-  - **Checked** - `develop` at `1ed0cc8` on 2026-08-03, measured against the installed hook.
-  - **Open** - Nothing.
-  - **Settled** - A lone `git push -u origin revendor/x` resolves to the one branch, while the same push followed by a newline and a `gh pr create` with a base of `develop` resolves to five, meaning `revendor/x`, `gh`, `pr`, `create`, and `develop`.
-  - **Settled** - The `&&` form resolves correctly, which is what isolates the defect to the newline case, and the existing suite covers only that form.
-  - **Settled** - The error direction is over-blocking rather than under-blocking, so it is a usability defect rather than a safety hole, and that is why it is worth fixing: the denial claims a direct push to a protected branch when the push targets an ordinary feature branch, and teaching a safety hook to cry wolf is how it stops being read.
-
 ### Three Rules That Leave the Recurring Case Unstated
 
 One pull request widening three carried [`GOVERNANCE.md`][governance] rules that each state their common case and go quiet on the case that recurs, filed together because they share that shape and land in one re-vendor.
@@ -428,7 +413,7 @@ Regenerate [reports/divergences.md][divergences-report] before using it as the w
   - **Hub state** - Done for the documentary half, verified `develop` at `1ed0cc8` on 2026-08-03.
   - **Outstanding** - Four machines, WSL2 Ubuntu, the MacBook Air and both ThinkPads, plus any headless or cron environment running with the token. macOS needs someone on that platform, the Proxmox question is whether that host also runs containers which decides whether Docker is required there, and the engine-inside-the-distro variant of the WSL2 Docker cell is unverified.
   - **Issue** - [#365][issue-365] and [#483][issue-483].
-  - **Rides with** - The write-guard newline fix, since only re-running the installer deploys it.
+  - **Rides with** - Nothing on the hub, since the write-guard newline fix has landed on `develop` and a machine keeps running the old hook until the installer is re-run there.
   - **Detail** - A ticked row means the host-wide rules text and not the hook, since only running the installer deploys both layers, and the proxmox host proved that distinction by carrying the documentary half alone for eight days on the machine where the incident originated.
   - **Detail** - Honor the issue's own rule when filling a cell, that an unverified install command is worse than a blank, because a blank prompts a question while a wrong command produces a broken host and a false sense that setup succeeded.
   - **Detail** - The superseded safety section from [#364][issue-364] still sits above the canonical block in this host's rules file, so the two overlap. Removing it is a judgment call on a per-machine file, which is why it is surfaced rather than applied.
