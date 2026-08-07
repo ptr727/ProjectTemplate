@@ -312,19 +312,19 @@ One pull request, after a measurement, stating what change size licenses and whe
   - **Settled** - The remote loop is where most of a session's tokens and wall-clock go, and it delivers findings one round at a time, which is the slowest available way to learn that a change had five problems.
   - **Settled** - The trap is that a local pass finding nothing reads exactly like a clean change, and the next inference is that the remote review can be skipped, which is the one outcome the review contract exists to prevent, so the local pass is an input to the loop and never a substitute for the round the merge gate requires.
 
-### A Home for a Disproved Finding
+### Where a Disproof Goes When the Reviewer Is Not Copilot
 
-One pull request giving a disproved review finding somewhere the next round will read it, so the same proof is not built twice.
+One pull request routing the disproof record from the provider-agnostic contract, so an agent that never opens the provider runbook still knows where a proof lives after the thread closes.
 
-**State** `ready`. **Touches** [`.github/copilot-instructions.md`][copilot-instructions]. **Cost** one hub edit plus a carried re-vendor, since the file is carried whole at `intent`.
+**State** `ready`. **Touches** [`GOVERNANCE.md`][governance] "PR Review Etiquette". **Cost** one hub edit plus a carried re-vendor of a byte-locked section, which is why it is not folded into the change that built the record.
 
-- **Record what was tested and against which revision, and delete an entry whose subject changes.** A disproof is true of one tree at one revision.
+- **State that a disproof is recorded where it survives the pull request, not only in the thread.** The record exists in [`.github/copilot-instructions.md`][copilot-instructions] "Disproved Claims" and nothing agent-agnostic points at it.
   - **Blocked by** - Nothing.
   - **Issue** - None filed.
-  - **Checked** - `develop` at `b82c1a3` on 2026-08-05, where the file says the reviewer is sometimes factually wrong, requires a decline to carry evidence, and keeps a list of known non-working request paths, with nowhere to put the finding itself.
-  - **Open** - Nothing.
-  - **Settled** - The worked example is the claim that `keys_unsorted` needs jq 1.6, disproved against a 1.5 binary on which `keys_unsorted` works and `walk` does not.
-  - **Settled** - This is not simply a list to append to, since an entry outliving the code it was proved against becomes a reason not to check, which is strictly worse than re-proving it.
+  - **Checked** - `develop` at `756a53e` on 2026-08-07, where outcome 2 of "Every Finding Ends in an Action" ends at the thread, "Responding and Resolution Expectations" requires the proof and says nothing about where it then lives, and the only pointer to the runbook is scoped to provider mechanics.
+  - **Open** - Whether the destination is named in the byte-locked text at all, since a repository is free to keep its record elsewhere and a rule naming one file is a rule that has to be true in every copy.
+  - **Settled** - The write side is where the gap bites rather than the read side, because an agent following the loop is already routed to the runbook for mechanics and an agent posting a decline is routed nowhere.
+  - **Settled** - "Durable Knowledge and Self-Improvement" already requires durable knowledge to reach a committed file, so this states where one class of it goes rather than adding an obligation.
 
 ## Standalone Chores
 
