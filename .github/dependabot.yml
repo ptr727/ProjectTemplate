@@ -1,9 +1,9 @@
 # https://docs.github.com/en/code-security/dependabot/dependabot-version-updates/configuration-options-for-the-dependabot.yml-file
 #
-# github-actions is the only ecosystem this repo ships. Dual-target (main + develop) so both branches
-# stay current independently of the develop -> main release cadence; the merge-bot auto-merges each
-# base with its per-base method. See catalog/snippets/configs/dependabot.yml for the multi-ecosystem
-# reference (nuget, uv) a code-shipping repo uses.
+# The github-actions ecosystem is the only one this repo ships.
+# Both main and develop are targeted so each stays current independently of the develop to main release cadence.
+# The merge-bot auto-merges each base with its per-base method.
+# See catalog/snippets/configs/dependabot.yml for the multi-ecosystem reference, covering nuget and uv, that a code-shipping repo uses.
 version: 2
 updates:
 

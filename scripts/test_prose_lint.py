@@ -425,6 +425,19 @@ class TestCommentWrap(BaitCase):
         """Stripping the marker must not stop the rule seeing what follows it."""
         self.assertEqual(['comment-wrap'], self.flag('a.sh', f'# 1. {self.RUN_ON}\n'))
 
+    def test_an_ellipsis_is_not_a_sentence_terminator(self) -> None:
+        """An ellipsis marks an elision inside one sentence, so its closing dot does not end one.
+
+        Reading it as a terminator made a schematic comment two sentences, and the split the rule
+        then asked for would have broken the fragment the line exists to show.
+        """
+        self.assertEqual([], self.flag('a.py', '# .editorconfig: [glob] ... end_of_line = lf\n'))
+
+    def test_an_ellipsis_does_not_hide_a_real_run_on(self) -> None:
+        """The guard is one dot wide, so a terminator later on the line is still caught."""
+        self.assertEqual(['comment-wrap'],
+                         self.flag('a.py', '# Take the first ... and the rest. Another sentence.\n'))
+
     def test_a_step_marker_does_not_hide_a_lowercase_opening(self) -> None:
         """Before the strip, the digit read as the opening character, so comment-case never fired."""
         self.assertEqual(['comment-case'], self.flag('a.sh', '# 1. deploy the hook.\n'))

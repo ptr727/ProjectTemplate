@@ -670,7 +670,11 @@ BARE_URI = re.compile(r'^(?:<(?:https?|ftp)://[^>\s]+>|(?:https?|ftp)://[^>\s]+)
 # The initial guard anchors on a word boundary, so `J. Smith` reads as one name.
 # A sentence ending in an acronym such as CI is two sentences and has to be caught.
 # The second sentence may open in either case, since a lowercase opening is still a second sentence.
-RUN_ON = re.compile(r'(?<!\b[A-Z])(?<!\be\.g)(?<!\bi\.e)(?<!\bvs)(?<!\betc)[.!?]\s+(?=[A-Za-z])')
+# An ellipsis marks an elision inside one sentence, so its closing dot is not a terminator.
+# The guard is that a dot preceded by a dot never terminates.
+# That reads a schematic such as `... end_of_line = lf` as the one line it is.
+# Splitting such a line would break the fragment it exists to show.
+RUN_ON = re.compile(r'(?<!\b[A-Z])(?<!\be\.g)(?<!\bi\.e)(?<!\bvs)(?<!\betc)(?<!\.)[.!?]\s+(?=[A-Za-z])')
 
 # A step marker opening a comment is a label on the sentence that follows, not a sentence of its own.
 # `# 1. Deploy the hook.` is one sentence, and reading the marker's dot as a terminator made it two.

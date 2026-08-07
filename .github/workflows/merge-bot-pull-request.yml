@@ -3,15 +3,14 @@ name: Merge bot pull request action
 # Auto-merges in-repo bot PRs (Dependabot, codegen): enable on opened/reopened, disable on a maintainer push.
 # - Merge method by base: develop = squash, main = merge.
 # - App token, not GITHUB_TOKEN: fires downstream workflows on merge, and grants write on read-only Dependabot PRs.
-# - pull_request_target, not pull_request: jobs hold the App key, so the workflow + action SHAs resolve from the
-#   trusted base, not PR head. Safe because no job checks out PR code (each runs gh pr merge by URL).
+# - pull_request_target rather than pull_request, since jobs hold the App key, so the workflow and action SHAs resolve from the trusted base rather than the PR head.
+#   This is safe because no job checks out PR code, each one running gh pr merge by URL.
 on:
   pull_request_target:
     types: [opened, reopened, synchronize]
 
-# Concurrency keys on the PR number, not github.ref (the base branch under pull_request_target, which would
-# serialize every bot PR against it), so each PR queues independently. cancel-in-progress: false so a follow-up
-# synchronize doesn't cancel an in-flight opened run before it enables auto-merge.
+# Concurrency keys on the PR number rather than on github.ref, which under pull_request_target is the base branch and would serialize every bot PR against it, so each PR queues independently.
+# The cancel-in-progress setting is false so a follow-up synchronize does not cancel an in-flight opened run before it enables auto-merge.
 concurrency:
   group: ${{ github.workflow }}-${{ github.event.pull_request.number }}
   cancel-in-progress: false
@@ -21,7 +20,8 @@ jobs:
   merge-dependabot:
     name: Merge dependabot pull request job
     runs-on: ubuntu-latest
-    # Dependabot PRs from this repo (not forks). Only on opened/reopened so the disable job stays sticky.
+    # Dependabot PRs from this repo rather than from forks.
+    # Only on opened or reopened, so the disable job stays sticky.
     if: >-
       (github.event.action == 'opened' || github.event.action == 'reopened') &&
       github.event.pull_request.user.login == 'dependabot[bot]' &&
@@ -59,8 +59,9 @@ jobs:
   merge-codegen:
     name: Merge codegen pull request job
     runs-on: ubuntu-latest
-    # Codegen PRs from this repo. Head/base pairing is enforced strictly (codegen-main->main, codegen-develop->
-    # develop). Only on opened/reopened so the disable job stays sticky.
+    # Codegen PRs from this repo.
+    # Head and base pairing is enforced strictly, codegen-main to main and codegen-develop to develop.
+    # Only on opened or reopened, so the disable job stays sticky.
     if: >-
       (github.event.action == 'opened' || github.event.action == 'reopened') &&
       github.event.pull_request.user.login == 'ptr727-codegen[bot]' &&
@@ -101,8 +102,9 @@ jobs:
   merge-upstream-version:
     name: Merge upstream version pull request job
     runs-on: ubuntu-latest
-    # Upstream-version bump PRs from the App. Head/base pairing is enforced (upstream-version-main->main,
-    # upstream-version-develop->develop). Only on opened/reopened so the disable job stays sticky.
+    # Upstream-version bump PRs from the App.
+    # Head and base pairing is enforced, upstream-version-main to main and upstream-version-develop to develop.
+    # Only on opened or reopened, so the disable job stays sticky.
     if: >-
       (github.event.action == 'opened' || github.event.action == 'reopened') &&
       github.event.pull_request.user.login == 'ptr727-codegen[bot]' &&
@@ -143,8 +145,9 @@ jobs:
   disable-auto-merge-on-maintainer-push:
     name: Disable auto-merge on maintainer push job
     runs-on: ubuntu-latest
-    # Fires when a maintainer pushes to a bot's branch (synchronize, actor != bot). Disables auto-merge so the
-    # maintainer's commits don't merge with the bot's, and they re-enable it manually. The disable call is idempotent.
+    # Fires when a maintainer pushes to a bot's branch, meaning a synchronize whose actor is not the bot.
+    # It disables auto-merge so the maintainer's commits do not merge with the bot's, and the maintainer re-enables it manually.
+    # The disable call is idempotent.
     if: >-
       github.event.action == 'synchronize' &&
       github.event.pull_request.head.repo.full_name == github.repository &&
