@@ -1,6 +1,6 @@
 # Devcontainer Setup
 
-This repo ships no application toolchain. It keeps two per-language [Dev Container][containers-link] definitions under `catalog/snippets/devcontainer/` as reference for fleet code repos, each carrying one toolchain, extension surface, and `postCreateCommand`. The mechanics below (SSH commit signing, bind mounts, and `gh` auth) apply to any repo that uses them.
+This repo ships no application toolchain. It keeps two per-language [Dev Container][containers-link] definitions under `catalog/snippets/devcontainer/` as a reference for fleet code repos, each carrying one toolchain, extension surface, and `postCreateCommand`. The mechanics below (SSH commit signing, bind mounts, and `gh` auth) apply to any repo that uses them.
 
 | Devcontainer | Image | Toolchain |
 | ------------ | ----- | --------- |

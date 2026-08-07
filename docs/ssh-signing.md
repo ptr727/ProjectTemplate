@@ -1,6 +1,6 @@
 # SSH Commit Signing
 
-This repo enforces signed commits on `main` and `develop` via branch protection. Use SSH signing, where one Ed25519 key serves both authentication (push) and signing.
+This repo enforces signed commits on `main` and `develop` via branch protection. Use SSH signing, since one Ed25519 key serves both authentication (push) and signing.
 
 If you haven't generated a key and configured git yet, follow [host setup][host-setup] first.
 
