@@ -72,7 +72,7 @@ A comment sentence also has to start with a capital, which `comment-case` checks
 
 **A comment whose whole body is a URI is a reference rather than a sentence**, and neither rule applies to it. It cannot be capitalized or restructured without corrupting the address it exists to carry, so before the exemption every repo carrying a reference block inherited a finding no edit could answer. Consecutive reference lines are separate addresses rather than one sentence wrapping, which is why the exemption also stops the line below a URI from reading as its continuation. A URI inside a sentence is still prose, so the exemption requires the whole body to be the address and nothing else.
 
-`charset`, `dupword`, `comment-wrap`, and `comment-case` are clean tree-wide and gate CI. `charset-unknown`, `semicolon`, and `dash` run as one warn-only CI step, so the remaining backlog is visible without blocking and is corrected as each file is next edited, or cleared in a deliberate batch.
+`charset`, `dupword`, `spelling`, `comment-wrap`, and `comment-case` are clean tree-wide and gate CI. `charset-unknown`, `semicolon`, and `dash` run as one warn-only CI step, so the remaining backlog is visible without blocking and is corrected as each file is next edited, or cleared in a deliberate batch.
 
 ## `repo_gate.py`
 

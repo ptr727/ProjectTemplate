@@ -31,7 +31,7 @@ One pull request clearing the prose findings the hub's own docs and spec still c
 - **Clear the remaining [#519][issue-519] prose backlog, outside the snippets.** The whole-tree figure moves as readily with a fix to the gate as with a fix to the prose, so it is re-measured rather than quoted.
   - **Blocked by** - Nothing.
   - **Issue** - [#519][issue-519], whose headline numbers are stale and whose four planned changes are two-thirds landed.
-  - **Checked** - `develop` at `c64e3e0` on 2026-08-07, where `python3 scripts/prose_lint.py --summary` reported 373 violations across 26 files before the comment batch and 131 across 15 after it, and `catalog/snippets` reports 0. The snippets sweep took the tree from 557 across 45, of which 184 across 19 were snippets.
+  - **Checked** - `develop` at `c64e3e0` on 2026-08-07, where `python3 scripts/prose_lint.py --summary` reported 373 violations across 26 files and `catalog/snippets` reported 0. The 131 across 15 the comment batch leaves is a figure on the branch carrying that batch rather than on this anchor, and it becomes the anchor's own number when that branch merges. The snippets sweep took the tree from 557 across 45, of which 184 across 19 were snippets.
   - **Open** - Whether the gate becomes a carried file rather than a hub-only one, which "Reducing the Carried Surface Further" asks from the other direction.
   - **Settled** - `comment-wrap` and `comment-case` are in `DEFAULT_RULES` and `reports/` is exempt as a generated tree, which is why the figures differ from the 668 and 119 the issue records.
   - **Settled** - `sentence-split` is defined but excluded from `DEFAULT_RULES`, so a sweep never reports it and a wrapped sentence in Markdown prose is not a finding.
