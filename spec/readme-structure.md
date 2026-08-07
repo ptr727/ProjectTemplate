@@ -1,6 +1,6 @@
 # README Structure
 
-The preferred `README.md` shape for a fleet project. The audit's `readme-structure` dimension checks a repo's README against this: the sections below, in this order (to the letter where a section applies, to intent where a project legitimately has nothing to say). A section that does not apply to a project type is N/A, not a defect (a library has no running-app "Installation"; a source-only repo has no "Usage").
+The preferred `README.md` shape for a fleet project. The audit's `readme-structure` dimension checks a repo's README against this: the sections below, in this order (to the letter where a section applies, to intent where a project legitimately has nothing to say). A section that does not apply to a project type is N/A, not a defect (a library has no running-app "Installation", and a source-only repo has no "Usage").
 
 ## Sections and Order
 

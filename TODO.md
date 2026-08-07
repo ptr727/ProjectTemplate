@@ -31,7 +31,7 @@ One pull request clearing the prose findings the hub's own docs and spec still c
 - **Clear the remaining [#519][issue-519] prose backlog, outside the snippets.** The whole-tree figure moves as readily with a fix to the gate as with a fix to the prose, so it is re-measured rather than quoted.
   - **Blocked by** - Nothing.
   - **Issue** - [#519][issue-519], whose headline numbers are stale and whose four planned changes are two-thirds landed.
-  - **Checked** - `develop` at `c64e3e0` on 2026-08-07, where `python3 scripts/prose_lint.py --summary` reported 373 violations across 26 files and `catalog/snippets` reported 0. The 131 across 15 the comment batch leaves is a figure on the branch carrying that batch rather than on this anchor, and it becomes the anchor's own number when that branch merges. The snippets sweep took the tree from 557 across 45, of which 184 across 19 were snippets.
+  - **Checked** - `develop` at `c9c92dd` on 2026-08-07, where `python3 scripts/prose_lint.py --summary` reported 131 violations across 15 files, the comment batch having merged and made that figure the anchor's own rather than a branch's. The hub-only Markdown batch clears 90 of those across 9 files, leaving 41 across the 6 carried ones. The snippets sweep took the tree from 557 across 45, of which 184 across 19 were snippets, and the comment batch took it from 373 across 26.
   - **Open** - Whether the gate becomes a carried file rather than a hub-only one, which "Reducing the Carried Surface Further" asks from the other direction.
   - **Settled** - `comment-wrap` and `comment-case` are in `DEFAULT_RULES` and `reports/` is exempt as a generated tree, which is why the figures differ from the 668 and 119 the issue records.
   - **Settled** - `sentence-split` is defined but excluded from `DEFAULT_RULES`, so a sweep never reports it and a wrapped sentence in Markdown prose is not a finding.
@@ -40,6 +40,10 @@ One pull request clearing the prose findings the hub's own docs and spec still c
   - **Settled** - An ellipsis read as a sentence terminator, so `RUN_ON` reported one schematic comment line as two sentences and the split it asked for would have broken the fragment the line exists to show. The guard is that a dot preceded by a dot never terminates, fixed and tested before any prose moved, and the verdict diff in both directions was that one finding and nothing else.
   - **Settled** - A comment opening on a lowercase identifier was the bulk of what `comment-case` reported, and the rule intends those restructured rather than exempted, which is what the batch did rather than widening any exemption.
   - **Settled** - The remainder is prose in Markdown, and six of the fifteen files are carried, being [`GOVERNANCE.md`][governance] at 14, [`WORKFLOW.md`][workflow] at 14, [`CODESTYLE.md`][codestyle] at 6, [`.github/copilot-instructions.md`][copilot-instructions] at 4, `repo-config/README.md` at 2 and [`HISTORY.md`][history] at 1. So the next batch splits again at that line, since the carried half rewrites byte-locked sections and owes a re-vendor while the hub-only half owes nothing.
+  - **Settled** - The hub-only Markdown batch cleared 90 findings across 9 files, 79 dash and 11 semicolon, the largest being [`docs/devcontainer.md`][devcontainer-doc] at 22, [`docs/ssh-signing.md`][ssh-signing] at 17 and [`spec/type-model.md`][type-model] at 17. Every dash finding in the tree was hub-only, so what the carried half now holds is 41 semicolons and no dash at all.
+  - **Settled** - The exemption pass raised two candidates and the corpus rejected both, so the checker is unchanged by this batch. `LABEL_DASH` exempts `- **Label** - text` and reaches neither a code-span label nor a paragraph-leading one, yet the tree already spells a code-span definition list with a colon in five files against four dash-spelled lines in one, and already spells a paragraph label as `**Label.** Sentence` against nine dash-spelled lines confined to two troubleshooting sections. Both were a file that had not adopted the tree's own convention rather than a construct the rule fails to describe, which is the same verdict the comment batch reached on a lowercase-opening comment.
+  - **Settled** - A bulleted list terminating its items with semicolons appeared in exactly one place tree-wide, and its own last item already ended in a period, so it was punctuation to make consistent rather than the list construction the semicolon exemption protects. A line-based checker cannot see a list spread across bullets in any case, since the unit it judges is the sentence within a line.
+  - **Settled** - Rewriting a file with a script rather than an editor converts every line ending in it, which took two files from CRLF to LF with every prose and Markdown gate still green and only `editorconfig-checker` reporting it. [`OPERATIONS.md`][operations] scoped that instruction to a new file, and this batch widens it to a scripted rewrite of an existing one.
   - **Settled** - `home-path` is in `DEFAULT_RULES` and is named by neither CI list, so the pattern-detectable half of the representative-data rule runs on every bare local run and gates nothing in CI. It is clean tree-wide, so this is a hole rather than a backlog, and it is recorded in [`OPERATIONS.md`][operations] beside the two gaps already named there.
 
 ### Giving the Fleet's Own Pins Something to Resolve Against
@@ -469,6 +473,7 @@ Each was checked against the tree and has nothing left to do anywhere. Closing i
 [audit-doc]: ./AUDIT.md
 [codestyle]: ./CODESTYLE.md
 [copilot-instructions]: ./.github/copilot-instructions.md
+[devcontainer-doc]: ./docs/devcontainer.md
 [divergences]: ./spec/divergences.json
 [divergences-report]: ./reports/divergences.md
 [files]: ./spec/files.json
@@ -489,6 +494,7 @@ Each was checked against the tree and has nothing left to do anywhere. Closing i
 [secrets-schema]: ./spec/secrets.schema.json
 [section-model]: ./spec/section-model.md
 [snippets]: ./catalog/snippets/
+[ssh-signing]: ./docs/ssh-signing.md
 [standup]: ./STANDUP.md
 [type-model]: ./spec/type-model.md
 [validate]: ./spec/validate.py
