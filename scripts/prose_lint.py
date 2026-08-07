@@ -86,6 +86,48 @@ def changed_lines(base: str) -> dict[str, set[int]] | None:
     return out
 
 
+def asked_about(key: str, paths: list[str]) -> bool:
+    """Whether a repository-relative diff key falls under one of the requested paths.
+
+    The floor below compares the diff's file list against what the run matched, and a caller who
+    narrowed the scan on purpose must not be told the narrowing is a defect. Anything the request
+    did not cover is not a file this run failed to read.
+    """
+    for raw in paths:
+        # `Path` drops a trailing separator, so the test appends one rather than stripping it.
+        # Comparing the bare prefix would let `catalog` claim `catalogue/x.md`.
+        r = rel(Path(raw))
+        if r in ('', '.'):
+            return True
+        if key == r or key.startswith(r + '/'):
+            return True
+    return False
+
+
+def unread_diff_files(scope: dict[str, set[int]], paths: list[str],
+                      excludes: tuple[str, ...]) -> list[str]:
+    """Files the diff names that this run was asked about and could have read, in sorted order.
+
+    Keys are resolved against the repository top level rather than the working directory, because
+    `git diff` reports repository-relative paths while discovery keys off the directory the run
+    started in. Reading them against the working directory would make this list empty from a
+    subdirectory, which is the one place it most needs to be full.
+    """
+    root = Path(repo_root(Path('.')) or '.')
+    out: list[str] = []
+    for key in sorted(scope):
+        if not asked_about(key, paths):
+            continue
+        if any(x in key for x in excludes):
+            continue
+        if not GENERATED_TREES.isdisjoint(Path(key).parts):
+            continue
+        target = root / key
+        if target.is_file() and is_text(target):
+            out.append(key)
+    return out
+
+
 def repo_prefix(root: Path) -> str:
     """Where `root` sits inside its repository, as a posix prefix, or '' when git cannot say.
 
@@ -1021,7 +1063,27 @@ def main(argv: list[str] | None = None) -> int:
               'checkout carries its history.', file=sys.stderr)
         return 2
     if scope is not None:
-        files = [f for f in files if rel(f) in scope]
+        matched = [f for f in files if rel(f) in scope]
+        # The floor every verdict below rests on, asserted rather than guarded.
+        # Each route to a false clean so far was closed after a reviewer saw it.
+        # The next is closed that way or not at all, which is what a floor covers.
+        # A run that resolves a non-empty diff and matches none of its files failed to scope.
+        # Zero alone is not the test.
+        # A change touching only files the rules do not read matches nothing and is clean.
+        # An image or a lock file is that case.
+        # So the comparison is against the diff's own list of files this run could have read.
+        if scope and not matched:
+            unread = unread_diff_files(scope, a.paths or ['.'], tuple(a.exclude))
+            if unread:
+                shown = ', '.join(unread[:5]) + (' and more' if len(unread) > 5 else '')
+                print(f'error: the diff against {a.diff!r} names {len(unread)} readable file(s) '
+                      f'this run was asked about, and the scan matched none of them: {shown}. '
+                      'Refusing to report a clean run, since a gate that read nothing is '
+                      'indistinguishable from a gate with nothing to read. Check that the run '
+                      'starts at the repository top level and that the requested paths cover '
+                      'the change.', file=sys.stderr)
+                return 2
+        files = matched
 
     total = 0
     bykind: dict[str, int] = {}

@@ -1540,6 +1540,134 @@ class TestCli(unittest.TestCase):
         self.assertEqual([], prose_lint.check_file(self.tmp / 'absent.md', {'dupword'}))
 
 
+class TestDiffScopeFloor(unittest.TestCase):
+    """The assertion every `--diff` verdict rests on, that the run matched something it was given.
+
+    Four routes to the same false clean are on record, each closed by a guard written after a
+    reviewer noticed it: an unresolvable base widening to a whole-tree scan, a multi-line `paths`
+    input read only to its first newline, a diff taken in one repository while scanning another,
+    and a path under no repository at all. Per-route guards are the wrong shape for a fifth,
+    because the fifth is found by a reviewer or not at all. This asserts the floor instead.
+
+    Zero is not the test on its own. A change touching only files the rules do not read matches
+    nothing and is honestly clean, so the comparison is against the diff's own list of files this
+    run could have read.
+    """
+
+    def setUp(self) -> None:
+        self.tmp = Path(self.enterContext(tempfile.TemporaryDirectory()))
+        self.enterContext(contextlib.redirect_stdout(io.StringIO()))
+        self.err = self.enterContext(contextlib.redirect_stderr(io.StringIO()))
+
+    def test_a_diff_naming_readable_files_that_match_nothing_is_refused(self) -> None:
+        """The floor itself: a non-empty diff, a readable file in it, and nothing scanned."""
+        named = self.tmp / 'named.md'
+        named.write_text('A clean line.\n', encoding='utf-8')
+        elsewhere = self.tmp / 'elsewhere.md'
+        elsewhere.write_text('A clean line.\n', encoding='utf-8')
+        with mock.patch.object(prose_lint, 'repo_root', return_value=str(self.tmp)), \
+                mock.patch.object(prose_lint, 'discover', return_value=[elsewhere]), \
+                mock.patch.object(prose_lint, 'changed_lines', return_value={'named.md': {1}}):
+            self.assertEqual(2, prose_lint.main(['--check', 'dupword', '--diff', 'HEAD']))
+        self.assertIn('named.md', self.err.getvalue())
+
+    def test_a_diff_of_only_unreadable_files_is_a_clean_run(self) -> None:
+        """The honest limit, and the reason zero alone cannot be the test.
+
+        An image or a lock file is a real change the rules do not read, so it matches nothing and
+        the run is clean rather than broken. Refusing here would make the gate cry wolf on a
+        commit that adds a logo, which is how a safety check stops being read.
+        """
+        blob = self.tmp / 'logo.png'
+        blob.write_bytes(b'\x89PNG\r\n\x1a\n\x00\x00\x00binary')
+        with mock.patch.object(prose_lint, 'repo_root', return_value=str(self.tmp)), \
+                mock.patch.object(prose_lint, 'discover', return_value=[]), \
+                mock.patch.object(prose_lint, 'changed_lines', return_value={'logo.png': {1}}):
+            self.assertEqual(0, prose_lint.main(['--check', 'dupword', '--diff', 'HEAD']))
+
+    def test_a_diff_naming_a_file_that_no_longer_exists_is_a_clean_run(self) -> None:
+        """A deletion names a path with nothing behind it, which this run cannot have read."""
+        with mock.patch.object(prose_lint, 'repo_root', return_value=str(self.tmp)), \
+                mock.patch.object(prose_lint, 'discover', return_value=[]), \
+                mock.patch.object(prose_lint, 'changed_lines', return_value={'gone.md': {1}}):
+            self.assertEqual(0, prose_lint.main(['--check', 'dupword', '--diff', 'HEAD']))
+
+    def test_an_empty_diff_is_not_a_scoping_failure(self) -> None:
+        """A branch level with its base names no files, which is a result rather than a fault."""
+        with mock.patch.object(prose_lint, 'repo_root', return_value=str(self.tmp)), \
+                mock.patch.object(prose_lint, 'discover', return_value=[]), \
+                mock.patch.object(prose_lint, 'changed_lines', return_value={}):
+            self.assertEqual(0, prose_lint.main(['--check', 'dupword', '--diff', 'HEAD']))
+
+    def test_a_run_that_matched_a_file_asserts_nothing_further(self) -> None:
+        """The floor is a floor. One match clears it, and the findings decide the exit code."""
+        bait = self.tmp / 'bait.md'
+        bait.write_text(f'{DUP} thing\n', encoding='utf-8')
+        with mock.patch.object(prose_lint, 'repo_root', return_value=str(self.tmp)), \
+                mock.patch.object(prose_lint, 'discover', return_value=[bait]), \
+                mock.patch.object(prose_lint, 'changed_lines',
+                                  return_value={prose_lint.rel(bait): {1}}):
+            self.assertEqual(1, prose_lint.main(['--check', 'dupword', '--diff', 'HEAD']))
+
+    def test_a_deliberately_narrowed_scan_is_not_told_the_narrowing_is_a_defect(self) -> None:
+        """Asking about one subtree while the change sits in another is a request, not a failure."""
+        (self.tmp / 'scripts').mkdir()
+        changed = self.tmp / 'scripts' / 'tool.py'
+        changed.write_text('# A clean comment.\n', encoding='utf-8')
+        with mock.patch.object(prose_lint, 'repo_root', return_value=str(self.tmp)), \
+                mock.patch.object(prose_lint, 'discover', return_value=[]), \
+                mock.patch.object(prose_lint, 'changed_lines',
+                                  return_value={'scripts/tool.py': {1}}):
+            self.assertEqual(0, prose_lint.main(['--check', 'dupword', '--diff', 'HEAD',
+                                                 'catalog']))
+
+    def test_an_excluded_file_is_not_counted_as_one_the_run_should_have_read(self) -> None:
+        """`--exclude` removes a file from the scan, so it cannot also be evidence of a failure."""
+        skipped = self.tmp / 'vendor.md'
+        skipped.write_text('A clean line.\n', encoding='utf-8')
+        with mock.patch.object(prose_lint, 'repo_root', return_value=str(self.tmp)), \
+                mock.patch.object(prose_lint, 'discover', return_value=[]), \
+                mock.patch.object(prose_lint, 'changed_lines', return_value={'vendor.md': {1}}):
+            self.assertEqual(0, prose_lint.main(['--check', 'dupword', '--diff', 'HEAD',
+                                                 '--exclude', 'vendor']))
+
+    def test_a_generated_tree_is_not_counted_as_one_the_run_should_have_read(self) -> None:
+        """Discovery drops `reports/`, so a change confined to it matches nothing by design."""
+        (self.tmp / 'reports').mkdir()
+        generated = self.tmp / 'reports' / 'divergences.md'
+        generated.write_text('A clean line.\n', encoding='utf-8')
+        with mock.patch.object(prose_lint, 'repo_root', return_value=str(self.tmp)), \
+                mock.patch.object(prose_lint, 'discover', return_value=[]), \
+                mock.patch.object(prose_lint, 'changed_lines',
+                                  return_value={'reports/divergences.md': {1}}):
+            self.assertEqual(0, prose_lint.main(['--check', 'dupword', '--diff', 'HEAD']))
+
+    def test_diff_keys_resolve_against_the_repository_rather_than_the_working_directory(
+            self) -> None:
+        """The fifth route, which no per-route guard covers and this one found.
+
+        Run from a subdirectory, `git diff` reports repository-relative keys while discovery keys
+        off the directory the run started in, so the intersection is empty and the run reports
+        clean. Reading the diff's paths against the working directory would leave this list empty
+        in exactly that case, making the floor silent where it is most needed.
+        """
+        (self.tmp / 'scripts').mkdir()
+        nested = self.tmp / 'scripts' / 'tool.py'
+        nested.write_text('# A clean comment.\n', encoding='utf-8')
+        with mock.patch.object(prose_lint, 'repo_root', return_value=str(self.tmp)):
+            found = prose_lint.unread_diff_files({'scripts/tool.py': {1}}, ['.'], ())
+        self.assertEqual(['scripts/tool.py'], found)
+
+    def test_asked_about_reads_a_prefix_as_a_directory_boundary(self) -> None:
+        """`catalog` must not claim `catalogue/x.md`, which shares its first seven characters."""
+        self.assertTrue(prose_lint.asked_about('catalog/x.md', ['catalog']))
+        self.assertTrue(prose_lint.asked_about('catalog/x.md', ['catalog/']))
+        self.assertTrue(prose_lint.asked_about('README.md', ['README.md']))
+        self.assertTrue(prose_lint.asked_about('anything/at/all.md', ['.']))
+        self.assertFalse(prose_lint.asked_about('catalogue/x.md', ['catalog']))
+        self.assertFalse(prose_lint.asked_about('docs/x.md', ['catalog']))
+
+
 class TestHarness(unittest.TestCase):
     def test_this_module_collects_a_plausible_number_of_cases(self) -> None:
         """A module whose cases fail to load still reports OK, which is a pass proving nothing."""
