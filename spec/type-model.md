@@ -46,7 +46,7 @@ A cross-cutting check that presumes a built, tested language must respect the pr
 
 Language types carry the style and type-check requirements for their language, gated by profile. A language that is only ever linted in the fleet is `lint-only` by nature and defines no build/test/package checks:
 
-- **cpp** - C/C++ present for style only. The check of record is **clang-format** (a shared config driving the editor, the CLI, and CI, a `parity.lang` arm), feeding the operational lint CI. Deeper semantic and static analysis is intentionally out of scope here. For a codegen or config repo the C++ is scaffolded and completed by its downstream toolchain (an ESPHome compile), which does the compilation-time checking, and clang-tidy would need a compile database the repo does not have. A repo's `.h` is read as C++ by context (Arduino/ESPHome), since the extension alone is ambiguous.
+- **cpp** - C/C++ present for style only. The check of record is **clang-format** (a shared config driving the editor, the CLI, and CI, a `parity.lang` arm), feeding the operational lint CI. Deeper semantic and static analysis is intentionally out of scope here. For a codegen or config repo, the C++ is scaffolded and completed by its downstream toolchain (an ESPHome compile), which does the compilation-time checking, and clang-tidy would need a compile database the repo does not have. A repo's `.h` is read as C++ by context (Arduino/ESPHome), since the extension alone is ambiguous.
 
 ## Generators
 
