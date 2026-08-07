@@ -1540,6 +1540,173 @@ class TestCli(unittest.TestCase):
         self.assertEqual([], prose_lint.check_file(self.tmp / 'absent.md', {'dupword'}))
 
 
+# The gate reads this file, so a bait path is assembled rather than written.
+# A literal would be a finding in the very file that defines the rule.
+# This file already takes that approach for non-ASCII, which it writes as escapes.
+# `adalovelace` is a constructed account name, never an account on any machine here.
+BAIT_USER = 'adalovelace'
+NIX_HOME = f'/home/{BAIT_USER}'
+MAC_HOME = f'/Users/{BAIT_USER}'
+WIN_HOME = f'C:\\Users\\{BAIT_USER}'
+
+
+class TestHomePath(BaitCase):
+    """The pattern-detectable half of the representative-data rule, and only that half.
+
+    Every fixture below uses a constructed account name. Writing the maintainer's own path into
+    a committed test would be the exact exposure the rule exists to prevent, in the file that
+    implements the rule.
+
+    The shapes were chosen against the corpus rather than from the list the backlog recorded. A
+    bare drive letter matched 11 files here and named a path in none of them, because an escaped
+    newline after any word ending in a letter and a colon reads as one, so `jobs:\\n` inside a
+    fixture is a drive letter. The shape kept is a drive letter followed by `Users`.
+    """
+
+    def test_a_home_path_naming_a_person_is_flagged(self) -> None:
+        for text in (f'See {NIX_HOME}/notes.txt for the log.\n',
+                     f'See {MAC_HOME}/notes.txt for the log.\n',
+                     f'See {WIN_HOME}\\notes.txt for the log.\n'):
+            with self.subTest(text=text.strip()):
+                self.assertIn('home-path', self.kinds(text, {'home-path'}))
+
+    def test_the_documentation_placeholder_is_not_a_finding(self) -> None:
+        """The rule's own wording quotes these shapes to describe them, and must survive its gate.
+
+        A real user segment is required, so the placeholder form does not match and no exemption
+        list has to carry the files that describe the rule. A stale exemption list is what turns
+        a gate into a work list that damages correct documents.
+        """
+        for text in ('The shapes are `/home/<name>` and `C:\\Users\\<name>`.\n',
+                     'A path under `/Users/<name>` is the macOS form.\n'):
+            with self.subTest(text=text.strip()):
+                self.assertNotIn('home-path', self.kinds(text, {'home-path'}))
+
+    def test_a_container_account_is_not_a_persons_home(self) -> None:
+        """`/home/vscode` is a fixed name a devcontainer image ships, so it names no environment.
+
+        Every one of this repository's 15 home-path hits is this shape, from the devcontainer
+        snippets and the doc describing them, so a rule without this exemption would open with a
+        work list of 15 findings and no true positive among them.
+        """
+        for account in ('vscode', 'runner', 'root', 'ubuntu', 'node'):
+            with self.subTest(account=account):
+                self.assertNotIn('home-path',
+                                 self.kinds(f'Mounted at /home/{account}/.ssh here.\n',
+                                            {'home-path'}))
+
+    def test_a_path_inside_a_fenced_block_is_still_a_finding(self) -> None:
+        """A transcript pasted from a terminal is the exposure, and it arrives fenced.
+
+        Every other prose rule skips a fenced block because it holds code rather than prose. This
+        one reads it, since the rule gates a literal path rather than a sentence.
+        """
+        self.assertIn('home-path',
+                      self.kinds(f'```text\n$ ls {NIX_HOME}/keys\n```\n',
+                                 {'home-path'}))
+
+    def test_a_path_in_a_config_value_is_still_a_finding(self) -> None:
+        """A bind mount naming a real home is the exposure in its most consequential form."""
+        self.assertIn('home-path',
+                      self.kinds(f'{{ "target": "{NIX_HOME}/.ssh/id_ed25519.pub" }}\n',
+                                 {'home-path'}, 'a.json'))
+
+    def test_a_relative_or_tilde_path_is_not_a_finding(self) -> None:
+        """`~/.ssh` names no account, which is the form the docs are supposed to use."""
+        for text in ('Copy `~/.ssh/id_ed25519.pub` into place.\n',
+                     f'The path `home/{BAIT_USER}` is relative.\n'):
+            with self.subTest(text=text.strip()):
+                self.assertNotIn('home-path', self.kinds(text, {'home-path'}))
+
+    def test_a_bare_drive_letter_is_not_a_shape(self) -> None:
+        """Kept as a case because the backlog recorded it as one and the corpus rejected it.
+
+        These are the two forms that made it unworkable: an escaped newline in a fixture, and a
+        temporary directory in a string literal.
+        """
+        for text in ("key: 'jobs:\\n  a:'\n", 'var p = "C:\\tmp\\out";\n'):
+            with self.subTest(text=text.strip()):
+                self.assertNotIn('home-path', self.kinds(text, {'home-path'}))
+
+    def test_the_rule_runs_by_default(self) -> None:
+        """A rule outside DEFAULT_RULES reads as enforced while nothing runs it."""
+        self.assertIn('home-path', prose_lint.DEFAULT_RULES)
+        self.assertIn('home-path', prose_lint.RULES)
+
+    def test_neither_source_file_carries_a_literal_home_path(self) -> None:
+        """Both files are read by the rule they implement, so the bait is assembled.
+
+        This is the same guarantee the tier tables carry for non-ASCII, and it is the reason the
+        constants above exist. Written as literals, the gate would report its own definition and
+        its own cases, and the only repair would be an exemption naming these files, which is the
+        stale-exemption shape that hands out a work list damaging correct documents.
+        """
+        for name in ('prose_lint.py', 'test_prose_lint.py'):
+            with self.subTest(source=name):
+                found = prose_lint.check_file(Path(__file__).with_name(name), {'home-path'})
+                self.assertEqual([], found)
+
+
+class TestOperationalExemption(unittest.TestCase):
+    """An operational repository's runbook carries the path an operator types.
+
+    That is the repository's own content rather than an agent quoting an environment it observed,
+    which is the distinction the rule is about.
+    """
+
+    def setUp(self) -> None:
+        self.tmp = Path(self.enterContext(tempfile.TemporaryDirectory()))
+        self.enterContext(contextlib.redirect_stdout(io.StringIO()))
+        self.err = self.enterContext(contextlib.redirect_stderr(io.StringIO()))
+
+    def _payload(self, *parts: str) -> None:
+        target = self.tmp.joinpath(*parts)
+        target.parent.mkdir(parents=True, exist_ok=True)
+        target.write_text('{}\n', encoding='utf-8')
+
+    def test_an_operational_checkout_is_read_from_what_it_carries(self) -> None:
+        """`spec/files.json` declares the payload per model, so the repository states its own."""
+        self._payload('repo-config', 'operational', 'develop.json')
+        self.assertTrue(prose_lint.operational_checkout(self.tmp))
+
+    def test_a_release_checkout_is_not_operational(self) -> None:
+        self._payload('repo-config', 'develop.json')
+        self.assertFalse(prose_lint.operational_checkout(self.tmp))
+
+    def test_the_hub_carrying_both_payloads_is_not_operational(self) -> None:
+        """The hub is the template for each model, so carrying the release payload decides it.
+
+        Read as operational, the hub would exempt itself from a rule it authors, which is the
+        one repository where that matters most.
+        """
+        self._payload('repo-config', 'develop.json')
+        self._payload('repo-config', 'operational', 'develop.json')
+        self.assertFalse(prose_lint.operational_checkout(self.tmp))
+
+    def test_a_checkout_carrying_neither_payload_is_not_operational(self) -> None:
+        """An unknown model is gated rather than exempted, since exempting on doubt is the risk."""
+        self.assertFalse(prose_lint.operational_checkout(self.tmp))
+
+    def test_the_skip_is_announced_rather_than_silent(self) -> None:
+        """A rule that stops running without saying so reads as a rule that passed."""
+        self._payload('repo-config', 'operational', 'develop.json')
+        bait = self.tmp / 'runbook.md'
+        bait.write_text(f'Deploy into {NIX_HOME}/stack here.\n', encoding='utf-8')
+        with mock.patch.object(prose_lint, 'repo_root', return_value=str(self.tmp)), \
+                mock.patch.object(prose_lint, 'discover', return_value=[bait]):
+            self.assertEqual(0, prose_lint.main(['--check', 'home-path']))
+        self.assertIn('operational repository', self.err.getvalue())
+
+    def test_a_release_repository_still_reports_the_finding(self) -> None:
+        """The exemption must not be the whole rule."""
+        self._payload('repo-config', 'develop.json')
+        bait = self.tmp / 'runbook.md'
+        bait.write_text(f'Deploy into {NIX_HOME}/stack here.\n', encoding='utf-8')
+        with mock.patch.object(prose_lint, 'repo_root', return_value=str(self.tmp)), \
+                mock.patch.object(prose_lint, 'discover', return_value=[bait]):
+            self.assertEqual(1, prose_lint.main(['--check', 'home-path']))
+
+
 class TestDiffScopeFloor(unittest.TestCase):
     """The assertion every `--diff` verdict rests on, that the run matched something it was given.
 
