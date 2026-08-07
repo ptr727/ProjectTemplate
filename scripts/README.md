@@ -78,7 +78,7 @@ A comment sentence also has to start with a capital, which `comment-case` checks
 
 Two deterministic checks:
 
-- `sha-pin`: every workflow `uses:` is a 40-hex commit SHA, with the one documented `dotnet/nbgv@master` exception allowed.
+- `sha-pin`: every workflow `uses:` is a 40-hex commit SHA that resolves, with the one documented `dotnet/nbgv@master` exception allowed.
 - `eol`: every path pinned LF in [`.gitattributes`][gitattributes] has the matching [`.editorconfig`][editorconfig] override the line-ending rule requires, with EditorConfig brace syntax expanded. One direction only: an `.editorconfig` LF glob with no git pin is legitimate, since `.editorconfig` governs what the editor writes where git enforces a class it must not guess at.
 
 ```sh
@@ -86,14 +86,23 @@ python3 scripts/repo_gate.py
 python3 scripts/repo_gate.py --check sha-pin
 ```
 
+**`sha-pin` resolves the pin as well as reading its shape**, because forty hex characters is a format any fabricated string satisfies, and an agent hand-writing a plausible SHA into a workflow is a failure this repo has seen rather than a hypothetical one. The `gh-write-guard` hook cannot cover it: the hook watches Bash, and an editor tool writing the same string into a file never reaches it. Resolving also catches the neighboring case, a pin whose commit was reachable only from a branch since squashed and deleted, which breaks a downstream gate long after the change that caused it.
+
+The resolution pass is **scoped to the scanned repository's own owner**, which is where the fleet's actions live and where that decay comes from, since a squash merge deletes the branch a pin was taken from and the pin outlives the commit. A third-party action's tag is stable by comparison, and reading one would make every local run of this gate depend on a stranger's repository answering. The cost is real and is stated rather than left to be found: a fabricated pin on a third-party action is still only shape-checked. Every run therefore prints what the pass actually covered, because a scope that resolves nothing prints the same `0 issue(s)` a full sweep does. On the hub today it covers nothing, since this repo's own `uses:` refs are all under other owners and the fleet's `ptr727` pins live in the downstream repos that consume [`prose-gate`][prose-gate-action]. Those are reached by running this gate from a hub checkout with `--root`, per the hosted-and-reached model above.
+
+A pin is a finding only where GitHub **answered** that the commit is absent, meaning a 404 or a 422. An offline host, a missing `gh`, a rate limit and a narrow token all report as unread and leave the pin on its shape, so the gate stays usable with no network instead of failing a correct tree. A 404 is confirmed against the repository itself before it becomes a finding, since an absent commit and a repository the credentials cannot see are the same answer from here, and a repository-scoped CI token is narrower than the fleet. That second read runs only on the failing path, and each distinct pin is read once however often it repeats.
+
+A `note:` line is how a check says it did less than its name. It prints under the check's own result, outside the issue count, and never changes the exit code, because nothing is wrong with the tree when the network is what is missing.
+
 A stale-backticked-path check was built and **rejected**: a template repo legitimately references paths that live in downstream repos, so it produced 34 false positives on a clean tree with no way to separate those from real drift. Doc-to-doc drift is a review lens, not a regex.
 
 ## `pr_review.py`
 
-One compact digest of a pull request's Copilot review state, replacing a sequence of one-`gh`-call-per-turn polls. `status` prints the digest, `wait` runs the backoff in-process so a long review wait costs one agent turn instead of one per poll, and `reply` answers one thread and resolves it. Re-requesting a review stays out and its runbook is in [`.github/copilot-instructions.md`][copilot-instructions].
+One compact digest of a pull request's Copilot review state, replacing a sequence of one-`gh`-call-per-turn polls. `status` prints the digest, `wait` runs the backoff in-process so a long review wait costs one agent turn instead of one per poll, `reply` answers one thread and resolves it, and `claims` reads the description against the branch it describes. Re-requesting a review stays out and its runbook is in [`.github/copilot-instructions.md`][copilot-instructions].
 
 ```sh
 python3 scripts/pr_review.py status 452 --repo ptr727/ProjectTemplate
+python3 scripts/pr_review.py claims 452 --repo ptr727/ProjectTemplate
 python3 scripts/pr_review.py wait 452 --repo ptr727/ProjectTemplate --timeout 2700
 python3 scripts/pr_review.py reply 452 --repo ptr727/ProjectTemplate \
   --match "retry count is off by one" --body "Fixed in abc1234: the loop now stops at n." --resolve
@@ -119,6 +128,14 @@ Every failure is a stop rather than a fallback, because each alternative closes 
 
 What this trades away is stated rather than glossed. A mutation spelled as a `gh` command in a shell is read by the `gh-write-guard` hook and one this script performs is not, since the hook sees `python3 pr_review.py reply` and no `gh` write. That is a real loss of a second pair of eyes, and it is taken because what the hook guards against there is a fabricated id, which this removes at the source instead of catching after the fact. The guard's other rule is re-implemented here rather than assumed: the owner check above is the same scope rule, enforced in-process, and it is honest that it stops a mistake rather than a determined caller. The whole-source guard against every other state-changing call stays and was narrowed to these two documents rather than dropped when the first of them arrived.
 
+`claims` checks that a description does not contradict its own branch, and it exists for the same reason `sha-pin` now resolves: a reference that points at nothing is a silent failure caught by a reviewer or not at all. Three stale descriptions in one session generated six review findings between them, each a reviewer noticing that the body named a commit or a behavior the branch no longer carried. It reads the commits a body **claims** the branch carries and the `uses:` refs it quotes, confirms the head tree still carries each, and exits `70` where one does not. Prose claims stay **out of scope**, since judging those needs a similarity heuristic, which [`spec/section-model.md`][section-model] rejects for exactly the reason it would fail here.
+
+**Scanning for bare SHAs was built first and the corpus rejected it.** Over the 25 most recent merged pull requests it raised four findings, and every one was correct prose: a `develop` commit named as history, a SHA inside a pasted digest, and two commits in `ptr727/Blog` written without a URL. Nothing in the *form* of a bare SHA separates those from a real claim, and separating them by meaning is the heuristic already ruled out above. A path arm was measured on the same corpus and is worse, flagging 54 of 215 backticked candidates, nearly all of them bare basenames, `origin/develop`, and other repositories. What survives is the verb: a commit counts only where the body says it was fixed, landed, shipped, added, introduced, corrected, resolved, carried or amended in it. That alternation raises exactly one reference over the same 25, and that one is true. It is an **inclusion** list, so a phrasing nobody thought of costs a detection rather than producing a finding, which is the direction to be incomplete in, and a claimed SHA still has to carry a digit as a backstop on the list growing later, since `accede` and `defaced` inflect into all-hex English words.
+
+A commit passes on **ancestry** rather than on membership of the branch's own commits, so a description may cite a commit it inherited from the base branch. A commit the repository does not carry at all and a commit this head does not descend from are both findings, and each names which it is, since the first is an amended-away SHA and the second is a branch cut elsewhere. The `uses:` refs are checked against the whole tree at head rather than a guessed set of workflow paths, because this repo carries `uses:` lines in catalog snippets and in documentation as well as under `.github/`, and a narrower surface would report a ref absent because it looked in the wrong place. One archive is also one request, where walking a listing costs a request per file and grows with the repository, and the match is on bytes so a file that does not decode is searched rather than skipped.
+
+Undecided is a third answer here for the reason it is one in `repo_gate.py`. A reference GitHub did not answer for is left undecided rather than reported stale, and where **every** reference is undecided the run exits `71` and says so, because `stale=0` from a check that read nothing renders exactly like `stale=0` from one that did.
+
 The match is on the block's heading rather than anywhere in the body, and on the runbook's alternation rather than on one phrasing, since the wording has already appeared two ways. A case asserts the script's pattern is the one the runbook publishes rather than a copy of it that can drift. Reading the whole body was the first implementation and its own review caught it: a review whose overview prose discusses suppressed findings carries none, and reporting that as a finding trains the reader to skim the field. A heading outside any `<details>` wrapper is still read, because reporting zero when the markup moves is the same false clean one level up, and that fallback takes a count so ordinary prose does not become one.
 
 <!-- Internal -->
@@ -131,3 +148,4 @@ The match is on the block's heading rather than anywhere in the body, and on the
 [governance]: ../GOVERNANCE.md
 [governance-hub-hosted-tooling]: ../GOVERNANCE.md#hub-hosted-tooling
 [prose-gate-action]: ../.github/actions/prose-gate/action.yml
+[section-model]: ../spec/section-model.md

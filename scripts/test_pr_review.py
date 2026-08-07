@@ -990,6 +990,218 @@ class TestReplyArguments(unittest.TestCase):
                 self.assertIn(flag[0], self.err(['status', '7', '--repo', 'o/r', *flag]))
 
 
+HERE = 'ptr727/ProjectTemplate'
+PIN = 'actions/checkout@' + '9' * 40
+
+
+def refs(body: str) -> tuple[list[str], list[str]]:
+    return pr_review.body_references(body)
+
+
+class TestBodyReferences(unittest.TestCase):
+    """What a description is read as claiming, before anything is fetched.
+
+    Over-reading is the failure that matters here, and the free SHA scan this replaced is the
+    proof: over 25 merged pull requests it raised four findings and every one was correct prose.
+    The cases below are those four shapes, each held to yielding nothing.
+    """
+
+    def test_an_action_pin_is_a_uses_ref_and_not_a_commit_of_this_repository(self) -> None:
+        """The pin's SHA belongs to the action's repository, so reading it here reports it stale."""
+        uses, shas = refs(f'Bumped to `uses: {PIN}` this round.')
+        self.assertEqual([PIN], uses)
+        self.assertEqual([], shas)
+
+    def test_a_commit_a_verb_claims_this_branch_carries_is_read(self) -> None:
+        for phrase in ('Fixed in `69688ec`', 'landed in 69688ec', 'Corrected by `69688ec`',
+                       'shipped as `69688ec`'):
+            with self.subTest(phrase=phrase):
+                self.assertEqual(['69688ec'], refs(f'{phrase} on this branch.')[1])
+
+    def test_a_commit_stated_as_history_is_not_a_claim_about_this_branch(self) -> None:
+        """PR 592's shape: a `develop` commit named as history, correct and not on this head."""
+        self.assertEqual([], refs('`9d85941` merged "Reaching the Hub" whole, so the cluster '
+                                  'is deleted rather than annotated.')[1])
+
+    def test_a_sha_inside_quoted_tool_output_is_not_a_claim(self) -> None:
+        """PR 584's shape: a digest pasted to show what the tool prints."""
+        self.assertEqual([], refs('pr=108 head=9f56a472 rounds=1 review_on_head=yes '
+                                  'threads=0 merge=CLEAN')[1])
+
+    def test_a_commit_in_another_repository_is_not_a_claim(self) -> None:
+        """PR 571 and 568's shape, and neither carries a URL that would mark it as elsewhere."""
+        for body in ('Read at Blog `main@2b132e4`. Verdict operational.',
+                     'Both are on Blog\'s ground-truth `main` (`2b132e4`), verified by reading it.',
+                     '`themes/README.md` records the upstream repository, commit `154d006e`.'):
+            with self.subTest(body=body):
+                self.assertEqual([], refs(body)[1])
+
+    def test_an_all_hex_english_word_is_not_read_as_a_commit(self) -> None:
+        """The digit backstop, so a verb this list gains later cannot start reading prose."""
+        for word in ('accede', 'acceded', 'defaced', 'effaced'):
+            with self.subTest(word=word):
+                self.assertEqual([], refs(f'The clause was corrected as {word} above.')[1])
+
+    def test_a_hex_run_shorter_than_gits_own_floor_is_not_a_commit(self) -> None:
+        """Six is short enough to collide with an identifier, and git abbreviates to seven."""
+        self.assertEqual([], refs('Fixed in `abc12` which is not a commit.')[1])
+
+    def test_each_reference_is_reported_once_however_often_it_is_quoted(self) -> None:
+        uses, shas = refs(f'Fixed in `69688ec`, again fixed in `69688ec`, '
+                          f'and `uses: {PIN}` twice: `uses: {PIN}`.')
+        self.assertEqual(['69688ec'], shas)
+        self.assertEqual([PIN], uses)
+
+    def test_a_description_naming_nothing_yields_nothing(self) -> None:
+        self.assertEqual(([], []), refs('This widens a rule and adds a case for it.'))
+
+
+class ClaimsCase(unittest.TestCase):
+    """Base for the `claims` path, with the pull request and every read replaced."""
+
+    def setUp(self) -> None:
+        self.compare: dict[str, tuple[int, str, str]] = {}
+        self.carried: set[str] | None = set()
+
+    def run_claims(self, body: str, head: str = HEAD) -> tuple[int, str]:
+        def rest(path: str, jq: str | None = None) -> subprocess.CompletedProcess:
+            rc, out, err = self.compare.get(path, (1, '', 'gh: Not Found (HTTP 404)'))
+            return subprocess.CompletedProcess([path], rc, out, err)
+
+        with mock.patch.object(pr_review, 'gql',
+                               return_value={'headRefOid': head, 'body': body}), \
+                mock.patch.object(pr_review, 'gh_rest', side_effect=rest), \
+                mock.patch.object(pr_review, 'head_carries', return_value=self.carried), \
+                contextlib.redirect_stdout(io.StringIO()) as out:
+            code = pr_review.check_claims('ptr727', 'ProjectTemplate', 7)
+        return code, out.getvalue()
+
+    def answer(self, sha: str, status: str, head: str = HEAD) -> None:
+        self.compare[f'repos/ptr727/ProjectTemplate/compare/{sha}...{head}'] = (0, status, '')
+
+    def unread(self, sha: str, head: str = HEAD) -> None:
+        self.compare[f'repos/ptr727/ProjectTemplate/compare/{sha}...{head}'] = (
+            1, '', 'error connecting to api.github.com')
+
+
+class TestClaimsReadsCommits(ClaimsCase):
+    def test_a_commit_the_head_descends_from_is_clean(self) -> None:
+        """The count is asserted beside the verdict, since `stale=0` over nothing read is also 0."""
+        for status in ('ahead', 'identical'):
+            with self.subTest(status=status):
+                self.answer('69688ec', status)
+                code, out = self.run_claims('Fixed in `69688ec`.')
+                self.assertEqual(0, code)
+                self.assertIn('commits=1 uses=0 stale=0 unread=0', out)
+
+    def test_a_commit_the_repository_does_not_carry_is_stale(self) -> None:
+        """The amended-away SHA: the body still names the commit the branch was rewritten off."""
+        code, out = self.run_claims('Fixed in `deadbee1`.')
+        self.assertEqual(70, code)
+        self.assertIn('STALE COMMIT `deadbee1`', out)
+        self.assertIn('carries no such commit', out)
+
+    def test_a_commit_this_head_does_not_descend_from_is_stale_and_names_the_status(self) -> None:
+        """A commit that exists and is not on this branch is the rebase case, not a missing one."""
+        self.answer('dbd1cdc', 'diverged')
+        code, out = self.run_claims('Landed in `dbd1cdc`.')
+        self.assertEqual(70, code)
+        self.assertIn('does not descend from it (diverged)', out)
+
+    def test_a_commit_github_did_not_answer_for_is_undecided_rather_than_stale(self) -> None:
+        """A network failure reported as a stale description sends a reader to fix correct prose."""
+        self.unread('69688ec')
+        self.answer('a6d7a4b', 'ahead')
+        code, out = self.run_claims('Fixed in `69688ec`, then corrected in `a6d7a4b`.')
+        self.assertEqual(0, code)
+        self.assertIn('unread=1', out)
+        self.assertIn('left undecided', out)
+
+    def test_every_reference_undecided_reports_no_verdict_rather_than_a_clean_pass(self) -> None:
+        """`stale=0` from a check that read nothing renders exactly like `stale=0` from one that did."""
+        self.unread('69688ec')
+        code, out = self.run_claims('Fixed in `69688ec`.')
+        self.assertEqual(71, code)
+        self.assertIn('NOTHING_WAS_READ', out)
+
+
+class TestClaimsReadsUsesRefs(ClaimsCase):
+    def test_a_ref_the_head_tree_carries_is_clean(self) -> None:
+        self.carried = {PIN}
+        code, out = self.run_claims(f'Pinned to `uses: {PIN}`.')
+        self.assertEqual(0, code)
+        self.assertIn('uses=1 stale=0', out)
+
+    def test_a_ref_no_file_at_head_carries_is_stale(self) -> None:
+        """The bump the branch reverted, with the description still quoting the pin it named."""
+        self.carried = set()
+        code, out = self.run_claims(f'Pinned to `uses: {PIN}`.')
+        self.assertEqual(70, code)
+        self.assertIn(f'STALE USES `{PIN}`', out)
+
+    def test_an_unreadable_head_tree_is_undecided_rather_than_stale(self) -> None:
+        self.carried = None
+        code, out = self.run_claims(f'Pinned to `uses: {PIN}`.')
+        self.assertEqual(71, code)
+        self.assertIn('NOTHING_WAS_READ', out)
+
+    def test_a_description_quoting_no_ref_reads_no_tree(self) -> None:
+        """The archive is one request, and a body naming nothing has no reason to spend it."""
+        with mock.patch.object(pr_review, 'gql',
+                               return_value={'headRefOid': HEAD, 'body': 'Prose only.'}), \
+                mock.patch.object(pr_review, 'head_carries') as tree, \
+                contextlib.redirect_stdout(io.StringIO()):
+            self.assertEqual(0, pr_review.check_claims('ptr727', 'ProjectTemplate', 7))
+        tree.assert_not_called()
+
+    def test_a_stale_ref_and_a_stale_commit_are_both_reported(self) -> None:
+        """One failing reference does not end the read, since a body drifts in more than one place."""
+        self.carried = set()
+        code, out = self.run_claims(f'Fixed in `deadbee1`, pinned to `uses: {PIN}`.')
+        self.assertEqual(70, code)
+        self.assertIn('STALE COMMIT', out)
+        self.assertIn('STALE USES', out)
+        self.assertIn('stale=2', out)
+
+
+class TestClaimsIsReadOnly(unittest.TestCase):
+    def test_the_head_tree_read_asks_for_an_archive_and_nothing_else(self) -> None:
+        source = (REPO / 'scripts' / 'pr_review.py').read_text(encoding='utf-8')
+        self.assertIn('tarball/{head}', source)
+
+    def test_an_unreadable_archive_reads_as_undecided_rather_than_as_an_empty_tree(self) -> None:
+        """An empty tree carries no ref, so reading a failed download as one reports every ref stale."""
+        for outcome in (subprocess.CompletedProcess([], 1, b'', b''),):
+            with mock.patch.object(pr_review.subprocess, 'run', return_value=outcome):
+                self.assertIsNone(pr_review.head_carries('ptr727', 'ProjectTemplate', HEAD, [PIN]))
+
+    def test_an_archive_that_is_not_a_readable_tarball_is_undecided(self) -> None:
+        proc = subprocess.CompletedProcess([], 0, b'not a gzip stream', b'')
+        with mock.patch.object(pr_review.subprocess, 'run', return_value=proc):
+            self.assertIsNone(pr_review.head_carries('ptr727', 'ProjectTemplate', HEAD, [PIN]))
+
+    def test_a_ref_is_matched_as_bytes_so_an_undecodable_file_is_still_searched(self) -> None:
+        """Skipping a file this cannot decode is how a present ref reads as absent."""
+        source = (REPO / 'scripts' / 'pr_review.py').read_text(encoding='utf-8')
+        self.assertIn('n in blob', source)
+
+    def test_an_absent_status_is_absence_and_a_rate_limit_is_not(self) -> None:
+        """Reading a 403 as a missing commit reports a correct description as contradicting itself."""
+        for status, absent in (('404', True), ('422', True), ('403', False), ('401', False),
+                               ('500', False)):
+            with self.subTest(status=status):
+                proc = subprocess.CompletedProcess([], 1, '', f'gh: (HTTP {status})')
+                self.assertEqual(absent, pr_review.answered_absent(proc))
+
+    def test_a_network_error_carrying_no_status_is_not_absence(self) -> None:
+        proc = subprocess.CompletedProcess([], 1, '', 'error connecting to api.github.com')
+        self.assertFalse(pr_review.answered_absent(proc))
+
+    def test_gh_being_absent_does_not_raise(self) -> None:
+        with mock.patch.object(pr_review.subprocess, 'run', side_effect=FileNotFoundError):
+            self.assertEqual(1, pr_review.gh_rest('repos/o/r').returncode)
+
+
 class TestContract(unittest.TestCase):
     def test_the_reviewer_login_matches_the_runbook_graphql_form(self) -> None:
         """GraphQL drops the `[bot]` suffix REST carries, and this script is GraphQL-only.
@@ -1143,7 +1355,7 @@ class TestHarness(unittest.TestCase):
     def test_this_module_collects_a_plausible_number_of_cases(self) -> None:
         """A module whose cases fail to load still reports OK, which is a pass proving nothing."""
         loaded = unittest.defaultTestLoader.loadTestsFromModule(sys.modules[__name__])
-        self.assertGreaterEqual(loaded.countTestCases(), 20)
+        self.assertGreaterEqual(loaded.countTestCases(), 45)
 
 
 if __name__ == '__main__':

@@ -38,29 +38,19 @@ One pull request clearing the prose findings the hub's own docs and spec still c
   - **Settled** - The three largest files are not snippets and are Python comments rather than prose, being [`spec/audit.py`][audit] at 99, [`gh-write-guard.py`][write-guard] at 52, and [`spec/validate.py`][validate] at 41 when measured before the sweep.
   - **Settled** - A comment opening on a lowercase identifier is the bulk of what `comment-case` still reports, and the rule intends those restructured rather than exempted. The exemptions the snippets sweep added cover a commented-out key and a definition label, and nothing wider.
 
-### Two Checks That Read What a Claim Points At
+### Giving the Fleet's Own Pins Something to Resolve Against
 
-One pull request adding two gates of the same shape, each confirming that a reference in a committed artifact still resolves, since both failures are silent and both are caught by a reviewer or not at all.
+One pull request pointing a hub `uses:` at a hub-owned action, so that the resolvability pass added beside it has a reference under this owner to read. It is separated from that pass because it changes what a workflow runs, where the pass only changes what a gate reports.
 
-**State** `ready`. **Touches** [`scripts/repo_gate.py`][repo-gate] and [`scripts/pr_review.py`][pr-review]. **Cost** one hub edit, hub-only, no sweep.
+**State** `decision`. **Touches** the hub's own workflows. **Cost** one hub edit, hub-only, and it changes a running workflow so it is not a paper change.
 
-- **Teach the `sha-pin` check to verify a pin resolves rather than that it is shaped like a SHA.** Forty hex characters is a format any fabricated string satisfies.
-  - **Blocked by** - Nothing.
+- **Decide whether the hub consumes its own [`prose-gate`][prose-gate] action the way the fleet does.** Today it calls `prose_lint.py` directly, so every `uses:` in the tree is under another owner.
+  - **Blocked by** - Nothing, though it is only worth doing on its own merits rather than to give a gate something to read.
   - **Issue** - None filed.
-  - **Checked** - `develop` at `1ed0cc8` on 2026-08-03, where the check reads the shape and never the ref.
-  - **Open** - Nothing.
-  - **Settled** - An agent hand-writing a plausible SHA into a workflow is a real failure mode rather than a hypothetical one.
-  - **Settled** - Resolvability also catches the neighboring case, a pin whose commit was reachable only from a branch since squashed and deleted, which breaks a downstream gate long after the change that caused it.
-  - **Settled** - The network call is scoped to same-owner repositories, where the fleet's own actions live, and skips rather than fails when the host is offline so the local gate stays usable.
-  - **Settled** - The `gh-write-guard` hook cannot cover this, since it watches Bash and an editor tool writing the same string into a file never reaches it.
-
-- **Check that a pull request description does not contradict its own branch.** Extract the commits and `uses:` refs the body quotes and confirm each still appears in the head tree.
-  - **Blocked by** - Nothing.
-  - **Issue** - None filed.
-  - **Checked** - `develop` at `1ed0cc8` on 2026-08-03, where no check reads a description at all.
-  - **Open** - Nothing.
-  - **Settled** - Three stale descriptions in one session generated six review findings between them, each a reviewer noticing that the body named a commit, a branch, or a behavior the branch no longer carried.
-  - **Settled** - Prose claims stay out of scope, since judging those needs a similarity heuristic, which [`spec/section-model.md`][section-model] rejects for the reason it would fail here.
+  - **Checked** - `develop` at `dbd1cdc` on 2026-08-07, where the tree carries 45 pinned `uses:` refs and not one of them names a `ptr727` repository.
+  - **Open** - Whether the hub gating itself through its own pinned action is desirable at all, given the action reads the rules from hub `develop` on a non-`main` target and the hub already has the script in its own checkout.
+  - **Settled** - The resolvability pass reports what it covered on every run, so the hub's zero is visible rather than silent, which is why this is a separate decision rather than a defect in that pass.
+  - **Settled** - The fleet's `ptr727` pins are live in the downstream repos that consume the action, and `repo_gate.py --root <repo>` from a hub checkout reads them there, so the pass is not idle fleet-wide.
 
 ### Three Rules That Leave the Recurring Case Unstated
 
@@ -482,12 +472,10 @@ Each was checked against the tree and has nothing left to do anywhere. Closing i
 [matrix]: ./reports/conformance-matrix.md
 [merge-bot]: ./.github/workflows/merge-bot-pull-request.yml
 [operations]: ./OPERATIONS.md
-[pr-review]: ./scripts/pr_review.py
 [project-types]: ./spec/project-types.json
 [prose-gate]: ./.github/actions/prose-gate/action.yml
 [readme]: ./README.md
 [readme-structure]: ./spec/readme-structure.md
-[repo-gate]: ./scripts/repo_gate.py
 [reports]: ./reports/
 [repos]: ./registry/repos.json
 [scripts]: ./scripts/README.md
