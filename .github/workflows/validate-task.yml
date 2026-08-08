@@ -68,8 +68,8 @@ jobs:
       - name: Check repo gates step
         run: python3 scripts/repo_gate.py
 
-      # Every default prose rule is clean tree-wide, so each one gates rather than reporting a backlog.
-      # `charset-unknown` is clean too and still reports, for the reason the step below gives.
+      # Every default prose rule is clean tree-wide, so all but one gate rather than reporting a backlog.
+      # `charset-unknown` is the exception and reports in the step below, for the reason given there.
       - name: Check prose step
         run: python3 scripts/prose_lint.py . --check charset --check semicolon --check dash --check dupword --check spelling --check comment-wrap --check comment-case --check home-path
 
