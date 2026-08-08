@@ -83,6 +83,14 @@ def main():
                 f"{settings} exists but is not valid JSON ({e}). Fix or remove it, then re-run.\n"
             )
             return 1
+    # A settings file is an object, and any other JSON value parses cleanly and breaks every lookup below.
+    # The root is therefore checked before the keys under it are.
+    if not isinstance(data, dict):
+        sys.stderr.write(
+            f"{settings} is valid JSON but holds {type(data).__name__} at its root where an object "
+            "is required. Fix or remove it, then re-run. Nothing was written.\n"
+        )
+        return 1
     # Every container this installer descends into is checked before it is used.
     # A key holding an unexpected type would otherwise raise a traceback mid-edit.
     # That reads as a crash rather than as the settings problem it is.
@@ -122,14 +130,17 @@ def main():
     # Written in the same pass as the hook, so the file is read once and written once.
     allow = data.setdefault("permissions", {}).setdefault("allow", [])
     for prefix, rule in MANAGED_PERMISSIONS:
-        superseded = [a for a in allow if isinstance(a, str) and a.startswith(prefix)]
-        allow[:] = [a for a in allow if a not in superseded] + [rule]
-        if superseded == [rule]:
-            action = "already current"
-        elif superseded:
-            action = f"updated, superseding {len(superseded)}"
-        else:
+        matched = [a for a in allow if isinstance(a, str) and a.startswith(prefix)]
+        allow[:] = [a for a in allow if a not in matched] + [rule]
+        # Counted over the rules actually replaced rather than over everything the prefix matched.
+        # The current rule matches its own prefix, so counting the match set reports it as superseded.
+        older = [a for a in matched if a != rule]
+        if not matched:
             action = "added"
+        elif not older:
+            action = "already current"
+        else:
+            action = f"updated, superseding {len(older)}"
         done.append(f"permission {rule}: {action}")
 
     # Reported after the write rather than as each edit is made, since both edits share one write.
@@ -165,7 +176,10 @@ def main():
     print(f"  {launcher} \"{hook_dst}\" --selftest")
     print(f"  grep -c 'agent-safety v' \"{claude_md}\"      # expect 2")
     print(f"  grep -c 'fleet-bootstrap v' \"{claude_md}\"   # expect 2")
-    print(f"  grep -c 'pr_review.py' \"{settings}\"         # expect {len(MANAGED_PERMISSIONS)}")
+    # One line per rule, matching the rule itself rather than a word inside it.
+    # A hint naming a fixed word would stop matching the moment a rule that lacks it is added.
+    for _, rule in MANAGED_PERMISSIONS:
+        print(f"  grep -cF '{rule}' \"{settings}\"   # expect 1")
     print("Restart Claude Code sessions on this machine so the hook and CLAUDE.md load.")
     return 0
 

@@ -40,7 +40,7 @@ The deployed copy on each machine is a snapshot, so when the guard changes upstr
 python3 ~/.claude/hooks/gh-write-guard.py --selftest    # decision matrix: all cases pass
 grep -c 'agent-safety v' ~/.claude/CLAUDE.md            # expect 2 (start + end marker)
 grep -c 'fleet-bootstrap v' ~/.claude/CLAUDE.md         # expect 2 (start + end marker)
-grep -c 'pr_review.py' ~/.claude/settings.json          # expect 1 (one rule, never duplicated)
+grep -cF 'Bash(python3 scripts/pr_review.py:*)' ~/.claude/settings.json   # expect 1 (never duplicated)
 ```
 
 On Windows PowerShell:
@@ -49,7 +49,7 @@ On Windows PowerShell:
 py -3 "$env:USERPROFILE\.claude\hooks\gh-write-guard.py" --selftest    # all cases pass
 (Select-String 'agent-safety v' "$env:USERPROFILE\.claude\CLAUDE.md").Count      # expect 2
 (Select-String 'fleet-bootstrap v' "$env:USERPROFILE\.claude\CLAUDE.md").Count   # expect 2
-(Select-String 'pr_review.py' "$env:USERPROFILE\.claude\settings.json").Count    # expect 1
+(Select-String -SimpleMatch 'Bash(python3 scripts/pr_review.py:*)' "$env:USERPROFILE\.claude\settings.json").Count   # expect 1
 ```
 
 Live end-to-end (in any repo): attempt a discarded-output write and confirm the Bash tool is blocked:
