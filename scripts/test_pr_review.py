@@ -656,7 +656,7 @@ class TestCoverage(GqlCase):
         self.assertIn('UNRECOGNIZED REVIEWER OUTPUT (1)', out)
         self.assertIn(f'coverage line: {line}', out)
 
-    def test_a_round_stating_no_coverage_at_all_is_unknown_rather_than_either_verdict(self) -> None:
+    def test_a_round_stating_no_coverage_at_all_is_unstated_rather_than_a_verdict(self) -> None:
         """28 of the 332 bodies are an overview and a change list, and that shape is current.
 
         It interleaves with the counted one throughout rather than preceding it, and one pull
@@ -701,7 +701,7 @@ class TestCoverage(GqlCase):
 
 
     def test_a_round_that_states_full_coverage_settles_it_over_one_stating_none(self) -> None:
-        """Unknown is the absence of a statement rather than a bad one, so it loses to a count."""
+        """Unstated is the absence of a statement rather than a bad one, so it loses to a count."""
         self.assertEqual(pr_review.FULL,
                          pr_review.head_coverage(payload([review(body='## Overview\n\nNarrow.'),
                                                           review(body=COVERED)]))[0])
