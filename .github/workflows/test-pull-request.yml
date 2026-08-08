@@ -18,8 +18,8 @@ jobs:
     permissions:
       contents: read
 
-  # GitHub Actions does not support required status checks on conditional jobs, so a single always-run aggregator gates
-  # the merge. Its name is the ruleset-bound required status-check context - rename it and the ruleset context together.
+  # GitHub Actions does not support required status checks on conditional jobs, so a single always-run aggregator gates the merge.
+  # Its name is the ruleset-bound required status-check context, so rename it and the ruleset context together.
   check-workflow-status:
     name: Check pull request workflow status job
     runs-on: ubuntu-latest

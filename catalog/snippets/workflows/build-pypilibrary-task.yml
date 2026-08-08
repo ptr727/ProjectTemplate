@@ -1,8 +1,9 @@
 name: Build PyPI library task
 
-# Reusable workflow that only builds the PyPI wheel + sdist and uploads them as a run artifact; it does not
-# publish. Publishing lives in publish-release.yml so id-token:write is granted only at that entry point and not
-# propagated to every caller (e.g. the PR smoke build).
+# Reusable workflow that only builds the PyPI wheel + sdist and uploads them as a run artifact.
+# It does not publish.
+# Publishing lives in publish-release.yml, so id-token:write is granted only at that entry point.
+# It is therefore not propagated to every caller, such as the PR smoke build.
 
 on:
   workflow_call:
@@ -12,13 +13,14 @@ on:
         required: false
         type: string
         default: ''
-      # Logical branch driving the PEP 440 version (develop => .dev0 prerelease, otherwise plain release). Required; the
-      # orchestrator passes it explicitly.
+      # Logical branch driving the PEP 440 version, where develop gives a .dev0 prerelease and anything else a plain release.
+      # It is required, and the orchestrator passes it explicitly.
       branch:
         required: true
         type: string
-      # Smoke mode: build for validation only and skip the artifact upload. A PR smoke run has no consumer for the
-      # wheel/sdist (the publish-pypi job runs only on a real publish), so uploading it just burns artifact storage.
+      # Smoke mode: build for validation only and skip the artifact upload.
+      # A PR smoke run has no consumer for the wheel/sdist, since the publish-pypi job runs only on a real publish.
+      # Uploading it would just burn artifact storage.
       smoke:
         required: false
         type: boolean
@@ -58,8 +60,8 @@ jobs:
       - name: Setup uv step
         uses: astral-sh/setup-uv@08807647e7069bb48b6ef5acd8ec9567f424441b # v8.1.0
         with:
-          # Pin uv to the same version as the devcontainer (UV_VERSION) so CI and local resolves cannot drift; bump in
-          # lockstep.
+          # Pin uv to the same version as the devcontainer (UV_VERSION) so CI and local resolves cannot drift.
+          # Bump the two in lockstep.
           version: "0.11.8"
           enable-cache: true
           cache-dependency-glob: "PyPiLibrary/uv.lock"
@@ -79,8 +81,9 @@ jobs:
       - name: Run pytest step
         run: uv run pytest
 
-      # PEP 440 version: develop -> M.N.P.B.dev0 (prerelease), else M.N.P.B. The NBGV git height sits in the release
-      # segment, so develop's normally exceeds main's and `pip install --pre` picks the dev build over the main release.
+      # PEP 440 version: develop gives M.N.P.B.dev0 as a prerelease, and anything else gives M.N.P.B.
+      # The NBGV git height sits in the release segment, so develop's normally exceeds main's.
+      # `pip install --pre` therefore picks the dev build over the main release.
       - name: Compute PyPI version step
         id: pypiver
         run: |

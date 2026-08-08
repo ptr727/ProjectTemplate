@@ -171,7 +171,7 @@ def driftnote_findings(entry, spec, open_count):
 
 
 def repo_slug(entry):
-    # url is https://github.com/<owner>/<repo>
+    # The url field is https://github.com/<owner>/<repo>
     return "/".join(entry["url"].rstrip("/").split("/")[-2:])
 
 
@@ -186,8 +186,8 @@ def repo_selectors(entry, defaults):
     sel = set(entry.get("types", []))
     sel.add(entry.get("workflowModel") or defaults.get("workflowModel") or "release")
     sel.add(entry.get("releaseTrigger") or defaults.get("releaseTrigger") or "two-phase")
-    # consumerModel has no defaults fallback - the registry schema does not allow defaults.consumerModel, and
-    # validate.py requires it on every cataloged repo. The guard only shields a malformed non-cataloged entry.
+    # The consumerModel field has no defaults fallback, since the registry schema does not allow defaults.consumerModel and validate.py requires it on every cataloged repo.
+    # The guard only shields a malformed non-cataloged entry.
     cm = entry.get("consumerModel")
     if cm:
         sel.add(cm)
@@ -341,8 +341,8 @@ def title_and_intro(text):
         if s.startswith("## "):
             break
         region.append(ln.rstrip())
-    # Trim the blank lines surrounding the region but keep the interior ones, so a paragraph-boundary
-    # difference is a real difference - the spec says the intro is copied verbatim.
+    # Trim the blank lines surrounding the region but keep the interior ones, so a paragraph-boundary difference is a real difference.
+    # The spec says the intro is copied verbatim.
     while region and not region[0]:
         region.pop(0)
     while region and not region[-1]:
@@ -449,9 +449,8 @@ def check_interface(path, contract, text):
     tok = contract.get("artifactNameToken")
     if tok and tok not in code:
         findings.append(("DRIFT", f"interface: {path} missing the '{tok}<branch>-<target>' artifact handoff"))
-    # Token checks only apply to a job that is present; an absent job is already reported by requiredJobKeys,
-    # so skip it rather than emit a redundant "missing token" for every token it cannot contain. Scan the
-    # job's code view so a token in a comment is not read as signal.
+    # Token checks only apply to a job that is present, since an absent job is already reported by requiredJobKeys, so skip it rather than emit a redundant "missing token" for every token it cannot contain.
+    # Scan the job's code view so a token in a comment is not read as signal.
     for job, toks in contract.get("requireTokensInJob", {}).items():
         if job in jobs:
             block = _code_view(jobs[job])
@@ -467,15 +466,15 @@ def check_interface(path, contract, text):
     return findings
 
 
-# A `uses: <action>@<40-hex sha>` pin, plus only a trailing Dependabot version comment (` # v1.2.3` - the
-# leading `v`-or-digit is required). Dependabot bumps both per repo, so that drift is governed (like EOL), not a
-# fidelity deviation. Anchored to `uses:`, so a 64-hex docker digest and a tag/branch ref (`@v4`) do not match.
+# A `uses: <action>@<40-hex sha>` pin, plus only a trailing Dependabot version comment such as ` # v1.2.3`, where the leading `v` or digit is required.
+# Dependabot bumps both per repo, so that drift is governed the way EOL is rather than being a fidelity deviation.
+# It is anchored to `uses:`, so a 64-hex docker digest and a tag or branch ref such as `@v4` do not match.
 # Hex is case-insensitive, and a hand-written note on a pin is not version-shaped, so it survives to be compared.
 _ACTION_PIN = re.compile(r"(\buses:[ \t]*[^\s@]+)@[0-9a-fA-F]{40}(?:[ \t]+#[ \t]*v?[0-9][\w.\-]*)?")
-# A workflow job's `needs:` list names the jobs it sequences after. In a verbatim job region a repo prunes that
-# list to the targets it actually vendors - a `needs` entry naming an unvendored job fails the whole workflow to
-# load - so the list is owned per repo, not fixed. Mask it (the inline `[ ... ]`, scalar, and block-list forms),
-# same as the action pin. The interface contract still checks the required job keys separately.
+# A workflow job's `needs:` list names the jobs it sequences after.
+# In a verbatim job region a repo prunes that list to the targets it actually vendors, since a `needs` entry naming an unvendored job fails the whole workflow to load, so the list is owned per repo rather than fixed.
+# Mask it in the inline, scalar and block-list forms, the same as the action pin.
+# The interface contract still checks the required job keys separately.
 _JOB_NEEDS = re.compile(
     r"(^[ \t]*)needs:[ \t]*"
     r"(?:\[[^\]\n]*\]"                                  # inline: needs: [a, b] (same line only)
@@ -529,7 +528,8 @@ def git_file_history(rel_path):
     if rel_path in _HISTORY_CACHE:
         return _HISTORY_CACHE[rel_path]
     out = []
-    # Decode as UTF-8/replace to match the downstream and canonical reads. A divergent decode would fabricate a mismatch.
+    # Decode as UTF-8 with replacement to match the downstream and canonical reads.
+    # A divergent decode would fabricate a mismatch.
     r = subprocess.run(["git", "log", "--format=%H", "--", rel_path], cwd=ROOT, capture_output=True,
                        encoding="utf-8", errors="replace")
     if r.returncode == 0:
@@ -548,8 +548,7 @@ def check_verbatim(label, down_text, canonical_rel, extract=None):
     byte diff is a hint to review, never proof of breakage.
     """
     try:
-        # Same decode policy as the downstream copy and the git history, so a stray byte can never make
-        # otherwise-equal content hash differently across the three sources.
+        # Same decode policy as the downstream copy and the git history, so a stray byte can never make otherwise-equal content hash differently across the three sources.
         canon_text = (ROOT / canonical_rel).read_text(encoding="utf-8", errors="replace")
     except OSError:
         return [("DRIFT", f"verbatim: {label} canonical {canonical_rel} is unreadable from the hub (spec error?)")]
@@ -609,8 +608,7 @@ def audit_repo(entry, spec, branch=None):
     if bool(entry.get("hasDevelop")) != dev_exists:
         findings.append(("DRIFT", f"registry: hasDevelop={entry.get('hasDevelop')} but develop {'exists' if dev_exists else 'is absent'}"))
     # Resolve the branch every content read is keyed on, reusing what the branch facts already read.
-    # An unresolvable one is an error rather than a run: every `?ref=` read would 404 and report the
-    # whole baseline as absent, which is a flood of letters describing the ref, not the repo.
+    # An unresolvable one is an error rather than a run, since every `?ref=` read would 404 and report the whole baseline as absent, which is a flood of letters describing the ref rather than the repo.
     # The branch facts above are reported either way, since they are already read and still true.
     ground_head = {"main": branch_main, "develop": branch_dev}.get(ground)
     if ground_head is None:
@@ -618,22 +616,16 @@ def audit_repo(entry, spec, branch=None):
     if ground_head is None:
         return findings + [("ERROR", f"branch: ground-truth branch {ground} does not exist, so nothing could be read")], ""
     if main_exists and dev_exists:
-        # Commit counts mislead here: merge-commit promotions leave main permanently "ahead" while the
-        # head trees are identical, so tree equality is the no-drift fast path. When the head trees
-        # differ, empty compare files[] means develop is merely ahead (no main-side changes since the
-        # merge-base) - normal, no finding, no further API calls.
+        # Commit counts mislead here, since merge-commit promotions leave main permanently ahead while the head trees are identical, so tree equality is the no-drift fast path.
+        # Where the head trees differ, an empty compare files[] means develop is merely ahead, carrying no main-side changes since the merge-base, which is normal and yields no finding and no further API calls.
         if branch_main["commit"]["commit"]["tree"]["sha"] != branch_dev["commit"]["commit"]["tree"]["sha"]:
             cmp = gh(f"repos/{slug}/compare/develop...main", ok404=True)
             if cmp and cmp.get("files"):
-                # Non-empty files[] signals main-side changes, but is not usable directly: it is blind
-                # to cherry-picked promotions (develop may already hold identical content under
-                # different commit SHAs, e.g. promote/* branches) AND capped at 300 entries (#336).
-                # Instead, derive the main-side change set from the merge-base tree - paths whose
-                # object SHA (blob, or submodule pointer) differs base->main, additions and deletions
-                # included, no cap - then drop paths whose objects already match at develop: content
-                # develop already has is not "content develop lacks". Three recursive tree calls, so if
-                # any tree is truncated (or unexpectedly not a dict) the filter is skipped and the
-                # compare's unfiltered count kept (conservative, marked).
+                # A non-empty files[] signals main-side changes but is not usable directly.
+                # It is blind to cherry-picked promotions, where develop may already hold identical content under different commit SHAs such as a promote branch, and it is capped at 300 entries, per #336.
+                # Derive the main-side change set from the merge-base tree instead, taking paths whose object SHA, a blob or a submodule pointer, differs from base to main, additions and deletions included and with no cap.
+                # Then drop paths whose objects already match at develop, since content develop already has is not content develop lacks.
+                # That is three recursive tree calls, so where any tree is truncated, or unexpectedly not a dict, the filter is skipped and the compare's unfiltered count is kept, which is conservative and marked.
                 trees = {
                     "base": gh(f"repos/{slug}/git/trees/{cmp['merge_base_commit']['commit']['tree']['sha']}?recursive=1"),
                     "develop": gh(f"repos/{slug}/git/trees/{branch_dev['commit']['commit']['tree']['sha']}?recursive=1"),
@@ -685,15 +677,14 @@ def audit_repo(entry, spec, branch=None):
 
     # --- Secrets (names only) ---
     secrets = spec["secrets"]
-    # The codecov coverage requirement (the CODECOV_TOKEN secret and the codecov.yml file) is claimed by a
-    # type only at build profile: a lint-only language has no tests, so no coverage (spec/type-model.md).
+    # The codecov coverage requirement, meaning the CODECOV_TOKEN secret and the codecov.yml file, is claimed by a type only at build profile.
+    # A lint-only language has no tests and so no coverage, per spec/type-model.md.
     repo_profiles = entry.get("profiles", {})
     if not isinstance(repo_profiles, dict):
         repo_profiles = {}
     coverage_active = any(secrets.get("typeMechanisms", {}).get(t) == "codecov" and repo_profiles.get(t) != "lint-only" for t in types)
     stores = {}
-    # No ok404: an empty store returns {"secrets": []}, so a 404/403 (permissions, rename) must
-    # surface as ERROR rather than cascade into false missing-secret DEFECTs.
+    # There is no ok404 here, since an empty store returns {"secrets": []}, so a 404 or 403 from permissions or a rename must surface as ERROR rather than cascade into false missing-secret DEFECTs.
     for store, path in [("actions", f"repos/{slug}/actions/secrets?per_page=100"), ("dependabot", f"repos/{slug}/dependabot/secrets?per_page=100")]:
         data = gh(path)
         stores[store] = {s["name"] for s in (data or {}).get("secrets", [])}
@@ -706,9 +697,8 @@ def audit_repo(entry, spec, branch=None):
     for mech in claimed:
         for store in mech.get("stores", []):
             required_by_store[store] |= set(mech.get("requires", []))
-    # Registry requiredSecrets[] are the domain-specific additions (STANDUP.md: requiredSecrets plus the
-    # implicit baseline). Mechanism-mapped names already carry their stores above, and unmapped ones are
-    # expected in the actions store and count as claimed (never stale).
+    # The registry requiredSecrets entries are the domain-specific additions, per STANDUP.md, being requiredSecrets plus the implicit baseline.
+    # Mechanism-mapped names already carry their stores above, and unmapped ones are expected in the actions store and count as claimed, never stale.
     required_by_store["actions"] |= set(entry.get("requiredSecrets", []))
     forbidden = set(secrets["baseline"].get("forbids", []))
     for mech in claimed:
@@ -724,14 +714,13 @@ def audit_repo(entry, spec, branch=None):
             findings.append(("DRIFT", f"secrets: {name} in the {store} store is claimed by no applicable mechanism (stale?)"))
 
     # --- Dependabot ecosystem coverage ---
-    # A repo's tree implies Dependabot ecosystems it must track: github-actions when it ships workflows
-    # (the action versions they reference otherwise go stale, and a merge-bot then has no PRs to auto-merge),
-    # devcontainers when it ships a .devcontainer. dependabot.yml is YAML (no stdlib parser), so scan the
-    # declared package-ecosystem values by regex - anchored to the line start so a commented-out entry
-    # (# package-ecosystem: ...) is not read as declared. This asserts an implied ecosystem's *presence*
-    # only. Whether each declared ecosystem dual-targets main+develop (the fleet norm) is verified by
-    # inspection, not here. Only runs when dependabot.yml exists, since its absence is already a file-presence
-    # LETTER below. Language ecosystems (nuget/uv/npm) are directory-scoped and not yet cross-checked here.
+    # A repo's tree implies Dependabot ecosystems it must track, being github-actions where it ships workflows and devcontainers where it ships a .devcontainer.
+    # Without the first, the action versions those workflows reference go stale and a merge-bot then has no PRs to auto-merge.
+    # The dependabot.yml file is YAML and no stdlib parser reads it, so scan the declared package-ecosystem values by regex, anchored to the line start so a commented-out entry is not read as declared.
+    # This asserts an implied ecosystem's *presence* only.
+    # Whether each declared ecosystem dual-targets main and develop, which is the fleet norm, is verified by inspection rather than here.
+    # It only runs where dependabot.yml exists, since its absence is already a file-presence LETTER below.
+    # Language ecosystems such as nuget, uv and npm are directory-scoped and not yet cross-checked here.
     db = gh(f"repos/{slug}/contents/.github/dependabot.yml?ref={ground}", ok404=True)
     if db and db.get("content"):
         declared = set(re.findall(r'^[ \t]*-?[ \t]*package-ecosystem:[ \t]*["\']?([\w-]+)', base64.b64decode(db["content"]).decode("utf-8", "replace"), re.M))
@@ -746,11 +735,10 @@ def audit_repo(entry, spec, branch=None):
                 findings.append(("DRIFT", f"dependabot: {eco} ecosystem not declared though {why}; add it for both main and develop per the fleet norm"))
 
     # --- File and section presence on the ground-truth branch ---
-    # appliesTo is matched against the repo's full selector set (types + workflowModel + releaseTrigger +
-    # consumerModel), so the release/operational develop ruleset is two data entries, not a code swap.
-    # Required sections union across same-path entries. A carried Markdown file must contain each heading
-    # scoped to this repo. A rename reads as missing and equivalence is judged by hand, so a missing section
-    # is DRIFT (a hint to verify), never a LETTER.
+    # The appliesTo selector is matched against the repo's full selector set, being types, workflowModel, releaseTrigger and consumerModel, so the release and operational develop rulesets are two data entries rather than a code swap.
+    # Required sections union across same-path entries.
+    # A carried Markdown file must contain each heading scoped to this repo.
+    # A rename reads as missing and equivalence is judged by hand, so a missing section is DRIFT, a hint to verify, and never a LETTER.
     sel = repo_selectors(entry, spec["registry"].get("defaults", {}))
     wanted_sections = {}  # path -> set of required section names, unioned across applicable entries
     verbatim_secs = {}  # path -> set of section names checked byte-for-byte against the hub canonical
@@ -776,15 +764,15 @@ def audit_repo(entry, spec, branch=None):
         item = check_item.get(path)
         fid = item.get("fidelity") if item else "presence"
         if content is None:
-            # An interface unit's presence is DRIFT, not LETTER - a workflow's naming is more variable than a
-            # carried config, so absence is a hint to verify. Any other unit's absence is a file-presence LETTER.
+            # An interface unit's presence is DRIFT rather than LETTER, since a workflow's naming is more variable than a carried config, so absence is a hint to verify.
+            # Any other unit's absence is a file-presence LETTER.
             if fid == "interface":
                 findings.append(("DRIFT", f"interface: {path} absent on {ground}, cannot verify its contract"))
             else:
                 findings.append(("LETTER", f"file: {path} absent on {ground} (verify intent per AUDIT.md section 7)"))
             continue
-        # Guard on encoding, not truthiness: an empty file returns encoding "base64" with content "" (decode it
-        # to ""), whereas a too-large or non-inline payload returns encoding "none" (text stays None -> flagged).
+        # Guard on encoding rather than truthiness, since an empty file returns encoding "base64" with an empty content that decodes to an empty string.
+        # A too-large or non-inline payload returns encoding "none", where text stays None and is flagged.
         text = base64.b64decode(content["content"]).decode("utf-8", "replace") if content.get("encoding") == "base64" else None
         if path in ("README.md", "HISTORY.md") and text is not None:
             doc_texts[path] = text  # retained for the README/HISTORY mirror check below
@@ -805,35 +793,30 @@ def audit_repo(entry, spec, branch=None):
                 findings.append(("DRIFT", f"verbatim: could not read {path} content on {ground} to compare (no inline content returned); verify by hand"))
             else:
                 findings.extend(check_verbatim(path, text, item.get("reference") or path))
-        # Heading-based presence is only meaningful for Markdown. A "section" named on a non-md file (e.g. a
-        # tasks.json task group) is an intent marker judged per AUDIT.md, not a heading grep.
+        # Heading-based presence is only meaningful for Markdown.
+        # A "section" named on a non-md file, a tasks.json task group being one, is an intent marker judged per AUDIT.md rather than a heading grep.
         needed = wanted_sections[path]
         verbatim_needed = verbatim_secs[path]
         if (needed or verbatim_needed) and path.endswith(".md"):
             if text is None:
-                # Fail loud rather than skip silently: the contents API returned no inline content (an
-                # oversized file, a symlink, a submodule), so the section check could not run - surface that
-                # instead of a false clean.
+                # Fail loud rather than skip silently, since the contents API returned no inline content, which happens for an oversized file, a symlink or a submodule.
+                # The section check could not run, so surface that rather than a false clean.
                 findings.append(("DRIFT", f"section: could not read {path} content on {ground} to verify sections (no inline content returned); verify by hand"))
             else:
                 present = heading_texts(text)
                 for name in sorted(needed):
                     if name.strip().lower() not in present:
                         findings.append(("DRIFT", f"section: '{name}' not found as a heading in {path} on {ground} (renamed or missing; verify intent per AUDIT.md section 7)"))
-                # A verbatim section must match the hub's canonical byte-for-byte (EOL-normalized), like a
-                # verbatim file but scoped to the one `## <heading>` region - so a universal rule block cannot
-                # drift or fall behind a newly added rule while its heading still passes the presence check.
+                # A verbatim section must match the hub's canonical byte-for-byte once EOL-normalized, like a verbatim file but scoped to the one `## <heading>` region.
+                # A universal rule block then cannot drift or fall behind a newly added rule while its heading still passes the presence check.
                 for name in sorted(verbatim_needed):
                     findings.extend(check_verbatim(f"{path} section '{name}'", text, path,
                                                    extract=lambda t, n=name: extract_section(t, n)))
-                # Undeclared-section advisory (spec/section-model.md): an H2 the manifest does not declare is a
-                # candidate duplicate of a verbatim section, or repo-specific content to relocate. Advisory only -
-                # a repo may legitimately carry its own project-specific sections (the AGENTS.md preamble allows
-                # them) - so it points at the reconciliation, it never fails. AGENTS.md and GOVERNANCE.md only,
-                # the two files whose section structure is governed by section-model.md.
-                # Skip the hub itself: its copies are the source and legitimately hold hub-only sections
-                # (e.g. Repository Onboarding and Conformance) that are deliberately not carried. A downstream
-                # repo carrying such a section is still flagged, which is the point.
+                # The undeclared-section advisory, per spec/section-model.md, treats an H2 the manifest does not declare as a candidate duplicate of a verbatim section, or as repo-specific content to relocate.
+                # It is advisory only, since a repo may legitimately carry its own project-specific sections, which the AGENTS.md preamble allows, so it points at the reconciliation and never fails.
+                # It covers AGENTS.md and GOVERNANCE.md only, the two files whose section structure is governed by section-model.md.
+                # Skip the hub itself, since its copies are the source and legitimately hold hub-only sections, Repository Onboarding and Conformance being one, that are deliberately not carried.
+                # A downstream repo carrying such a section is still flagged, which is the point.
                 if path in ("AGENTS.md", "GOVERNANCE.md") and entry.get("name") != HUB_NAME:
                     declared = {n.strip().lower() for n in (needed | verbatim_needed)}
                     h2s = {ln[3:].strip().lower() for ln in text.splitlines() if ln.startswith("## ")}
@@ -854,8 +837,8 @@ def audit_repo(entry, spec, branch=None):
                 findings.append(("DRIFT", f"carried: {path} references the template repo by name or link outside its verbatim sections (the coordination flow is machinery this repo's readers should not see; state the behavior, not the destination)"))
 
     # --- HISTORY.md mirrors the README opening ---
-    # spec/readme-structure.md "HISTORY.md": the changelog opens as the README's twin - same H1 title and the
-    # same intro paragraph. Checked only when both files were readable (absence is already a file LETTER above).
+    # Per spec/readme-structure.md "HISTORY.md", the changelog opens as the README's twin, carrying the same H1 title and the same intro paragraph.
+    # It is checked only where both files were readable, since absence is already a file LETTER above.
     if "README.md" in doc_texts and "HISTORY.md" in doc_texts:
         r_title, r_intro = title_and_intro(doc_texts["README.md"])
         h_title, h_intro = title_and_intro(doc_texts["HISTORY.md"])
@@ -864,10 +847,10 @@ def audit_repo(entry, spec, branch=None):
         elif r_intro != h_intro:
             findings.append(("LETTER", "history: HISTORY.md intro does not mirror the README intro - copy the README's opening paragraph (spec/readme-structure.md)"))
 
-    # --- README title/intro is the one canonical short description ---
-    # spec/readme-structure.md item 1 + GOVERNANCE.md "Repository Details": the H1 is the repo name, and the intro
-    # line after it is a link-free, <=100-char plain sentence that carries verbatim to the GitHub About
-    # description and (for a docker repo) the Docker Hub short description. The README is the source of truth.
+    # --- README title and intro are the one canonical short description ---
+    # Per spec/readme-structure.md item 1 and GOVERNANCE.md "Repository Details", the H1 is the repo name.
+    # The intro line after it is a link-free plain sentence of at most 100 characters that carries verbatim to the GitHub About description, and on a docker repo to the Docker Hub short description.
+    # The README is the source of truth.
     if "README.md" in doc_texts:
         title, intro = title_and_intro(doc_texts["README.md"])
         intro_line = intro.split("\n")[0]
@@ -902,9 +885,8 @@ def audit_repo(entry, spec, branch=None):
                     findings.append(("LETTER", f"description: the Docker Hub short description ('{dh.strip()}') does not match the README intro ('{want}') - set it from the README (spec/readme-structure.md)"))
 
     # --- cspell single source of truth ---
-    # CODESTYLE.md "Markdown and Spelling": cspell.json is the one word list, and a cSpell words block left in
-    # a *.code-workspace duplicates it and silently drifts. Checked only when cspell.json is carried - its
-    # absence is already a file LETTER above, and a workspace list with no cspell.json is that same finding.
+    # Per CODESTYLE.md "Markdown and Spelling", cspell.json is the one word list, and a cSpell words block left in a *.code-workspace duplicates it and silently drifts.
+    # It is checked only where cspell.json is carried, since its absence is already a file LETTER above, and a workspace list with no cspell.json is that same finding.
     if gh(f"repos/{slug}/contents/cspell.json?ref={ground}", ok404=True) is not None:
         root_entries = gh(f"repos/{slug}/contents/?ref={ground}", ok404=True) or []
         for it in root_entries:
@@ -912,7 +894,7 @@ def audit_repo(entry, spec, branch=None):
             if not ws_name.endswith(".code-workspace"):
                 continue
             ws = gh(f"repos/{slug}/contents/{ws_name}?ref={ground}", ok404=True)
-            # isinstance guard: the contents API returns a list for a directory, and .get would raise on it.
+            # The isinstance guard is needed because the contents API returns a list for a directory, where .get would raise.
             ws_text = base64.b64decode(ws["content"]).decode("utf-8", "replace") if isinstance(ws, dict) and ws.get("encoding") == "base64" else None
             if ws_text is None:
                 findings.append(("DRIFT", f"cspell: could not read {ws_name} on {ground} to check for a duplicated word list; verify by hand"))
@@ -922,8 +904,8 @@ def audit_repo(entry, spec, branch=None):
     # --- Registry driftNotes freshness ---
     findings.extend(driftnote_findings(entry, spec, len(findings)))
 
-    # Stamp the commit actually read for the ground-truth branch. Never fall back to another branch:
-    # a stamp naming develop while carrying main's sha would misattribute every finding.
+    # Stamp the commit actually read for the ground-truth branch.
+    # Never fall back to another branch, since a stamp naming develop while carrying main's sha would misattribute every finding.
     audited_sha = ground_head.get("commit", {}).get("sha", "")
     return findings, audited_sha
 
@@ -975,9 +957,8 @@ def _selftest():
     else:
         print("  ok   split_jobs (inline-mapping job captured with its content)")
 
-    # Verbatim engine: EOL normalization, hashing, and the stale-vs-modified classification. Exercised here
-    # rather than only in production, because a latent bug in the comparison would otherwise surface as a
-    # false clean on a real fleet run.
+    # The verbatim engine, covering EOL normalization, hashing, and the stale-versus-modified classification.
+    # It is exercised here rather than only in production, because a latent bug in the comparison would otherwise surface as a false clean on a real fleet run.
     canon = "line one\nline two\nline three\n"
     verbatim_cases = [
         # (label, down_text, canon_text, history, want)
@@ -994,9 +975,8 @@ def _selftest():
         if got != want:
             ok = False
         print(f"  {'ok  ' if got == want else 'FAIL'} want={str(want):>8} got={str(got):>8}  verbatim: {label}")
-    # Action-pin neutralization: a Dependabot uses:@<sha> bump (both the 40-hex sha and its ` # vN` comment)
-    # must not count as verbatim drift, but a changed action name must. This is what lets a verbatim workflow
-    # region survive routine action bumps while still catching a real fork.
+    # Action-pin neutralization, where a Dependabot uses:@<sha> bump, meaning both the 40-hex sha and its ` # vN` comment, must not count as verbatim drift, while a changed action name must.
+    # This is what lets a verbatim workflow region survive routine action bumps while still catching a real fork.
     pin_a = "      - uses: actions/checkout@" + "a" * 40 + " # v7.0.0\n"
     pin_b = "      - uses: actions/checkout@" + "B" * 40 + " # v7.0.1\n"  # uppercase hex + version bump
     pin_struct = "      - uses: actions/setup-node@" + "a" * 40 + " # v7.0.0\n"
@@ -1014,8 +994,7 @@ def _selftest():
     else:
         print("  ok   action-pin: version bump normalizes equal, changed action differs, hand-written note survives")
 
-    # needs-mask: a verbatim job region whose `needs:` list is pruned to the repo's vendored targets must not
-    # count as drift (the list is owned), but a structural change to the job's steps must.
+    # The needs-mask case, where a verbatim job region whose `needs:` list is pruned to the repo's vendored targets must not count as drift, since the list is owned, while a structural change to the job's steps must.
     needs_full = "  github-release:\n    needs: [get-version, validate-release, build-nugetlibrary, build-executable]\n    runs-on: x\n    steps: []\n"
     needs_pruned = "  github-release:\n    needs: [get-version, validate-release, build-executable]\n    runs-on: x\n    steps: []\n"
     needs_block = "  github-release:\n    needs:\n      - get-version\n      - build-executable\n    runs-on: x\n    steps: []\n"
@@ -1041,9 +1020,8 @@ def _selftest():
         print("  FAIL verbatim: forked github-release region should hash differently")
     else:
         print("  ok   verbatim: a forked github-release region hashes differently from the canonical")
-    # Section-region extraction: the region includes the heading line, keeps a nested ### and a fenced ## inside
-    # the body, ends at the next sibling H2, is None if absent, and rehashes when the heading is re-cased - the
-    # per-section verbatim check depends on every one of these.
+    # Section-region extraction, where the region includes the heading line, keeps a nested ### and a fenced ## inside the body, ends at the next sibling H2, is None where absent, and rehashes where the heading is re-cased.
+    # The per-section verbatim check depends on every one of these.
     md = "# Title\n\n## Alpha\n\nbody a\n\n```\n## not a heading\n```\n\n### nested\nstill alpha\n\n## Beta\n\nbody b\n"
     a, b, gone = extract_section(md, "Alpha"), extract_section(md, "Beta"), extract_section(md, "Gamma")
     spaced = extract_section("##   Alpha\n\nbody a\n", "Alpha")  # extra marker-gap whitespace still locates
@@ -1128,7 +1106,7 @@ def _selftest():
     else:
         print("  ok   cspell: workspace cSpell word list detected, a plain cspell.json mention is not")
 
-    # branch-drift direction split, covering modify/add/delete on main and a develop-only change
+    # The branch-drift direction split, covering a modify, add and delete on main plus a develop-only change.
     bd_base = {"keep": "a", "moda": "1", "modb": "2", "deld": "e", "devonly": "x"}
     bd_main = {"keep": "a", "moda": "9", "modb": "9", "add": "n", "devonly": "x"}          # moved moda/modb, added 'add', deleted 'deld'
     bd_dev = {"keep": "a", "moda": "1", "modb": "7", "add": "m", "deld": "e", "devonly": "y"}  # still at base on moda/deld, moved modb/add/devonly
@@ -1139,9 +1117,8 @@ def _selftest():
     else:
         print("  ok   branch-drift: behind (modify/delete develop still at base) vs diverged (both moved), develop-only excluded")
 
-    # CLI parsing: a repo name and a flag value must not be confused for one another. The previous
-    # hand-rolled parse took every non `--` argument as a repo name, so `--branch develop` would have
-    # audited a repo called "develop" instead of overriding the branch.
+    # CLI parsing, where a repo name and a flag value must not be confused for one another.
+    # The previous hand-rolled parse took every non `--` argument as a repo name, so `--branch develop` would have audited a repo called "develop" rather than overriding the branch.
     cli_cases = [
         ([], [], None, False, False),
         (["Utilities"], ["Utilities"], None, False, False),
@@ -1328,8 +1305,8 @@ def main(argv=None):
             print(f"Not cataloged: {', '.join(sorted(missing))}", file=sys.stderr)
             return 2
 
-    # Findings are a point-in-time snapshot. Stamp the run so anything derived from it (an onboarding
-    # issue, a report) carries its own freshness signal and a reader can tell whether it still applies.
+    # Findings are a point-in-time snapshot.
+    # Stamp the run so anything derived from it, an onboarding issue or a report, carries its own freshness signal and a reader can tell whether it still applies.
     run_utc = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
     hub = subprocess.run(["git", "rev-parse", "--short", "HEAD"], capture_output=True, text=True, cwd=ROOT)
     hub_sha = hub.stdout.strip() if hub.returncode == 0 else "unknown"

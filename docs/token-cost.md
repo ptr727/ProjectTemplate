@@ -19,7 +19,7 @@ A session's context grows monotonically and every request re-reads all of it at 
 | Output | $528 | 10.4% |
 | Fresh input | $9 | 0.2% |
 
-**Output verbosity is not the lever.** Output was 0.30% of prompt volume and 10.4% of cost, so instructing an agent to write less prose targets a tenth of the bill at best. The cache is also working correctly at a 98.4% read share - the problem is the volume being re-read, not the hit rate.
+**Output verbosity is not the lever.** Output was 0.30% of prompt volume and 10.4% of cost, so instructing an agent to write less prose targets a tenth of the bill at best. The cache is also working correctly at a 98.4% read share. The problem is the volume being re-read, not the hit rate.
 
 ## The Root Cause: Sessions Outliving Their Task
 
@@ -63,9 +63,9 @@ Two measured attributions. Both **overlap** with the counterfactual above rather
 | `CODESTYLE.md` | 56 | $32 |
 | `AUDIT.md` | 27 | $17 |
 
-Median 199 requests remained in the session after such a read, p90 6,005, and only 36.9% of all reads used a range. `AGENTS.md` was **not** auto-loaded by any harness - the session baseline was 33,000 to 37,000 tokens with none of its text present - so the whole cost came from explicit whole-file reads.
+Median 199 requests remained in the session after such a read, p90 6,005, and only 36.9% of all reads used a range. `AGENTS.md` was **not** auto-loaded by any harness (the session baseline was 33,000 to 37,000 tokens with none of its text present), so the whole cost came from explicit whole-file reads.
 
-The rule text could not simply be cut: 16 of 18 sections were declared `fidelity: verbatim` and carried byte-identically to the fleet. So the file was split instead - `AGENTS.md` from 87,457 to 7,789 bytes as a router, with the rule text in [`GOVERNANCE.md`][governance] - and reading one section now costs about 3,200 bytes against 87,457.
+The rule text could not simply be cut: 16 of 18 sections were declared `fidelity: verbatim` and carried byte-identically to the fleet. So the file was split instead (`AGENTS.md` from 87,457 to 7,789 bytes as a router, with the rule text in [`GOVERNANCE.md`][governance]), and reading one section now costs about 3,200 bytes against 87,457.
 
 ### GitHub orchestration: $938, 27% of the cache-read bill
 

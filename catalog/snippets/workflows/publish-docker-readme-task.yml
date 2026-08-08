@@ -1,21 +1,23 @@
 name: Publish Docker Hub readme task
 
-# Pushes the Docker Hub repository overview (Docker/README.md). Caller-gated: the publisher invokes this only when main
-# is published - the overview has no per-branch context. The repository list is either passed directly (`repositories`)
-# or derived from a manifest (`manifest` + `manifest-jq`), covering single- and multi-image repos without per-repo glue.
+# Pushes the Docker Hub repository overview (Docker/README.md).
+# Caller-gated, so the publisher invokes this only when main is published.
+# The overview has no per-branch context.
+# The repository list is either passed directly (`repositories`) or derived from a manifest (`manifest` + `manifest-jq`).
+# That covers single- and multi-image repos without per-repo glue.
 # An optional transform step (e.g. m4) renders the readme before pushing, optionally after downloading a build artifact.
 
 on:
   workflow_call:
     inputs:
-      # Ref whose readme (and any transform sources) to publish; empty uses the caller's ref. The publisher passes
-      # `main` so the overview tracks the main release even when dispatched from another ref.
+      # Ref whose readme, and any transform sources, to publish, where empty uses the caller's ref.
+      # The publisher passes `main` so the overview tracks the main release even when dispatched from another ref.
       ref:
         required: false
         type: string
         default: ''
-      # JSON array of Docker Hub repositories to update, e.g. '["owner/image"]'. Leave empty to derive the list from a
-      # manifest instead (see `manifest`).
+      # JSON array of Docker Hub repositories to update, e.g. '["owner/image"]'.
+      # Leave empty to derive the list from a manifest instead (see `manifest`).
       repositories:
         required: false
         type: string
@@ -30,8 +32,8 @@ on:
         required: false
         type: string
         default: ''
-      # Optional command that renders the readme before pushing (e.g. an m4 step that writes Docker/README.md). Empty
-      # pushes the committed file as-is.
+      # Optional command that renders the readme before pushing, such as an m4 step that writes Docker/README.md.
+      # Empty pushes the committed file as-is.
       transform-run:
         required: false
         type: string
@@ -42,8 +44,8 @@ on:
         required: false
         type: string
         default: ''
-      # Readme file to push (the transform's output, or the committed file). Single-image repos with a root README pass
-      # './README.md'.
+      # Readme file to push, being the transform's output or the committed file.
+      # Single-image repos with a root README pass './README.md'.
       readme-filepath:
         required: false
         type: string
@@ -51,8 +53,8 @@ on:
 
 jobs:
 
-  # Resolve the repository list once - either the static `repositories` input or a jq program over a manifest - so the
-  # publish matrix is the same shape for single- and multi-image repos and no caller hand-rolls its own derivation.
+  # Resolve the repository list once, from either the static `repositories` input or a jq program over a manifest.
+  # The publish matrix is then the same shape for single- and multi-image repos, and no caller hand-rolls its own derivation.
   get-repos:
     name: Get repository list job
     runs-on: ubuntu-latest
@@ -61,9 +63,10 @@ jobs:
 
     steps:
 
-      # Enforce the input contract once so the downstream steps can trust it: the list comes from exactly one source -
-      # `repositories`, the `manifest` + `manifest-jq` pair, or neither (default to this repo). Silent fall-through to the
-      # default would otherwise mask caller mistakes (a half-filled manifest pair, or both sources passed at once).
+      # Enforce the input contract once so the downstream steps can trust it.
+      # The list comes from exactly one source: `repositories`, the `manifest` + `manifest-jq` pair, or neither, defaulting to this repo.
+      # Silent fall-through to the default would otherwise mask caller mistakes.
+      # A half-filled manifest pair, or both sources passed at once, are the cases.
       - name: Validate inputs step
         env:
           REPOSITORIES: ${{ inputs.repositories }}
@@ -101,8 +104,8 @@ jobs:
           elif [ -n "$MANIFEST" ]; then
             echo "repositories=$(jq --compact-output "$MANIFEST_JQ" "$MANIFEST")" >> "$GITHUB_OUTPUT"
           else
-            # Default to this repo's own Docker Hub repository (lowercased owner/name) so a single-image caller
-            # carries the orchestration verbatim with no repo-specific value.
+            # Default to this repo's own Docker Hub repository, being the lowercased owner/name.
+            # A single-image caller then carries the orchestration verbatim with no repo-specific value.
             echo "repositories=[\"$(echo "$GITHUB_REPOSITORY" | tr '[:upper:]' '[:lower:]')\"]" >> "$GITHUB_OUTPUT"
           fi
 

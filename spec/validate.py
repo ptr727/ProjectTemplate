@@ -13,13 +13,12 @@ import sys
 
 ROOT = pathlib.Path(__file__).resolve().parent.parent
 
-# Scope-selector vocabularies (see spec/scope-model.md), kept in sync with registry/repos.schema.json
-# $defs. The four namespaces - project types plus these three - must stay disjoint, so a flat appliesTo
-# token set in spec/files.json is unambiguous.
+# Scope-selector vocabularies, per spec/scope-model.md, kept in sync with the $defs in registry/repos.schema.json.
+# The four namespaces, meaning project types plus these three, must stay disjoint so a flat appliesTo token set in spec/files.json is unambiguous.
 WORKFLOW_MODELS = ("release", "operational")
 RELEASE_TRIGGERS = ("two-phase", "publish-on-merge", "dispatch-only", "none")
 CONSUMER_MODELS = ("push", "pull")
-# How faithfully a carried unit is checked (spec/fidelity-model.md). Default presence.
+# How faithfully a carried unit is checked, per spec/fidelity-model.md, defaulting to presence.
 FIDELITIES = ("presence", "intent", "verbatim", "interface")
 # The keys an interface unit's `contract` may carry (kept in sync with files.schema.json).
 CONTRACT_KEYS = {"requiredJobKeys", "requiredCheckName", "artifactNameToken", "requireTokensInJob", "forbidTokensInJob", "verbatimJobs"}
@@ -58,8 +57,7 @@ def main():
     target_mech = secrets["targetMechanisms"]
     mechanisms = secrets["mechanisms"]
 
-    # CI runs no JSON-schema validation, so shape-check secrets.json here to fail with a clear message
-    # rather than crash the cross-reference loops below.
+    # CI runs no JSON-schema validation, so shape-check secrets.json here to fail with a clear message rather than crash the cross-reference loops below.
     def check_secret_set(label, entry, need_kind):
         if not isinstance(entry, dict):
             errors.append(f"secrets.json: {label} is not an object")
@@ -106,9 +104,8 @@ def main():
             print(f"  - {e}")
         return 1
 
-    # defaults.workflowModel/releaseTrigger feed configure.sh's fallback and selector resolution, so an
-    # invalid value here breaks the apply or scopes wrong while every per-repo entry still validates - check
-    # them once.
+    # The defaults for workflowModel and releaseTrigger feed configure.sh's fallback and selector resolution.
+    # An invalid value there breaks the apply or scopes wrong while every per-repo entry still validates, so check them once.
     reg_defaults = repos.get("defaults", {})
     default_model = reg_defaults.get("workflowModel")
     if default_model is not None and default_model not in WORKFLOW_MODELS:
@@ -157,14 +154,13 @@ def main():
         if model is not None and model not in WORKFLOW_MODELS:
             errors.append(f"{name}: workflowModel '{model}' invalid (expected {' or '.join(WORKFLOW_MODELS)})")
 
-        # releaseTrigger is a scope selector (spec/scope-model.md), so an invalid value would silently fail
-        # to match any releaseTrigger-scoped section rather than error.
+        # The releaseTrigger field is a scope selector, per spec/scope-model.md, so an invalid value would silently fail to match any releaseTrigger-scoped section rather than error.
         trigger = repo.get("releaseTrigger")
         if trigger is not None and trigger not in RELEASE_TRIGGERS:
             errors.append(f"{name}: releaseTrigger '{trigger}' invalid (expected one of {', '.join(RELEASE_TRIGGERS)})")
 
-        # consumerModel is a scope selector (spec/scope-model.md), so a cataloged repo must declare it or a
-        # push/pull-scoped section would fail open (never matched) on that repo.
+        # The consumerModel field is a scope selector, per spec/scope-model.md, so a cataloged repo must declare it.
+        # Otherwise a push-scoped or pull-scoped section would fail open on that repo, never matching.
         cm = repo.get("consumerModel")
         if cm not in CONSUMER_MODELS:
             errors.append(f"{name}: consumerModel '{cm}' invalid or missing (expected {' or '.join(CONSUMER_MODELS)})")
@@ -172,10 +168,9 @@ def main():
         eol = repo.get("lineEndings")
         if eol is not None and eol not in ("lf", "crlf"):
             errors.append(f"{name}: lineEndings '{eol}' invalid (expected lf or crlf)")
-        # An operational repo's endings follow the consuming app's platform, so they must be declared; a release
-        # repo omits the field and uses the fleet CRLF default. Resolve the effective model the same way
-        # configure.sh does (repo -> defaults -> release) so the requirement holds even if a repo relies on an
-        # operational defaults.workflowModel rather than setting it explicitly.
+        # An operational repo's endings follow the consuming app's platform, so they must be declared, where a release repo omits the field and takes the fleet CRLF default.
+        # Resolve the effective model the way configure.sh does, from the repo, then the defaults, then release.
+        # The requirement then holds even where a repo relies on an operational defaults.workflowModel rather than setting its own.
         effective_model = model or default_model or "release"
         if effective_model == "operational" and eol is None:
             errors.append(f"{name}: operational repo must declare lineEndings (lf or crlf)")
@@ -196,25 +191,23 @@ def main():
                 errors.append(f"{name}: target '{target}' maps to undefined mechanism '{mech_key}'")
                 continue
             spec_mech = mechanisms[mech_key]
-            # docker/static-secret must carry its required secrets
+            # A docker or static-secret target must carry its required secrets.
             for req in spec_mech.get("requires", []):
                 if req not in required:
                     errors.append(f"{name}: {target} requires secret '{req}' (missing)")
-            # oidc mechanisms must not carry a forbidden static key
+            # An oidc mechanism must not carry a forbidden static key.
             for bad in spec_mech.get("forbids", []):
                 if bad in required:
                     errors.append(f"{name}: {target} forbids secret '{bad}' (present)")
-            # mechanism label must match the target's expected mechanism family
-            # The repo's mechanism label (oidc / static-secret) must match the target mechanism's kind.
-            # An OIDC mechanism may still require a non-secret stored value (e.g. NUGET_USERNAME for
-            # NuGet/login), so requires-emptiness is not the signal - match on the explicit kind.
+            # The repo's mechanism label, oidc or static-secret, must match the target mechanism's kind.
+            # An OIDC mechanism may still require a non-secret stored value, NUGET_USERNAME for a NuGet login being one, so an empty requires list is not the signal.
+            # The match is on the explicit kind instead.
             kind = spec_mech.get("kind")
             if kind and mech != kind:
                 errors.append(f"{name}: {target} labeled '{mech}' but its mechanism is '{kind}'")
 
-    # files.json appliesTo selectors must resolve to a known token, and no project type may collide with a
-    # reserved selector - a flat token set is only unambiguous while the namespaces stay disjoint. An
-    # unknown token fails open (it never matches), so a required file/section would silently apply nowhere.
+    # Every files.json appliesTo selector must resolve to a known token, and no project type may collide with a reserved selector, since a flat token set is only unambiguous while the namespaces stay disjoint.
+    # An unknown token fails open, never matching, so a required file or section would silently apply nowhere.
     reserved = set(WORKFLOW_MODELS) | set(RELEASE_TRIGGERS) | set(CONSUMER_MODELS)
     clash = known_types & reserved
     if clash:
@@ -227,15 +220,14 @@ def main():
             return
         tokens = [] if applies_to == "*" else (applies_to if isinstance(applies_to, list) else [applies_to])
         for tok in tokens:
-            # CI runs no JSON-schema validation, so guard the type here rather than crash on an unhashable
-            # token (e.g. a nested object) reaching the set-membership test below.
+            # CI runs no JSON-schema validation, so guard the type here rather than crash on an unhashable token, a nested object being one, reaching the set-membership test below.
             if not isinstance(tok, str):
                 errors.append(f"files.json: {where} appliesTo has a non-string token {tok!r}")
             elif tok not in universe:
                 errors.append(f"files.json: {where} appliesTo '{tok}' is not a known selector")
 
-    # CI runs no JSON-schema validation, so shape-check files.json here rather than crash on a malformed
-    # entry (a non-object baseline item, a non-array sections, a section that is neither string nor object).
+    # CI runs no JSON-schema validation, so shape-check files.json here rather than crash on a malformed entry.
+    # The shapes that reach this are a non-object baseline item, a non-array sections, and a section that is neither string nor object.
     files = load("spec/files.json")
     baseline = files.get("baseline", [])
     if not isinstance(baseline, list):
@@ -251,9 +243,8 @@ def main():
             continue
         check_selector(path, item.get("appliesTo", "*"))
 
-        # fidelity governs how faithfully the unit is checked (spec/fidelity-model.md). CI runs no schema
-        # validation, so shape-check the fidelity fields here rather than let a malformed contract or an
-        # outside-root reference slip through and crash a later check.
+        # The fidelity field governs how faithfully the unit is checked, per spec/fidelity-model.md.
+        # CI runs no schema validation, so shape-check the fidelity fields here rather than let a malformed contract or an outside-root reference slip through and crash a later check.
         fid = item.get("fidelity", "presence")
         if fid not in FIDELITIES:
             errors.append(f"files.json: {path} fidelity '{fid}' invalid (expected one of {', '.join(FIDELITIES)})")
@@ -301,9 +292,9 @@ def main():
                 if not isinstance(elt.get("name"), str) or not elt.get("name"):
                     errors.append(f"files.json: {path} section object missing a non-empty string 'name': {elt!r}")
                 check_selector(f"{path} section '{elt.get('name', '?')}'", elt.get("appliesTo", "*"))
-                # A section may carry its own fidelity (intent default, or verbatim for a universal rule block
-                # checked byte-for-byte). verbatim is meaningful only on a Markdown file, where the heading
-                # delimits the region. The hub's own file is the canonical, so no reference is needed.
+                # A section may carry its own fidelity, defaulting to intent, or verbatim for a universal rule block checked byte-for-byte.
+                # Verbatim is meaningful only on a Markdown file, where the heading delimits the region.
+                # The hub's own file is the canonical, so no reference is needed.
                 sfid = elt.get("fidelity", "intent")
                 if sfid not in ("intent", "verbatim"):
                     errors.append(f"files.json: {path} section '{elt.get('name', '?')}' fidelity '{sfid}' invalid (expected intent or verbatim)")
@@ -312,11 +303,10 @@ def main():
             elif not isinstance(elt, str):
                 errors.append(f"files.json: {path} section entry {elt!r} must be a string or object")
 
-        # Every declared section must resolve to a real `## <heading>` in the hub's own copy of the file
-        # (spec/section-model.md "Enforcement"). Without this, a renamed or mistyped section name declares a
-        # region that does not exist: the downstream verbatim byte-match in audit.py then has nothing to
-        # compare, and the section silently stops being checked anywhere - the quiet-narrowing failure that
-        # Verification Discipline forbids. Markdown only, and only when the hub ships the file.
+        # Every declared section must resolve to a real `## <heading>` in the hub's own copy of the file, per spec/section-model.md "Enforcement".
+        # Without this, a renamed or mistyped section name declares a region that does not exist.
+        # The downstream verbatim byte-match in audit.py then has nothing to compare, and the section silently stops being checked anywhere, which is the quiet-narrowing failure Verification Discipline forbids.
+        # This is Markdown only, and only where the hub ships the file.
         if path.endswith(".md") and (ROOT / path).exists():
             hub_text = (ROOT / path).read_text(encoding="utf-8", errors="replace")
             headings = {m.group(1).strip() for m in re.finditer(r"^## (.+?)\s*$", hub_text, re.M)}
@@ -325,16 +315,14 @@ def main():
                 if isinstance(name, str) and name and name not in headings:
                     errors.append(f"files.json: {path} declares section '{name}' but no '## {name}' heading exists in {path}")
 
-    # Validate the divergence ledger (spec/divergences.json) when present, so a mistyped repo name or
-    # disposition fails CI instead of silently dropping a burn-down row.
+    # Validate the divergence ledger in spec/divergences.json when present, so a mistyped repo name or disposition fails CI rather than silently dropping a burn-down row.
     dispositions = ("re-vendor", "track", "accepted", "upstream-candidate", "investigate", "retire")
     if (ROOT / "spec/divergences.json").exists():
         div = load("spec/divergences.json")
         repo_names = {r.get("name") for r in repos["repos"] if isinstance(r, dict)}
         manifest_paths = {i.get("path") for i in baseline if isinstance(i, dict)}
-        # A verbatim section is an addressable unit too, labeled "path > section" (matches fidelity_honesty's
-        # SECTION_SEP), so a section-scoped divergence can carry its own disposition. Only well-formed section
-        # entries produce a label - a malformed one is already reported by the files.json checks above.
+        # A verbatim section is an addressable unit too, labeled "path > section" to match fidelity_honesty's SECTION_SEP, so a section-scoped divergence can carry its own disposition.
+        # Only well-formed section entries produce a label, since a malformed one is already reported by the files.json checks above.
         for i in baseline:
             if not isinstance(i, dict) or not isinstance(i.get("path"), str) or not isinstance(i.get("sections"), list):
                 continue
@@ -358,7 +346,7 @@ def main():
                 errors.append(f"divergences.json: disposition {d!r} is not an object")
                 continue
             p = d.get("path")
-            # isinstance guard first: a non-string path is unhashable and would crash the membership test.
+            # The isinstance guard comes first, since a non-string path is unhashable and would crash the membership test.
             if not isinstance(p, str):
                 errors.append(f"divergences.json: disposition path {p!r} must be a string")
             elif p not in manifest_paths:
@@ -380,7 +368,7 @@ def main():
                 errors.append(f"divergences.json: gap {g!r} is not an object")
                 continue
             gp = g.get("path")
-            # isinstance guard first: a non-string path is unhashable and would crash the membership test.
+            # The isinstance guard comes first, since a non-string path is unhashable and would crash the membership test.
             if not isinstance(gp, str):
                 errors.append(f"divergences.json: gap path {gp!r} must be a string")
             elif gp in manifest_paths:

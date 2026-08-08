@@ -3,8 +3,8 @@ name: Publish project release action
 on:
   workflow_dispatch:
 
-# A publish is a deliberate dispatch, so runs serialize on one group and queue rather than cancel, so a run is
-# never left with a half-created GitHub release.
+# A publish is a deliberate dispatch, so runs serialize on one group and queue rather than cancel.
+# That leaves no run with a half-created GitHub release.
 concurrency:
   group: ${{ github.workflow }}
   cancel-in-progress: false
@@ -18,8 +18,9 @@ jobs:
     permissions:
       contents: read
 
-  # Publish the dispatched branch (main => release, develop => prerelease): NBGV computes the tag from the ref, then
-  # a GitHub release is created (tag + auto source archive + README + LICENSE). Source-only repo - no build targets.
+  # Publish the dispatched branch, where main gives a release and develop a prerelease.
+  # NBGV computes the tag from the ref, then a GitHub release is created carrying the tag, the auto source archive, README and LICENSE.
+  # This repo is source-only, so it has no build targets.
   publish:
     name: Publish project release job
     runs-on: ubuntu-latest
@@ -56,8 +57,8 @@ jobs:
 
       # Create-or-refresh: every trigger here is a dispatch, so an existing tag is refreshed, never skipped
       # (the exists-gate belongs to the multi-trigger reusable form, where a scheduled re-run must no-op).
-      # target_commitish pins the tag to the exact built commit (GitCommitId), not the default branch. The release is
-      # the tag plus GitHub's auto source archive, README, and LICENSE - no build assets (source-only).
+      # The target_commitish input pins the tag to the exact built commit, GitCommitId, rather than to the default branch.
+      # The release is the tag plus GitHub's auto source archive, README and LICENSE, carrying no build assets because the repo is source-only.
       - name: Create GitHub release step
         uses: softprops/action-gh-release@718ea10b132b3b2eba29c1007bb80653f286566b # v3.0.1
         with:

@@ -13,13 +13,15 @@ on:
         required: false
         type: string
         default: ''
-      # Logical branch driving config and tags (main => Release/latest, otherwise Debug/develop). Required (no
-      # github.ref_name fallback): the publisher builds develop from a main-ref run, so a fallback would mistag it.
+      # Logical branch driving config and tags, where main gives Release/latest and anything else Debug/develop.
+      # It is required, with no github.ref_name fallback.
+      # The publisher builds develop from a main-ref run, so a fallback would mistag it.
       branch:
         required: true
         type: string
-      # Smoke mode: build linux/amd64 only (no QEMU/arm64), never push, and skip the shared registry cache-to so PR
-      # builds don't pollute the release buildcache. Used for fast PR feedback.
+      # Smoke mode: build linux/amd64 only, with no QEMU/arm64, and never push.
+      # It also skips the shared registry cache-to so PR builds don't pollute the release buildcache.
+      # It is used for fast PR feedback.
       smoke:
         required: false
         type: boolean
@@ -49,7 +51,8 @@ jobs:
         with:
           ref: ${{ inputs.ref }}
 
-      # arm64 is non-native on the amd64 runner, so install its QEMU emulator only when the build includes it.
+      # The arm64 target is non-native on the amd64 runner.
+      # Install its QEMU emulator only when the build includes it.
       - name: Setup QEMU step
         if: ${{ contains(env.PLATFORMS, 'arm64') }}
         uses: docker/setup-qemu-action@c7c53464625b32c7a7e944ae62b3e17d2b600130 # v3.7.0
@@ -61,8 +64,8 @@ jobs:
         with:
           platforms: ${{ env.PLATFORMS }}
 
-      # Always login (even for smoke) for the higher Docker rate limits on pulls/cache reads; fork PRs without the
-      # secrets can't run the Docker smoke build, acceptable for same-repo PRs.
+      # Always login, even for smoke, for the higher Docker rate limits on pulls and cache reads.
+      # Fork PRs without the secrets can't run the Docker smoke build, which is acceptable for same-repo PRs.
       - name: Login to Docker Hub step
         uses: docker/login-action@c94ce9fb468520275223c153574b00df6fe4bcc9 # v3.7.0
         with:
@@ -79,8 +82,8 @@ jobs:
             docker.io/ptr727/projecttemplate:${{ inputs.branch == 'main' && 'latest' || 'develop' }}
             docker.io/ptr727/projecttemplate:${{ needs.get-version.outputs.SemVer2 }}
           platforms: ${{ env.PLATFORMS }}
-          # Read both branches' caches (near-identical layers) but write only this branch's tag, and only when
-          # pushing, so the weekly main+develop matrix legs don't overwrite one shared cache.
+          # Read both branches' caches, whose layers are near-identical, but write only this branch's tag.
+          # Write only when pushing, so the weekly main+develop matrix legs don't overwrite one shared cache.
           cache-from: |
             type=registry,ref=docker.io/ptr727/projecttemplate:buildcache-main
             type=registry,ref=docker.io/ptr727/projecttemplate:buildcache-develop

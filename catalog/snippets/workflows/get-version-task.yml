@@ -3,8 +3,9 @@ name: Get version information task
 on:
   workflow_call:
     inputs:
-      # Git ref to check out and version. Empty falls back to the caller's default checkout ref (`github.ref`); the
-      # publisher passes an explicit branch so a scheduled run can still compute versions for `develop`.
+      # Git ref to check out and version.
+      # Empty falls back to the caller's default checkout ref (`github.ref`).
+      # The publisher passes an explicit branch so a scheduled run can still compute versions for `develop`.
       ref:
         required: false
         type: string
@@ -47,14 +48,16 @@ jobs:
           ref: ${{ inputs.ref }}
           fetch-depth: 0
 
-      # nbgv is floated on @master: its tag stream lags master, so Dependabot tag-tracking would propose a downgrade.
+      # The nbgv action is floated on @master, because its tag stream lags master.
+      # Dependabot tag-tracking would otherwise propose a downgrade.
       # Revisit if dotnet/nbgv resumes regular tagged releases.
       - name: Run Nerdbank.GitVersioning tool step
         id: nbgv
         uses: dotnet/nbgv@master
         env:
-          # Version from the checked-out branch, not the CI ref. GITHUB_REF is reserved and a step env can't reliably
-          # override it (the runner re-injects the dispatch ref), so on a publish dispatched from the default branch NBGV
-          # would classify every leg as the public ref. IGNORE_GITHUB_REF makes NBGV ignore GITHUB_REF and use the
-          # checked-out branch, which each matrix leg already is. The validate-release gate backstops any misclassification.
+          # Version from the checked-out branch rather than the CI ref.
+          # GITHUB_REF is reserved and a step env can't reliably override it, since the runner re-injects the dispatch ref.
+          # On a publish dispatched from the default branch, NBGV would therefore classify every leg as the public ref.
+          # IGNORE_GITHUB_REF makes NBGV ignore GITHUB_REF and use the checked-out branch, which each matrix leg already is.
+          # The validate-release gate backstops any misclassification.
           IGNORE_GITHUB_REF: "true"
