@@ -173,7 +173,7 @@ The sentence tail after the first spelling reports how many comments the round r
 - **Exempt: a body stating no coverage at all.** 28 of those 332 bodies are an overview and a change list and nothing more. That shape is current, interleaves with the counted one throughout, and one pull request carries both across its two rounds, so treating it as a failure cries wolf on about one review in twelve and teaches an agent to work around the gate. It reads as **unknown**, never as a pass and never as a failure.
 - **Exempt: a refusal.** It carries no coverage line by design, and the refusal rule above has already classified it. Read it here as well and every refusal grows a spurious second failure on top of the one that names its remedy.
 
-`scripts/pr_review.py status <N> --repo <owner>/<repo>` reports this as `coverage=full`, `coverage=PARTIAL`, `coverage=UNVETTED` or `coverage=unknown`, and exits `42` and `43` on the two failures. Read it by hand as:
+`scripts/pr_review.py status <N> --repo <owner>/<repo>` reports this as `coverage=full`, `coverage=PARTIAL`, `coverage=UNVETTED` or `coverage=unstated`, and exits `42` on a partial round. An unreadable wording exits `43` instead, as one of the unrecognized shapes below rather than as a case of its own, since both say the reader is what needs fixing. Read it by hand as:
 
 ```sh
 gh pr view <N> --json reviews --jq \

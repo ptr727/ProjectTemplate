@@ -599,7 +599,7 @@ class TestCoverage(GqlCase):
         out = self.digest_for(review(body=nested(covers='- **Files reviewed:** 2/3 changed files')))
         self.assertIn('coverage=PARTIAL', out)
 
-    def test_a_coverage_shaped_line_that_parses_to_nothing_is_a_failure_naming_this_script(self):
+    def test_a_coverage_line_that_parses_to_nothing_names_this_script(self) -> None:
         """The wording has drifted once for each of the two patterns beside this one.
 
         Passing a shape it does not recognize is how a gate stops gating as the wording moves,
