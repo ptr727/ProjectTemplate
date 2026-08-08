@@ -60,13 +60,14 @@ After the first commit, confirm it took with `git log -1 --format='%G? author=%a
 The three local steps are four commands, run before the repository exists on GitHub:
 
 ```shell
-git init --initial-branch main                       # Rather than relying on the host's init.defaultBranch.
+git init                                             # The host default may be master, which the rename below corrects.
 git commit --allow-empty --message "Initial commit"  # The one signed empty root commit.
+git branch --move --force main                       # Idempotent, so it is correct on either default.
 git branch develop                                   # From main, so the two start level.
-git switch --create "<feature-branch>" develop       # Every step below runs here.
+git checkout -b "<feature-branch>" develop           # Every step below runs here.
 ```
 
-The placeholder is quoted for the reason step 4 gives, that an unquoted `<` is input redirection. Section 0's `git config --local` check belongs between the first and second lines, and its `git log -1` verification reads that empty commit, which is the first commit the signing window covers rather than an exception to it. Push `main` and `develop` once the repository exists and **before** step 4 applies the rulesets, since [`repo-config/main.json`][repo-config] carries a `pull_request` rule and no bypass actors, so an applied ruleset blocks the direct push that would otherwise seed the branch.
+The rename runs unconditionally rather than behind a test of `init.defaultBranch`, because forcing it is correct whether the host produced `master` or `main` and a conditional is one more thing to get wrong. Every command here predates `git switch` and `git init --initial-branch`, so the block needs no minimum version, which matters because [`docs/host-setup.md`][host-setup] checks that `git` is present and states no floor. The placeholder is quoted for the reason step 4 gives, that an unquoted `<` is input redirection. Section 0's `git config --local` check belongs between the first and second lines, and its `git log -1` verification reads that empty commit, which is the first commit the signing window covers rather than an exception to it. Push `main` and `develop` once the repository exists and **before** step 4 applies the rulesets, since [`repo-config/main.json`][repo-config] carries a `pull_request` rule and no bypass actors, so an applied ruleset blocks the direct push that would otherwise seed the branch.
 
 **Committing onto `develop` and squashing afterwards does not work**, because `non_fast_forward` is set on both `develop` payloads and rewriting that history is exactly what the rule rejects. This is not hypothetical, since a repo stood up that way was correctly blocked at the point the history needed rewriting, with the standup already written into the branch it had to be lifted off.
 
