@@ -1,6 +1,6 @@
 # Agent Write-Safety Kit
 
-Per-machine, user-account-scoped guards against an agent making a mis-targeted GitHub **write** under the maintainer's identity, or a **git operation that bypasses a branch rule or overrides a required check**, meaning a push, force-push, or delete that an active branch rule forbids, or an override flag (`--admin` past the server-side merge gate, `--no-verify` past the local git hooks). Deploy it as the **first thing on any new system** where Claude Code runs with the `gh` credentials logged in (WSL, Linux, macOS, Proxmox, Windows).
+Per-machine, user-account-scoped guards against an agent making a mis-targeted GitHub **write** under the maintainer's identity, or a **git operation that bypasses a branch rule or overrides a required check**, meaning a push, force-push, or delete that an active branch rule forbids, or an override flag (`--admin` past the server-side merge gate, `--no-verify` past the local git hooks). Deploy it as the **first thing on any new system** where Claude Code runs with the `gh` credentials logged in (Linux, WSL, macOS, Windows).
 
 ## What It Installs
 
@@ -17,7 +17,7 @@ The hook is the mechanical backstop. The CLAUDE.md rules and the carried GOVERNA
 ## Install (Idempotent, Safe to Re-Run to Update)
 
 ```sh
-# Linux / WSL / macOS / Proxmox
+# Linux / WSL / macOS
 host-setup/agent-safety/install.sh
 ```
 
@@ -58,6 +58,16 @@ Live end-to-end (in any repo): attempt a discarded-output write and confirm the 
 gh api graphql -f query='mutation{noop}' -F t="PRRT_x" >/dev/null 2>&1 || true   # blocked by the hook
 ```
 
+## Granting a Cross-Owner Write
+
+The cross-origin rule is the one denial a maintainer has to act on, because it is the only one with a grant behind it. The others name a shape to stop using, while this one names a target that may be entirely legitimate.
+
+`GH_WRITE_GUARD_ALLOW` is one string holding every grant, since it is an environment variable, and it is split into `owner/repo` tokens on any run of whitespace or commas, so `a/b c/d` and `a/b, c/d` are the same two grants. `owner/*` grants a whole owner. A token carrying no `/` is ignored, so a malformed grant grants nothing, and a repository grant does not extend to that owner's other repositories.
+
+The hook reads it from the environment the session was launched with, which is the one channel an agent cannot use on itself: the hook runs as its own process, so an inline `VAR=x cmd` prefix and an `export` inside a Bash call both leave the write denied. Granting is therefore a deliberate act taken outside the session, and a blocked agent asks rather than unblocks itself.
+
+The channel that works is an `env` block in the checkout's `.claude/settings.local.json`, which scopes the grant to sessions started in that checkout, followed by a session restart. The worked example, the fork case that raises this most often, and how to confirm a grant loaded without making the write are in [`docs/host-setup.md` "Granting a Write the Guard Denies"][host-setup-grant].
+
 ## Manual settings.json Shape (for Reference)
 
 The installer writes this. It is here so you can inspect or hand-place it:
@@ -89,4 +99,5 @@ Every other key in the file is left as it stands, `permissions.allow` included, 
 
 <!-- Repo -->
 [governance]: ../../GOVERNANCE.md
+[host-setup-grant]: ../../docs/host-setup.md#granting-a-write-the-guard-denies
 [issue-365]: https://github.com/ptr727/ProjectTemplate/issues/365

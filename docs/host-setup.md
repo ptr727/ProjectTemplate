@@ -145,7 +145,7 @@ Choose the SSH key generated above when prompted.
 Required on any host where an agent runs with the `gh` credentials logged in, and its own README calls it the first thing to deploy on a new system. Install it from this repo, since the installer is idempotent and safe to re-run to update:
 
 ```shell
-host-setup/agent-safety/install.sh        # Linux, WSL, macOS, Proxmox
+host-setup/agent-safety/install.sh        # Linux, WSL, macOS
 ```
 
 ```powershell
@@ -155,6 +155,42 @@ host-setup/agent-safety/install.sh        # Linux, WSL, macOS, Proxmox
 Both wrap one `install.py`, so every platform runs the same tested path. Restart Claude Code sessions on the machine afterward so the hook and the `CLAUDE.md` block load. Details, verification, and scope limits are in [`host-setup/agent-safety/README.md`][agent-safety].
 
 This is a **host** control, not a repo one. The carried `GOVERNANCE.md` rules reach fleet repos only, while the hook and the `CLAUDE.md` block cover every session on the machine, including ad-hoc work in no project at all, which is where the incident behind the kit happened.
+
+### Granting a Write the Guard Denies
+
+The guard denies a `gh` write whose explicit target sits under an owner other than the checkout's `origin` owner, and the denial names `GH_WRITE_GUARD_ALLOW` as the way past it. That grant is the maintainer's to make, and making it is a deliberate act taken outside the session rather than something an agent does for itself once blocked.
+
+**The case that raises it is usually a fork.** `origin` is your own fork under your own owner, and `upstream` is the project it was forked from under someone else's. Everything aimed at the fork is in scope and never denies, and only the half that leaves the owner stops: filing an issue on the upstream, opening a pull request against it, or commenting on one there. The grant therefore names the upstream alone, and the fork needs no grant at all. That asymmetry is what a reader hits first, since half the session's writes succeed and the other half do not.
+
+**The grant goes in the checkout's `.claude/settings.local.json`, as an `env` block:**
+
+```json
+{
+  "env": {
+    "GH_WRITE_GUARD_ALLOW": "upstream-owner/upstream-repo second-owner/other-repo third-owner/*"
+  }
+}
+```
+
+**The value is one string holding every grant, never a JSON array**, since the hook reads an environment variable and an environment variable is a string. The three tokens above are three separate grants: two naming one repository each, and `third-owner/*` granting every repository under that owner.
+
+Tokens are separated by **any run of whitespace or commas**, so `a/b c/d`, `a/b,c/d`, and `a/b, c/d` all parse to the same two grants and the choice is cosmetic. A token carrying no `/` is ignored, so a malformed entry grants nothing rather than granting everything, and it also fails silently, which is why the confirmation step below is worth running. Grant the narrowest thing that unblocks the work, since a repository grant does not extend to that owner's other repositories and that containment is the property worth keeping.
+
+**The grant is per checkout, not per host.** `.claude/settings.local.json` lives in the working tree and is git-ignored, so it applies to sessions started in that checkout and does not follow the agent into another repository's sessions. That is the intended scope: a grant made to file one upstream issue from one fork does not quietly become a standing permission everywhere.
+
+**Restart the session afterward.** The hook reads the value from the environment the session was launched with, which is what makes the channel one an agent cannot use on itself, and it is equally why a grant added to a live session does nothing until that session restarts.
+
+**Two forms look right and leave the write denied.** An inline `GH_WRITE_GUARD_ALLOW=owner/repo gh ...` prefix sets the environment of the `gh` process, and an `export` inside a shell call sets the environment of that shell. The hook runs as its own process and sees neither, so the write stays denied with nothing to explain the difference. [`gh-write-guard.py`][write-guard] asserts the inline-prefix case in its own self-test, so this is settled behavior rather than a quirk to work around.
+
+**Confirm the grant loaded before relying on it**, since inferring it from a write that no longer denies means learning the answer by making the write. In a restarted session in that checkout, read the variable the hook reads:
+
+```shell
+printenv GH_WRITE_GUARD_ALLOW
+```
+
+Run it bare, with no `VAR=value` prefix of its own, which would report a value the hook never sees. An empty result means the grant did not load, and the fix is the file location or the restart rather than the token. Feeding the hook a synthetic payload is not a usable probe from inside a session, because the payload text carries the very write shape the guard matches and the guard denies the probe command itself.
+
+Withdraw a grant by deleting the `env` entry and restarting. Nothing expires it, so a grant left in place stays live for every later session in that checkout, which is the reason to remove it once the work that needed it is done.
 
 ## Verify Host Setup
 
@@ -196,6 +232,7 @@ A host that fails any row is not ready for the procedure that row names, and the
 [issue-483]: https://github.com/ptr727/ProjectTemplate/issues/483
 [ssh-signing]: ./ssh-signing.md
 [standup]: ../STANDUP.md
+[write-guard]: ../host-setup/agent-safety/gh-write-guard.py
 
 <!-- External -->
 
