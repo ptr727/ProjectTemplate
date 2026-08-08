@@ -1060,7 +1060,8 @@ def digest(owner: str, repo: str, num: int, seen: set[str] | None = None,
         else:
             lines.append(f'  CHECK FAILED ({name!r}, {node.get("state")}/'
                          f'{node.get("conclusion")}): a verdict rather than a stuck check, so '
-                         'the run and fix it, since no wait and no re-run clears a real failure')
+                         'read the run and fix what failed, since no wait and no re-run clears '
+                         'a real failure')
     unread = checks_unread(checks)
     if unread:
         lines.append(f'  CHECKS PARTIALLY UNREAD ({", ".join(sorted(set(unread)))}): the rollup '
