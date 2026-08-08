@@ -24,7 +24,7 @@ if [ "$(git config --global --get gpg.format)" = ssh ]; then ssh-add -L; else gp
 
 The agent check branches rather than listing both forms, because they are alternatives and running the wrong one fails on a correctly configured host: an SSH host need not have `gpg` installed at all. Signing is **SSH or GPG**, so judge the format and its agent together rather than requiring `ssh`: what matters is that the configured format has a matching agent holding the key, which is the check [GOVERNANCE.md "Git and Commit Rules"][governance-git-and-commit-rules] prescribes. Any of these wrong or absent is a **host** misconfiguration to surface to the maintainer ([`docs/host-setup.md`][host-setup] is the setup procedure), not something to patch per repo. Patching it locally hides a broken host that then produces wrong identities in every other repo on that machine.
 
-After `git init` and before the first commit, confirm the repo added no override of its own. This one needs a repository, since `--local` fails outside one:
+After `git init` and before the first commit, confirm the repo added no override of its own. This one needs a repository, since `--local` fails outside one. Read it here and run it in section 0B, which places it between the init and the first commit, so nothing here is a prompt to init early:
 
 ```shell
 git config --local --get user.email || true    # expect no output
@@ -32,7 +32,7 @@ git config --local --get user.email || true    # expect no output
 
 **The finding is a printed value, never the exit code.** An unset key prints nothing and makes `git config --get` exit `1`, so reading that as failure inverts the check, and the tolerant tail turns it into a zero exit in any case, which leaves empty output as the whole of the passing result. The tail is in the snippet above so a copy into a `set -e` script does not abort on the expected case.
 
-After the first commit, confirm it took with `git log -1 --format='%G? author=%an <%ae> committer=%cn <%ce>'`, so the passing result is `G` plus the expected `noreply` address in **both** identities. Read both rather than the author alone: the rule governs the `author` and the `committer` together, GitHub verifies the signature against the **committer**, and a rebase, amend, or cherry-pick rewrites the committer while leaving the author untouched, which is exactly the case an author-only check passes and should not. `git verify-commit HEAD` is the pass/fail form, exiting non-zero on a bad signature and writing its "Good signature" line to stderr rather than emitting a status letter.
+After the first commit, confirm it took with `git log -1 --format='%G? author=%an <%ae> committer=%cn <%ce>'`, so the passing result is `G` plus the expected `noreply` address in **both** identities. Read both rather than the author alone: the rule governs the `author` and the `committer` together, GitHub verifies the signature against the **committer**, and a rebase, amend, or cherry-pick rewrites the committer while leaving the author untouched, which is exactly the case an author-only check passes and should not. `git verify-commit HEAD` is the pass/fail form, exiting non-zero on a bad signature and writing its "Good signature" line to stderr rather than emitting a status letter. Section 0B's block runs this line too, in the position described here, which is the same split as the check above.
 
 ## 0A. Hand Over What Only the Maintainer Can Supply
 
