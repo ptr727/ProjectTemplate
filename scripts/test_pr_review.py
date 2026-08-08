@@ -605,9 +605,20 @@ class TestCoverage(GqlCase):
         Requiring them read a bullet that had lost them as no statement at all, which is a
         silent `unstated` over a round that stated its coverage plainly.
         """
-        self.assertEqual(['- **Files reviewed:** 4/4'],
-                         pr_review.coverage_statements('- **Files reviewed:** 4/4'))
-        self.assertEqual((4, 4), pr_review.read_coverage('- **Files reviewed:** 4/4 changed file'))
+        # Detected and read, which are two assertions rather than one.
+        # Asserting only the first left the bare bullet blocking on a line it could read.
+        for line in ('- **Files reviewed:** 4/4', '- **Files reviewed:** 4/4 changed file',
+                     '- **Files reviewed:** 4/4 changed files'):
+            with self.subTest(line=line):
+                self.assertEqual([line], pr_review.coverage_statements(line))
+                self.assertEqual((4, 4), pr_review.read_coverage(line))
+                self.assertEqual(pr_review.FULL, pr_review.coverage_of({'body': line})[0])
+
+    def test_a_bullet_carrying_no_counts_still_blocks(self) -> None:
+        """What is left after the words are optional is a line that states no coverage at all."""
+        self.assertIsNone(pr_review.read_coverage('- **Files reviewed:** all of them'))
+        self.assertEqual(pr_review.UNVETTED,
+                         pr_review.coverage_of({'body': '- **Files reviewed:** all of them'})[0])
 
     def test_the_reviewer_s_name_alone_is_not_a_coverage_line(self) -> None:
         """The other opener keeps its text requirement, prose opening lines with that name too."""

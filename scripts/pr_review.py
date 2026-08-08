@@ -98,9 +98,12 @@ COVERAGE_SENTENCE = re.compile(r'\s*Copilot\b', re.IGNORECASE)
 # A fifth wording of it would fail every merge over a sentence ending read correctly.
 # The plural is optional, since a one-file round reading `1 changed file` means what it says.
 # Blocking on that is the cry-wolf case, a fleet-wide stop over a grammatical agreement.
+# The bullet's trailing words are optional for the reason its label alone identifies the line.
+# Detection and parsing disagreeing there turned a readable `4/4` into a block on a readable line.
+# What is left blocking is a bullet carrying no counts, which genuinely states no coverage.
 COVERAGE_COUNTS = re.compile(
     r'reviewed\s+(\d+)\s+out of\s+(\d+)\s+changed files?'
-    r'|\*\*Files reviewed:\*\*\s*(\d+)\s*/\s*(\d+)\s+changed files?', re.IGNORECASE)
+    r'|\*\*Files reviewed:\*\*\s*(\d+)\s*/\s*(\d+)(?:\s+changed files?)?', re.IGNORECASE)
 # A fenced block is a quotation rather than a statement, and 131 of those bodies carry one.
 # This change puts both spellings into the source and the runbook, so a review of it quotes them.
 # A quoted count read as this round's own is a coverage figure nobody stated.
