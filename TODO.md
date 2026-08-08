@@ -318,6 +318,21 @@ The review loop ends by replying on a thread and resolving it, and both halves f
   - **Checked** - `develop` at `0e4a1c2` on 2026-08-08, reading the exit-code table in the `scripts/pr_review.py` module docstring.
   - **Detail** - This is the failure the suppressed-findings count already exists for, where a step that stopped running reads exactly like a step that passed.
 
+### The Grant That Unblocks a Cross-Owner Write
+
+One pull request documenting how a maintainer grants a write target the guard denies. The hook denies a `gh` write whose explicit target is under an owner other than the checkout origin's, and the only way past it is a grant in `GH_WRITE_GUARD_ALLOW`, which no document tells a reader how to give.
+
+**State** `ready`. **Touches** [`docs/host-setup.md`][host-setup] and [`host-setup/agent-safety/README.md`][write-guard-readme]. **Cost** one pull request, prose only, and hub-only, since the kit is host state rather than carried repo content.
+
+- **Document the grant where a reader already is when the denial arrives, which is the install section rather than the hook's description.** A denial names the variable, and the two documents that could explain it either never mention it or mention it while describing what the hook refuses, so the reader is told a grant exists and never how to make one.
+  - **Blocked by** - Nothing.
+  - **Issue** - None filed.
+  - **Checked** - `develop` at `92b9fc5` on 2026-08-08, where "Agent Write-Safety Kit" in [`docs/host-setup.md`][host-setup] never names the variable at all, [`host-setup/agent-safety/README.md`][write-guard-readme] names it once inside the bullet listing what the hook denies, giving the token format and not how to set it, and [`README.md`][readme] carries no host-protection section, only a pointer to the first.
+  - **Detail** - The channel that works is an `env` block in the checkout's `.claude/settings.local.json`, holding `GH_WRITE_GUARD_ALLOW` set to the target. It is per project rather than host-wide, which is the property worth stating, since a grant made for one checkout does not follow the agent into another repository's sessions.
+  - **Detail** - The case that raised it is a fork, where `origin` is under the maintainer's own owner and `upstream` is the project it forked from. Filing an issue or a pull request against the upstream is the cross-owner write, and everything aimed at the fork is not, so the grant names the upstream alone and the denial appears only on the half that leaves the owner. That asymmetry is the part a reader hits first and the reason a worked example beats a definition here.
+  - **Detail** - The two forms a reader reaches for first both fail, silently in the sense that the write simply stays denied: an inline `GH_WRITE_GUARD_ALLOW=owner/repo gh ...` prefix, and an `export` in a shell call. The hook runs as its own process and reads only the environment the session was launched with, which is exactly what makes a grant a deliberate act taken outside the session rather than something an agent can do for itself once blocked. The behavior is settled and tested, since [`gh-write-guard.py`][write-guard] already asserts the inline prefix denies, so what is missing is only the explanation.
+  - **Detail** - Two things worth carrying beside the example: that a session restart is what loads the grant, and a way to confirm one took, since inferring it from a write that no longer denies means learning the answer by making the write.
+
 ## Standalone Chores
 
 Small work with no research to preserve, selectable one bullet at a time.
@@ -468,12 +483,14 @@ Each was checked against the tree and has nothing left to do anywhere. Closing i
 [divergences-report]: ./reports/divergences.md
 [files]: ./spec/files.json
 [governance]: ./GOVERNANCE.md
+[host-setup]: ./docs/host-setup.md
 [markdownlint]: ./.markdownlint-cli2.jsonc
 [matrix]: ./reports/conformance-matrix.md
 [merge-bot]: ./.github/workflows/merge-bot-pull-request.yml
 [operations]: ./OPERATIONS.md
 [project-types]: ./spec/project-types.json
 [prose-gate]: ./.github/actions/prose-gate/action.yml
+[readme]: ./README.md
 [readme-structure]: ./spec/readme-structure.md
 [reports]: ./reports/
 [repos]: ./registry/repos.json
@@ -487,3 +504,4 @@ Each was checked against the tree and has nothing left to do anywhere. Closing i
 [workflow]: ./WORKFLOW.md
 [workflows]: ./catalog/snippets/workflows/
 [write-guard]: ./host-setup/agent-safety/gh-write-guard.py
+[write-guard-readme]: ./host-setup/agent-safety/README.md
