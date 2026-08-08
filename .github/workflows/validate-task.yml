@@ -17,12 +17,12 @@ jobs:
     steps:
 
       - name: Checkout code step
-        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
       # Doc linters run as pinned action wrappers.
       # The editorconfig-checker action is install-only, so it runs via Docker instead.
       - name: Lint Markdown step
-        uses: DavidAnson/markdownlint-cli2-action@8de2aa07cae85fd17c0b35642db70cf5495f1d25 # v24.0.0
+        uses: DavidAnson/markdownlint-cli2-action@21c1be1b93ad9ed58fa840aacc3f279cde2a72ff # v24.2.0
         with:
           globs: '**/*.md'
 
@@ -55,6 +55,7 @@ jobs:
       # Each gate in scripts/ is proven by a case that reintroduces the fault it catches.
       # Standard library only, so no install step and no dependency to pin.
       # The audit engine self-test is offline, so it runs here rather than only on an owner sweep.
+      # The write-guard self-test is offline too, and it otherwise runs only when a host installs the hook, which is where a regression in it would surface as a broken machine.
       - name: Run script self-tests step
         run: |
           set -Eeuo pipefail
@@ -62,17 +63,18 @@ jobs:
           python3 scripts/test_repo_gate.py
           python3 scripts/test_pr_review.py
           python3 spec/audit.py --selftest
+          python3 host-setup/agent-safety/gh-write-guard.py --selftest
 
       - name: Check repo gates step
         run: python3 scripts/repo_gate.py
 
-      # The charset, duplicate-word and spelling rules are clean tree-wide, so they gate.
+      # The charset, duplicate-word, spelling and comment rules are clean tree-wide, so they gate.
       # Every other prose rule reports in the step below without gating.
       - name: Check prose step
-        run: python3 scripts/prose_lint.py . --check charset --check dupword --check spelling
+        run: python3 scripts/prose_lint.py . --check charset --check dupword --check spelling --check comment-wrap --check comment-case
 
       # Warn-only, and visible rather than absent: an unrun check is one nobody acts on.
-      # The backlog is corrected as each file is next edited, never swept.
+      # The backlog is corrected as each file is next edited, or cleared in a deliberate batch.
       - name: Report prose backlog step
         continue-on-error: true
-        run: python3 scripts/prose_lint.py . --check charset-unknown --check semicolon --check dash --check comment-wrap --check comment-case --summary
+        run: python3 scripts/prose_lint.py . --check charset-unknown --check semicolon --check dash --summary

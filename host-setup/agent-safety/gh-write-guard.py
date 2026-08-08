@@ -35,7 +35,8 @@ import sys
 from urllib.parse import quote
 
 # --- What counts as a GitHub write -------------------------------------------------------------------
-# gh subcommands that mutate. `gh api` is handled separately (it needs field/method inspection).
+# The gh subcommands that mutate.
+# The `gh api` command is handled separately, since it needs field and method inspection.
 _GH_WRITE_SUB = re.compile(
     r"""\bgh\s+(?:
         pr\s+(?:create|comment|close|merge|edit|review|reopen|ready|lock|unlock)
@@ -49,7 +50,7 @@ _GH_WRITE_SUB = re.compile(
 )
 _GH_API = re.compile(r"\bgh\s+api\b")
 _EXPLICIT_WRITE_METHOD = re.compile(r"(?:--method|-X)\s+(?:POST|PUT|PATCH|DELETE)\b", re.I)
-# gh api with a field flag defaults to POST even without -X, so it is a write.
+# A gh api call with a field flag defaults to POST even without -X, so it is a write.
 _API_FIELD_FLAG = re.compile(r"(?:^|\s)(?:-f|-F|--field|--raw-field|--input)\b")
 _GRAPHQL = re.compile(r"\bgh\s+api\b.*\bgraphql\b", re.S)
 _MUTATION = re.compile(r"\bmutation\b")
@@ -58,11 +59,10 @@ _MUTATION = re.compile(r"\bmutation\b")
 _GIT_PUSH = re.compile(r"\bgit\b.*?\bpush\b", re.S)
 
 # --- Bypass-of-branch-rule detectors (Rule 4) --------------------------------------------------------
-# A git operation is denied when it would only succeed by bypassing an active branch rule - the harm is
-# that the maintainer's admin identity CAN bypass, so a plain-looking push silently lands on a protected
-# branch. The judgment is made against the branch's *live* rules (self-configuring: a code-style develop
-# carries `pull_request` and is denied, a config-style develop does not and is allowed), except for the
-# explicit-bypass flags below, which are the bypass by definition and need no query.
+# A git operation is denied when it would only succeed by bypassing an active branch rule.
+# The harm is that the maintainer's admin identity can bypass, so a plain-looking push silently lands on a protected branch.
+# The judgment is made against the branch's *live* rules, which makes it self-configuring: a code-style develop carries `pull_request` and is denied, where a config-style develop does not and is allowed.
+# The exception is the explicit-bypass flags below, which are the bypass by definition and need no query.
 #
 # Branches that fail CLOSED when their rules cannot be read - protected-by-default across every config.
 _PROTECTED_DEFAULT_ORDER = ("main", "master", "develop")
@@ -71,27 +71,25 @@ _PROTECTED_DEFAULT = set(_PROTECTED_DEFAULT_ORDER)
 _GH_ADMIN_MERGE = re.compile(r"\bgh\s+pr\s+merge\b[^\n|&;]*(?:^|\s)--admin\b")
 
 # --- Risk-pattern detectors --------------------------------------------------------------------------
-# Output-discard / force-success tails. Bare `2>&1` is NOT here: it merges stderr into stdout, leaving
-# the output visible, so it is not suppression (and denying it would break `... 2>&1 | tee log`).
+# Output-discard and force-success tails.
+# A bare `2>&1` is deliberately not here, since it merges stderr into stdout and leaves the output visible, so it is not suppression, and denying it would break `... 2>&1 | tee log`.
 _SUPPRESS = re.compile(r">\s*/dev/null|&>\s*/dev/null|2>\s*/dev/null|\|\|\s*(?:true\b|echo\b|:)")
-# A quoted argument value ("..." or '...'). Stripped before the suppression scan so a --body/--title
-# that merely mentions `|| true` or `>/dev/null` as text is not mistaken for a real command tail. Real
-# suppression tails are unquoted shell operators, so stripping quotes never hides an actual footgun. The
-# double-quoted form allows `\"` escapes so an embedded quote does not end the span early; shell single
-# quotes take no escapes, so their form is literal.
+# A quoted argument value, in either double or single quotes.
+# It is stripped before the suppression scan so a --body or --title that merely mentions `|| true` or `>/dev/null` as text is not mistaken for a real command tail.
+# Real suppression tails are unquoted shell operators, so stripping quotes never hides an actual footgun.
+# The double-quoted form allows `\"` escapes so an embedded quote does not end the span early.
+# Shell single quotes take no escapes, so their form is literal.
 _QUOTED_SPAN = re.compile(r'"(?:\\.|[^"\\])*"' r"|'[^']*'")
-# A GitHub global node id literal: an UPPERCASE prefix (PR_, PRRT_, IC_, BOT_, ...) + a long base64url
-# body, or a legacy MD... base64 id. The uppercase prefix plus a >=12-char body keeps it from matching
-# an ordinary underscored word in a reply body (e.g. body="fixed_the_thing_now", lowercase prefix).
+# A GitHub global node id literal, being an uppercase prefix such as PR_, PRRT_, IC_ or BOT_ followed by a long base64url body, or a legacy MD-prefixed base64 id.
+# The uppercase prefix plus a body of at least 12 characters keeps it from matching an ordinary underscored word in a reply body, such as body="fixed_the_thing_now" with its lowercase prefix.
 _NODE_ID_LITERAL = re.compile(r'^(?:[A-Z]{1,5}_[A-Za-z0-9_\-]{12,}|MD[A-Za-z0-9]{12,})$')
 # -F/-f name=VALUE, capturing the value - handles "quoted" and bare
 _FIELD_ASSIGN = re.compile(r"""(?:-F|-f|--field|--raw-field)\s+[A-Za-z_][\w]*=(?P<v>'[^']*'|"[^"]*"|\S+)""")
-# Every spelling gh accepts for the target flag: `--repo x`, `--repo=x`, `-R x`, `-R=x`, and the attached
-# short form `-Rx`. A form left out is not a near-miss, it is a silent bypass of the whole repository
-# scope, so the separator is matched rather than assumed to be a space. The look-behind requires the flag
-# to start a shell token (whitespace before it, or the string start), which is where a real flag always
-# sits, so a value that opens a quoted span (`--title "-Rowner/repo"`) is not read as a target.
-# A mention inside prose (`--title "use -Rowner/repo"`) IS still read as a target and still denies.
+# Every spelling gh accepts for the target flag, being `--repo x`, `--repo=x`, `-R x`, `-R=x`, and the attached short form `-Rx`.
+# A form left out is not a near-miss, it is a silent bypass of the whole repository scope, so the separator is matched rather than assumed to be a space.
+# The look-behind requires the flag to start a shell token, meaning whitespace before it or the string start, which is where a real flag always sits.
+# A value that opens a quoted span, as in `--title "-Rowner/repo"`, is therefore not read as a target.
+# A mention inside prose, as in `--title "use -Rowner/repo"`, is still read as a target and still denies.
 # A space precedes it exactly as one precedes a real flag, so no look-behind can separate the two.
 # Telling a flag from text needs argv-position parsing, the way _push_targets does it for git push.
 _EXPLICIT_REPO = re.compile(r"(?<![^\s])(?:--repo[=\s]+|-R[=\s]*)(?P<q>['\"]?)(?P<r>[^\s'\"]+)(?P=q)")
@@ -148,8 +146,8 @@ def _granted_targets(environ=None):
 
 def _target_permitted(target, origin, granted):
     """True when a write to target is in scope for a checkout whose origin is origin."""
-    # Same owner covers the origin itself and every sibling repository, which is the case the maintainer
-    # works in daily. A different owner is the incident shape and needs the grant.
+    # Same owner covers the origin itself and every sibling repository, which is the case the maintainer works in daily.
+    # A different owner is the incident shape and needs the grant.
     if target[0] == origin[0]:
         return True
     return target in granted or (target[0], "*") in granted
@@ -163,7 +161,7 @@ def _live_branch_rules(owner, repo, branch):
     """
     try:
         r = subprocess.run(
-            # quote the branch: a name with `/` (feature/x) would otherwise split the API path.
+            # Quote the branch, since a name carrying `/`, such as feature/x, would otherwise split the API path.
             ["gh", "api", f"repos/{owner}/{repo}/rules/branches/{quote(branch, safe='')}", "--jq", "[.[].type]"],
             capture_output=True, text=True, timeout=10,
         )
@@ -195,27 +193,40 @@ def _current_push_branch(cwd):
 
 # Flags that consume the following token as a value, so the value is not a positional (remote/refspec).
 _PUSH_VALUE_FLAGS = {"-o", "--push-option", "--repo", "--receive-pack", "--exec"}
-# git global options (before the subcommand) that consume the following token as their value.
+# The git global options, which sit before the subcommand, that consume the following token as their value.
 _GIT_GLOBAL_VALUE_OPTS = {"-C", "-c", "--git-dir", "--work-tree", "--namespace", "--exec-path", "--config-env"}
 
 
-_SHELL_OP_CHARS = set("();<>|&")
+# A newline ends a command exactly as `;` does, so it is an operator character here rather than whitespace.
+# Read as whitespace it vanishes when tokenizing, and every token on a later line of a multi-line command is then read as one more argument of the first line's command.
+# A backslash-newline continuation is folded to a space in `classify` before any of this runs, so every newline reaching the tokenizer is a real command separator.
+# The string is the form shlex takes the set in, and the set is derived from it so the two cannot drift apart.
+_PUNCTUATION_CHARS = "();<>|&\n"
+_SHELL_OP_CHARS = set(_PUNCTUATION_CHARS)
 
 
 def _shell_tokens(cmd):
-    """Tokenize like a shell, isolating operator runs (`|`, `&&`, `;`, `>`, `2>&1`, ...) as their own
-    tokens even when glued to a word - so a `>` inside a quoted value stays part of that token while a
-    real redirection is separated. Degrades gracefully if the quoting cannot be parsed.
+    """Tokenize like a shell, isolating operator runs (`|`, `&&`, `;`, newline, `>`, `2>&1`, ...) as
+    their own tokens even when glued to a word - so a `>` or a newline inside a quoted value stays part
+    of that token while a real redirection or line break is separated. Degrades gracefully if the
+    quoting cannot be parsed.
     """
     try:
-        lex = shlex.shlex(cmd, posix=True, punctuation_chars=True)
+        lex = shlex.shlex(cmd, posix=True, punctuation_chars=_PUNCTUATION_CHARS)
         lex.whitespace_split = True
+        lex.whitespace = lex.whitespace.replace("\n", "")  # A newline is an operator above rather than a gap between words.
         return list(lex)
     except (ValueError, TypeError):  # bad quoting, or punctuation_chars unsupported on old Python
-        try:
-            return shlex.split(cmd, posix=True)
-        except ValueError:
-            return cmd.split()
+        # Neither fallback isolates an operator, so the lines are split here to keep the one thing this path must not lose, that a newline ends the command before it.
+        toks = []
+        for i, line in enumerate(cmd.split("\n")):
+            if i:
+                toks.append("\n")
+            try:
+                toks.extend(shlex.split(line, posix=True))
+            except ValueError:
+                toks.extend(line.split())
+        return toks
 
 
 def _is_shell_op(tok):
@@ -227,7 +238,7 @@ def _is_redir_op(tok):
 
 
 def _is_separator(tok):
-    return _is_shell_op(tok) and ">" not in tok and "<" not in tok  # |, ||, &, &&, ;, (, )
+    return _is_shell_op(tok) and ">" not in tok and "<" not in tok  # |, ||, &, &&, ;, (, ), newline
 
 
 def _is_git_exe(tok):
@@ -243,7 +254,8 @@ def _git_subcommand_arglists(cmd, sub):
 
     Keying off a real `git`->`<sub>` token sequence (git's value-taking global options skipped, an
     absolute-path or .exe git recognized) means the same invocation named inside a quoted --body forms no
-    such sequence, and a compound `<sub> A && <sub> B` yields two independent arg lists so both are seen.
+    such sequence, and a compound `<sub> A && <sub> B` yields two independent arg lists so both are seen,
+    whether the two are joined by `&&` or written on their own lines.
     """
     toks = _shell_tokens(cmd)
     n = len(toks)
@@ -265,7 +277,7 @@ def _git_subcommand_arglists(cmd, sub):
             while k < n:
                 t = toks[k]
                 if _is_separator(t):
-                    break  # a command separator (|, &&, ;) ends this git invocation
+                    break  # a command separator (|, &&, ;, newline) ends this git invocation
                 if t.isdigit() and k + 1 < n and _is_redir_op(toks[k + 1]):
                     k += 1  # a file-descriptor number before a redirection is shell syntax, not git argv
                     continue
@@ -313,7 +325,7 @@ def _push_targets(cmd, cwd=None, current_branch=None):
             else:
                 positionals.append(t)
             i += 1
-        # positionals are [remote, refspec...]; a lone positional is the remote (a bare push).
+        # The positionals are the remote followed by any refspecs, and a lone positional is the remote, meaning a bare push.
         refspecs = positionals[1:] if len(positionals) >= 2 else []
         branches = []
         for rs in refspecs:
@@ -363,9 +375,9 @@ def _check_bypass_flags(cmd):
             "This uses `gh pr merge --admin`, which merges past required reviews and status checks using "
             "admin power - a bypass of the merge gate. Merge only when the gate is satisfied." + _handoff(cmd)
         )
-    # --no-verify / commit -n skip the git hooks, so they only matter as an actual arg to a git commit or
-    # push (other tools use --no-verify for unrelated things; shlex keeps a quoted mention out of the argv).
-    # `-n` is --no-verify only for commit; `git push -n` is --dry-run.
+    # The --no-verify flag and `commit -n` skip the git hooks, so they only matter as an actual argument to a git commit or push.
+    # Other tools use --no-verify for unrelated things, and shlex keeps a quoted mention out of the argv.
+    # The `-n` form is --no-verify only for commit, since `git push -n` is --dry-run.
     commit_lists = _git_subcommand_arglists(cmd, "commit")
     push_lists = _push_arg_lists(cmd)
     commit_bypass = any(("--no-verify" in a) or ("-n" in a) for a in commit_lists)
@@ -433,17 +445,16 @@ def classify(cmd, cwd=None, origin=None, current_branch=None, rules_lookup=None,
     stands in for the live branch-rules query, and environ stands in for the process environment the
     maintainer's grant is read from.
     """
-    # Fold shell line-continuations so a multi-line Bash invocation (`gh pr merge 5 \<newline> --admin`)
-    # parses as one command; only backslash-newline is joined, so a real newline between commands still
-    # separates them.
+    # Fold shell line-continuations so a multi-line Bash invocation, such as `gh pr merge 5 \<newline> --admin`, parses as one command.
+    # Only backslash-newline is joined, so a real newline between commands still separates them.
     cmd = re.sub(r"\\\r?\n", " ", cmd)
-    # Rule 4: a git operation that would only succeed by bypassing an active branch rule. Checked before
-    # the gh-write gate below, since `git commit --no-verify` is a bypass yet not a GitHub write.
+    # Rule 4 covers a git operation that would only succeed by bypassing an active branch rule.
+    # It is checked before the gh-write gate below, since `git commit --no-verify` is a bypass yet not a GitHub write.
     dec, reason = _check_bypass_flags(cmd)
     if dec == "deny":
         return dec, reason
-    # `_push_targets` tokenizes with shlex and keys off a real `git push` argv adjacency, so a push named
-    # only inside a quoted argument yields no target - the raw substring is just a cheap pre-filter.
+    # The `_push_targets` helper tokenizes with shlex and keys off a real `git push` argv adjacency, so a push named only inside a quoted argument yields no target.
+    # The raw substring is just a cheap pre-filter.
     if _GIT_PUSH.search(cmd):
         dec, reason = _check_push_bypass(cmd, cwd, origin, current_branch, rules_lookup)
         if dec == "deny":
@@ -483,8 +494,8 @@ def classify(cmd, cwd=None, origin=None, current_branch=None, rules_lookup=None,
     if origin is None:
         origin = _origin_owner_repo(cwd)
     targets = []
-    # Every occurrence, not the first: a compound command carries one target per invocation, and reading
-    # only the first checks the harmless one while the write after `&&` goes unexamined.
+    # Every occurrence is read rather than the first, since a compound command carries one target per invocation.
+    # Reading only the first checks the harmless one while the write after `&&` goes unexamined.
     for mr in _EXPLICIT_REPO.finditer(cmd):
         val = mr.group("r")
         if "/" in val and "<" not in val:
@@ -493,9 +504,8 @@ def classify(cmd, cwd=None, origin=None, current_branch=None, rules_lookup=None,
     for m in _API_REPO_PATH.finditer(cmd):
         if "<" not in m.group("owner"):
             targets.append((m.group("owner").lower(), m.group("repo").lower()))
-    # Only runs when origin resolves (a git checkout): with no project context there is nothing to
-    # compare an explicit target against, so this check is skipped and rules 1-2 still apply. A node-id
-    # target is invisible here regardless - that is what rule 2 guards.
+    # This only runs when origin resolves, meaning a git checkout, since with no project context there is nothing to compare an explicit target against, so the check is skipped and rules 1 and 2 still apply.
+    # A node-id target is invisible here regardless, which is what rule 2 guards.
     if origin:
         granted = _granted_targets(environ)
         for t in targets:
@@ -542,8 +552,9 @@ _CASES = [
     ("gh api graphql -f query='mutation{resolveReviewThread(input:{threadId:$t}){thread{isResolved}}}' -F t=\"TODO_fixit\"", "allow", "short all-caps token is not a node id"),
 ]
 
-# Rule-3 (repository scope) cases. Each carries the environment the grant is read from, so the run never
-# depends on the environment the self-test happens to inherit. Origin is ptr727/plexcleaner throughout.
+# Rule-3 cases, covering repository scope.
+# Each carries the environment the grant is read from, so the run never depends on the environment the self-test happens to inherit.
+# Origin is ptr727/plexcleaner throughout.
 _SCOPE_CASES = [
     # (command, environ, expected_decision, label)
     ("gh issue create --repo ptr727/PhotoCleaner --title x --body y", {}, "allow", "sibling repo under the same owner"),
@@ -555,8 +566,8 @@ _SCOPE_CASES = [
     ("gh issue comment 5 -R mankatcheung/job-finder --body hi", {_ALLOW_ENV: "esphome/*"}, "deny", "the incident: a grant for one owner does not reach another"),
     ("gh issue create --repo esphome/esphome --title x", {_ALLOW_ENV: "not-an-owner-repo"}, "deny", "a malformed grant grants nothing"),
     ("GH_WRITE_GUARD_ALLOW=esphome/esphome gh issue create --repo esphome/esphome --title x", {}, "deny", "an inline env prefix is part of the command, not the hook's environment"),
-    # Every spelling of the target flag. A form the extraction misses is a silent bypass of rule 3, not a
-    # near-miss, so each is asserted against a foreign owner that must deny.
+    # Every spelling of the target flag.
+    # A form the extraction misses is a silent bypass of rule 3 rather than a near-miss, so each is asserted against a foreign owner that must deny.
     ("gh issue create --repo=esphome/esphome --title x", {}, "deny", "--repo=value equals form"),
     ("gh issue create -R=esphome/esphome --title x", {}, "deny", "-R=value equals form"),
     ("gh issue create -Resphome/esphome --title x", {}, "deny", "-Rvalue attached short form"),
@@ -565,9 +576,10 @@ _SCOPE_CASES = [
     ("gh issue create --repo ptr727/PhotoCleaner --title \"-Resphome/esphome\"", {}, "allow", "a value opening a quoted span is not a flag"),
 ]
 
-# Rule-4 (branch-rule bypass) cases. Each carries its own branch->rules map so the run is deterministic
-# and offline - the real hook queries the live rules, here rules_lookup is injected. current_branch
-# stands in for the git resolution of a bare push. `None` rules mean the query could not be read.
+# Rule-4 cases, covering branch-rule bypass.
+# Each carries its own branch-to-rules map so the run is deterministic and offline, where the real hook queries the live rules and here rules_lookup is injected.
+# The current_branch value stands in for the git resolution of a bare push.
+# A `None` rules value means the query could not be read.
 _CODE_RULES = {"deletion", "non_fast_forward", "required_linear_history", "required_signatures",
                "pull_request", "required_status_checks", "copilot_code_review"}  # code-style develop / any main
 _CONFIG_RULES = {"deletion", "non_fast_forward", "required_signatures"}  # config-style develop: no pull_request
@@ -622,13 +634,21 @@ _GIT_CASES = [
     ("gh issue comment 5 --body \"first git push\" && git push origin develop", None, {"develop": _CODE_RULES}, "deny", "a quoted mention before a real push does not hide the real target"),
     ("git push >push.log 2>&1", "develop", {"develop": _CODE_RULES}, "deny", "redirection tokens are not a branch: bare push to develop still denies"),
     ("git push origin develop >push.log 2>&1", None, {"develop": _CODE_RULES}, "deny", "redirect after a real refspec does not hide the develop target"),
+    # A newline ends a command as `&&` does, and reading it as whitespace made every token on a later line an argument of the push.
+    # A feature-branch push followed by a `gh pr create` then denied as a direct push to the base branch that command named.
+    ("git push -u origin feature/x\ngh pr create --base develop --title x --body y", None, {"feature/x": set(), "develop": _CODE_RULES}, "allow", "a newline ends the push argv: the pr-create base is not a push target"),
+    ("cd /repo\ngit push origin develop", None, {"develop": _CODE_RULES}, "deny", "a push on a later line is still parsed as a push"),
+    ("git push origin feature/x\ngit push origin develop", None, {"feature/x": set(), "develop": _CODE_RULES}, "deny", "a second push on the next line is checked: develop denies"),
+    ("git push \\\n  origin develop", None, {"develop": _CODE_RULES}, "deny", "a backslash-newline is a continuation, not a separator: develop still parsed"),
+    ("gh issue comment 5 --body \"one line\ngit push origin develop\"", None, {"develop": _CODE_RULES}, "allow", "a newline inside a quoted body does not start a new command"),
+    # Unbalanced quoting is what actually reaches the degraded path, and the separator has to survive there too.
+    ("git push origin feature/x\ngit push origin develop 'unclosed", None, {"feature/x": set(), "develop": _CODE_RULES}, "deny", "the degraded path keeps the newline: a push on the next line is still read"),
 ]
 
 
 def _selftest():
-    # Deterministic offline run: pin origin to ptr727/PlexCleaner (the incident repo) so the cross-origin
-    # case resolves without touching a real checkout. The gh-write cases inject empty rules + a feature
-    # current-branch so no case reaches the live branch-rules query.
+    # A deterministic offline run, pinning origin to ptr727/PlexCleaner, the incident repo, so the cross-origin case resolves without touching a real checkout.
+    # The gh-write cases inject empty rules and a feature current-branch so no case reaches the live branch-rules query.
     origin = ("ptr727", "plexcleaner")
     ok = True
     for cmd, want, label in _CASES:

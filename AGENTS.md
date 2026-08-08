@@ -8,7 +8,7 @@ Treat this file and `GOVERNANCE.md` as authoritative for cross-cutting rules, an
 
 ## Fleet Bootstrap
 
-This repository is governed by a shared template, and the canonical rules, machine-readable spec, and procedures live in `github.com/ptr727/ProjectTemplate`. Fetch that repository before acting on anything about conformance, carried content, repository settings, or standing a repository up, because a carried copy here can be stale or absent and the hub is the only authority on what this repository is supposed to hold. This section is byte-locked across every repository in the fleet, so it reads identically wherever it is found, and it is the entry point whenever nothing else present says where the rules are.
+This repository is governed by a shared template, and the canonical rules, machine-readable spec, and procedures live in `github.com/ptr727/ProjectTemplate`, the repository these rules call the hub. Fetch that repository before acting on anything about conformance, carried content, repository settings, or standing a repository up, because a carried copy here can be stale or absent and the hub is the only authority on what this repository is supposed to hold. This section is byte-locked across every repository in the fleet, so it reads identically wherever it is found, and it is the entry point whenever nothing else present says where the rules are.
 
 Route by what this repository currently holds rather than by what it is expected to hold, since the two differ exactly when this section matters most.
 
@@ -17,7 +17,7 @@ Route by what this repository currently holds rather than by what it is expected
 - **A repository with the instruction set, current or stale.** Follow the hub's `AUDIT.md` end to end, then apply what it finds per its section 10. An audit that reports drift and stops is half the procedure.
 - **A repository that believes it is conformant.** Run the audit anyway and commit the report, because conformance asserted without a report is conformance nobody can check. This is the same procedure as the case above and is listed separately only because it is the one most often skipped.
 
-Two rules bound every path above. **Read the hub's `main` branch as ground truth**, since that is the promoted and gated state, and read `develop` only to detect divergence. And **the audit is read-only**: it produces a report and never edits the repository it measures, so a fix is a separate, reviewable change.
+Three rules bound every path above. **Read the hub's `main` branch as ground truth**, since that is the promoted and gated state, and read `develop` only to detect divergence. **Reach the hub as a checkout of your own and fetch it immediately before reading it**, because a clone is whatever it last fetched rather than the branch it names, and work only in that checkout rather than in one that another task is using, per [`GOVERNANCE.md`](./GOVERNANCE.md) "Repository Boundaries and Write Safety" and "Hub-Hosted Tooling". And **the audit is read-only**: it produces a report and never edits the repository it measures, so a fix is a separate, reviewable change.
 
 ## Context and Delegation Discipline
 
@@ -68,7 +68,7 @@ Every rule below is a level-two section of [`GOVERNANCE.md`](./GOVERNANCE.md). R
 | --- | --- |
 | Why the rules are shaped this way | `Foundational Principles` |
 | Recording a durable lesson or updating governance | `Durable Knowledge and Self-Improvement` |
-| Any push, API mutation, comment, label, or merge | `Repository Boundaries and Write Safety` |
+| Any push, API mutation, comment, label, or merge, or which checkout the work happens in | `Repository Boundaries and Write Safety` |
 | Quoting data into a comment, commit, test, or doc | `Representative Data in Agent-Authored Text` |
 | Committing, signing, rebasing, force-pushing | `Git and Commit Rules` |
 | Branch choice, promotion, keeping branches in sync | `Branching Model` |

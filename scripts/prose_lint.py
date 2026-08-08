@@ -12,6 +12,7 @@ these rules, so nothing enforced them before this script. Rules implemented:
   dupword        No duplicated consecutive word.
   sentence-split A sentence must not wrap across lines (one sentence per line).
   spelling       No British spelling, the repo-wide convention being US English.
+  home-path      No absolute home path naming a real account, per the representative-data rule.
 
 Exit 1 if any violation is found. Read-only, never edits.
 """
@@ -31,9 +32,10 @@ RULES = {
     'dupword': 'a duplicated consecutive word',
     'sentence-split': 'a sentence wrapping across lines',
     'spelling': 'a British spelling where the repo convention is US English',
+    'home-path': 'an absolute home path naming a real account',
 }
 DEFAULT_RULES = frozenset({'charset', 'charset-unknown', 'semicolon', 'dash', 'dupword',
-                           'spelling', 'comment-wrap', 'comment-case'})
+                           'spelling', 'comment-wrap', 'comment-case', 'home-path'})
 
 # Trees this repo generates rather than authors, skipped when a wider scan expands into them.
 # The gate then measures hand-written prose.
@@ -52,6 +54,24 @@ GENERATED_ROOTS = frozenset({
 # A floor on what a healthy sweep of this repo reaches, asserted by the tests.
 # A sweep that quietly stops finding files satisfies every rule by having nothing to read.
 LEAST_PLAUSIBLE = 60
+
+# The pattern-detectable half of the representative-data rule, and only that half.
+# A real user segment is required, so a documented placeholder describes the shape unmatched.
+# That is how the rule's own wording escapes its own gate, with no exemption naming files.
+# A bare drive letter is deliberately not a shape here.
+# Measured against this repo it matched 11 files and named a path in none of them.
+# An escaped newline after a word ending in a letter and a colon reads as a drive letter.
+# `Users` is matched case-insensitively on the Windows branch alone, since that filesystem is.
+# The POSIX branches stay case-sensitive, since a lowercase `/users/` is a common REST path.
+# An API route is not a home directory, and widening this would flag one in every doc.
+HOME_PATH = re.compile(
+    r'(?:/home/|/Users/|[A-Za-z]:\\(?i:users)\\)(?P<user>[A-Za-z][A-Za-z0-9._-]*)')
+
+# Accounts that belong to a container or a runner rather than to a person.
+# Every one is a fixed name an image ships, so a path under it names no environment.
+# `vscode` is the devcontainer user this repo's own snippets mount into.
+# `runner` is the GitHub Actions user, and the rest are stock image accounts.
+SERVICE_ACCOUNTS = frozenset({'vscode', 'runner', 'root', 'ubuntu', 'node', 'shared', 'public'})
 
 
 def rel(path: Path) -> str:
@@ -84,6 +104,77 @@ def changed_lines(base: str) -> dict[str, set[int]] | None:
                 count = int(m.group(2) or 1)
                 out[cur].update(range(start, start + count))
     return out
+
+
+def asked_about(key: str, paths: list[str]) -> bool:
+    """Whether a repository-relative diff key falls under one of the requested paths.
+
+    The floor below compares the diff's file list against what the run matched, and a caller who
+    narrowed the scan on purpose must not be told the narrowing is a defect. Anything the request
+    did not cover is not a file this run failed to read.
+    """
+    for raw in paths:
+        # `Path` drops a trailing separator, so the test appends one rather than stripping it.
+        # Comparing the bare prefix would let `catalog` claim `catalogue/x.md`.
+        r = rel(Path(raw))
+        if r in ('', '.'):
+            return True
+        if key == r or key.startswith(r + '/'):
+            return True
+    return False
+
+
+def unread_diff_files(scope: dict[str, set[int]], paths: list[str],
+                      excludes: tuple[str, ...]) -> list[str]:
+    """Files the diff names that this run was asked about and could have read, in sorted order.
+
+    Keys are resolved against the repository top level rather than the working directory, because
+    `git diff` reports repository-relative paths while discovery keys off the directory the run
+    started in. Reading them against the working directory would make this list empty from a
+    subdirectory, which is the one place it most needs to be full.
+    """
+    root = Path(repo_root(Path('.')) or '.')
+    out: list[str] = []
+    for key in sorted(scope):
+        if not asked_about(key, paths):
+            continue
+        if any(x in key for x in excludes):
+            continue
+        if not GENERATED_TREES.isdisjoint(Path(key).parts):
+            continue
+        target = root / key
+        if target.is_file() and is_text(target):
+            out.append(key)
+    return out
+
+
+def home_path_findings(lineno: int, line: str) -> list[tuple[int, str, str]]:
+    """Absolute home paths on this line that name a real account.
+
+    The exposure this gates was a maintainer's own path reaching a public comment, so the unit
+    is the raw line rather than stripped prose. A path is the same exposure in a JSON config
+    value, in a fenced transcript pasted from a terminal, and in a sentence.
+    """
+    out = []
+    for m in HOME_PATH.finditer(line):
+        if m.group('user').lower() in SERVICE_ACCOUNTS:
+            continue
+        out.append((lineno, 'home-path',
+                    f'absolute home path {m.group(0)!r} -> use a constructed path, not an '
+                    'observed one'))
+    return out
+
+
+def operational_checkout(root: Path) -> bool:
+    """Whether this checkout is an operational repository, read from what it carries.
+
+    `spec/files.json` declares `repo-config/operational/develop.json` for the operational model
+    and `repo-config/develop.json` for the release one, so a repository states its own model and
+    nothing has to reach the hub registry to ask. The hub itself carries both payloads, being the
+    template for each, so carrying the release payload decides it.
+    """
+    return ((root / 'repo-config' / 'operational' / 'develop.json').is_file()
+            and not (root / 'repo-config' / 'develop.json').is_file())
 
 
 def repo_prefix(root: Path) -> str:
@@ -579,12 +670,34 @@ BARE_URI = re.compile(r'^(?:<(?:https?|ftp)://[^>\s]+>|(?:https?|ftp)://[^>\s]+)
 # The initial guard anchors on a word boundary, so `J. Smith` reads as one name.
 # A sentence ending in an acronym such as CI is two sentences and has to be caught.
 # The second sentence may open in either case, since a lowercase opening is still a second sentence.
-RUN_ON = re.compile(r'(?<!\b[A-Z])(?<!\be\.g)(?<!\bi\.e)(?<!\bvs)(?<!\betc)[.!?]\s+(?=[A-Za-z])')
+# An ellipsis marks an elision inside one sentence, so its closing dot is not a terminator.
+# The guard is that a dot preceded by a dot never terminates.
+# That reads a schematic such as `... end_of_line = lf` as the one line it is.
+# Splitting such a line would break the fragment it exists to show.
+# It is scoped to the dot alternative, since a `?` or `!` after an ellipsis does terminate.
+# Guarding the whole class would read `Really...? Yes.` as one sentence and miss a real run-on.
+RUN_ON = re.compile(r'(?<!\b[A-Z])(?<!\be\.g)(?<!\bi\.e)(?<!\bvs)(?<!\betc)(?:(?<!\.)\.|[!?])\s+(?=[A-Za-z])')
 
 # A step marker opening a comment is a label on the sentence that follows, not a sentence of its own.
 # `# 1. Deploy the hook.` is one sentence, and reading the marker's dot as a terminator made it two.
 # It is stripped before the sentence checks so both the run-on and the opening-case test see the prose.
 ENUM_PREFIX = re.compile(r'^\d+[.)]\s+')
+
+# A comment body that is one token closing on a colon is a key or a heading, not a sentence.
+# `# ignore:` above a commented-out block is disabled configuration.
+# Capitalizing it corrupts the key a reader uncomments, so the rule would damage the file.
+# The token count carries the test, since a colon ending real prose always has words before it.
+KEY_ONLY = re.compile(r'^\S+:$')
+
+# A label opening a definition names the thing being defined, so it is not the sentence's first word.
+# `#   publish - 'true' when ...` documents an output named `publish`.
+# Capitalizing it renames the output the workflow declares.
+# This is the comment spelling of the `- **Label** - text` construct LABEL_DASH exempts in Markdown.
+# It is tested where a line opens a definition, never where one continues a wrapped sentence.
+# A continuation whose first word is followed by a spaced dash is a parenthetical instead.
+# That is the construction the dash rule exists to catch, so exempting it would hide the violation.
+# Both live instances in the tree are continuations, which is what scoped this to the case branch.
+COMMENT_LABEL = re.compile(r'^[A-Za-z_][\w.-]*\s+-\s+')
 CODE_FENCE = re.compile(r'^\s*(```|~~~)')
 
 # Both are correct English. `the the` is always a typo, so it is not here.
@@ -838,7 +951,8 @@ def comment_wrap_findings(path: Path, raw: str, lines: list[str]) -> list[tuple[
     prev_body = ''
     prev_no = 0
     for n, body, leading in comments:
-        if not body or NOT_PROSE.search(body) or BARE_URI.match(body.strip()):
+        if (not body or NOT_PROSE.search(body) or BARE_URI.match(body.strip())
+                or KEY_ONLY.match(body)):
             prev_body = ''
             continue
         # An unpunctuated Markdown HTML comment is a structural marker, not commentary.
@@ -860,7 +974,8 @@ def comment_wrap_findings(path: Path, raw: str, lines: list[str]) -> list[tuple[
             out.append((prev_no, 'comment-wrap',
                         'comment sentence wraps into the next line -> one sentence per line'))
         # A lowercase opening that is not a continuation is a sentence that failed to start.
-        elif leading and body[:1].islower():
+        # A label opening a definition is exempt, since the lowercase word is the name being defined.
+        elif leading and body[:1].islower() and not COMMENT_LABEL.match(body):
             out.append((n, 'comment-case',
                         'comment sentence opens in lowercase -> capitalize, or restructure so it '
                         'does not open on a lowercase name'))
@@ -892,6 +1007,10 @@ def check_file(path: Path, rules: set[str]) -> list[tuple[int, str, str]]:
     prev_no = 0
     for i, line in enumerate(lines, 1):
         line = line.rstrip('\r')
+        # Judged before the fence and inline-code handling below, deliberately.
+        # A path pasted inside a fenced transcript is the same exposure as one in a sentence.
+        if 'home-path' in rules:
+            out.extend(home_path_findings(i, line))
         if CODE_FENCE.match(line):
             in_fence = not in_fence
             prev_txt = ''
@@ -980,6 +1099,15 @@ def main(argv: list[str] | None = None) -> int:
 
     rules = set(a.checks or DEFAULT_RULES)
 
+    # An operational repository's runbook carries the literal path an operator types.
+    # That is the repository's own content, not an agent quoting an environment it observed.
+    # The skip is announced, since a rule that silently stops running reads as one that passed.
+    # That is the same failure the diff-scope floor below exists to prevent.
+    if 'home-path' in rules and operational_checkout(Path(repo_root(Path('.')) or '.')):
+        rules.discard('home-path')
+        print('note: home-path is not checked in an operational repository, where an absolute '
+              'path is the operator instruction rather than observed data.', file=sys.stderr)
+
     # Checked before discovery, which reads every tracked file to classify it as text.
     # A run this rejects would otherwise pay that cost and throw the result away.
     # `--list-files` is exempt, since it reports the scan scope and never consults the diff.
@@ -1021,7 +1149,27 @@ def main(argv: list[str] | None = None) -> int:
               'checkout carries its history.', file=sys.stderr)
         return 2
     if scope is not None:
-        files = [f for f in files if rel(f) in scope]
+        matched = [f for f in files if rel(f) in scope]
+        # The floor every verdict below rests on, asserted rather than guarded.
+        # Each route to a false clean so far was closed after a reviewer saw it.
+        # The next is closed that way or not at all, which is what a floor covers.
+        # A run that resolves a non-empty diff and matches none of its files failed to scope.
+        # Zero alone is not the test.
+        # A change touching only files the rules do not read matches nothing and is clean.
+        # An image or a lock file is that case.
+        # So the comparison is against the diff's own list of files this run could have read.
+        if scope and not matched:
+            unread = unread_diff_files(scope, a.paths or ['.'], tuple(a.exclude))
+            if unread:
+                shown = ', '.join(unread[:5]) + (' and more' if len(unread) > 5 else '')
+                print(f'error: the diff against {a.diff!r} names {len(unread)} readable file(s) '
+                      f'this run was asked about, and the scan matched none of them: {shown}. '
+                      'Refusing to report a clean run, since a gate that read nothing is '
+                      'indistinguishable from a gate with nothing to read. Check that the run '
+                      'starts at the repository top level and that the requested paths cover '
+                      'the change.', file=sys.stderr)
+                return 2
+        files = matched
 
     total = 0
     bykind: dict[str, int] = {}

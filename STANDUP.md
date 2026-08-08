@@ -24,15 +24,15 @@ if [ "$(git config --global --get gpg.format)" = ssh ]; then ssh-add -L; else gp
 
 The agent check branches rather than listing both forms, because they are alternatives and running the wrong one fails on a correctly configured host: an SSH host need not have `gpg` installed at all. Signing is **SSH or GPG**, so judge the format and its agent together rather than requiring `ssh`: what matters is that the configured format has a matching agent holding the key, which is the check [GOVERNANCE.md "Git and Commit Rules"][governance-git-and-commit-rules] prescribes. Any of these wrong or absent is a **host** misconfiguration to surface to the maintainer ([`docs/host-setup.md`][host-setup] is the setup procedure), not something to patch per repo. Patching it locally hides a broken host that then produces wrong identities in every other repo on that machine.
 
-After `git init` and before the first commit, confirm the repo added no override of its own. This one needs a repository, since `--local` fails outside one:
+After `git init` and before the first commit, confirm the repo added no override of its own. This one needs a repository, since `--local` fails outside one. Read it here and run it in section 0B, which places it between the init and the first commit, so nothing here is a prompt to init early:
 
 ```shell
 git config --local --get user.email || true    # expect no output
 ```
 
-**The finding is a printed value, never the exit code.** An unset key prints nothing and exits `1`, so the passing case is a non-zero exit with empty output, and reading the exit status as failure inverts the check. The tolerant tail is in the snippet above so a copy into a `set -e` script does not abort on the expected case.
+**The finding is a printed value, never the exit code.** An unset key prints nothing and makes `git config --get` exit `1`, so reading that as failure inverts the check, and the tolerant tail turns it into a zero exit in any case, which leaves empty output as the whole of the passing result. The tail is in the snippet above so a copy into a `set -e` script does not abort on the expected case.
 
-After the first commit, confirm it took with `git log -1 --format='%G? author=%an <%ae> committer=%cn <%ce>'`, so the passing result is `G` plus the expected `noreply` address in **both** identities. Read both rather than the author alone: the rule governs the `author` and the `committer` together, GitHub verifies the signature against the **committer**, and a rebase, amend, or cherry-pick rewrites the committer while leaving the author untouched, which is exactly the case an author-only check passes and should not. `git verify-commit HEAD` is the pass/fail form, exiting non-zero on a bad signature and writing its "Good signature" line to stderr rather than emitting a status letter.
+After the first commit, confirm it took with `git log -1 --format='%G? author=%an <%ae> committer=%cn <%ce>'`, so the passing result is `G` plus the expected `noreply` address in **both** identities. Read both rather than the author alone: the rule governs the `author` and the `committer` together, GitHub verifies the signature against the **committer**, and a rebase, amend, or cherry-pick rewrites the committer while leaving the author untouched, which is exactly the case an author-only check passes and should not. `git verify-commit HEAD` is the pass/fail form, exiting non-zero on a bad signature and writing its "Good signature" line to stderr rather than emitting a status letter. Section 0B's block runs this line too, in the position described here, which is the same split as the check above.
 
 ## 0A. Hand Over What Only the Maintainer Can Supply
 
@@ -46,6 +46,36 @@ After the first commit, confirm it took with `git log -1 --format='%G? author=%a
 **A repo with no remote is not partially stood up. It is not started.** Steps 0 through 3 complete locally and report progress with no repository in existence, so local progress is not evidence of onboarding progress. [`AUDIT.md`][audit] is the check that would catch it, and it reads a live repo, so the one instrument that detects this condition is unavailable exactly while it holds.
 
 **Escalate a blocking prerequisite the moment it is found, rather than carrying it.** In a task list a pending task and a blocking prerequisite look identical, and the second quietly becomes the first as work continues around it. Stop at the step that needs the missing input and say which input it is.
+
+## 0B. Create the Branches, Before the First Standup Commit
+
+**Create both long-lived branches empty and do the whole standup on a feature branch off `develop`.** An agent that starts committing onto whichever branch `git init` produced is writing the repo's permanent history, and every step below is exploratory work that has no business being permanent. Doing this first means nothing ever has to be cleaned off `main` or `develop`, because the only commit either carries is the empty one it starts from and every change after it arrives by pull request.
+
+1. **Create `main` carrying nothing.** A git branch cannot exist without a commit, so carrying nothing means exactly one signed empty root commit, and section 0's signing window applies to it like any other.
+2. **Create `develop` from `main`**, also carrying nothing, so the two start level.
+3. **Create the first feature branch from `develop`** and run every step below on it, through the audit in step 5.
+4. **Add the repository on GitHub and apply the configuration while still on that branch**, which is step 4 and needs no branch of its own.
+5. **Open a normal pull request into `develop`** when the standup is done, and let it squash like any other change.
+
+Steps 1 through 3 are the block below, run before the repository exists on GitHub. It carries the procedure's only `git init`, so section 0 is read as its `--global` checks running ahead of this block and its two repository-scoped checks sitting inside it, rather than as an init of its own to run first.
+
+```shell
+git init                                                        # The host default may be master, which the rename below corrects.
+git config --local --get user.email || true                     # Section 0's override check, whose passing case is no output.
+git commit --allow-empty --message "Initial commit"             # The one signed empty root commit.
+git log -1 --format='%G? author=%an <%ae> committer=%cn <%ce>'  # Section 0's verification of that commit.
+git branch -M main                                              # Renames whichever branch git init produced, in a repo holding only it.
+git branch develop                                              # From main, so the two start level.
+git checkout -b "<feature-branch>" develop                      # Every step below runs here.
+```
+
+The rename runs unconditionally rather than behind a test of `init.defaultBranch`, because forcing it is correct whether the host produced `master` or `main` and a conditional is one more thing to get wrong. What makes the force safe is where the block runs, in a repository holding one branch and one commit, so it is a rename with nothing to collide with rather than a general-purpose one. In a repository that already carries a `main` the same line overwrites that branch, which is why this block belongs to a fresh `git init` and never to a repair. The rename is written `-M` rather than `--move --force` because `git branch` gained those long options later than the short one, so the long spelling would add a version floor for nothing. `git switch` and `git init --initial-branch` are newer still, which is why neither appears here. It is worth the care because [`docs/host-setup.md`][host-setup] checks that `git` is present and states no floor of its own. The placeholder is quoted for the reason step 4 gives, that an unquoted `<` is input redirection. Both of section 0's checks sit in the block rather than beside it, placed where that section requires them rather than left to a reader to interpolate, and each is read as section 0 reads it. On the second line the finding is the printed value and never the exit status, so the passing case is empty output. Reading `$?` there answers nothing, because `git config --get` exits non-zero on the unset key that is the wanted result and the tolerant tail then returns zero regardless, which is what keeps a copy of the block inside a `set -e` script from aborting on the expected case. On the fourth the passing result is `G` beside the noreply address in the author and the committer both, which reads the empty root commit as the first commit the signing window covers rather than as an exception to it. Push `main` and `develop` once the repository exists and **before** step 4 applies the rulesets, since [`repo-config/main.json`][repo-config-main] carries a `pull_request` rule, so an applied ruleset blocks the direct push that would otherwise seed the branch. Ordering it this way rather than relying on a bypass is deliberate, because who may bypass a ruleset is a human decision no payload declares, and `repo-config/configure.sh` reads the live list and preserves it rather than asserting one, so an agent cannot know from the payload whether a bypass exists.
+
+**Committing onto `develop` and squashing afterwards does not work**, because `non_fast_forward` is set on both `develop` payloads and rewriting that history is exactly what the rule rejects. This is not hypothetical, since a repo stood up that way was correctly blocked at the point the history needed rewriting, with the standup already written into the branch it had to be lifted off.
+
+**The protection is uneven, so on an operational repo this instruction is the only thing holding the line.** A release repo's `repo-config/develop.json` carries a `pull_request` rule that blocks a direct commit outright, while `repo-config/operational/develop.json` carries three rules, `deletion`, `non_fast_forward` and `required_signatures`, and none of them stops one. A conformant operational repo therefore accepts the commit that this step exists to prevent, and reports nothing wrong afterwards.
+
+**On a public repo the squash is the one chance to leave the exploratory history out.** Standup is where a wrong secret value, a throwaway credential, and a run of noise commits accumulate, and a squashed feature branch publishes the result rather than the route to it.
 
 ## 1. Classify and Catalog
 
@@ -89,10 +119,10 @@ Copy every [`spec/files.json`][files] entry whose `appliesTo` matches the repo's
 
 - [`CODESTYLE.md`][codestyle]: the repo's language and formatting conventions beyond the carried rules.
 - `ARCHITECTURE.md`: how a code repo is built, its module layout, data flow, and design decisions.
-- `OPERATIONS.md`: how the repo is run, under the headings `Runbooks`, `Backup and Recovery`, `Logs and Debugging`, `Tool Usage`, and `Configuration Layout`.
+- `OPERATIONS.md`: how the repo is run, under the headings `Local Verification`, `Runbooks`, `Backup and Recovery`, `Logs and Debugging`, `Tool Usage`, and `Configuration Layout`. `Local Verification` leads because it is the only pre-merge heading, and it names the part of the repo's contract CI structurally cannot exercise.
 - `TODO.md`: the repo's running backlog, per [`spec/readme-structure.md`][readme-structure]. It keeps open work out of the README's section order, where it does not belong and changes on a different cadence from everything around it.
 
-**`OPERATIONS.md` is required on every repo**, not optional, so it appears in the baseline above with `appliesTo: "*"`. It is presence-checked only, the same footing as `README.md` and `HISTORY.md`, so its content is entirely the repo's own and a repo with little to say still carries the file as a stub, meaning those five headings with no content under them, for which this repo's own `OPERATIONS.md` is the worked example. Do not read the `operational` workflow model into the requirement, because that selector describes where config lives rather than whether the repo has runbooks, and a repo that publishes to a package registry or deploys a site has operational surface under either model. It is the operational analogue of `ARCHITECTURE.md`, and it is where an `AGENTS.md` split puts the repo-specific half, so real runbooks (a deploy procedure, a rollback, a retention policy, a credential rotation) go there rather than into a carried file. It is agent-instruction content, so it takes the inline-link exception the Markdown rules name rather than the reference-style default. `ARCHITECTURE.md` and `TODO.md` stay advisory and are required by no selector, so a repo with nothing to say in one carries no file rather than an empty one.
+**`OPERATIONS.md` is required on every repo**, not optional, so it appears in the baseline above with `appliesTo: "*"`. It is presence-checked only, the same footing as `README.md` and `HISTORY.md`, so its content is entirely the repo's own and a repo with little to say still carries the file as a stub, meaning those six headings with no content under them, for which this repo's own `OPERATIONS.md` is the worked example. Do not read the `operational` workflow model into the requirement, because that selector describes where config lives rather than whether the repo has runbooks, and a repo that publishes to a package registry or deploys a site has operational surface under either model. It is the operational analogue of `ARCHITECTURE.md`, and it is where an `AGENTS.md` split puts the repo-specific half, so real runbooks (a deploy procedure, a rollback, a retention policy, a credential rotation) go there rather than into a carried file. It is agent-instruction content, so it takes the inline-link exception the Markdown rules name rather than the reference-style default. `ARCHITECTURE.md` and `TODO.md` stay advisory and are required by no selector, so a repo with nothing to say in one carries no file rather than an empty one.
 
 Choose the destination while scaffolding rather than after. Repo-specific content left in a carried file is drift, which the audit lists as an undeclared section to reconcile, and reconciling it later means moving prose that downstream readers have already started trusting in the wrong place.
 
@@ -163,6 +193,7 @@ The same [`AUDIT.md`][audit] run is the on-demand audit for any known repo, and 
 [readme-structure]: ./spec/readme-structure.md
 [repo-config]: ./repo-config/
 [repo-config-carry]: ./docs/repo-config-carry.md
+[repo-config-main]: ./repo-config/main.json
 [repo-config-readme]: ./repo-config/README.md
 [repos]: ./registry/repos.json
 [repos-schema]: ./registry/repos.schema.json

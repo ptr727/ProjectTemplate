@@ -28,7 +28,12 @@ EARLY = '2026-08-02T10:00:00Z'
 LATE = '2026-08-02T11:00:00Z'
 
 
-def review(login: str = pr_review.REVIEWER, oid: str = HEAD, body: str = '',
+# The shape 28 of the 332 measured bodies carry: an overview, and no count of what was read.
+# A body of no text at all is not one of the shapes, and the reader now says so, correctly.
+OVERVIEW = '## Pull request overview\n\nThe change is narrow.\n'
+
+
+def review(login: str = pr_review.REVIEWER, oid: str = HEAD, body: str = OVERVIEW,
            at: str = EARLY) -> dict:
     return {'author': {'login': login}, 'state': 'COMMENTED', 'commit': {'oid': oid},
             'body': body, 'submittedAt': at}
@@ -39,25 +44,40 @@ def comment(login: str = pr_review.REVIEWER, at: str = LATE,
     return {'author': {'login': login}, 'createdAt': at, 'body': body}
 
 
+COVERED = ('Copilot reviewed 3 out of 3 changed files in this pull request and generated '
+           'no new comments.')
+
+
 def collapsed(heading: str = 'Comments suppressed due to low confidence (1)',
-              finding: str = 'a.py:12 The retry count is off by one.') -> str:
-    return (f'Reviewed 3 of 3 changed files.\n\n<details>\n<summary>{heading}</summary>\n\n'
+              finding: str = 'a.py:12 The retry count is off by one.',
+              covers: str = COVERED) -> str:
+    """The section as its own `<details>` wrapper, under the round's own coverage line.
+
+    The coverage line is the reviewer's, quoted from the corpus rather than invented: it sat here
+    as filler that nothing asserted on, which is one of the two places the shape was already in
+    this file while no case read it.
+    """
+    return (f'{OVERVIEW}\n{covers}\n\n<details>\n<summary>{heading}</summary>\n\n'
             f'{finding}\n\n</details>\n')
 
 
 def nested(heading: str = '### Suppressed comments (2)',
-           finding: str = '**a.py:12**\n* The retry count is off by one.') -> str:
+           finding: str = '**a.py:12**\n* The retry count is off by one.',
+           covers: str = '- **Files reviewed:** 1/1 changed files') -> str:
     """The section as a Markdown heading nested inside the `Review details` wrapper.
 
     The live shape as of 2026-08-05: the section is no longer its own `<details>` wrapper with a
     matching `<summary>`, it is a Markdown heading inside the wrapper that also carries the
     round's file and effort metadata, which trails the findings rather than preceding them.
+
+    That metadata is where this shape states its coverage, and it is the second spelling of the
+    line rather than a second wrapper. It sat here as filler that nothing asserted on too.
     """
     return ('### Ready to approve\n\nThe change is narrow.\n\n'
             '<details>\n<summary>File summaries</summary>\n\n'
             '| File | Description |\n\n</details>\n\n'
             f'<details>\n<summary>Review details</summary>\n\n{heading}\n\n{finding}\n\n'
-            '- **Files reviewed:** 1/1 changed files\n'
+            f'{covers}\n'
             '- **Review effort level:** Lite\n</details>\n')
 
 
@@ -401,14 +421,15 @@ class TestSuppressed(GqlCase):
 
     def test_a_body_naming_the_block_outside_a_details_wrapper_still_reports(self) -> None:
         """Reporting zero because the markup moved is the failure the whole case guards."""
-        self.answer(payload([review(body='Suppressed comments (1)\n\na.py:12 Off by one.')]))
+        self.answer(payload([review(body=OVERVIEW + '\nSuppressed comments (1)\n\n'
+                                                     'a.py:12 Off by one.')]))
         out, _ = pr_review.digest('o', 'r', 7)
         self.assertIn('suppressed=1', out)
         self.assertIn('a.py:12 Off by one.', out)
 
     def test_the_per_file_summary_block_beside_it_is_not_a_finding(self) -> None:
         """Every real body collapses a file table too, and reporting that is noise, not a finding."""
-        body = ('<details>\n<summary>Show a summary per file</summary>\n\n'
+        body = (OVERVIEW + '\n<details>\n<summary>Show a summary per file</summary>\n\n'
                 '| File | Description |\n\n</details>\n' + collapsed())
         self.answer(payload([review(body=body)]))
         out, _ = pr_review.digest('o', 'r', 7)
@@ -578,6 +599,430 @@ class TestRefusal(GqlCase):
         self.answer(payload([review(login='ptr727', body=REFUSED), review(oid=OLD)]))
         out, _ = pr_review.digest('o', 'r', 7)
         self.assertIn('refusal=no', out)
+
+
+class TestCoverage(GqlCase):
+    """The round that covered the head and read part of the diff, which is a clean pass elsewhere.
+
+    Measured over 332 Copilot review bodies on this repository: five rounds across three pull
+    requests reported reading fewer files than the pull request changed, and all three merged.
+    One of them changed three files, left one unread across both its rounds, and reported
+    "generated no comments" each time.
+    """
+
+    def digest_for(self, *reviews: dict) -> str:
+        self.answer(payload(list(reviews)))
+        out, _ = pr_review.digest('o', 'r', 7)
+        return out
+
+    def test_each_vetted_spelling_of_a_full_round_reads_as_full(self) -> None:
+        """The census: four tails on the first spelling, and the `Review details` bullet."""
+        for covers in (
+            'Copilot reviewed 7 out of 7 changed files in this pull request and generated '
+            'no new comments.',
+            'Copilot reviewed 7 out of 7 changed files in this pull request and generated '
+            'no comments.',
+            'Copilot reviewed 7 out of 7 changed files in this pull request and generated '
+            '1 comment.',
+            'Copilot reviewed 7 out of 7 changed files in this pull request and generated '
+            '4 comments.',
+            '- **Files reviewed:** 7/7 changed files',
+        ):
+            with self.subTest(covers=covers[:44]):
+                self.assertEqual((pr_review.FULL, covers),
+                                 pr_review.coverage_of({'body': covers}))
+
+    def test_a_round_that_read_part_of_the_diff_is_a_failure_the_digest_names(self) -> None:
+        """PR 592's shape: three changed files, one never read, and it merged."""
+        line = ('Copilot reviewed 2 out of 3 changed files in this pull request and generated '
+                'no comments.')
+        out = self.digest_for(review(body=OVERVIEW + '\n' + line))
+        self.assertIn('coverage=PARTIAL', out)
+        self.assertIn('COVERAGE IS PARTIAL', out)
+        # The counts print, since they are what say how much went unread and no thread carries it.
+        self.assertIn(line, out)
+        # The round did cover the head.
+        # That reading was correct, and it was not the whole reading.
+        self.assertIn('review_on_head=yes', out)
+
+    def test_the_second_spelling_reports_a_partial_round_too(self) -> None:
+        """Both spellings appear in the corpus to this day, so neither replaces the other."""
+        out = self.digest_for(review(body=nested(covers='- **Files reviewed:** 2/3 changed files')))
+        self.assertIn('coverage=PARTIAL', out)
+
+    def test_the_bullet_spelling_is_a_coverage_line_on_its_label_alone(self) -> None:
+        """Its label is the marker, so dropping the words after the counts is not dropping it.
+
+        Requiring them read a bullet that had lost them as no statement at all, which is a
+        silent `unstated` over a round that stated its coverage plainly.
+        """
+        # Detected and read, which are two assertions rather than one.
+        # Asserting only the first left the bare bullet blocking on a line it could read.
+        for line in ('- **Files reviewed:** 4/4', '- **Files reviewed:** 4/4 changed file',
+                     '- **Files reviewed:** 4/4 changed files'):
+            with self.subTest(line=line):
+                self.assertEqual([line], pr_review.coverage_statements(line))
+                self.assertEqual((4, 4), pr_review.read_coverage(line))
+                self.assertEqual(pr_review.FULL, pr_review.coverage_of({'body': line})[0])
+
+    def test_a_bullet_carrying_no_counts_still_blocks(self) -> None:
+        """What is left after the words are optional is a line that states no coverage at all."""
+        self.assertIsNone(pr_review.read_coverage('- **Files reviewed:** all of them'))
+        self.assertEqual(pr_review.UNVETTED,
+                         pr_review.coverage_of({'body': '- **Files reviewed:** all of them'})[0])
+
+    def test_the_reviewer_s_name_alone_is_not_a_coverage_line(self) -> None:
+        """The other opener keeps its text requirement, prose opening lines with that name too."""
+        self.assertFalse(pr_review.is_coverage_line('Copilot answers a request with a comment.'))
+
+    def test_a_singular_changed_file_reads_rather_than_blocks(self) -> None:
+        """A one-file round means what it says, and stopping the fleet over an -s is crying wolf."""
+        self.assertEqual((1, 1), pr_review.read_coverage(
+            'Copilot reviewed 1 out of 1 changed file in this pull request and generated '
+            'no comments.'))
+
+    def test_counts_that_cannot_both_be_true_block_rather_than_read_as_full(self) -> None:
+        """A round claiming it read more files than were changed is one this is parsing wrongly.
+
+        Read as full coverage it fails open on the very statement saying something is off, which
+        is the shape of every other failure here.
+        """
+        line = ('Copilot reviewed 8 out of 7 changed files in this pull request and generated '
+                'no comments.')
+        self.assertIsNone(pr_review.read_coverage(line))
+        self.assertEqual(pr_review.UNVETTED, pr_review.coverage_of({'body': line})[0])
+        self.assertIn(f'coverage line: {line}', pr_review.unrecognized_in(OVERVIEW + '\n' + line))
+
+    def test_a_coverage_line_that_parses_to_nothing_names_this_script(self) -> None:
+        """The wording has drifted once for each of the two patterns beside this one.
+
+        Passing a shape it does not recognize is how a gate stops gating as the wording moves,
+        so the unrecognized shape is reported and its remedy is stated as fixing this script.
+        """
+        line = 'Copilot reviewed most of the changed files in this pull request.'
+        out = self.digest_for(review(body=OVERVIEW + '\n' + line))
+        self.assertIn('coverage=UNVETTED', out)
+        # It is one of the unrecognized shapes rather than a report of its own.
+        # Both say the reader needs fixing, and one of them saying it once is the whole message.
+        self.assertIn('UNRECOGNIZED REVIEWER OUTPUT (1)', out)
+        self.assertIn(f'coverage line: {line}', out)
+
+    def test_a_round_stating_no_coverage_at_all_is_unstated_rather_than_a_verdict(self) -> None:
+        """28 of the 332 bodies are an overview and a change list, and that shape is current.
+
+        It interleaves with the counted one throughout rather than preceding it, and one pull
+        request carries both across its two rounds, so failing on it would cry wolf on about one
+        review in twelve. Reporting it as coverage is the bug this reading exists to remove.
+        """
+        body = ('## Pull request overview\n\nThis PR updates the backlog.\n\n'
+                '**Changes:**\n- Delete the shipped cluster from `TODO.md`.\n')
+        out = self.digest_for(review(body=body))
+        self.assertIn('coverage=unstated', out)
+        self.assertNotIn('COVERAGE IS PARTIAL', out)
+        self.assertIn('shapes=ok', out)
+
+    def test_a_refusal_is_exempt_rather_than_an_unrecognized_shape(self) -> None:
+        """It states no coverage by design, and `head_reviews` has already dropped it.
+
+        Read as a round, every refusal becomes a spurious unvetted-shape failure sitting on top
+        of the `refusal=YES` that already names the state and its remedy.
+        """
+        out = self.digest_for(review(body=REFUSED))
+        self.assertIn('refusal=YES', out)
+        self.assertIn('coverage=unstated', out)
+        self.assertIn('shapes=ok', out)
+
+    def test_coverage_is_read_from_the_head_rather_than_from_a_superseded_round(self) -> None:
+        """A partial round describes one commit's diff, and the push that changes it is answered
+        by a round reading the whole of the new one."""
+        old = (OVERVIEW + '\nCopilot reviewed 2 out of 3 changed files in this pull request '
+               'and generated no comments.')
+        out = self.digest_for(review(oid=OLD, body=old),
+                              review(body=OVERVIEW + '\n' + COVERED))
+        self.assertIn('coverage=full', out)
+        self.assertNotIn('COVERAGE IS PARTIAL', out)
+
+    def test_the_worst_of_two_rounds_on_one_head_is_what_reports(self) -> None:
+        """A head carries two rounds through a re-request, and both read the same diff."""
+        partial = ('Copilot reviewed 2 out of 3 changed files in this pull request and '
+                   'generated no comments.')
+        self.assertEqual(pr_review.PARTIAL,
+                         pr_review.head_coverage(payload([review(body=COVERED, at=EARLY),
+                                                          review(body=partial, at=LATE)]))[0])
+
+
+    def test_a_round_that_states_full_coverage_settles_it_over_one_stating_none(self) -> None:
+        """Unstated is the absence of a statement rather than a bad one, so it loses to a count."""
+        self.assertEqual(pr_review.FULL,
+                         pr_review.head_coverage(payload([review(body='## Overview\n\nNarrow.'),
+                                                          review(body=COVERED)]))[0])
+
+    def test_prose_mentioning_changed_files_is_not_this_round_stating_its_coverage(self) -> None:
+        """The false positive the suppressed matcher and the refusal matcher have each had once.
+
+        A review of the pull request that adds this check discusses the wording it adds, and a
+        body-wide match reads that discussion as the round's own count.
+        """
+        body = ('## Pull request overview\n\nThis PR reads the line saying Copilot reviewed 2 '
+                'out of 3 changed files, so a partial round stops reporting as a clean pass.\n\n'
+                '- The digest now carries a `coverage` field.\n')
+        out = self.digest_for(review(body=body))
+        self.assertIn('coverage=unstated', out)
+
+    def test_a_quoted_line_in_a_fenced_block_is_not_this_round_stating_its_coverage(self) -> None:
+        """131 of the 332 bodies carry a fence, and this change puts both spellings in the diff."""
+        body = ('### Ready to approve\n\nThe vetted spellings read:\n\n```\n'
+                'Copilot reviewed 2 out of 3 changed files in this pull request and generated '
+                'no comments.\n- **Files reviewed:** 4/9 changed files\n```\n\n' + COVERED + '\n')
+        body = '### Ready to approve\n\n' + body
+        out = self.digest_for(review(body=body))
+        self.assertIn('coverage=full', out)
+        self.assertNotIn('COVERAGE IS PARTIAL', out)
+
+    def test_a_human_review_carrying_a_coverage_line_is_not_the_reviewer_s_round(self) -> None:
+        partial = ('Copilot reviewed 2 out of 3 changed files in this pull request and '
+                   'generated no comments.')
+        out = self.digest_for(review(login='ptr727', body=partial),
+                              review(body=OVERVIEW + '\n' + COVERED))
+        self.assertIn('coverage=full', out)
+
+
+class TestUnrecognizedShapes(GqlCase):
+    """A shape this script has no reader for blocks, rather than being read past.
+
+    Every reader here keys on a structural marker, so a marker that changes spelling is a section
+    the reader stops finding and reports as absent. All three failures on record have that shape:
+    a suppressed heading reworded, a suppressed section moved inside another wrapper, and a
+    coverage line nothing parsed. Each was caught after it had already reported a clean pass.
+
+    The inventory is measured rather than imagined. Over the same 332 review bodies, with fenced
+    blocks removed and text reduced to ASCII, the whole corpus is 7 headings, 6 summaries and 3
+    metadata labels, and every body carries at least one of them.
+    """
+
+    def digest_for(self, *reviews: dict) -> str:
+        self.answer(payload(list(reviews)))
+        out, _ = pr_review.digest('o', 'r', 7)
+        return out
+
+    def test_every_vetted_marker_together_reads_as_recognized(self) -> None:
+        """The corpus shape in one body, so the lists are held against what they were built from."""
+        self.assertEqual([], pr_review.unrecognized_in(nested()))
+        self.assertEqual([], pr_review.unrecognized_in(collapsed()))
+        self.assertEqual([], pr_review.unrecognized_in(OVERVIEW))
+
+    def test_a_heading_that_is_not_in_the_inventory_blocks(self) -> None:
+        """A renamed section is one the reader stops finding, which it reports as nothing there."""
+        out = self.digest_for(review(body=OVERVIEW + '\n### Confidence assessment\n\nHigh.\n'))
+        self.assertIn('shapes=UNRECOGNIZED', out)
+        self.assertIn('heading: ### Confidence assessment', out)
+
+    def test_a_details_summary_that_is_not_in_the_inventory_blocks(self) -> None:
+        """The suppressed section has already moved between wrappers once."""
+        body = OVERVIEW + '\n<details>\n<summary>Withheld findings</summary>\n\nx\n</details>\n'
+        out = self.digest_for(review(body=body))
+        self.assertIn('summary: Withheld findings', out)
+
+    def test_a_metadata_label_that_is_not_in_the_inventory_blocks(self) -> None:
+        """The coverage line arrived as one of these bullets, so the next reading may too."""
+        out = self.digest_for(review(body=nested() + '\n- **Confidence:** high\n'))
+        self.assertIn('metadata label: Confidence', out)
+
+    def test_a_body_carrying_no_heading_at_all_blocks(self) -> None:
+        """Every measured body opens on a heading, so one with none is a format never seen.
+
+        This is the arm that catches a rewrite wholesale rather than marker by marker, and it is
+        also what catches the refusal wording drifting, since a refusal stops being exempt.
+        """
+        self.assertIn('body carrying no heading at all',
+                      ' '.join(pr_review.unrecognized_in('Looks good to me.')))
+        self.assertIn('body carrying no heading at all',
+                      ' '.join(pr_review.unrecognized_in('')))
+
+    def test_a_refusal_is_exempt_because_it_is_already_a_vetted_shape(self) -> None:
+        """It is a bare paragraph by design, and `refusal=YES` already names its remedy."""
+        self.assertEqual([], pr_review.unrecognized_in(REFUSED))
+        out = self.digest_for(review(body=REFUSED))
+        self.assertIn('shapes=ok', out)
+        self.assertIn('refusal=YES', out)
+
+    def test_a_refusal_whose_wording_drifted_stops_being_exempt_and_blocks(self) -> None:
+        """The exemption is the pattern, so losing the pattern loses the exemption, not the check.
+
+        This is the failure the refusal check was built for arriving one rewording later: the
+        body would read as an ordinary review carrying the head and raising nothing.
+        """
+        drifted = 'Copilot has declined to review this pull request because it is too large.'
+        self.assertEqual('', pr_review.refusal_of({'body': drifted}))
+        out = self.digest_for(review(body=drifted))
+        self.assertIn('shapes=UNRECOGNIZED', out)
+        self.assertIn('refusal=no', out)
+
+    def test_the_emoji_and_the_finding_count_are_normalized_rather_than_vetted(self) -> None:
+        """Both change without the section changing, so comparing them raw blocks every review."""
+        for heading in ('### \U0001F7E2 Ready to approve', '### \U0001F7E1 Changes recommended',
+                        '### Suppressed comments (4)', '### Suppressed comments (11)'):
+            with self.subTest(heading=heading):
+                self.assertEqual([], pr_review.unrecognized_in(f'{heading}\n\nText.\n'))
+
+    def test_a_marker_quoted_in_a_fenced_block_is_not_one_the_review_carries(self) -> None:
+        """This change publishes the inventory, so a review of it quotes the lot back."""
+        body = (OVERVIEW + '\nThe vetted headings are:\n\n```\n### Confidence assessment\n'
+                '- **Confidence:** high\n```\n')
+        self.assertEqual([], pr_review.unrecognized_in(body))
+
+    def test_a_reviewer_login_that_is_not_the_one_every_query_filters_on_blocks(self) -> None:
+        """A rename leaves every filter here matching nothing, which reads as no review at all.
+
+        That is the quietest drift of the lot: the digest reports `rounds=0 review_on_head=NO`
+        over a review that landed, and a wait polls out its whole timeout against it.
+        """
+        pr = payload([review(login='copilot-code-review-agent')])
+        found = ' '.join(pr_review.unrecognized_shapes(pr))
+        self.assertIn('reviewer login: copilot-code-review-agent', found)
+
+    def test_the_coding_agent_and_a_human_are_not_the_reviewer_renamed(self) -> None:
+        """`copilot-swe-agent` edits code and is not this reviewer under another name."""
+        for login in ('copilot-swe-agent', 'ptr727', 'codecov[bot]', 'dependabot[bot]'):
+            with self.subTest(login=login):
+                self.assertEqual([], pr_review.unrecognized_shapes(payload([review(login=login)])))
+
+    def test_the_block_names_the_hub_and_leaves_the_merge_to_the_maintainer(self) -> None:
+        """The remedy is an issue where the reader lives, and the merge is not this script's call."""
+        out = self.digest_for(review(body=OVERVIEW + '\n### Confidence assessment\n'))
+        self.assertIn('UNRECOGNIZED REVIEWER OUTPUT (1)', out)
+        self.assertIn(f'File an issue on {pr_review.HUB}', out)
+        self.assertIn("maintainer's call rather than the agent's", out)
+
+    def test_every_round_is_read_rather_than_the_head_s(self) -> None:
+        """This asks whether the reader still understands the reviewer, which is not head-scoped.
+
+        A shape that arrived one round ago is one every later round carries, so waiting for it to
+        reach the head is waiting through the rounds it is already misreading.
+        """
+        out = self.digest_for(review(oid=OLD, body=OVERVIEW + '\n### Confidence assessment\n'),
+                              review(body=OVERVIEW))
+        self.assertIn('shapes=UNRECOGNIZED', out)
+        self.assertIn(f'(round {OLD[:8]})', out)
+
+
+class TestCoverageExitCodes(GqlCase):
+    """`status` returned 0 unconditionally, so a partial round reported as a covered head."""
+
+    def setUp(self) -> None:
+        self.out = self.enterContext(contextlib.redirect_stdout(io.StringIO()))
+
+    def partial(self) -> dict:
+        return review(body=OVERVIEW + '\nCopilot reviewed 2 out of 3 changed files in this '
+                                      'pull request and generated no comments.')
+
+    def test_status_exits_forty_two_on_a_round_that_read_part_of_the_diff(self) -> None:
+        self.answer(payload([self.partial()]))
+        self.assertEqual(42, pr_review.main(['status', '7', '--repo', 'o/r']))
+        self.assertIn('status=COVERAGE_IS_PARTIAL', self.out.getvalue())
+
+    def test_the_partial_message_counts_the_unread_files_rather_than_assuming_one(self) -> None:
+        """Every partial on record skipped exactly one file, which is a measurement of seven
+        rounds rather than a property the state carries, so the line reads the run it prints."""
+        for reviewed, changed, phrase in ((2, 3, '1 of the 3 changed files has'),
+                                          (5, 9, '4 of the 9 changed files have')):
+            with self.subTest(reviewed=reviewed, changed=changed):
+                out = self.enterContext(contextlib.redirect_stdout(io.StringIO()))
+                self.answer(payload([review(
+                    body=OVERVIEW + f'\nCopilot reviewed {reviewed} out of {changed} changed '
+                                    f'files in this pull request and generated no comments.')]))
+                self.assertEqual(42, pr_review.main(['status', '7', '--repo', 'o/r']))
+                self.assertIn(phrase, out.getvalue())
+
+    def test_the_partial_message_still_blocks_where_the_counts_cannot_be_re_read(self) -> None:
+        """Unreachable by construction, since PARTIAL is set only where that line parsed, so the
+        counts are withheld from `report_verdict` directly. A crash on the blocking path would
+        read to a caller as this script being broken rather than as a round that read part."""
+        pr = payload([self.partial()])
+        unparseable = 'a coverage line carrying no counts at all'
+        with mock.patch.object(pr_review, 'head_coverage',
+                               return_value=(pr_review.PARTIAL, unparseable)):
+            self.assertEqual(42, pr_review.report_verdict(pr))
+        out = self.out.getvalue()
+        self.assertIn('status=COVERAGE_IS_PARTIAL', out)
+        self.assertIn('could not be re-read', out)
+        self.assertNotIn('changed files', out)
+
+    def test_status_exits_forty_three_on_a_wording_it_does_not_read(self) -> None:
+        self.answer(payload([review(body=OVERVIEW +
+                                     '\nCopilot reviewed some of the changed files.')]))
+        self.assertEqual(43, pr_review.main(['status', '7', '--repo', 'o/r']))
+        out = self.out.getvalue()
+        self.assertIn('status=UNRECOGNIZED_REVIEWER_OUTPUT', out)
+        self.assertIn('coverage=UNVETTED', out)
+
+    def test_status_still_exits_zero_on_a_full_round_and_on_a_silent_one(self) -> None:
+        """Failing the silent shape would fail roughly one review in twelve on this repository."""
+        for body in (OVERVIEW + '\n' + COVERED, nested(), OVERVIEW):
+            with self.subTest(body=body[:40]):
+                self.answer(payload([review(body=body)]))
+                self.assertEqual(0, pr_review.main(['status', '7', '--repo', 'o/r']))
+
+    def test_wait_carries_the_same_codes_rather_than_ending_on_a_partial_round(self) -> None:
+        """`reviewed_head` is what decided its zero, and coverage of the head is not coverage
+        of the diff."""
+        self.answer(payload([self.partial()]))
+        with mock.patch.object(pr_review.time, 'sleep'):
+            self.assertEqual(42, pr_review.main(['wait', '7', '--repo', 'o/r']))
+        self.assertIn('coverage=PARTIAL', self.out.getvalue())
+
+    def test_status_and_wait_both_exit_forty_three_on_an_unrecognized_shape(self) -> None:
+        """Neither may report a clean pass over output the reader does not understand."""
+        self.answer(payload([review(body=OVERVIEW + '\n### Confidence assessment\n')]))
+        self.assertEqual(43, pr_review.main(['status', '7', '--repo', 'o/r']))
+        with mock.patch.object(pr_review.time, 'sleep'):
+            self.assertEqual(43, pr_review.main(['wait', '7', '--repo', 'o/r']))
+        self.assertIn('status=UNRECOGNIZED_REVIEWER_OUTPUT', self.out.getvalue())
+
+    def test_an_unrecognized_shape_outranks_the_partial_coverage_code(self) -> None:
+        """A reader that does not understand the output cannot be believed about the diff either."""
+        body = (OVERVIEW + '\n### Confidence assessment\n\nCopilot reviewed 2 out of 3 changed '
+                'files in this pull request and generated no comments.\n')
+        self.answer(payload([review(body=body)]))
+        self.assertEqual(43, pr_review.main(['status', '7', '--repo', 'o/r']))
+
+    def test_a_drifted_login_reaches_the_code_rather_than_timing_out_as_pending(self) -> None:
+        """The gate could not fire for the one drift it was written to catch.
+
+        `reviewed_head` filters on the login, so a renamed reviewer leaves it false, and gating
+        the verdict behind it meant the login check never reached an exit code. The digest
+        printed `shapes=UNRECOGNIZED` and the wait returned 30, which is the digest disagreeing
+        with the code, and an automated reader settles that by believing the code.
+        """
+        pr = payload([review(login='copilot-code-review-agent')])
+        self.assertFalse(pr_review.reviewed_head(pr))
+        self.answer(pr)
+        with mock.patch.object(pr_review.time, 'sleep') as slept:
+            self.assertEqual(43, pr_review.main(['wait', '7', '--repo', 'o/r',
+                                                 '--timeout', '600']))
+        # Terminal, so it stops rather than polling out the timeout against a landed review.
+        slept.assert_not_called()
+        out = self.out.getvalue()
+        self.assertIn('status=UNRECOGNIZED_REVIEWER_OUTPUT', out)
+        self.assertIn('shapes=UNRECOGNIZED', out)
+
+    def test_a_shape_on_a_round_that_covers_no_head_still_reaches_the_code(self) -> None:
+        """The same gap with the body reader rather than the login, since both sit behind it."""
+        self.answer(payload([review(oid=OLD, body=OVERVIEW + '\n### Confidence assessment\n')]))
+        with mock.patch.object(pr_review.time, 'sleep'):
+            self.assertEqual(43, pr_review.main(['wait', '7', '--repo', 'o/r', '--timeout', '0']))
+
+    def test_a_pending_round_with_nothing_unrecognized_still_reports_pending(self) -> None:
+        """The gate is not allowed to swallow the ordinary wait, which is most of them."""
+        self.answer(payload([review(oid=OLD)]))
+        with mock.patch.object(pr_review.time, 'sleep'):
+            self.assertEqual(30, pr_review.main(['wait', '7', '--repo', 'o/r', '--timeout', '0']))
+
+    def test_a_refusal_still_exits_forty_one_rather_than_on_a_coverage_code(self) -> None:
+        """The refusal names the round that declined, where a coverage code names a round."""
+        self.answer(payload([review(body=REFUSED)]))
+        with mock.patch.object(pr_review.time, 'sleep'):
+            self.assertEqual(41, pr_review.main(['wait', '7', '--repo', 'o/r', '--timeout', '0']))
 
 
 class TestDigestReportsTheAnswer(GqlCase):
@@ -1011,7 +1456,7 @@ class TestCli(GqlCase):
         slept.assert_not_called()
         self.assertIn('waited=', self.out.getvalue())
 
-    def test_wait_exits_forty_two_where_the_review_closed_but_a_check_is_starved(self) -> None:
+    def test_wait_exits_forty_four_where_the_review_closed_but_a_check_is_starved(self) -> None:
         """Exit 0 was saying the review loop closing is the merge gate, and it is not.
 
         `main` reads the real clock, so the timestamp comes from that clock rather than from the
@@ -1022,17 +1467,17 @@ class TestCli(GqlCase):
         self.answer(payload([review()], merge='BLOCKED', checks=[
             check(name='gate', status='QUEUED', conclusion='', started=real_ago(900))]))
         with mock.patch.object(pr_review.time, 'sleep'):
-            self.assertEqual(42, self.cli(['wait', '7']))
+            self.assertEqual(44, self.cli(['wait', '7']))
         out = self.out.getvalue()
         self.assertIn('status=CHECKS_NOT_MERGEABLE', out)
         self.assertIn('CHECK NOT PICKED UP', out)
 
-    def test_a_stuck_check_nothing_requires_does_not_take_forty_two(self) -> None:
+    def test_a_stuck_check_nothing_requires_does_not_take_forty_four(self) -> None:
         """A rollup carries checks the ruleset does not require, four of six on a green run here.
 
         So the code borrows GitHub's own reading of which checks gate a merge, and `CLEAN` proves
         no required gate is outstanding whatever else the rollup is doing. Without that, a stuck
-        check nothing requires returns 42 on a mergeable pull request. Raised in review on this
+        check nothing requires returns 44 on a mergeable pull request. Raised in review on this
         change. The digest still names the check, so the narrower code costs the reader nothing.
         """
         self.answer(payload([review()], merge='CLEAN', checks=[
@@ -1047,7 +1492,7 @@ class TestCli(GqlCase):
         """A code that fires on every pull request mid-CI carries nothing, so this must be 0.
 
         The wait returns the moment coverage lands, which on almost every pull request is while
-        the checks are still going, so a pending check taking 42 would make 42 the usual outcome.
+        the checks are still going, so a pending check taking 44 would make 44 the usual outcome.
         Inside the default grace on the real clock, which is what this reads, so no flag is needed.
         """
         self.answer(payload([review()], merge='BLOCKED', checks=[
@@ -1268,6 +1713,432 @@ class TestCli(GqlCase):
         self.assertIn('repo=o/r pr=7', self.out.getvalue())
 
 
+def rthread(tid: str, body: str = 'The retry count is off by one.', path: str = 'a.py',
+            line: int = 12, resolved: bool = False,
+            login: str = pr_review.REVIEWER) -> dict:
+    """A thread as the reply query reads it, with `path` and `line` on the thread itself."""
+    return {'id': tid, 'isResolved': resolved, 'path': path, 'line': line,
+            'comments': {'nodes': [{'author': {'login': login}, 'body': body}]}}
+
+
+def page(threads: list[dict], more: bool = False, cursor: str | None = None) -> dict:
+    return {'nodes': threads, 'pageInfo': {'hasNextPage': more, 'endCursor': cursor}}
+
+
+LANDED = {'id': 'c1', 'url': 'https://github.com/o/r/pull/7#discussion_r1', 'body': 'Fixed in abc.'}
+
+
+class ReplyCase(unittest.TestCase):
+    """Base driving `reply` against crafted responses, so no case reaches the network."""
+
+    def setUp(self) -> None:
+        self.out = self.enterContext(contextlib.redirect_stdout(io.StringIO()))
+        self.enterContext(mock.patch.object(pr_review, 'origin_owner', return_value='o'))
+        self.docs: list[str] = []
+
+    def wire(self, *pages: dict, reply: dict | None = LANDED, resolved: bool = True) -> None:
+        """Answer the thread reads from `pages`, and each mutation from the given shape."""
+        queue = list(pages) or [page([])]
+
+        def fake(query: str, **variables: object) -> dict:
+            self.docs.append(query)
+            if 'reviewThreads' in query:
+                return {'repository': {'pullRequest': {'reviewThreads': queue.pop(0)}}}
+            if 'addPullRequestReviewThreadReply' in query:
+                return {'addPullRequestReviewThreadReply': {'comment': reply}}
+            if 'resolveReviewThread' in query:
+                return {'resolveReviewThread': {'thread': {'isResolved': resolved}}}
+            raise AssertionError(f'unexpected document: {query[:60]}')
+
+        self.enterContext(mock.patch.object(pr_review, 'gh_graphql', side_effect=fake))
+
+    def run_reply(self, *extra: str) -> int:
+        return pr_review.main(['reply', '7', '--repo', 'o/r', '--match', 'retry count',
+                               '--body', 'Fixed in abc.', *extra])
+
+    def wrote(self) -> bool:
+        return any('mutation' in d for d in self.docs)
+
+    def resolved_a_thread(self) -> bool:
+        return any('resolveReviewThread' in d for d in self.docs)
+
+
+class TestReplySelectsWithoutAnId(ReplyCase):
+    def test_the_matching_thread_is_answered_and_resolved(self) -> None:
+        self.wire(page([rthread('t1')]))
+        self.assertEqual(0, self.run_reply('--resolve'))
+        self.assertIn('REPLIED_AND_RESOLVED', self.out.getvalue())
+        self.assertIn(LANDED['url'], self.out.getvalue())
+
+    def test_the_id_comes_from_the_query_rather_than_the_caller(self) -> None:
+        """The whole point: the id each mutation carries is one this same run just read."""
+        ids = []
+
+        def capture(query: str, **variables: object) -> dict:
+            if 'reviewThreads' in query:
+                return {'repository': {'pullRequest':
+                                       {'reviewThreads': page([rthread('t-from-the-query')])}}}
+            ids.append(variables.get('threadId'))
+            if 'addPullRequestReviewThreadReply' in query:
+                return {'addPullRequestReviewThreadReply': {'comment': LANDED}}
+            return {'resolveReviewThread': {'thread': {'isResolved': True}}}
+
+        with mock.patch.object(pr_review, 'gh_graphql', side_effect=capture):
+            self.assertEqual(0, self.run_reply('--resolve'))
+        self.assertEqual(['t-from-the-query', 't-from-the-query'], ids)
+
+    def test_no_match_writes_nothing_and_lists_what_is_open(self) -> None:
+        """A no-match reads the same as an already-answered thread, so it stops rather than guesses."""
+        self.wire(page([rthread('t1', body='An unrelated finding about naming.')]))
+        self.assertEqual(60, self.run_reply('--resolve'))
+        self.assertFalse(self.wrote())
+        self.assertIn('NO_MATCH', self.out.getvalue())
+        # The open threads print, or the reader's next move is to go hunting for an id.
+        self.assertIn('unrelated finding', self.out.getvalue())
+
+    def test_two_matches_refuse_rather_than_take_the_first(self) -> None:
+        """`head -n 1` on an ambiguous match is how a reply lands on the wrong finding."""
+        self.wire(page([rthread('t1', path='a.py'), rthread('t2', path='b.py')]))
+        self.assertEqual(61, self.run_reply('--resolve'))
+        self.assertFalse(self.wrote())
+        self.assertIn('AMBIGUOUS', self.out.getvalue())
+        for path in ('a.py', 'b.py'):
+            self.assertIn(path, self.out.getvalue())
+
+    def test_path_narrows_an_otherwise_ambiguous_match(self) -> None:
+        self.wire(page([rthread('t1', path='a.py'), rthread('t2', path='b.py')]))
+        self.assertEqual(0, self.run_reply('--resolve', '--path', 'b.py'))
+        self.assertIn('b.py:12', self.out.getvalue())
+
+    def test_a_resolved_thread_is_not_a_candidate(self) -> None:
+        """It is answered, and replying again reopens a conversation nobody is reading."""
+        self.wire(page([rthread('t1', resolved=True)]))
+        self.assertEqual(60, self.run_reply('--resolve'))
+        self.assertFalse(self.wrote())
+
+    def test_the_match_follows_the_cursor_to_the_last_page(self) -> None:
+        """A first page read as the whole set reports no match on a thread further along."""
+        self.wire(page([rthread('t1', body='Something else.')], more=True, cursor='c1'),
+                  page([rthread('t2')]))
+        self.assertEqual(0, self.run_reply('--resolve'))
+        self.assertIn('REPLIED_AND_RESOLVED', self.out.getvalue())
+
+    def test_the_match_reads_the_finding_text_rather_than_a_line_number(self) -> None:
+        """A fix push moves the line, and every lookup keyed to one then misses."""
+        self.wire(page([rthread('t1', line=999, body='The RETRY COUNT is off by one.')]))
+        self.assertEqual(0, self.run_reply('--resolve'))
+        self.assertIn('REPLIED_AND_RESOLVED', self.out.getvalue())
+
+
+class TestReplyConfirmsBeforeResolving(ReplyCase):
+    def test_a_reply_returning_no_url_leaves_the_thread_open(self) -> None:
+        """Three replies posted empty and the resolves still succeeded, closing them unanswered."""
+        self.wire(page([rthread('t1')]), reply={'id': 'c1', 'url': None, 'body': ''})
+        self.assertEqual(62, self.run_reply('--resolve'))
+        self.assertFalse(self.resolved_a_thread())
+        self.assertIn('REPLY_NOT_CONFIRMED', self.out.getvalue())
+
+    def test_a_reply_whose_body_came_back_empty_leaves_the_thread_open(self) -> None:
+        """A url alone says a comment exists, not that it carries the answer."""
+        self.wire(page([rthread('t1')]), reply={'id': 'c1', 'url': LANDED['url'], 'body': '   '})
+        self.assertEqual(62, self.run_reply('--resolve'))
+        self.assertFalse(self.resolved_a_thread())
+
+    def test_a_resolve_that_does_not_confirm_is_reported_rather_than_assumed(self) -> None:
+        """The reply is already posted, so silence here leaves a thread open behind an answer."""
+        self.wire(page([rthread('t1')]), resolved=False)
+        self.assertEqual(63, self.run_reply('--resolve'))
+        self.assertIn('RESOLVE_NOT_CONFIRMED', self.out.getvalue())
+
+    def test_without_resolve_the_thread_is_answered_and_left_open(self) -> None:
+        """A decline is resolved once its evidence is in the thread, which is the reader's call."""
+        self.wire(page([rthread('t1')]))
+        self.assertEqual(0, self.run_reply())
+        self.assertFalse(self.resolved_a_thread())
+        self.assertIn('status=REPLIED', self.out.getvalue())
+
+
+class TestReplyStaysInScope(ReplyCase):
+    def test_a_target_under_another_owner_is_refused_before_anything_is_read(self) -> None:
+        """The incident shape: a write that lands on a stranger's repository."""
+        self.wire(page([rthread('t1')]))
+        code = pr_review.main(['reply', '7', '--repo', 'someone-else/r', '--match', 'retry',
+                               '--body', 'Fixed.', '--resolve'])
+        self.assertEqual(64, code)
+        self.assertEqual([], self.docs)
+        self.assertIn('OUT_OF_SCOPE', self.out.getvalue())
+
+    def test_an_unreadable_origin_refuses_rather_than_assuming_scope(self) -> None:
+        """An unverified scope is not a scope, and a check that cannot run reports itself."""
+        self.wire(page([rthread('t1')]))
+        with mock.patch.object(pr_review, 'origin_owner', return_value=None):
+            self.assertEqual(64, self.run_reply('--resolve'))
+        self.assertEqual([], self.docs)
+
+    def test_a_sibling_repository_under_the_same_owner_is_in_scope(self) -> None:
+        """The fleet is one owner, and that is the case the maintainer works in daily."""
+        self.wire(page([rthread('t1')]))
+        code = pr_review.main(['reply', '7', '--repo', 'o/some-other-repo', '--match',
+                               'retry count', '--body', 'Fixed in abc.', '--resolve'])
+        self.assertEqual(0, code)
+
+
+class TestReplyArguments(unittest.TestCase):
+    def err(self, argv: list[str]) -> str:
+        with contextlib.redirect_stderr(io.StringIO()) as err:
+            with self.assertRaises(SystemExit):
+                pr_review.main(argv)
+        return err.getvalue()
+
+    def test_an_empty_body_is_rejected_rather_than_posted(self) -> None:
+        """A thread resolved on an empty answer reads as addressed while carrying nothing."""
+        for body in ('', '   '):
+            with self.subTest(body=body):
+                self.assertIn('--body', self.err(
+                    ['reply', '7', '--repo', 'o/r', '--match', 'x', '--body', body]))
+
+    def test_a_missing_match_is_rejected_rather_than_matching_everything(self) -> None:
+        self.assertIn('--match', self.err(['reply', '7', '--repo', 'o/r', '--body', 'Fixed.']))
+
+    def test_a_writing_option_on_a_reading_command_is_an_error(self) -> None:
+        """Silently ignored, it reads as an option that took effect on a run that wrote nothing."""
+        for flag in (['--body', 'Fixed.'], ['--match', 'x'], ['--resolve'], ['--path', 'a.py']):
+            with self.subTest(flag=flag[0]):
+                self.assertIn(flag[0], self.err(['status', '7', '--repo', 'o/r', *flag]))
+
+
+PIN = 'actions/checkout@' + '9' * 40
+
+
+def refs(body: str) -> tuple[list[str], list[str]]:
+    return pr_review.body_references(body)
+
+
+class TestBodyReferences(unittest.TestCase):
+    """What a description is read as claiming, before anything is fetched.
+
+    Over-reading is the failure that matters here, and the free SHA scan this replaced is the
+    proof: over 25 merged pull requests it raised four findings and every one was correct prose.
+    The cases below are those four shapes, each held to yielding nothing.
+    """
+
+    def test_an_action_pin_is_a_uses_ref_and_not_a_commit_of_this_repository(self) -> None:
+        """The pin's SHA belongs to the action's repository, so reading it here reports it stale."""
+        uses, shas = refs(f'Bumped to `uses: {PIN}` this round.')
+        self.assertEqual([PIN], uses)
+        self.assertEqual([], shas)
+
+    def test_a_commit_a_verb_claims_this_branch_carries_is_read(self) -> None:
+        for phrase in ('Fixed in `69688ec`', 'landed in 69688ec', 'Corrected by `69688ec`',
+                       'shipped as `69688ec`'):
+            with self.subTest(phrase=phrase):
+                self.assertEqual(['69688ec'], refs(f'{phrase} on this branch.')[1])
+
+    def test_a_commit_stated_as_history_is_not_a_claim_about_this_branch(self) -> None:
+        """PR 592's shape: a `develop` commit named as history, correct and not on this head."""
+        self.assertEqual([], refs('`9d85941` merged "Reaching the Hub" whole, so the cluster '
+                                  'is deleted rather than annotated.')[1])
+
+    def test_a_sha_inside_quoted_tool_output_is_not_a_claim(self) -> None:
+        """PR 584's shape: a digest pasted to show what the tool prints."""
+        self.assertEqual([], refs('pr=108 head=9f56a472 rounds=1 review_on_head=yes '
+                                  'threads=0 merge=CLEAN')[1])
+
+    def test_a_commit_in_another_repository_is_not_a_claim(self) -> None:
+        """PR 571 and 568's shape, and neither carries a URL that would mark it as elsewhere."""
+        for body in ('Read at Blog `main@2b132e4`. Verdict operational.',
+                     'Both are on Blog\'s ground-truth `main` (`2b132e4`), verified by reading it.',
+                     '`themes/README.md` records the upstream repository, commit `154d006e`.'):
+            with self.subTest(body=body):
+                self.assertEqual([], refs(body)[1])
+
+    def test_an_all_hex_english_word_is_not_read_as_a_commit(self) -> None:
+        """The digit backstop, so a verb this list gains later cannot start reading prose."""
+        for word in ('accede', 'acceded', 'defaced', 'effaced'):
+            with self.subTest(word=word):
+                self.assertEqual([], refs(f'The clause was corrected as {word} above.')[1])
+
+    def test_a_hex_run_shorter_than_gits_own_floor_is_not_a_commit(self) -> None:
+        """Six is short enough to collide with an identifier, and git abbreviates to seven."""
+        self.assertEqual([], refs('Fixed in `abc12` which is not a commit.')[1])
+
+    def test_each_reference_is_reported_once_however_often_it_is_quoted(self) -> None:
+        uses, shas = refs(f'Fixed in `69688ec`, again fixed in `69688ec`, '
+                          f'and `uses: {PIN}` twice: `uses: {PIN}`.')
+        self.assertEqual(['69688ec'], shas)
+        self.assertEqual([PIN], uses)
+
+    def test_a_description_naming_nothing_yields_nothing(self) -> None:
+        self.assertEqual(([], []), refs('This widens a rule and adds a case for it.'))
+
+
+class ClaimsCase(unittest.TestCase):
+    """Base for the `claims` path, with the pull request and every read replaced."""
+
+    def setUp(self) -> None:
+        self.compare: dict[str, tuple[int, str, str]] = {}
+        self.carried: set[str] | None = set()
+
+    def run_claims(self, body: str, head: str = HEAD) -> tuple[int, str]:
+        def rest(path: str, jq: str | None = None) -> subprocess.CompletedProcess:
+            rc, out, err = self.compare.get(path, (1, '', 'gh: Not Found (HTTP 404)'))
+            return subprocess.CompletedProcess([path], rc, out, err)
+
+        with mock.patch.object(pr_review, 'gql',
+                               return_value={'headRefOid': head, 'body': body}), \
+                mock.patch.object(pr_review, 'gh_rest', side_effect=rest), \
+                mock.patch.object(pr_review, 'head_carries', return_value=self.carried), \
+                contextlib.redirect_stdout(io.StringIO()) as out:
+            code = pr_review.check_claims('ptr727', 'ProjectTemplate', 7)
+        return code, out.getvalue()
+
+    def answer(self, sha: str, status: str, head: str = HEAD) -> None:
+        self.compare[f'repos/ptr727/ProjectTemplate/compare/{sha}...{head}'] = (0, status, '')
+
+    def unread(self, sha: str, head: str = HEAD) -> None:
+        self.compare[f'repos/ptr727/ProjectTemplate/compare/{sha}...{head}'] = (
+            1, '', 'error connecting to api.github.com')
+
+
+class TestClaimsReadsCommits(ClaimsCase):
+    def test_a_commit_the_head_descends_from_is_clean(self) -> None:
+        """The count is asserted beside the verdict, since `stale=0` over nothing read is also 0."""
+        for status in ('ahead', 'identical'):
+            with self.subTest(status=status):
+                self.answer('69688ec', status)
+                code, out = self.run_claims('Fixed in `69688ec`.')
+                self.assertEqual(0, code)
+                self.assertIn('commits=1 uses=0 stale=0 unread=0', out)
+
+    def test_a_commit_the_repository_does_not_carry_is_stale(self) -> None:
+        """The amended-away SHA: the body still names the commit the branch was rewritten off."""
+        code, out = self.run_claims('Fixed in `deadbee1`.')
+        self.assertEqual(70, code)
+        self.assertIn('STALE COMMIT `deadbee1`', out)
+        self.assertIn('carries no such commit', out)
+
+    def test_a_commit_this_head_does_not_descend_from_is_stale_and_names_the_status(self) -> None:
+        """A commit that exists and is not on this branch is the rebase case, not a missing one."""
+        self.answer('dbd1cdc', 'diverged')
+        code, out = self.run_claims('Landed in `dbd1cdc`.')
+        self.assertEqual(70, code)
+        self.assertIn('does not descend from it (diverged)', out)
+
+    def test_a_commit_github_did_not_answer_for_is_undecided_rather_than_stale(self) -> None:
+        """A network failure reported as a stale description sends a reader to fix correct prose."""
+        self.unread('69688ec')
+        self.answer('a6d7a4b', 'ahead')
+        code, out = self.run_claims('Fixed in `69688ec`, then corrected in `a6d7a4b`.')
+        self.assertEqual(0, code)
+        self.assertIn('unread=1', out)
+        self.assertIn('left undecided', out)
+
+    def test_every_reference_undecided_reports_no_verdict_rather_than_a_clean_pass(self) -> None:
+        """`stale=0` from a check that read nothing renders exactly like `stale=0` from one that did."""
+        self.unread('69688ec')
+        code, out = self.run_claims('Fixed in `69688ec`.')
+        self.assertEqual(71, code)
+        self.assertIn('NOTHING_WAS_READ', out)
+
+
+class TestClaimsReadsUsesRefs(ClaimsCase):
+    def test_a_ref_the_head_tree_carries_is_clean(self) -> None:
+        self.carried = {PIN}
+        code, out = self.run_claims(f'Pinned to `uses: {PIN}`.')
+        self.assertEqual(0, code)
+        self.assertIn('uses=1 stale=0', out)
+
+    def test_a_ref_no_file_at_head_carries_is_stale(self) -> None:
+        """The bump the branch reverted, with the description still quoting the pin it named."""
+        self.carried = set()
+        code, out = self.run_claims(f'Pinned to `uses: {PIN}`.')
+        self.assertEqual(70, code)
+        self.assertIn(f'STALE USES `{PIN}`', out)
+
+    def test_an_unreadable_head_tree_is_undecided_rather_than_stale(self) -> None:
+        self.carried = None
+        code, out = self.run_claims(f'Pinned to `uses: {PIN}`.')
+        self.assertEqual(71, code)
+        self.assertIn('NOTHING_WAS_READ', out)
+
+    def test_a_description_quoting_no_ref_reads_no_tree(self) -> None:
+        """The archive is one request, and a body naming nothing has no reason to spend it."""
+        with mock.patch.object(pr_review, 'gql',
+                               return_value={'headRefOid': HEAD, 'body': 'Prose only.'}), \
+                mock.patch.object(pr_review, 'head_carries') as tree, \
+                contextlib.redirect_stdout(io.StringIO()):
+            self.assertEqual(0, pr_review.check_claims('ptr727', 'ProjectTemplate', 7))
+        tree.assert_not_called()
+
+    def test_a_stale_ref_and_a_stale_commit_are_both_reported(self) -> None:
+        """One failing reference does not end the read, since a body drifts in more than one place."""
+        self.carried = set()
+        code, out = self.run_claims(f'Fixed in `deadbee1`, pinned to `uses: {PIN}`.')
+        self.assertEqual(70, code)
+        self.assertIn('STALE COMMIT', out)
+        self.assertIn('STALE USES', out)
+        self.assertIn('stale=2', out)
+
+
+class TestClaimsIsReadOnly(unittest.TestCase):
+    def test_the_head_tree_read_asks_for_an_archive_and_nothing_else(self) -> None:
+        source = (REPO / 'scripts' / 'pr_review.py').read_text(encoding='utf-8')
+        self.assertIn('tarball/{head}', source)
+
+    def test_an_unreadable_archive_reads_as_undecided_rather_than_as_an_empty_tree(self) -> None:
+        """An empty tree carries no ref, so reading a failed download as one reports every ref stale."""
+        for outcome in (subprocess.CompletedProcess([], 1, b'', b''),):
+            with mock.patch.object(pr_review.subprocess, 'run', return_value=outcome):
+                self.assertIsNone(pr_review.head_carries('ptr727', 'ProjectTemplate', HEAD, [PIN]))
+
+    def test_gh_being_absent_leaves_the_tree_undecided_rather_than_aborting_claims(self) -> None:
+        """This read cannot go through `gh_rest`, so it carries that helper's guards itself.
+
+        Raising here would abort a run mid-way, where every other unreadable answer in this
+        subcommand reports undecided and lets the caller see what was decided.
+        """
+        with mock.patch.object(pr_review.subprocess, 'run', side_effect=FileNotFoundError):
+            self.assertIsNone(pr_review.head_carries('ptr727', 'ProjectTemplate', HEAD, [PIN]))
+
+    def test_a_hung_download_times_out_rather_than_hanging_the_run(self) -> None:
+        with mock.patch.object(pr_review.subprocess, 'run',
+                               side_effect=subprocess.TimeoutExpired('gh', 1)):
+            self.assertIsNone(pr_review.head_carries('ptr727', 'ProjectTemplate', HEAD, [PIN]))
+
+    def test_the_archive_read_is_bounded_by_a_timeout(self) -> None:
+        """An unbounded read of a whole repository is a wait with no end and no message."""
+        with mock.patch.object(pr_review.subprocess, 'run') as run:
+            run.return_value = subprocess.CompletedProcess([], 1, b'', b'')
+            pr_review.head_carries('ptr727', 'ProjectTemplate', HEAD, [PIN])
+        self.assertEqual(pr_review.TARBALL_TIMEOUT, run.call_args.kwargs['timeout'])
+
+    def test_an_archive_that_is_not_a_readable_tarball_is_undecided(self) -> None:
+        proc = subprocess.CompletedProcess([], 0, b'not a gzip stream', b'')
+        with mock.patch.object(pr_review.subprocess, 'run', return_value=proc):
+            self.assertIsNone(pr_review.head_carries('ptr727', 'ProjectTemplate', HEAD, [PIN]))
+
+    def test_a_ref_is_matched_as_bytes_so_an_undecodable_file_is_still_searched(self) -> None:
+        """Skipping a file this cannot decode is how a present ref reads as absent."""
+        source = (REPO / 'scripts' / 'pr_review.py').read_text(encoding='utf-8')
+        self.assertIn('n in blob', source)
+
+    def test_an_absent_status_is_absence_and_a_rate_limit_is_not(self) -> None:
+        """Reading a 403 as a missing commit reports a correct description as contradicting itself."""
+        for status, absent in (('404', True), ('422', True), ('403', False), ('401', False),
+                               ('500', False)):
+            with self.subTest(status=status):
+                proc = subprocess.CompletedProcess([], 1, '', f'gh: (HTTP {status})')
+                self.assertEqual(absent, pr_review.answered_absent(proc))
+
+    def test_a_network_error_carrying_no_status_is_not_absence(self) -> None:
+        proc = subprocess.CompletedProcess([], 1, '', 'error connecting to api.github.com')
+        self.assertFalse(pr_review.answered_absent(proc))
+
+    def test_gh_being_absent_does_not_raise(self) -> None:
+        with mock.patch.object(pr_review.subprocess, 'run', side_effect=FileNotFoundError):
+            self.assertEqual(1, pr_review.gh_rest('repos/o/r').returncode)
+
+
 class TestContract(unittest.TestCase):
     def test_the_reviewer_login_matches_the_runbook_graphql_form(self) -> None:
         """GraphQL drops the `[bot]` suffix REST carries, and this script is GraphQL-only.
@@ -1290,14 +2161,76 @@ class TestContract(unittest.TestCase):
         # The published filter is single-quoted, which no spelling of the apostrophe survives.
         self.assertNotIn("'", pr_review.REFUSAL.pattern)
 
-    def test_no_mutation_reaches_this_script(self) -> None:
-        """Mutations stay as explicit `gh` calls so the write-guard hook and review still see them."""
+    def test_the_vetted_coverage_spellings_are_the_ones_the_runbook_publishes(self) -> None:
+        """The wording drifts, so the vetted list is read out of the runbook rather than recalled.
+
+        The two published lines are pulled out with the script's own opener and handed to its own
+        parser, which holds the pair in step in both directions: a spelling the runbook adds and
+        this cannot read fails here, and so does one this reads that the runbook never named.
+        """
+        text = RUNBOOK.read_text(encoding='utf-8')
+        published = [ln.strip() for ln in text.splitlines()
+                     if pr_review.is_coverage_line(ln)]
+        self.assertEqual(2, len(published), published)
+        for line in published:
+            with self.subTest(line=line[:44]):
+                self.assertIsNotNone(pr_review.read_coverage(line))
+        # The published filter is single-quoted in the shell, which no apostrophe survives.
+        self.assertNotIn("'", pr_review.COVERAGE_COUNTS.pattern)
+
+    def test_the_runbook_names_the_partial_round_as_a_state_that_blocks_a_merge(self) -> None:
+        """A verify step reading `commit.oid` alone is what let five partial rounds merge."""
+        text = RUNBOOK.read_text(encoding='utf-8')
+        self.assertIn('Coverage of the head is not coverage of the diff', text)
+
+    def test_the_only_writes_are_the_two_the_reply_path_owns(self) -> None:
+        """One writing path, and everything else that changes state stays out of this script.
+
+        The read subcommands are the bulk of it and a mutation reaching them is a digest that
+        writes, so the whole-source guard stays and is narrowed to the two documents `reply`
+        needs rather than dropped when the first of them arrived.
+        """
         source = (REPO / 'scripts' / 'pr_review.py').read_text(encoding='utf-8')
-        # The GraphQL keyword is matched with its opening token, so naming the runbook is not a hit.
-        for verb in ('mutation(', 'mutation{', 'mutation {', '-X POST', '-X PATCH', '-X PUT',
-                     '-X DELETE', 'gh pr merge', 'gh pr review'):
+        for verb in ('-X POST', '-X PATCH', '-X PUT', '-X DELETE', '--method',
+                     'gh pr merge', 'gh pr review', 'gh pr edit', 'requestReviews'):
             with self.subTest(verb=verb):
-                self.assertFalse(verb in source, f'{verb!r} is a state-changing call in a read-only script')
+                self.assertNotIn(verb, source, f'{verb!r} is a state-changing call this script '
+                                               'has no reason to make')
+        # `mutation(` opens a document, so the count is the number of documents.
+        # A third arriving is a write nobody reviewed as one rather than a style drift.
+        self.assertEqual(2, source.count('mutation('))
+        self.assertIn('addPullRequestReviewThreadReply', source)
+        self.assertIn('resolveReviewThread', source)
+
+    def test_the_mutations_are_the_ones_the_runbook_publishes(self) -> None:
+        """A helper performing a different write than the documented one is undocumented."""
+        text = RUNBOOK.read_text(encoding='utf-8')
+        for name in ('addPullRequestReviewThreadReply', 'resolveReviewThread'):
+            with self.subTest(mutation=name):
+                self.assertIn(name, text)
+
+    def test_no_argument_accepts_a_thread_id(self) -> None:
+        """The failure is an id typed into a mutation, so the fix is having nowhere to type one.
+
+        A parser that takes an id restores the failing shape however plainly the docs discourage
+        it, which is the lesson the two prior instances taught: the rule was known and read.
+        """
+        source = (REPO / 'scripts' / 'pr_review.py').read_text(encoding='utf-8')
+        # A node id literal anywhere in the source is an example a hand copies out of it.
+        self.assertNotIn('PRRT_', source)
+        parser_options = re.findall(r"add_argument\('(--[a-z-]+)'", source)
+        for opt in parser_options:
+            with self.subTest(option=opt):
+                self.assertNotIn('id', opt.replace('--', '').split('-'))
+        # The selector is the finding's text, and it is required rather than defaulted.
+        self.assertIn("'--match'", source)
+
+    def test_no_write_suppresses_or_forces_its_own_result(self) -> None:
+        """A mutation whose output is discarded is a write nobody can say landed."""
+        source = (REPO / 'scripts' / 'pr_review.py').read_text(encoding='utf-8')
+        for tail in ('>/dev/null', '2>/dev/null', '&>/dev/null', '|| true', '|| :', 'shell=True'):
+            with self.subTest(tail=tail):
+                self.assertNotIn(tail, source)
 
     def test_the_guard_tests_the_window_the_queries_actually_read(self) -> None:
         """A guard measuring one number while the query fetches another reads clean on drift."""
@@ -1372,16 +2305,16 @@ class TestContract(unittest.TestCase):
                 self.assertIn(flag.lstrip('-'), err.getvalue())
 
     def test_the_documented_exit_codes_are_the_ones_the_code_returns(self) -> None:
-        """The 42 docstring claimed a failed check without naming the BLOCKED the code requires.
+        """The 44 docstring claimed a failed check without naming the BLOCKED the code requires.
 
         A failed *required* check does read BLOCKED, so the code was right and the doc was short
         of it, which is the direction that costs a reader trust in the field. Raised in review
         here. This holds the docstring to naming the condition rather than only the shapes.
         """
         doc = pr_review.__doc__ or ''
-        self.assertIn('42 =', doc)
+        self.assertIn('44 =', doc)
         self.assertIn('BLOCKED', doc)
-        # Every shape the digest can print is named where the code can return 42 for it.
+        # Every shape the digest can print is named where the code can return 44 for it.
         for shape in ('queued', 'never posted', 'far past', 'failed'):
             with self.subTest(shape=shape):
                 self.assertIn(shape, doc)
@@ -1431,7 +2364,7 @@ class TestHarness(unittest.TestCase):
     def test_this_module_collects_a_plausible_number_of_cases(self) -> None:
         """A module whose cases fail to load still reports OK, which is a pass proving nothing."""
         loaded = unittest.defaultTestLoader.loadTestsFromModule(sys.modules[__name__])
-        self.assertGreaterEqual(loaded.countTestCases(), 20)
+        self.assertGreaterEqual(loaded.countTestCases(), 48)
 
 
 if __name__ == '__main__':

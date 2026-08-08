@@ -3,8 +3,8 @@ name: Publish project release action
 on:
   workflow_dispatch:
 
-# A publish is a deliberate dispatch, so runs serialize on one group and queue rather than cancel, so a run is
-# never left with a half-created GitHub release.
+# A publish is a deliberate dispatch, so runs serialize on one group and queue rather than cancel.
+# That leaves no run with a half-created GitHub release.
 concurrency:
   group: ${{ github.workflow }}
   cancel-in-progress: false
@@ -18,8 +18,9 @@ jobs:
     permissions:
       contents: read
 
-  # Publish the dispatched branch (main => release, develop => prerelease): NBGV computes the tag from the ref, then
-  # a GitHub release is created (tag + auto source archive + README + LICENSE). Source-only repo - no build targets.
+  # Publish the dispatched branch, where main gives a release and develop a prerelease.
+  # NBGV computes the tag from the ref, then a GitHub release is created carrying the tag, the auto source archive, README and LICENSE.
+  # This repo is source-only, so it has no build targets.
   publish:
     name: Publish project release job
     runs-on: ubuntu-latest
@@ -38,13 +39,13 @@ jobs:
           fi
 
       - name: Setup .NET SDK step
-        uses: actions/setup-dotnet@9a946fdbd5fb07b82b2f5a4466058b876ab72bb2 # v5.3.0
+        uses: actions/setup-dotnet@a98b56852c35b8e3190ac28c8c2271da59106c68 # v6.0.0
         with:
           dotnet-version: 10.x
 
       # Full history for NBGV; pin the dispatch-time commit - a push landing after dispatch must not release unvalidated.
       - name: Checkout code step
-        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           ref: ${{ github.sha }}
           fetch-depth: 0
@@ -56,10 +57,10 @@ jobs:
 
       # Create-or-refresh: every trigger here is a dispatch, so an existing tag is refreshed, never skipped
       # (the exists-gate belongs to the multi-trigger reusable form, where a scheduled re-run must no-op).
-      # target_commitish pins the tag to the exact built commit (GitCommitId), not the default branch. The release is
-      # the tag plus GitHub's auto source archive, README, and LICENSE - no build assets (source-only).
+      # The target_commitish input pins the tag to the exact built commit, GitCommitId, rather than to the default branch.
+      # The release is the tag plus GitHub's auto source archive, README and LICENSE, carrying no build assets because the repo is source-only.
       - name: Create GitHub release step
-        uses: softprops/action-gh-release@718ea10b132b3b2eba29c1007bb80653f286566b # v3.0.1
+        uses: softprops/action-gh-release@3d0d9888cb7fd7b750713d6e236d1fcb99157228 # v3.0.2
         with:
           generate_release_notes: true
           tag_name: ${{ steps.nbgv.outputs.SemVer2 }}

@@ -2,30 +2,33 @@
 
 How this repository is run. It ships no application code, so its operations are the fleet audit, the gates that mirror CI, and the script that applies repository configuration. Those gates and that script serve the whole fleet from this checkout rather than being carried into each repository, per [GOVERNANCE.md "Hub-Hosted Tooling"](./GOVERNANCE.md#hub-hosted-tooling), so every run below is a run from here against a repository named on the command line.
 
-## Runbooks
+## Local Verification
+
+What verifying a change here requires, including the part CI cannot perform. The gates below do run in CI, so a local run of them buys an earlier failure rather than a different one. The two verifications CI never performs are the fleet audit and the repository-configuration check, because each reads live state in another repository over the API and a pull request runner is given neither the credentials nor a target to read. `python3 spec/audit.py --selftest` is what CI runs of the audit, which exercises the checker against its fixtures and reads no repository at all. So a change to [spec/](./spec/), [registry/](./registry/), [repo-config/](./repo-config/) or [AUDIT.md](./AUDIT.md) is verified by running `python3 spec/audit.py` and `repo-config/configure.sh check` from this checkout before the pull request opens, each from the repository root and each taking the arguments the two runbooks below give it. A green pipeline says nothing about either, and taking it as coverage is the failure this section exists to name.
 
 ### Run the gates the way CI runs them
 
-CI passes explicit `--check` lists, and a bare `python3 scripts/prose_lint.py [file]` runs `DEFAULT_RULES`, which is those two lists together. What differs is the exit code rather than the coverage: CI gates on `charset`, `dupword` and `spelling` and reports the other five warn-only, where a bare run exits non-zero on any of the eight. `sentence-split` is in neither and is asked for by name. Run the CI invocations:
+CI passes explicit `--check` lists, and a bare `python3 scripts/prose_lint.py [file]` runs `DEFAULT_RULES`, which is those two lists plus `home-path`. What differs is the exit code rather than the coverage: CI gates on `charset`, `dupword`, `spelling`, `comment-wrap` and `comment-case` and reports the other three warn-only, where a bare run exits non-zero on any of the nine. `sentence-split` is in neither and is asked for by name. Run the CI invocations:
 
 ```sh
 python3 scripts/test_prose_lint.py
 python3 scripts/test_repo_gate.py
 python3 scripts/test_pr_review.py
 python3 spec/audit.py --selftest
+python3 host-setup/agent-safety/gh-write-guard.py --selftest
 python3 scripts/repo_gate.py
-python3 scripts/prose_lint.py . --check charset --check dupword --check spelling
-python3 scripts/prose_lint.py . --check charset-unknown --check semicolon --check dash --check comment-wrap --check comment-case --summary
+python3 scripts/prose_lint.py . --check charset --check dupword --check spelling --check comment-wrap --check comment-case
+python3 scripts/prose_lint.py . --check charset-unknown --check semicolon --check dash --summary
 for f in registry/*.json spec/*.json repo-config/*.json; do jq empty "$f"; done
 python3 spec/validate.py
 docker run --rm --pull=always -v "$PWD":/check --workdir /check mstruebing/editorconfig-checker:latest
 ```
 
-Two gaps in that list are CI's rather than this runbook's, reproduced here so a local run matches CI rather than quietly exceeding it. The `jq` glob covers `repo-config/*.json` and does not reach `repo-config/operational/develop.json`, so a malformed operational payload passes. And `sentence-split` is implemented and tested but named by no invocation, so nothing runs it.
+Three gaps in that list are CI's rather than this runbook's, reproduced here so a local run matches CI rather than quietly exceeding it. The `jq` glob covers `repo-config/*.json` and does not reach `repo-config/operational/develop.json`, so a malformed operational payload passes. And `sentence-split` is implemented and tested but named by no invocation, so nothing runs it. The third is `home-path`, which is in `DEFAULT_RULES` and so runs on every bare local run, yet is named by neither CI list, so the pattern-detectable half of the representative-data rule gates nothing in CI. It is clean tree-wide today, which is why the gap is a hole rather than a backlog.
 
-Run the `editorconfig-checker` line before pushing any new file. This repository defaults to CRLF, most tooling writes LF, and a new file therefore fails that check on its first CI run rather than locally.
+Run the `editorconfig-checker` line before pushing a new file, and before pushing an existing file that a script rewrote rather than an editor. This repository defaults to CRLF and most tooling writes LF, so a new file fails that check on its first CI run rather than locally. A scripted rewrite is the same hazard on a file that was already correct, since reading and rewriting a whole file in text mode converts every line ending in it, which no prose or Markdown gate reports.
 
-The first prose invocation gates. The second reports the backlog that is corrected as each file is next edited, and it exits non-zero locally whenever findings exist. It is warn-only in CI because the workflow step sets `continue-on-error: true`, not because the command is lenient, so a non-zero exit locally is the expected result rather than a problem.
+The first prose invocation gates. The second reports the backlog that is corrected as each file is next edited, or cleared in a deliberate batch, and it exits non-zero locally whenever findings exist. It is warn-only in CI because the workflow step sets `continue-on-error: true`, not because the command is lenient, so a non-zero exit locally is the expected result rather than a problem.
 
 Scope a run to what changed, which matches the correct-as-next-edited rule:
 
@@ -34,6 +37,8 @@ python3 scripts/prose_lint.py . --diff origin/develop
 ```
 
 Whole-tree discovery reads only files git tracks, so `python3 scripts/prose_lint.py .` and `--diff` do not see a new file until it is staged, and a clean whole-tree run proves nothing about an unstaged one. An explicit path is always read, tracked or not, so name a new file directly to check it before staging.
+
+## Runbooks
 
 ### Audit the fleet
 
@@ -94,7 +99,7 @@ The `editorconfig-checker` action is setup-only. Using it alone silently skips t
 Two `gh` limitations on the current host, both worked around rather than fixed:
 
 - `gh pr checks` carries no `--json` flag on the installed `gh` 2.46.0, so a watcher built on it prints nothing and a quiet result reads as a passing one. Read the checks from `gh pr view --json statusCheckRollup` instead.
-- `gh pr edit --base` fails with a Projects-classic deprecation error. Use `gh api --method PATCH repos/[owner/repo]/pulls/[number] -f base=[branch]` instead.
+- `gh pr edit` fails with a Projects-classic deprecation error whichever field it is given, `--base`, `--title` and `--body-file` alike, since the failure is in the mutation the command builds rather than in the field asked for. It exits non-zero without applying the change, so a stale pull request description survives review rounds. Use `gh api --method PATCH repos/[owner/repo]/pulls/[number]` with the field instead, `-f base=[branch]` or `-F body=@[file]`, and verify it took. [.github/copilot-instructions.md](./.github/copilot-instructions.md) carries the same limitation against the title and body under "PR Edits and Merge-State Gotchas".
 
 ## Configuration Layout
 

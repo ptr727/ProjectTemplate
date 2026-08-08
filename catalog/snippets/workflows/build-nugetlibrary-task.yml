@@ -13,13 +13,14 @@ on:
         required: false
         type: string
         default: ''
-      # Logical branch driving build configuration (`main` => Release, else Debug). Required (no fallback) so the
-      # develop leg of the publisher's matrix isn't mislabeled.
+      # Logical branch driving build configuration, where `main` gives Release and anything else Debug.
+      # It is required, with no fallback, so the develop leg of the publisher's matrix isn't mislabeled.
       branch:
         required: true
         type: string
-      # Smoke mode: build for validation only and skip the release-asset zip/upload. A PR smoke run has no consumer
-      # for the artifact (the github-release job is gated `!smoke`), so uploading it just burns artifact storage.
+      # Smoke mode: build for validation only and skip the release-asset zip and upload.
+      # A PR smoke run has no consumer for the artifact, since the github-release job is gated `!smoke`.
+      # Uploading it would just burn artifact storage.
       smoke:
         required: false
         type: boolean
@@ -76,9 +77,9 @@ jobs:
         if: ${{ !inputs.smoke }}
         run: 7z a -t7z ${{ runner.temp }}/NuGetLibrary.7z ${{ runner.temp }}/publish/*
 
-      # GitHub-release asset, uploaded under the `release-asset-<branch>-*` pattern that the `github-release` job
-      # collects. Branch-suffixed so the publisher can build both branches in one run without colliding on the name.
-      # Skipped on smoke: the github-release job is `!smoke`, so nothing would consume it.
+      # GitHub-release asset, uploaded under the `release-asset-<branch>-*` pattern that the `github-release` job collects.
+      # It is branch-suffixed so the publisher can build both branches in one run without colliding on the name.
+      # It is skipped on smoke, since the github-release job is `!smoke` and nothing would consume it.
       - name: Upload build artifacts step
         if: ${{ !inputs.smoke }}
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
