@@ -57,6 +57,17 @@ After the first commit, confirm it took with `git log -1 --format='%G? author=%a
 4. **Add the repository on GitHub and apply the configuration while still on that branch**, which is step 4 and needs no branch of its own.
 5. **Open a normal pull request into `develop`** when the standup is done, and let it squash like any other change.
 
+The three local steps are four commands, run before the repository exists on GitHub:
+
+```shell
+git init --initial-branch main                       # Rather than relying on the host's init.defaultBranch.
+git commit --allow-empty --message "Initial commit"  # The one signed empty root commit.
+git branch develop                                   # From main, so the two start level.
+git switch --create "<feature-branch>" develop       # Every step below runs here.
+```
+
+The placeholder is quoted for the reason step 4 gives, that an unquoted `<` is input redirection. Section 0's `git config --local` check belongs between the first and second lines, and its `git log -1` verification reads that empty commit, which is the first commit the signing window covers rather than an exception to it. Push `main` and `develop` once the repository exists and **before** step 4 applies the rulesets, since [`repo-config/main.json`][repo-config] carries a `pull_request` rule and no bypass actors, so an applied ruleset blocks the direct push that would otherwise seed the branch.
+
 **Committing onto `develop` and squashing afterwards does not work**, because `non_fast_forward` is set on both `develop` payloads and rewriting that history is exactly what the rule rejects. This is not hypothetical, since a repo stood up that way was correctly blocked at the point the history needed rewriting, with the standup already written into the branch it had to be lifted off.
 
 **The protection is uneven, so on an operational repo this instruction is the only thing holding the line.** A release repo's `repo-config/develop.json` carries a `pull_request` rule that blocks a direct commit outright, while `repo-config/operational/develop.json` carries three rules, `deletion`, `non_fast_forward` and `required_signatures`, and none of them stops one. A conformant operational repo therefore accepts the commit that this step exists to prevent, and reports nothing wrong afterwards.
