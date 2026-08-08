@@ -1,8 +1,9 @@
 #!/usr/bin/env python3
 """Install the agent write-safety kit for the current user account. Cross-platform, idempotent.
 
-Deploys the PreToolUse hook, registers it in the user settings.json, adds the safety rules to the user
-CLAUDE.md (marker-delimited so re-runs update in place), and self-tests the hook before registering it.
+Deploys the PreToolUse hook, registers it in the user settings.json, merges the permission rules this
+kit owns into the same file, adds the safety rules to the user CLAUDE.md (marker-delimited so re-runs
+update in place), and self-tests the hook before registering it.
 The bash and PowerShell wrappers both call this, so every OS runs one tested code path.
 
 Usage: python3 install.py            (installs to ~/.claude)
@@ -17,6 +18,18 @@ import subprocess
 import sys
 
 HERE = pathlib.Path(__file__).resolve().parent
+
+# Permission rules this kit installs, each as (owned prefix, rule).
+# A re-run drops every rule under the prefix before adding the current one, so a changed rule updates in place.
+# The prefix bounds what the installer owns, so a rule written by hand outside it is never touched.
+# These widen rather than restrict, so they stay their own step for the reason the two CLAUDE.md blocks stay separate.
+MANAGED_PERMISSIONS = [
+    # The review loop's reply and resolve, the one write in that loop an agent performs.
+    # Driving it by hand needs a raw GraphQL mutation, which is the shape that reached a stranger's repository.
+    # `pr_review.py` queries the thread id itself and takes no argument an id fits in.
+    # Allowing the script is therefore narrower than allowing the mutation it replaces.
+    ("Bash(python3 scripts/pr_review.py", "Bash(python3 scripts/pr_review.py:*)"),
+]
 
 
 def hook_launcher():
@@ -83,10 +96,26 @@ def main():
         group = {"matcher": "Bash", "hooks": []}
         pre.append(group)
     group.setdefault("hooks", []).append({"type": "command", "command": hook_cmd})
-    settings.write_text(json.dumps(data, indent=2) + "\n", encoding="utf-8")
     print(f"  settings -> {settings} (PreToolUse/Bash hook registered)")
 
-    # 3. CLAUDE.md carries one marker block per snippet, replaced where present and appended where not.
+    # 3. Permission rules, merged under the prefixes this installer owns.
+    # Dropping the prefix before appending is the same strip-then-register the hook above uses.
+    # That is what makes a re-run update a changed rule rather than leave both spellings in the list.
+    # Written in the same pass as the hook, so the file is read once and written once.
+    allow = data.setdefault("permissions", {}).setdefault("allow", [])
+    for prefix, rule in MANAGED_PERMISSIONS:
+        superseded = [a for a in allow if isinstance(a, str) and a.startswith(prefix)]
+        allow[:] = [a for a in allow if a not in superseded] + [rule]
+        if superseded == [rule]:
+            action = "already current"
+        elif superseded:
+            action = f"updated, superseding {len(superseded)}"
+        else:
+            action = "added"
+        print(f"  settings -> {settings} (permission {rule}: {action})")
+    settings.write_text(json.dumps(data, indent=2) + "\n", encoding="utf-8")
+
+    # 4. CLAUDE.md carries one marker block per snippet, replaced where present and appended where not.
     # The two blocks install and update independently, so one can change without rewriting the other.
     # The safety block states restrictions only.
     # The fleet block enables, so it stays separate from a block whose own text says nothing in it widens a permission.
@@ -113,6 +142,7 @@ def main():
     print(f"  {launcher} \"{hook_dst}\" --selftest")
     print(f"  grep -c 'agent-safety v' \"{claude_md}\"      # expect 2")
     print(f"  grep -c 'fleet-bootstrap v' \"{claude_md}\"   # expect 2")
+    print(f"  grep -c 'pr_review.py' \"{settings}\"         # expect {len(MANAGED_PERMISSIONS)}")
     print("Restart Claude Code sessions on this machine so the hook and CLAUDE.md load.")
     return 0
 
