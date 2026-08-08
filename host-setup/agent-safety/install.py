@@ -24,6 +24,17 @@ HERE = pathlib.Path(__file__).resolve().parent
 MISSING = object()
 
 
+def owns(entry, prefix):
+    """Whether an allow rule names the script the prefix identifies, rather than a longer path.
+
+    The prefix ends at the script name, so a bare `startswith` also claims `pr_review.py-custom`,
+    and dropping that would delete a hand-written rule for a different script. What separates the
+    two is the character after the name: a rule that invokes this script continues with a rule-syntax
+    delimiter, where a different script continues with more of its own path.
+    """
+    return entry.startswith(prefix) and entry[len(prefix):len(prefix) + 1] in (":", " ", ")")
+
+
 def at(data, path):
     """The value at a slash-separated key path, or MISSING where any step of it is absent."""
     node = data
@@ -34,8 +45,8 @@ def at(data, path):
     return node
 
 # Permission rules this kit installs, each as (owned prefix, rule).
-# A re-run drops every rule under the prefix before adding the current one, so a changed rule updates in place.
-# The prefix bounds what the installer owns, so a rule written by hand outside it is never touched.
+# A re-run drops every rule the prefix owns before adding the current one, so a changed rule updates in place.
+# Ownership needs a delimiter after the prefix, so a longer path such as `pr_review.py-custom` is not claimed.
 # These widen rather than restrict, so they stay their own step for the reason the two CLAUDE.md blocks stay separate.
 MANAGED_PERMISSIONS = [
     # The review loop's reply and resolve, the one write in that loop an agent performs.
@@ -163,7 +174,7 @@ def main():
     # Written in the same pass as the hook, so the file is read once and written once.
     allow = data.setdefault("permissions", {}).setdefault("allow", [])
     for prefix, rule in MANAGED_PERMISSIONS:
-        matched = [a for a in allow if isinstance(a, str) and a.startswith(prefix)]
+        matched = [a for a in allow if isinstance(a, str) and owns(a, prefix)]
         allow[:] = [a for a in allow if a not in matched] + [rule]
         # Counted over the rules actually replaced rather than over everything the prefix matched.
         # The current rule matches its own prefix, so counting the match set reports it as superseded.
