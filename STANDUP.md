@@ -57,7 +57,7 @@ After the first commit, confirm it took with `git log -1 --format='%G? author=%a
 4. **Add the repository on GitHub and apply the configuration while still on that branch**, which is step 4 and needs no branch of its own.
 5. **Open a normal pull request into `develop`** when the standup is done, and let it squash like any other change.
 
-Steps 1 through 3 are the block below, run before the repository exists on GitHub:
+Steps 1 through 3 are the block below, run before the repository exists on GitHub. It carries the procedure's only `git init`, so section 0 is read as its `--global` checks running ahead of this block and its two repository-scoped checks sitting inside it, rather than as an init of its own to run first.
 
 ```shell
 git init                                                        # The host default may be master, which the rename below corrects.
