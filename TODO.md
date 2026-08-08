@@ -418,12 +418,6 @@ Actions on issues that are the maintainer's to take, each carrying its evidence 
 
 Each was checked against the tree and has nothing left to do anywhere. Closing is the maintainer's call, and each wants the evidence quoted in the closing comment rather than a bare close.
 
-- **[#519][issue-519], the hub's own tree does not pass the prose gate it ships.** Complete on the prose and on both questions.
-  - **Fixed by** - `f7a6a13` (snippets), `c9c92dd` (comments), `d791930` (hub-only Markdown), and the carried batch on `prose/carried-semicolons`.
-  - **Checked** - `develop` at `d791930` on 2026-08-07, where `python3 scripts/prose_lint.py --summary` reported 41 across 6 files, and 0 across 0 with the carried batch applied.
-  - **Closing evidence** - The whole-tree figure went 557 across 45 to zero, in four batches split by surface, being 184 in `catalog/snippets/`, 241 in non-Markdown comments, 90 in hub-only Markdown and 41 in the six carried files. Question 1 is answered by `reports/` being exempt as a generated tree, and question 2 by the snippets leading, since a non-conformant snippet seeds its violations into every repo that adopts it.
-  - **Closing evidence** - The issue's claim that the governance files were clean, and that this was therefore not a carry problem, was true of the checker of the day and false of the tree. Today's checker reports 38 findings against the same six files as they stood at `69688ec`, the commit the issue measured, while that commit's own checker reports zero. Scoping the list exemption to a sentence rather than a whole bullet accounts for 37 of the 38, because a colon anywhere ahead of the first semicolon had exempted every semicolon after it. The carry problem was real throughout and invisible, which is the stale-exemption hazard running in the loose direction.
-
 - **[#557][issue-557], the agent-isolation rule and its two open questions.** Complete on the rule and on both questions.
   - **Fixed by** - `9d85941`.
   - **Checked** - `develop` at `9d85941` on 2026-08-06.
@@ -447,7 +441,6 @@ Each was checked against the tree and has nothing left to do anywhere. Closing i
 [issue-483]: https://github.com/ptr727/ProjectTemplate/issues/483
 [issue-489]: https://github.com/ptr727/ProjectTemplate/issues/489
 [issue-509]: https://github.com/ptr727/ProjectTemplate/issues/509
-[issue-519]: https://github.com/ptr727/ProjectTemplate/issues/519
 [issue-521]: https://github.com/ptr727/ProjectTemplate/issues/521
 [issue-523]: https://github.com/ptr727/ProjectTemplate/issues/523
 [issue-550]: https://github.com/ptr727/ProjectTemplate/issues/550

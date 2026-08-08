@@ -8,7 +8,7 @@ What verifying a change here requires, including the part CI cannot perform. The
 
 ### Run the gates the way CI runs them
 
-CI passes explicit `--check` lists, and a bare `python3 scripts/prose_lint.py [file]` runs `DEFAULT_RULES`, which is those two lists plus `home-path`. What differs is the exit code rather than the coverage: CI gates on `charset`, `dupword`, `spelling`, `comment-wrap` and `comment-case` and reports the other three warn-only, where a bare run exits non-zero on any of the nine. `sentence-split` is in neither and is asked for by name. Run the CI invocations:
+CI passes explicit `--check` lists, and a bare `python3 scripts/prose_lint.py [file]` runs `DEFAULT_RULES`, which is those two lists together. What differs is the exit code rather than the coverage: CI gates on eight of the nine and reports `charset-unknown` warn-only, where a bare run exits non-zero on any of the nine. `sentence-split` is in neither and is asked for by name. Run the CI invocations:
 
 ```sh
 python3 scripts/test_prose_lint.py
@@ -17,18 +17,18 @@ python3 scripts/test_pr_review.py
 python3 spec/audit.py --selftest
 python3 host-setup/agent-safety/gh-write-guard.py --selftest
 python3 scripts/repo_gate.py
-python3 scripts/prose_lint.py . --check charset --check dupword --check spelling --check comment-wrap --check comment-case
-python3 scripts/prose_lint.py . --check charset-unknown --check semicolon --check dash --summary
+python3 scripts/prose_lint.py . --check charset --check semicolon --check dash --check dupword --check spelling --check comment-wrap --check comment-case --check home-path
+python3 scripts/prose_lint.py . --check charset-unknown --summary
 for f in registry/*.json spec/*.json repo-config/*.json; do jq empty "$f"; done
 python3 spec/validate.py
 docker run --rm --pull=always -v "$PWD":/check --workdir /check mstruebing/editorconfig-checker:latest
 ```
 
-Three gaps in that list are CI's rather than this runbook's, reproduced here so a local run matches CI rather than quietly exceeding it. The `jq` glob covers `repo-config/*.json` and does not reach `repo-config/operational/develop.json`, so a malformed operational payload passes. And `sentence-split` is implemented and tested but named by no invocation, so nothing runs it. The third is `home-path`, which is in `DEFAULT_RULES` and so runs on every bare local run, yet is named by neither CI list, so the pattern-detectable half of the representative-data rule gates nothing in CI. It is clean tree-wide today, which is why the gap is a hole rather than a backlog.
+Two gaps in that list are CI's rather than this runbook's, reproduced here so a local run matches CI rather than quietly exceeding it. The `jq` glob covers `repo-config/*.json` and does not reach `repo-config/operational/develop.json`, so a malformed operational payload passes. The second is that `sentence-split` is implemented and tested but named by no invocation, so nothing runs it.
 
 Run the `editorconfig-checker` line before pushing a new file, and before pushing an existing file that a script rewrote rather than an editor. This repository defaults to CRLF and most tooling writes LF, so a new file fails that check on its first CI run rather than locally. A scripted rewrite is the same hazard on a file that was already correct, since reading and rewriting a whole file in text mode converts every line ending in it, which no prose or Markdown gate reports.
 
-The first prose invocation gates. The second reports the backlog that is corrected as each file is next edited, or cleared in a deliberate batch, and it exits non-zero locally whenever findings exist. It is warn-only in CI because the workflow step sets `continue-on-error: true`, not because the command is lenient, so a non-zero exit locally is the expected result rather than a problem.
+The first prose invocation gates. The second reports a character that no tier covers, and it exits non-zero locally whenever findings exist. It is warn-only in CI because the workflow step sets `continue-on-error: true`, not because the command is lenient, so a non-zero exit locally is the expected result rather than a problem.
 
 Scope a run to what changed, which matches the correct-as-next-edited rule:
 

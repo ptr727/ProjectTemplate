@@ -18,7 +18,7 @@ uvx coverage@latest run --source=. -m unittest discover -s scripts && uvx covera
 
 ## `prose_lint.py`
 
-Enforces the [`GOVERNANCE.md`][governance] "Documentation Style Conventions" rules that no linter checks: non-ASCII judged against the charset rule's three tiers, a semicolon in prose, a spaced hyphen joining or interrupting a sentence, a duplicated consecutive word, a British spelling, and the shape of a comment's prose.
+Enforces the [`GOVERNANCE.md`][governance] "Documentation Style Conventions" rules that no linter checks: non-ASCII judged against the charset rule's three tiers, a semicolon in prose, a spaced hyphen joining or interrupting a sentence, a duplicated consecutive word, a British spelling, and the shape of a comment's prose. It carries one rule from elsewhere in that document, `home-path`, which comes from "Representative Data in Agent-Authored Text" and catches an absolute home path naming a real account. That rule closes the pattern-detectable sliver of its section and nothing beyond it, since the exposure the section exists for was name-shaped and no pattern finds a name.
 
 The tiers decide by context rather than by a flat ban. Tier 1 carries no meaning its ASCII form loses and always flags. Tier 2 is an operator, kept next to a figure or another operator and replaced between words, so a threshold table reads as the range it is. Tier 3 is a unit or scientific symbol whose ASCII form would be a lie and never flags. Developer-typed characters such as emoji are preserved regardless of tier, and an un-tiered one is still reported as `charset-unknown` until it is classified.
 
@@ -30,7 +30,7 @@ Run it scoped to changed lines, matching the standing rule that existing prose i
 python3 scripts/prose_lint.py . --diff origin/develop
 ```
 
-Whole-tree (`python3 scripts/prose_lint.py .`) reports the legacy backlog as well, which is informational rather than a gate. `charset`, `dupword`, `spelling`, `comment-wrap` and `comment-case` are clean tree-wide, so CI gates those five and reports the rest warn-only.
+Whole-tree (`python3 scripts/prose_lint.py .`) reports zero, so a finding is a line the change under review wrote rather than backlog it inherited. CI gates every rule in the default set on that basis, except `charset-unknown`, which reports warn-only because classifying a character is a fleet-law edit rather than a prose fix.
 
 The default rule set covers comment shape (`comment-wrap` and `comment-case`) alongside the prose rules. It did not, which meant a run nobody parameterized reported clean on a wrapped comment while the rule read as enforced, and comment shape is the most frequently regressed rule in agent-authored work. Reading the backlog it exposes needs no flag now, and gating it needed `--diff` while the tree carried several hundred of them. That backlog is cleared, so both comment rules gate whole-tree, and `--diff` is now about scoping a run rather than about surviving one.
 
