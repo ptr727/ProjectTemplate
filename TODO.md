@@ -327,6 +327,17 @@ One pull request, after a survey, deciding whether anything stands between this 
   - **Settled** - The only Copilot-named types in the GraphQL schema are `CopilotCodeReviewParameters` and its input form, which configure review-on-push inside a branch ruleset and describe nothing about a review that has run, so the schema search that looks promising by name answers a different question.
   - **Settled** - A negative finding is the deliverable as much as a positive one, and it is recorded here rather than re-derived, since the reading layer's design rests on prose being the only surface and that premise is worth re-checking rather than assuming.
 
+- **Find out which file a partial round skips, and why re-requesting never clears it.** The coverage reading shipped in #608 blocks on a partial round, and the record says the state is durable rather than transient.
+  - **Blocked by** - Nothing, though it is research rather than a change, and the reader already reports the state correctly.
+  - **Issue** - None filed. The reading that surfaces it shipped under [#607][issue-607].
+  - **Checked** - `develop` at `fa1ebf1` on 2026-08-08, measured over the 332 Copilot review bodies on the newest 120 pull requests, read with `gh pr list --json number,changedFiles,additions,deletions` beside them.
+  - **Open** - Which file is skipped. The reviewer names no file list in these rounds, so it cannot be recovered from the API, and the GitHub pull request page is the only place it may appear.
+  - **Open** - Whether a partial round is worth escalating to GitHub at all, which needs the file first.
+  - **Settled** - It is durable rather than flaky. Four pull requests and seven rounds (#476, #479, #592, and the #609 promotion), and **every later round repeated the identical ratio**. A re-request has never cleared one, so the remedy the digest first stated was wrong and now says so.
+  - **Settled** - Size does not predict it. The partials changed 502, 629 and 961 lines, while fully covered pull requests here reach 33 files and 2,219 lines.
+  - **Settled** - The reviewer counts the file and does not read it, rather than losing it earlier. The stated denominator equals the API's own `changedFiles` on **103 of 104** pull requests, the exception being one whose branch shrank between rounds.
+  - **Settled** - Splitting remains a real remedy for a feature branch and is unavailable for a promotion, whose head is `develop`, so a promotion carrying a partial round is a maintainer decision by construction.
+
 ## Standalone Chores
 
 Small work with no research to preserve, selectable one bullet at a time.
