@@ -265,9 +265,10 @@ The repo runs a review loop on every PR: local agent iteration plus remote autom
 **Do not merge, and do not enable auto-merge, unless ALL of these hold:**
 
 1. Required status checks are green (`mergeStateStatus: CLEAN`), **and**
-2. A Copilot review is confirmed on the **current head SHA** by matching the review's commit SHA to the head, not an earlier push, because a push makes required checks go green **before** the re-review lands, so a green merge-state can precede the current-head review and never signals readiness on its own, and the matched review is **read** rather than only counted, because Copilot declines a pull request it will not take on with a formal review carrying that same head SHA and no findings, which matches the SHA and covers nothing, **and**
+2. A Copilot review is confirmed on the **current head SHA** by matching the review's commit SHA to the head, not an earlier push, because a push makes required checks go green **before** the re-review lands, so a green merge-state can precede the current-head review and never signals readiness on its own, and the matched review is **read** rather than only counted, because Copilot declines a pull request it will not take on with a formal review carrying that same head SHA and no findings, which matches the SHA and covers nothing, and because a review can carry the head SHA and still say it read only part of the diff, which is the same clean pass in everything a SHA match can see, so the body's own count of the files it read is checked against the files the pull request changed, **and**
 3. **Every** Copilot finding on that head SHA is closed out, with all review threads resolved, **and** any issue-level Copilot comments (which have no resolve action) triaged and replied to, **and** the low-confidence findings collapsed in the review body investigated and answered, since those appear in no thread and a loop that polls threads alone reports a clean pass while they stand, so zero outstanding findings remain, **and**
-4. The maintainer has given **explicit** permission to merge.
+4. Nothing in the reviewer's output was a shape the review tooling could not read, since every reader keys on a marker and a marker that changes spelling is a section the reader stops finding and reports as absent, which is how three separate misreadings each reported a clean pass over a review they had not understood. An unrecognized shape blocks this gate on its own, and the remedy is an issue filed against the repository hosting the reader, naming the shape and quoting the body it came from, rather than a judgment about what the new wording probably meant, **and**
+5. The maintainer has given **explicit** permission to merge.
 
 `mergeStateStatus: CLEAN` reflects **only** required statuses, and never open bot review comments, so `CLEAN` alone is **never** sufficient to merge. A green/`CLEAN` PR with an unresolved Copilot finding fails this gate, so treat it as "not mergeable" no matter what the merge-state field says. The agent never merges on its own (consistent with "default to staging", and merging is maintainer-authorized).
 
@@ -283,7 +284,7 @@ The repo runs a review loop on every PR: local agent iteration plus remote autom
 6. Reply to each thread and resolve what was addressed.
 7. Re-run the loop after every fix push until no actionable findings remain.
 
-Drive the loop to green, meaning a review confirmed on the latest head SHA and every actionable finding closed, then stop and apply the **Merge Gate** above: all four preconditions must hold, and `mergeStateStatus: CLEAN` alone never satisfies it.
+Drive the loop to green, meaning a review confirmed on the latest head SHA and every actionable finding closed, then stop and apply the **Merge Gate** above: all five preconditions must hold, and `mergeStateStatus: CLEAN` alone never satisfies it.
 
 For provider-specific mechanics (how to request review, query review state, post replies, resolve threads), see the **GitHub Copilot Review Runbook** in [.github/copilot-instructions.md](./.github/copilot-instructions.md). This file owns the contract, and that file owns the mechanics.
 
