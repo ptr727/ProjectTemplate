@@ -27,7 +27,12 @@ EARLY = '2026-08-02T10:00:00Z'
 LATE = '2026-08-02T11:00:00Z'
 
 
-def review(login: str = pr_review.REVIEWER, oid: str = HEAD, body: str = '',
+# The shape 28 of the 332 measured bodies carry: an overview, and no count of what was read.
+# A body of no text at all is not one of the shapes, and the reader now says so, correctly.
+OVERVIEW = '## Pull request overview\n\nThe change is narrow.\n'
+
+
+def review(login: str = pr_review.REVIEWER, oid: str = HEAD, body: str = OVERVIEW,
            at: str = EARLY) -> dict:
     return {'author': {'login': login}, 'state': 'COMMENTED', 'commit': {'oid': oid},
             'body': body, 'submittedAt': at}
@@ -38,25 +43,40 @@ def comment(login: str = pr_review.REVIEWER, at: str = LATE,
     return {'author': {'login': login}, 'createdAt': at, 'body': body}
 
 
+COVERED = ('Copilot reviewed 3 out of 3 changed files in this pull request and generated '
+           'no new comments.')
+
+
 def collapsed(heading: str = 'Comments suppressed due to low confidence (1)',
-              finding: str = 'a.py:12 The retry count is off by one.') -> str:
-    return (f'Reviewed 3 of 3 changed files.\n\n<details>\n<summary>{heading}</summary>\n\n'
+              finding: str = 'a.py:12 The retry count is off by one.',
+              covers: str = COVERED) -> str:
+    """The section as its own `<details>` wrapper, under the round's own coverage line.
+
+    The coverage line is the reviewer's, quoted from the corpus rather than invented: it sat here
+    as filler that nothing asserted on, which is one of the two places the shape was already in
+    this file while no case read it.
+    """
+    return (f'{OVERVIEW}\n{covers}\n\n<details>\n<summary>{heading}</summary>\n\n'
             f'{finding}\n\n</details>\n')
 
 
 def nested(heading: str = '### Suppressed comments (2)',
-           finding: str = '**a.py:12**\n* The retry count is off by one.') -> str:
+           finding: str = '**a.py:12**\n* The retry count is off by one.',
+           covers: str = '- **Files reviewed:** 1/1 changed files') -> str:
     """The section as a Markdown heading nested inside the `Review details` wrapper.
 
     The live shape as of 2026-08-05: the section is no longer its own `<details>` wrapper with a
     matching `<summary>`, it is a Markdown heading inside the wrapper that also carries the
     round's file and effort metadata, which trails the findings rather than preceding them.
+
+    That metadata is where this shape states its coverage, and it is the second spelling of the
+    line rather than a second wrapper. It sat here as filler that nothing asserted on too.
     """
     return ('### Ready to approve\n\nThe change is narrow.\n\n'
             '<details>\n<summary>File summaries</summary>\n\n'
             '| File | Description |\n\n</details>\n\n'
             f'<details>\n<summary>Review details</summary>\n\n{heading}\n\n{finding}\n\n'
-            '- **Files reviewed:** 1/1 changed files\n'
+            f'{covers}\n'
             '- **Review effort level:** Lite\n</details>\n')
 
 
@@ -350,14 +370,15 @@ class TestSuppressed(GqlCase):
 
     def test_a_body_naming_the_block_outside_a_details_wrapper_still_reports(self) -> None:
         """Reporting zero because the markup moved is the failure the whole case guards."""
-        self.answer(payload([review(body='Suppressed comments (1)\n\na.py:12 Off by one.')]))
+        self.answer(payload([review(body=OVERVIEW + '\nSuppressed comments (1)\n\n'
+                                                     'a.py:12 Off by one.')]))
         out, _ = pr_review.digest('o', 'r', 7)
         self.assertIn('suppressed=1', out)
         self.assertIn('a.py:12 Off by one.', out)
 
     def test_the_per_file_summary_block_beside_it_is_not_a_finding(self) -> None:
         """Every real body collapses a file table too, and reporting that is noise, not a finding."""
-        body = ('<details>\n<summary>Show a summary per file</summary>\n\n'
+        body = (OVERVIEW + '\n<details>\n<summary>Show a summary per file</summary>\n\n'
                 '| File | Description |\n\n</details>\n' + collapsed())
         self.answer(payload([review(body=body)]))
         out, _ = pr_review.digest('o', 'r', 7)
@@ -527,6 +548,328 @@ class TestRefusal(GqlCase):
         self.answer(payload([review(login='ptr727', body=REFUSED), review(oid=OLD)]))
         out, _ = pr_review.digest('o', 'r', 7)
         self.assertIn('refusal=no', out)
+
+
+class TestCoverage(GqlCase):
+    """The round that covered the head and read part of the diff, which is a clean pass elsewhere.
+
+    Measured over 332 Copilot review bodies on this repository: five rounds across three pull
+    requests reported reading fewer files than the pull request changed, and all three merged.
+    One of them changed three files, left one unread across both its rounds, and reported
+    "generated no comments" each time.
+    """
+
+    def digest_for(self, *reviews: dict) -> str:
+        self.answer(payload(list(reviews)))
+        out, _ = pr_review.digest('o', 'r', 7)
+        return out
+
+    def test_each_vetted_spelling_of_a_full_round_reads_as_full(self) -> None:
+        """The census: four tails on the first spelling, and the `Review details` bullet."""
+        for covers in (
+            'Copilot reviewed 7 out of 7 changed files in this pull request and generated '
+            'no new comments.',
+            'Copilot reviewed 7 out of 7 changed files in this pull request and generated '
+            'no comments.',
+            'Copilot reviewed 7 out of 7 changed files in this pull request and generated '
+            '1 comment.',
+            'Copilot reviewed 7 out of 7 changed files in this pull request and generated '
+            '4 comments.',
+            '- **Files reviewed:** 7/7 changed files',
+        ):
+            with self.subTest(covers=covers[:44]):
+                self.assertEqual((pr_review.FULL, covers),
+                                 pr_review.coverage_of({'body': covers}))
+
+    def test_a_round_that_read_part_of_the_diff_is_a_failure_the_digest_names(self) -> None:
+        """PR 592's shape: three changed files, one never read, and it merged."""
+        line = ('Copilot reviewed 2 out of 3 changed files in this pull request and generated '
+                'no comments.')
+        out = self.digest_for(review(body=OVERVIEW + '\n' + line))
+        self.assertIn('coverage=PARTIAL', out)
+        self.assertIn('COVERAGE IS PARTIAL', out)
+        # The counts print, since they are what say how much went unread and no thread carries it.
+        self.assertIn(line, out)
+        # The round did cover the head.
+        # That reading was correct, and it was not the whole reading.
+        self.assertIn('review_on_head=yes', out)
+
+    def test_the_second_spelling_reports_a_partial_round_too(self) -> None:
+        """Both spellings appear in the corpus to this day, so neither replaces the other."""
+        out = self.digest_for(review(body=nested(covers='- **Files reviewed:** 2/3 changed files')))
+        self.assertIn('coverage=PARTIAL', out)
+
+    def test_a_coverage_shaped_line_that_parses_to_nothing_is_a_failure_naming_this_script(self):
+        """The wording has drifted once for each of the two patterns beside this one.
+
+        Passing a shape it does not recognize is how a gate stops gating as the wording moves,
+        so the unrecognized shape is reported and its remedy is stated as fixing this script.
+        """
+        line = 'Copilot reviewed most of the changed files in this pull request.'
+        out = self.digest_for(review(body=OVERVIEW + '\n' + line))
+        self.assertIn('coverage=UNVETTED', out)
+        # It is one of the unrecognized shapes rather than a report of its own.
+        # Both say the reader needs fixing, and one of them saying it once is the whole message.
+        self.assertIn('UNRECOGNIZED REVIEWER OUTPUT (1)', out)
+        self.assertIn(f'coverage line: {line}', out)
+
+    def test_a_round_stating_no_coverage_at_all_is_unknown_rather_than_either_verdict(self) -> None:
+        """28 of the 332 bodies are an overview and a change list, and that shape is current.
+
+        It interleaves with the counted one throughout rather than preceding it, and one pull
+        request carries both across its two rounds, so failing on it would cry wolf on about one
+        review in twelve. Reporting it as coverage is the bug this reading exists to remove.
+        """
+        body = ('## Pull request overview\n\nThis PR updates the backlog.\n\n'
+                '**Changes:**\n- Delete the shipped cluster from `TODO.md`.\n')
+        out = self.digest_for(review(body=body))
+        self.assertIn('coverage=unstated', out)
+        self.assertNotIn('COVERAGE IS PARTIAL', out)
+        self.assertIn('shapes=ok', out)
+
+    def test_a_refusal_is_exempt_rather_than_an_unrecognized_shape(self) -> None:
+        """It states no coverage by design, and `head_reviews` has already dropped it.
+
+        Read as a round, every refusal becomes a spurious unvetted-shape failure sitting on top
+        of the `refusal=YES` that already names the state and its remedy.
+        """
+        out = self.digest_for(review(body=REFUSED))
+        self.assertIn('refusal=YES', out)
+        self.assertIn('coverage=unstated', out)
+        self.assertIn('shapes=ok', out)
+
+    def test_coverage_is_read_from_the_head_rather_than_from_a_superseded_round(self) -> None:
+        """A partial round describes one commit's diff, and the push that changes it is answered
+        by a round reading the whole of the new one."""
+        old = (OVERVIEW + '\nCopilot reviewed 2 out of 3 changed files in this pull request '
+               'and generated no comments.')
+        out = self.digest_for(review(oid=OLD, body=old),
+                              review(body=OVERVIEW + '\n' + COVERED))
+        self.assertIn('coverage=full', out)
+        self.assertNotIn('COVERAGE IS PARTIAL', out)
+
+    def test_the_worst_of_two_rounds_on_one_head_is_what_reports(self) -> None:
+        """A head carries two rounds through a re-request, and both read the same diff."""
+        partial = ('Copilot reviewed 2 out of 3 changed files in this pull request and '
+                   'generated no comments.')
+        self.assertEqual(pr_review.PARTIAL,
+                         pr_review.head_coverage(payload([review(body=COVERED, at=EARLY),
+                                                          review(body=partial, at=LATE)]))[0])
+
+
+    def test_a_round_that_states_full_coverage_settles_it_over_one_stating_none(self) -> None:
+        """Unknown is the absence of a statement rather than a bad one, so it loses to a count."""
+        self.assertEqual(pr_review.FULL,
+                         pr_review.head_coverage(payload([review(body='## Overview\n\nNarrow.'),
+                                                          review(body=COVERED)]))[0])
+
+    def test_prose_mentioning_changed_files_is_not_this_round_stating_its_coverage(self) -> None:
+        """The false positive the suppressed matcher and the refusal matcher have each had once.
+
+        A review of the pull request that adds this check discusses the wording it adds, and a
+        body-wide match reads that discussion as the round's own count.
+        """
+        body = ('## Pull request overview\n\nThis PR reads the line saying Copilot reviewed 2 '
+                'out of 3 changed files, so a partial round stops reporting as a clean pass.\n\n'
+                '- The digest now carries a `coverage` field.\n')
+        out = self.digest_for(review(body=body))
+        self.assertIn('coverage=unstated', out)
+
+    def test_a_quoted_line_in_a_fenced_block_is_not_this_round_stating_its_coverage(self) -> None:
+        """131 of the 332 bodies carry a fence, and this change puts both spellings in the diff."""
+        body = ('### Ready to approve\n\nThe vetted spellings read:\n\n```\n'
+                'Copilot reviewed 2 out of 3 changed files in this pull request and generated '
+                'no comments.\n- **Files reviewed:** 4/9 changed files\n```\n\n' + COVERED + '\n')
+        body = '### Ready to approve\n\n' + body
+        out = self.digest_for(review(body=body))
+        self.assertIn('coverage=full', out)
+        self.assertNotIn('COVERAGE IS PARTIAL', out)
+
+    def test_a_human_review_carrying_a_coverage_line_is_not_the_reviewer_s_round(self) -> None:
+        partial = ('Copilot reviewed 2 out of 3 changed files in this pull request and '
+                   'generated no comments.')
+        out = self.digest_for(review(login='ptr727', body=partial),
+                              review(body=OVERVIEW + '\n' + COVERED))
+        self.assertIn('coverage=full', out)
+
+
+class TestUnrecognizedShapes(GqlCase):
+    """A shape this script has no reader for blocks, rather than being read past.
+
+    Every reader here keys on a structural marker, so a marker that changes spelling is a section
+    the reader stops finding and reports as absent. All three failures on record have that shape:
+    a suppressed heading reworded, a suppressed section moved inside another wrapper, and a
+    coverage line nothing parsed. Each was caught after it had already reported a clean pass.
+
+    The inventory is measured rather than imagined. Over the same 332 review bodies, with fenced
+    blocks removed and text reduced to ASCII, the whole corpus is 7 headings, 6 summaries and 3
+    metadata labels, and every body carries at least one of them.
+    """
+
+    def digest_for(self, *reviews: dict) -> str:
+        self.answer(payload(list(reviews)))
+        out, _ = pr_review.digest('o', 'r', 7)
+        return out
+
+    def test_every_vetted_marker_together_reads_as_recognized(self) -> None:
+        """The corpus shape in one body, so the lists are held against what they were built from."""
+        self.assertEqual([], pr_review.unrecognized_in(nested()))
+        self.assertEqual([], pr_review.unrecognized_in(collapsed()))
+        self.assertEqual([], pr_review.unrecognized_in(OVERVIEW))
+
+    def test_a_heading_that_is_not_in_the_inventory_blocks(self) -> None:
+        """A renamed section is one the reader stops finding, which it reports as nothing there."""
+        out = self.digest_for(review(body=OVERVIEW + '\n### Confidence assessment\n\nHigh.\n'))
+        self.assertIn('shapes=UNRECOGNIZED', out)
+        self.assertIn('heading: ### Confidence assessment', out)
+
+    def test_a_details_summary_that_is_not_in_the_inventory_blocks(self) -> None:
+        """The suppressed section has already moved between wrappers once."""
+        body = OVERVIEW + '\n<details>\n<summary>Withheld findings</summary>\n\nx\n</details>\n'
+        out = self.digest_for(review(body=body))
+        self.assertIn('summary: Withheld findings', out)
+
+    def test_a_metadata_label_that_is_not_in_the_inventory_blocks(self) -> None:
+        """The coverage line arrived as one of these bullets, so the next reading may too."""
+        out = self.digest_for(review(body=nested() + '\n- **Confidence:** high\n'))
+        self.assertIn('metadata label: Confidence', out)
+
+    def test_a_body_carrying_no_heading_at_all_blocks(self) -> None:
+        """Every measured body opens on a heading, so one with none is a format never seen.
+
+        This is the arm that catches a rewrite wholesale rather than marker by marker, and it is
+        also what catches the refusal wording drifting, since a refusal stops being exempt.
+        """
+        self.assertIn('body carrying no heading at all',
+                      ' '.join(pr_review.unrecognized_in('Looks good to me.')))
+        self.assertIn('body carrying no heading at all',
+                      ' '.join(pr_review.unrecognized_in('')))
+
+    def test_a_refusal_is_exempt_because_it_is_already_a_vetted_shape(self) -> None:
+        """It is a bare paragraph by design, and `refusal=YES` already names its remedy."""
+        self.assertEqual([], pr_review.unrecognized_in(REFUSED))
+        out = self.digest_for(review(body=REFUSED))
+        self.assertIn('shapes=ok', out)
+        self.assertIn('refusal=YES', out)
+
+    def test_a_refusal_whose_wording_drifted_stops_being_exempt_and_blocks(self) -> None:
+        """The exemption is the pattern, so losing the pattern loses the exemption, not the check.
+
+        This is the failure the refusal check was built for arriving one rewording later: the
+        body would read as an ordinary review carrying the head and raising nothing.
+        """
+        drifted = 'Copilot has declined to review this pull request because it is too large.'
+        self.assertEqual('', pr_review.refusal_of({'body': drifted}))
+        out = self.digest_for(review(body=drifted))
+        self.assertIn('shapes=UNRECOGNIZED', out)
+        self.assertIn('refusal=no', out)
+
+    def test_the_emoji_and_the_finding_count_are_normalized_rather_than_vetted(self) -> None:
+        """Both change without the section changing, so comparing them raw blocks every review."""
+        for heading in ('### \U0001F7E2 Ready to approve', '### \U0001F7E1 Changes recommended',
+                        '### Suppressed comments (4)', '### Suppressed comments (11)'):
+            with self.subTest(heading=heading):
+                self.assertEqual([], pr_review.unrecognized_in(f'{heading}\n\nText.\n'))
+
+    def test_a_marker_quoted_in_a_fenced_block_is_not_one_the_review_carries(self) -> None:
+        """This change publishes the inventory, so a review of it quotes the lot back."""
+        body = (OVERVIEW + '\nThe vetted headings are:\n\n```\n### Confidence assessment\n'
+                '- **Confidence:** high\n```\n')
+        self.assertEqual([], pr_review.unrecognized_in(body))
+
+    def test_a_reviewer_login_that_is_not_the_one_every_query_filters_on_blocks(self) -> None:
+        """A rename leaves every filter here matching nothing, which reads as no review at all.
+
+        That is the quietest drift of the lot: the digest reports `rounds=0 review_on_head=NO`
+        over a review that landed, and a wait polls out its whole timeout against it.
+        """
+        pr = payload([review(login='copilot-code-review-agent')])
+        found = ' '.join(pr_review.unrecognized_shapes(pr))
+        self.assertIn('reviewer login: copilot-code-review-agent', found)
+
+    def test_the_coding_agent_and_a_human_are_not_the_reviewer_renamed(self) -> None:
+        """`copilot-swe-agent` edits code and is not this reviewer under another name."""
+        for login in ('copilot-swe-agent', 'ptr727', 'codecov[bot]', 'dependabot[bot]'):
+            with self.subTest(login=login):
+                self.assertEqual([], pr_review.unrecognized_shapes(payload([review(login=login)])))
+
+    def test_the_block_names_the_hub_and_leaves_the_merge_to_the_maintainer(self) -> None:
+        """The remedy is an issue where the reader lives, and the merge is not this script's call."""
+        out = self.digest_for(review(body=OVERVIEW + '\n### Confidence assessment\n'))
+        self.assertIn('UNRECOGNIZED REVIEWER OUTPUT (1)', out)
+        self.assertIn(f'File an issue on {pr_review.HUB}', out)
+        self.assertIn("maintainer's call rather than the agent's", out)
+
+    def test_every_round_is_read_rather_than_the_head_s(self) -> None:
+        """This asks whether the reader still understands the reviewer, which is not head-scoped.
+
+        A shape that arrived one round ago is one every later round carries, so waiting for it to
+        reach the head is waiting through the rounds it is already misreading.
+        """
+        out = self.digest_for(review(oid=OLD, body=OVERVIEW + '\n### Confidence assessment\n'),
+                              review(body=OVERVIEW))
+        self.assertIn('shapes=UNRECOGNIZED', out)
+        self.assertIn(f'(round {OLD[:8]})', out)
+
+
+class TestCoverageExitCodes(GqlCase):
+    """`status` returned 0 unconditionally, so a partial round reported as a covered head."""
+
+    def setUp(self) -> None:
+        self.out = self.enterContext(contextlib.redirect_stdout(io.StringIO()))
+
+    def partial(self) -> dict:
+        return review(body=OVERVIEW + '\nCopilot reviewed 2 out of 3 changed files in this '
+                                      'pull request and generated no comments.')
+
+    def test_status_exits_forty_two_on_a_round_that_read_part_of_the_diff(self) -> None:
+        self.answer(payload([self.partial()]))
+        self.assertEqual(42, pr_review.main(['status', '7', '--repo', 'o/r']))
+        self.assertIn('status=COVERAGE_IS_PARTIAL', self.out.getvalue())
+
+    def test_status_exits_forty_three_on_a_wording_it_does_not_read(self) -> None:
+        self.answer(payload([review(body=OVERVIEW +
+                                     '\nCopilot reviewed some of the changed files.')]))
+        self.assertEqual(43, pr_review.main(['status', '7', '--repo', 'o/r']))
+        out = self.out.getvalue()
+        self.assertIn('status=UNRECOGNIZED_REVIEWER_OUTPUT', out)
+        self.assertIn('coverage=UNVETTED', out)
+
+    def test_status_still_exits_zero_on_a_full_round_and_on_a_silent_one(self) -> None:
+        """Failing the silent shape would fail roughly one review in twelve on this repository."""
+        for body in (OVERVIEW + '\n' + COVERED, nested(), OVERVIEW):
+            with self.subTest(body=body[:40]):
+                self.answer(payload([review(body=body)]))
+                self.assertEqual(0, pr_review.main(['status', '7', '--repo', 'o/r']))
+
+    def test_wait_carries_the_same_codes_rather_than_ending_on_a_partial_round(self) -> None:
+        """`reviewed_head` is what decided its zero, and coverage of the head is not coverage
+        of the diff."""
+        self.answer(payload([self.partial()]))
+        with mock.patch.object(pr_review.time, 'sleep'):
+            self.assertEqual(42, pr_review.main(['wait', '7', '--repo', 'o/r']))
+        self.assertIn('coverage=PARTIAL', self.out.getvalue())
+
+    def test_status_and_wait_both_exit_forty_three_on_an_unrecognized_shape(self) -> None:
+        """Neither may report a clean pass over output the reader does not understand."""
+        self.answer(payload([review(body=OVERVIEW + '\n### Confidence assessment\n')]))
+        self.assertEqual(43, pr_review.main(['status', '7', '--repo', 'o/r']))
+        with mock.patch.object(pr_review.time, 'sleep'):
+            self.assertEqual(43, pr_review.main(['wait', '7', '--repo', 'o/r']))
+        self.assertIn('status=UNRECOGNIZED_REVIEWER_OUTPUT', self.out.getvalue())
+
+    def test_an_unrecognized_shape_outranks_the_partial_coverage_code(self) -> None:
+        """A reader that does not understand the output cannot be believed about the diff either."""
+        body = (OVERVIEW + '\n### Confidence assessment\n\nCopilot reviewed 2 out of 3 changed '
+                'files in this pull request and generated no comments.\n')
+        self.answer(payload([review(body=body)]))
+        self.assertEqual(43, pr_review.main(['status', '7', '--repo', 'o/r']))
+
+    def test_a_refusal_still_exits_forty_one_rather_than_on_a_coverage_code(self) -> None:
+        """The refusal names the round that declined, where a coverage code names a round."""
+        self.answer(payload([review(body=REFUSED)]))
+        with mock.patch.object(pr_review.time, 'sleep'):
+            self.assertEqual(41, pr_review.main(['wait', '7', '--repo', 'o/r', '--timeout', '0']))
 
 
 class TestDigestReportsTheAnswer(GqlCase):
@@ -1243,6 +1586,28 @@ class TestContract(unittest.TestCase):
         self.assertIn(f'test("{pr_review.REFUSAL.pattern}")', text)
         # The published filter is single-quoted, which no spelling of the apostrophe survives.
         self.assertNotIn("'", pr_review.REFUSAL.pattern)
+
+    def test_the_vetted_coverage_spellings_are_the_ones_the_runbook_publishes(self) -> None:
+        """The wording drifts, so the vetted list is read out of the runbook rather than recalled.
+
+        The two published lines are pulled out with the script's own opener and handed to its own
+        parser, which holds the pair in step in both directions: a spelling the runbook adds and
+        this cannot read fails here, and so does one this reads that the runbook never named.
+        """
+        text = RUNBOOK.read_text(encoding='utf-8')
+        published = [ln.strip() for ln in text.splitlines()
+                     if pr_review.COVERAGE_OPENS.match(ln) and 'changed file' in ln.lower()]
+        self.assertEqual(2, len(published), published)
+        for line in published:
+            with self.subTest(line=line[:44]):
+                self.assertIsNotNone(pr_review.read_coverage(line))
+        # The published filter is single-quoted in the shell, which no apostrophe survives.
+        self.assertNotIn("'", pr_review.COVERAGE_COUNTS.pattern)
+
+    def test_the_runbook_names_the_partial_round_as_a_state_that_blocks_a_merge(self) -> None:
+        """A verify step reading `commit.oid` alone is what let five partial rounds merge."""
+        text = RUNBOOK.read_text(encoding='utf-8')
+        self.assertIn('Coverage of the head is not coverage of the diff', text)
 
     def test_the_only_writes_are_the_two_the_reply_path_owns(self) -> None:
         """One writing path, and everything else that changes state stays out of this script.

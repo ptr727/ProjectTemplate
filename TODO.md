@@ -310,6 +310,23 @@ One pull request routing the disproof record from the provider-agnostic contract
   - **Settled** - The write side is where the gap bites rather than the read side, because an agent following the loop is already routed to the runbook for mechanics and an agent posting a decline is routed nowhere.
   - **Settled** - "Durable Knowledge and Self-Improvement" already requires durable knowledge to reach a committed file, so this states where one class of it goes rather than adding an obligation.
 
+### A Programmatic Reading of a Copilot Review
+
+One pull request, after a survey, deciding whether anything stands between this fleet's review loop and the raw prose of a Copilot review. Today [`scripts/pr_review.py`][scripts] reads the review body as text and holds a vetted inventory of the headings, collapsed sections, metadata labels and coverage wordings it recognizes, blocking on anything it does not. That design is correct for a prose surface and it carries a cost the maintainer has accepted deliberately: a wording change at GitHub blocks every open pull request in the fleet at once, until the inventory is updated. The cost is worth paying against a reviewer silently missing a raised finding, which is the failure it replaces, but it is worth paying only for as long as prose is the only surface on offer.
+
+**State** `measure`. **Touches** [`scripts/pr_review.py`][scripts] and the runbook section in [`.github/copilot-instructions.md`][copilot-instructions], once the survey says whether there is anything to move to. **Cost** a survey first, then either nothing or a rewrite of the reading layer, which is the larger of the two outcomes and the reason the survey comes first.
+
+- **Find out whether GitHub publishes a structured form of a Copilot review, and decide whether to read that instead of the prose.** A schema, an API surface, a published payload, or a maintained library, anything that would make a wording change a non-event rather than a fleet-wide block.
+  - **Blocked by** - Nothing. The prose reader ships either way, so this decides what replaces it rather than whether the loop has a gate.
+  - **Issue** - None filed. The prose reader and its vetted inventory shipped under [#607][issue-607], which is the change this would supersede.
+  - **Checked** - `develop` at `20916ad` on 2026-08-07, reading the live GraphQL schema by introspection and one review over REST, against the reader in [`scripts/pr_review.py`][scripts].
+  - **Open** - Whether `bodyHTML` is a better surface than the Markdown body, since it arrives as a rendered tree whose structure survives a change in Markdown syntax, while leaving the wording drift the inventory exists for exactly where it is.
+  - **Open** - Whether any third-party library tracks this output, and whether depending on one is acceptable at all, given that [`scripts/README.md`][scripts] holds these scripts to the standard library with no third-party packages.
+  - **Open** - Whether the review's own inline threads and their metadata carry enough to derive coverage and suppression without reading the body, which would narrow the prose surface rather than replace it.
+  - **Settled** - The public API carries no structured Copilot review as of the date above. GraphQL `PullRequestReview` exposes `body`, `bodyText` and `bodyHTML` and no field naming a finding, a file count, or a withheld section, and REST returns the same prose body beside its ids and its state.
+  - **Settled** - The only Copilot-named types in the GraphQL schema are `CopilotCodeReviewParameters` and its input form, which configure review-on-push inside a branch ruleset and describe nothing about a review that has run, so the schema search that looks promising by name answers a different question.
+  - **Settled** - A negative finding is the deliverable as much as a positive one, and it is recorded here rather than re-derived, since the reading layer's design rests on prose being the only surface and that premise is worth re-checking rather than assuming.
+
 ## Standalone Chores
 
 Small work with no research to preserve, selectable one bullet at a time.
@@ -448,6 +465,7 @@ Each was checked against the tree and has nothing left to do anywhere. Closing i
 [issue-580]: https://github.com/ptr727/ProjectTemplate/issues/580
 [issue-585]: https://github.com/ptr727/ProjectTemplate/issues/585
 [issue-597]: https://github.com/ptr727/ProjectTemplate/issues/597
+[issue-607]: https://github.com/ptr727/ProjectTemplate/issues/607
 
 <!-- Repo -->
 

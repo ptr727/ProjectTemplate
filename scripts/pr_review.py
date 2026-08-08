@@ -14,6 +14,14 @@ Subcommands
            review findings between them. Read-only. Exit 0 = every reference resolves, 70 = one
            does not, 71 = there were references and none could be read, so nothing was decided.
   status   One digest line, any unresolved threads, and any suppressed findings. Read-only.
+           Exit 0 = every shape in the reviewer's output is one this reads, and the round
+           covering the head read the whole diff or stated nothing about what it read.
+           42 = that round read fewer files than the pull request changed, so part of the diff
+           has no review at all, and the remedy is a re-request or a split.
+           43 = the reviewer sent a shape this script has no reader for, so no field here can
+           be believed. The remedy is an issue on the repository hosting this script, and the
+           review loop does not close until the reader is fixed. Merging regardless is the
+           maintainer's decision rather than the agent's.
   reply    Answer one thread selected by its text, and resolve it on request. The only
            writing path here, and it exists because the hand-run form keeps failing the
            same way: a node id typed into a mutation, which resolves globally and so
@@ -30,6 +38,9 @@ Subcommands
            40 reports the shape of that answer and reads nothing of its cause: an answer
            carrying no commit covers no head, so the wait ends and the reader decides.
            41 = the review carrying the head says it did not review, so it covers nothing.
+           42 and 43 = the review landed and `status`'s two blocking readings apply to it,
+           since a wait ending on a round that covered half the diff, or on output nothing here
+           can read, has ended on something other than a review of this pull request.
            50 = the request is pending and nothing picked it up, which no amount of
            waiting changes. Recovery is two mutations, and they stay in the runbook.
 
@@ -61,6 +72,73 @@ SUPPRESSED = re.compile(r'Suppressed comments|low confidence', re.IGNORECASE)
 # It also keeps the published filter usable inside single quotes, which neither survives.
 REFUSAL = re.compile(r'wasn.t able to review|was not able to review|unable to review',
                      re.IGNORECASE)
+# A round states how much of the diff it read on a line of its own.
+# A round that read part of it is the clean pass elsewhere, same commit and threads and digest.
+# Five such rounds landed across three merged pull requests here.
+# One of them read 2 of 3 changed files across both its rounds and merged.
+# This is the third instance of the shape the two patterns above answer.
+# It is also the only one nothing was reading.
+# The line is anchored at its start rather than matched body-wide, both spellings being structural.
+# Over 332 review bodies every coverage statement opens its line and not one sits mid-sentence.
+# 272 of them open with the reviewer's own name and 32 are the `Review details` bullet.
+# A body-wide match reports the pull request adding this check as a partial round.
+# That is the false positive the suppressed matcher and the refusal matcher have each had once.
+# The cost of the anchor is named rather than hidden.
+# A wording that moves the statement off the line start reads as no statement at all.
+COVERAGE_OPENS = re.compile(r'\s*(?:Copilot\b|[-*]\s*\*\*Files reviewed:)', re.IGNORECASE)
+# The count pair itself, in the two spellings the corpus carries.
+# The comment tail one of them ends on is deliberately not part of the unit.
+# It says how many comments the round raised, which is not coverage.
+# A fifth wording of it would fail every merge over a sentence ending read correctly.
+COVERAGE_COUNTS = re.compile(
+    r'reviewed\s+(\d+)\s+out of\s+(\d+)\s+changed files'
+    r'|\*\*Files reviewed:\*\*\s*(\d+)\s*/\s*(\d+)\s+changed files', re.IGNORECASE)
+# A fenced block is a quotation rather than a statement, and 131 of those bodies carry one.
+# This change puts both spellings into the source and the runbook, so a review of it quotes them.
+# A quoted count read as this round's own is a coverage figure nobody stated.
+FENCE = re.compile(r'^ {0,3}```.*?^ {0,3}```[^\n]*', re.DOTALL | re.MULTILINE)
+# The readings a round's coverage carries, worst first.
+# A head carries more than one round only through a re-request.
+# Where two disagree, the one naming files it did not read is the one to answer.
+# `UNKNOWN` sits last rather than beside the failures, being the absence of a statement.
+# A round that did state full coverage settles the question over one that stated nothing.
+UNVETTED, PARTIAL, FULL, UNKNOWN = 'unvetted', 'partial', 'full', 'unknown'
+SEVERITY = (UNVETTED, PARTIAL, FULL, UNKNOWN)
+# Upper-case for the two that block a merge, for the reason `review_on_head=NO` is upper-case.
+# `unstated` rather than `unknown`, since a body carrying no count is a shape this knows.
+# What this script does not know is the separate `shapes` field, and one word for both hides it.
+COVERAGE_FIELD = {UNVETTED: 'UNVETTED', PARTIAL: 'PARTIAL', FULL: 'full', UNKNOWN: 'unstated'}
+
+# Every structural marker the reviewer's own bodies carry, measured over the same 332.
+# A body is read for these rather than trusted, because every reader below keys on one of them.
+# A heading this script has no spelling for is a section it will not find, reported as absent.
+# That is the shape of all three failures already on record here, each caught after it landed.
+# The lists are small because the output is regular: 7 headings, 6 summaries and 3 labels.
+# Counts are normalized to `(N)` and non-ASCII is dropped before comparing.
+# The verdict headings carry a colored circle, so the emoji is what would drift most cheaply.
+# Dropping it also keeps this file inside the charset rule that governs the repository.
+VETTED_HEADINGS = {
+    '## Pull request overview', '### Reviewed changes', '### Ready to approve',
+    '### Changes recommended', '### Not ready to approve', '### Human review recommended',
+    '### Suppressed comments (N)',
+}
+VETTED_SUMMARIES = {
+    'Pull request overview', 'Show a summary per file', 'File summaries', 'Review details',
+    'Suppressed comments (N)', 'Comments suppressed due to low confidence (N)',
+}
+VETTED_LABELS = {'Files reviewed', 'Comments generated', 'Review effort level'}
+MARKDOWN_HEADING = re.compile(r'\s*#{1,6}\s')
+# The `Review details` metadata bullets, of which the coverage line is one.
+LABEL_LINE = re.compile(r'\s*[-*]\s+\*\*([^*]+):\*\*')
+# A login that reads as this reviewer without being the spelling every query here filters on.
+# A rename leaves every filter matching nothing, so a review that landed reads as none at all.
+# A wait then polls out its whole timeout against a review sitting in plain sight.
+# `copilot-swe-agent` is the coding agent rather than the reviewer, and does not match this.
+READS_AS_REVIEWER = re.compile(r'copilot.*review', re.IGNORECASE)
+# The repository this script is hosted in, named because an unrecognized shape is fixed here.
+# It is a literal rather than the pull request's own repository.
+# That one is where the shape was seen, not where the reader failing on it lives.
+HUB = 'ptr727/ProjectTemplate'
 DETAILS = re.compile(r'<details>(.*?)</details>', re.DOTALL | re.IGNORECASE)
 SUMMARY = re.compile(r'<summary>(.*?)</summary>', re.DOTALL | re.IGNORECASE)
 TAGS = re.compile(r'</?(?:details|summary)>', re.IGNORECASE)
@@ -342,22 +420,173 @@ def refusing_review(pr: dict) -> dict | None:
     return max(refusals, key=lambda n: n.get('submittedAt') or '') if refusals else None
 
 
-def reviewed_head(pr: dict) -> bool:
-    """True where one of the reviewer's own reviews covers the current head's commit.
+def head_reviews(pr: dict) -> list[dict]:
+    """The reviewer's own reviews that cover the current head, refusals excluded.
 
     A refusal is not coverage. It is a formal review, `state: COMMENTED`, carrying the head's
     commit and raising no threads, so it satisfies every check a clean pass does and renders a
     digest identical to one. That is how a pull request of 301 changed files, one over the
     reviewer's limit, sat one command from merging on a review that never ran.
 
+    One list rather than a predicate beside a filter, because coverage and the count of rounds on
+    the head are read from the same set and a second spelling of it drifts from the first.
+    """
+    head = pr['headRefOid']
+    return [n for n in reviewer_nodes(pr, 'reviews')
+            if (n.get('commit') or {}).get('oid') == head and not refusal_of(n)]
+
+
+def reviewed_head(pr: dict) -> bool:
+    """True where one of the reviewer's own reviews covers the current head's commit.
+
     The liveness query carries no bodies, so a refusal reads there as ordinary coverage. That is
     deliberate rather than a gap: it ends the wait, which is what a terminal outcome should do,
     and the full read every wait finishes with is what tells the two apart. No exit code and no
     merge decision is taken from the liveness reading.
     """
-    head = pr['headRefOid']
-    return any((n.get('commit') or {}).get('oid') == head and not refusal_of(n)
-               for n in reviewer_nodes(pr, 'reviews'))
+    return bool(head_reviews(pr))
+
+
+def coverage_statements(body: str) -> list[str]:
+    """The lines this round states its file coverage on, quotations excluded."""
+    return [ln.strip() for ln in FENCE.sub('', body or '').splitlines()
+            if COVERAGE_OPENS.match(ln) and 'changed file' in ln.lower()]
+
+
+def read_coverage(line: str) -> tuple[int, int] | None:
+    """The (reviewed, changed) counts the line states, or None where its wording is not vetted."""
+    m = COVERAGE_COUNTS.search(line)
+    if not m:
+        return None
+    reviewed, changed = (m.group(1), m.group(2)) if m.group(1) else (m.group(3), m.group(4))
+    return int(reviewed), int(changed)
+
+
+def coverage_of(node: dict) -> tuple[str, str]:
+    """This round's coverage reading, with the line it was read from.
+
+    A round making no statement at all reads as unknown rather than as a pass or a failure. 28 of
+    the 332 bodies measured carry an overview and a change list and nothing more, that shape
+    interleaves with the counted one throughout rather than preceding it, and one pull request
+    carries both across its two rounds. Failing on it would cry wolf on roughly one review in
+    twelve, and a guard an agent learns to work around is worse than no guard. Passing it as
+    coverage is the bug this whole reading exists to remove, one shape over.
+
+    A wording that is coverage-shaped and parses to no counts is the failure whose remedy is
+    fixing this script, since a gate that allows whatever it does not recognize stops gating as
+    the wording drifts, which it has done once already for each of the two patterns above.
+    """
+    worst, detail = UNKNOWN, ''
+    for line in coverage_statements(node.get('body') or ''):
+        counts = read_coverage(line)
+        state = UNVETTED if counts is None else (FULL if counts[0] >= counts[1] else PARTIAL)
+        if SEVERITY.index(state) < SEVERITY.index(worst):
+            worst, detail = state, line
+    return worst, detail
+
+
+def head_coverage(pr: dict) -> tuple[str, str]:
+    """The worst coverage the rounds covering the current head state, and the line saying it.
+
+    Head-scoped for the reason a refusal is, and unlike a suppressed finding: a partial round is
+    a statement about one commit's diff, and the push that changes that diff raises a round which
+    reads the whole of the new one. A refusal needs no exemption of its own here, `head_reviews`
+    having dropped it already, and reading one would report the round that declined as a wording
+    this script fails to recognize.
+    """
+    worst, detail = UNKNOWN, ''
+    for node in head_reviews(pr):
+        state, line = coverage_of(node)
+        if SEVERITY.index(state) < SEVERITY.index(worst):
+            worst, detail = state, line
+    return worst, detail
+
+
+def normal(text: str) -> str:
+    """A marker reduced to what a vetted list compares: ASCII, single spaces, counts as `(N)`.
+
+    The verdict headings carry a colored circle and the suppressed heading carries its finding
+    count, so both drift on every review without the section having changed at all.
+    """
+    ascii_only = ''.join(c for c in text if ord(c) < 128)
+    return re.sub(r'\s+', ' ', re.sub(r'\(\d+\)', '(N)', ascii_only)).strip()
+
+
+def unrecognized_in(body: str) -> list[str]:
+    """Every marker in one review body this script has no vetted spelling for.
+
+    Read over the body with fenced blocks removed, for the reason the coverage line is: a review
+    quoting a heading is not a review carrying one, and this script's own pull requests quote
+    these lists in full.
+
+    A body carrying no heading at all is reported rather than passed, since every one of the 332
+    measured opens on a heading and a body with none is a format nothing here has seen. A refusal
+    is the exemption, being a bare paragraph by design and already classified as one.
+    """
+    # A refusal is a bare paragraph rather than a review body, and `REFUSAL` is its spelling.
+    # It carries no marker to check, and its own opening line is not a coverage statement.
+    # Its wording drifting is still caught, since `refusal_of` then stops matching.
+    # What is left of a drifted refusal is a body with no heading, which is the arm below.
+    if refusal_of({'body': body}):
+        return []
+    plain = FENCE.sub('', body or '')
+    headings = [normal(ln) for ln in plain.splitlines() if MARKDOWN_HEADING.match(ln)]
+    labels = [normal(m.group(1)) for m in map(LABEL_LINE.match, plain.splitlines()) if m]
+    found = [f'heading: {h}' for h in dict.fromkeys(headings) if h not in VETTED_HEADINGS]
+    found += [f'summary: {normal(s)}' for s in dict.fromkeys(SUMMARY.findall(plain))
+              if normal(s) not in VETTED_SUMMARIES]
+    found += [f'metadata label: {la}' for la in dict.fromkeys(labels) if la not in VETTED_LABELS]
+    found += [f'coverage line: {ln}' for ln in coverage_statements(body)
+              if read_coverage(ln) is None]
+    if not headings and not refusal_of({'body': body}):
+        found.append('body carrying no heading at all, which no measured review body does')
+    return found
+
+
+def unrecognized_shapes(pr: dict) -> list[str]:
+    """Everything about this pull request's reviewer output that this script cannot read.
+
+    Every round rather than the head's, because this asks whether the reader still understands
+    the reviewer rather than what the reviewer said about this commit. A shape that arrived one
+    round ago is one every later round will carry.
+    """
+    found = []
+    for node in reviewer_nodes(pr, 'reviews'):
+        where = ((node.get('commit') or {}).get('oid') or '')[:8] or 'commit unknown'
+        found += [f'{item}  (round {where})' for item in
+                  unrecognized_in(node.get('body') or '')]
+    logins = {(n.get('author') or {}).get('login') or ''
+              for field in ('reviews', 'comments')
+              for n in ((pr.get(field) or {}).get('nodes') or [])}
+    found += [f'reviewer login: {login}, where every query here filters on {REVIEWER}'
+              for login in sorted(logins)
+              if login != REVIEWER and READS_AS_REVIEWER.search(login)]
+    return found
+
+
+def report_verdict(pr: dict) -> int:
+    """Print the blocking verdict's own status line, and return the exit code it carries.
+
+    The unrecognized shape outranks the coverage one, because a reader that does not understand
+    the output cannot be trusted about what it read of the diff either.
+    """
+    # A coverage line this cannot parse is one of the shapes below rather than a case of its own.
+    # It exits here with the remedy that fits it, the reader being what needs the fix.
+    if unrecognized_shapes(pr):
+        print(f'status=UNRECOGNIZED_REVIEWER_OUTPUT this script does not know one or more shapes '
+              f'in what the reviewer sent, listed above, so nothing it reports about this review '
+              f'is trustworthy and the review loop does not close on this digest. File an issue '
+              f'on {HUB} naming each shape and quoting the body it came from, since this script '
+              f'is hosted there and the fix lands there. Merging this pull request anyway is the '
+              f'maintainer\'s decision to take and not this script\'s, and not the agent\'s.')
+        return 43
+    state, _ = head_coverage(pr)
+    if state == PARTIAL:
+        print('status=COVERAGE_IS_PARTIAL the review covering the head read fewer files than the '
+              'pull request changed, so part of the diff has no review at all: re-request on this '
+              'head, or split the pull request, rather than merging it')
+        return 42
+    return 0
 
 
 def live_state(owner: str, repo: str, num: int) -> tuple[str, bool, dict | None]:
@@ -426,10 +655,11 @@ def digest(owner: str, repo: str, num: int, seen: set[str] | None = None,
     stalled = stall_of(owner, repo, num, pr) if stalled is None else stalled
     head = pr['headRefOid']
     revs = reviewer_nodes(pr, 'reviews')
-    # A refusal carries the head and covers nothing, so it counts as a round and not as coverage.
-    # Reading it as coverage prints `review_on_head=yes` over a review that says it did not run.
-    on_head = [n for n in revs
-               if (n.get('commit') or {}).get('oid') == head and not refusal_of(n)]
+    # `revs` is every round and `on_head` is the ones that reviewed this commit.
+    # A refusal sits in the first and not the second, being a round that covered nothing.
+    on_head = head_reviews(pr)
+    cover, cover_line = head_coverage(pr)
+    unknown = unrecognized_shapes(pr)
     threads = pr['reviewThreads']['nodes']
     # A deleted account leaves `author` present and null, which `.get('author', {})` returns as
     # None rather than as the default, so the chained lookup crashes the whole digest.
@@ -461,6 +691,12 @@ def digest(owner: str, repo: str, num: int, seen: set[str] | None = None,
         # A digest of the wrong pull request is well-formed, so naming it is what shows the miss.
         f'repo={owner}/{repo} pr={num} head={head[:8]} rounds={len(revs)} '
         f'review_on_head={"yes" if on_head else "NO"} '
+        # A field of its own beside that one, since a round can cover the head and read part.
+        # Those two readings are what `review_on_head=yes` alone conflates.
+        f'coverage={COVERAGE_FIELD[cover]} '
+        # Every other field on this line is a reading of the review.
+        # This one says whether the readings can be believed at all, so it is not a count.
+        f'shapes={"UNRECOGNIZED" if unknown else "ok"} '
         # A field of its own, since `rounds=1 review_on_head=NO` is also what a stale round is.
         # The two want opposite responses, one a re-request and the other a split pull request.
         # Upper-case for the reason `NO` is, as a state that blocks a merge is not one to skim.
@@ -481,6 +717,22 @@ def digest(owner: str, repo: str, num: int, seen: set[str] | None = None,
                      'it, and the body below is what says which remedy applies')
         lines += [f'    {ln.rstrip()}' for ln in (refusal.get('body') or '').splitlines()
                   if ln.strip()]
+    if unknown:
+        # First of the blocks, since it says how far the rest of them can be trusted.
+        lines.append(f'  UNRECOGNIZED REVIEWER OUTPUT ({len(unknown)}): the shapes below are ones '
+                     'this script has no reader for, so every other field here is a reading of '
+                     'output it does not fully understand and a clean digest does not mean a '
+                     f'clean review. File an issue on {HUB}, which hosts this script, naming each '
+                     'shape and quoting the body it came from, before closing the review loop. '
+                     'Whether to merge anyway is the maintainer\'s call rather than the agent\'s')
+        lines += [f'    {item}' for item in unknown]
+    if cover == PARTIAL:
+        # The line prints under the marker for the reason a suppressed block does.
+        # The counts say how much of the diff went unread, and no thread carries them.
+        lines.append('  COVERAGE IS PARTIAL: the review covering the head read fewer files than '
+                     'the pull request changed, so files in the diff have no review at all and '
+                     'the remedy is a re-request or a split rather than a merge')
+        lines.append(f'    {cover_line}')
     if stalled:
         lines.append(f'  REQUEST NOT PICKED UP (requested {stalled}, no copilot_work_started '
                      'since): clear the request and re-request, per the runbook')
@@ -877,9 +1129,12 @@ def main(argv: list[str] | None = None) -> int:
         return check_claims(owner, repo, a.number)
 
     if a.cmd == 'status':
-        out, _ = digest(owner, repo, a.number)
+        # One payload renders the digest and decides the code, for the reason `wait` reads one.
+        # Fetched twice, a round landing between them prints one pull request and grades another.
+        pr = gql(Q_FULL, owner, repo, a.number)
+        out, _ = digest(owner, repo, a.number, pr=pr)
         print(out)
-        return 0
+        return report_verdict(pr)
 
     if a.cmd == 'reply':
         return reply_to_thread(owner, repo, a.number, a.match, a.body, a.path, a.resolve)
@@ -924,7 +1179,10 @@ def main(argv: list[str] | None = None) -> int:
     print(out)
     print(f'waited={int(time.monotonic()-start)}s')
     if reviewed_head(final):
-        return 0
+        # Coverage of the head is what this returns 0 on.
+        # Coverage of the diff is a second reading it used to take on trust.
+        # A round can carry the head and have read only part of it.
+        return report_verdict(final)
     # A refusal before an answer, since it names the round that declined where 40 names none.
     # The digest prints both bodies regardless, so the narrower code costs the reader nothing.
     if refusing_review(final):

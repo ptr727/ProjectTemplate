@@ -156,6 +156,42 @@ gh api repos/<owner>/<repo>/issues/<N>/comments --jq \
 
 Coverage is confirmed when (1) exits 0, and **a formal review with no inline comments still satisfies path (1)**, because coverage is about the head SHA, not the comment count. The exception is the refusal above, which is a formal review on the head with no inline comments and covers nothing, so path (1) exits 0 over a round that never ran. Read the body of the review the SHA matched, not only the SHA. For issue comments (path 2), body content is the only reliable signal, and `created_at` is not: `git log -1 --format=%cI` is the **commit** timestamp, not the push timestamp, so amended or rebased commits can have an earlier timestamp and an older Copilot comment could satisfy a time check even though Copilot never saw the current head. Treat path (2) as confirmed only when the comment body explicitly refers to the current changes.
 
+**Coverage of the head is not coverage of the diff, and the second one is stated in a line nothing above reads.** A review body says how many of the pull request's changed files it read, and a round that read fewer than the pull request changed is byte for byte the clean pass in everything else: the same `commit.oid`, the same absent threads, the same "generated no comments". Measured over 332 Copilot review bodies on this repository, five rounds across three pull requests reported reading fewer files than were changed, and all three merged. One of them changed three files, left one unread across **both** its rounds, and reported no comments each time. This is the third instance of the shape the refusal above and the suppressed block below are the first two, so read it the same way: **fail closed on a wording you do not recognize**, since a gate that allows whatever it does not recognize stops gating as the wording drifts, and both of those wordings have drifted once already.
+
+Two spellings carry the count, and both are current rather than one superseding the other. Each opens its own line, which is what separates the round stating its coverage from prose mentioning changed files, that prose being what a review of a change to this rule looks like:
+
+```text
+Copilot reviewed 2 out of 3 changed files in this pull request and generated no comments.
+- **Files reviewed:** 2/3 changed files
+```
+
+The sentence tail after the first spelling reports how many comments the round raised and appears in four wordings. It is not coverage, so it is not part of what has to be recognized, and the counts are. Read them into three verdicts and two exemptions:
+
+- **Counts equal** - the round read the whole diff. This is the clean pass.
+- **Counts unequal** - files in the diff have no review at all. Re-request on this head or split the pull request, rather than merging on it.
+- **Coverage-shaped and unreadable** - the remedy is to fix the reader, not to read past it. The vetted spellings live in `scripts/pr_review.py` and here, and they stay in step because a case reads them out of this file.
+- **Exempt: a body stating no coverage at all.** 28 of those 332 bodies are an overview and a change list and nothing more. That shape is current, interleaves with the counted one throughout, and one pull request carries both across its two rounds, so treating it as a failure cries wolf on about one review in twelve and teaches an agent to work around the gate. It reads as **unknown**, never as a pass and never as a failure.
+- **Exempt: a refusal.** It carries no coverage line by design, and the refusal rule above has already classified it. Read it here as well and every refusal grows a spurious second failure on top of the one that names its remedy.
+
+`scripts/pr_review.py status <N> --repo <owner>/<repo>` reports this as `coverage=full`, `coverage=PARTIAL`, `coverage=UNVETTED` or `coverage=unknown`, and exits `42` and `43` on the two failures. Read it by hand as:
+
+```sh
+gh pr view <N> --json reviews --jq \
+  '.reviews[] | select(.author.login=="copilot-pull-request-reviewer") | .body
+   | split("\n")[] | select(test("^(Copilot|[-*] \\*\\*Files reviewed:).*changed files?"))'
+```
+
+### A Shape Nothing Recognizes Blocks the Loop and Earns an Issue
+
+**Every rule above keys on a marker in what Copilot sent, so a marker that changes spelling is a section the reader stops finding and reports as absent.** That is not a hypothetical: all three failures on record here have exactly that shape. The suppressed heading was reworded and the count went to zero. The suppressed section moved inside another wrapper and the count went to zero again. The coverage line was never read at all. Each one reported a clean pass over a review it had misread, and each was caught by the maintainer after it had already landed, rather than by the gate.
+
+**So an unrecognized shape is a blocking outcome, and its remedy is an issue rather than a judgment call.** When any reader here meets a heading, a collapsed section, a metadata line, a coverage wording or a reviewer login it has no vetted spelling for, the review loop **does not close**, whatever else the digest says. Do not read past it, do not infer what the new wording probably means, and do not treat a body that looks clean as a clean review, because "looks clean" is precisely what a misread review looks like. Two things follow, in this order:
+
+1. **File an issue on the hub, `ptr727/ProjectTemplate`**, which hosts `scripts/pr_review.py` and holds the vetted inventory. Name each unrecognized shape and quote the review body it came from, so the fix is made against the real wording rather than a paraphrase. The issue is filed even when the shape turns out to be cosmetic, since "cosmetic" is a conclusion drawn after reading the body and not before.
+2. **The merge decision is the maintainer's**, not the agent's and not the script's. An unrecognized shape does not mean the pull request is bad, it means nothing here can vouch for the review of it. Report the state, hand it over, and stop.
+
+`scripts/pr_review.py status <N> --repo <owner>/<repo>` reports this as `shapes=UNRECOGNIZED`, lists each shape under a marker naming the remedy, and exits `43`. `wait` carries the same code, so a wait cannot end on a clean zero over output nothing read. The vetted inventory lives in that script and is small on purpose: measured over 332 Copilot review bodies on this repository, with fenced blocks dropped and text reduced to ASCII, the whole corpus is seven headings, six `<summary>` texts and three metadata labels, and every body carries at least one of them. A body carrying none is itself the unrecognized shape, which is what catches a rewrite that changes everything at once, the refusal wording drifting among it.
+
 ### Bounded Retry Workflow
 
 This path is only for a **genuinely missing** review, meaning no Copilot review (formal *or* issue comment) covers the current head SHA after polling. A review that covered the head but produced no comments is a clean pass, not a missing review, so do not enter this retry path for it.
