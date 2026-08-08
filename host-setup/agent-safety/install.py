@@ -169,19 +169,16 @@ def main():
     done = ["PreToolUse/Bash hook registered"]
 
     # 3. Permission rules, merged under the prefixes this installer owns.
-    # Dropping the prefix before appending is the same strip-then-register the hook above uses.
-    # That is what makes a re-run update a changed rule rather than leave both spellings in the list.
+    # The strip-then-register shape is the hook registration's above, applied to a flat list.
     # Written in the same pass as the hook, so the file is read once and written once.
     allow = data.setdefault("permissions", {}).setdefault("allow", [])
     for prefix, rule in MANAGED_PERMISSIONS:
         matched = [a for a in allow if isinstance(a, str) and owns(a, prefix)]
         allow[:] = [a for a in allow if a not in matched] + [rule]
-        # Counted over the rules actually replaced rather than over everything the prefix matched.
-        # The current rule matches its own prefix, so counting the match set reports it as superseded.
-        older = [a for a in matched if a != rule]
         # Counted over what the write removes rather than over what the prefix matched.
         # The current rule matches its own prefix, so a match-set count reports it as superseded.
         # A duplicate of it is removed too, and both can happen at once, so both are named.
+        older = [a for a in matched if a != rule]
         duplicates = max(0, len(matched) - len(older) - 1)
         changes = []
         if older:
