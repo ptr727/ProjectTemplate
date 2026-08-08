@@ -83,6 +83,24 @@ def main():
                 f"{settings} exists but is not valid JSON ({e}). Fix or remove it, then re-run.\n"
             )
             return 1
+    # Every container this installer descends into is checked before it is used.
+    # A key holding an unexpected type would otherwise raise a traceback mid-edit.
+    # That reads as a crash rather than as the settings problem it is.
+    # The invalid-JSON refusal above is the shape this file already answers a malformed file with.
+    for path, want in (("hooks", dict), ("hooks/PreToolUse", list),
+                       ("permissions", dict), ("permissions/allow", list)):
+        parts = path.split("/")
+        node = data
+        for p in parts[:-1]:
+            node = node.get(p, {})
+        held = node.get(parts[-1]) if isinstance(node, dict) else None
+        if held is not None and not isinstance(held, want):
+            sys.stderr.write(
+                f"{settings} has `{path.replace('/', '.')}` as {type(held).__name__} where "
+                f"{want.__name__} is required. Fix or remove that key, then re-run. Nothing was written.\n"
+            )
+            return 1
+
     pre = data.setdefault("hooks", {}).setdefault("PreToolUse", [])
     # Strip the hook from every existing group first, so a re-run leaves no duplicate behind.
     # That matters when settings.json already carries more than one Bash group.
@@ -96,7 +114,7 @@ def main():
         group = {"matcher": "Bash", "hooks": []}
         pre.append(group)
     group.setdefault("hooks", []).append({"type": "command", "command": hook_cmd})
-    print(f"  settings -> {settings} (PreToolUse/Bash hook registered)")
+    done = ["PreToolUse/Bash hook registered"]
 
     # 3. Permission rules, merged under the prefixes this installer owns.
     # Dropping the prefix before appending is the same strip-then-register the hook above uses.
@@ -112,8 +130,13 @@ def main():
             action = f"updated, superseding {len(superseded)}"
         else:
             action = "added"
-        print(f"  settings -> {settings} (permission {rule}: {action})")
+        done.append(f"permission {rule}: {action}")
+
+    # Reported after the write rather than as each edit is made, since both edits share one write.
+    # A line printed before it claims a change that a later failure would leave unmade.
     settings.write_text(json.dumps(data, indent=2) + "\n", encoding="utf-8")
+    for line in done:
+        print(f"  settings -> {settings} ({line})")
 
     # 4. CLAUDE.md carries one marker block per snippet, replaced where present and appended where not.
     # The two blocks install and update independently, so one can change without rewriting the other.
