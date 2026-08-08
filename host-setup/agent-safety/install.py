@@ -87,10 +87,13 @@ def main():
     launcher = hook_launcher()
     # Quote the launcher too: the sys.executable fallback can contain spaces (e.g. C:\Program Files\...).
     hook_cmd = f'"{launcher}" "{hook_dst}"'
+    # Read into a variable rather than twice off disk, once to test for content and once to parse.
+    # Two reads can also disagree, since another process may write between them.
     data = {}
-    if settings.exists() and settings.read_text(encoding="utf-8").strip():
+    raw = settings.read_text(encoding="utf-8") if settings.exists() else ""
+    if raw.strip():
         try:
-            data = json.loads(settings.read_text(encoding="utf-8"))
+            data = json.loads(raw)
         except json.JSONDecodeError as e:
             sys.stderr.write(
                 f"{settings} exists but is not valid JSON ({e}). Fix or remove it, then re-run.\n"
