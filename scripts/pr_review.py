@@ -623,17 +623,23 @@ def report_verdict(pr: dict) -> int:
         # Every partial measured here skipped exactly one file, across seven rounds.
         # That is a measurement of those rounds rather than a property the state carries.
         # Asserting it would be a claim this script cannot check on the run it prints for.
-        # Re-reading the line cannot return None, since PARTIAL is reached only where it parsed.
+        # None is unreachable while PARTIAL is set only where this same line parsed.
+        # It is narrowed rather than indexed, since the alternative is a crash on the gate's path.
+        # A crash there reads as this script being broken rather than as a round that read part.
         counts = read_coverage(line)
-        unread = counts[1] - counts[0]
+        if counts is None:
+            gap = 'how much of the diff went unread, which could not be re-read from that line'
+        else:
+            unread = counts[1] - counts[0]
+            gap = (f'{unread} of the {counts[1]} changed files '
+                   f'{"has" if unread == 1 else "have"} no review')
         print(f'status=COVERAGE_IS_PARTIAL the review covering the head read fewer files than the '
               f'pull request changed, so part of the diff has no review at all. Every partial on '
               f'record stayed partial at the identical ratio across every later round, so a '
               f're-request is not the remedy it reads as, and the reviewer names no file list in '
               f'these rounds, so which file went unread cannot be read from the API. Splitting is '
               f'the remedy where it applies, and it does not apply to a promotion. Otherwise this '
-              f'is the maintainer\'s call, taken knowing {unread} of the {counts[1]} changed '
-              f'files {"has" if unread == 1 else "have"} no review')
+              f'is the maintainer\'s call, taken knowing {gap}')
         return 42
     return 0
 

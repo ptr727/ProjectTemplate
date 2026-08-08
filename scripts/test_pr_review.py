@@ -883,6 +883,20 @@ class TestCoverageExitCodes(GqlCase):
                 self.assertEqual(42, pr_review.main(['status', '7', '--repo', 'o/r']))
                 self.assertIn(phrase, out.getvalue())
 
+    def test_the_partial_message_still_blocks_where_the_counts_cannot_be_re_read(self) -> None:
+        """Unreachable by construction, since PARTIAL is set only where that line parsed, so the
+        counts are withheld from `report_verdict` directly. A crash on the blocking path would
+        read to a caller as this script being broken rather than as a round that read part."""
+        pr = payload([self.partial()])
+        unparseable = 'a coverage line carrying no counts at all'
+        with mock.patch.object(pr_review, 'head_coverage',
+                               return_value=(pr_review.PARTIAL, unparseable)):
+            self.assertEqual(42, pr_review.report_verdict(pr))
+        out = self.out.getvalue()
+        self.assertIn('status=COVERAGE_IS_PARTIAL', out)
+        self.assertIn('could not be re-read', out)
+        self.assertNotIn('changed files', out)
+
     def test_status_exits_forty_three_on_a_wording_it_does_not_read(self) -> None:
         self.answer(payload([review(body=OVERVIEW +
                                      '\nCopilot reviewed some of the changed files.')]))
