@@ -70,39 +70,15 @@ gh api repos/<owner>/<repo>/pulls/<N>/reviews --jq \
      | {round: (if .commit_id == \"$PR_HEAD\" then \"head\" else \"earlier\" end), id}]"
 ```
 
-**Round 1 is normally auto-seeded, so poll for it before trying to self-trigger.** Auto-review-on-open supplies the first review with no `botIds` call needed, but it can lag one to three minutes. After opening a PR (or the first push), **poll** for a Copilot review on the head SHA (see [Verify Review Covered Current Head](#verify-review-covered-current-head)) before concluding none ran. The `requestReviews` mutation below is for **re-requesting on later pushes** (a new head SHA). By then a prior review exists, so its bot node id is readable. A missing bot node id on round 1 therefore means "the auto-review has not landed yet - wait and poll," **not** "ask the maintainer to kick it off."
+**Round 1 is normally auto-seeded, so poll for it before trying to self-trigger.** Auto-review-on-open supplies the first review with no `botIds` call needed, but it can lag one to three minutes, and on some pull requests it never fires at all. After opening a PR (or the first push), **poll** for a Copilot review on the head SHA (see [Verify Review Covered Current Head](#verify-review-covered-current-head)) before concluding none ran. Where it never lands, drive round 1 with the same `requestReviews` mutation every later round uses, which needs nothing this PR has to produce first. A round 1 carrying no review therefore means "wait, then request it yourself," **not** "ask the maintainer to kick it off."
 
 > **The reviewer login differs by API, in three forms rather than two.** In **GraphQL** (`gh api graphql` and `gh pr view --json reviews`, which is GraphQL-backed) the `Bot.login` is `copilot-pull-request-reviewer`, with **no `[bot]` suffix**. In the **REST** API (`gh api repos/.../issues|pulls/...`) the same account's `user.login` is `copilot-pull-request-reviewer[bot]`, **with** the suffix. In a REST **timeline** `review_requested` event the `requested_reviewer` is a third spelling again, login `Copilot` with `type` `Bot`, so a filter written against either of the other two selects nothing there and reports a pull request with requests as having none. Match on the type plus a loose login test rather than on any one spelling, and each query below uses the correct form for its API.
 
 ```sh
-# 1. PR node id + the Copilot reviewer's bot node id (read from any existing
-#    Copilot review; the reviewer login is `copilot-pull-request-reviewer`).
+# 1. PR node id, plus the reviewer bot's node id read across the repo's recent PRs.
+# The bot id is the reviewer account's own, so every PR in the repo carries the same one.
+# The reviewer login is `copilot-pull-request-reviewer` in GraphQL.
 PR_NODE=$(gh pr view <N> --json id --jq '.id')
-BOT_ID=$(gh api graphql -f query='
-{
-  repository(owner: "<owner>", name: "<repo>") {
-    pullRequest(number: <N>) {
-      reviews(first: 50) { nodes { author { __typename login ... on Bot { id } } } }
-    }
-  }
-}' --jq '[.data.repository.pullRequest.reviews.nodes[]
-          | select(.author.login == "copilot-pull-request-reviewer")
-          | .author.id] | first')
-
-# 2. Re-request a Copilot review on the current head.
-gh api graphql -f query='
-mutation($pr: ID!, $bot: ID!) {
-  requestReviews(input: { pullRequestId: $pr, botIds: [$bot], union: true }) {
-    pullRequest { id }
-  }
-}' -F pr="$PR_NODE" -F bot="$BOT_ID"
-```
-
-The bot node id is read from an existing Copilot **formal** review (`pullRequest.reviews`), so step 1 needs at least one prior formal review on the PR, and the auto-review-on-open normally supplies the first one (it may have **no inline comments**, which still counts, and its bot node id is still readable). Poll for it (give auto-review-on-open a few minutes) before deciding it is missing.
-
-**Cold start (round 1 not yet landed): read the id repo-wide, not from this PR.** The Copilot reviewer's bot node id is the reviewer bot *account's* node id and is **stable across every PR in the repo**. So a freshly opened PR that has neither a formal review nor an issue comment yet does **not** need UI seeding to bootstrap the id: read it from any prior Copilot review anywhere in the repo, then feed it into the `requestReviews` mutation to drive round 1. Query the **most recent** PRs (`first: 20` with an explicit newest-first order, since plain `last: 20` returns the *oldest* PRs, which may predate Copilot on the repo), and **guard for an empty result**, since an empty `$BOT_ID` means none of the sampled PRs carry a Copilot review. Widen the window (raise the count or paginate) before concluding the repo has never had one and falling back to UI seeding. Never feed an empty id into the mutation:
-
-```sh
 BOT_ID=$(gh api graphql -f query='
 {
   repository(owner: "<owner>", name: "<repo>") {
@@ -114,12 +90,22 @@ BOT_ID=$(gh api graphql -f query='
           | select(.author.login == "copilot-pull-request-reviewer")
           | .author.id] | first // empty')
 if [ -z "$BOT_ID" ]; then
-  echo "no Copilot review in the 20 most recent PRs - widen the window, else fall back to UI seeding" >&2
-  return 1 2>/dev/null || exit 1   # stop; do NOT call requestReviews with an empty id
+  echo "no Copilot review in the 20 most recent PRs, so widen the window" >&2
+  return 1 2>/dev/null || exit 1   # Stop. Do NOT call requestReviews with an empty id.
 fi
+
+# 2. Re-request a Copilot review on the current head.
+gh api graphql -f query='
+mutation($pr: ID!, $bot: ID!) {
+  requestReviews(input: { pullRequestId: $pr, botIds: [$bot], union: true }) {
+    pullRequest { id }
+  }
+}' -F pr="$PR_NODE" -F bot="$BOT_ID"
 ```
 
-If Copilot posted **only an issue comment** on this PR and no formal review, you can instead read the id from that comment's author (`pullRequest.comments` -> author `... on Bot { id }`). Manual UI seeding is the last resort, needed only for a repo that has **never** had a Copilot review, so no prior id exists anywhere to read. Use the mutation for every subsequent re-request.
+**The bot node id belongs to the reviewer account, not to a pull request**, and it is the same id on **every PR in the repo**, so nothing has to land on this PR before step 1 can read it. A PR opened a minute ago, with no review and no comment of its own, needs no UI seeding to bootstrap the id and no prior review to source it from: any Copilot review anywhere in the repo carries it. Query the **most recent** PRs, since a plain `last: 20` returns the *oldest* ones, which may predate Copilot on the repo. **Guard for an empty result**, because an empty `$BOT_ID` says only that none of the PRs sampled carry a Copilot review, so widen the window (raise the count or paginate) before concluding the repo has never had one. Never pass an empty id to the mutation.
+
+A read scoped to this PR (`pullRequest(number: <N>) { reviews }`) returns the same id once a review has landed here, and it buys nothing over the repo-wide read while failing on exactly the round the repo-wide read handles. Where the repo's only Copilot artifact is an issue comment rather than a formal review, read the id from that comment's author instead (`pullRequest.comments` -> author `... on Bot { id }`). Manual UI seeding is the last resort, needed only for a repo that has **never** had a Copilot review, so no prior id exists anywhere to read.
 
 **Do NOT post `@Copilot review` as a PR comment.** That comment triggers the Copilot *coding agent* (`copilot-swe-agent[bot]`), which makes code changes rather than posting a review.
 
