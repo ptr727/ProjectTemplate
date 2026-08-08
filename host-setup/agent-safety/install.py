@@ -179,15 +179,19 @@ def main():
         # Counted over the rules actually replaced rather than over everything the prefix matched.
         # The current rule matches its own prefix, so counting the match set reports it as superseded.
         older = [a for a in matched if a != rule]
-        # A list holding the rule more than once is collapsed here, and the file therefore changes.
-        # That is reported as its own action rather than read as unchanged.
-        copies = len(matched) - len(older)
+        # Counted over what the write removes rather than over what the prefix matched.
+        # The current rule matches its own prefix, so a match-set count reports it as superseded.
+        # A duplicate of it is removed too, and both can happen at once, so both are named.
+        duplicates = max(0, len(matched) - len(older) - 1)
+        changes = []
+        if older:
+            changes.append(f"superseding {len(older)}")
+        if duplicates:
+            changes.append(f"removing {duplicates} duplicate" + ("s" if duplicates > 1 else ""))
         if not matched:
             action = "added"
-        elif older:
-            action = f"updated, superseding {len(older)}"
-        elif copies > 1:
-            action = f"deduplicated, collapsing {copies} copies"
+        elif changes:
+            action = "updated, " + " and ".join(changes)
         else:
             action = "already current"
         done.append(f"permission {rule}: {action}")
