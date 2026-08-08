@@ -135,6 +135,10 @@ def main():
             if "hooks" in g and not isinstance(g["hooks"], list):
                 reject(f"hooks.PreToolUse[{i}].hooks", g["hooks"], list)
                 return 1
+            for j, h in enumerate(g.get("hooks") or []):
+                if not isinstance(h, dict):
+                    reject(f"hooks.PreToolUse[{i}].hooks[{j}]", h, dict)
+                    return 1
 
     pre = data.setdefault("hooks", {}).setdefault("PreToolUse", [])
     # Strip the hook from every existing group first, so a re-run leaves no duplicate behind.
