@@ -908,6 +908,38 @@ class TestCoverageExitCodes(GqlCase):
         self.answer(payload([review(body=body)]))
         self.assertEqual(43, pr_review.main(['status', '7', '--repo', 'o/r']))
 
+    def test_a_drifted_login_reaches_the_code_rather_than_timing_out_as_pending(self) -> None:
+        """The gate could not fire for the one drift it was written to catch.
+
+        `reviewed_head` filters on the login, so a renamed reviewer leaves it false, and gating
+        the verdict behind it meant the login check never reached an exit code. The digest
+        printed `shapes=UNRECOGNIZED` and the wait returned 30, which is the digest disagreeing
+        with the code, and an automated reader settles that by believing the code.
+        """
+        pr = payload([review(login='copilot-code-review-agent')])
+        self.assertFalse(pr_review.reviewed_head(pr))
+        self.answer(pr)
+        with mock.patch.object(pr_review.time, 'sleep') as slept:
+            self.assertEqual(43, pr_review.main(['wait', '7', '--repo', 'o/r',
+                                                 '--timeout', '600']))
+        # Terminal, so it stops rather than polling out the timeout against a landed review.
+        slept.assert_not_called()
+        out = self.out.getvalue()
+        self.assertIn('status=UNRECOGNIZED_REVIEWER_OUTPUT', out)
+        self.assertIn('shapes=UNRECOGNIZED', out)
+
+    def test_a_shape_on_a_round_that_covers_no_head_still_reaches_the_code(self) -> None:
+        """The same gap with the body reader rather than the login, since both sit behind it."""
+        self.answer(payload([review(oid=OLD, body=OVERVIEW + '\n### Confidence assessment\n')]))
+        with mock.patch.object(pr_review.time, 'sleep'):
+            self.assertEqual(43, pr_review.main(['wait', '7', '--repo', 'o/r', '--timeout', '0']))
+
+    def test_a_pending_round_with_nothing_unrecognized_still_reports_pending(self) -> None:
+        """The gate is not allowed to swallow the ordinary wait, which is most of them."""
+        self.answer(payload([review(oid=OLD)]))
+        with mock.patch.object(pr_review.time, 'sleep'):
+            self.assertEqual(30, pr_review.main(['wait', '7', '--repo', 'o/r', '--timeout', '0']))
+
     def test_a_refusal_still_exits_forty_one_rather_than_on_a_coverage_code(self) -> None:
         """The refusal names the round that declined, where a coverage code names a round."""
         self.answer(payload([review(body=REFUSED)]))

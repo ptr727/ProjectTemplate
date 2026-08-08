@@ -581,13 +581,22 @@ def unrecognized_shapes(pr: dict) -> list[str]:
         where = ((node.get('commit') or {}).get('oid') or '')[:8] or 'commit unknown'
         found += [f'{item}  (round {where})' for item in
                   unrecognized_in(node.get('body') or '')]
+    return found + reviewer_login_drift(pr)
+
+
+def reviewer_login_drift(pr: dict) -> list[str]:
+    """Logins that read as this reviewer without being the spelling every query here filters on.
+
+    Read from the authors alone, so the liveness query answers it as well as the full one. That
+    is what lets the wait stop on a drift rather than poll its whole timeout out against a review
+    sitting in plain sight, which is the failure this reading exists to name.
+    """
     logins = {(n.get('author') or {}).get('login') or ''
               for field in ('reviews', 'comments')
               for n in ((pr.get(field) or {}).get('nodes') or [])}
-    found += [f'reviewer login: {login}, where every query here filters on {REVIEWER}'
-              for login in sorted(logins)
-              if login != REVIEWER and READS_AS_REVIEWER.search(login)]
-    return found
+    return [f'reviewer login: {login}, where every query here filters on {REVIEWER}'
+            for login in sorted(logins)
+            if login != REVIEWER and READS_AS_REVIEWER.search(login)]
 
 
 def report_verdict(pr: dict) -> int:
@@ -1170,10 +1179,14 @@ def main(argv: list[str] | None = None) -> int:
     start = time.monotonic()
     pr = gql(Q_LIVE, owner, repo, a.number)
     done, answer = reviewed_head(pr), answered_outside_review(pr)
+    # A drifted login matches no filter here, so `done` stays false however long this runs.
+    # Waiting it out reports a review that landed as one that never did, at the timeout.
+    # The liveness query carries the authors, so this costs the loop no extra call.
+    drift = reviewer_login_drift(pr)
     stalled = ''
     i = 0
     next_pickup = a.pickup_grace
-    while not done and not answer:
+    while not done and not answer and not drift:
         elapsed = time.monotonic() - start
         # Read the pickup before the clock, so a request nothing acted on reports as itself.
         # Running the clock out instead would report it exactly as a slow reviewer.
@@ -1191,6 +1204,7 @@ def main(argv: list[str] | None = None) -> int:
         # Re-read head each iteration: a push during the wait moves it.
         pr = gql(Q_LIVE, owner, repo, a.number)
         done, answer = reviewed_head(pr), answered_outside_review(pr)
+        drift = reviewer_login_drift(pr)
 
     # One payload decides the digest and the exit code together.
     # Read separately, a review landing between them prints coverage and returns a stalled code.
@@ -1204,10 +1218,14 @@ def main(argv: list[str] | None = None) -> int:
     out, _ = digest(owner, repo, a.number, pr=final, stalled=stalled)
     print(out)
     print(f'waited={int(time.monotonic()-start)}s')
-    if reviewed_head(final):
-        # Coverage of the head is what this returns 0 on.
-        # Coverage of the diff is a second reading it used to take on trust.
-        # A round can carry the head and have read only part of it.
+    # The shape reading comes first and is not gated on coverage of the head.
+    # `reviewed_head` is itself one of the readings a drift breaks.
+    # A renamed login matches no filter here, so it reads as no review at all.
+    # Every arm below then reports a review that landed as a pending one.
+    # Gating the verdict behind it left the login check unable to reach an exit code.
+    # The digest above printed `shapes=UNRECOGNIZED` the whole time it did so.
+    # Coverage of the head is the other half, returning 0 only once the diff is covered too.
+    if unrecognized_shapes(final) or reviewed_head(final):
         return report_verdict(final)
     # A refusal before an answer, since it names the round that declined where 40 names none.
     # The digest prints both bodies regardless, so the narrower code costs the reader nothing.
