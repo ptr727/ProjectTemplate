@@ -619,16 +619,11 @@ def report_verdict(pr: dict) -> int:
         return 43
     state, line = head_coverage(pr)
     if state == PARTIAL:
-        # The count comes from the line that decided PARTIAL, not from what past rounds skipped.
-        # Every partial measured here skipped exactly one file, across seven rounds.
-        # That is a measurement of those rounds rather than a property the state carries.
-        # Asserting it would be a claim this script cannot check on the run it prints for.
-        # None is unreachable while PARTIAL is set only where this same line parsed.
-        # It is narrowed rather than indexed, since the alternative is a crash on the gate's path.
-        # A crash there reads as this script being broken rather than as a round that read part.
+        # The unread count comes from the line that decided PARTIAL, never from past rounds.
+        # None is unreachable there, and narrowing keeps a later change from crashing the gate.
         counts = read_coverage(line)
         if counts is None:
-            gap = 'how much of the diff went unread, which could not be re-read from that line'
+            gap = 'that the counts on that line could not be re-read, so the total is unknown'
         else:
             unread = counts[1] - counts[0]
             gap = (f'{unread} of the {counts[1]} changed files '
