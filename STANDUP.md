@@ -47,6 +47,22 @@ After the first commit, confirm it took with `git log -1 --format='%G? author=%a
 
 **Escalate a blocking prerequisite the moment it is found, rather than carrying it.** In a task list a pending task and a blocking prerequisite look identical, and the second quietly becomes the first as work continues around it. Stop at the step that needs the missing input and say which input it is.
 
+## 0B. Create the Branches, Before the First Standup Commit
+
+**Create both long-lived branches empty and do the whole standup on a feature branch off `develop`.** An agent that starts committing onto whichever branch `git init` produced is writing the repo's permanent history, and every step below is exploratory work that has no business being permanent. Doing this first means nothing ever has to be cleaned off `main` or `develop`, because nothing reaches either without review.
+
+1. **Create `main` carrying nothing.** A git branch cannot exist without a commit, so carrying nothing means exactly one signed empty root commit, and section 0's signing window applies to it like any other.
+2. **Create `develop` from `main`**, also carrying nothing, so the two start level.
+3. **Create the first feature branch from `develop`** and run every step below on it, through the audit in step 5.
+4. **Add the repository on GitHub and apply the configuration while still on that branch**, which is step 4 and needs no branch of its own.
+5. **Open a normal pull request into `develop`** when the standup is done, and let it squash like any other change.
+
+**Committing onto `develop` and squashing afterwards does not work**, because `non_fast_forward` is set on both `develop` payloads and rewriting that history is exactly what the rule rejects. This is not hypothetical, since a repo stood up that way was correctly blocked at the point the history needed rewriting, with the standup already written into the branch it had to be lifted off.
+
+**The protection is uneven, so on an operational repo this instruction is the only thing holding the line.** A release repo's `repo-config/develop.json` carries a `pull_request` rule that blocks a direct commit outright, while `repo-config/operational/develop.json` carries three rules, `deletion`, `non_fast_forward` and `required_signatures`, and none of them stops one. A conformant operational repo therefore accepts the commit that this step exists to prevent, and reports nothing wrong afterwards.
+
+**On a public repo the squash is the one chance to leave the exploratory history out.** Standup is where a wrong secret value, a throwaway credential, and a run of noise commits accumulate, and a squashed feature branch publishes the result rather than the route to it.
+
 ## 1. Classify and Catalog
 
 Resolve the repo's type(s) with the [`AUDIT.md`][audit] section 2 detection rules, then write or repair its [`registry/repos.json`][repos] entry: `status`, `types[]`, `groundTruthBranch`, `hasDevelop`, `publish[]`, `requiredSecrets[]`, `consumerModel`, `releaseTrigger`, `workflowModel` (omit to take the `release` default), `configLayout`, and `driftNotes` that describe what the repo **actually is**. Run [`spec/validate.py`][validate] to confirm it classifies cleanly. The registry is ground truth about reality, not intent, and a `validate.py`-clean entry is still false if it disagrees with the live repo.
