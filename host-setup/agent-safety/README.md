@@ -10,6 +10,7 @@ Into `~/.claude/` (or `%USERPROFILE%\.claude\` on Windows):
 - **Two marker-delimited blocks of host-wide content in `CLAUDE.md`**, loaded into every session on the machine (including ad-hoc work outside any project), installed and updated independently so one can change without rewriting the other.
   - The `agent-safety` block carries restrictions alone, so nothing in it can widen a permission. `Repository Boundaries and Write Safety` mirrors the committed `GOVERNANCE.md` section of the same name, carrying its write rules and its rule that a task works in its own checkout as behavioral guidance. `Data in Agent-Authored Text` mirrors `GOVERNANCE.md` "Representative Data in Agent-Authored Text", so an agent illustrates with constructed data rather than data observed on the machine. `Authorization Scope and Memory Hygiene` bounds how a granted permission is recorded and read. Each mirrors a rule that otherwise reaches fleet repos only.
   - The `fleet-bootstrap` block carries `Fleet Governance Entry Point`, which names the template repository and routes by the state a repository is actually in. It is separate precisely because it enables rather than restricts, and the safety block's own text says nothing in it widens a permission, so merging the two would contradict that. It is host-wide rather than per repository because the repositories that most need it are the ones carrying no instruction set to point the way, and it mirrors the byte-locked `AGENTS.md` "Fleet Bootstrap" section that a conformant repository carries.
+- **The permission rules this kit owns, merged into `settings.json`** beside the hook registration. Each is declared as a prefix and a rule, and a re-run drops every rule the prefix owns before adding the current one, so a rule whose spelling changes updates in place rather than accumulating beside the version it replaced. Ownership requires a rule-syntax delimiter after the prefix, since the prefix ends at the script name and a bare prefix test would also claim a longer path such as `pr_review.py-custom`, so a rule written by hand for a different script is never touched. These widen rather than restrict, which is why they are their own component for the same reason the `fleet-bootstrap` block is separate from the `agent-safety` one. Today the list holds one rule, for `scripts/pr_review.py`, the review loop's reply and resolve. Driving that loop by hand needs a raw GraphQL mutation carrying a node id, which is the shape that reached a stranger's repository, where the script queries the id itself and takes no argument an id fits in. What the rule decides is which command runs without a prompt, and it matches the command text rather than the directory the command runs in, so it reaches a `scripts/pr_review.py` in any checkout that carries one. An absolute path would not narrow that, since the hub is reached as a checkout of the caller's own and its location differs per task, so pinning one path would name a checkout the next task does not use. What bounds it is the rule that an agent reaches the hub as a checkout of its own, fetched immediately before it is read, rather than a copy it happens to find on disk, which the `fleet-bootstrap` block beside this carries and [`GOVERNANCE.md`][governance] "Hub-Hosted Tooling" states in full.
 
 The hook is the mechanical backstop. The CLAUDE.md rules and the carried GOVERNANCE.md rules are the behavioral layer. Prose alone is not enough, since the incident happened under prose rules, so both ship. The GitHub write rules have a hook behind them, as do the git operations that bypass a repository protection, while which checkout a command belongs in, the data a line of text quotes, and how an authorization is recorded are prose only, since no hook can see any of the three.
 
@@ -25,7 +26,7 @@ host-setup/agent-safety/install.sh
 .\host-setup\agent-safety\install.ps1
 ```
 
-Both are thin wrappers around `install.py`, so every OS runs one tested code path. The installer self-tests the hook before registering it, merges the settings.json entry without clobbering other keys, and updates each CLAUDE.md block in place by its own markers rather than duplicating it, so the two blocks move independently.
+Both are thin wrappers around `install.py`, so every OS runs one tested code path. The installer self-tests the hook before registering it, merges the settings.json hook entry and the permission rules without clobbering other keys, and updates each CLAUDE.md block in place by its own markers rather than duplicating it, so the two blocks move independently. The settings file is read once and written once, so the hook and the permission rules land together or not at all.
 
 **Restart Claude Code sessions on the machine afterward** so the new hook and CLAUDE.md load.
 
@@ -39,6 +40,7 @@ The deployed copy on each machine is a snapshot, so when the guard changes upstr
 python3 ~/.claude/hooks/gh-write-guard.py --selftest    # decision matrix: all cases pass
 grep -c 'agent-safety v' ~/.claude/CLAUDE.md            # expect 2 (start + end marker)
 grep -c 'fleet-bootstrap v' ~/.claude/CLAUDE.md         # expect 2 (start + end marker)
+grep -cF 'Bash(python3 scripts/pr_review.py:*)' ~/.claude/settings.json   # expect 1 (never duplicated)
 ```
 
 On Windows PowerShell:
@@ -47,6 +49,7 @@ On Windows PowerShell:
 py -3 "$env:USERPROFILE\.claude\hooks\gh-write-guard.py" --selftest    # all cases pass
 (Select-String 'agent-safety v' "$env:USERPROFILE\.claude\CLAUDE.md").Count      # expect 2
 (Select-String 'fleet-bootstrap v' "$env:USERPROFILE\.claude\CLAUDE.md").Count   # expect 2
+(Select-String -SimpleMatch 'Bash(python3 scripts/pr_review.py:*)' "$env:USERPROFILE\.claude\settings.json").Count   # expect 1
 ```
 
 Live end-to-end (in any repo): attempt a discarded-output write and confirm the Bash tool is blocked:
@@ -65,9 +68,14 @@ The installer writes this. It is here so you can inspect or hand-place it:
     "PreToolUse": [
       { "matcher": "Bash", "hooks": [ { "type": "command", "command": "\"python3\" \"<home>/.claude/hooks/gh-write-guard.py\"" } ] }
     ]
+  },
+  "permissions": {
+    "allow": [ "Bash(python3 scripts/pr_review.py:*)" ]
   }
 }
 ```
+
+Every other key in the file is left as it stands, `permissions.allow` included, apart from the rules whose prefix this kit owns.
 
 ## Scope and Limits
 
@@ -80,4 +88,5 @@ The installer writes this. It is here so you can inspect or hand-place it:
 - **Not a credential control.** A fine-grained PAT limited to owned repositories is a separate, stronger structural guard (a hard `403` on any non-owned repo) and is left to per-machine credential setup, out of this kit.
 
 <!-- Repo -->
+[governance]: ../../GOVERNANCE.md
 [issue-365]: https://github.com/ptr727/ProjectTemplate/issues/365

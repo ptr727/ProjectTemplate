@@ -322,6 +322,29 @@ One pull request, after a survey, deciding whether anything stands between this 
   - **Settled** - The reviewer counts the file and does not read it, rather than losing it earlier. The stated denominator equals the API's own `changedFiles` on **103 of 104** pull requests, the exception being one whose branch shrank between rounds.
   - **Settled** - Splitting remains a real remedy for a feature branch and is unavailable for a promotion, whose head is `develop`, so a promotion carrying a partial round is a maintainer decision by construction.
 
+### A Resolve the Loop Cannot Perform and a Thread Nobody Can Find
+
+The review loop ends by replying on a thread and resolving it, and both halves failed on one pull request in ways the runbook describes nowhere. The resolve mutation was refused by the agent harness's own permission layer before any request left the machine, seconds after the reply mutation carrying the identical thread id had succeeded, so the refusal was neither GitHub's nor the id's. Handing the resolve to the maintainer then failed a second time, because the digest names a thread by its `PRRT_` node id, that id appears nowhere in the GitHub interface, and the person asked to resolve it could not find what to click.
+
+**State** `ready`. **Touches** `scripts/pr_review.py`, the runbook section in [`.github/copilot-instructions.md`][copilot-instructions], and [`OPERATIONS.md`][operations]. **Cost** one pull request, since the query change is one field and the runbook change is one paragraph.
+
+- **Carry a thread's own web address beside its node id, so a resolve can be handed to a person.** `Q_THREADS` selects `id`, `isResolved`, `path`, `line` and the first comment's `author` and `body`, and not its `url`, so the digest can name a thread and cannot point at it. Selecting `url` and printing it beside the id makes the hand-off one click.
+  - **Blocked by** - Nothing.
+  - **Checked** - `develop` at `0e4a1c2` on 2026-08-08, reading `Q_THREADS` in `scripts/pr_review.py` against the digest line that consumes it.
+  - **Detail** - The two identifiers are not interchangeable and neither is derivable from the other without a query. A `PRRT_` node id is what a mutation takes, and a `#discussion_r` fragment is what the web page anchors on.
+  - **Detail** - The evidence is [#620][pr-620], where a thread was handed over by node id and the reply was that it could not be found.
+
+- **Give the runbook a shape for a write the harness refuses, which it currently has none for.** Its list of dead paths is entirely GitHub's own refusals, a silent no-op, a 422, and the wrong bot login for the API in use, so a local refusal matches none of them and reads as a bad identifier, which invites the retry a blocked write must never get.
+  - **Blocked by** - Nothing.
+  - **Checked** - `develop` at `0e4a1c2` on 2026-08-08, against the known-non-working-paths list in the runbook.
+  - **Detail** - The distinguishing evidence is that a reply on the same thread id, in the same session, had already succeeded and returned a comment url, so the identifier was demonstrably good.
+  - **Detail** - What cleared it was a permalink and a human click, and the durable remedy is a permission rule in host settings. That is host state rather than repo content, so it belongs in the runbook as a note rather than in a committed configuration file.
+
+- **Confirm a resolve by re-reading the thread rather than by the mutation returning.** `reply` already exits 63 where the resolve did not report the thread resolved, which is the right shape, and a loop driving `gh api` by hand gets no exit code at all and so cannot notice. The rule worth writing down is that the state is the evidence.
+  - **Blocked by** - Nothing.
+  - **Checked** - `develop` at `0e4a1c2` on 2026-08-08, reading the exit-code table in the `scripts/pr_review.py` module docstring.
+  - **Detail** - This is the failure the suppressed-findings count already exists for, where a step that stopped running reads exactly like a step that passed.
+
 ## Standalone Chores
 
 Small work with no research to preserve, selectable one bullet at a time.
@@ -418,12 +441,6 @@ Actions on issues that are the maintainer's to take, each carrying its evidence 
 
 Each was checked against the tree and has nothing left to do anywhere. Closing is the maintainer's call, and each wants the evidence quoted in the closing comment rather than a bare close.
 
-- **[#519][issue-519], the hub's own tree does not pass the prose gate it ships.** Complete on the prose and on both questions.
-  - **Fixed by** - `f7a6a13` (snippets), `c9c92dd` (comments), `d791930` (hub-only Markdown), and the carried batch on `prose/carried-semicolons`.
-  - **Checked** - `develop` at `d791930` on 2026-08-07, where `python3 scripts/prose_lint.py --summary` reported 41 across 6 files, and 0 across 0 with the carried batch applied.
-  - **Closing evidence** - The whole-tree figure went 557 across 45 to zero, in four batches split by surface, being 184 in `catalog/snippets/`, 241 in non-Markdown comments, 90 in hub-only Markdown and 41 in the six carried files. Question 1 is answered by `reports/` being exempt as a generated tree, and question 2 by the snippets leading, since a non-conformant snippet seeds its violations into every repo that adopts it.
-  - **Closing evidence** - The issue's claim that the governance files were clean, and that this was therefore not a carry problem, was true of the checker of the day and false of the tree. Today's checker reports 38 findings against the same six files as they stood at `69688ec`, the commit the issue measured, while that commit's own checker reports zero. Scoping the list exemption to a sentence rather than a whole bullet accounts for 37 of the 38, because a colon anywhere ahead of the first semicolon had exempted every semicolon after it. The carry problem was real throughout and invisible, which is the stale-exemption hazard running in the loose direction.
-
 - **[#557][issue-557], the agent-isolation rule and its two open questions.** Complete on the rule and on both questions.
   - **Fixed by** - `9d85941`.
   - **Checked** - `develop` at `9d85941` on 2026-08-06.
@@ -447,7 +464,6 @@ Each was checked against the tree and has nothing left to do anywhere. Closing i
 [issue-483]: https://github.com/ptr727/ProjectTemplate/issues/483
 [issue-489]: https://github.com/ptr727/ProjectTemplate/issues/489
 [issue-509]: https://github.com/ptr727/ProjectTemplate/issues/509
-[issue-519]: https://github.com/ptr727/ProjectTemplate/issues/519
 [issue-521]: https://github.com/ptr727/ProjectTemplate/issues/521
 [issue-523]: https://github.com/ptr727/ProjectTemplate/issues/523
 [issue-550]: https://github.com/ptr727/ProjectTemplate/issues/550
@@ -464,6 +480,7 @@ Each was checked against the tree and has nothing left to do anywhere. Closing i
 <!-- Pull requests -->
 
 [pr-591]: https://github.com/ptr727/ProjectTemplate/pull/591
+[pr-620]: https://github.com/ptr727/ProjectTemplate/pull/620
 
 <!-- Upstream -->
 
