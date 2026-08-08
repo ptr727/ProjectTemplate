@@ -168,12 +168,14 @@ def check_sha_pin(root: Path, files: list[str]) -> list[str]:
                 unread += 1
             else:
                 resolved += 1
-    if resolved or foreign or unowned or unread:
-        # One fixed shape every run, so a zero in any position is as visible as a count.
-        NOTES.append(f'resolved {resolved} pin(s) against GitHub. Read for shape only: '
-                     f'{foreign} under another owner, {unowned} whose owner could not be '
-                     f"compared because this checkout's origin is unreadable, "
-                     f'{unread} GitHub did not answer for.')
+    # Unconditional, so a zero in any position is as visible as a count.
+    # Guarded on a non-zero counter it went silent on the one reading it exists to surface.
+    # A run that resolved nothing is what a repository carrying no workflow at all produces.
+    # That is the clean line the note was added to stop anyone inferring narrowness from.
+    NOTES.append(f'resolved {resolved} pin(s) against GitHub. Read for shape only: '
+                 f'{foreign} under another owner, {unowned} whose owner could not be '
+                 f"compared because this checkout's origin is unreadable, "
+                 f'{unread} GitHub did not answer for.')
     return bad
 
 

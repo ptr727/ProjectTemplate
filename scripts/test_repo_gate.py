@@ -174,6 +174,20 @@ class TestShaPinResolves(ResolveCase):
             with self.subTest(fragment=fragment):
                 self.assertIn(fragment, repo_gate.NOTES[0])
 
+    def test_the_note_prints_where_every_count_is_zero(self) -> None:
+        """The all-zero run is the one the note exists for, and it was the one it skipped.
+
+        Guarded on a non-zero counter, the note went silent on a repository carrying no workflow
+        at all, which is exactly the clean line the docstring says nobody should have to infer
+        the check's narrowness from.
+        """
+        repo_gate.check_sha_pin(self.tmp, [])
+        self.assertEqual(1, len(repo_gate.NOTES))
+        for fragment in ('resolved 0 pin(s)', '0 under another owner',
+                         '0 whose owner could not be compared', '0 GitHub did not answer for'):
+            with self.subTest(fragment=fragment):
+                self.assertIn(fragment, repo_gate.NOTES[0])
+
     def test_a_pin_github_did_not_answer_for_is_skipped_rather_than_failed(self) -> None:
         """Offline, unauthenticated and rate-limited all read as nothing learned, not as absent."""
         self.answers({f'repos/{self.OWNER}/Fleet/commits/{PINNED}': None})
