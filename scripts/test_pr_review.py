@@ -870,6 +870,19 @@ class TestCoverageExitCodes(GqlCase):
         self.assertEqual(42, pr_review.main(['status', '7', '--repo', 'o/r']))
         self.assertIn('status=COVERAGE_IS_PARTIAL', self.out.getvalue())
 
+    def test_the_partial_message_counts_the_unread_files_rather_than_assuming_one(self) -> None:
+        """Every partial on record skipped exactly one file, which is a measurement of seven
+        rounds rather than a property the state carries, so the line reads the run it prints."""
+        for reviewed, changed, phrase in ((2, 3, '1 of the 3 changed files has'),
+                                          (5, 9, '4 of the 9 changed files have')):
+            with self.subTest(reviewed=reviewed, changed=changed):
+                out = self.enterContext(contextlib.redirect_stdout(io.StringIO()))
+                self.answer(payload([review(
+                    body=OVERVIEW + f'\nCopilot reviewed {reviewed} out of {changed} changed '
+                                    f'files in this pull request and generated no comments.')]))
+                self.assertEqual(42, pr_review.main(['status', '7', '--repo', 'o/r']))
+                self.assertIn(phrase, out.getvalue())
+
     def test_status_exits_forty_three_on_a_wording_it_does_not_read(self) -> None:
         self.answer(payload([review(body=OVERVIEW +
                                      '\nCopilot reviewed some of the changed files.')]))
