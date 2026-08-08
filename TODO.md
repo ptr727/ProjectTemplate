@@ -37,36 +37,6 @@ One pull request pointing a hub `uses:` at a hub-owned action, so that the resol
   - **Settled** - The resolvability pass reports what it covered on every run, so the hub's zero is visible rather than silent, which is why this is a separate decision rather than a defect in that pass.
   - **Settled** - The fleet's `ptr727` pins are live in the downstream repos that consume the action, and `repo_gate.py --root <repo>` from a hub checkout reads them there, so the pass is not idle fleet-wide.
 
-### Three Rules That Leave the Recurring Case Unstated
-
-One pull request widening three carried [`GOVERNANCE.md`][governance] rules that each state their common case and go quiet on the case that recurs, filed together because they share that shape and land in one re-vendor.
-
-**State** `ready`. **Touches** [`GOVERNANCE.md`][governance] "Git and Commit Rules", "Communicating with the User", and "Operational Repositories". **Cost** one hub edit plus a carried-section re-vendor, which rides the visit in "Fleet Sweeps".
-
-- **Say when an issue is closed by hand, not only that the closing keyword belongs on the promotion.** The uncovered case is work complete on `develop` with no promotion imminent.
-  - **Blocked by** - Nothing.
-  - **Issue** - [#578][issue-578] item 1.
-  - **Checked** - `develop` at `b82c1a3` on 2026-08-05, where the rule licenses a hand-close only once a promotion has merged without the keyword.
-  - **Open** - Nothing.
-  - **Settled** - Downstream agents keep re-deriving the rule and reporting it as a discovery, which says it is being missed rather than that it is missing, so the discoverability half is not a wording fix.
-  - **Settled** - The widening says an issue is closed when the work is verifiably complete, citing the squash commit that completed it, and that the promotion keyword is the automation for the common case rather than the only permitted route.
-
-- **Say that the message carrying the clickable link comes before the prompt it accompanies.** A message emitted after the prompt is not read before the question is answered.
-  - **Blocked by** - Nothing.
-  - **Issue** - [#578][issue-578] item 2.
-  - **Checked** - `develop` at `b82c1a3` on 2026-08-05, where the rule says accompanying rather than preceding.
-  - **Open** - Nothing.
-  - **Settled** - The rule already gets the hard part right, that an interactive prompt renders neither a Markdown link nor a bare URL, so the reference inside it is a bare number and the link goes in the message.
-  - **Settled** - The recurrence is evidence that the wording does not reach the case rather than that the rule is ignored, which is the same diagnosis the entry above reaches.
-
-- **State that an operational repository still opens a pull request for a large or risky change.** The grant to commit direct to `develop` says nothing about when to decline it.
-  - **Blocked by** - Nothing.
-  - **Issue** - [#578][issue-578] item 3.
-  - **Checked** - `develop` at `3d1a0b1` on 2026-08-06, where `repo-config/operational/develop.json` carries exactly three rules, `deletion`, `non_fast_forward` and `required_signatures`.
-  - **Open** - What counts as large, stated as a shape rather than a line count, since the property that matters is whether the change can be read at a glance and reverted cleanly.
-  - **Settled** - The reason the grant exists is the one-line config edit that a review round costs more than it protects, and that reason stops applying well before a change gets large.
-  - **Settled** - This stays guidance by construction, because adding a `pull_request` rule to the operational ruleset would withdraw the direct-commit grant the model exists to give.
-
 ### The Declared Repository Description
 
 One pull request moving the canonical short description into declared data, which settles the second-paragraph ambiguity by construction rather than by writing an extraction rule the same change then deletes.
@@ -348,6 +318,21 @@ The review loop ends by replying on a thread and resolving it, and both halves f
   - **Checked** - `develop` at `0e4a1c2` on 2026-08-08, reading the exit-code table in the `scripts/pr_review.py` module docstring.
   - **Detail** - This is the failure the suppressed-findings count already exists for, where a step that stopped running reads exactly like a step that passed.
 
+### The Grant That Unblocks a Cross-Owner Write
+
+One pull request documenting how a maintainer grants a write target the guard denies. The hook denies a `gh` write whose explicit target is under an owner other than the checkout origin's, and the only way past it is a grant in `GH_WRITE_GUARD_ALLOW`, which no document tells a reader how to give.
+
+**State** `ready`. **Touches** [`docs/host-setup.md`][host-setup] and [`host-setup/agent-safety/README.md`][write-guard-readme]. **Cost** one pull request, prose only, and hub-only, since the kit is host state rather than carried repo content.
+
+- **Document the grant where a reader already is when the denial arrives, which is the install section rather than the hook's description.** A denial names the variable, and the two documents that could explain it either never mention it or mention it while describing what the hook refuses, so the reader is told a grant exists and never how to make one.
+  - **Blocked by** - Nothing.
+  - **Issue** - None filed.
+  - **Checked** - `develop` at `92b9fc5` on 2026-08-08, where "Agent Write-Safety Kit" in [`docs/host-setup.md`][host-setup] never names the variable at all, [`host-setup/agent-safety/README.md`][write-guard-readme] names it once inside the bullet listing what the hook denies, giving the token format and not how to set it, and [`README.md`][readme] carries no host-protection section, only a pointer to the first.
+  - **Detail** - The channel that works is an `env` block in the checkout's `.claude/settings.local.json`, holding `GH_WRITE_GUARD_ALLOW` set to the target. It is per project rather than host-wide, which is the property worth stating, since a grant made for one checkout does not follow the agent into another repository's sessions.
+  - **Detail** - The case that raised it is a fork, where `origin` is under the maintainer's own owner and `upstream` is the project it forked from. Filing an issue or a pull request against the upstream is the cross-owner write, and everything aimed at the fork is not, so the grant names the upstream alone and the denial appears only on the half that leaves the owner. That asymmetry is the part a reader hits first and the reason a worked example beats a definition here.
+  - **Detail** - The two forms a reader reaches for first both fail, silently in the sense that the write simply stays denied: an inline `GH_WRITE_GUARD_ALLOW=owner/repo gh ...` prefix, and an `export` in a shell call. The hook runs as its own process and reads only the environment the session was launched with, which is exactly what makes a grant a deliberate act taken outside the session rather than something an agent can do for itself once blocked. The behavior is settled and tested, since [`gh-write-guard.py`][write-guard] already asserts the inline prefix denies, so what is missing is only the explanation.
+  - **Detail** - Two things worth carrying beside the example: that a session restart is what loads the grant, and a way to confirm one took, since inferring it from a write that no longer denies means learning the answer by making the write.
+
 ## Standalone Chores
 
 Small work with no research to preserve, selectable one bullet at a time.
@@ -383,7 +368,9 @@ Regenerate [reports/divergences.md][divergences-report] before using it as the w
   - **Detail** - Two comment lines in [`.markdownlint-cli2.jsonc`][markdownlint] took the same capitalization, and that file is `verbatim` and `whole`, so every downstream copy is byte-mismatched on a config nothing else changed about.
   - **Detail** - [`CODESTYLE.md`][codestyle] is the fifth file, at `intent` rather than `verbatim`, so it reaches the fleet as a rule each repo adopts in its own copy, and the same mixed spelling waits in every downstream tree.
   - **Detail** - [`.github/copilot-instructions.md`][copilot-instructions] is the sixth, also at `intent`, where "Reply and Thread Resolution Workflow" now leads with the hub's reply helper and keeps the hand-run mutations as the cross-owner and unreachable-hub path. A repo taking the old copy is not broken by it, since the mutations it documents still work, so this rides the visit rather than gating it.
+  - **Detail** - The same file's "Triggering and Polling" reads the reviewer bot's node id across the repo's newest pull requests rather than from the pull request under review, because the id is the reviewer account's own and is identical on every pull request in the repo, read as one value across all eight of the newest here on 2026-08-08. This is the other part that propagates a procedure rather than refreshing a hash, so a repo left on the old copy reads its own runbook as requiring a review on the pull request before the id can be read, and hands round 1 to the maintainer to seed through the UI whenever auto-review-on-open does not fire, which is the hand-off the mutation exists to remove.
   - **Detail** - The prose batch rewrote punctuation in five `verbatim` [`GOVERNANCE.md`][governance] sections, "Branching Model", "Release Model", "Documentation Style Conventions", "PR Review Etiquette" and "Workflow YAML Conventions", so every downstream copy of those five is byte-mismatched and the audit reports it as stale. No rule changed meaning, so the re-vendor is a hash refresh rather than a propagation, and a repo taking the old copy is correct on the rule while wrong on the bytes.
+  - **Detail** - The [#578][issue-578] widening is one of the two parts of this sweep that propagate a rule rather than refreshing a hash, the runbook correction above being the other, so a repo left on the old copy is wrong on the rule and not merely on the bytes, which makes the pair the half to carry first. It touches three `verbatim` [`GOVERNANCE.md`][governance] sections, "Branching Model", "Communicating with the User" and "Operational Repositories", and the third of those matters most on the two `operational` repos that can act on it. [`WORKFLOW.md`][workflow] took a cross-reference in the same change and is `intent`, so nothing reports it.
   - **Detail** - [`WORKFLOW.md`][workflow] is the seventh file and `repo-config/README.md` joins [`CODESTYLE.md`][codestyle] and [`.github/copilot-instructions.md`][copilot-instructions] at `intent`, where a punctuation-only edit produces no hash and therefore no audit finding at all. Nothing reports these, which is why they are recorded here rather than left to the run. `HISTORY.md` is `presence` and is each repo's own changelog, so its one fix owes nothing downstream.
 
 - **Carry the `Local Verification` heading into every repository's `OPERATIONS.md`.** The heading leads the file and states what verifying a change there requires, naming the part of the repo's contract CI structurally cannot exercise, and a repo whose gates are entirely in CI says that under it rather than omitting it.
@@ -444,15 +431,12 @@ Actions on issues that are the maintainer's to take, each carrying its evidence 
 
 Each was checked against the tree and has nothing left to do anywhere. Closing is the maintainer's call, and each wants the evidence quoted in the closing comment rather than a bare close.
 
-- **[#557][issue-557], the agent-isolation rule and its two open questions.** Complete on the rule and on both questions.
-  - **Fixed by** - `9d85941`.
-  - **Checked** - `develop` at `9d85941` on 2026-08-06.
-  - **Closing evidence** - [`GOVERNANCE.md`][governance] "Repository Boundaries and Write Safety" carries the rule that each task runs in its own checkout, in its own directory, on its own feature branch, scoped per task rather than per agent, which adopts the first open question. It names the three commands that cross the boundary while being correct in isolation, and it names the two signals that another task is live in a tree, whose stated response is to stop, which adopts the second. The rule reaches every machine through the same text in [`host-setup/agent-safety/`][agent-safety].
-
-- **[#579][issue-579], a repository with no instruction set cannot resolve its own vocabulary.** Complete on the term definitions and on the routing.
-  - **Fixed by** - `9d85941`.
-  - **Checked** - `develop` at `9d85941` on 2026-08-06.
-  - **Closing evidence** - [`AGENTS.md`][agents] "Fleet Bootstrap" names the hub as a defined term and carries the reach rule, and [`README.md`][readme] defines the six words a request is phrased in, the hub, the fleet, standing a repository up, auditing one, closing the review loop, and carried against reached, each naming the file that answers it. The host-wide block under [`host-setup/agent-safety/`][agent-safety] carries the same definition, which is what reaches a repository holding no instruction set at all.
+- **[#578][issue-578], three rules that state the common case and leave the recurring one unstated.** Complete on all three items.
+  - **Fixed by** - The pull request carrying this entry, since the fix and the entry ship in one squash and the closing comment cites that SHA.
+  - **Checked** - `develop` at `a706ddb` on 2026-08-08, where all three gaps were re-read before the widening was written.
+  - **Closing evidence** - [`GOVERNANCE.md`][governance] "Branching Model" now states that an issue closes when its work is verifiably complete and that the keyword automates the case where completion and promotion coincide rather than adding a condition to it, naming work complete on `develop` with no promotion imminent as the second hand-close case beside a promotion that merged without the keyword, which answers item 1. "Communicating with the User" now says the message carrying the clickable link comes **before** the prompt rather than merely alongside it, since a prompt blocks on an answer and a later message arrives after that answer is given, which answers item 2. "Operational Repositories" now states when to decline the direct-commit grant, as a shape rather than a line count, and records that it stays guidance because a `pull_request` rule on the operational ruleset would gate the direct push and withdraw the allowance, which answers item 3.
+  - **Detail** - The item 1 rule sits in "Branching Model" rather than the "Git and Commit Rules" the retired cluster named, which is where the re-vendor has to look for it.
+  - **Detail** - Sweeping item 3 by term rather than by the instance the issue named found [`WORKFLOW.md`][workflow] section 3 restating the same allowance with the same silence, so it now points at the section that owns the test rather than repeating it, which is one rule in one place and a cross-reference for the second reader.
 
 <!-- Issues -->
 
@@ -470,11 +454,9 @@ Each was checked against the tree and has nothing left to do anywhere. Closing i
 [issue-521]: https://github.com/ptr727/ProjectTemplate/issues/521
 [issue-523]: https://github.com/ptr727/ProjectTemplate/issues/523
 [issue-550]: https://github.com/ptr727/ProjectTemplate/issues/550
-[issue-557]: https://github.com/ptr727/ProjectTemplate/issues/557
 [issue-558]: https://github.com/ptr727/ProjectTemplate/issues/558
 [issue-577]: https://github.com/ptr727/ProjectTemplate/issues/577
 [issue-578]: https://github.com/ptr727/ProjectTemplate/issues/578
-[issue-579]: https://github.com/ptr727/ProjectTemplate/issues/579
 [issue-580]: https://github.com/ptr727/ProjectTemplate/issues/580
 [issue-585]: https://github.com/ptr727/ProjectTemplate/issues/585
 [issue-597]: https://github.com/ptr727/ProjectTemplate/issues/597
@@ -492,7 +474,6 @@ Each was checked against the tree and has nothing left to do anywhere. Closing i
 
 <!-- Repo -->
 
-[agent-safety]: ./host-setup/agent-safety/
 [agents]: ./AGENTS.md
 [audit]: ./spec/audit.py
 [audit-doc]: ./AUDIT.md
@@ -502,6 +483,7 @@ Each was checked against the tree and has nothing left to do anywhere. Closing i
 [divergences-report]: ./reports/divergences.md
 [files]: ./spec/files.json
 [governance]: ./GOVERNANCE.md
+[host-setup]: ./docs/host-setup.md
 [markdownlint]: ./.markdownlint-cli2.jsonc
 [matrix]: ./reports/conformance-matrix.md
 [merge-bot]: ./.github/workflows/merge-bot-pull-request.yml
@@ -522,3 +504,4 @@ Each was checked against the tree and has nothing left to do anywhere. Closing i
 [workflow]: ./WORKFLOW.md
 [workflows]: ./catalog/snippets/workflows/
 [write-guard]: ./host-setup/agent-safety/gh-write-guard.py
+[write-guard-readme]: ./host-setup/agent-safety/README.md
