@@ -322,6 +322,29 @@ One pull request, after a survey, deciding whether anything stands between this 
   - **Settled** - The reviewer counts the file and does not read it, rather than losing it earlier. The stated denominator equals the API's own `changedFiles` on **103 of 104** pull requests, the exception being one whose branch shrank between rounds.
   - **Settled** - Splitting remains a real remedy for a feature branch and is unavailable for a promotion, whose head is `develop`, so a promotion carrying a partial round is a maintainer decision by construction.
 
+### A Resolve the Loop Cannot Perform and a Thread Nobody Can Find
+
+The review loop ends by replying on a thread and resolving it, and both halves failed on one pull request in ways the runbook describes nowhere. The resolve mutation was refused by the agent harness's own permission layer before any request left the machine, seconds after the reply mutation carrying the identical thread id had succeeded, so the refusal was neither GitHub's nor the id's. Handing the resolve to the maintainer then failed a second time, because the digest names a thread by its `PRRT_` node id, that id appears nowhere in the GitHub interface, and the person asked to resolve it could not find what to click.
+
+**State** `ready`. **Touches** `scripts/pr_review.py`, the runbook section in [`.github/copilot-instructions.md`][copilot-instructions], and [`OPERATIONS.md`][operations]. **Cost** one pull request, since the query change is one field and the runbook change is one paragraph.
+
+- **Carry a thread's own web address beside its node id, so a resolve can be handed to a person.** `Q_THREADS` selects `id`, `isResolved`, `path`, `line` and the first comment's `author` and `body`, and not its `url`, so the digest can name a thread and cannot point at it. Selecting `url` and printing it beside the id makes the hand-off one click.
+  - **Blocked by** - Nothing.
+  - **Checked** - `develop` at `0e4a1c2` on 2026-08-08, reading `Q_THREADS` in `scripts/pr_review.py` against the digest line that consumes it.
+  - **Detail** - The two identifiers are not interchangeable and neither is derivable from the other without a query. A `PRRT_` node id is what a mutation takes, and a `#discussion_r` fragment is what the web page anchors on.
+  - **Detail** - The evidence is [#620][pr-620], where a thread was handed over by node id and the reply was that it could not be found.
+
+- **Give the runbook a shape for a write the harness refuses, which it currently has none for.** Its list of dead paths is entirely GitHub's own refusals, a silent no-op, a 422, and the wrong bot login for the API in use, so a local refusal matches none of them and reads as a bad identifier, which invites the retry a blocked write must never get.
+  - **Blocked by** - Nothing.
+  - **Checked** - `develop` at `0e4a1c2` on 2026-08-08, against the known-non-working-paths list in the runbook.
+  - **Detail** - The distinguishing evidence is that a reply on the same thread id, in the same session, had already succeeded and returned a comment url, so the identifier was demonstrably good.
+  - **Detail** - What cleared it was a permalink and a human click, and the durable remedy is a permission rule in host settings. That is host state rather than repo content, so it belongs in the runbook as a note rather than in a committed configuration file.
+
+- **Confirm a resolve by re-reading the thread rather than by the mutation returning.** `reply` already exits 63 where the resolve did not report the thread resolved, which is the right shape, and a loop driving `gh api` by hand gets no exit code at all and so cannot notice. The rule worth writing down is that the state is the evidence.
+  - **Blocked by** - Nothing.
+  - **Checked** - `develop` at `0e4a1c2` on 2026-08-08, reading the exit-code table in the `scripts/pr_review.py` module docstring.
+  - **Detail** - This is the failure the suppressed-findings count already exists for, where a step that stopped running reads exactly like a step that passed.
+
 ## Standalone Chores
 
 Small work with no research to preserve, selectable one bullet at a time.
@@ -457,6 +480,7 @@ Each was checked against the tree and has nothing left to do anywhere. Closing i
 <!-- Pull requests -->
 
 [pr-591]: https://github.com/ptr727/ProjectTemplate/pull/591
+[pr-620]: https://github.com/ptr727/ProjectTemplate/pull/620
 
 <!-- Upstream -->
 
