@@ -11,7 +11,7 @@ A cluster's `State` is one of four. `ready` means every open question is answera
 The steps below are followed in order rather than sampled.
 
 1. Run `gh issue list --state open` and confirm every number it returns appears somewhere in this file. A number appearing nowhere is an entry that does not exist yet, so write it before selecting anything, because an invisible issue cannot be selected. Nothing mechanical enforces this, which is the honest limit of a hand-maintained file and the reason the step is first.
-2. Run `gh pr list --state open` and confirm every pull request it returns carries a **stated active blocker**, written where the pull request itself carries it rather than held in a session that has ended. A blocker is active only while the thing it names is still true, so a review round that has landed, a dependency that has merged, and an outage that has passed each stop being one, and what they leave behind is a forgotten pull request rather than a parked one. The remedy is to finish it, close it, or write the current blocker down, and it happens before selecting new work rather than after, because the cost is not the waiting. [#591][pr-591] was parked correctly during a GitHub Actions outage and came back three days later twenty commits behind `develop`, conflicting in six regions, and carrying an exit code that had come to mean something else in the meantime.
+2. Run `gh pr list --state open` and confirm every pull request it returns carries a **stated active blocker**, written where the pull request itself carries it rather than held in a session that has ended. A blocker is active only while the thing it names is still true, so a review round that has landed, a dependency that has merged, and an outage that has passed each stop being one, and what they leave behind is a forgotten pull request rather than a parked one. The remedy is to finish it, close it, or write the current blocker down, and it happens before selecting new work rather than after, because the cost is not the waiting. A bot pull request is read rather than excluded, since nobody is there to write a blocker on one and its checks say what it waits on, so an unfinished or failing check is its stated blocker and a green one sitting open means the merge-bot did not take it, which is the finding rather than the exemption. [#591][pr-591] was parked correctly during a GitHub Actions outage and came back three days later twenty commits behind `develop`, conflicting in six regions, and carrying an exit code that had come to mean something else in the meantime.
 3. Read the cluster headings and their `State` lines. A cluster is the unit of selection, so pick a cluster rather than an entry, and never carry two clusters in one pull request.
 4. Prefer a cluster whose state is `ready`. Select a `decision` cluster only when the maintainer is present to answer its open questions, select a `blocked` cluster only after the cluster it names has shipped, and select a `measure` cluster knowing its deliverable is a number rather than a behavior change.
 5. Re-verify every `Checked` line in the chosen cluster against current `develop` before writing anything, by reading the surface the anchor names rather than by re-reading the issue. An issue records the tree as it was on the day it was filed, so a claim in one is a starting point for a check rather than a finding to act on.
@@ -436,7 +436,6 @@ Each was checked against the tree and has nothing left to do anywhere. Closing i
 
 <!-- Issues -->
 
-[copilot-review-schema]: https://github.com/orgs/community/discussions/204320
 [issue-305]: https://github.com/ptr727/ProjectTemplate/issues/305
 [issue-310]: https://github.com/ptr727/ProjectTemplate/issues/310
 [issue-353]: https://github.com/ptr727/ProjectTemplate/issues/353
@@ -461,7 +460,14 @@ Each was checked against the tree and has nothing left to do anywhere. Closing i
 [issue-585]: https://github.com/ptr727/ProjectTemplate/issues/585
 [issue-597]: https://github.com/ptr727/ProjectTemplate/issues/597
 [issue-607]: https://github.com/ptr727/ProjectTemplate/issues/607
+
+<!-- Pull requests -->
+
 [pr-591]: https://github.com/ptr727/ProjectTemplate/pull/591
+
+<!-- Upstream -->
+
+[copilot-review-schema]: https://github.com/orgs/community/discussions/204320
 
 <!-- Repo -->
 
