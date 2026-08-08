@@ -168,12 +168,12 @@ def check_sha_pin(root: Path, files: list[str]) -> list[str]:
                 unread += 1
             else:
                 resolved += 1
-    if resolved or foreign or unowned or unread:
-        # One fixed shape every run, so a zero in any position is as visible as a count.
-        NOTES.append(f'resolved {resolved} pin(s) against GitHub. Read for shape only: '
-                     f'{foreign} under another owner, {unowned} whose owner could not be '
-                     f"compared because this checkout's origin is unreadable, "
-                     f'{unread} GitHub did not answer for.')
+    # Unconditional, so an all-zero run is as visible as a count rather than a clean line.
+    # A guard on a non-zero counter hides the run that resolved nothing, which is this one.
+    NOTES.append(f'resolved {resolved} pin(s) against GitHub. Read for shape only: '
+                 f'{foreign} under another owner, {unowned} whose owner could not be '
+                 f"compared because this checkout's origin is unreadable, "
+                 f'{unread} GitHub did not answer for.')
     return bad
 
 
