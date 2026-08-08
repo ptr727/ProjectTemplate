@@ -8,7 +8,7 @@ What verifying a change here requires, including the part CI cannot perform. The
 
 ### Run the gates the way CI runs them
 
-CI passes explicit `--check` lists, and a bare `python3 scripts/prose_lint.py [file]` runs `DEFAULT_RULES`, which is those two lists together. What differs is the exit code rather than the coverage: CI gates on eight of the nine and reports `charset-unknown` warn-only, where a bare run exits non-zero on any of the nine. `sentence-split` is in neither and is asked for by name. Run the CI invocations:
+CI passes explicit `--check` lists, and a bare `python3 scripts/prose_lint.py [file]` runs `DEFAULT_RULES`, which is those two lists together. What differs is the exit code rather than the coverage: CI gates on eight of the nine and reports `charset-unknown` warn-only, where a bare run exits non-zero on any of the nine. `sentence-split` is in neither, so nothing below runs it and a local run reaches it only by naming it. Run the CI invocations:
 
 ```sh
 python3 scripts/test_prose_lint.py
