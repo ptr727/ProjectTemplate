@@ -19,6 +19,20 @@ import sys
 
 HERE = pathlib.Path(__file__).resolve().parent
 
+# Distinguishes an absent key from one holding an explicit null, which `dict.get` reports alike.
+# The two need different answers, since a gap is filled and a null is a settings error.
+MISSING = object()
+
+
+def at(data, path):
+    """The value at a slash-separated key path, or MISSING where any step of it is absent."""
+    node = data
+    for part in path.split("/"):
+        if not isinstance(node, dict) or part not in node:
+            return MISSING
+        node = node[part]
+    return node
+
 # Permission rules this kit installs, each as (owned prefix, rule).
 # A re-run drops every rule under the prefix before adding the current one, so a changed rule updates in place.
 # The prefix bounds what the installer owns, so a rule written by hand outside it is never touched.
@@ -95,19 +109,32 @@ def main():
     # A key holding an unexpected type would otherwise raise a traceback mid-edit.
     # That reads as a crash rather than as the settings problem it is.
     # The invalid-JSON refusal above is the shape this file already answers a malformed file with.
+    def reject(where, held, want):
+        sys.stderr.write(
+            f"{settings} has `{where}` as {type(held).__name__} where {want.__name__} is required. "
+            "Fix or remove that key, then re-run. Nothing was written.\n"
+        )
+
     for path, want in (("hooks", dict), ("hooks/PreToolUse", list),
                        ("permissions", dict), ("permissions/allow", list)):
-        parts = path.split("/")
-        node = data
-        for p in parts[:-1]:
-            node = node.get(p, {})
-        held = node.get(parts[-1]) if isinstance(node, dict) else None
-        if held is not None and not isinstance(held, want):
-            sys.stderr.write(
-                f"{settings} has `{path.replace('/', '.')}` as {type(held).__name__} where "
-                f"{want.__name__} is required. Fix or remove that key, then re-run. Nothing was written.\n"
-            )
+        held = at(data, path)
+        # An explicit null is present rather than absent, and `setdefault` hands back the null it found.
+        # It is therefore rejected here rather than read as a gap the default fills.
+        if held is not MISSING and not isinstance(held, want):
+            reject(path.replace("/", "."), held, want)
             return 1
+
+    # A list of the right type can still hold the wrong elements.
+    # The registration below reads each group as an object, and each group's `hooks` as a list it appends to.
+    groups = at(data, "hooks/PreToolUse")
+    if groups is not MISSING:
+        for i, g in enumerate(groups):
+            if not isinstance(g, dict):
+                reject(f"hooks.PreToolUse[{i}]", g, dict)
+                return 1
+            if "hooks" in g and not isinstance(g["hooks"], list):
+                reject(f"hooks.PreToolUse[{i}].hooks", g["hooks"], list)
+                return 1
 
     pre = data.setdefault("hooks", {}).setdefault("PreToolUse", [])
     # Strip the hook from every existing group first, so a re-run leaves no duplicate behind.
