@@ -354,6 +354,11 @@ After the final push, sweep-resolve stale older threads for removed code paths.
   - **Proved against** - the 25 most recent merged pull requests as of `develop` at `756a53e`, the corpus on which the anchored verb form that ships instead raises one reference, and that one true.
   - **Delete when** - `claims` stops reading a description for commit references.
 
+- **"The agent check branches" in `STANDUP.md` section 0 is a subject-verb disagreement, and should read "The agent checks branches".** Raised as a suppressed finding against a line the change under review only touched as diff context.
+  - **Disproved by** - reading the sentence against the snippet it describes. The subject is the noun phrase "the agent check", meaning the check for the signing agent, and "branches" is its verb, which is what the `if [ ... = ssh ]; then ssh-add -L; else gpg --list-secret-keys; fi` line does. The proposed reading needs "branches" as a plural noun, and the paragraph is section 0, before a repository exists, where the alternatives it names are the SSH and GPG forms rather than refs.
+  - **Proved against** - the paragraph following the agent snippet in `STANDUP.md` section 0 on `develop` at `676a2bd`, unchanged since `77be3a3`.
+  - **Delete when** - the sentence is reworded for any reason, since the entry is about this phrasing rather than about the rule it states.
+
 ## When in Doubt
 
 Read [AGENTS.md](../AGENTS.md) to find the section that governs your change, and [GOVERNANCE.md](../GOVERNANCE.md) for the rule text itself. For code-style rules, [`CODESTYLE.md`](../CODESTYLE.md) (its General section plus the relevant language section) is authoritative. Don't restate any of these files' rules in commit bodies or PR descriptions, and keep those focused on the change itself.
