@@ -599,6 +599,38 @@ class TestCoverage(GqlCase):
         out = self.digest_for(review(body=nested(covers='- **Files reviewed:** 2/3 changed files')))
         self.assertIn('coverage=PARTIAL', out)
 
+    def test_the_bullet_spelling_is_a_coverage_line_on_its_label_alone(self) -> None:
+        """Its label is the marker, so dropping the words after the counts is not dropping it.
+
+        Requiring them read a bullet that had lost them as no statement at all, which is a
+        silent `unstated` over a round that stated its coverage plainly.
+        """
+        self.assertEqual(['- **Files reviewed:** 4/4'],
+                         pr_review.coverage_statements('- **Files reviewed:** 4/4'))
+        self.assertEqual((4, 4), pr_review.read_coverage('- **Files reviewed:** 4/4 changed file'))
+
+    def test_the_reviewer_s_name_alone_is_not_a_coverage_line(self) -> None:
+        """The other opener keeps its text requirement, prose opening lines with that name too."""
+        self.assertFalse(pr_review.is_coverage_line('Copilot answers a request with a comment.'))
+
+    def test_a_singular_changed_file_reads_rather_than_blocks(self) -> None:
+        """A one-file round means what it says, and stopping the fleet over an -s is crying wolf."""
+        self.assertEqual((1, 1), pr_review.read_coverage(
+            'Copilot reviewed 1 out of 1 changed file in this pull request and generated '
+            'no comments.'))
+
+    def test_counts_that_cannot_both_be_true_block_rather_than_read_as_full(self) -> None:
+        """A round claiming it read more files than were changed is one this is parsing wrongly.
+
+        Read as full coverage it fails open on the very statement saying something is off, which
+        is the shape of every other failure here.
+        """
+        line = ('Copilot reviewed 8 out of 7 changed files in this pull request and generated '
+                'no comments.')
+        self.assertIsNone(pr_review.read_coverage(line))
+        self.assertEqual(pr_review.UNVETTED, pr_review.coverage_of({'body': line})[0])
+        self.assertIn(f'coverage line: {line}', pr_review.unrecognized_in(OVERVIEW + '\n' + line))
+
     def test_a_coverage_line_that_parses_to_nothing_names_this_script(self) -> None:
         """The wording has drifted once for each of the two patterns beside this one.
 
@@ -1596,7 +1628,7 @@ class TestContract(unittest.TestCase):
         """
         text = RUNBOOK.read_text(encoding='utf-8')
         published = [ln.strip() for ln in text.splitlines()
-                     if pr_review.COVERAGE_OPENS.match(ln) and 'changed file' in ln.lower()]
+                     if pr_review.is_coverage_line(ln)]
         self.assertEqual(2, len(published), published)
         for line in published:
             with self.subTest(line=line[:44]):

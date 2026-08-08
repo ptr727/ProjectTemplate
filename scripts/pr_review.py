@@ -85,14 +85,22 @@ REFUSAL = re.compile(r'wasn.t able to review|was not able to review|unable to re
 # That is the false positive the suppressed matcher and the refusal matcher have each had once.
 # The cost of the anchor is named rather than hidden.
 # A wording that moves the statement off the line start reads as no statement at all.
-COVERAGE_OPENS = re.compile(r'\s*(?:Copilot\b|[-*]\s*\*\*Files reviewed:)', re.IGNORECASE)
+# Two openers rather than one alternation, because the text each needs beside it differs.
+# The bullet's own label is the marker, so it is a coverage line whatever follows the counts.
+# Requiring the trailing words there made a bullet that drops them read as no statement at all.
+# The sentence opener is the reviewer's name, which prose also opens a line with.
+# That one keeps the text requirement, since the name alone does not say the line states coverage.
+COVERAGE_BULLET = re.compile(r'\s*[-*]\s*\*\*Files reviewed:', re.IGNORECASE)
+COVERAGE_SENTENCE = re.compile(r'\s*Copilot\b', re.IGNORECASE)
 # The count pair itself, in the two spellings the corpus carries.
 # The comment tail one of them ends on is deliberately not part of the unit.
 # It says how many comments the round raised, which is not coverage.
 # A fifth wording of it would fail every merge over a sentence ending read correctly.
+# The plural is optional, since a one-file round reading `1 changed file` means what it says.
+# Blocking on that is the cry-wolf case, a fleet-wide stop over a grammatical agreement.
 COVERAGE_COUNTS = re.compile(
-    r'reviewed\s+(\d+)\s+out of\s+(\d+)\s+changed files'
-    r'|\*\*Files reviewed:\*\*\s*(\d+)\s*/\s*(\d+)\s+changed files', re.IGNORECASE)
+    r'reviewed\s+(\d+)\s+out of\s+(\d+)\s+changed files?'
+    r'|\*\*Files reviewed:\*\*\s*(\d+)\s*/\s*(\d+)\s+changed files?', re.IGNORECASE)
 # A fenced block is a quotation rather than a statement, and 131 of those bodies carry one.
 # This change puts both spellings into the source and the runbook, so a review of it quotes them.
 # A quoted count read as this round's own is a coverage figure nobody stated.
@@ -447,19 +455,32 @@ def reviewed_head(pr: dict) -> bool:
     return bool(head_reviews(pr))
 
 
+def is_coverage_line(line: str) -> bool:
+    """Whether this line is the reviewer stating its file coverage, rather than prose about it."""
+    if COVERAGE_BULLET.match(line):
+        return True
+    return bool(COVERAGE_SENTENCE.match(line)) and 'changed file' in line.lower()
+
+
 def coverage_statements(body: str) -> list[str]:
     """The lines this round states its file coverage on, quotations excluded."""
-    return [ln.strip() for ln in FENCE.sub('', body or '').splitlines()
-            if COVERAGE_OPENS.match(ln) and 'changed file' in ln.lower()]
+    return [ln.strip() for ln in FENCE.sub('', body or '').splitlines() if is_coverage_line(ln)]
 
 
 def read_coverage(line: str) -> tuple[int, int] | None:
-    """The (reviewed, changed) counts the line states, or None where its wording is not vetted."""
+    """The (reviewed, changed) counts the line states, or None where they cannot be believed.
+
+    None covers a wording this has no vetted spelling for and a pair that cannot both be true
+    alike, since each leaves the same question unanswered and each takes the same remedy. A round
+    reporting it read more files than the pull request changed is not a round that read them all,
+    it is a line this script is parsing wrongly, and reading it as full coverage fails open on
+    exactly the statement that says something is off.
+    """
     m = COVERAGE_COUNTS.search(line)
     if not m:
         return None
     reviewed, changed = (m.group(1), m.group(2)) if m.group(1) else (m.group(3), m.group(4))
-    return int(reviewed), int(changed)
+    return (int(reviewed), int(changed)) if int(reviewed) <= int(changed) else None
 
 
 def coverage_of(node: dict) -> tuple[str, str]:
@@ -479,7 +500,7 @@ def coverage_of(node: dict) -> tuple[str, str]:
     worst, detail = UNKNOWN, ''
     for line in coverage_statements(node.get('body') or ''):
         counts = read_coverage(line)
-        state = UNVETTED if counts is None else (FULL if counts[0] >= counts[1] else PARTIAL)
+        state = UNVETTED if counts is None else (FULL if counts[0] == counts[1] else PARTIAL)
         if SEVERITY.index(state) < SEVERITY.index(worst):
             worst, detail = state, line
     return worst, detail
