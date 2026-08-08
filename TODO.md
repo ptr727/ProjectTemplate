@@ -11,14 +11,15 @@ A cluster's `State` is one of four. `ready` means every open question is answera
 The steps below are followed in order rather than sampled.
 
 1. Run `gh issue list --state open` and confirm every number it returns appears somewhere in this file. A number appearing nowhere is an entry that does not exist yet, so write it before selecting anything, because an invisible issue cannot be selected. Nothing mechanical enforces this, which is the honest limit of a hand-maintained file and the reason the step is first.
-2. Read the cluster headings and their `State` lines. A cluster is the unit of selection, so pick a cluster rather than an entry, and never carry two clusters in one pull request.
-3. Prefer a cluster whose state is `ready`. Select a `decision` cluster only when the maintainer is present to answer its open questions, select a `blocked` cluster only after the cluster it names has shipped, and select a `measure` cluster knowing its deliverable is a number rather than a behavior change.
-4. Re-verify every `Checked` line in the chosen cluster against current `develop` before writing anything, by reading the surface the anchor names rather than by re-reading the issue. An issue records the tree as it was on the day it was filed, so a claim in one is a starting point for a check rather than a finding to act on.
-5. Rewrite the `Checked` line with the branch, the short commit, and the date whenever a claim is confirmed, whether or not the work ships in the same session. A re-verification that leaves no anchor is a check the next session repeats.
-6. Move a claim the tree contradicts out of `Settled` and state what the tree carries instead. Where the tree answers a whole entry, move the entry to "Verified Complete, Awaiting Close" with the commit that answered it, and never delete it silently, since a deleted entry reads as work nobody recorded.
-7. Fold a new observation in under one of four dispositions, named on the pull request carrying it: `New entry`, `Amends "<entry title>"`, `Already covered`, or `Already shipped as #N`. A second observation of a surface an entry already reasons about strengthens that entry rather than opening a second one.
-8. An amendment adds a `Settled` bullet, shortens `Open`, and refreshes `Checked`. An observation that answers an open question deletes that question rather than annotating it.
-9. Delete a cluster heading when its pull request merges, and move anything the pull request did not carry into a new cluster with its own state.
+2. Run `gh pr list --state open` and confirm every pull request it returns carries a **stated active blocker**, written where the pull request itself carries it rather than held in a session that has ended. A blocker is active only while the thing it names is still true, so a review round that has landed, a dependency that has merged, and an outage that has passed each stop being one, and what they leave behind is a forgotten pull request rather than a parked one. The remedy is to finish it, close it, or write the current blocker down, and it happens before selecting new work rather than after, because the cost is not the waiting. A bot pull request is read rather than excluded, since nobody is there to write a blocker on one, so its blocker is whichever gate holds it open and is read off the pull request itself: an unfinished or failing check, a merge state of `BEHIND` because a sibling bot pull request merged first, or auto-merge disabled by a maintainer push, the last two of which [`GOVERNANCE.md`][governance] "Branching Model" documents as expected rather than as faults. One sitting open under none of them is the merge-bot having missed it, which is the finding rather than the exemption. [#591][pr-591] was parked correctly during a GitHub Actions outage and came back three days later twenty commits behind `develop`, conflicting in six regions, and carrying an exit code that had come to mean something else in the meantime.
+3. Read the cluster headings and their `State` lines. A cluster is the unit of selection, so pick a cluster rather than an entry, and never carry two clusters in one pull request.
+4. Prefer a cluster whose state is `ready`. Select a `decision` cluster only when the maintainer is present to answer its open questions, select a `blocked` cluster only after the cluster it names has shipped, and select a `measure` cluster knowing its deliverable is a number rather than a behavior change.
+5. Re-verify every `Checked` line in the chosen cluster against current `develop` before writing anything, by reading the surface the anchor names rather than by re-reading the issue. An issue records the tree as it was on the day it was filed, so a claim in one is a starting point for a check rather than a finding to act on.
+6. Rewrite the `Checked` line with the branch, the short commit, and the date whenever a claim is confirmed, whether or not the work ships in the same session. A re-verification that leaves no anchor is a check the next session repeats.
+7. Move a claim the tree contradicts out of `Settled` and state what the tree carries instead. Where the tree answers a whole entry, move the entry to "Verified Complete, Awaiting Close" with the commit that answered it, and never delete it silently, since a deleted entry reads as work nobody recorded.
+8. Fold a new observation in under one of four dispositions, named on the pull request carrying it: `New entry`, `Amends "<entry title>"`, `Already covered`, or `Already shipped as #N`. A second observation of a surface an entry already reasons about strengthens that entry rather than opening a second one.
+9. An amendment adds a `Settled` bullet, shortens `Open`, and refreshes `Checked`. An observation that answers an open question deletes that question rather than annotating it.
+10. Delete a cluster heading when its pull request merges, and move anything the pull request did not carry into a new cluster with its own state.
 
 ## Work Clusters
 
@@ -301,7 +302,7 @@ One pull request, after a survey, deciding whether anything stands between this 
 
 - **Find out whether GitHub publishes a structured form of a Copilot review, and decide whether to read that instead of the prose.** A schema, an API surface, a published payload, or a maintained library, anything that would make a wording change a non-event rather than a fleet-wide block.
   - **Blocked by** - Nothing. The prose reader ships either way, so this decides what replaces it rather than whether the loop has a gate.
-  - **Issue** - None filed. The prose reader and its vetted inventory shipped under [#607][issue-607], which is the change this would supersede.
+  - **Issue** - None filed here, and the ask is filed upstream as [GitHub community discussion 204320][copilot-review-schema], which asks for a versioned machine-readable schema carrying severity, category, suggestion and resolution state, rather than the human-facing prose an integration has to infer those from. It is unanswered, so it is a place to watch rather than a dependency to wait on. The prose reader and its vetted inventory shipped under [#607][issue-607], which is the change this would supersede.
   - **Checked** - `develop` at `20916ad` on 2026-08-07, reading the live GraphQL schema by introspection and one review over REST, against the reader in `scripts/pr_review.py`.
   - **Open** - Whether `bodyHTML` is a better surface than the Markdown body, since it arrives as a rendered tree whose structure survives a change in Markdown syntax, while leaving the wording drift the inventory exists for exactly where it is.
   - **Open** - Whether any third-party library tracks this output, and whether depending on one is acceptable at all, given that [`scripts/README.md`][scripts] holds these scripts to the standard library with no third-party packages.
@@ -459,6 +460,14 @@ Each was checked against the tree and has nothing left to do anywhere. Closing i
 [issue-585]: https://github.com/ptr727/ProjectTemplate/issues/585
 [issue-597]: https://github.com/ptr727/ProjectTemplate/issues/597
 [issue-607]: https://github.com/ptr727/ProjectTemplate/issues/607
+
+<!-- Pull requests -->
+
+[pr-591]: https://github.com/ptr727/ProjectTemplate/pull/591
+
+<!-- Upstream -->
+
+[copilot-review-schema]: https://github.com/orgs/community/discussions/204320
 
 <!-- Repo -->
 
