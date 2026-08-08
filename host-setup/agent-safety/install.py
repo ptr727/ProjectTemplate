@@ -115,7 +115,8 @@ def main():
     if not isinstance(data, dict):
         sys.stderr.write(
             f"{settings} is valid JSON but holds {type(data).__name__} at its root where an object "
-            "is required. Fix or remove it, then re-run. Nothing was written.\n"
+            "is required. Fix or remove it, then re-run. This file is unchanged, so the hook is "
+            "deployed but not registered.\n"
         )
         return 1
     # Every container this installer descends into is checked before it is used.
@@ -125,7 +126,8 @@ def main():
     def reject(where, held, want):
         sys.stderr.write(
             f"{settings} has `{where}` as {type(held).__name__} where {want.__name__} is required. "
-            "Fix or remove that key, then re-run. Nothing was written.\n"
+            "Fix or remove that key, then re-run. This file is unchanged, so the hook is deployed "
+            "but not registered.\n"
         )
 
     for path, want in (("hooks", dict), ("hooks/PreToolUse", list),
