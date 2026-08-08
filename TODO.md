@@ -313,10 +313,13 @@ One pull request, after a survey, deciding whether anything stands between this 
 
 - **Find out which file a partial round skips, and why re-requesting never clears it.** The coverage reading shipped in #608 blocks on a partial round, and the record says the state is durable rather than transient.
   - **Blocked by** - Nothing, though it is research rather than a change, and the reader already reports the state correctly.
-  - **Issue** - None filed. The reading that surfaces it shipped under [#607][issue-607].
-  - **Checked** - `develop` at `fa1ebf1` on 2026-08-08, measured over the 332 Copilot review bodies on the newest 120 pull requests, read with `gh pr list --json number,changedFiles,additions,deletions` beside them.
-  - **Open** - Which file is skipped. The reviewer names no file list in these rounds, so it cannot be recovered from the API, and the GitHub pull request page is the only place it may appear.
-  - **Open** - Whether a partial round is worth escalating to GitHub at all, which needs the file first.
+  - **Issue** - [#623][issue-623], filed from a downstream repository against the `PARTIAL` caveat's claim that the reviewer names no file list. The reading that surfaces the state shipped under [#607][issue-607].
+  - **Checked** - `develop` at `674a27a` on 2026-08-08, measured over 348 Copilot review bodies on the newest 120 pull requests here and 121 on the fleet's Blog repository, each read against the pull request's own changed-file list rather than against its counts alone.
+  - **Settled** - The reviewer does name a file list, and the caveat saying otherwise was wrong. It is a `| File | Description |` table carried by 91 of the 348 bodies, and every table row in the corpus belongs to one of those tables.
+  - **Settled** - The table names the unread file on exactly one round of the seven, which states 16 of 17 and names 16, omitting `GOVERNANCE.md`. That round is also the only evidence on record that the unread file is a real file rather than an artifact of counting.
+  - **Settled** - It cannot be read as coverage anywhere else. It names the whole changed set on partial and fully covered rounds alike, including all seven partials on Blog, while one round here states 61 of 62 and names 50, another states 33 of 33 and names 32, and a third names `GOVENANCE.md`, a path no diff carries. A reading identical under both outcomes discriminates neither.
+  - **Settled** - Three of the four partials here carry their table on the round before a push, describing the diff that push replaced, so the comparison is head-scoped like the counts and reports no table rather than a stale list of unreviewed files.
+  - **Open** - Whether a partial round is worth escalating to GitHub at all. One named file on one round is a starting point rather than the pattern an escalation needs.
   - **Settled** - It is durable rather than flaky. Four pull requests and seven rounds (#476, #479, #592, and the #609 promotion), and **every later round repeated the identical ratio**. A re-request has never cleared one, so the remedy the digest first stated was wrong and now says so.
   - **Settled** - Size does not predict it. The partials changed 502, 629 and 961 lines, while fully covered pull requests here reach 33 files and 2,219 lines.
   - **Settled** - The reviewer counts the file and does not read it, rather than losing it earlier. The stated denominator equals the API's own `changedFiles` on **103 of 104** pull requests, the exception being one whose branch shrank between rounds.
@@ -476,6 +479,7 @@ Each was checked against the tree and has nothing left to do anywhere. Closing i
 [issue-585]: https://github.com/ptr727/ProjectTemplate/issues/585
 [issue-597]: https://github.com/ptr727/ProjectTemplate/issues/597
 [issue-607]: https://github.com/ptr727/ProjectTemplate/issues/607
+[issue-623]: https://github.com/ptr727/ProjectTemplate/issues/623
 
 <!-- Pull requests -->
 
