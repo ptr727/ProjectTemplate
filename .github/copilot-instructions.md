@@ -168,7 +168,7 @@ Copilot reviewed 2 out of 3 changed files in this pull request and generated no 
 The sentence tail after the first spelling reports how many comments the round raised and appears in four wordings. It is not coverage, so it is not part of what has to be recognized, and the counts are. Read them into three verdicts and two exemptions:
 
 - **Counts equal** - the round read the whole diff. This is the clean pass.
-- **Counts unequal** - files in the diff have no review at all. Re-request on this head or split the pull request, rather than merging on it.
+- **Counts unequal** - files in the diff have no review at all. Do **not** treat a re-request as the remedy: measured over four pull requests and seven rounds on this repository, every partial round stayed partial at the identical ratio and no round ever recovered, so re-requesting spends a round and changes nothing. Splitting works where it applies and does not apply to a promotion, whose head is `develop`. The reviewer names no file list in these rounds, so which file went unread cannot be read from the API either. Report the state and hand the merge decision to the maintainer.
 - **Coverage-shaped and unreadable** - the remedy is to fix the reader, not to read past it. The vetted spellings live in `scripts/pr_review.py` and here, and they stay in step because a case reads them out of this file.
 - **Exempt: a body stating no coverage at all.** 28 of those 332 bodies are an overview and a change list and nothing more. That shape is current, interleaves with the counted one throughout, and one pull request carries both across its two rounds, so treating it as a failure cries wolf on about one review in twelve and teaches an agent to work around the gate. It reads as `coverage=unstated`, never as a pass and never as a failure.
 - **Exempt: a refusal.** It carries no coverage line by design, and the refusal rule above has already classified it. Read it here as well and every refusal grows a spurious second failure on top of the one that names its remedy.
@@ -353,6 +353,11 @@ After the final push, sweep-resolve stale older threads for removed code paths.
   - **Disproved by** - running it over the 25 most recent merged pull requests, where it raised four references and all four were correct prose: a `develop` commit named as history, a SHA inside a pasted digest, and two commits in another repository written without a URL. Nothing in the shape of a bare SHA separates those from a claim, and separating them by meaning is the similarity heuristic [`spec/section-model.md`](../spec/section-model.md) rules out. A path arm measured on the same corpus is worse, flagging 54 of 215 backticked candidates, nearly all of them bare basenames and other repositories.
   - **Proved against** - the 25 most recent merged pull requests as of `develop` at `756a53e`, the corpus on which the anchored verb form that ships instead raises one reference, and that one true.
   - **Delete when** - `claims` stops reading a description for commit references.
+
+- **"The agent check branches" in `STANDUP.md` section 0 is a subject-verb disagreement, and should read "The agent checks branches".** Raised as a suppressed finding against a line the change under review only touched as diff context.
+  - **Disproved by** - reading the sentence against the snippet it describes. The subject is the noun phrase "the agent check", meaning the check for the signing agent, and "branches" is its verb, which is what the `if [ ... = ssh ]; then ssh-add -L; else gpg --list-secret-keys; fi` line does. The proposed reading needs "branches" as a plural noun, and the paragraph is section 0, before a repository exists, where the alternatives it names are the SSH and GPG forms rather than refs.
+  - **Proved against** - the paragraph following the agent snippet in `STANDUP.md` section 0 on `develop` at `676a2bd`, unchanged since `77be3a3`.
+  - **Delete when** - the sentence is reworded for any reason, since the entry is about this phrasing rather than about the rule it states.
 
 ## When in Doubt
 

@@ -172,23 +172,6 @@ One pull request reworking the README spec to the hand-crafted PlexCleaner shape
   - **Open** - The position of the sections the spec already names, since PlexCleaner places Questions or Issues immediately after the Table of Contents where the spec orders it ninth.
   - **Settled** - PlexCleaner's Performance Considerations, Runtime Metrics, Custom Plugins, Testing, Development Tooling, Feature Ideas and Sample Media Files are correctly repo-specific under the recurrence rule in [`spec/section-model.md`][section-model] and stay undeclared.
 
-### Branch Bootstrap in the Standup
-
-One pull request giving [`STANDUP.md`][standup] the branch-creation step it lacks, so an agent stops committing onto whichever branch it finds.
-
-**State** `ready`. **Touches** [`STANDUP.md`][standup]. **Cost** one hub edit, hub-only, since the file is deliberately not carried.
-
-- **State the sequence that avoids every cleanup problem.** Nothing ever has to be cleaned off `main` or `develop`, because nothing reaches them without review.
-  - **Blocked by** - Nothing.
-  - **Issue** - [#490][issue-490] covered the human-gated half and is complete, so this is the remaining half rather than the whole gap.
-  - **Checked** - `develop` at `1ed0cc8` on 2026-08-03, where section 0A covers the prerequisites and nothing says how the branches come into being.
-  - **Open** - Nothing.
-  - **Settled** - The sequence is create `main` carrying nothing, create `develop` from it carrying nothing, create the first feature branch from `develop` and do the whole standup there, add the repo to GitHub and apply the config while still on that branch, then open a normal pull request to `develop`.
-  - **Settled** - A git branch cannot exist without a commit, so carrying nothing means exactly one signed empty root commit, and section 0's signing window applies to it like any other.
-  - **Settled** - Committing onto `develop` and squashing afterwards does not work, since `non_fast_forward` is set on both `develop` payloads, and Blog was correctly blocked when it tried.
-  - **Settled** - The protection is uneven, since a `release` repo's `develop` payload carries a `pull_request` rule that blocks a direct commit outright while the operational payload carries only three rules, so on an operational repo only the instruction stands between the agent and an unfixable history.
-  - **Settled** - It matters on a public repo because the exploratory standup history is where secrets and noise commits accumulate, and squashing the feature branch is the one chance to leave them out.
-
 ### Two Project Types and a Shared C++ Style
 
 One pull request extending the type model with the two types the fleet already needs, plus the shared style the `cpp` type has no canonical for.
@@ -327,6 +310,17 @@ One pull request, after a survey, deciding whether anything stands between this 
   - **Settled** - The only Copilot-named types in the GraphQL schema are `CopilotCodeReviewParameters` and its input form, which configure review-on-push inside a branch ruleset and describe nothing about a review that has run, so the schema search that looks promising by name answers a different question.
   - **Settled** - A negative finding is the deliverable as much as a positive one, and it is recorded here rather than re-derived, since the reading layer's design rests on prose being the only surface and that premise is worth re-checking rather than assuming.
 
+- **Find out which file a partial round skips, and why re-requesting never clears it.** The coverage reading shipped in #608 blocks on a partial round, and the record says the state is durable rather than transient.
+  - **Blocked by** - Nothing, though it is research rather than a change, and the reader already reports the state correctly.
+  - **Issue** - None filed. The reading that surfaces it shipped under [#607][issue-607].
+  - **Checked** - `develop` at `fa1ebf1` on 2026-08-08, measured over the 332 Copilot review bodies on the newest 120 pull requests, read with `gh pr list --json number,changedFiles,additions,deletions` beside them.
+  - **Open** - Which file is skipped. The reviewer names no file list in these rounds, so it cannot be recovered from the API, and the GitHub pull request page is the only place it may appear.
+  - **Open** - Whether a partial round is worth escalating to GitHub at all, which needs the file first.
+  - **Settled** - It is durable rather than flaky. Four pull requests and seven rounds (#476, #479, #592, and the #609 promotion), and **every later round repeated the identical ratio**. A re-request has never cleared one, so the remedy the digest first stated was wrong and now says so.
+  - **Settled** - Size does not predict it. The partials changed 502, 629 and 961 lines, while fully covered pull requests here reach 33 files and 2,219 lines.
+  - **Settled** - The reviewer counts the file and does not read it, rather than losing it earlier. The stated denominator equals the API's own `changedFiles` on **103 of 104** pull requests, the exception being one whose branch shrank between rounds.
+  - **Settled** - Splitting remains a real remedy for a feature branch and is unavailable for a promotion, whose head is `develop`, so a promotion carrying a partial round is a maintainer decision by construction.
+
 ## Standalone Chores
 
 Small work with no research to preserve, selectable one bullet at a time.
@@ -451,7 +445,6 @@ Each was checked against the tree and has nothing left to do anywhere. Closing i
 [issue-456]: https://github.com/ptr727/ProjectTemplate/issues/456
 [issue-483]: https://github.com/ptr727/ProjectTemplate/issues/483
 [issue-489]: https://github.com/ptr727/ProjectTemplate/issues/489
-[issue-490]: https://github.com/ptr727/ProjectTemplate/issues/490
 [issue-509]: https://github.com/ptr727/ProjectTemplate/issues/509
 [issue-519]: https://github.com/ptr727/ProjectTemplate/issues/519
 [issue-521]: https://github.com/ptr727/ProjectTemplate/issues/521
