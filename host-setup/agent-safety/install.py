@@ -39,9 +39,8 @@ def at(data, path):
 # These widen rather than restrict, so they stay their own step for the reason the two CLAUDE.md blocks stay separate.
 MANAGED_PERMISSIONS = [
     # The review loop's reply and resolve, the one write in that loop an agent performs.
-    # Driving it by hand needs a raw GraphQL mutation, which is the shape that reached a stranger's repository.
-    # `pr_review.py` queries the thread id itself and takes no argument an id fits in.
-    # Allowing the script is therefore narrower than allowing the mutation it replaces.
+    # Driving it by hand needs a raw GraphQL mutation carrying a node id, which is the shape to avoid.
+    # The rule decides which command skips a prompt, and it bounds no checkout, since it matches the text.
     ("Bash(python3 scripts/pr_review.py", "Bash(python3 scripts/pr_review.py:*)"),
 ]
 
@@ -166,12 +165,17 @@ def main():
         # Counted over the rules actually replaced rather than over everything the prefix matched.
         # The current rule matches its own prefix, so counting the match set reports it as superseded.
         older = [a for a in matched if a != rule]
+        # A list holding the rule more than once is collapsed here, and the file therefore changes.
+        # That is reported as its own action rather than read as unchanged.
+        copies = len(matched) - len(older)
         if not matched:
             action = "added"
-        elif not older:
-            action = "already current"
-        else:
+        elif older:
             action = f"updated, superseding {len(older)}"
+        elif copies > 1:
+            action = f"deduplicated, collapsing {copies} copies"
+        else:
+            action = "already current"
         done.append(f"permission {rule}: {action}")
 
     # Reported after the write rather than as each edit is made, since both edits share one write.
