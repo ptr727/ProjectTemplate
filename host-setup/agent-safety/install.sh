@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Thin wrapper: run the cross-platform installer with a Python 3 (Linux / WSL / macOS / Proxmox).
+# Thin wrapper: run the cross-platform installer with a Python 3 (Linux / WSL / macOS).
 # All logic lives in install.py so every OS runs one tested code path.
 # It is idempotent and safe to re-run.
 #   ./install.sh            installs to ~/.claude

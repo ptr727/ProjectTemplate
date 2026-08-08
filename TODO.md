@@ -132,7 +132,7 @@ One pull request reworking the README spec to the hand-crafted PlexCleaner shape
   - **Checked** - `develop` at `1ed0cc8` on 2026-08-03.
   - **Open** - Nothing.
   - **Settled** - PlexCleaner ships executables and calls the channel Binary Releases, while the spec fixes the label as Versioned Releases for every repo, so the label belongs in a per-channel table.
-  - **Settled** - The license shield sits in the top Build Status block here and at the very bottom of PlexCleaner, inside a closing License section reading that the project is licensed under the MIT License, followed by the shield, immediately before the link definitions.
+  - **Settled** - The wanted form puts the license shield at the very bottom, inside a closing License section reading that the project is licensed under the MIT License, followed by the shield, immediately before the link definitions, which is where PlexCleaner carries it and where this repo's README now carries it too on the maintainer's instruction. [`spec/readme-structure.md`][readme-structure] still says shields are not a top-level section and live under Build and Distribution, so the hub README is deliberately ahead of the spec here and the spec text is part of this cluster's edit rather than a separate fix.
   - **Settled** - The Release Notes section closes by pointing at the release history for complete release notes and older versions, which is the wanted form, and PlexCleaner writes that link inline, which the reference-style rule forbids, so the wording is adopted and the reference form kept.
   - **Settled** - Channel bullets and shields vary by deliverable, meaning GitHub binaries, Docker Hub, NuGet and PyPI each carry a different bullet label and shield set, which is what a per-type table has to encode.
 
@@ -318,21 +318,6 @@ The review loop ends by replying on a thread and resolving it, and both halves f
   - **Checked** - `develop` at `0e4a1c2` on 2026-08-08, reading the exit-code table in the `scripts/pr_review.py` module docstring.
   - **Detail** - This is the failure the suppressed-findings count already exists for, where a step that stopped running reads exactly like a step that passed.
 
-### The Grant That Unblocks a Cross-Owner Write
-
-One pull request documenting how a maintainer grants a write target the guard denies. The hook denies a `gh` write whose explicit target is under an owner other than the checkout origin's, and the only way past it is a grant in `GH_WRITE_GUARD_ALLOW`, which no document tells a reader how to give.
-
-**State** `ready`. **Touches** [`docs/host-setup.md`][host-setup] and [`host-setup/agent-safety/README.md`][write-guard-readme]. **Cost** one pull request, prose only, and hub-only, since the kit is host state rather than carried repo content.
-
-- **Document the grant where a reader already is when the denial arrives, which is the install section rather than the hook's description.** A denial names the variable, and the two documents that could explain it either never mention it or mention it while describing what the hook refuses, so the reader is told a grant exists and never how to make one.
-  - **Blocked by** - Nothing.
-  - **Issue** - None filed.
-  - **Checked** - `develop` at `92b9fc5` on 2026-08-08, where "Agent Write-Safety Kit" in [`docs/host-setup.md`][host-setup] never names the variable at all, [`host-setup/agent-safety/README.md`][write-guard-readme] names it once inside the bullet listing what the hook denies, giving the token format and not how to set it, and [`README.md`][readme] carries no host-protection section, only a pointer to the first.
-  - **Detail** - The channel that works is an `env` block in the checkout's `.claude/settings.local.json`, holding `GH_WRITE_GUARD_ALLOW` set to the target. It is per project rather than host-wide, which is the property worth stating, since a grant made for one checkout does not follow the agent into another repository's sessions.
-  - **Detail** - The case that raised it is a fork, where `origin` is under the maintainer's own owner and `upstream` is the project it forked from. Filing an issue or a pull request against the upstream is the cross-owner write, and everything aimed at the fork is not, so the grant names the upstream alone and the denial appears only on the half that leaves the owner. That asymmetry is the part a reader hits first and the reason a worked example beats a definition here.
-  - **Detail** - The two forms a reader reaches for first both fail, silently in the sense that the write simply stays denied: an inline `GH_WRITE_GUARD_ALLOW=owner/repo gh ...` prefix, and an `export` in a shell call. The hook runs as its own process and reads only the environment the session was launched with, which is exactly what makes a grant a deliberate act taken outside the session rather than something an agent can do for itself once blocked. The behavior is settled and tested, since [`gh-write-guard.py`][write-guard] already asserts the inline prefix denies, so what is missing is only the explanation.
-  - **Detail** - Two things worth carrying beside the example: that a session restart is what loads the grant, and a way to confirm one took, since inferring it from a write that no longer denies means learning the answer by making the write.
-
 ## Standalone Chores
 
 Small work with no research to preserve, selectable one bullet at a time.
@@ -345,7 +330,7 @@ Small work with no research to preserve, selectable one bullet at a time.
 - **Canonicalize Python linter-config placement on `pyproject.toml`**, since one cataloged repo uses a standalone ruff config plus a pyright config. Track it as a drift finding and fix it downstream.
 - **Populate [reports/][reports] for the cataloged repos that still have no audit**, since a registry `status` of `cataloged` asserts a result only a committed report evidences. Nine of 22 have one, measured on `develop` at `3d1a0b1` on 2026-08-06. This is paced by maintainer capacity rather than blocked, since repos are brought up to spec as they are worked on.
 - **Finish onboarding hardening**, from [#310][issue-310], making the [`AUDIT.md`][audit-doc] audit a required onboarding step and running the per-type cold-start self-tests tracked in [reports/conformance-matrix.md][matrix]. Every cold-standup cell reads not-tested today.
-- **Refresh the README, which has gone stale, and evaluate a lower-maintenance structure**, for example a per-section index pointing into each doc with a one-line description, keeping the README as the adoption and audit-instruction entry point. A per-section index trades brevity for a sync obligation, since it must track what the docs contain.
+- **Decide whether the human entry points the README now carries belong in [`spec/readme-structure.md`][readme-structure]**, so a fleet repo is measured on them rather than reinventing them. The README routes by reader (browsing, adopting, blocked by a rule, reporting, an agent) in an optional Getting Started table, and answers adoption, divergence, and issue-reporting in the Installation, Configuration, and Questions or Issues slots the spec already orders. What is undecided is how much of that is fleet-general, since a repo shipping an application has a different reader set from a rules hub, and a per-section index was considered and declined because it trades brevity for a sync obligation to whatever the docs contain. This sits beside "The README Structure Rework" and is settled with it rather than before it.
 - **Consider renaming this repo to reflect the audit-catalog identity**, which updates badge and link URLs across the fleet.
 - **Revisit automating the audit**, explored and deliberately deferred, recorded so the reasoning is not re-derived. Three shapes were considered, a scheduled hub-driven audit publishing each report as a workflow artifact, the same thing committing the report back, and a pull-request hook in each downstream repo auditing itself against the current hub. Three things block all of them: until the fleet reaches stasis a scheduled run reports mostly noise, since a repo mid-onboarding is expected to be non-conformant, the hub has to be stable before downstreams audit against it because a hub change lands as fleet-wide findings the same day, and the downstream half is a catch-22 since a self-auditing hook is CI instrumentation the repos that most need it do not carry. Worth reopening once the fleet is onboarded and the hub goes a stretch without carried-content changes, and the artifact shape is the one to try first since it produces evidence without committing anything.
 
@@ -483,14 +468,12 @@ Each was checked against the tree and has nothing left to do anywhere. Closing i
 [divergences-report]: ./reports/divergences.md
 [files]: ./spec/files.json
 [governance]: ./GOVERNANCE.md
-[host-setup]: ./docs/host-setup.md
 [markdownlint]: ./.markdownlint-cli2.jsonc
 [matrix]: ./reports/conformance-matrix.md
 [merge-bot]: ./.github/workflows/merge-bot-pull-request.yml
 [operations]: ./OPERATIONS.md
 [project-types]: ./spec/project-types.json
 [prose-gate]: ./.github/actions/prose-gate/action.yml
-[readme]: ./README.md
 [readme-structure]: ./spec/readme-structure.md
 [reports]: ./reports/
 [repos]: ./registry/repos.json
@@ -504,4 +487,3 @@ Each was checked against the tree and has nothing left to do anywhere. Closing i
 [workflow]: ./WORKFLOW.md
 [workflows]: ./catalog/snippets/workflows/
 [write-guard]: ./host-setup/agent-safety/gh-write-guard.py
-[write-guard-readme]: ./host-setup/agent-safety/README.md
