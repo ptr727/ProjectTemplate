@@ -17,7 +17,9 @@ Subcommands
            Exit 0 = every shape in the reviewer's output is one this reads, and the round
            covering the head read the whole diff or stated nothing about what it read.
            42 = that round read fewer files than the pull request changed, so part of the diff
-           has no review at all, and the remedy is a re-request or a split.
+           has no review at all. Measured over four pull requests and seven rounds here, a
+           re-request never cleared one and no round ever recovered, so this is a state to
+           hand to the maintainer rather than one to retry into.
            43 = the reviewer sent a shape this script has no reader for, so no field here can
            be believed. The remedy is an issue on the repository hosting this script, and the
            review loop does not close until the reader is fixed. Merging regardless is the
@@ -618,8 +620,12 @@ def report_verdict(pr: dict) -> int:
     state, _ = head_coverage(pr)
     if state == PARTIAL:
         print('status=COVERAGE_IS_PARTIAL the review covering the head read fewer files than the '
-              'pull request changed, so part of the diff has no review at all: re-request on this '
-              'head, or split the pull request, rather than merging it')
+              'pull request changed, so part of the diff has no review at all. Every partial on '
+              'record stayed partial at the identical ratio across every later round, so a '
+              're-request is not the remedy it reads as, and the reviewer names no file list in '
+              'these rounds, so which file went unread cannot be read from the API. Splitting is '
+              'the remedy where it applies, and it does not apply to a promotion. Otherwise this '
+              'is the maintainer\'s call, taken knowing one file of the diff has no review')
         return 42
     return 0
 
@@ -765,8 +771,9 @@ def digest(owner: str, repo: str, num: int, seen: set[str] | None = None,
         # The line prints under the marker for the reason a suppressed block does.
         # The counts say how much of the diff went unread, and no thread carries them.
         lines.append('  COVERAGE IS PARTIAL: the review covering the head read fewer files than '
-                     'the pull request changed, so files in the diff have no review at all and '
-                     'the remedy is a re-request or a split rather than a merge')
+                     'the pull request changed, so files in the diff have no review at all. A '
+                     're-request has never cleared this on record, so report it rather than '
+                     'retrying into it, and let the maintainer take the merge decision')
         lines.append(f'    {cover_line}')
     if stalled:
         lines.append(f'  REQUEST NOT PICKED UP (requested {stalled}, no copilot_work_started '
