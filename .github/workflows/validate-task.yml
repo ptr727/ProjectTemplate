@@ -68,13 +68,13 @@ jobs:
       - name: Check repo gates step
         run: python3 scripts/repo_gate.py
 
-      # The charset, duplicate-word, spelling and comment rules are clean tree-wide, so they gate.
-      # Every other prose rule reports in the step below without gating.
+      # Every default prose rule is clean tree-wide, so each one gates rather than reporting a backlog.
+      # `charset-unknown` is clean too and still reports, for the reason the step below gives.
       - name: Check prose step
-        run: python3 scripts/prose_lint.py . --check charset --check dupword --check spelling --check comment-wrap --check comment-case
+        run: python3 scripts/prose_lint.py . --check charset --check semicolon --check dash --check dupword --check spelling --check comment-wrap --check comment-case --check home-path
 
       # Warn-only, and visible rather than absent: an unrun check is one nobody acts on.
-      # The backlog is corrected as each file is next edited, or cleared in a deliberate batch.
-      - name: Report prose backlog step
+      # A finding here names a character no tier covers, and classifying it is a fleet-law edit rather than a prose fix.
+      - name: Report unclassified characters step
         continue-on-error: true
-        run: python3 scripts/prose_lint.py . --check charset-unknown --check semicolon --check dash --summary
+        run: python3 scripts/prose_lint.py . --check charset-unknown --summary

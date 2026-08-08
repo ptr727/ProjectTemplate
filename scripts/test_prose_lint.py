@@ -1406,7 +1406,7 @@ class TestChangedLines(unittest.TestCase):
 
     The repo policy is that existing prose is corrected as each file is next edited rather than
     swept, and this parse is the whole mechanism behind it. A parse that returns too little makes
-    the warn-only step silently stop reporting, and one that returns too much reports the backlog
+    a diff-scoped run silently stop reporting, and one that returns too much reports the backlog
     as if the change introduced it.
     """
 
