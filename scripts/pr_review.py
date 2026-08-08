@@ -140,6 +140,15 @@ COVERAGE_COUNTS = re.compile(
 # This change puts both spellings into the source and the runbook, so a review of it quotes them.
 # A quoted count read as this round's own is a coverage figure nobody stated.
 FENCE = re.compile(r'^ {0,3}```.*?^ {0,3}```[^\n]*', re.DOTALL | re.MULTILINE)
+# The round's own file summary table, whose first column is a path and whose second is prose.
+# The header row is the marker rather than the `<details>` around it.
+# One measured round carries the table with no `<summary>`, and two summary spellings wrap it.
+# Over the same 348 bodies, 91 carry a table and every table row in the corpus belongs to one.
+# A row outside this shape is a shape nothing has seen rather than a table read wrongly.
+TABLE_HEADER = re.compile(r'\s*\|\s*File\s*\|', re.IGNORECASE)
+# The alignment row under the header, which is punctuation rather than a file.
+TABLE_RULE = re.compile(r'\s*\|[\s:|-]+\|\s*$')
+TABLE_ROW = re.compile(r'\s*\|([^|]*)\|')
 # The readings a round's coverage carries, worst first.
 # A head carries more than one round only through a re-request.
 # Where two disagree, the one naming files it did not read is the one to answer.
@@ -198,6 +207,13 @@ HEADING = re.compile(r'\s*(?:#{1,6}\s|<summary)', re.IGNORECASE)
 # A test holds this equal to the number the queries carry, since a drift between them reads clean.
 WINDOW = 100
 
+# How many of the pull request's own changed files the full query asks for.
+# 100 is the connection's own ceiling, so a longer diff is truncated rather than paged.
+# A truncated list is reported as one and compared against nothing.
+# A path missing from a short window reads exactly like a path the reviewer left out.
+# The record holds a pull request of 301 changed files, so the truncation is reachable here.
+FILES_WINDOW = 100
+
 # How many rollup contexts the full query asks for, which is not the window above.
 # The query is built from this and the truncation line quotes it, so the two cannot drift.
 # Naming it beside a hard-coded literal only documented the literal, which a case then held.
@@ -243,6 +259,7 @@ query($o:String!,$r:String!,$n:Int!){
       comments(first:1){ nodes{ author{login} path line body } } }}
     comments(last:100){ nodes{ author{login} createdAt body } pageInfo{ hasPreviousPage } }
     reviewRequests(first:10){ nodes{ requestedReviewer{ __typename ... on Bot{login} ... on User{login} } } }
+    files(first:__FILES_WINDOW__){ pageInfo{ hasNextPage } nodes{ path } }
     commits(last:1){ nodes{ commit{ oid statusCheckRollup{ state
       contexts(first:__CHECKS_WINDOW__){ pageInfo{ hasNextPage } nodes{
         __typename
@@ -250,7 +267,7 @@ query($o:String!,$r:String!,$n:Int!){
         ... on StatusContext{ context state createdAt }
       }}}}}}
   }}}
-""".replace('__CHECKS_WINDOW__', str(CHECKS_WINDOW))
+""".replace('__CHECKS_WINDOW__', str(CHECKS_WINDOW)).replace('__FILES_WINDOW__', str(FILES_WINDOW))
 # Substituted rather than interpolated, because GraphQL is braces from end to end.
 # An f-string would need every one of them doubled, which is unreadable against the schema.
 
@@ -577,6 +594,108 @@ def head_coverage(pr: dict) -> tuple[str, str]:
     return worst, detail
 
 
+def file_table(body: str) -> list[str]:
+    """The paths the round's own file summary table names, in the order it names them.
+
+    Quotations are dropped for the reason a coverage line's are: this change puts a table into
+    the diff and a review of it quotes one, and a quoted table read as this round's own names
+    files nobody reviewed.
+
+    The header is what opens the table and any line that is not a row closes it, so a second
+    table later in the body is read as a second table rather than as more of the first.
+    """
+    paths, reading = [], False
+    for line in FENCE.sub('', body or '').splitlines():
+        if TABLE_HEADER.match(line):
+            reading = True
+        elif not TABLE_ROW.match(line):
+            reading = False
+        elif reading and not TABLE_RULE.match(line):
+            cell = TABLE_ROW.match(line).group(1)
+            paths.append(cell.strip().strip('`').strip())
+    return [p for p in paths if p]
+
+
+def changed_paths(pr: dict) -> tuple[list[str], bool]:
+    """The paths this pull request changes, and whether the query's window cut the list short.
+
+    Truncation is carried rather than hidden, since a path outside a short window reads exactly
+    like a path the reviewer left out of its table, and the two take opposite readings.
+    """
+    files = pr.get('files') or {}
+    paths = [n.get('path') or '' for n in (files.get('nodes') or [])]
+    return [p for p in paths if p], bool((files.get('pageInfo') or {}).get('hasNextPage'))
+
+
+def head_table(pr: dict) -> list[str]:
+    """The file table the rounds covering the current head carry, from the first that has one.
+
+    Any round on the head rather than the one whose counts decided the verdict, since rounds on
+    one commit describe one diff, and a re-requested round states the counts again and carries no
+    table at all. Thirteen commits here carry more than one round and one of those pairs is that
+    shape exactly, so which of the two the verdict happens to read must not decide whether a
+    table is found.
+
+    Head-scoped for the reason the coverage line is, and this is the tighter half of the reading:
+    three of this repository's four partial pull requests carry their table on the round before a
+    push, describing a diff that is not the one being merged, and comparing that table against
+    the current changed files would name files as unreviewed on the strength of a stale list.
+    Those report as no table rather than as a comparison, which is the honest answer.
+    """
+    for node in head_reviews(pr):
+        named = file_table(node.get('body') or '')
+        if named:
+            return named
+    return []
+
+
+def table_against_diff(pr: dict, counts: tuple[int, int] | None) -> str:
+    """What the reviewer's own file table says about the files the counts leave unread.
+
+    This reports and decides nothing. The exit code stays with the counts, because the table
+    tracks them nowhere near well enough to overturn one, and the measurement is what says so.
+    Over 348 review bodies on this repository and 121 on ptr727/Blog, the table names the whole
+    changed set on partial and fully covered rounds alike: all seven partials on Blog name every
+    changed file, as do two of the four here that carry a table. A reading identical under both
+    outcomes discriminates neither, which is why a full table is reported as corroborating
+    nothing rather than as the count being a miscount.
+
+    The one arm that locates anything is a table shorter by exactly what the counts say went
+    unread. #479 states 16 of 17 and names 16, omitting `GOVERNANCE.md`, and it is the only
+    evidence on record that the unread file is a real file rather than an artifact of counting.
+    It stays a lead rather than a verdict, since the table is prose the reviewer writes: #609
+    states 61 of 62 and names 50, and #606 names `GOVENANCE.md`, a path no diff here carries.
+
+    A path named that the diff does not carry is what disqualifies the naming arm, that typo
+    being enough to drop a real file into the omissions and read it as the one nobody reviewed.
+    """
+    named = head_table(pr)
+    if not named:
+        return 'no round covering this head carries a file table, so none of them locates the file'
+    changed, truncated = changed_paths(pr)
+    if truncated or not changed:
+        return (f'the reviewer names {len(named)} files in its own table and the diff could not '
+                f'be read back to compare them, the changed-file list being '
+                f'{"longer than the window this reads" if truncated else "absent from the query"}')
+    omitted = [p for p in changed if p not in named]
+    invented = [p for p in named if p not in changed]
+    short = 0 if counts is None else counts[1] - counts[0]
+    if not omitted:
+        return (f'the reviewer\'s own file table names all {len(changed)} changed files, which it '
+                f'also does on rounds stating full coverage, so it corroborates nothing and '
+                f'names no unread file')
+    if len(omitted) == short and not invented:
+        return (f'the reviewer\'s own file table omits exactly the {short} file'
+                f'{"" if short == 1 else "s"} the counts leave unread, naming '
+                f'{", ".join(omitted)}. The table is prose the reviewer writes rather than a '
+                f'list from the API, so that is a lead to check rather than a verdict')
+    return (f'the reviewer\'s own file table names {len(named)} of the {len(changed)} changed '
+            f'files, omitting {len(omitted)} where the counts leave {short} unread'
+            + (f' and naming {", ".join(invented)}, which the diff does not carry' if invented
+               else '')
+            + ', so it tracks the counts nowhere and names no unread file')
+
+
 def normal(text: str) -> str:
     """A marker reduced to what a vetted list compares: ASCII, single spaces, counts as `(N)`.
 
@@ -678,10 +797,10 @@ def report_verdict(pr: dict) -> int:
         print(f'status=COVERAGE_IS_PARTIAL the review covering the head read fewer files than the '
               f'pull request changed, so part of the diff has no review at all. Every partial on '
               f'record stayed partial at the identical ratio across every later round, so a '
-              f're-request is not the remedy it reads as, and the reviewer names no file list in '
-              f'these rounds, so which file went unread cannot be read from the API. Splitting is '
+              f're-request is not the remedy it reads as. Splitting is '
               f'the remedy where it applies, and it does not apply to a promotion. Otherwise this '
-              f'is the maintainer\'s call, taken knowing {gap}')
+              f'is the maintainer\'s call, taken knowing {gap}, and knowing that '
+              f'{table_against_diff(pr, counts)}')
         return 42
     return 0
 
@@ -1033,6 +1152,11 @@ def digest(owner: str, repo: str, num: int, seen: set[str] | None = None,
                      're-request has never cleared this on record, so report it rather than '
                      'retrying into it, and let the maintainer take the merge decision')
         lines.append(f'    {cover_line}')
+        # The counts decide the state and this line says what the reviewer's file table adds.
+        # Printed under the same marker, since a maintainer taking the decision wants both.
+        # It names no verdict of its own, having been measured against the counts it sits under.
+        # The table tracks them nowhere, which is why it is reported rather than read.
+        lines.append(f'    {table_against_diff(pr, read_coverage(cover_line))}')
     for node, shape in stuck:
         # Each shape carries its own remedy, which is the whole point of telling them apart.
         # A reader handed one word for all three retries the wrong thing, or waits on a queue.

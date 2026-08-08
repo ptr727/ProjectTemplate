@@ -81,6 +81,17 @@ def nested(heading: str = '### Suppressed comments (2)',
             '- **Review effort level:** Lite\n</details>\n')
 
 
+def summarized(paths: list[str], covers: str = COVERED) -> str:
+    """A round carrying its coverage line and the file table naming `paths`.
+
+    The table is quoted from the corpus in shape: a header, an alignment row, and one row per
+    file whose second cell is prose about the change.
+    """
+    rows = '\n'.join(f'| {p} | Prose about the change. |' for p in paths)
+    return (f'{OVERVIEW}\n{covers}\n\n<details>\n<summary>Show a summary per file</summary>\n\n'
+            f'| File | Description |\n| ---- | ----------- |\n{rows}\n\n</details>\n')
+
+
 REFUSED = ("Copilot wasn't able to review this pull request because it exceeds the maximum "
            'number of files (300). Try reducing the number of changed files and requesting a '
            'review from Copilot again.')
@@ -136,10 +147,15 @@ def status_context(context: str = 'ci/external', state: str = 'SUCCESS',
 def payload(reviews: list[dict], threads: list[dict] | None = None,
             merge: str = 'CLEAN', comments: list[dict] | None = None,
             older: bool = False, older_reviews: bool = False, pending: bool = False,
-            checks: list[dict] | None = None, rollup_oid: str | None = None) -> dict:
+            checks: list[dict] | None = None, rollup_oid: str | None = None,
+            files: list[str] | None = None, more_files: bool = False) -> dict:
     requested = ([{'requestedReviewer': {'__typename': 'Bot', 'login': pr_review.REVIEWER}}]
                  if pending else [])
     return {'headRefOid': HEAD, 'mergeable': 'MERGEABLE', 'mergeStateStatus': merge,
+            # The diff's own file list, which the round's file table is compared against.
+            # A case naming none gets the empty connection a pull request of no files carries.
+            'files': {'nodes': [{'path': p} for p in files or []],
+                      'pageInfo': {'hasNextPage': more_files}},
             'reviews': {'nodes': reviews, 'pageInfo': {'hasPreviousPage': older_reviews}},
             'reviewThreads': {'nodes': threads or []},
             'comments': {'nodes': comments or [], 'pageInfo': {'hasPreviousPage': older}},
@@ -1023,6 +1039,134 @@ class TestCoverageExitCodes(GqlCase):
         self.answer(payload([review(body=REFUSED)]))
         with mock.patch.object(pr_review.time, 'sleep'):
             self.assertEqual(41, pr_review.main(['wait', '7', '--repo', 'o/r', '--timeout', '0']))
+
+
+class TestTheRoundsOwnFileTable(GqlCase):
+    """The file table a partial round carries, read against the diff it claims to describe.
+
+    The reading reports and decides nothing, because the measurement says it cannot decide
+    anything. Over 348 review bodies here and 121 on ptr727/Blog, the table names the whole
+    changed set on partial and fully covered rounds alike, and every case below is one of the
+    shapes that corpus carries rather than one invented for the reader.
+    """
+
+    PART = ('Copilot reviewed 2 out of 3 changed files in this pull request and generated '
+            'no comments.')
+
+    def reading(self, body: str, files: list[str], more: bool = False) -> str:
+        counts = pr_review.read_coverage(self.PART) if self.PART in body else None
+        return pr_review.table_against_diff(
+            payload([review(body=body)], files=files, more_files=more), counts)
+
+    def test_the_table_reads_as_its_paths_rather_than_as_its_rows(self) -> None:
+        """The header and the alignment row are punctuation, and the second cell is prose."""
+        self.assertEqual(['a.py', 'docs/b.md'],
+                         pr_review.file_table(summarized(['a.py', 'docs/b.md'])))
+
+    def test_a_quoted_table_is_not_this_rounds_own(self) -> None:
+        """The reason a quoted coverage line is not: this change puts a table in the diff.
+
+        A review of it quotes one, and a quoted table read as the round's own names files
+        nobody reviewed.
+        """
+        quoted = f'{OVERVIEW}\n```\n| File | Description |\n| ---- | ---- |\n| a.py | Prose. |\n```'
+        self.assertEqual([], pr_review.file_table(quoted))
+
+    def test_a_table_naming_every_changed_file_corroborates_nothing(self) -> None:
+        """The reporter's case, and the one the measurement answers.
+
+        All seven partial rounds on ptr727/Blog name every changed file, as do #476 and #592
+        here. So does a round stating full coverage, which is why a full table cannot separate a
+        miscount from a file that went unread.
+        """
+        body = summarized(['a.py', 'b.md', 'c.yml'], covers=self.PART)
+        self.assertIn('corroborates nothing',
+                      self.reading(body, ['a.py', 'b.md', 'c.yml']))
+
+    def test_a_table_short_by_what_the_counts_leave_unread_names_the_file(self) -> None:
+        """#479 states 16 of 17 and names 16, omitting `GOVERNANCE.md`.
+
+        It is the only round on record whose table locates the unread file, and it is reported
+        as a lead rather than as a verdict, the table being prose the reviewer writes.
+        """
+        out = self.reading(summarized(['a.py', 'b.md'], covers=self.PART), ['a.py', 'b.md', 'c.yml'])
+        self.assertIn('omits exactly the 1 file', out)
+        self.assertIn('c.yml', out)
+        self.assertIn('lead to check rather than a verdict', out)
+
+    def test_a_path_the_diff_does_not_carry_disqualifies_the_naming(self) -> None:
+        """#606 names `GOVENANCE.md`, which no diff here carries.
+
+        A misspelled path drops the real file into the omissions, where the arm above would read
+        it as the one nobody reviewed, so a table naming anything outside the diff names nothing.
+        """
+        out = self.reading(summarized(['a.py', 'b.mb'], covers=self.PART), ['a.py', 'b.md', 'c.yml'])
+        self.assertIn('b.mb', out)
+        self.assertIn('names no unread file', out)
+        self.assertNotIn('omits exactly', out)
+
+    def test_a_table_short_by_more_than_the_counts_tracks_neither(self) -> None:
+        """#609 states 61 of 62 and names 50, so the shortfalls disagree by eleven files."""
+        out = self.reading(summarized(['a.py'], covers=self.PART), ['a.py', 'b.md', 'c.yml'])
+        self.assertIn('names 1 of the 3 changed files', out)
+        self.assertIn('names no unread file', out)
+
+    def test_a_changed_file_list_the_window_cut_short_is_not_compared(self) -> None:
+        """A path outside the window reads exactly like a path the reviewer left out.
+
+        The record holds a pull request of 301 changed files, so this is reachable rather than
+        theoretical, and reading it would name every file past the window as unreviewed.
+        """
+        out = self.reading(summarized(['a.py'], covers=self.PART), ['a.py'], more=True)
+        self.assertIn('longer than the window this reads', out)
+        self.assertNotIn('corroborates nothing', out)
+
+    def test_a_head_carrying_no_table_at_all_says_so_rather_than_staying_silent(self) -> None:
+        """A silent field reads as a comparison that ran and found nothing to report."""
+        self.assertIn('no round covering this head carries a file table',
+                      self.reading(OVERVIEW + '\n' + self.PART, ['a.py', 'b.md', 'c.yml']))
+
+    def test_the_table_is_read_from_any_round_on_the_head_rather_than_the_deciding_one(self) -> None:
+        """A re-request restates the counts and carries no table, and #474 is that pair.
+
+        Thirteen commits here carry more than one round, and on one of them a round with a table
+        sits beside a round without, so which of the two the verdict reads must not decide
+        whether a table is found. Both reviewed the same commit, so both describe the same diff.
+        """
+        again = ('Copilot reviewed 2 out of 3 changed files in this pull request and generated '
+                 'no new comments.')
+        pr = payload([review(body=summarized(['a.py', 'b.md', 'c.yml'], covers=self.PART),
+                             at=EARLY),
+                      review(body=OVERVIEW + '\n' + again, at=LATE)],
+                     files=['a.py', 'b.md', 'c.yml'])
+        self.assertIn('corroborates nothing',
+                      pr_review.table_against_diff(pr, pr_review.read_coverage(again)))
+
+    def test_a_table_from_before_a_push_describes_another_diff_and_is_not_read(self) -> None:
+        """The tighter half, and the shape three of this repository's four partials carry.
+
+        The round naming files sits before a push and describes the diff that push replaced, so
+        comparing it against the current changed files names a file as unreviewed on a stale
+        list. Reporting no table is the honest answer where the only table is that one.
+        """
+        again = ('Copilot reviewed 2 out of 3 changed files in this pull request and generated '
+                 'no new comments.')
+        pr = payload([review(oid=OLD, body=summarized(['a.py'], covers=self.PART)),
+                      review(body=OVERVIEW + '\n' + again)],
+                     files=['a.py', 'b.md', 'c.yml'])
+        self.assertIn('no round covering this head carries a file table',
+                      pr_review.table_against_diff(pr, pr_review.read_coverage(again)))
+
+    def test_the_table_moves_no_exit_code_and_prints_under_the_partial_marker(self) -> None:
+        """The counts decide the state, and the table is what the maintainer decides beside it."""
+        self.answer(payload([review(body=summarized(['a.py', 'b.md', 'c.yml'], covers=self.PART))],
+                            files=['a.py', 'b.md', 'c.yml']))
+        with contextlib.redirect_stdout(io.StringIO()) as out:
+            self.assertEqual(42, pr_review.main(['status', '7', '--repo', 'o/r']))
+        printed = out.getvalue()
+        self.assertIn('COVERAGE IS PARTIAL', printed)
+        self.assertIn('corroborates nothing', printed)
+        self.assertIn('status=COVERAGE_IS_PARTIAL', printed)
 
 
 class TestDigestReportsTheAnswer(GqlCase):
