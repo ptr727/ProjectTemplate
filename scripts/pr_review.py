@@ -617,15 +617,24 @@ def report_verdict(pr: dict) -> int:
               f'is hosted there and the fix lands there. Merging this pull request anyway is the '
               f'maintainer\'s decision to take and not this script\'s, and not the agent\'s.')
         return 43
-    state, _ = head_coverage(pr)
+    state, line = head_coverage(pr)
     if state == PARTIAL:
-        print('status=COVERAGE_IS_PARTIAL the review covering the head read fewer files than the '
-              'pull request changed, so part of the diff has no review at all. Every partial on '
-              'record stayed partial at the identical ratio across every later round, so a '
-              're-request is not the remedy it reads as, and the reviewer names no file list in '
-              'these rounds, so which file went unread cannot be read from the API. Splitting is '
-              'the remedy where it applies, and it does not apply to a promotion. Otherwise this '
-              'is the maintainer\'s call, taken knowing one file of the diff has no review')
+        # The unread count comes from the line that decided PARTIAL, never from past rounds.
+        # None is unreachable there, and narrowing keeps a later change from crashing the gate.
+        counts = read_coverage(line)
+        if counts is None:
+            gap = 'that the counts on that line could not be re-read, so the total is unknown'
+        else:
+            unread = counts[1] - counts[0]
+            gap = (f'{unread} of the {counts[1]} changed files '
+                   f'{"has" if unread == 1 else "have"} no review')
+        print(f'status=COVERAGE_IS_PARTIAL the review covering the head read fewer files than the '
+              f'pull request changed, so part of the diff has no review at all. Every partial on '
+              f'record stayed partial at the identical ratio across every later round, so a '
+              f're-request is not the remedy it reads as, and the reviewer names no file list in '
+              f'these rounds, so which file went unread cannot be read from the API. Splitting is '
+              f'the remedy where it applies, and it does not apply to a promotion. Otherwise this '
+              f'is the maintainer\'s call, taken knowing {gap}')
         return 42
     return 0
 
