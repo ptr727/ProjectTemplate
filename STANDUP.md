@@ -49,7 +49,7 @@ After the first commit, confirm it took with `git log -1 --format='%G? author=%a
 
 ## 0B. Create the Branches, Before the First Standup Commit
 
-**Create both long-lived branches empty and do the whole standup on a feature branch off `develop`.** An agent that starts committing onto whichever branch `git init` produced is writing the repo's permanent history, and every step below is exploratory work that has no business being permanent. Doing this first means nothing ever has to be cleaned off `main` or `develop`, because nothing reaches either without review.
+**Create both long-lived branches empty and do the whole standup on a feature branch off `develop`.** An agent that starts committing onto whichever branch `git init` produced is writing the repo's permanent history, and every step below is exploratory work that has no business being permanent. Doing this first means nothing ever has to be cleaned off `main` or `develop`, because the only commit either carries is the empty one it starts from and every change after it arrives by pull request.
 
 1. **Create `main` carrying nothing.** A git branch cannot exist without a commit, so carrying nothing means exactly one signed empty root commit, and section 0's signing window applies to it like any other.
 2. **Create `develop` from `main`**, also carrying nothing, so the two start level.
@@ -57,7 +57,7 @@ After the first commit, confirm it took with `git log -1 --format='%G? author=%a
 4. **Add the repository on GitHub and apply the configuration while still on that branch**, which is step 4 and needs no branch of its own.
 5. **Open a normal pull request into `develop`** when the standup is done, and let it squash like any other change.
 
-The three local steps are four commands, run before the repository exists on GitHub:
+Steps 1 through 3 are the block below, run before the repository exists on GitHub:
 
 ```shell
 git init                                             # The host default may be master, which the rename below corrects.
