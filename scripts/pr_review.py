@@ -111,14 +111,16 @@ FENCE = re.compile(r'^ {0,3}```.*?^ {0,3}```[^\n]*', re.DOTALL | re.MULTILINE)
 # The readings a round's coverage carries, worst first.
 # A head carries more than one round only through a re-request.
 # Where two disagree, the one naming files it did not read is the one to answer.
-# `UNKNOWN` sits last rather than beside the failures, being the absence of a statement.
+# `UNSTATED` sits last rather than beside the failures, being the absence of a statement.
 # A round that did state full coverage settles the question over one that stated nothing.
-UNVETTED, PARTIAL, FULL, UNKNOWN = 'unvetted', 'partial', 'full', 'unknown'
-SEVERITY = (UNVETTED, PARTIAL, FULL, UNKNOWN)
+UNVETTED, PARTIAL, FULL, UNSTATED = 'unvetted', 'partial', 'full', 'unstated'
+SEVERITY = (UNVETTED, PARTIAL, FULL, UNSTATED)
 # Upper-case for the two that block a merge, for the reason `review_on_head=NO` is upper-case.
 # `unstated` rather than `unknown`, since a body carrying no count is a shape this knows.
 # What this script does not know is the separate `shapes` field, and one word for both hides it.
-COVERAGE_FIELD = {UNVETTED: 'UNVETTED', PARTIAL: 'PARTIAL', FULL: 'full', UNKNOWN: 'unstated'}
+# The constant carries that name too, so no reader has to map a name here onto another word.
+COVERAGE_FIELD = {UNVETTED: 'UNVETTED', PARTIAL: 'PARTIAL', FULL: 'full',
+                  UNSTATED: 'unstated'}
 
 # Every structural marker the reviewer's own bodies carry, measured over the same 332.
 # A body is read for these rather than trusted, because every reader below keys on one of them.
@@ -489,7 +491,7 @@ def read_coverage(line: str) -> tuple[int, int] | None:
 def coverage_of(node: dict) -> tuple[str, str]:
     """This round's coverage reading, with the line it was read from.
 
-    A round making no statement at all reads as unknown rather than as a pass or a failure. 28 of
+    A round making no statement at all reads as unstated rather than a pass or a failure. 28 of
     the 332 bodies measured carry an overview and a change list and nothing more, that shape
     interleaves with the counted one throughout rather than preceding it, and one pull request
     carries both across its two rounds. Failing on it would cry wolf on roughly one review in
@@ -500,7 +502,7 @@ def coverage_of(node: dict) -> tuple[str, str]:
     fixing this script, since a gate that allows whatever it does not recognize stops gating as
     the wording drifts, which it has done once already for each of the two patterns above.
     """
-    worst, detail = UNKNOWN, ''
+    worst, detail = UNSTATED, ''
     for line in coverage_statements(node.get('body') or ''):
         counts = read_coverage(line)
         state = UNVETTED if counts is None else (FULL if counts[0] == counts[1] else PARTIAL)
@@ -518,7 +520,7 @@ def head_coverage(pr: dict) -> tuple[str, str]:
     having dropped it already, and reading one would report the round that declined as a wording
     this script fails to recognize.
     """
-    worst, detail = UNKNOWN, ''
+    worst, detail = UNSTATED, ''
     for node in head_reviews(pr):
         state, line = coverage_of(node)
         if SEVERITY.index(state) < SEVERITY.index(worst):
