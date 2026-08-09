@@ -1,0 +1,37 @@
+#!/bin/sh
+# Local pre-commit gate for this repository: the doc checks CI runs, on the commit's own scope.
+# Enable it per clone with `git config core.hooksPath .husky`.
+# A clone carries no hooks path, so this file does nothing until that is set.
+# It deliberately does not source `_/husky.sh`.
+# That file is gitignored and arrives with an npm install this repository does not have.
+# Sourcing it would therefore break the hook in a fresh clone.
+# The path is kept for the fleet convention the line-ending pins are written against.
+#
+# The language-formatting half the fleet convention names is absent here, and measured rather than assumed.
+# This repository declares ruff in `pyproject.toml`, no workflow runs it, and the tree does not pass it.
+# `ruff format --check` reports 13 of 57 files would be reformatted and `ruff check` reports 106 errors.
+# A gate failing on the corpus it guards blocks every commit from the moment it lands.
+# Converging the Python comes first, and the step is added here after that rather than before it.
+#
+# `repo_gate.py --check sha-pin` is absent for a different reason.
+# It resolves same-owner pins against the GitHub API, and a hook needing a network fails offline.
+# The doc linters that need Docker stay in CI and in the VS Code Lint tasks.
+set -e
+
+# Git already runs a hook from the top level, measured by committing from `scripts/` and printing `pwd`.
+# This is belt and braces for an invocation that does not come from git.
+# The relative paths below would otherwise resolve against whatever directory the caller was in.
+cd "$(git rev-parse --show-toplevel)"
+
+# The prose gate is scoped to what changed against HEAD, which is the policy for prose.
+# A rule is applied as a file is next edited rather than swept across the tree.
+# Whole-tree costs about 2.2 seconds where the diff-scoped run costs about 0.13.
+# The scope is the working tree rather than the index.
+# A partially staged file is therefore judged on all of its edits, not only the staged ones.
+# CI re-runs the same rules over the whole tree, which is what makes that affordable here.
+python3 scripts/prose_lint.py . --diff HEAD
+
+# The eol check is repo-wide rather than diff-scoped, and it is here because it is already fast.
+# It reads `.gitattributes` against `.editorconfig` for the whole repository and takes no file list.
+# At about 0.04 seconds there is nothing to scope, so scoping it would only make it wrong.
+python3 scripts/repo_gate.py --check eol
