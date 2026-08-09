@@ -350,6 +350,381 @@ def title_and_intro(text):
     return title, "\n".join(region)
 
 
+def tagline(intro):
+    """The first line of a README/HISTORY intro region - the one canonical short description.
+
+    Per spec/readme-structure.md item 1, only this line carries the length and link-free rules and only this
+    line mirrors to the About panel, the Docker Hub short description, and the HISTORY.md opening. Any further
+    paragraph is free prose no mirror reads, so comparing the whole region would report a legitimate second
+    paragraph as a mirror difference.
+    """
+    return intro.split("\n")[0]
+
+
+_MD_IMAGE_REF = re.compile(r"!\[[^\]]*\]\[([^\]]+)\]")
+_MD_IMAGE_INLINE = re.compile(r"!\[[^\]]*\]\((\S+?)\)")
+_LINK_DEF = re.compile(r"^\[([^\]]+)\]:\s*(\S+)", re.M)
+
+
+def readme_region(text, heading):
+    """extract_section against a comment-stripped copy of the document.
+
+    extract_section matches a heading by its exact parsed text, so `## License <!-- omit from toc -->` is not
+    the section named License and the lookup returns None. Four repos suffix every heading that way for the
+    Markdown All in One extension, and reading them as sectionless reported twelve absent sub-sections that
+    were present. Stripping first is confined to the README checks: extract_section itself must keep the
+    comment, since the verbatim engine hashes a section's exact bytes.
+    """
+    return extract_section(_HTML_COMMENT.sub("", normalize(text)), heading)
+
+
+def shield_endpoints(region, defs):
+    """The image URLs a Markdown region renders, from both its `![alt][ref]` and its `![alt](url)` uses.
+
+    Keyed on the endpoint rather than the alt text or the reference name, because those are captions. The
+    fleet writes Release Status, Releases Build, Build Status, Workflow Status and Lint Build for one badge,
+    and names its reference `last-commit-shield` and `lastcommit-shield` in the same breath, while the
+    endpoint under img.shields.io is identical in every repo.
+
+    Inline uses are resolved as well as reference ones. Reading references alone made an inline shield
+    invisible rather than wrong, so a repo writing every badge inline, which the reference-link rule forbids
+    for a separate reason, would have passed the shield check by carrying nothing the check could see.
+    A `[ref]: url` definition line is not an image, so it is never counted as a use, which is what keeps a
+    shield's own definition from reading as a second placement of it.
+    """
+    region = region or ""
+    urls = [defs[m.group(1)] for m in _MD_IMAGE_REF.finditer(region) if m.group(1) in defs]
+    return urls + [m.group(1) for m in _MD_IMAGE_INLINE.finditer(region)]
+
+
+def shield_matches(url, shield):
+    """True where a rendered URL is the shield the model describes, by endpoint plus its query discriminators."""
+    return (shield["match"] in url
+            and (shield.get("requireQuery") is None or shield["requireQuery"] in url)
+            and (shield.get("forbidQuery") is None or shield["forbidQuery"] not in url))
+
+
+def addressed_region(text, address):
+    """The region a shield's `in` address names, as `Heading` or `Heading > Sub-heading`, or None if absent."""
+    parts = [p.strip() for p in address.split(">")]
+    body = readme_region(text, parts[0])
+    if body is None or len(parts) == 1:
+        return body
+    want, out, capturing = parts[1].lower(), [], False
+    for ln in body.split("\n"):
+        s = ln.strip()
+        if s.startswith("### "):
+            if capturing:
+                break
+            capturing = s[4:].strip().lower() == want
+            continue
+        if capturing:
+            out.append(ln)
+    return "\n".join(out) if capturing else None
+
+
+def ordered_headings(markdown, level):
+    """Heading texts at `level` in document order, HTML comments stripped, fenced blocks skipped.
+
+    Distinct from heading_texts, which returns an unordered set across every level: the order check needs the
+    sequence, and the ToC-omit comment (`## License <!-- omit from toc -->`) must not read as a different name.
+    A `## ` line inside a fenced block is not a heading, matching extract_section, so a code sample cannot
+    inject a phantom section.
+    """
+    marker = "#" * level + " "
+    out, fenced = [], False
+    for ln in _HTML_COMMENT.sub("", normalize(markdown)).split("\n"):
+        s = ln.strip()
+        if s.startswith("```") or s.startswith("~~~"):
+            fenced = not fenced
+        elif not fenced and s.startswith(marker):
+            out.append(s[len(marker):].strip())
+    return out
+
+
+def readme_section_findings(text, model, sel, public):
+    """README section presence and order against spec/readme-sections.json.
+
+    Headings the model does not name are dropped before the order comparison, so the roughly sixty genuinely
+    repo-specific sections across the fleet sit anywhere without a finding - the model constrains the sections
+    it declares and nothing else. A retired name still resolves to its canonical ordinal, so a repo that has
+    not renamed yet is checked on order too rather than silently losing the check along with the name.
+    """
+    findings = []
+    by_name = {s["name"].lower(): s for s in model["sections"]}
+    retired = {r.lower(): s for s in model["sections"] for r in s.get("retiredNames", [])}
+    heads = ordered_headings(text, 2)
+    lower = [h.lower() for h in heads]
+    present = set(lower)
+
+    for h, hl in zip(heads, lower):
+        if hl in retired:
+            findings.append(("LETTER", f"readme: section '{h}' uses a retired name - rename it to '{retired[hl]['name']}', which has no accepted aliases (spec/readme-structure.md)"))
+
+    for s in model["sections"]:
+        req = s["required"]
+        if req == "optional" or (req == "public" and not public):
+            continue
+        if {t.lower() for t in s.get("notApplicableTo", [])} & {t.lower() for t in sel}:
+            continue
+        if s["name"].lower() in present or any(r.lower() in present for r in s.get("retiredNames", [])):
+            continue
+        why = " (a public repo; optional while private)" if req == "public" else ""
+        findings.append(("LETTER", f"readme: no `## {s['name']}` section{why} - it is a required section (spec/readme-structure.md)"))
+
+    seq = [(by_name.get(hl) or retired.get(hl), h) for h, hl in zip(heads, lower) if hl in by_name or hl in retired]
+    for (prev, prev_h), (cur, cur_h) in zip(seq, seq[1:]):
+        if cur["ordinal"] < prev["ordinal"]:
+            findings.append(("LETTER", f"readme: section '{cur_h}' follows '{prev_h}' but is ordered before it - the declared sections keep their relative order (spec/readme-structure.md)"))
+
+    last = next((s for s in model["sections"] if s.get("last")), None)
+    if last and last["name"].lower() in present and lower[-1] != last["name"].lower():
+        findings.append(("LETTER", f"readme: `## {last['name']}` is not the last section, '{heads[-1]}' follows it - it closes the file, immediately before the link definitions (spec/readme-structure.md)"))
+
+    for s in model["sections"]:
+        if s["name"].lower() not in present or not s.get("subsections"):
+            continue
+        have = {h.lower() for h in ordered_headings(readme_region(text, s["name"]) or "", 3)}
+        for sub in s["subsections"]:
+            if sub.lower() not in have:
+                findings.append(("LETTER", f"readme: `## {s['name']}` carries no `### {sub}` sub-section (spec/readme-structure.md)"))
+    return findings
+
+
+def link_kind(url, slug, rendered=()):
+    """Which linkGroups kind a reference definition points at, for the repo at `slug`.
+
+    A reference in `rendered`, meaning one the document uses as an image, is a shield whatever host serves it.
+    Keying on img.shields.io alone read a badge from any other host as a plain URI and asked for it to be
+    renamed `-link`, which is a rename away from the convention. The case that found it was a retired
+    last-build service, which deprecatedShields now reports separately, but the rule is about how a reference
+    is used rather than about that one host.
+
+    Distribution is scoped to this repo's own URLs, so a link to somebody else's GitHub repo or Docker Hub
+    image, which a 3rd Party Tools list is full of, stays external rather than being read as a channel of this
+    project's.
+    """
+    if url.startswith("#"):
+        return "anchor"
+    if not url.startswith(("http://", "https://")):
+        return "local"
+    if url.startswith("https://img.shields.io"):
+        return "shield"
+    owner = slug.split("/")[0].lower()
+    own = (f"https://github.com/{slug}".lower(), f"https://hub.docker.com/r/{owner}/",
+           f"https://www.nuget.org/packages/{owner}.", f"https://nuget.org/packages/{owner}.",
+           f"https://pypi.org/project/{owner}-")
+    if url.lower().startswith(own):
+        return "distribution"
+    return "shield" if url in rendered else "external"
+
+
+def canonical_link_entry(url, model, slug):
+    """The canonicalLinks entry `url` is a destination for, or None where the model fixes no name for it.
+
+    A destination every repo has is called the same thing in every repo, so a reader moving between them is
+    not re-learning names.
+    """
+    base = f"https://github.com/{slug}"
+    bare = url.rstrip("/")
+    for c in model.get("canonicalLinks", []):
+        if "match" in c:
+            if re.search(c["match"], url):
+                return c
+            continue
+        want = (base + c["repoPath"]).rstrip("/")
+        if (bare.lower().startswith(want.lower()) if c.get("prefix") else bare.lower() == want.lower()):
+            return c
+    return None
+
+
+def canonical_name_findings(defs, model, slug, rendered=()):
+    """Reference names against canonicalLinks, resolved over the whole definition set rather than one at a time.
+
+    A perTarget destination is one a repo may publish several of, and its rule is a count: the bare canonical
+    name where there is exactly one, and `<target>-<name>` where there are several. Judging a definition alone
+    cannot see which case it is in, which is why this is a second pass over the collected set. The qualifier is
+    a prefix on the same name rather than a different name, so one shape covers PlexCleaner's single image and
+    NxWitness's twelve.
+
+    Only a distribution-kind link is renamed, so an upstream image a repo happens to link is left alone.
+    ESPHome-Config links `hub.docker.com/r/esphome/esphome`, which is upstream's image and not a channel of
+    its own, and matching the host alone told it to call that `docker-hub-link`.
+    """
+    findings, hits = [], {}
+    for ref, url in defs:
+        if link_kind(url, slug, rendered) != "distribution":
+            continue
+        c = canonical_link_entry(url, model, slug)
+        if c:
+            hits.setdefault(c["name"], (c, []))[1].append((ref, url))
+    for name, (c, group) in hits.items():
+        if c.get("perTarget") and len(group) > 1:
+            for ref, url in group:
+                if not (ref.endswith(f"-{name}") and len(ref) > len(name) + 1):
+                    findings.append(("LETTER", f"readme: the reference `[{ref}]` points at {url} - this repo publishes {len(group)} of these, so each is named `<target>-{name}` (spec/readme-structure.md)"))
+        else:
+            for ref, url in group:
+                if ref != name:
+                    findings.append(("LETTER", f"readme: the reference `[{ref}]` points at {url} and is named `{name}` in every repo - a shared destination carries a shared name (spec/readme-structure.md)"))
+    return findings
+
+
+def readme_link_findings(text, model, slug):
+    """Reference-definition naming and grouping, per the linkGroups, linkNaming and canonicalLinks model.
+
+    The naming half is a LETTER because the fleet already meets it: 119 of 122 shield references end
+    `-shield` and 514 of 532 URI references end `-link`, so the rule is written down rather than imposed.
+    The grouping half is a DRIFT because it is not met: the fleet carries seventeen distinct group-header
+    names across twenty-two repos, and gating that would bury the naming findings under a re-grouping sweep
+    of every README at once.
+    """
+    findings = []
+    norm = _HTML_COMMENT.sub(lambda m: "\x00" + m.group(0) + "\x00", normalize(text))
+    suffixes = {n["kind"]: n["suffix"] for n in model["linkNaming"]}
+    groups = model["linkGroups"]
+    declared = [g["name"] for g in groups]
+    holds = {g["name"].lower(): g["holds"] for g in groups}
+
+    # Walk the definitions in order, tracking which group header each one falls under.
+    seen_headers, current, in_group = [], None, {}
+    for ln in normalize(text).split("\n"):
+        s = ln.strip()
+        h = re.fullmatch(r"<!--\s*(.*?)\s*-->", s)
+        if h and "omit from toc" not in h.group(1):
+            current = h.group(1)
+            seen_headers.append(current)
+            in_group.setdefault(current, [])
+            continue
+        d = _LINK_DEF.match(s)
+        if d:
+            in_group.setdefault(current, []).append((d.group(1), d.group(2)))
+
+    all_defs = [p for v in in_group.values() for p in v]
+    # A reference the document renders as an image is a shield whatever host serves it, so resolve those first.
+    by_ref = dict(all_defs)
+    rendered = {by_ref[m.group(1)] for m in _MD_IMAGE_REF.finditer(norm) if m.group(1) in by_ref}
+    described = {"shield": "a badge", "anchor": "an in-page anchor", "local": "a path in this repo"}
+    for ref, url in all_defs:
+        kind = link_kind(url, slug, rendered)
+        want = suffixes.get(kind, "")
+        got = "-shield" if ref.endswith("-shield") else "-link" if ref.endswith("-link") else ""
+        if got != want:
+            shown = f"`{want}`" if want else "a bare name with no suffix"
+            findings.append(("LETTER", f"readme: the reference `[{ref}]` points at {described.get(kind, 'a URI')} and should end in {shown} (spec/readme-structure.md)"))
+    findings += canonical_name_findings(all_defs, model, slug, rendered)
+
+    unknown = [h for h in seen_headers if h not in declared]
+    if unknown:
+        findings.append(("DRIFT", f"readme: link-group header(s) outside the declared set: {', '.join(sorted(set(unknown)))} - the groups are {', '.join(declared)} (spec/readme-structure.md)"))
+    ordered = [h for h in seen_headers if h in declared]
+    if ordered != sorted(ordered, key=declared.index):
+        findings.append(("DRIFT", f"readme: the link groups run {', '.join(ordered)} rather than the declared order (spec/readme-structure.md)"))
+    if in_group.get(None):
+        # Distinguish no grouping at all from a stray definition above the first header.
+        # Two repos carry the whole block ungrouped, and "116 definitions sit above the first header" describes that badly.
+        if not seen_headers:
+            findings.append(("DRIFT", f"readme: the {len(in_group[None])} reference definitions carry no group headers - they are grouped under {', '.join(declared)} (spec/readme-structure.md)"))
+        else:
+            findings.append(("DRIFT", f"readme: {len(in_group[None])} reference definition(s) sit above the first group header (spec/readme-structure.md)"))
+    for header, defs in in_group.items():
+        if header is None or not defs:
+            continue
+        names = [r for r, _ in defs]
+        if names != sorted(names):
+            findings.append(("DRIFT", f"readme: the `{header}` group is not sorted by reference name (spec/readme-structure.md)"))
+        want_kind = holds.get(header.lower())
+        strays = {link_kind(u, slug, rendered) for _, u in defs} - {want_kind} if want_kind else set()
+        if strays:
+            findings.append(("DRIFT", f"readme: the `{header}` group holds {', '.join(sorted(strays))} reference(s) where it holds {want_kind} (spec/readme-structure.md)"))
+    return findings
+
+
+_TOOL_ROW = re.compile(r"^\|\s*\[([^\]]+)\]\[([^\]]+)\]\s*\|\s*([^|]*?)\s*\|")
+_TOOL_BULLET = re.compile(r"^[-*]\s*\[([^\]]+)\]\[([^\]]+)\]\s*(.*)$")
+
+
+def third_party_tool_findings(text, catalog):
+    """A repo's 3rd Party Tools entries against the shared catalog in spec/third-party-tools.json.
+
+    The catalog is a standard set rather than a complete one. A repo's tools are mostly its own, so a tool the
+    catalog does not name produces nothing at all: what is checked is the intersection, meaning that a repo
+    using a tool the fleet has standardized links it by the same URL and describes it the same way. Twelve
+    tools already appear in more than one repo, and three of them are linked by two different URLs today, which
+    is the divergence this closes.
+
+    Matching is by the tool's display name, the text a README links, since that is what a reader compares
+    across repos and what the catalog is keyed on.
+    """
+    body = readme_region(text, "3rd Party Tools")
+    if body is None:
+        return []  # the absent section is already one finding from readme_section_findings
+    declared = {t["name"].lower(): t for t in catalog["tools"]}
+    defs = {m.group(1): m.group(2) for m in _LINK_DEF.finditer(normalize(text))}
+    findings = []
+    for ln in body.split("\n"):
+        m = _TOOL_ROW.match(ln.strip()) or _TOOL_BULLET.match(ln.strip())
+        if not m:
+            continue
+        name, ref, desc = m.group(1), m.group(2), m.group(3).strip(" -:")
+        want = declared.get(name.lower())
+        if want is None:
+            continue
+        url = defs.get(ref)
+        if url is not None and url.rstrip("/") != want["link"].rstrip("/"):
+            findings.append(("LETTER", f"readme: 3rd Party Tools links {name} as {url} where the fleet links it as {want['link']} - a shared tool carries one link (spec/third-party-tools.json)"))
+        if desc != want["description"]:
+            shown = f"'{desc}'" if desc else "no description"
+            findings.append(("LETTER", f"readme: 3rd Party Tools describes {name} as {shown} where the fleet describes it as '{want['description']}' - a shared tool carries one description (spec/third-party-tools.json)"))
+    return findings
+
+
+def readme_shield_findings(text, model, entry):
+    """Shield presence, by the additive classes in spec/readme-sections.json.
+
+    Each shield names the section it belongs in, so the license shield is an ordinary member of the base class
+    that happens to sit in the closing License section rather than a second model beside this one. Where a
+    named section is absent, the shield is skipped, because readme_section_findings already reports the
+    section and a second finding would describe the same gap.
+
+    A class is a floor, so an extra shield is never a finding. The classes deliberately assert the endpoint
+    and not the channel: a repo publishing several images carries a version shield per image per channel
+    (NxWitness carries forty, across six images and four channels that are not `develop`), so a
+    latest-plus-develop pair is the single-image form the spec recommends rather than something every docker
+    repo can be measured against.
+    """
+    findings = []
+    defs = {m.group(1): m.group(2) for m in _LINK_DEF.finditer(normalize(text))}
+    # A retired badge service is scanned across the whole document rather than per section, since a dead badge is wrong wherever it sits.
+    # It renders broken rather than absent, which a visitor reads as a failing build rather than as a stale badge.
+    for dep in model.get("deprecatedShields", []):
+        for ref, url in sorted(defs.items()):
+            if dep["match"] in url:
+                findings.append(("LETTER", f"readme: `[{ref}]` renders {dep['label']}, which is retired - {dep['reason']} (spec/readme-structure.md)"))
+    targets = {(p.get("target") if isinstance(p, dict) else p) for p in entry.get("publish", [])}
+    secrets = set(entry.get("requiredSecrets", []))
+    want = []
+    for cls in model["shieldClasses"]:
+        t = cls["trigger"]
+        if (t["kind"] == "always" or (t["kind"] == "publish" and t.get("target") in targets)
+                or (t["kind"] == "secret" and t.get("name") in secrets)):
+            want += cls["shields"]
+    for sh in want:
+        region = addressed_region(text, sh["in"])
+        if region is None:
+            continue
+        if not any(shield_matches(u, sh) for u in shield_endpoints(region, defs)):
+            findings.append(("LETTER", f"readme: `{sh['in']}` carries no {sh['label']} shield ({sh['match']}), which this repo's deliverables require (spec/readme-structure.md)"))
+        if not sh.get("exclusive"):
+            continue
+        # Rendered elsewhere, which for the license shield is the whole point: it belongs at the bottom and nowhere else.
+        # Compared over uses rather than over raw text, so the shield's own `[ref]: url` definition is not read as a second placement.
+        outside = strip_sections(_HTML_COMMENT.sub("", normalize(text)), [sh["in"].split(">")[0].strip()])
+        if any(shield_matches(u, sh) for u in shield_endpoints(outside, defs)):
+            findings.append(("LETTER", f"readme: the {sh['label']} shield is rendered outside `{sh['in']}` - it belongs there and nowhere else (spec/readme-structure.md)"))
+    return findings
+
+
 def workspace_cspell_words(text):
     """True if workspace/settings JSON carries its own cSpell word list - the block cspell.json canonicalizes.
 
@@ -837,41 +1212,43 @@ def audit_repo(entry, spec, branch=None):
                 findings.append(("DRIFT", f"carried: {path} references the template repo by name or link outside its verbatim sections (the coordination flow is machinery this repo's readers should not see; state the behavior, not the destination)"))
 
     # --- HISTORY.md mirrors the README opening ---
-    # Per spec/readme-structure.md "HISTORY.md", the changelog opens as the README's twin, carrying the same H1 title and the same intro paragraph.
+    # Per spec/readme-structure.md "HISTORY.md", the changelog opens as the README's twin, carrying the same H1 title and the same tagline.
+    # The mirror is the tagline alone, not the whole intro region: a README may carry further clarifying paragraphs, and HISTORY.md does not repeat them.
     # It is checked only where both files were readable, since absence is already a file LETTER above.
     if "README.md" in doc_texts and "HISTORY.md" in doc_texts:
         r_title, r_intro = title_and_intro(doc_texts["README.md"])
         h_title, h_intro = title_and_intro(doc_texts["HISTORY.md"])
         if r_title != h_title:
             findings.append(("LETTER", f"history: HISTORY.md title '{h_title}' does not match README.md title '{r_title}' - the changelog opens as the README's twin (spec/readme-structure.md)"))
-        elif r_intro != h_intro:
-            findings.append(("LETTER", "history: HISTORY.md intro does not mirror the README intro - copy the README's opening paragraph (spec/readme-structure.md)"))
+        elif tagline(r_intro) != tagline(h_intro):
+            findings.append(("LETTER", "history: HISTORY.md tagline does not mirror the README tagline - copy the README's first line after the H1 (spec/readme-structure.md)"))
 
     # --- README title and intro are the one canonical short description ---
     # Per spec/readme-structure.md item 1 and GOVERNANCE.md "Repository Details", the H1 is the repo name.
-    # The intro line after it is a link-free plain sentence of at most 100 characters that carries verbatim to the GitHub About description, and on a docker repo to the Docker Hub short description.
+    # The tagline after it, the first line of the intro region, is a link-free plain sentence of at most 100 characters that carries verbatim to the GitHub About description, and on a docker repo to the Docker Hub short description.
+    # Any further paragraph is free prose no mirror reads, which is why only the first line is measured.
     # The README is the source of truth.
     if "README.md" in doc_texts:
         title, intro = title_and_intro(doc_texts["README.md"])
-        intro_line = intro.split("\n")[0]
+        intro_line = tagline(intro)
         # The H1 is the repository name, and a hyphenated name may render its hyphens as spaces.
         # Use the GitHub API's canonical name, since the registry-URL slug can carry a different case.
         repo_name = live.get("name") or slug.split("/")[-1]
         if not title:
-            findings.append(("LETTER", "readme: no `# ` H1 title - the README opens with `# <repo name>` then a one-line description (spec/readme-structure.md)"))
+            findings.append(("LETTER", "readme: no `# ` H1 title - the README opens with `# <repo name>` then the tagline (spec/readme-structure.md)"))
         elif title.replace("-", " ") != repo_name.replace("-", " "):
             findings.append(("LETTER", f"readme: the H1 title '{title}' is not the repo name '{repo_name}' (a hyphenated name may render its hyphens as spaces) - the H1 is the repository name (spec/readme-structure.md)"))
         if not intro_line:
-            findings.append(("LETTER", "readme: no intro line after the H1 - the README opens with the title then a one-line description, which doubles as the About description (spec/readme-structure.md)"))
+            findings.append(("LETTER", "readme: no tagline after the H1 - the README opens with the title then a one-line description, which doubles as the About description (spec/readme-structure.md)"))
         else:
             if strip_md_links(intro_line) != intro_line:
-                findings.append(("LETTER", "readme: the intro line carries Markdown links - keep it link-free plain text, it doubles as the repo About description (spec/readme-structure.md)"))
+                findings.append(("LETTER", "readme: the tagline carries Markdown links - keep it link-free plain text, it doubles as the repo About description (spec/readme-structure.md)"))
             want = strip_md_links(intro_line).strip()
             if len(want) > 100:
-                findings.append(("LETTER", f"readme: the intro line is {len(want)} characters, over the 100-char limit (Docker Hub's short-description cap, the tightest surface it feeds) - tighten it to one short sentence (spec/readme-structure.md)"))
+                findings.append(("LETTER", f"readme: the tagline is {len(want)} characters, over the 100-char limit (Docker Hub's short-description cap, the tightest surface it feeds) - tighten it to one short sentence (spec/readme-structure.md)"))
             desc = (live.get("description") or "").strip()
             if desc != want:
-                findings.append(("LETTER", f"description: the About description does not match the README intro line (description '{desc}' vs readme '{want}') - set it from the README, or sharpen the README first if the description carries real detail (GOVERNANCE.md Repository Details)"))
+                findings.append(("LETTER", f"description: the About description does not match the README tagline (description '{desc}' vs readme '{want}') - set it from the README, or sharpen the README first if the description carries real detail (GOVERNANCE.md Repository Details)"))
             # Docker Hub short description mirrors the same intro, for a repo that publishes a docker image.
             # A transient lookup failure surfaces as a DRIFT ("could not verify"), never aborting or silently passing.
             # A 404 (image not at the derived name) returns None and is skipped.
@@ -882,7 +1259,19 @@ def audit_repo(entry, spec, branch=None):
                     dh = None
                     findings.append(("DRIFT", f"description: could not read the Docker Hub short description to verify it mirrors the README ({e}) - verify by hand"))
                 if dh is not None and dh.strip() != want:
-                    findings.append(("LETTER", f"description: the Docker Hub short description ('{dh.strip()}') does not match the README intro ('{want}') - set it from the README (spec/readme-structure.md)"))
+                    findings.append(("LETTER", f"description: the Docker Hub short description ('{dh.strip()}') does not match the README tagline ('{want}') - set it from the README (spec/readme-structure.md)"))
+
+    # --- README section order, shield classes, and license-shield placement ---
+    # The readme-structure dimension, driven by the declared model in spec/readme-sections.json rather than by prose.
+    # Sited after the title and intro checks so one README read serves both, and guarded on the model being loaded, since the selftest builds a spec without it.
+    readme_model = spec.get("readme")
+    if readme_model and "README.md" in doc_texts:
+        readme_text = doc_texts["README.md"]
+        findings += readme_section_findings(readme_text, readme_model, sel, not live.get("private", False))
+        findings += readme_shield_findings(readme_text, readme_model, entry)
+        findings += readme_link_findings(readme_text, readme_model, slug)
+        if spec.get("tools"):
+            findings += third_party_tool_findings(readme_text, spec["tools"])
 
     # --- cspell single source of truth ---
     # Per CODESTYLE.md "Markdown and Spelling", cspell.json is the one word list, and a cSpell words block left in a *.code-workspace duplicates it and silently drifts.
@@ -1193,6 +1582,154 @@ def _selftest():
         else:
             print("  ok   missing catalog: raises and names spec/project-types.json")
 
+    # The README structure engine, run against the real declared model rather than a fixture of it.
+    # A model edit that contradicts these checks then fails here instead of on the fleet.
+    rm = load("spec/readme-sections.json")
+    conformant = (
+        "# Fixture\n\nA fixture repository.\n\n## Build and Distribution\n\n- **Source Code**: [GitHub][gh]\n\n"
+        "### Build Status\n\n[![Release Status][a]][x]\\\n[![Last Commit][b]][x]\n\n"
+        "### Releases\n\n[![GitHub Release][c]][x]\\\n[![GitHub Pre-Release][d]][x]\n\n"
+        "### Release Notes\n\n**Version**: 1.0\n\n## Table of Contents\n\n- [Overview](#overview)\n\n"
+        "## Overview\n\nWhat it does.\n\n## Whatever This Repo Calls It\n\nRepo-specific.\n\n"
+        "## Questions or Issues\n\nOpen an issue.\n\n## 3rd Party Tools\n\n- [Thing][t]\n\n"
+        "## License\n\nLicensed under the [MIT License][license]\\\n![License][license-shield]\n\n"
+        "<!-- Shields -->\n\n"
+        "[a]: https://img.shields.io/github/actions/workflow/status/o/r/publish-release.yml?label=Releases%20Build\n"
+        "[b]: https://img.shields.io/github/last-commit/o/r\n"
+        "[c]: https://img.shields.io/github/v/release/o/r?label=GitHub%20Release\n"
+        "[d]: https://img.shields.io/github/v/release/o/r?include_prereleases&label=GitHub%20Pre-Release\n"
+        "[license-shield]: https://img.shields.io/github/license/o/r\n"
+    )
+    # The four repos that suffix every heading for the ToC extension must read identically to the plain form.
+    omit_toc = re.sub(r"^(#{2,3} .*)$", r"\1 <!-- omit from toc -->", conformant, flags=re.M)
+    readme_cases = [
+        ("a conformant README, repo-specific section included", conformant, set(), True, 0),
+        ("a second intro paragraph is not a finding", conformant.replace("A fixture repository.\n", "A fixture repository.\n\nAnd a clarifying paragraph about it.\n"), set(), True, 0),
+        ("a retired section name reports a rename", conformant.replace("## Overview", "## Features"), set(), True, 1),
+        ("Questions or Issues is optional while private", conformant.replace("## Questions or Issues\n\nOpen an issue.\n\n", ""), set(), False, 0),
+        ("Questions or Issues is required when public", conformant.replace("## Questions or Issues\n\nOpen an issue.\n\n", ""), set(), True, 1),
+        ("3rd Party Tools is required in every repo", conformant.replace("## 3rd Party Tools\n\n- [Thing][t]\n\n", ""), set(), True, 1),
+        ("a Table of Contents is required with no size threshold", conformant.replace("## Table of Contents\n\n- [Overview](#overview)\n\n", ""), set(), True, 1),
+        ("an out-of-order declared section reports once", conformant.replace("## Questions or Issues\n\nOpen an issue.\n\n", "").replace("## Overview", "## Questions or Issues\n\nOpen an issue.\n\n## Overview"), set(), True, 1),
+        ("License must be the last section", conformant + "\n## TODO\n\nA backlog.\n", set(), True, 1),
+        ("a missing Release Notes sub-section reports once", conformant.replace("### Release Notes\n\n**Version**: 1.0\n\n", ""), set(), True, 1),
+        ("a `## ` line inside a fence is not a section", conformant.replace("What it does.", "```md\n## Not A Section\n```"), set(), True, 0),
+        ("Usage and Installation are N/A for source-only", conformant, {"source-only"}, True, 0),
+        ("a ToC-omit comment on every heading changes nothing", omit_toc, set(), True, 0),
+    ]
+    for label, text, sel_types, public, wantn in readme_cases:
+        got = readme_section_findings(text, rm, sel_types, public)
+        if len(got) != wantn:
+            ok = False
+        print(f"  {'ok  ' if len(got) == wantn else 'FAIL'} want={wantn} got={len(got)}  readme sections: {label}")
+        if len(got) != wantn:
+            for _, t in got:
+                print(f"         {t}")
+
+    docker_shield = "[![Docker Latest][e]][x]\n[e]: https://img.shields.io/docker/v/o/r/latest\n"
+    inline_all = re.sub(r"!\[([^\]]*)\]\[([a-z-]+)\]", lambda m: f"![{m.group(1)}](https://img.shields.io/PLACEHOLDER-{m.group(2)})", conformant)
+    shield_cases = [
+        ("base shields only, a repo publishing nothing", conformant, {}, 0),
+        ("a ToC-omit comment on every heading changes nothing", omit_toc, {}, 0),
+        ("a docker repo owes a version shield", conformant, {"publish": [{"target": "docker"}]}, 1),
+        ("a docker repo carrying one is satisfied, whatever its channel", conformant.replace("[![GitHub Pre-Release][d]][x]\n", "[![GitHub Pre-Release][d]][x]\\\n" + docker_shield), {"publish": [{"target": "docker"}]}, 0),
+        ("a nuget repo owes one version shield, no prerelease", conformant, {"publish": [{"target": "nuget"}]}, 1),
+        ("a pypi repo owes one version shield, no prerelease", conformant, {"publish": [{"target": "pypi"}]}, 1),
+        ("a caption the repo spells differently is not a finding", conformant.replace("![Release Status]", "![Lint Build]"), {}, 0),
+        ("an extra shield beyond the class is not a finding", conformant.replace("[![Last Commit][b]][x]", "[![Last Commit][b]][x]\\\n[![Last Build][a]][x]"), {}, 0),
+        ("a shield in the wrong sub-section does not count as present", conformant.replace("[![GitHub Release][c]][x]\\\n", ""), {}, 1),
+        ("a retired badge service is reported wherever it sits", conformant.replace("[license-shield]: https://img.shields.io/github/license/o/r\n", "[license-shield]: https://img.shields.io/github/license/o/r\n[last-build-shield]: https://byob.yarr.is/o/r/lastbuild\n"), {}, 1),
+        ("the pre-release shield is told from the release shield by its query", conformant.replace("?include_prereleases&label=GitHub%20Pre-Release", "?label=Another%20Release"), {}, 1),
+        # The license shield is an ordinary member of the base class, addressed to a different section.
+        ("the license shield in the closing License section", conformant, {}, 0),
+        ("no license shield at all", conformant.replace("\\\n![License][license-shield]", ""), {}, 1),
+        ("the license shield left under Releases", conformant.replace("\\\n![License][license-shield]", "").replace("[![GitHub Pre-Release][d]][x]", "[![GitHub Pre-Release][d]][x]\\\n![License][license-shield]"), {}, 2),
+        ("a shield's own reference definition is not a use of it", conformant.replace("![License][license-shield]\n", ""), {}, 1),
+        # An inline shield is resolved rather than silently invisible.
+        # Reading references alone let a repo writing every badge inline pass by carrying nothing the check could see.
+        ("inline shields count as present", inline_all.replace("PLACEHOLDER-a", "github/actions/workflow/status/o/r").replace("PLACEHOLDER-b", "github/last-commit/o/r").replace("PLACEHOLDER-c", "github/v/release/o/r").replace("PLACEHOLDER-d", "github/v/release/o/r?include_prereleases").replace("PLACEHOLDER-license-shield", "github/license/o/r"), {}, 0),
+        ("an inline shield in the wrong section is still exclusive", conformant.replace("## Overview", "![License](https://img.shields.io/github/license/o/r)\n\n## Overview"), {}, 1),
+    ]
+    for label, text, ent, wantn in shield_cases:
+        got = readme_shield_findings(text, rm, ent)
+        if len(got) != wantn:
+            ok = False
+        print(f"  {'ok  ' if len(got) == wantn else 'FAIL'} want={wantn} got={len(got)}  readme shields: {label}")
+        if len(got) != wantn:
+            for _, t in got:
+                print(f"         {t}")
+
+    links_ok = (
+        "# F\n\nA fixture.\n\n## X\n\n[a](#x) [b][gh] [c][docker-hub-link] [d][agents] [e][upstream-link]\n\n"
+        "<!-- Sections -->\n\n[x-anchor]: #x\n\n<!-- Shields -->\n\n[license-shield]: https://img.shields.io/github/license/o/r\n\n"
+        "<!-- Distribution -->\n\n[actions-link]: https://github.com/o/r/actions\n[docker-hub-link]: https://hub.docker.com/r/o/r\n[github-link]: https://github.com/o/r\n\n"
+        "<!-- Repo -->\n\n[agents]: ./AGENTS.md\n[license]: ./LICENSE\n\n"
+        "<!-- External -->\n\n[upstream-link]: https://github.com/someone-else/their-repo\n"
+    )
+    # Kept in reference-name order, so the case measures the per-target rule rather than tripping the sort check.
+    two_images = links_ok.replace(
+        "[github-link]: https://github.com/o/r\n",
+        "[github-link]: https://github.com/o/r\n[lsio-docker-hub-link]: https://hub.docker.com/r/o/r-lsio\n")
+    swapped = links_ok.replace(
+        "<!-- Sections -->\n\n[x-anchor]: #x\n\n<!-- Shields -->\n\n[license-shield]: https://img.shields.io/github/license/o/r\n",
+        "<!-- Shields -->\n\n[license-shield]: https://img.shields.io/github/license/o/r\n\n<!-- Sections -->\n\n[x-anchor]: #x\n")
+    link_cases = [
+        ("a conformant reference block", links_ok, 0, 0),
+        ("a shield reference not ending -shield", links_ok.replace("[license-shield]", "[licence]"), 1, 0),
+        ("a URI reference not ending -link", links_ok.replace("[upstream-link]", "[upstream]"), 1, 0),
+        ("a repo-local reference ending -link", links_ok.replace("[agents]:", "[agents-link]:"), 1, 0),
+        ("the repo root named for the project", links_ok.replace("[github-link]", "[fixture-link]"), 1, 0),
+        ("somebody else's GitHub repo is not renamed", links_ok, 0, 0),
+        ("one Docker Hub image takes the bare name", links_ok, 0, 0),
+        ("two Docker Hub images each take a target prefix", two_images, 1, 0),
+        ("two Docker Hub images, both prefixed, is clean", two_images.replace("[docker-hub-link]: https://hub.docker.com/r/o/r\n", "[base-docker-hub-link]: https://hub.docker.com/r/o/r\n"), 0, 0),
+        ("an undeclared group header", links_ok.replace("<!-- External -->", "<!-- Other links -->"), 0, 1),
+        ("groups out of the declared order", swapped, 0, 1),
+        ("a group not sorted by reference name", links_ok.replace("[agents]: ./AGENTS.md\n[license]: ./LICENSE\n", "[license]: ./LICENSE\n[agents]: ./AGENTS.md\n"), 0, 1),
+        ("a reference in the wrong group", links_ok.replace("[license]: ./LICENSE\n", "").replace("<!-- External -->\n", "<!-- External -->\n\n[license]: ./LICENSE\n"), 0, 1),
+    ]
+    for label, text, want_letter, want_drift in link_cases:
+        got = readme_link_findings(text, rm, "o/r")
+        gl = sum(1 for k, _ in got if k == "LETTER")
+        gd = sum(1 for k, _ in got if k == "DRIFT")
+        good = (gl, gd) == (want_letter, want_drift)
+        if not good:
+            ok = False
+        print(f"  {'ok  ' if good else 'FAIL'} want={want_letter}L/{want_drift}D got={gl}L/{gd}D  readme links: {label}")
+        if not good:
+            for k, t in got:
+                print(f"         {k}: {t}")
+
+    # The shared tool catalog, checked over the intersection only: a repo's own tools are its own business.
+    cat = load("spec/third-party-tools.json")
+    tools_head = "# F\n\nA fixture.\n\n## 3rd Party Tools\n\n"
+    tools_defs = "\n[cspell-link]: https://cspell.org\n[widget-link]: https://widget.example/\n"
+    tool_cases = [
+        ("a catalog tool matching the catalog", tools_head + "| Tool | Role |\n| --- | --- |\n| [cspell][cspell-link] | Spell checker. |\n" + tools_defs, 0),
+        ("a catalog tool described differently", tools_head + "| Tool | Role |\n| --- | --- |\n| [cspell][cspell-link] | Spell-checks README.md in CI. |\n" + tools_defs, 1),
+        ("a catalog tool with no description at all", tools_head + "- [cspell][cspell-link]\n" + tools_defs, 1),
+        ("a catalog tool linked by another URL", tools_head + "| Tool | Role |\n| --- | --- |\n| [cspell][widget-link] | Spell checker. |\n" + tools_defs, 1),
+        ("a tool the catalog does not name is not judged", tools_head + "| Tool | Role |\n| --- | --- |\n| [Widget][widget-link] | whatever this repo calls it |\n" + tools_defs, 0),
+        ("the bullet form is read like the table form", tools_head + "- [cspell][cspell-link] - Spell checker.\n" + tools_defs, 0),
+        ("no section yields nothing, since its absence is already reported", "# F\n\nA fixture.\n\n## Other\n\nx\n", 0),
+    ]
+    for label, text, wantn in tool_cases:
+        got = third_party_tool_findings(text, cat)
+        if len(got) != wantn:
+            ok = False
+        print(f"  {'ok  ' if len(got) == wantn else 'FAIL'} want={wantn} got={len(got)}  3rd party tools: {label}")
+        if len(got) != wantn:
+            for _, t in got:
+                print(f"         {t}")
+
+    # The tagline is the first line of the intro region, so a README carrying a second paragraph still mirrors.
+    two_para = title_and_intro("# X\n\nThe tagline.\n\nA clarifying paragraph.\n\n## Next\n")[1]
+    if tagline(two_para) != "The tagline." or "\n" in tagline(two_para):
+        ok = False
+        print(f"  FAIL tagline extraction -> {tagline(two_para)!r}")
+    else:
+        print("  ok   tagline: the first line of the intro region, further paragraphs excluded")
+
     # A ground-truth branch that does not resolve is one error, not a baseline's worth of letters.
     # Every `?ref=` read would 404 and report each carried file absent, describing the ref, not the repo.
     # The branch facts are already read at that point, so they are reported rather than dropped.
@@ -1294,6 +1831,8 @@ def main(argv=None):
         "secrets": load("spec/secrets.json"),
         "files": load("spec/files.json"),
         "types": load("spec/project-types.json"),
+        "readme": load("spec/readme-sections.json"),
+        "tools": load("spec/third-party-tools.json"),
     }
     issue_mode = a.issue
     wanted = {n.lower() for n in a.names}

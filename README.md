@@ -4,7 +4,7 @@ Agent enablement for a fleet of repositories: autonomy and repeatable quality in
 
 ## Build and Distribution <!-- omit from toc -->
 
-- **Source Code**: [GitHub][projecttemplate-link] for source, issues, discussions, and CI/CD pipelines.
+- **Source Code**: [GitHub][github-link] for source, issues, discussions, and CI/CD pipelines.
 - **Versioned Releases**: [GitHub Releases][releases-link] for version-tagged source archives.
 
 ### Build Status <!-- omit from toc -->
@@ -66,6 +66,7 @@ Nothing here is installed as a dependency. The rules are read, the baseline is c
   - [For Workflows](#for-workflows)
 - [Questions or Issues](#questions-or-issues)
 - [Development Environment Setup](#development-environment-setup)
+- [3rd Party Tools](#3rd-party-tools)
 - [License](#license)
 
 ## What This Repo Is
@@ -253,6 +254,20 @@ Contributors sign every commit. See [docs/ssh-signing.md][ssh-signing] for SSH c
 
 Changes land the same way every fleet change does: a feature branch, a squash merge into `develop`, a Copilot review loop driven to green, and a merge only with the maintainer's explicit approval. The backlog is [`TODO.md`][todo], which holds the work that is ready to pick up along with the reasoning behind each item, so read it before proposing something it already covers.
 
+## 3rd Party Tools
+
+The third-party tools, libraries, and actions this project depends on.
+
+| Tool | Role |
+| --- | --- |
+| [cspell][cspell-link] | Spell checker. |
+| [editorconfig-checker][editorconfig-checker-link] | Line-ending and whitespace linter. |
+| [GitHub Actions][github-actions-link] | CI and automation runner. |
+| [GitHub Dependabot][dependabot-link] | Dependency update bot. |
+| [Markdown All in One][markdown-all-in-one-link] | Markdown editing extension. |
+| [markdownlint-cli2][markdownlint-link] | Markdown linter. |
+| [Nerdbank.GitVersioning][nbgv-link] | Version computation from git height. |
+
 ## License
 
 Licensed under the [MIT License][license]\
@@ -272,6 +287,15 @@ Licensed under the [MIT License][license]\
 [last-commit-shield]: https://img.shields.io/github/last-commit/ptr727/ProjectTemplate?logo=github&label=Last%20Commit
 [license-shield]: https://img.shields.io/github/license/ptr727/ProjectTemplate?label=License
 [releases-build-shield]: https://img.shields.io/github/actions/workflow/status/ptr727/ProjectTemplate/publish-release.yml?event=schedule&logo=github&label=Releases%20Build
+
+<!-- Distribution -->
+
+[actions-link]: https://github.com/ptr727/ProjectTemplate/actions
+[commits-link]: https://github.com/ptr727/ProjectTemplate/commits
+[discussions-link]: https://github.com/ptr727/ProjectTemplate/discussions
+[github-link]: https://github.com/ptr727/ProjectTemplate
+[issues-link]: https://github.com/ptr727/ProjectTemplate/issues
+[releases-link]: https://github.com/ptr727/ProjectTemplate/releases
 
 <!-- Repo -->
 
@@ -316,9 +340,10 @@ Licensed under the [MIT License][license]\
 
 <!-- External -->
 
-[actions-link]: https://github.com/ptr727/ProjectTemplate/actions
-[commits-link]: https://github.com/ptr727/ProjectTemplate/commits
-[discussions-link]: https://github.com/ptr727/ProjectTemplate/discussions
-[issues-link]: https://github.com/ptr727/ProjectTemplate/issues
-[projecttemplate-link]: https://github.com/ptr727/ProjectTemplate
-[releases-link]: https://github.com/ptr727/ProjectTemplate/releases
+[cspell-link]: https://cspell.org
+[dependabot-link]: https://github.com/dependabot
+[editorconfig-checker-link]: https://github.com/editorconfig-checker/editorconfig-checker
+[github-actions-link]: https://github.com/actions
+[markdown-all-in-one-link]: https://marketplace.visualstudio.com/items?itemName=yzhang.markdown-all-in-one
+[markdownlint-link]: https://github.com/DavidAnson/markdownlint-cli2
+[nbgv-link]: https://github.com/dotnet/Nerdbank.GitVersioning

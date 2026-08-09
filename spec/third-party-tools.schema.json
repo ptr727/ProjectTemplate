@@ -1,0 +1,26 @@
+{
+    "$schema": "https://json-schema.org/draft/2020-12/schema",
+    "$id": "https://github.com/ptr727/ProjectTemplate/spec/third-party-tools.schema.json",
+    "title": "Shared 3rd party tool catalog",
+    "type": "object",
+    "required": ["tools"],
+    "additionalProperties": false,
+    "properties": {
+        "$schema": { "type": "string" },
+        "note": { "type": "string" },
+        "tools": {
+            "type": "array",
+            "minItems": 1,
+            "items": {
+                "type": "object",
+                "required": ["name", "link", "description"],
+                "additionalProperties": false,
+                "properties": {
+                    "name": { "type": "string", "minLength": 1, "description": "The tool's name as a README links it." },
+                    "link": { "type": "string", "minLength": 1, "description": "The one URL every repository links this tool by." },
+                    "description": { "type": "string", "minLength": 1, "description": "What the tool is, never what a repository does with it." }
+                }
+            }
+        }
+    }
+}

@@ -73,6 +73,28 @@ def main():
                 errors.append(f"secrets.json: oidc {label} forbids no static credential")
 
     check_secret_set("baseline", secrets.get("baseline"), need_kind=False)
+
+    # CI runs no JSON-schema validation, so shape-check the shared tool catalog here.
+    # A duplicate name is the failure worth catching: the audit keys on it, so the second entry silently shadows the first and half the fleet is measured against a description nobody can see.
+    tools = load("spec/third-party-tools.json").get("tools")
+    if not isinstance(tools, list) or not tools:
+        errors.append("third-party-tools.json: 'tools' must be a non-empty array")
+    else:
+        seen = set()
+        for t in tools:
+            name = t.get("name") if isinstance(t, dict) else None
+            if not isinstance(t, dict) or not all(isinstance(t.get(f), str) and t.get(f) for f in ("name", "link", "description")):
+                errors.append(f"third-party-tools.json: entry {name or t!r} needs a non-empty name, link and description")
+                continue
+            if name.lower() in seen:
+                errors.append(f"third-party-tools.json: duplicate tool name '{name}' - the audit keys on it, so the second entry would shadow the first")
+            seen.add(name.lower())
+            desc = t["description"]
+            if not (desc[0].isupper() and desc.endswith(".")):
+                errors.append(f"third-party-tools.json: '{name}' description {desc!r} is not a sentence - open with a capital and close with a full stop")
+        names = [t["name"] for t in tools if isinstance(t, dict) and isinstance(t.get("name"), str)]
+        if names != sorted(names, key=str.lower):
+            errors.append("third-party-tools.json: 'tools' is not sorted by name, which is how a reader finds an entry to copy")
     if not isinstance(mechanisms, dict):
         errors.append("secrets.json: 'mechanisms' is not an object")
     else:

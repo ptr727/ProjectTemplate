@@ -1,0 +1,128 @@
+{
+    "$schema": "https://json-schema.org/draft/2020-12/schema",
+    "$id": "https://github.com/ptr727/ProjectTemplate/spec/readme-sections.schema.json",
+    "title": "README section and shield model",
+    "type": "object",
+    "required": ["sections", "shieldClasses", "linkGroups", "linkNaming", "canonicalLinks"],
+    "additionalProperties": false,
+    "properties": {
+        "$schema": { "type": "string" },
+        "note": { "type": "string" },
+        "sections": {
+            "type": "array",
+            "minItems": 1,
+            "items": {
+                "type": "object",
+                "required": ["name", "ordinal", "required"],
+                "additionalProperties": false,
+                "properties": {
+                    "name": { "type": "string", "minLength": 1 },
+                    "ordinal": { "type": "integer", "minimum": 1 },
+                    "required": { "enum": ["always", "public", "optional"] },
+                    "last": { "type": "boolean" },
+                    "subsections": { "type": "array", "items": { "type": "string", "minLength": 1 } },
+                    "retiredNames": { "type": "array", "items": { "type": "string", "minLength": 1 } },
+                    "notApplicableTo": { "type": "array", "minItems": 1, "items": { "type": "string", "minLength": 1 } }
+                }
+            }
+        },
+        "linkGroups": {
+            "type": "array",
+            "minItems": 1,
+            "items": {
+                "type": "object",
+                "required": ["name", "holds"],
+                "additionalProperties": false,
+                "properties": {
+                    "name": { "type": "string", "minLength": 1 },
+                    "holds": { "$ref": "#/$defs/linkKind" },
+                    "note": { "type": "string" }
+                }
+            }
+        },
+        "linkNaming": {
+            "type": "array",
+            "minItems": 1,
+            "items": {
+                "type": "object",
+                "required": ["kind", "suffix"],
+                "additionalProperties": false,
+                "properties": {
+                    "kind": { "$ref": "#/$defs/linkKind" },
+                    "suffix": { "type": "string", "description": "The suffix a reference name carries for this kind. An empty string means a bare name." },
+                    "note": { "type": "string" }
+                }
+            }
+        },
+        "canonicalLinks": {
+            "type": "array",
+            "items": {
+                "type": "object",
+                "required": ["name"],
+                "additionalProperties": false,
+                "properties": {
+                    "name": { "type": "string", "minLength": 1 },
+                    "repoPath": { "type": "string", "description": "Matched against the repository's own URL plus this path. An empty string is the repository root." },
+                    "match": { "type": "string", "minLength": 1, "description": "A regular expression, for a destination that is not under the repository URL." },
+                    "prefix": { "type": "boolean", "description": "Match repoPath as a prefix rather than exactly, for a path carrying a branch or a sub-path." },
+                    "perTarget": { "type": "boolean", "description": "The repository may publish more than one of these. One takes the bare name; several each take `<target>-<name>`." }
+                }
+            }
+        },
+        "deprecatedShields": {
+            "type": "array",
+            "items": {
+                "type": "object",
+                "required": ["match", "label", "reason"],
+                "additionalProperties": false,
+                "properties": {
+                    "match": { "type": "string", "minLength": 1, "description": "A substring of the badge URL." },
+                    "label": { "type": "string", "minLength": 1 },
+                    "reason": { "type": "string", "minLength": 1 }
+                }
+            }
+        },
+        "shieldClasses": {
+            "type": "array",
+            "minItems": 1,
+            "items": {
+                "type": "object",
+                "required": ["name", "trigger", "shields"],
+                "additionalProperties": false,
+                "properties": {
+                    "name": { "type": "string", "minLength": 1 },
+                    "trigger": {
+                        "type": "object",
+                        "required": ["kind"],
+                        "additionalProperties": false,
+                        "properties": {
+                            "kind": { "enum": ["always", "publish", "secret"] },
+                            "target": { "type": "string", "minLength": 1 },
+                            "name": { "type": "string", "minLength": 1 }
+                        }
+                    },
+                    "shields": { "$ref": "#/$defs/shieldList" }
+                }
+            }
+        }
+    },
+    "$defs": {
+        "linkKind": { "enum": ["shield", "distribution", "external", "anchor", "local"] },
+        "shieldList": {
+            "type": "array",
+            "items": {
+                "type": "object",
+                "required": ["label", "match", "in"],
+                "additionalProperties": false,
+                "properties": {
+                    "label": { "type": "string", "minLength": 1 },
+                    "match": { "type": "string", "minLength": 1 },
+                    "in": { "type": "string", "minLength": 1, "description": "The section the shield belongs in, as `Heading` or `Heading > Sub-heading`." },
+                    "exclusive": { "type": "boolean", "description": "The shield must appear nowhere outside the section it names." },
+                    "requireQuery": { "type": "string", "minLength": 1 },
+                    "forbidQuery": { "type": "string", "minLength": 1 }
+                }
+            }
+        }
+    }
+}
