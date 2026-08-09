@@ -1,5 +1,5 @@
 #!/bin/sh
-# Local pre-commit gate for this repository: the doc checks CI runs, on the commit's own scope.
+# Local pre-commit gate for this repository: the doc checks CI runs, each at the scope that fits it.
 # Enable it per clone with `git config core.hooksPath .husky`.
 # A clone carries no hooks path, so this file does nothing until that is set.
 # It deliberately does not source `_/husky.sh`.
