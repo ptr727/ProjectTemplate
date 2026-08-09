@@ -415,6 +415,28 @@ class TestShippedDeclaration(unittest.TestCase):
         floors = {t['name'] for t in self.data['tools'] if t['minimum'] is not None}
         self.assertEqual(floors, {'gh', 'git-restore-mtime', 'python3'})
 
+    def test_the_contract_table_carries_every_declared_floor(self):
+        """docs/host-setup.md restates the floors, so the doc goes stale the moment the data moves.
+
+        The table's other columns answer presence, and a tool below its floor answers `--version`
+        like any other, so the Floor column is the only thing there that distinguishes present from
+        sufficient. A number that drifts out of step with the data is worse than an absent one,
+        since a host reads the table and stops.
+        """
+        doc = (host_gate.SPEC.parent.parent / 'docs' / 'host-setup.md').read_text(encoding='utf-8')
+        table = [ln for ln in doc.splitlines() if ln.startswith('| ') and '|' in ln[2:]]
+        self.assertTrue(table, 'no contract table found in docs/host-setup.md')
+        for t in self.data['tools']:
+            # An optional tool is deliberately outside the table, which lists what a host must provide.
+            # `git-restore-mtime` carries a floor and no row, and that is correct.
+            if t['minimum'] is None or not t.get('required'):
+                continue
+            rows = [ln for ln in table if t['name'] in ln or t['name'].rstrip('3') in ln]
+            self.assertTrue(rows, f'{t["name"]} declares a floor and has no row in the contract table')
+            self.assertTrue(
+                any(t['minimum'] in ln for ln in rows),
+                f'{t["name"]} declares {t["minimum"]} and no table row states it')
+
     def test_a_target_floor_says_so_rather_than_implying_a_defect(self):
         """The python3 floor is a target, so its `why` has to distinguish itself from a measured one.
 
