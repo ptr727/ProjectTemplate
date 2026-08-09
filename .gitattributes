@@ -29,12 +29,15 @@ scripts/pr_review.py text eol=lf
 scripts/test_prose_lint.py text eol=lf
 scripts/test_repo_gate.py text eol=lf
 scripts/test_pr_review.py text eol=lf
+scripts/host_gate.py text eol=lf
+scripts/test_host_gate.py text eol=lf
 
 # The uv tool regenerates uv.lock with LF on every platform, so pin it here.
 # That makes git enforce LF on checkout and renormalize, so a CRLF-default repo does not fight the tool on every `uv lock` or `uv sync`.
-# A repo with no lockfile is unaffected.
+# A repo with no lockfile is unaffected, so this pin is forward-declared.
 uv.lock text eol=lf
 
 # Dockerfiles must be LF, because a CRLF breaks RUN heredocs and line continuations.
+# A repo with no Dockerfile is unaffected, so these pins are forward-declared.
 Dockerfile text eol=lf
 *.Dockerfile text eol=lf

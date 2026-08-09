@@ -4,14 +4,13 @@ Agent enablement for a fleet of repositories: autonomy and repeatable quality in
 
 ## Build and Distribution <!-- omit from toc -->
 
-- **Source Code**: [GitHub][projecttemplate-link] for source, issues, discussions, and CI/CD pipelines.
+- **Source Code**: [GitHub][github-link] for source, issues, discussions, and CI/CD pipelines.
 - **Versioned Releases**: [GitHub Releases][releases-link] for version-tagged source archives.
 
 ### Build Status <!-- omit from toc -->
 
 [![Releases Build][releases-build-shield]][actions-link]\
-[![Last Commit][last-commit-shield]][commits-link]\
-[![License][license-shield]][license]
+[![Last Commit][last-commit-shield]][commits-link]
 
 ### Releases <!-- omit from toc -->
 
@@ -28,21 +27,46 @@ Agent enablement for a fleet of repositories: autonomy and repeatable quality in
 
 See [Release History][history] for the full history.
 
+## Getting Started <!-- omit from toc -->
+
+This repo has two kinds of reader, a human and an AI coding agent, and they enter at different doors. **An agent starts at [AGENTS.md][agents]**, which maps a task to the document that governs it and is written to be read one section at a time. **A human starts here**, and the table below is the fork: find the row that describes why you opened this page, and read the one it points at rather than the whole file.
+
+| You are | Your question | Start at |
+| --- | --- | --- |
+| Browsing GitHub | What is this, and why does it exist? | [What This Repo Is][what-this-repo-is] and [What It Achieves][what-it-achieves] |
+| Setting up a machine where an agent runs | How do I deploy the host guardrails? | [`docs/host-setup.md`][host-setup] |
+| Adopting the rules in a repository | How do I stand a repo up, or bring an existing one into line? | [`STANDUP.md`][standup], then [`AUDIT.md`][audit] |
+| Blocked by a rule | How do I diverge from one, or grant a write the guard denies? | [Diverging From a Rule][diverging-from-a-rule] |
+| Reporting a defect or proposing a rule | Where does that go, and what does it need? | [Questions or Issues][questions-or-issues] |
+| An AI coding agent | Which document governs the task in front of me? | [`AGENTS.md`][agents] |
+
+Nothing here is installed as a dependency. The rules are read, the baseline is carried into a repository as files it then owns, and the one thing that is genuinely installed is the host guardrail kit, which lands in your home directory rather than in any repository.
+
 ## Table of Contents <!-- omit from toc -->
 
 - [What This Repo Is](#what-this-repo-is)
 - [What It Achieves](#what-it-achieves)
 - [How This Repo Operates](#how-this-repo-operates)
+- [Using This Repo](#using-this-repo)
+  - [Deploy the Host Guardrails](#deploy-the-host-guardrails)
+  - [Carry the Rules Into a Repository](#carry-the-rules-into-a-repository)
+  - [Adopting Outside This Fleet](#adopting-outside-this-fleet)
+- [Diverging From a Rule](#diverging-from-a-rule)
+  - [A Repository Diverging From a Carried Unit](#a-repository-diverging-from-a-carried-unit)
+  - [A Write the Host Guard Denies](#a-write-the-host-guard-denies)
 - [Rules](#rules)
   - [Always](#always)
   - [Never](#never)
   - [If a C# Project](#if-a-c-project)
   - [If a Python Project](#if-a-python-project)
+  - [If Both C# and Python](#if-both-c-and-python)
   - [If Publishing a Package (NuGet or PyPI)](#if-publishing-a-package-nuget-or-pypi)
   - [If a Docker Image](#if-a-docker-image)
   - [For a README or Human-Facing Doc](#for-a-readme-or-human-facing-doc)
   - [For Workflows](#for-workflows)
+- [Questions or Issues](#questions-or-issues)
 - [Development Environment Setup](#development-environment-setup)
+- [3rd Party Tools](#3rd-party-tools)
 - [License](#license)
 
 ## What This Repo Is
@@ -59,12 +83,15 @@ This repo is the single home for those rules, a machine-readable spec they are c
 - **[GOVERNANCE.md][governance]** - cross-cutting rules for AI coding agents: git, branching, release model, doc style, the recurring-violation rules (comments, ASCII charset, US spelling, line endings), PR review etiquette, and workflow YAML conventions.
 - **[CODESTYLE.md][codestyle]** - code style for .NET and Python.
 - **[WORKFLOW.md][workflow]** - the CI/CD workflow contract (behavioral guarantees D1-D9) and its audit methodology.
+- **[STANDUP.md][standup]** - how an agent stands a repository up and carries the baseline it is owed.
 - **[AUDIT.md][audit]** - how an agent audits a repository against the spec and reports drift.
 - **[spec/][spec]** - the machine-readable ground truth: project-type requirements, the file/section baseline, required/forbidden secrets, and the preferred README structure.
 - **[registry/repos.json][repos]** - the fleet registry: every project, its type(s), publish mechanism, and status (cataloged or standardization backlog).
 - **[repo-config/][repo-config]** - branch rulesets and the apply script (kept out of `.github/`, which is Actions-owned), plus the GitHub setup reference.
+- **[host-setup/][host-setup-dir]** - the host guardrail kit, which is per machine rather than per repository.
 - **[catalog/][catalog]** - reusable reference snippets (workflow tasks, config exemplars, devcontainers) the audit compares implementations against.
 - **[reports/][reports]** - per-repo audit output.
+- **[docs/][docs]** - the human setup and reference guides: host prerequisites, SSH signing, devcontainers, and the carry procedures.
 
 **The words a request is phrased in are defined here.** A repository is asked to audit itself against the hub, or to close the review loop on a pull request, and the phrasing carries the whole instruction, so each term below names the file that answers it and a request using one is a complete instruction rather than a starting point for interpretation.
 
@@ -104,6 +131,54 @@ ProjectTemplate follows the same model it documents, and audits its own rules ag
 - **CI is lint-only.** There is no build or unit test. The PR gate runs markdownlint, cspell, JSON validation (`jq` parses `registry/`, `spec/`, and `repo-config/`, plus the `spec/validate.py` cross-reference and shape checks), and actionlint, and exposes the ruleset-bound `Check pull request workflow status job` aggregator. The same lint configs (`.markdownlint-cli2.jsonc`, `cspell.json`) drive the editor extensions, the CLI, and CI.
 - **Review loop.** Every PR is reviewed by GitHub Copilot, and the agent drives the review loop to green and merges only with explicit maintainer permission. See [GOVERNANCE.md "PR Review Etiquette"][governance-pr-review-etiquette].
 - **Release.** A `develop -> main` merge is promoted through a GitHub release (tag plus a source zip, README, and LICENSE). Versioning is NBGV-driven from [version.json][version]. See [WORKFLOW.md][workflow].
+
+## Using This Repo
+
+Three things are deployed from here, and they land in different places. The host guardrails install once per machine, the baseline is carried once per repository, and the audit is run whenever a repository changes materially. Do them in that order on a new machine, because the guardrails bound every session that follows and retrofitting them means the sessions in between ran unguarded.
+
+### Deploy the Host Guardrails
+
+The guardrails are the one component that is installed rather than read, and they are **host state rather than repository content**, because they have to cover ad-hoc sessions in no project at all. They deny a mis-targeted GitHub write under your identity, and a git operation that would only land by bypassing a branch rule.
+
+```shell
+host-setup/agent-safety/install.sh        # Linux, WSL, macOS
+```
+
+```powershell
+.\host-setup\agent-safety\install.ps1     # Windows, and the .\ prefix is required
+```
+
+Restart Claude Code sessions on the machine afterward so the hook and the `CLAUDE.md` blocks load. The installer is idempotent, so re-running it is also how a machine picks up an upstream change to the guard. What it installs, how to verify it, and what it deliberately does not catch are in [`host-setup/agent-safety/README.md`][agent-safety], and the surrounding host prerequisites (git identity, SSH signing, `gh`, `docker`, `uv`) are in [`docs/host-setup.md`][host-setup].
+
+### Carry the Rules Into a Repository
+
+A repository that does not exist yet is stood up with [`STANDUP.md`][standup], which is ordered rather than a menu: verify commit identity and signing before the first commit, hand the maintainer what only they can supply, classify the repo and write its [registry][repos] entry, carry the instruction set before authoring anything of your own, then carry the remaining baseline, the workflows, and the settings. The two steps with a closing window are first, because signing has to be live before the first commit and the rules have to be loaded before the first authored file.
+
+A repository that already exists is measured with [`AUDIT.md`][audit] instead. The audit is read-only and ends in a report under [reports/][reports], so nothing is changed by measuring, and applying what it found is a separate reviewable change per its section 10. Onboarding is complete when the repo passes, or carries a committed report plus a tracking issue for the residual deltas, per [GOVERNANCE.md "Repository Onboarding and Conformance"][governance-repository-onboarding-and-conformance].
+
+The mechanical helpers that go with those procedures are documented beside them: [`docs/repo-config-carry.md`][repo-config-carry] for branch rulesets and repository settings, and [`docs/content-import.md`][content-import] for importing existing content into a new repo.
+
+### Adopting Outside This Fleet
+
+The rules, the spec, and the procedures are readable and reusable by anyone, and the guardrail kit installs on any host. What does not transfer is the registry, since [registry/repos.json][repos] lists this fleet's projects, and standing a repository up writes an entry in it. Adopting outside this fleet therefore means running your own hub, forked or copied, holding your own registry and your own reports, with `AGENTS.md`, `GOVERNANCE.md`, `CODESTYLE.md`, `WORKFLOW.md`, and `spec/` adapted to what your projects actually are. There is no supported mode where an outside repository points at this hub's registry.
+
+## Diverging From a Rule
+
+A rule that cannot be diverged from is a rule people work around silently, which is worse than the divergence, so both kinds of exception have a declared channel. The two kinds are genuinely different: one is a repository not matching a carried unit, and the other is a host guard denying a write. Neither is granted by editing the thing that blocked you.
+
+### A Repository Diverging From a Carried Unit
+
+**Check the unit's fidelity level first, because most apparent divergences are not divergences at all.** Each [spec/files.json][files] entry declares one of `verbatim`, `interface`, `intent`, or `presence`, defaulting to `presence`, and the two permissive levels already hand the repo its content outright. A repo rewriting a `presence` or `intent` file to suit itself is exercising the freedom the level grants rather than breaking a rule, and the audit asserts nothing beyond presence for it. See [spec/fidelity-model.md][fidelity-model] for which unit sits where and why.
+
+**A divergence from a `verbatim` or `interface` unit is recorded, not hidden.** The ledger is [spec/divergences.json][divergences], where each entry names the path, the repos, a disposition, and a reason, and `spec/fidelity_honesty.py --report` joins it against live fleet reality to regenerate [reports/divergences.md][divergences-report]. A divergence recorded as `accepted` is a legitimate permanent one and no further action is owed. A live divergence with no entry renders as `UNTRIAGED`, which is the point: the audit does not care whether a difference is deliberate, only whether someone decided about it. Edit the ledger and regenerate the report, never the report.
+
+**A rule that is wrong for many repositories is a hub defect rather than a per-repo exception.** [AUDIT.md][audit] section 9 says so directly, that a repeated letter miss many repos share is a signal the spec needs adjusting, so raise it here instead of accumulating one exception per repository.
+
+### A Write the Host Guard Denies
+
+The guard denies a `gh` write whose explicit target sits under an owner other than the checkout's `origin` owner, which is the shape that once put a stray comment on a stranger's repository. Sibling repositories under the same owner are allowed, so the denial appears only on a write that leaves the owner, and the common case that raises it is a fork, where `origin` is yours and `upstream` is the project you forked from.
+
+The only way past it is a grant the maintainer makes **outside the session**, in `GH_WRITE_GUARD_ALLOW`. It is deliberately not something an agent can do for itself once blocked, so an inline `GH_WRITE_GUARD_ALLOW=owner/repo gh ...` prefix and an `export` inside a shell call both leave the write denied. The worked example, the file the grant goes in, and how to confirm one took effect are in [`docs/host-setup.md` "Granting a Write the Guard Denies"][host-setup-granting-a-write-the-guard-denies].
 
 ## Rules
 
@@ -160,13 +235,50 @@ A human-readable index of the rules agents enforce, implement, and audit. The au
 
 - Make GitHub Actions satisfy the [WORKFLOW.md][workflow] contract (guarantees D1-D9), which the audit verifies.
 
+## Questions or Issues
+
+File everything at [Issues][issues-link], including a defect in a rule, a procedure that did not survive contact with a real repository, and a proposal for a new rule. Use [Discussions][discussions-link] for an open question that is not yet a defect. This repo ships no application code, so an issue here is about the rules, the spec, the procedures, or the tooling under [`scripts/`][scripts] and [`spec/`][spec], never about a downstream project's behavior, which belongs on that project's own tracker.
+
+An issue is most useful when it names the ground truth it disagrees with, so include the file and section that states the rule, the repository and branch where the problem was observed, and what you expected instead. A finding measured against a specific commit is worth more than one measured against a memory of the docs, per [GOVERNANCE.md "Verification Discipline"][governance-verification-discipline].
+
+Two kinds of report are worth calling out because they are the ones that improve the procedures rather than one repository:
+
+- **A procedure that could not be followed cold.** The onboarding docs are sufficient only when a context-free agent can stand a repo shape up from them alone, so a step that needed knowledge the docs never gave is a documentation defect tracked in the [conformance matrix][matrix] and fixed here rather than worked around per repo.
+- **A rule that many repositories miss the same way.** That is a signal the spec needs adjusting rather than a queue of per-repo exceptions, per [AUDIT.md][audit] section 9.
+
+Issues are also filed here **by agents working in downstream repositories**, which is the normal path rather than an exception, since the agent that hit the gap is the one holding the evidence for it.
+
 ## Development Environment Setup
 
 Contributors sign every commit. See [docs/ssh-signing.md][ssh-signing] for SSH commit-signing setup, [docs/host-setup.md][host-setup] for host prerequisites, and [docs/devcontainer.md][devcontainer] for devcontainer SSH-agent forwarding. Run the linters before pushing (see [GOVERNANCE.md "Running the Linters Locally"][governance-running-the-linters-locally-known-working-invocations]).
 
+Changes land the same way every fleet change does: a feature branch, a squash merge into `develop`, a Copilot review loop driven to green, and a merge only with the maintainer's explicit approval. The backlog is [`TODO.md`][todo], which holds the work that is ready to pick up along with the reasoning behind each item, so read it before proposing something it already covers.
+
+## 3rd Party Tools
+
+The third-party tools, libraries, and actions this project depends on.
+
+| Tool | Role |
+| --- | --- |
+| [cspell][cspell-link] | Spell checker. |
+| [editorconfig-checker][editorconfig-checker-link] | Line-ending and whitespace linter. |
+| [GitHub Actions][github-actions-link] | CI and automation runner. |
+| [GitHub Dependabot][dependabot-link] | Dependency update bot. |
+| [Markdown All in One][markdown-all-in-one-link] | Markdown editing extension. |
+| [markdownlint-cli2][markdownlint-link] | Markdown linter. |
+| [Nerdbank.GitVersioning][nbgv-link] | Version computation from git height. |
+
 ## License
 
-See [LICENSE][license].
+Licensed under the [MIT License][license]\
+![License][license-shield]
+
+<!-- Sections -->
+
+[diverging-from-a-rule]: #diverging-from-a-rule
+[questions-or-issues]: #questions-or-issues
+[what-it-achieves]: #what-it-achieves
+[what-this-repo-is]: #what-this-repo-is
 
 <!-- Shields -->
 
@@ -176,37 +288,62 @@ See [LICENSE][license].
 [license-shield]: https://img.shields.io/github/license/ptr727/ProjectTemplate?label=License
 [releases-build-shield]: https://img.shields.io/github/actions/workflow/status/ptr727/ProjectTemplate/publish-release.yml?event=schedule&logo=github&label=Releases%20Build
 
+<!-- Distribution -->
+
+[actions-link]: https://github.com/ptr727/ProjectTemplate/actions
+[commits-link]: https://github.com/ptr727/ProjectTemplate/commits
+[discussions-link]: https://github.com/ptr727/ProjectTemplate/discussions
+[github-link]: https://github.com/ptr727/ProjectTemplate
+[issues-link]: https://github.com/ptr727/ProjectTemplate/issues
+[releases-link]: https://github.com/ptr727/ProjectTemplate/releases
+
 <!-- Repo -->
 
+[agent-safety]: ./host-setup/agent-safety/README.md
 [agents]: ./AGENTS.md
 [audit]: ./AUDIT.md
 [catalog]: ./catalog/
 [codestyle]: ./CODESTYLE.md
+[content-import]: ./docs/content-import.md
 [devcontainer]: ./docs/devcontainer.md
+[divergences]: ./spec/divergences.json
+[divergences-report]: ./reports/divergences.md
+[docs]: ./docs/
+[fidelity-model]: ./spec/fidelity-model.md
 [files]: ./spec/files.json
 [governance]: ./GOVERNANCE.md
 [governance-branching-model]: ./GOVERNANCE.md#branching-model
 [governance-hub-hosted-tooling]: ./GOVERNANCE.md#hub-hosted-tooling
 [governance-pr-review-etiquette]: ./GOVERNANCE.md#pr-review-etiquette
+[governance-repository-onboarding-and-conformance]: ./GOVERNANCE.md#repository-onboarding-and-conformance
 [governance-running-the-linters-locally-known-working-invocations]: ./GOVERNANCE.md#running-the-linters-locally-known-working-invocations
+[governance-verification-discipline]: ./GOVERNANCE.md#verification-discipline
 [history]: ./HISTORY.md
 [host-setup]: ./docs/host-setup.md
+[host-setup-dir]: ./host-setup/
+[host-setup-granting-a-write-the-guard-denies]: ./docs/host-setup.md#granting-a-write-the-guard-denies
 [license]: ./LICENSE
 [matrix]: ./reports/conformance-matrix.md
 [project-types]: ./spec/project-types.json
 [readme-structure]: ./spec/readme-structure.md
 [repo-config]: ./repo-config/
+[repo-config-carry]: ./docs/repo-config-carry.md
 [reports]: ./reports/
 [repos]: ./registry/repos.json
+[scripts]: ./scripts/
 [spec]: ./spec/
 [ssh-signing]: ./docs/ssh-signing.md
 [standup]: ./STANDUP.md
+[todo]: ./TODO.md
 [version]: ./version.json
 [workflow]: ./WORKFLOW.md
 
 <!-- External -->
 
-[actions-link]: https://github.com/ptr727/ProjectTemplate/actions
-[commits-link]: https://github.com/ptr727/ProjectTemplate/commits
-[projecttemplate-link]: https://github.com/ptr727/ProjectTemplate
-[releases-link]: https://github.com/ptr727/ProjectTemplate/releases
+[cspell-link]: https://cspell.org
+[dependabot-link]: https://github.com/dependabot
+[editorconfig-checker-link]: https://github.com/editorconfig-checker/editorconfig-checker
+[github-actions-link]: https://github.com/actions
+[markdown-all-in-one-link]: https://marketplace.visualstudio.com/items?itemName=yzhang.markdown-all-in-one
+[markdownlint-link]: https://github.com/DavidAnson/markdownlint-cli2
+[nbgv-link]: https://github.com/dotnet/Nerdbank.GitVersioning

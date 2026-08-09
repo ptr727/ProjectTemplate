@@ -1,0 +1,86 @@
+{
+    "$schema": "https://json-schema.org/draft/2020-12/schema",
+    "$id": "https://github.com/ptr727/ProjectTemplate/spec/host-tools.schema.json",
+    "title": "Host tool contract",
+    "description": "The tools a host must provide, with the version floor each known defect requires. Read by scripts/host_gate.py and shape-checked by spec/validate.py.",
+    "type": "object",
+    "required": ["tools"],
+    "additionalProperties": false,
+    "properties": {
+        "$schema": { "type": "string" },
+        "note": { "type": "string" },
+        "tools": {
+            "type": "array",
+            "minItems": 1,
+            "items": { "$ref": "#/$defs/tool" }
+        }
+    },
+    "$defs": {
+        "tool": {
+            "type": "object",
+            "required": ["name", "probes", "pattern", "minimum", "why"],
+            "additionalProperties": false,
+            "allOf": [
+                {
+                    "title": "A declared floor carries a source",
+                    "description": "A host below a floor is told where to install from rather than only to upgrade, which is the whole reason source exists. spec/validate.py enforces this, and encoding it here stops a declaration being schema-valid and validator-invalid at once. A null minimum declares no floor, so the requirement does not apply to it.",
+                    "if": {
+                        "required": ["minimum"],
+                        "properties": { "minimum": { "type": "string" } }
+                    },
+                    "then": {
+                        "required": ["source"],
+                        "properties": { "source": { "minProperties": 1 } }
+                    }
+                }
+            ],
+            "properties": {
+                "name": {
+                    "type": "string",
+                    "minLength": 1,
+                    "description": "The tool as a reader names it, and the key the gate reports under."
+                },
+                "required": {
+                    "type": "boolean",
+                    "default": true,
+                    "description": "False where the tool serves one repository rather than the fleet, in which case its absence is skipped rather than failed."
+                },
+                "probes": {
+                    "type": "array",
+                    "minItems": 1,
+                    "description": "Argument lists tried in order, so the first that runs answers. A second probe exists for a tool whose name differs per platform.",
+                    "items": {
+                        "type": "array",
+                        "minItems": 1,
+                        "items": { "type": "string", "minLength": 1 }
+                    }
+                },
+                "pattern": {
+                    "type": "string",
+                    "minLength": 1,
+                    "description": "Matched against the probe's combined output, with the first capture group taken as the version. It does not anchor on the tool's own name where the tool prints its invoked name instead."
+                },
+                "minimum": {
+                    "type": ["string", "null"],
+                    "pattern": "^\\d+(\\.\\d+)*$",
+                    "description": "The lowest acceptable version as dot-separated integers, or null where no floor has been measured. A floor is declared only where a version is known to break a documented procedure."
+                },
+                "why": {
+                    "type": "string",
+                    "minLength": 1,
+                    "description": "The defect the floor encodes, or the reason no floor exists. This is the field that keeps a floor from becoming folklore."
+                },
+                "source": {
+                    "type": "object",
+                    "description": "Where the tool must come from, per platform, where the source rather than the presence is what the contract requires.",
+                    "additionalProperties": false,
+                    "properties": {
+                        "linux": { "type": "string", "minLength": 1 },
+                        "macos": { "type": "string", "minLength": 1 },
+                        "windows": { "type": "string", "minLength": 1 }
+                    }
+                }
+            }
+        }
+    }
+}

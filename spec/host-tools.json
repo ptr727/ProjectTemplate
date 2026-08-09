@@ -1,0 +1,64 @@
+{
+    "$schema": "./host-tools.schema.json",
+    "note": "The host contract in docs/host-setup.md, as data a gate can read. docs/host-setup.md states which tools a host needs and which repo procedure stops working without each one; this file adds the version floors, and each floor records the defect it encodes rather than a preference. A floor exists only where a specific version is known to break a documented procedure, so most entries carry none and are presence-only, which is deliberate: a floor nobody can justify becomes a host failure nobody can act on. An entry is required unless it declares otherwise, and an optional tool that is absent is skipped rather than failed, since it is needed by one repository rather than by the fleet. Probes are tried in order and the first that runs is the answer, which is how a host whose interpreter is not called python3 still reports a version. The pattern is matched against the probe's combined output and its first capture group is the version, read as dot-separated integers, so a two-part YYYY.MM version compares correctly against a three-part semantic one.",
+    "tools": [
+        {
+            "name": "docker",
+            "required": true,
+            "probes": [["docker", "--version"]],
+            "pattern": "Docker version (\\d+(?:\\.\\d+)*)",
+            "minimum": null,
+            "why": "The four linters run as pinned images rather than local installs, so the image tag fixes the linter version and the daemon's own version has never been the thing that broke a run. No floor is declared because none has been measured here."
+        },
+        {
+            "name": "gh",
+            "required": true,
+            "probes": [["gh", "--version"]],
+            "pattern": "gh version (\\d+(?:\\.\\d+)*)",
+            "minimum": "2.47.0",
+            "why": "The GitHub CLI maintainers name the community-distributed 2.45.x and 2.46.x as broken by deprecated GitHub APIs, so the floor sits immediately above that range rather than at a version anyone has verified good. Two symptoms were observed on a distribution 2.46.0 and re-tested as resolved on 2.97.0, and OPERATIONS.md records both: gh pr edit failed on the Projects-classic projectCards field whichever argument it was given and exited non-zero having applied nothing, and gh pr checks carried no --json flag, so a watcher built on it printed nothing and a quiet result read as a passing one. Neither is visible to a presence check, since a tool old enough to be broken answers --version cleanly.",
+            "source": {
+                "linux": "The official apt repository at cli.github.com, per https://github.com/cli/cli/blob/trunk/docs/install_linux.md, and never the distribution's own package.",
+                "macos": "Homebrew, which tracks upstream releases.",
+                "windows": "winget, which tracks upstream releases, so the hazard the Linux note describes does not arise."
+            }
+        },
+        {
+            "name": "git",
+            "required": true,
+            "probes": [["git", "--version"]],
+            "pattern": "git version (\\d+(?:\\.\\d+)*)",
+            "minimum": null,
+            "why": "No floor, and the interaction worth knowing runs the other way: git 2.51 announced the deprecation of git whatchanged and current git gates it behind a hidden flag, which is what silently disables a git-restore-mtime older than 2025.08. A newer git is therefore the trigger rather than the remedy, and the floor belongs on that tool instead."
+        },
+        {
+            "name": "git-restore-mtime",
+            "required": false,
+            "probes": [["git", "restore-mtime", "--version"], ["git-restore-mtime", "--version"]],
+            "pattern": "version (\\d+(?:\\.\\d+)*)",
+            "minimum": "2025.08",
+            "why": "A release before 2025.08 shells out to git whatchanged, which current git refuses without a hidden opt-in flag the caller cannot pass through, so the tool restores nothing, prints its ordinary statistics and exits 0. A deploy keyed on mtimes then ships a full copy and reports success. Debian and Ubuntu both package 2022.12, so the distribution package is the failing case rather than an unlucky one.",
+            "source": {
+                "linux": "The upstream release at https://github.com/MestreLion/git-tools, or in CI the action at https://github.com/chetan/git-restore-mtime-action which vendors it, and never the distribution's own package.",
+                "macos": "Homebrew's git-tools, checked against the floor like any other source.",
+                "windows": "Not applicable, since the tool is used by a Linux deploy path."
+            }
+        },
+        {
+            "name": "python3",
+            "required": true,
+            "probes": [["python3", "--version"], ["py", "-3", "--version"]],
+            "pattern": "Python (\\d+(?:\\.\\d+)*)",
+            "minimum": null,
+            "why": "Every script here is standard library only, so a bare interpreter is enough and no package floor exists. No version floor is declared because none has been measured, and the name rather than the version is what differs per platform, which the second probe covers."
+        },
+        {
+            "name": "uv",
+            "required": true,
+            "probes": [["uv", "--version"]],
+            "pattern": "uv (\\d+(?:\\.\\d+)*)",
+            "minimum": null,
+            "why": "Used for coverage runs and the Python toolchain in a Python repository, where the pinned tool versions live in that repository rather than in uv itself. No floor has been measured here."
+        }
+    ]
+}

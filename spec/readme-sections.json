@@ -1,0 +1,86 @@
+{
+    "$schema": "./readme-sections.schema.json",
+    "note": "The declared README section and shield model the audit's readme-structure dimension checks mechanically. Ordinals match the numbered items in spec/readme-structure.md, which is the prose the model encodes; item 1 is the title block rather than a level-two heading, so the section list starts at ordinal 2. The order check drops every heading absent from this list, so a genuinely repo-specific section may sit anywhere, then asserts the surviving ordinals are non-decreasing, every required section is present, and the section carrying last:true is the final level-two heading in the file. Requirement is always, public (a public repository only), or optional; an optional section that is present still holds its ordinal. A section naming notApplicableTo is exempt where the repository carries one of those project types. Shield classes are additive: the base class applies to every repository and each remaining class adds its shields where its trigger fires. A shield is matched on its shields.io endpoint path rather than on its alt text or reference name, because those are captions a repository writes to suit itself and the fleet spells the same badge Release Status, Releases Build, Build Status, Workflow Status and Lint Build against one endpoint, while every one of them renders from /github/actions/workflow/status/. requireQuery and forbidQuery separate two shields sharing an endpoint, which is how the GitHub release and pre-release versions are told apart. Each shield names the section it belongs in, as a heading or a heading and sub-heading, so where a shield lives is data rather than a fixed field name: that is what lets the license shield be an ordinary shield sitting in a different section instead of a second model beside this one. A shield marked exclusive must appear nowhere outside the section it names, which the license shield is the only one to need. A class states a floor rather than a closed set, so an extra shield is never a finding. linkGroups is the closed, ordered set of reference-definition groups at the foot of the file, each holding one kind, and linkNaming gives the suffix a reference name carries for the kind it points at. canonicalLinks fixes the reference name for a destination every repository has, so the same thing is called the same thing everywhere and a reader moving between repositories is not re-learning the names: it is keyed to the repository's own URLs, so a link to somebody else's GitHub repository is an ordinary external link. A destination marked perTarget is one a repository may publish more than one of, and it takes the bare canonical name where there is exactly one and a target-qualified name where there are several, so NxWitness writes nxmeta-docker-hub-link and nxwitness-lsio-docker-hub-link where PlexCleaner writes docker-hub-link. The qualifier is a prefix rather than a new name, which is the whole point: one shape covers one image and twelve.",
+    "sections": [
+        { "name": "Build and Distribution", "ordinal": 2, "required": "always", "subsections": ["Build Status", "Releases", "Release Notes"] },
+        { "name": "Getting Started", "ordinal": 3, "required": "optional" },
+        { "name": "Table of Contents", "ordinal": 4, "required": "always" },
+        { "name": "Overview", "ordinal": 5, "required": "optional", "retiredNames": ["Use Cases", "Features", "About"] },
+        { "name": "Installation", "ordinal": 6, "required": "optional", "notApplicableTo": ["source-only"] },
+        { "name": "Configuration", "ordinal": 7, "required": "optional" },
+        { "name": "Usage", "ordinal": 8, "required": "optional", "notApplicableTo": ["source-only"] },
+        { "name": "Questions or Issues", "ordinal": 9, "required": "public" },
+        { "name": "Development Environment Setup", "ordinal": 10, "required": "optional" },
+        { "name": "Contributing", "ordinal": 11, "required": "optional" },
+        { "name": "3rd Party Tools", "ordinal": 12, "required": "always" },
+        { "name": "Credits", "ordinal": 13, "required": "optional" },
+        { "name": "License", "ordinal": 14, "required": "always", "last": true }
+    ],
+    "directiveComments": ["markdownlint", "prettier-ignore", "cspell:", "editorconfig-checker-", "omit from toc"],
+    "linkGroups": [
+        { "name": "Sections", "holds": "anchor", "note": "In-page anchors, which the auto-generated Table of Contents does not use since it keeps inline links." },
+        { "name": "Shields", "holds": "shield", "note": "Badges, meaning any reference the document renders as an image, whatever host serves it." },
+        { "name": "Distribution", "holds": "distribution", "note": "This project's own presence on a platform: its GitHub repository and the pages under it, its Docker Hub images, its NuGet packages, its PyPI packages. Separate from External because a reader looking for where the project ships should not have to pick it out of a list of third-party URLs." },
+        { "name": "Repo", "holds": "local", "note": "Files and paths inside this repository." },
+        { "name": "External", "holds": "external", "note": "Every other URI, meaning anything that is not this project." }
+    ],
+    "linkNaming": [
+        { "kind": "shield", "suffix": "-shield", "note": "A badge, judged by the document rendering the reference as an image rather than by the host serving it." },
+        { "kind": "distribution", "suffix": "-link", "note": "A URI." },
+        { "kind": "external", "suffix": "-link", "note": "A URI." },
+        { "kind": "anchor", "suffix": "", "note": "An in-page anchor is a bare reference." },
+        { "kind": "local", "suffix": "", "note": "A path inside this repository is a bare reference." }
+    ],
+    "distribution": {
+        "note": "The URL prefixes that make a link this project's own rather than somebody else's, with {slug} the owner/repo pair and {owner} the owner alone. This is the single definition of ownership: link_kind reads it to classify a reference, and a canonicalLinks entry is only ever consulted for a reference already classified distribution. Keeping the two apart matters, because a 3rd Party Tools list is full of other people's GitHub repositories, Docker Hub images and NuGet packages, and a host-only test would rename Serilog's package link to nuget-link. The package prefixes carry the owner because a fleet package is published under the owner's own name, which is what distinguishes it from a dependency on the same host.",
+        "urlPrefixes": [
+            "https://github.com/{slug}",
+            "https://hub.docker.com/r/{owner}/",
+            "https://www.nuget.org/packages/{owner}.",
+            "https://nuget.org/packages/{owner}.",
+            "https://pypi.org/project/{owner}-"
+        ]
+    },
+    "canonicalLinks": [
+        { "name": "github-link", "repoPath": "" },
+        { "name": "actions-link", "repoPath": "/actions" },
+        { "name": "releases-link", "repoPath": "/releases" },
+        { "name": "commits-link", "repoPath": "/commits", "prefix": true },
+        { "name": "issues-link", "repoPath": "/issues" },
+        { "name": "discussions-link", "repoPath": "/discussions" },
+        { "name": "docker-hub-link", "match": "^https://hub\\.docker\\.com/r/", "perTarget": true },
+        { "name": "nuget-link", "match": "^https://(www\\.)?nuget\\.org/packages/", "perTarget": true },
+        { "name": "pypi-link", "match": "^https://pypi\\.org/project/", "perTarget": true }
+    ],
+    "deprecatedShields": [
+        { "match": "byob.yarr.is", "label": "the byob.yarr.is last-build badge", "reason": "The service is deprecated, and two of the three repositories carrying it already render a broken badge, since the endpoint returns 404. No shield class requires a last-build badge, so the fix is to delete the shield and its reference definition rather than to replace it." }
+    ],
+    "shieldClasses": [
+        {
+            "name": "base",
+            "trigger": { "kind": "always" },
+            "shields": [
+                { "label": "build status", "match": "/github/actions/workflow/status/", "in": "Build and Distribution > Build Status" },
+                { "label": "last commit", "match": "/github/last-commit/", "in": "Build and Distribution > Build Status" },
+                { "label": "GitHub release version", "match": "/github/v/release/", "forbidQuery": "include_prereleases", "in": "Build and Distribution > Releases" },
+                { "label": "GitHub pre-release version", "match": "/github/v/release/", "requireQuery": "include_prereleases", "in": "Build and Distribution > Releases" },
+                { "label": "license", "match": "/github/license/", "in": "License", "exclusive": true }
+            ]
+        },
+        {
+            "name": "docker",
+            "trigger": { "kind": "publish", "target": "docker" },
+            "shields": [{ "label": "Docker image version", "match": "/docker/v/", "in": "Build and Distribution > Releases" }]
+        },
+        {
+            "name": "nuget",
+            "trigger": { "kind": "publish", "target": "nuget" },
+            "shields": [{ "label": "NuGet release version", "match": "/nuget/v/", "in": "Build and Distribution > Releases" }]
+        },
+        {
+            "name": "pypi",
+            "trigger": { "kind": "publish", "target": "pypi" },
+            "shields": [{ "label": "PyPI release version", "match": "/pypi/v/", "in": "Build and Distribution > Releases" }]
+        }
+    ]
+}

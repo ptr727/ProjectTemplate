@@ -73,6 +73,126 @@ def main():
                 errors.append(f"secrets.json: oidc {label} forbids no static credential")
 
     check_secret_set("baseline", secrets.get("baseline"), need_kind=False)
+
+    # The README model is indexed directly by spec/audit.py, so a key that is absent or the wrong type crashes the audit mid-run rather than reporting.
+    # The schema marks each one required, but CI runs no JSON-schema validation, so the guard that actually runs is this one.
+    # Checked as a set rather than one key at a time, since guarding only the keys a review happened to name is how the other four came to be unguarded.
+    readme_model = load("spec/readme-sections.json")
+    if not isinstance(readme_model, dict):
+        errors.append("readme-sections.json: top level is not an object")
+    else:
+        for key, want in (("sections", list), ("shieldClasses", list), ("linkGroups", list),
+                          ("linkNaming", list), ("canonicalLinks", list), ("distribution", dict)):
+            value = readme_model.get(key)
+            if not isinstance(value, want) or not value:
+                errors.append(f"readme-sections.json: '{key}' must be a non-empty {'array' if want is list else 'object'}, and spec/audit.py indexes it directly")
+        # The distribution prefixes are what tell a repo's own URLs from a third party's.
+        # Their absence fails open rather than loud: link_kind would classify every own URL as external, canonical naming would quietly stop being enforced, and the audit would still report green.
+        prefixes = readme_model.get("distribution", {}).get("urlPrefixes") if isinstance(readme_model.get("distribution"), dict) else None
+        if not is_str_list(prefixes) or not prefixes:
+            errors.append("readme-sections.json: 'distribution.urlPrefixes' must be a non-empty array of strings, or the link audit stops distinguishing this repo's URLs from a third party's and silently passes")
+        else:
+            # Every prefix, not merely one of them.
+            # A broad entry added beside a valid one would pass an any() guard while making link_kind read a third party's URL as this repo's own, which is the failure the guard exists to stop.
+            loose = [p for p in prefixes if "{slug}" not in p and "{owner}" not in p]
+            if loose:
+                errors.append(f"readme-sections.json: 'distribution.urlPrefixes' entry {loose[0]!r} carries neither {{slug}} nor {{owner}}, so it is not repo-scoped and would match another owner's URLs")
+        # A canonicalLinks entry naming a destination it cannot match is a name nothing enforces, and audit.py raises on it mid-run rather than reporting.
+        for c in readme_model.get("canonicalLinks", []) if isinstance(readme_model.get("canonicalLinks"), list) else []:
+            if isinstance(c, dict) and "repoPath" not in c and "match" not in c:
+                errors.append(f"readme-sections.json: canonicalLinks entry '{c.get('name')}' carries neither 'repoPath' nor 'match', so it can match no URL")
+
+    # CI runs no JSON-schema validation, so shape-check the shared tool catalog here.
+    # A duplicate name is the failure worth catching: the audit keys on it, so the second entry silently shadows the first and half the fleet is measured against a description nobody can see.
+    # The top level is read defensively rather than assumed: a malformed file (a bare array, say) would raise
+    # AttributeError off .get and crash the run, which is the opposite of what shape-checking here is for.
+    catalog = load("spec/third-party-tools.json")
+    if not isinstance(catalog, dict):
+        # One diagnostic, naming the outermost thing that is wrong.
+        # Reporting the missing 'tools' as well would describe a consequence of this as if it were a second defect.
+        errors.append("third-party-tools.json: top level is not an object")
+    elif not isinstance(catalog.get("tools"), list) or not catalog["tools"]:
+        errors.append("third-party-tools.json: 'tools' must be a non-empty array")
+    else:
+        tools = catalog["tools"]
+        seen = set()
+        for t in tools:
+            name = t.get("name") if isinstance(t, dict) else None
+            if not isinstance(t, dict) or not all(isinstance(t.get(f), str) and t.get(f) for f in ("name", "link", "description")):
+                errors.append(f"third-party-tools.json: entry {name or t!r} needs a non-empty name, link and description")
+                continue
+            if name.lower() in seen:
+                errors.append(f"third-party-tools.json: duplicate tool name '{name}' - the audit keys on it, so the second entry would shadow the first")
+            seen.add(name.lower())
+            desc = t["description"]
+            if not (desc[0].isupper() and desc.endswith(".")):
+                errors.append(f"third-party-tools.json: '{name}' description {desc!r} is not a sentence - open with a capital and close with a full stop")
+        names = [t["name"] for t in tools if isinstance(t, dict) and isinstance(t.get("name"), str)]
+        if names != sorted(names, key=str.lower):
+            errors.append("third-party-tools.json: 'tools' is not sorted by name, which is how a reader finds an entry to copy")
+    # Shape-checked here rather than left to the gate, because a malformed entry is a silently skipped tool.
+    # A floor nobody can compare against reports nothing, which reads exactly like a host that passed.
+    host_tools = load("spec/host-tools.json")
+    if not isinstance(host_tools, dict):
+        errors.append("host-tools.json: top level is not an object")
+    elif not isinstance(host_tools.get("tools"), list) or not host_tools["tools"]:
+        errors.append("host-tools.json: 'tools' must be a non-empty array")
+    else:
+        ht_seen = set()
+        for t in host_tools["tools"]:
+            name = t.get("name") if isinstance(t, dict) else None
+            if not isinstance(t, dict) or not isinstance(name, str) or not name:
+                errors.append(f"host-tools.json: entry {t!r} needs a non-empty name")
+                continue
+            # Case-insensitive, matching the gate, which folds case so a repository writing 'GH' overrides 'gh' rather than adding a second entry.
+            if name.lower() in ht_seen:
+                errors.append(f"host-tools.json: duplicate tool name '{name}' - the gate keys on it without regard to case, so the second entry would shadow the first")
+            ht_seen.add(name.lower())
+            if not isinstance(t.get("why"), str) or not t.get("why"):
+                errors.append(f"host-tools.json: '{name}' needs a non-empty why, which is what keeps a floor from becoming folklore")
+            # Type-checked rather than read for truthiness, since the string "false" is true and would fail every host on a tool nobody requires.
+            # CI runs no JSON-schema validation, so this file is the only thing that reads the declaration before the gate trusts it.
+            if "required" in t and not isinstance(t["required"], bool):
+                errors.append(f"host-tools.json: '{name}' required must be true or false, not {t['required']!r}")
+            # Compiled rather than only type-checked, since scripts/host_gate.py names this file as what covers the hub declaration.
+            # An uncompilable pattern would otherwise ship and surface at gate runtime, which is the reader that cannot fix it.
+            if not isinstance(t.get("pattern"), str) or not t.get("pattern"):
+                errors.append(f"host-tools.json: '{name}' needs a non-empty pattern to read a version with")
+            else:
+                try:
+                    re.compile(t["pattern"])
+                except re.error as e:
+                    errors.append(f"host-tools.json: '{name}' pattern does not compile ({e})")
+            probes = t.get("probes")
+            # The emptiness of each argument is read as well as its type, so this says what it claims and agrees with the gate's own check.
+            # An empty argument passes a type test and produces a probe that cannot execute.
+            if not isinstance(probes, list) or not probes or not all(isinstance(p, list) and p and all(isinstance(a, str) and a for a in p) for p in probes):
+                errors.append(f"host-tools.json: '{name}' needs 'probes' as a non-empty array of non-empty string arrays")
+            # Presence is read as presence, since a sentinel default cannot tell a missing key from one holding that same value.
+            # A declared "minimum": false would otherwise be reported as undeclared, sending the reader to add a field that is already there.
+            if "minimum" not in t:
+                errors.append(f"host-tools.json: '{name}' must declare 'minimum', using null where no floor has been measured")
+                floor = None
+            else:
+                floor = t["minimum"]
+            if floor is not None:
+                if not isinstance(floor, str) or not re.fullmatch(r"\d+(\.\d+)*", floor):
+                    errors.append(f"host-tools.json: '{name}' minimum {floor!r} must be dot-separated integers or null")
+                elif not isinstance(t.get("source"), dict) or not t["source"]:
+                    errors.append(f"host-tools.json: '{name}' declares a floor and no 'source', so a host below it is told to upgrade and not where from")
+                else:
+                    # The keys are read by platform, so a misspelled one drops the remedy on that platform while the object stays non-empty.
+                    # Requiring the object and not its contents is the shape of guard this repo keeps finding: present, and asserting nothing.
+                    platforms = {"linux", "macos", "windows"}
+                    stray = sorted(set(t["source"]) - platforms)
+                    if stray:
+                        errors.append(f"host-tools.json: '{name}' source names {', '.join(stray)}, which no platform reads - use {', '.join(sorted(platforms))}")
+                    for plat, where in t["source"].items():
+                        if not isinstance(where, str) or not where:
+                            errors.append(f"host-tools.json: '{name}' source.{plat} must be a non-empty string")
+        ht_names = [t["name"] for t in host_tools["tools"] if isinstance(t, dict) and isinstance(t.get("name"), str)]
+        if ht_names != sorted(ht_names, key=str.lower):
+            errors.append("host-tools.json: 'tools' is not sorted by name, which is how a reader finds an entry")
     if not isinstance(mechanisms, dict):
         errors.append("secrets.json: 'mechanisms' is not an object")
     else:

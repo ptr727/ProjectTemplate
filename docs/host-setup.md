@@ -28,6 +28,16 @@ Two consequences worth reading off the table rather than discovering later. **Py
 
 A missing tool is a host gap, not a repo problem. Install it and re-run, rather than working around it in a repo.
 
+### Where a Tool Comes From, and How Old It May Be
+
+Presence is the weaker half of this contract. Both host defects this fleet has actually hit are **version** facts on a tool that is installed, answers `--version`, and looks healthy, so the table above cannot see either one. [`spec/host-tools.json`][host-tools] carries the floors as data and records the defect each one encodes, and [`scripts/host_gate.py`][host-gate] reads it. A floor exists only where a version is known to break a documented procedure, so most entries carry none, deliberately: a floor nobody can justify becomes a host failure nobody can act on.
+
+**`gh` must not come from the distribution's package on Linux.** This is the one place this document names a source, because here the source *is* the requirement rather than a convenience. The GitHub CLI maintainers state that the community-distributed `2.45.x` / `2.46.x` is **broken by deprecated GitHub APIs**, so install from the official apt repository at [cli.github.com][cli-install-link] and upgrade from there. Both `gh` limitations recorded in [`OPERATIONS.md`][operations] were observed on a host carrying a distribution `gh 2.46.0`, and both are the deprecation class that note describes. On **Windows** `winget` tracks upstream releases, and on macOS Homebrew does, so neither raises this hazard and neither needs a note of its own.
+
+**`git-restore-mtime` must not come from it either, where a repo uses it.** Debian and Ubuntu package **2022.12**, which shells out to `git whatchanged`. Current `git` refuses that without a hidden opt-in flag a caller cannot pass through, so the tool restores nothing, prints its ordinary statistics and **exits 0**. A deploy keyed on mtimes then ships a full copy and reports success. Take the upstream release from [git-tools][git-tools-link], or in CI the [action][git-restore-mtime-action-link] that vendors it. Note the direction of that interaction: a **newer** `git` is the trigger rather than the remedy, so a host old enough to still allow `whatchanged` hides the defect rather than avoiding it. No procedure in this repo needs the tool, so the gate declares it **optional** and skips it when absent.
+
+A repository that needs more than the fleet does adds its own `host-tools.json` at its root, which the gate layers over the hub's. It may add a tool nobody else uses, raise a floor, or turn an optional tool required. It may **not** lower a floor or turn a required tool optional, since those edits retire a fleet check from inside the repository it protects, and the gate reports a rejected relaxation rather than dropping it.
+
 ## Git Identity
 
 Configure your name and email, used for commit authorship. **The email is the committing account's GitHub `noreply` address, never a private, personal, or invented one**, per [GOVERNANCE.md "Git and Commit Rules"][governance-git-and-commit-rules], which owns the rule and states the fleet's value. A private address trips GitHub's email-privacy push protection (GH007), and an invented one pollutes history.
@@ -145,7 +155,7 @@ Choose the SSH key generated above when prompted.
 Required on any host where an agent runs with the `gh` credentials logged in, and its own README calls it the first thing to deploy on a new system. Install it from this repo, since the installer is idempotent and safe to re-run to update:
 
 ```shell
-host-setup/agent-safety/install.sh        # Linux, WSL, macOS, Proxmox
+host-setup/agent-safety/install.sh        # Linux, WSL, macOS
 ```
 
 ```powershell
@@ -156,10 +166,46 @@ Both wrap one `install.py`, so every platform runs the same tested path. Restart
 
 This is a **host** control, not a repo one. The carried `GOVERNANCE.md` rules reach fleet repos only, while the hook and the `CLAUDE.md` block cover every session on the machine, including ad-hoc work in no project at all, which is where the incident behind the kit happened.
 
+### Granting a Write the Guard Denies
+
+The guard denies a `gh` write whose explicit target sits under an owner other than the checkout's `origin` owner, and the denial names `GH_WRITE_GUARD_ALLOW` as the way past it. That grant is the maintainer's to make, and making it is a deliberate act taken outside the session rather than something an agent does for itself once blocked.
+
+**The case that raises it is usually a fork.** `origin` is your own fork under your own owner, and `upstream` is the project it was forked from under someone else's. Everything aimed at the fork is in scope and never denies, and only the half that leaves the owner stops: filing an issue on the upstream, opening a pull request against it, or commenting on one there. The grant therefore names the upstream alone, and the fork needs no grant at all. That asymmetry is what a reader hits first, since half the session's writes succeed and the other half do not.
+
+**The grant goes in the checkout's `.claude/settings.local.json`, as an `env` block:**
+
+```json
+{
+  "env": {
+    "GH_WRITE_GUARD_ALLOW": "upstream-owner/upstream-repo second-owner/other-repo third-owner/*"
+  }
+}
+```
+
+**The value is one string holding every grant, never a JSON array**, since the hook reads an environment variable and an environment variable is a string. The three tokens above are three separate grants: two naming one repository each, and `third-owner/*` granting every repository under that owner.
+
+Tokens are separated by **any run of whitespace or commas**, so `a/b c/d`, `a/b,c/d`, and `a/b, c/d` all parse to the same two grants and the choice is cosmetic. A token carrying no `/` is ignored, so a malformed entry grants nothing rather than granting everything, and it also fails silently, which is why the confirmation step below is worth running. Grant the narrowest thing that unblocks the work, since a repository grant does not extend to that owner's other repositories and that containment is the property worth keeping.
+
+**The grant is per checkout, not per host.** `.claude/settings.local.json` lives in the working tree and is git-ignored, so it applies to sessions started in that checkout and does not follow the agent into another repository's sessions. That is the intended scope: a grant made to file one upstream issue from one fork does not quietly become a standing permission everywhere.
+
+**Restart the session afterward.** The hook reads the value from the environment the session was launched with, which is what makes the channel one an agent cannot use on itself, and it is equally why a grant added to a live session does nothing until that session restarts.
+
+**Two forms look right and leave the write denied.** An inline `GH_WRITE_GUARD_ALLOW=owner/repo gh ...` prefix sets the environment of the `gh` process, and an `export` inside a shell call sets the environment of that shell. The hook runs as its own process and sees neither, so the write stays denied with nothing to explain the difference. [`gh-write-guard.py`][write-guard] asserts the inline-prefix case in its own self-test, so this is settled behavior rather than a quirk to work around.
+
+**Confirm the grant loaded before relying on it**, since inferring it from a write that no longer denies means learning the answer by making the write. In a restarted session in that checkout, read the variable the hook reads:
+
+```shell
+printenv GH_WRITE_GUARD_ALLOW
+```
+
+Run it bare, with no `VAR=value` prefix of its own, which would report a value the hook never sees. An empty result means the grant did not load, and the fix is the file location or the restart rather than the token. Feeding the hook a synthetic payload is not a usable probe from inside a session, because the payload text carries the very write shape the guard matches and the guard denies the probe command itself.
+
+Withdraw a grant by deleting the `env` entry and restarting. Nothing expires it, so a grant left in place stays live for every later session in that checkout, which is the reason to remove it once the work that needed it is done.
+
 ## Verify Host Setup
 
 ```shell
-git --version && gh --version && python3 --version && docker --version && uv --version
+python3 scripts/host_gate.py           # presence and version floors, from spec/host-tools.json
 git config --global --list | grep -E "user\.|signing|gpg\."
 ssh-add -L                                   # should list your public key
 git -c gpg.format=ssh commit -S --allow-empty -m "verify-signing"
@@ -169,7 +215,9 @@ gh auth status
 
 If signing fails locally, the devcontainer will fail too, so fix here first.
 
-**This block is POSIX, and on native Windows the interpreter line needs translating**, since `python3` is the one name a correctly set-up Windows host does not have. Read it as `py -3 --version` there, matching the contract table above, and run the rest from WSL2 or Git Bash per the shell note. Git Bash inherits the Windows `PATH`, so `python3` reaches the same Store alias stub it does in PowerShell and reports a working interpreter as missing. A PowerShell equivalent of this block is deliberately **not** given here, because it has not been run on a Windows host, and an unverified verification command is worse than none. [#483][issue-483] is where one belongs once someone has executed it.
+The gate replaced a line that ran `--version` on each tool and read only whether it answered. That form reported a host carrying the broken `gh` as fully set up, which is the failure it exists to stop. It exits non-zero on a missing required tool or one below its floor, prints the defect behind the floor rather than the number alone, and names where to install from.
+
+**This block is POSIX, and on native Windows the interpreter line needs translating**, since `python3` is the one name a correctly set-up Windows host does not have. Read it as `py -3 scripts/host_gate.py` there, matching the contract table above, and run the rest from WSL2 or Git Bash per the shell note. Git Bash inherits the Windows `PATH`, so `python3` reaches the same Store alias stub it does in PowerShell and reports a working interpreter as missing. A PowerShell equivalent of this block is deliberately **not** given here, because it has not been run on a Windows host, and an unverified verification command is worse than none. [#483][issue-483] is where one belongs once someone has executed it.
 
 **What the host can do once this passes**, which is the point of the contract above:
 
@@ -193,11 +241,18 @@ A host that fails any row is not ready for the procedure that row names, and the
 [agent-safety]: ../host-setup/agent-safety/README.md
 [devcontainer]: ./devcontainer.md
 [governance-git-and-commit-rules]: ../GOVERNANCE.md#git-and-commit-rules
+[host-gate]: ../scripts/host_gate.py
+[host-tools]: ../spec/host-tools.json
 [issue-483]: https://github.com/ptr727/ProjectTemplate/issues/483
+[operations]: ../OPERATIONS.md
 [ssh-signing]: ./ssh-signing.md
 [standup]: ../STANDUP.md
+[write-guard]: ../host-setup/agent-safety/gh-write-guard.py
 
 <!-- External -->
 
+[cli-install-link]: https://github.com/cli/cli/blob/trunk/docs/install_linux.md
 [cli-link]: https://cli.github.com/
+[git-restore-mtime-action-link]: https://github.com/chetan/git-restore-mtime-action
+[git-tools-link]: https://github.com/MestreLion/git-tools
 [keys-link]: https://github.com/settings/keys

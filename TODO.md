@@ -39,9 +39,9 @@ One pull request pointing a hub `uses:` at a hub-owned action, so that the resol
 
 ### The Declared Repository Description
 
-One pull request moving the canonical short description into declared data, which settles the second-paragraph ambiguity by construction rather than by writing an extraction rule the same change then deletes.
+One pull request moving the canonical short description into declared data, so every check and every push reads a field rather than parsing a document, and the About panel gets something that writes it.
 
-**State** `decision`. **Touches** [`registry/repos.json`][repos] and its schema, [`spec/audit.py`][audit], [`spec/readme-structure.md`][readme-structure], and [`CODESTYLE.md`][codestyle]. **Cost** one hub edit plus a carried re-vendor of the `CODESTYLE.md` item, and repos adopt the field one at a time.
+**State** `decision`. **Touches** [`registry/repos.json`][repos] and its schema, [`spec/audit.py`][audit], and `repo-config/configure.sh`. **Cost** one hub edit, and repos adopt the field one at a time. The tagline rule this cluster once carried shipped on 2026-08-08.
 
 - **Declare the description in [`registry/repos.json`][repos] instead of deriving it by parsing the README.** Every check and every push then reads a field.
   - **Blocked by** - Nothing.
@@ -54,14 +54,14 @@ One pull request moving the canonical short description into declared data, whic
   - **Settled** - The field is optional at first so the audit falls back to the README intro while repos adopt it, and it needs a schema entry because `registry/repos.schema.json` sets `additionalProperties: false`.
   - **Settled** - The ask on the Docker repos meanwhile is only that the parsing step is not propagated further.
 
-- **Let the README intro carry more than the tagline, and say which line the mirrors take.** The current pair of rules forbids a README from saying anything further about itself above the fold.
-  - **Blocked by** - The entry above, since taking this first means writing an extraction rule the registry change deletes.
-  - **Issue** - [#577][issue-577], which carries the three surfaces that change together.
-  - **Checked** - `develop` at `b82c1a3` on 2026-08-05, where [`spec/readme-structure.md`][readme-structure] item 1 reads as though the canonical description is the paragraph after the H1 and [`CODESTYLE.md`][codestyle] has `HISTORY.md` copy the same intro paragraph verbatim.
-  - **Open** - Nothing.
-  - **Settled** - The shape is that the first line after the H1 is the tagline, it alone carries the 100-character link-free rule, it alone mirrors to the GitHub About panel, the Docker Hub short description and the `HISTORY.md` opening, and any further paragraph is free prose no mirror reads.
-  - **Settled** - The audit changes with the rule, since it measures the first non-empty line and would otherwise report a legitimate second paragraph.
-  - **Settled** - The cap belongs to a mirror rather than to the reader, which is why declaring the field removes the parser that motivates it.
+- **Close the README-to-About hop, which is the only one nothing writes.** The audit reports a drifted About panel, and no tool sets it.
+  - **Blocked by** - The entry above, since the field is what `repo-config/configure.sh` would set the panel from.
+  - **Issue** - [#577][issue-577], whose tagline half shipped on 2026-08-08.
+  - **Checked** - `develop` on 2026-08-08, where `repo-config/configure.sh` sets every other repository setting and carries no `description` handling, and [`catalog/snippets/workflows/publish-docker-readme-task.yml`][workflows] pushes `github.event.repository.description` to Docker Hub.
+  - **Open** - Nothing beyond sequencing.
+  - **Settled** - The chain is README, then the About panel by hand, then Docker Hub by CI, so the unautomated hop is the first one and it is the one that drifts. PhotoCleaner is the worked case, where the About panel still matched the README and only the Docker Hub short description had diverged.
+  - **Settled** - CI keeps reading `repository.description` rather than the README. Pointing it at the README puts a Markdown parser in a publish job, which PhotoCleaner#32 measured at nine guards, every one of which fails the release rather than the tagline.
+  - **Settled** - The tagline rule itself shipped on 2026-08-08 and is no longer owed here. The extraction rule this entry was once blocked on already existed: [`spec/audit.py`][audit] measured the first line for the About and Docker Hub mirrors all along, and narrowing the `HISTORY.md` mirror to match it was one line, so the sequencing that held the rule behind the registry field was stated more strongly than the code warranted.
 
 ### Content in the Wrong File
 
@@ -122,26 +122,53 @@ One pull request measuring the remaining carried surface against the carry-versu
 
 ### The README Structure Rework
 
-One pull request reworking the README spec to the hand-crafted PlexCleaner shape the maintainer wants, and making the result auditable rather than advisory.
+The spec rework and its audit check shipped. What remains is the per-repo conformance the check now reports, and one section the fleet carries that the model does not name.
 
-**State** `decision`. **Touches** [`spec/readme-structure.md`][readme-structure] and the `readme-structure` dimension in [`spec/audit.py`][audit]. **Cost** one hub edit, and it re-grades every repo's README.
+**State** `backlog`. **Touches** each repo's `README.md` on its next visit, plus [`spec/readme-structure.md`][readme-structure] and [`spec/readme-sections.json`][readme-sections] if `Build Artifacts` is adopted. **Cost** one edit per repo, driven by the finding rather than by a sweep.
 
-- **Encode the distribution channel by deliverable rather than as one fixed label.** Four divergences are already identified against PlexCleaner and this repo.
-  - **Blocked by** - "The Declared Repository Description", since the mirrors settle first.
+- **Work off the conformance backlog the `readme-structure` dimension now reports.** Measured across all 22 cataloged repos on 2026-08-08, against the shipped checks: 73 findings, 71 on sections and 2 on shields, plus the 3 retired-badge findings the entry below carries.
+  - **Blocked by** - Nothing, and no repo is edited by the hub. Each lands on its own next visit.
   - **Issue** - None filed.
-  - **Checked** - `develop` at `1ed0cc8` on 2026-08-03.
-  - **Open** - Nothing.
-  - **Settled** - PlexCleaner ships executables and calls the channel Binary Releases, while the spec fixes the label as Versioned Releases for every repo, so the label belongs in a per-channel table.
-  - **Settled** - The license shield sits in the top Build Status block here and at the very bottom of PlexCleaner, inside a closing License section reading that the project is licensed under the MIT License, followed by the shield, immediately before the link definitions.
-  - **Settled** - The Release Notes section closes by pointing at the release history for complete release notes and older versions, which is the wanted form, and PlexCleaner writes that link inline, which the reference-style rule forbids, so the wording is adopted and the reference form kept.
-  - **Settled** - Channel bullets and shields vary by deliverable, meaning GitHub binaries, Docker Hub, NuGet and PyPI each carry a different bullet label and shield set, which is what a per-type table has to encode.
+  - **Checked** - Every repo's default branch on 2026-08-08, with the hub read at its own `develop`.
+  - **Settled** - The shape of the work: 17 repos owe `3rd Party Tools`, 10 owe the `Overview` rename, 9 owe a Table of Contents, 7 owe a License section, and 5 public repos owe `Questions or Issues`.
+  - **Settled** - Three order findings are genuine and each is one move: LanguageTags places Installation after Usage, aiopurpleair places Getting Started after Installation, and PlexCleaner places Questions or Issues immediately after the Table of Contents where the order now puts it ninth.
+  - **Settled** - Two placement findings are genuine: KiCadLibrary carries a `## TODO` after `## License`, which the "TODO.md" rule already forbids, and HomeAutomation-Config renders the license shield twice, once outside the License section.
+  - **Settled** - MediaTools carries a `NuGet Pre-Release` shield that renders the same version as its `NuGet Release` shield, and it is dropped on that repo's next visit. The check does not report it, because a shield class is a floor and an extra shield is never a finding.
+  - **Settled** - Blog is the only repo carrying a `3rd Party Tools` table today, and it needs both fixes the rule now states: drop the License column, which the audit reports since 2026-08-09, and rewrite all three roles, since "theme, vendored under `themes/`" and "web server, serving the built site and the redirects" describe this repo's wiring where "static site generator" describes the tool correctly and differs only by its opening capital and its full stop.
 
-- **Decide whether the canonical section order follows PlexCleaner.** This affects every repo plus the audit dimension.
+- **Bring each repo's `3rd Party Tools` entries onto the shared catalog.** Measured on 2026-08-09: 57 findings across four repos, a link, a description, or an ordering that disagrees with [`spec/third-party-tools.json`][third-party-tools], plus the one License column [`spec/readme-structure.md`][readme-structure] forbids.
   - **Blocked by** - Nothing.
   - **Issue** - None filed.
-  - **Checked** - `develop` at `1ed0cc8` on 2026-08-03.
-  - **Open** - The position of the sections the spec already names, since PlexCleaner places Questions or Issues immediately after the Table of Contents where the spec orders it ninth.
-  - **Settled** - PlexCleaner's Performance Considerations, Runtime Metrics, Custom Plugins, Testing, Development Tooling, Feature Ideas and Sample Media Files are correctly repo-specific under the recurrence rule in [`spec/section-model.md`][section-model] and stay undeclared.
+  - **Checked** - Every repo's default branch on 2026-08-09, with the hub read at its own `develop`, which now conforms.
+  - **Settled** - The bulk is absent descriptions rather than wrong ones: 48 of the 57 are a tool listed with no description at all, across LanguageTags, MediaTools and PlexCleaner, and PlexCleaner alone accounts for 25 of those and 27 findings overall. Of the remaining nine, three describe a tool differently from the catalog, four link it differently, one is Blog listing Hugo, PaperMod, Caddy out of alphabetical order, and one is Blog's License column.
+  - **Settled** - Twelve tools already appear in more than one repo, which is what makes the catalog worth having before the 17 repos owing the section write their own wording for each.
+  - **Settled** - Four tools are already linked by two different URLs across the fleet, and the catalog picks one each: GitHub Actions takes `github.com/actions`, Dependabot takes `github.com/dependabot`, Nerdbank.GitVersioning takes the project repo rather than its marketplace action, and uv takes `docs.astral.sh/uv/` to match ruff. The hub was the outlier on the first two and is fixed.
+  - **Settled** - PlexCleaner lists Bring Your Own Badge as a tool, so the retired badge service has a fourth touchpoint beyond the three rendering it, and that entry goes with the same deletion.
+  - **Settled** - The catalog is a standard set and not a complete one, so a tool only one repo uses is unaudited. Of the 36 tools the fleet lists today, 24 are used by exactly one repo and are declared only so the second adopter copies rather than invents.
+
+- **Work off the reference-link naming and grouping backlog.** Measured across all 22 repos on 2026-08-08: 55 letter findings on naming and 27 drift findings on grouping.
+  - **Blocked by** - Nothing, and each repo's block is one edit.
+  - **Issue** - None filed.
+  - **Checked** - Every repo's default branch on 2026-08-08, with the hub read at its own `develop`, which now conforms.
+  - **Settled** - The naming half was already the fleet's practice before it was written down: 119 of 122 shield references end `-shield` and 514 of 532 URI references end `-link`, and `actions-link`, `releases-link`, `issues-link` and `discussions-link` are unanimous across every repo carrying them.
+  - **Settled** - The two real naming inconsistencies are the repository root, which 10 of 20 call `github-link` and the rest name for the project, and `./LICENSE`, which 9 repos call `license-link` where a repo-local path is a bare reference.
+  - **Settled** - The grouping half is drift rather than letter because it is not met: the fleet carries seventeen distinct group-header names, and two repos, NxWitness with 116 definitions and ESPHome-NonRoot with 45, carry no group headers at all.
+  - **Settled** - KiCadLibrary is the largest single block at 22 naming findings, almost all of them repo-local paths named `-link`.
+
+- **Delete the retired `byob.yarr.is` last-build badge from the three repos still carrying it.** The service is deprecated and the badge is not required by any shield class, so the fix is a deletion rather than a replacement.
+  - **Blocked by** - Nothing, and each repo's fix is deleting one shield line and one reference definition.
+  - **Issue** - None filed.
+  - **Checked** - Each repo's default branch on 2026-08-08, with the endpoints requested the same day: MediaTools and KiCadLibrary both return **HTTP 404**, so they already render a broken badge, and ESPHome-NonRoot still returns 200.
+  - **Settled** - The audit reports it, so this does not rely on anyone remembering: `deprecatedShields` in [`spec/readme-sections.json`][readme-sections] carries the retired service and the check fires on exactly those three repos.
+  - **Settled** - A dead badge is worse than an absent one, because it renders broken rather than missing and a visitor cannot tell a retired service from a failing build.
+  - **Settled** - All three repos are already non-conformant on other grounds, so this rides their next visit rather than earning a pass of its own.
+
+- **Decide where `## Build Artifacts` belongs.** LanguageTags and aiopurpleair both carry it, opening with the same `**Build process and artifacts**:` line and covering package, versioning, and publishing.
+  - **Blocked by** - Nothing.
+  - **Issue** - None filed.
+  - **Checked** - Both repos' default branches on 2026-08-08, where the section is the only one recurring across repos that [`spec/readme-sections.json`][readme-sections] does not name.
+  - **Open** - Whether it becomes a named optional section, folds into `Build and Distribution`, or moves to [`WORKFLOW.md`][workflow], since its content overlaps both.
+  - **Settled** - It is not a finding today. An unnamed heading is dropped before the order comparison, so the two repos carrying it pass, which is why this is a decision rather than a defect.
 
 ### Two Project Types and a Shared C++ Style
 
@@ -318,25 +345,33 @@ The review loop ends by replying on a thread and resolving it, and both halves f
   - **Checked** - `develop` at `0e4a1c2` on 2026-08-08, reading the exit-code table in the `scripts/pr_review.py` module docstring.
   - **Detail** - This is the failure the suppressed-findings count already exists for, where a step that stopped running reads exactly like a step that passed.
 
-### The Grant That Unblocks a Cross-Owner Write
+### Watching a Downstream Pull Request Touch Hub-Owned Content
 
-One pull request documenting how a maintainer grants a write target the guard denies. The hook denies a `gh` write whose explicit target is under an owner other than the checkout origin's, and the only way past it is a grant in `GH_WRITE_GUARD_ALLOW`, which no document tells a reader how to give.
+One pull request adding the observer the fleet has no equivalent of, reading merged pull requests across the fleet and resolving every changed path against what the hub declares it owns. The tools today read standing state, so a divergence is visible only once it is already there, and a repo-local file the manifest never names is invisible at every stage.
 
-**State** `ready`. **Touches** [`docs/host-setup.md`][host-setup] and [`host-setup/agent-safety/README.md`][write-guard-readme]. **Cost** one pull request, prose only, and hub-only, since the kit is host state rather than carried repo content.
+**State** `ready`. **Touches** a new `spec/carry_watch.py` with its self-test, [`reports/`][reports], [`AUDIT.md`][audit-doc], and [`.github/workflows/validate-task.yml`][validate-task]. **Cost** one hub script, hub-only, plus a first run whose output is a triage backlog rather than a change.
 
-- **Document the grant where a reader already is when the denial arrives, which is the install section rather than the hook's description.** A denial names the variable, and the two documents that could explain it either never mention it or mention it while describing what the hook refuses, so the reader is told a grant exists and never how to make one.
+- **Read merged fleet pull requests and classify each changed path against the manifest.** The gap is a whole reading rather than a missing field, since nothing anywhere enumerates pull requests.
   - **Blocked by** - Nothing.
-  - **Issue** - None filed.
-  - **Checked** - `develop` at `92b9fc5` on 2026-08-08, where "Agent Write-Safety Kit" in [`docs/host-setup.md`][host-setup] never names the variable at all, [`host-setup/agent-safety/README.md`][write-guard-readme] names it once inside the bullet listing what the hook denies, giving the token format and not how to set it, and [`README.md`][readme] carries no host-protection section, only a pointer to the first.
-  - **Detail** - The channel that works is an `env` block in the checkout's `.claude/settings.local.json`, holding `GH_WRITE_GUARD_ALLOW` set to the target. It is per project rather than host-wide, which is the property worth stating, since a grant made for one checkout does not follow the agent into another repository's sessions.
-  - **Detail** - The case that raised it is a fork, where `origin` is under the maintainer's own owner and `upstream` is the project it forked from. Filing an issue or a pull request against the upstream is the cross-owner write, and everything aimed at the fork is not, so the grant names the upstream alone and the denial appears only on the half that leaves the owner. That asymmetry is the part a reader hits first and the reason a worked example beats a definition here.
-  - **Detail** - The two forms a reader reaches for first both fail, silently in the sense that the write simply stays denied: an inline `GH_WRITE_GUARD_ALLOW=owner/repo gh ...` prefix, and an `export` in a shell call. The hook runs as its own process and reads only the environment the session was launched with, which is exactly what makes a grant a deliberate act taken outside the session rather than something an agent can do for itself once blocked. The behavior is settled and tested, since [`gh-write-guard.py`][write-guard] already asserts the inline prefix denies, so what is missing is only the explanation.
-  - **Detail** - Two things worth carrying beside the example: that a session restart is what loads the grant, and a way to confirm one took, since inferring it from a write that no longer denies means learning the answer by making the write.
+  - **Issue** - None filed. [#633][issue-633] is the instance that prompted it, raised by a downstream agent after the maintainer noticed it editing hub-managed CI files, and nothing mechanical had reported that.
+  - **Checked** - `develop` at `c2ce145` on 2026-08-08, reading [`spec/files.json`][files], [`spec/divergences.json`][divergences] and [`registry/repos.json`][repos], and running the enumeration query live against the owner.
+  - **Open** - How a window wider than a thousand results is split, since the GitHub search API caps there and a silent truncation is the false clean this whole class of tool exists against. The split has to be visible in the output rather than inferred.
+  - **Open** - Whether a `SECTION` or `CONTRACT` classification reads content in the same pass or defers to a human, since the path alone says a carried file moved and not which region of it.
+  - **Settled** - The enumeration is one query rather than a per-repo loop, measured live: `search(query: "org:ptr727 is:pr is:merged base:main merged:>=<DATE>", type: ISSUE)` returned 112 pull requests over a fortnight with per-pull-request `files` and `repository` inline. The `base:` term comes from each repo's registry `groundTruthBranch` rather than a hardcoded `main`.
+  - **Settled** - It belongs in `spec/` beside [`spec/fidelity_honesty.py`][fidelity-honesty], which is its sibling in every respect that decides placement, being owner-initiated, absent from CI, an importer of `audit` as a library, and a writer of a generated report. [`scripts/`][scripts] holds gates run against one repo named by `--root`.
+  - **Settled** - The classes are `OVERSTEP` for a `verbatim` whole unit, `SECTION` for a path declaring verbatim sections, `CONTRACT` for an `interface` unit, `GAP` for a path the hub tracks that the manifest never names, and `CANDIDATE` for a path absent from the hub changed in a pull request that also touched one of the others.
+  - **Settled** - `intent` and `presence` units are deliberately not watched, being downstream-owned by design, and that exclusion is what makes suppression keyed on the ledger correct rather than over-broad.
+  - **Settled** - `GAP` plus `CANDIDATE` is the pair that means a downstream wired local tooling into a workflow the hub authored, which is exactly `ptr727/Blog#69`: it changed `.gitattributes`, `.github/workflows/validate-task.yml` which is a ledger `gaps` entry dispositioned `investigate`, and a `checks/check-eol-pins.py` the hub has never heard of. A sibling pull request shows the same shape over a whole `checks/` tree.
+  - **Settled** - Triage needs no new store. [`spec/divergences.json`][divergences] already carries `upstream-candidate` in its disposition vocabulary, meaning the downstream carries an improvement the hub should adopt, and nothing in the ledger uses it today. A dispositioned pair prints with its disposition and everything else renders `UNTRIAGED`, which is what [`reports/divergences.md`][divergences-report] already does.
+  - **Settled** - The rule goes in [`AUDIT.md`][audit-doc] section 9 rather than [`GOVERNANCE.md`][governance], whose sections are verbatim fleet law, so an edit there puts every downstream repo into verbatim drift until re-vendored for a sentence that is procedure rather than law.
+  - **Settled** - Two floors are not optional. A run reading zero pull requests reports that rather than a clean zero, and a repo the search surfaces with no registry entry is reported separately, which feeds "Registry Membership Coverage" above.
+  - **Settled** - This is not the deferred audit automation recorded under "Standalone Chores". That entry rejected three scheduled and hook-driven shapes on three blockers, and this is owner-run and on demand like [`spec/fidelity_honesty.py`][fidelity-honesty], so it lands on none of them.
 
 ## Standalone Chores
 
 Small work with no research to preserve, selectable one bullet at a time.
 
+- **Answer the symmetric reading of [`.editorconfig`][editorconfig], a path-specific section naming files that do not exist**, which is the half of [#633][issue-633] the `eol-coverage` check deliberately left open. The dead-pin reading it does ship is the `.gitattributes` side, and the same question on the other document is not the same shape: this repo's `[.github/workflows/*]` and `[catalog/snippets/workflows/*]` sections are legitimately broad, and the issue's own first attempt at it produced false positives because the matcher did not expand brace syntax, which [`scripts/repo_gate.py`][repo-gate] already implements. Measure the exemption against the live corpus before building the gate rather than after, since a stale exemption hands out a work list that damages correct documents, and decide whether `forward-declared` carries across or whether an editorconfig section needs its own marker.
 - **Reconsider whether the pre-commit hook runs the doc gates now that they are diff-scoped.** [`scripts/README.md`][scripts] records the current decision and its reason, that doc linters stay out of the hook so it stays fast, which was sound when the only mode was a whole-tree sweep, and a diff-scoped run finishes in about a second. The failure it would prevent is the most repeated one on record, comment sentences wrapped across lines caught after the commit rather than before it. Weigh it against the standing preference for a fast hook and against a hook that runs the gate from the wrong directory, which is its own false clean.
 - **Audit the fleet's shell surface by size and branching, and decide per script whether Python with unit tests is cheaper.** The evidence is the review record rather than a language preference, since a non-trivial shell script earns findings round after round while every gate under [`scripts/`][scripts] carries a test file beside it and converges in one or two. The measure is lines, branch count, and the review rounds each has cost. `repo-config/configure.sh` and the agent-safety installer are the two worth measuring, and a bootstrap script that needs the Python it exists to install is not a rewrite worth having, which protects the installer more than the config script.
 - **Make a table of contents standard for a long document rather than for the README alone.** [`spec/readme-structure.md`][readme-structure] fixes one at README position 4 and no other hub file carries one, which leaves the three longest documents without it, `CODESTYLE.md` at 516 lines, `GOVERNANCE.md` at 436 and `WORKFLOW.md` at 301, measured on `develop` at `3d1a0b1` on 2026-08-06. Settle the threshold in headings or lines so the audit can check it, and settle how it sits with the reference-link exception, since the four agent-instruction files keep inline links exactly because they are read one section at a time, which is the property that makes a contents list worth having in them. The mechanical constraint is that the list is filled by the Markdown All in One extension on save, so a file nobody opens in the editor grows a stale list, which is worse than absent because it is read as current.
@@ -345,7 +380,7 @@ Small work with no research to preserve, selectable one bullet at a time.
 - **Canonicalize Python linter-config placement on `pyproject.toml`**, since one cataloged repo uses a standalone ruff config plus a pyright config. Track it as a drift finding and fix it downstream.
 - **Populate [reports/][reports] for the cataloged repos that still have no audit**, since a registry `status` of `cataloged` asserts a result only a committed report evidences. Nine of 22 have one, measured on `develop` at `3d1a0b1` on 2026-08-06. This is paced by maintainer capacity rather than blocked, since repos are brought up to spec as they are worked on.
 - **Finish onboarding hardening**, from [#310][issue-310], making the [`AUDIT.md`][audit-doc] audit a required onboarding step and running the per-type cold-start self-tests tracked in [reports/conformance-matrix.md][matrix]. Every cold-standup cell reads not-tested today.
-- **Refresh the README, which has gone stale, and evaluate a lower-maintenance structure**, for example a per-section index pointing into each doc with a one-line description, keeping the README as the adoption and audit-instruction entry point. A per-section index trades brevity for a sync obligation, since it must track what the docs contain.
+- **Decide whether the human entry points the README now carries belong in [`spec/readme-structure.md`][readme-structure]**, so a fleet repo is measured on them rather than reinventing them. The README routes by reader (browsing, adopting, blocked by a rule, reporting, an agent) in an optional Getting Started table, and answers adoption, divergence, and issue-reporting in the Installation, Configuration, and Questions or Issues slots the spec already orders. What is undecided is how much of that is fleet-general, since a repo shipping an application has a different reader set from a rules hub, and a per-section index was considered and declined because it trades brevity for a sync obligation to whatever the docs contain. This sits beside "The README Structure Rework" and is settled with it rather than before it.
 - **Consider renaming this repo to reflect the audit-catalog identity**, which updates badge and link URLs across the fleet.
 - **Revisit automating the audit**, explored and deliberately deferred, recorded so the reasoning is not re-derived. Three shapes were considered, a scheduled hub-driven audit publishing each report as a workflow artifact, the same thing committing the report back, and a pull-request hook in each downstream repo auditing itself against the current hub. Three things block all of them: until the fleet reaches stasis a scheduled run reports mostly noise, since a repo mid-onboarding is expected to be non-conformant, the hub has to be stable before downstreams audit against it because a hub change lands as fleet-wide findings the same day, and the downstream half is a catch-22 since a self-auditing hook is CI instrumentation the repos that most need it do not carry. Worth reopening once the fleet is onboarded and the hub goes a stretch without carried-content changes, and the artifact shape is the one to try first since it produces evidence without committing anything.
 
@@ -462,6 +497,7 @@ Each was checked against the tree and has nothing left to do anywhere. Closing i
 [issue-597]: https://github.com/ptr727/ProjectTemplate/issues/597
 [issue-607]: https://github.com/ptr727/ProjectTemplate/issues/607
 [issue-623]: https://github.com/ptr727/ProjectTemplate/issues/623
+[issue-633]: https://github.com/ptr727/ProjectTemplate/issues/633
 
 <!-- Pull requests -->
 
@@ -481,17 +517,19 @@ Each was checked against the tree and has nothing left to do anywhere. Closing i
 [copilot-instructions]: ./.github/copilot-instructions.md
 [divergences]: ./spec/divergences.json
 [divergences-report]: ./reports/divergences.md
+[editorconfig]: ./.editorconfig
+[fidelity-honesty]: ./spec/fidelity_honesty.py
 [files]: ./spec/files.json
 [governance]: ./GOVERNANCE.md
-[host-setup]: ./docs/host-setup.md
 [markdownlint]: ./.markdownlint-cli2.jsonc
 [matrix]: ./reports/conformance-matrix.md
 [merge-bot]: ./.github/workflows/merge-bot-pull-request.yml
 [operations]: ./OPERATIONS.md
 [project-types]: ./spec/project-types.json
 [prose-gate]: ./.github/actions/prose-gate/action.yml
-[readme]: ./README.md
+[readme-sections]: ./spec/readme-sections.json
 [readme-structure]: ./spec/readme-structure.md
+[repo-gate]: ./scripts/repo_gate.py
 [reports]: ./reports/
 [repos]: ./registry/repos.json
 [scripts]: ./scripts/README.md
@@ -500,8 +538,9 @@ Each was checked against the tree and has nothing left to do anywhere. Closing i
 [section-model]: ./spec/section-model.md
 [snippets]: ./catalog/snippets/
 [standup]: ./STANDUP.md
+[third-party-tools]: ./spec/third-party-tools.json
 [type-model]: ./spec/type-model.md
+[validate-task]: ./.github/workflows/validate-task.yml
 [workflow]: ./WORKFLOW.md
 [workflows]: ./catalog/snippets/workflows/
 [write-guard]: ./host-setup/agent-safety/gh-write-guard.py
-[write-guard-readme]: ./host-setup/agent-safety/README.md

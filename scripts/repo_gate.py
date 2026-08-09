@@ -4,8 +4,17 @@
 Each check maps to a recurring review-finding category (counts from a 1,047-finding audit
 of this repo's Copilot reviews):
 
-  sha-pin     Action SHA-pinning gaps                      25 findings  (GOVERNANCE.md rule)
-  eol         .editorconfig <-> .gitattributes disagreement 40 findings
+  sha-pin       Action SHA-pinning gaps                        25 findings  (GOVERNANCE.md rule)
+  eol           .editorconfig <-> .gitattributes disagreement  40 findings
+  eol-coverage  A line-ending pin the tree disagrees with      ptr727/ProjectTemplate#633
+
+`eol-coverage` is the direction `eol` does not have. Both line-ending documents can agree
+perfectly and both be wrong about the repository they describe, which is how `ptr727/Blog`
+carried an unpinned shebang script systemd runs unattended, and two pins naming paths never
+tracked there, while this gate reported clean over the lot. The dead pin is the worse half and
+the reason the other survived: the comment above those two asserted the extensionless case was
+handled, so the one real instance twenty lines up read as covered by every human and agent who
+opened the file.
 
 `sha-pin` reads the shape and then resolves it, because forty hex characters is a format any
 fabricated string satisfies, and an agent hand-writing a plausible SHA into a workflow is a
@@ -43,6 +52,13 @@ HTTP_STATUS = re.compile(r'\(HTTP (\d{3})\)')
 # Reading any of those as absence fails a correct pin, which is the direction that costs most.
 ABSENT = {'404', '422'}
 GH_TIMEOUT = 20
+
+# The token a .gitattributes comment carries to exempt the pins below it from the dead reading.
+# A carried baseline pin goes live the moment a consumer adds the file it names.
+# The mark travels with that copy, so the consumer holding the baseline stays exempt too.
+# It reaches to the next blank line, the way the file already groups a pin with its rationale.
+FORWARD = 'forward-declared'
+SHEBANG = b'#!'
 
 # How a check says it did less than its name.
 # A gate that quietly degrades to a weaker reading prints the same clean line as one that ran.
@@ -112,6 +128,116 @@ def workflow_files(files: list[str]) -> list[str]:
     A scan that matches nothing reports `0 issue(s)`, indistinguishable from a clean tree.
     """
     return [f for f in files if WORKFLOW.search(f)]
+
+
+def shebang_files(root: Path, files: list[str]) -> list[str]:
+    """The tracked files opening `#!`, exposed so a test can assert the scan found something.
+
+    The shebang is the test rather than the executable bit, because the two move independently and
+    it is the interpreter line a CRLF breaks. A path git lists but the working tree does not carry
+    is skipped, since `git ls-files` names what the index holds.
+    """
+    out = []
+    for rel in files:
+        try:
+            with (root / rel).open('rb') as fh:
+                if fh.read(2) == SHEBANG:
+                    out.append(rel)
+        except OSError:
+            continue
+    return out
+
+
+def eol_pins(text: str) -> list[tuple[str, bool]]:
+    """Every glob `.gitattributes` pins to LF, each with whether its block is forward-declared.
+
+    One parser for both line-ending checks, so the two cannot come to read different pin sets out
+    of the same file. Exposed so a case can read the marking without building a tree around it.
+    """
+    out, marked = [], False
+    for raw in text.split('\n'):
+        line = raw.strip()
+        if not line:
+            marked = False                              # a blank line closes the block and its mark
+            continue
+        if line.startswith('#'):
+            marked = marked or FORWARD in line
+            continue
+        m = re.match(r'(\S+)\s+.*eol=lf', line)
+        if m:
+            out.append((m.group(1), marked))
+    return out
+
+
+def attr_glob(pattern: str) -> re.Pattern[str]:
+    """One `.gitattributes` pattern as a regex over a repo-relative path.
+
+    Deliberately not `git ls-files -- <pattern>`, which is pathspec matching and a different
+    language: there `*` crosses a `/`, so `capture/*.py` also matches `capture/sub/x.py` and a dead
+    pin reads as live. A pattern carrying no `/` matches the basename at any depth, one carrying a
+    `/` anchors at the root, `*` and `?` stop at a separator, and a whole segment of `**` is the one
+    form that crosses them, which is what `Docker/s6-overlay/**` needs.
+    """
+    # A leading slash is itself the anchor, so it is read before it is stripped.
+    # `/uv.lock` binds at the root where the same pattern without it binds at any depth.
+    p = pattern.rstrip('/')
+    body, parts = '', p.lstrip('/').split('/')
+    for i, seg in enumerate(parts):
+        last = i == len(parts) - 1
+        if seg == '**':
+            body += '.*' if last else '(?:[^/]+/)*'
+        else:
+            body += _segment(seg) + ('' if last else '/')
+    # An unanchored pattern is matched against the basename, so any leading directories are free.
+    return re.compile(('' if '/' in p else '(?:.*/)?') + body + r'\Z')
+
+
+def _segment(seg: str) -> str:
+    """One path segment of a glob as a regex, with `*` and `?` held inside the segment."""
+    out, i = '', 0
+    while i < len(seg):
+        c = seg[i]
+        if c == '*':
+            out += '[^/]*'
+        elif c == '?':
+            out += '[^/]'
+        elif c == '[':
+            j = i + 1
+            j += 1 if j < len(seg) and seg[j] in '!^' else 0
+            j += 1 if j < len(seg) and seg[j] == ']' else 0
+            while j < len(seg) and seg[j] != ']':
+                j += 1
+            if j >= len(seg):                           # an unclosed class is a literal bracket
+                out += re.escape(c)
+                i += 1
+                continue
+            out += '[' + ('^' + seg[i + 2:j] if seg[i + 1] in '!^' else seg[i + 1:j]) + ']'
+            i = j + 1
+            continue
+        else:
+            out += re.escape(c)
+        i += 1
+    return out
+
+
+def resolved_eol(root: Path, paths: list[str]) -> dict[str, str] | None:
+    """What git resolves `eol` to for each path, or None where git did not answer at all.
+
+    Asked of git rather than re-derived from `.gitattributes`, so this cannot disagree with what a
+    checkout actually applies. NUL-delimited in both directions, since a tracked path may carry a
+    space or a colon and the newline form splits those wrongly.
+    """
+    if not paths:
+        return {}
+    try:
+        r = subprocess.run(['git', '-C', str(root), 'check-attr', '-z', '--stdin', 'eol'],
+                           input='\0'.join(paths) + '\0', capture_output=True, text=True)
+    except (OSError, subprocess.SubprocessError):
+        return None
+    if r.returncode != 0:
+        return None
+    f = r.stdout.split('\0')
+    return {f[i]: f[i + 2] for i in range(0, len(f) - 2, 3)}
 
 
 def check_sha_pin(root: Path, files: list[str]) -> list[str]:
@@ -193,14 +319,7 @@ def check_eol(root: Path, files: list[str]) -> list[str]:
     if missing:
         return [f'missing {name}' for name in missing]
     # .gitattributes: "<glob> text eol=lf"
-    ga_lf = set()
-    for raw in ga.read_text(encoding='utf-8', errors='replace').split('\n'):
-        line = raw.strip()
-        if not line or line.startswith('#'):
-            continue
-        m = re.match(r'(\S+)\s+.*eol=lf', line)
-        if m:
-            ga_lf.add(m.group(1))
+    ga_lf = {g for g, _ in eol_pins(ga.read_text(encoding='utf-8', errors='replace'))}
     # .editorconfig: [glob] ... end_of_line = lf
     ec_lf: set[str] = set()
     cur = None
@@ -220,6 +339,12 @@ def check_eol(root: Path, files: list[str]) -> list[str]:
                 for x in expand(g[:m.start()] + part + g[m.end():])]
 
     ec_pats = [p for e in ec_lf for p in expand(e)]
+    # A global LF default satisfies the lookup below for any path, an absent one included.
+    # On a repo shaped that way this is vacuously true for every pin it will ever read.
+    # Said out loud, since the result otherwise renders as an ordinary clean line.
+    if any(p in ('*', '**') for p in ec_pats):
+        NOTES.append('.editorconfig sets end_of_line = lf globally, so that default satisfies '
+                     'every pin and nothing here read pin content. Use eol-coverage instead.')
     out = []
     for g in sorted(ga_lf):
         for cand in expand(g):
@@ -231,7 +356,47 @@ def check_eol(root: Path, files: list[str]) -> list[str]:
     return out
 
 
-CHECKS = {'sha-pin': check_sha_pin, 'eol': check_eol}
+def check_eol_coverage(root: Path, files: list[str]) -> list[str]:
+    """The line-ending pins read against the tree, which is what `eol` never does.
+
+    `eol` compares .gitattributes with .editorconfig, so both can agree and both be wrong about the
+    repository they describe. Two shapes live in that gap. A tracked shebang script git does not
+    hold at LF is the live break, since a CRLF interpreter line fails at exec. A pin matching no
+    tracked file is the quieter one, and it is what hides the first: a dead pin reads as coverage,
+    so the class it names is taken as handled and nobody looks for the instance that is not.
+
+    A pin block marked `forward-declared` is exempt from the second reading only. The first has no
+    such case, since a shebang script that exists is a script that runs.
+    """
+    ga = root / '.gitattributes'
+    if not ga.exists():
+        return ['missing .gitattributes']
+    pins = eol_pins(ga.read_text(encoding='utf-8', errors='replace'))
+    shebangs = shebang_files(root, files)
+    out = []
+
+    attrs = resolved_eol(root, shebangs)
+    if attrs is None:
+        # Nothing was read rather than nothing was wrong, which are the same clean line otherwise.
+        NOTES.append('git did not answer `check-attr`, so no shebang file was read at all.')
+    else:
+        for rel in shebangs:
+            got = attrs.get(rel, 'unspecified')
+            if got != 'lf':
+                out.append(f'{rel}: a shebang script git resolves to `eol: {got}`, not `lf`')
+
+    for glob, forward in pins:
+        if forward or any(attr_glob(glob).match(f) for f in files):
+            continue
+        out.append(f'.gitattributes pins `{glob}` to LF and no tracked file matches it')
+
+    marked = sum(1 for _, forward in pins if forward)
+    NOTES.append(f'read {len(pins)} LF pin(s), {marked} of them forward-declared, over '
+                 f'{len(shebangs)} shebang file(s) in {len(files)} tracked file(s).')
+    return out
+
+
+CHECKS = {'sha-pin': check_sha_pin, 'eol': check_eol, 'eol-coverage': check_eol_coverage}
 
 
 def main(argv: list[str] | None = None) -> int:
