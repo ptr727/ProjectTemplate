@@ -569,6 +569,10 @@ def canonical_link_entry(url, model, slug):
             if re.search(c["match"], url):
                 return c
             continue
+        if "repoPath" not in c:
+            # Loud rather than skipped, since skipping would quietly stop enforcing this destination's name.
+            # The schema requires one of the two and validate.py gates it, so reaching here means a model nothing checked.
+            raise KeyError(f"spec/readme-sections.json: canonicalLinks entry '{c.get('name')}' carries neither repoPath nor match")
         want = (base + c["repoPath"]).rstrip("/")
         if (bare.lower().startswith(want.lower()) if c.get("prefix") else bare.lower() == want.lower()):
             return c
@@ -1788,6 +1792,20 @@ def _selftest():
         if len(got) != wantn:
             for _, t in got:
                 print(f"         {t}")
+
+    # A canonicalLinks entry that can match nothing is a name nothing enforces, so it raises rather than skipping.
+    # Skipping would quietly stop checking that destination, which is the failure mode this whole dimension exists to avoid.
+    broken = dict(rm, canonicalLinks=list(rm["canonicalLinks"]) + [{"name": "orphan-link"}])
+    try:
+        canonical_link_entry("https://example.test/", broken, "o/r")
+        ok = False
+        print("  FAIL canonicalLinks entry with neither repoPath nor match: no error raised")
+    except KeyError as e:
+        if "readme-sections.json" not in str(e) or "orphan-link" not in str(e):
+            ok = False
+            print(f"  FAIL canonicalLinks entry error does not name the file and entry -> {e}")
+        else:
+            print("  ok   canonicalLinks entry with neither repoPath nor match: raises, naming the file and the entry")
 
     # The tagline is the first line of the intro region, so a README carrying a second paragraph still mirrors.
     two_para = title_and_intro("# X\n\nThe tagline.\n\nA clarifying paragraph.\n\n## Next\n")[1]

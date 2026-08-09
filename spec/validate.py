@@ -90,6 +90,10 @@ def main():
             loose = [p for p in prefixes if "{slug}" not in p and "{owner}" not in p]
             if loose:
                 errors.append(f"readme-sections.json: 'distribution.urlPrefixes' entry {loose[0]!r} carries neither {{slug}} nor {{owner}}, so it is not repo-scoped and would match another owner's URLs")
+        # A canonicalLinks entry naming a destination it cannot match is a name nothing enforces, and audit.py raises on it mid-run rather than reporting.
+        for c in readme_model.get("canonicalLinks", []) if isinstance(readme_model.get("canonicalLinks"), list) else []:
+            if isinstance(c, dict) and "repoPath" not in c and "match" not in c:
+                errors.append(f"readme-sections.json: canonicalLinks entry '{c.get('name')}' carries neither 'repoPath' nor 'match', so it can match no URL")
 
     # CI runs no JSON-schema validation, so shape-check the shared tool catalog here.
     # A duplicate name is the failure worth catching: the audit keys on it, so the second entry silently shadows the first and half the fleet is measured against a description nobody can see.

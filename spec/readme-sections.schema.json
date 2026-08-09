@@ -72,6 +72,7 @@
             "items": {
                 "type": "object",
                 "required": ["name"],
+                "anyOf": [{ "required": ["repoPath"] }, { "required": ["match"] }],
                 "additionalProperties": false,
                 "properties": {
                     "name": { "type": "string", "minLength": 1 },
