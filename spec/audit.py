@@ -794,14 +794,21 @@ def readme_shield_findings(text, model, entry):
     # It renders broken rather than absent, which a visitor reads as a failing build rather than as a stale badge.
     # Both forms are read, since reading definitions alone made an inline badge invisible rather than wrong, which is the reading shield_endpoints already takes for every other shield.
     # A definition is reported even where nothing renders it, because a retired service left in the reference block is removed with the badge rather than after it.
-    # Which of the three it is decides the wording, since a definition nothing renders is not rendering anything and saying so sends the reader looking for a badge that is not on the page.
+    # Which of the four it is decides the wording, since a definition nothing renders is not rendering anything and saying so sends the reader looking for a badge that is not on the page.
+    # Attribution is by reference name and never by URL: the same endpoint rendered inline leaves this definition unused, so reading the URL alone would credit a render to a reference nothing uses.
     rendered = shield_endpoints(unfenced, defs)
+    used_refs = {m.group(1) for m in _MD_IMAGE_REF.finditer(unfenced)}
     for dep in model.get("deprecatedShields", []):
         defined = set()
         for ref, url in sorted(defs.items()):
             if dep["match"] in url:
                 defined.add(url)
-                verb = f"renders {dep['label']}" if url in rendered else f"defines {dep['label']} and nothing renders it"
+                if ref in used_refs:
+                    verb = f"renders {dep['label']}"
+                elif url in rendered:
+                    verb = f"defines {dep['label']} and it is rendered elsewhere"
+                else:
+                    verb = f"defines {dep['label']} and nothing renders it"
                 findings.append(("LETTER", f"readme: `[{ref}]` {verb}, which is retired - {dep['reason']} (spec/readme-structure.md)"))
         for url in sorted({u for u in rendered if dep["match"] in u} - defined):
             findings.append(("LETTER", f"readme: an inline image renders {dep['label']}, which is retired - {dep['reason']} (spec/readme-structure.md)"))
@@ -1756,6 +1763,8 @@ def _selftest():
         # Saying it renders sends the reader looking for a badge that is not on the page.
         ("an unrendered definition says so rather than claiming a render", conformant.replace("[license-shield]: https://img.shields.io/github/license/o/r\n", "[license-shield]: https://img.shields.io/github/license/o/r\n[last-build-shield]: https://byob.yarr.is/o/r/lastbuild\n"), {}, 1, "nothing renders it"),
         ("a rendered definition says renders", conformant.replace("[![Last Commit][b]][x]", "[![Last Commit][b]][x]\\\n![Last Build][last-build-shield]").replace("[license-shield]: https://img.shields.io/github/license/o/r\n", "[license-shield]: https://img.shields.io/github/license/o/r\n[last-build-shield]: https://byob.yarr.is/o/r/lastbuild\n"), {}, 1, "renders the byob"),
+        # The same endpoint rendered inline leaves this definition unused, so attributing by URL would credit the render to a reference nothing uses.
+        ("an unused definition beside an inline render is not credited with it", conformant.replace("[![Last Commit][b]][x]", "[![Last Commit][b]][x]\\\n![Last Build](https://byob.yarr.is/o/r/lastbuild)").replace("[license-shield]: https://img.shields.io/github/license/o/r\n", "[license-shield]: https://img.shields.io/github/license/o/r\n[last-build-shield]: https://byob.yarr.is/o/r/lastbuild\n"), {}, 1, "rendered elsewhere"),
         ("the pre-release shield is told from the release shield by its query", conformant.replace("?include_prereleases&label=GitHub%20Pre-Release", "?label=Another%20Release"), {}, 1),
         # The license shield is an ordinary member of the base class, addressed to a different section.
         ("the license shield in the closing License section", conformant, {}, 0),
