@@ -790,10 +790,17 @@ def readme_shield_findings(text, model, entry):
     defs = {m.group(1): m.group(2) for m in _LINK_DEF.finditer(unfenced_text(text))}
     # A retired badge service is scanned across the whole document rather than per section, since a dead badge is wrong wherever it sits.
     # It renders broken rather than absent, which a visitor reads as a failing build rather than as a stale badge.
+    # Both forms are read, since reading definitions alone made an inline badge invisible rather than wrong, which is the reading shield_endpoints already takes for every other shield.
+    # A definition is reported even where nothing renders it, because a retired service left in the reference block is removed with the badge rather than after it.
+    rendered = shield_endpoints(unfenced_text(text), defs)
     for dep in model.get("deprecatedShields", []):
+        defined = set()
         for ref, url in sorted(defs.items()):
             if dep["match"] in url:
+                defined.add(url)
                 findings.append(("LETTER", f"readme: `[{ref}]` renders {dep['label']}, which is retired - {dep['reason']} (spec/readme-structure.md)"))
+        for url in sorted({u for u in rendered if dep["match"] in u} - defined):
+            findings.append(("LETTER", f"readme: an inline image renders {dep['label']}, which is retired - {dep['reason']} (spec/readme-structure.md)"))
     targets = {(p.get("target") if isinstance(p, dict) else p) for p in entry.get("publish", [])}
     secrets = set(entry.get("requiredSecrets", []))
     want = []
@@ -1736,6 +1743,11 @@ def _selftest():
         ("a fenced badge sample does not satisfy a required shield", conformant.replace("[![GitHub Release][c]][x]\\\n", "```md\n[![GitHub Release][c]][x]\n```\n"), {}, 1),
         ("a fenced license shield does not trip the exclusive rule", conformant.replace("## Overview", "```md\n![License][license-shield]\n```\n\n## Overview"), {}, 0),
         ("a retired badge service is reported wherever it sits", conformant.replace("[license-shield]: https://img.shields.io/github/license/o/r\n", "[license-shield]: https://img.shields.io/github/license/o/r\n[last-build-shield]: https://byob.yarr.is/o/r/lastbuild\n"), {}, 1),
+        # The case above named every placement and read only the reference block, so an inline badge was invisible rather than wrong.
+        # That is the reading shield_endpoints already takes for every other shield, and this one had not taken it.
+        ("a retired badge written inline is reported", conformant.replace("[![Last Commit][b]][x]", "[![Last Commit][b]][x]\\\n![Last Build](https://byob.yarr.is/o/r/lastbuild)"), {}, 1),
+        ("a retired badge defined and rendered is one finding, not two", conformant.replace("[![Last Commit][b]][x]", "[![Last Commit][b]][x]\\\n![Last Build][last-build-shield]").replace("[license-shield]: https://img.shields.io/github/license/o/r\n", "[license-shield]: https://img.shields.io/github/license/o/r\n[last-build-shield]: https://byob.yarr.is/o/r/lastbuild\n"), {}, 1),
+        ("a retired badge shown as a fenced sample is markup", conformant.replace("## Overview", "```md\n![Last Build](https://byob.yarr.is/o/r/lastbuild)\n```\n\n## Overview"), {}, 0),
         ("the pre-release shield is told from the release shield by its query", conformant.replace("?include_prereleases&label=GitHub%20Pre-Release", "?label=Another%20Release"), {}, 1),
         # The license shield is an ordinary member of the base class, addressed to a different section.
         ("the license shield in the closing License section", conformant, {}, 0),
