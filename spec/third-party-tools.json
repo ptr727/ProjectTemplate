@@ -40,7 +40,7 @@
         { "name": "Utf8JsonAsyncStreamReader", "link": "https://github.com/gragra33/Utf8JsonAsyncStreamReader", "description": "Streaming JSON reader for .NET." },
         { "name": "uv", "link": "https://docs.astral.sh/uv/", "description": "Python package and project manager." },
         { "name": "Whisper", "link": "https://github.com/Softcatala/whisper-ctranslate2", "description": "Speech recognition transcriber." },
-        { "name": "Xml2CSharp", "link": "http://xmltocsharp.azurewebsites.net/", "description": "XML to C# class generator." },
+        { "name": "Xml2CSharp", "link": "https://xmltocsharp.azurewebsites.net/", "description": "XML to C# class generator." },
         { "name": "xUnit.Net", "link": "https://xunit.net/", "description": "Test framework for .NET." }
     ]
 }

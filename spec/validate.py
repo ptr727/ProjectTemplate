@@ -92,12 +92,14 @@ def main():
     # The top level is read defensively rather than assumed: a malformed file (a bare array, say) would raise
     # AttributeError off .get and crash the run, which is the opposite of what shape-checking here is for.
     catalog = load("spec/third-party-tools.json")
-    tools = catalog.get("tools") if isinstance(catalog, dict) else None
     if not isinstance(catalog, dict):
+        # One diagnostic, naming the outermost thing that is wrong.
+        # Reporting the missing 'tools' as well would describe a consequence of this as if it were a second defect.
         errors.append("third-party-tools.json: top level is not an object")
-    if not isinstance(tools, list) or not tools:
+    elif not isinstance(catalog.get("tools"), list) or not catalog["tools"]:
         errors.append("third-party-tools.json: 'tools' must be a non-empty array")
     else:
+        tools = catalog["tools"]
         seen = set()
         for t in tools:
             name = t.get("name") if isinstance(t, dict) else None
