@@ -28,6 +28,16 @@ Two consequences worth reading off the table rather than discovering later. **Py
 
 A missing tool is a host gap, not a repo problem. Install it and re-run, rather than working around it in a repo.
 
+### Where a Tool Comes From, and How Old It May Be
+
+Presence is the weaker half of this contract. Both host defects this fleet has actually hit are **version** facts on a tool that is installed, answers `--version`, and looks healthy, so the table above cannot see either one. [`spec/host-tools.json`][host-tools] carries the floors as data and records the defect each one encodes, and [`scripts/host_gate.py`][host-gate] reads it. A floor exists only where a version is known to break a documented procedure, so most entries carry none, deliberately: a floor nobody can justify becomes a host failure nobody can act on.
+
+**`gh` must not come from the distribution's package on Linux.** This is the one place this document names a source, because here the source *is* the requirement rather than a convenience. The GitHub CLI maintainers state that the community-distributed `2.45.x` / `2.46.x` is **broken by deprecated GitHub APIs**, so install from the official apt repository at [cli.github.com][cli-install-link] and upgrade from there. Both `gh` limitations recorded in [`OPERATIONS.md`][operations] were observed on a host carrying a distribution `gh 2.46.0`, and both are the deprecation class that note describes. On **Windows** `winget` tracks upstream releases, and on macOS Homebrew does, so neither raises this hazard and neither needs a note of its own.
+
+**`git-restore-mtime` must not come from it either, where a repo uses it.** Debian and Ubuntu package **2022.12**, which shells out to `git whatchanged`. Current `git` refuses that without a hidden opt-in flag a caller cannot pass through, so the tool restores nothing, prints its ordinary statistics and **exits 0**. A deploy keyed on mtimes then ships a full copy and reports success. Take the upstream release from [git-tools][git-tools-link], or in CI the [action][git-restore-mtime-action-link] that vendors it. Note the direction of that interaction: a **newer** `git` is the trigger rather than the remedy, so a host old enough to still allow `whatchanged` hides the defect rather than avoiding it. No procedure in this repo needs the tool, so the gate declares it **optional** and skips it when absent.
+
+A repository that needs more than the fleet does adds its own `host-tools.json` at its root, which the gate layers over the hub's. It may add a tool nobody else uses, raise a floor, or turn an optional tool required. It may **not** lower a floor or turn a required tool optional, since those edits retire a fleet check from inside the repository it protects, and the gate reports a rejected relaxation rather than dropping it.
+
 ## Git Identity
 
 Configure your name and email, used for commit authorship. **The email is the committing account's GitHub `noreply` address, never a private, personal, or invented one**, per [GOVERNANCE.md "Git and Commit Rules"][governance-git-and-commit-rules], which owns the rule and states the fleet's value. A private address trips GitHub's email-privacy push protection (GH007), and an invented one pollutes history.
@@ -195,7 +205,7 @@ Withdraw a grant by deleting the `env` entry and restarting. Nothing expires it,
 ## Verify Host Setup
 
 ```shell
-git --version && gh --version && python3 --version && docker --version && uv --version
+python3 scripts/host_gate.py           # presence and version floors, from spec/host-tools.json
 git config --global --list | grep -E "user\.|signing|gpg\."
 ssh-add -L                                   # should list your public key
 git -c gpg.format=ssh commit -S --allow-empty -m "verify-signing"
@@ -205,7 +215,9 @@ gh auth status
 
 If signing fails locally, the devcontainer will fail too, so fix here first.
 
-**This block is POSIX, and on native Windows the interpreter line needs translating**, since `python3` is the one name a correctly set-up Windows host does not have. Read it as `py -3 --version` there, matching the contract table above, and run the rest from WSL2 or Git Bash per the shell note. Git Bash inherits the Windows `PATH`, so `python3` reaches the same Store alias stub it does in PowerShell and reports a working interpreter as missing. A PowerShell equivalent of this block is deliberately **not** given here, because it has not been run on a Windows host, and an unverified verification command is worse than none. [#483][issue-483] is where one belongs once someone has executed it.
+The gate replaced a line that ran `--version` on each tool and read only whether it answered. That form reported a host carrying the broken `gh` as fully set up, which is the failure it exists to stop. It exits non-zero on a missing required tool or one below its floor, prints the defect behind the floor rather than the number alone, and names where to install from.
+
+**This block is POSIX, and on native Windows the interpreter line needs translating**, since `python3` is the one name a correctly set-up Windows host does not have. Read it as `py -3 scripts/host_gate.py` there, matching the contract table above, and run the rest from WSL2 or Git Bash per the shell note. Git Bash inherits the Windows `PATH`, so `python3` reaches the same Store alias stub it does in PowerShell and reports a working interpreter as missing. A PowerShell equivalent of this block is deliberately **not** given here, because it has not been run on a Windows host, and an unverified verification command is worse than none. [#483][issue-483] is where one belongs once someone has executed it.
 
 **What the host can do once this passes**, which is the point of the contract above:
 
@@ -229,12 +241,18 @@ A host that fails any row is not ready for the procedure that row names, and the
 [agent-safety]: ../host-setup/agent-safety/README.md
 [devcontainer]: ./devcontainer.md
 [governance-git-and-commit-rules]: ../GOVERNANCE.md#git-and-commit-rules
+[host-gate]: ../scripts/host_gate.py
+[host-tools]: ../spec/host-tools.json
 [issue-483]: https://github.com/ptr727/ProjectTemplate/issues/483
+[operations]: ../OPERATIONS.md
 [ssh-signing]: ./ssh-signing.md
 [standup]: ../STANDUP.md
 [write-guard]: ../host-setup/agent-safety/gh-write-guard.py
 
 <!-- External -->
 
+[cli-install-link]: https://github.com/cli/cli/blob/trunk/docs/install_linux.md
 [cli-link]: https://cli.github.com/
+[git-restore-mtime-action-link]: https://github.com/chetan/git-restore-mtime-action
+[git-tools-link]: https://github.com/MestreLion/git-tools
 [keys-link]: https://github.com/settings/keys
