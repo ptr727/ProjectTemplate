@@ -690,9 +690,10 @@ def readme_link_findings(text, model, slug):
     return findings
 
 
-# The closing pipe is optional because GitHub's Markdown makes it optional, so a row written without one is still a row this section is graded on.
-# Requiring it skipped such a row outright, so its link, its description and its place in the ordering all went unread and the repo scored clean on a table nothing had read.
-_TOOL_ROW = re.compile(r"^\|\s*\[([^\]]+)\]\[([^\]]+)\]\s*\|\s*([^|]*?)\s*(?:\||$)")
+# Both outer pipes are optional because GitHub's Markdown makes them optional, so a row written without either is still a row this section is graded on.
+# Requiring them skipped such a row outright, so its link, its description and its place in the ordering all went unread and the repo scored clean on a table nothing had read.
+# The separating pipe is what makes a row a row, and it is the one this keeps demanding, since a line carrying none of them is prose.
+_TOOL_ROW = re.compile(r"^\|?\s*\[([^\]]+)\]\[([^\]]+)\]\s*\|\s*([^|]*?)\s*(?:\||$)")
 _TOOL_BULLET = re.compile(r"^[-*]\s*\[([^\]]+)\]\[([^\]]+)\]\s*(.*)$")
 _DELIM_CELL = re.compile(r"^:?-{3,}:?$")
 
@@ -700,13 +701,20 @@ _DELIM_CELL = re.compile(r"^:?-{3,}:?$")
 def table_cells(line):
     """The cells of a Markdown table row, or None where the line is not one.
 
-    Both outer pipes are dropped, the trailing one only where it is there, for the same reason _TOOL_ROW
-    stopped requiring it.
+    Both outer pipes are dropped where they are there, and neither is required, for the same reason _TOOL_ROW
+    stopped requiring them.
+
+    A separating pipe is required instead, which is what keeps a thematic break out: `---` alone carries no
+    pipe and returns None here, where treating it as a one-cell delimiter row would have read the paragraph
+    above it as a table header.
     """
     s = line.strip()
-    if not s.startswith("|"):
+    if "|" not in s:
         return None
-    s = s[1:-1] if s.endswith("|") else s[1:]
+    if s.startswith("|"):
+        s = s[1:]
+    if s.endswith("|"):
+        s = s[:-1]
     return [c.strip() for c in s.split("|")]
 
 
@@ -1832,11 +1840,13 @@ def _selftest():
         # The list is alphabetized, which spec/readme-structure.md states and nothing checked until now.
         ("an unsorted tool list is reported", tools_head + "| Tool | Role |\n| --- | --- |\n| [markdownlint-cli2][md-link] | Markdown linter. |\n| [cspell][cspell-link] | Spell checker. |\n" + tools_defs + "[md-link]: https://github.com/DavidAnson/markdownlint-cli2\n", 1),
         ("a sorted tool list is not", tools_head + "| Tool | Role |\n| --- | --- |\n| [cspell][cspell-link] | Spell checker. |\n| [markdownlint-cli2][md-link] | Markdown linter. |\n" + tools_defs + "[md-link]: https://github.com/DavidAnson/markdownlint-cli2\n", 0),
-        # GitHub's Markdown makes the closing pipe optional, so a row written without one is an entry rather than a non-row.
-        # Requiring it read such a table as empty, which scores as clean rather than as unread.
+        # GitHub's Markdown makes both outer pipes optional, so a row written without either is an entry rather than a non-row.
+        # Requiring them read such a table as empty, which scores as clean rather than as unread.
         ("a row with no trailing pipe is read", tools_head + "| Tool | Role |\n| --- | --- |\n| [cspell][cspell-link] | Spell checker.\n" + tools_defs, 0),
         ("a row with no trailing pipe is judged like any other", tools_head + "| Tool | Role |\n| --- | --- |\n| [cspell][cspell-link] | Spell-checks the README in CI.\n" + tools_defs, 1),
         ("a whole table with no trailing pipes is ordered", tools_head + "| Tool | Role\n| --- | ---\n| [markdownlint-cli2][md-link] | Markdown linter.\n| [cspell][cspell-link] | Spell checker.\n" + tools_defs + "[md-link]: https://github.com/DavidAnson/markdownlint-cli2\n", 1),
+        ("a row with no leading pipe is read", tools_head + "Tool | Role |\n--- | --- |\n[cspell][cspell-link] | Spell checker. |\n" + tools_defs, 0),
+        ("a table with neither outer pipe is judged", tools_head + "Tool | Role\n--- | ---\n[cspell][cspell-link] | Spell-checks the README in CI.\n" + tools_defs, 1),
         # The License column is forbidden by spec/readme-structure.md, and project-types.json asserted that as `letter` before anything read it.
         # One finding is raised for the table, read off its header, rather than one per row.
         ("a License column is reported once", tools_head + "| Tool | Role | License |\n| --- | --- | --- |\n| [cspell][cspell-link] | Spell checker. | MIT |\n| [markdownlint-cli2][md-link] | Markdown linter. | MIT |\n" + tools_defs + "[md-link]: https://github.com/DavidAnson/markdownlint-cli2\n", 1),
@@ -1844,6 +1854,11 @@ def _selftest():
         ("a table with no License column is not reported", tools_head + "| Tool | Role |\n| --- | --- |\n| [cspell][cspell-link] | Spell checker. |\n" + tools_defs, 0),
         # A tool whose own role is the word license must not read as the column, since the header is a header.
         ("a row cell reading License is not the column", tools_head + "| Tool | Role |\n| --- | --- |\n| [Widget][widget-link] | License |\n" + tools_defs, 0),
+        ("a License column with no outer pipes is reported", tools_head + "Tool | Role | License\n--- | --- | ---\n[cspell][cspell-link] | Spell checker. | MIT\n" + tools_defs, 1),
+        # A thematic break carries no pipe, so it is not a one-cell delimiter row and the paragraph above it is not a header.
+        ("a thematic break is not a delimiter row", tools_head + "Licensing notes follow.\n\n---\n\n| Tool | Role |\n| --- | --- |\n| [cspell][cspell-link] | Spell checker. |\n" + tools_defs, 0),
+        # Prose mentioning a tool is not a row, since a link alone does not make one.
+        ("prose naming a cataloged tool is not a row", tools_head + "We run [cspell][cspell-link] in CI.\n" + tools_defs, 0),
     ]
     for label, text, wantn in tool_cases:
         got = third_party_tool_findings(text, cat)
