@@ -690,8 +690,24 @@ def readme_link_findings(text, model, slug):
     return findings
 
 
-_TOOL_ROW = re.compile(r"^\|\s*\[([^\]]+)\]\[([^\]]+)\]\s*\|\s*([^|]*?)\s*\|")
+# The closing pipe is optional because GitHub's Markdown makes it optional, so a row written without one is still a row this section is graded on.
+# Requiring it skipped such a row outright, so its link, its description and its place in the ordering all went unread and the repo scored clean on a table nothing had read.
+_TOOL_ROW = re.compile(r"^\|\s*\[([^\]]+)\]\[([^\]]+)\]\s*\|\s*([^|]*?)\s*(?:\||$)")
 _TOOL_BULLET = re.compile(r"^[-*]\s*\[([^\]]+)\]\[([^\]]+)\]\s*(.*)$")
+_DELIM_CELL = re.compile(r"^:?-{3,}:?$")
+
+
+def table_cells(line):
+    """The cells of a Markdown table row, or None where the line is not one.
+
+    Both outer pipes are dropped, the trailing one only where it is there, for the same reason _TOOL_ROW
+    stopped requiring it.
+    """
+    s = line.strip()
+    if not s.startswith("|"):
+        return None
+    s = s[1:-1] if s.endswith("|") else s[1:]
+    return [c.strip() for c in s.split("|")]
 
 
 def third_party_tool_findings(text, catalog):
@@ -705,6 +721,11 @@ def third_party_tool_findings(text, catalog):
 
     Matching is by the tool's display name, the text a README links, since that is what a reader compares
     across repos and what the catalog is keyed on.
+
+    The License column is read off the table's header rather than off its rows, so it reports once for the
+    table instead of once per tool, and it is the only extra column named. spec/readme-structure.md forbids
+    that one column and no other, and a check that flagged every extra column would be grading the fleet on a
+    rule nobody wrote.
     """
     body = readme_region(text, "3rd Party Tools")
     if body is None:
@@ -714,7 +735,14 @@ def third_party_tool_findings(text, catalog):
     defs = {m.group(1): m.group(2) for m in _LINK_DEF.finditer(unfenced_text(text))}
     findings = []
     listed = []
-    for ln in body.split("\n"):
+    lines = body.split("\n")
+    for i, ln in enumerate(lines):
+        cells = table_cells(ln)
+        if i and cells and all(_DELIM_CELL.match(c) for c in cells):
+            header = table_cells(lines[i - 1]) or []
+            if any(c.lower() == "license" for c in header):
+                findings.append(("LETTER", "readme: 3rd Party Tools carries a License column - a license belongs to the dependency and is authoritative at its source, so restating it adds a maintenance obligation and no information (spec/readme-structure.md)"))
+            continue
         m = _TOOL_ROW.match(ln.strip()) or _TOOL_BULLET.match(ln.strip())
         if not m:
             continue
@@ -1804,6 +1832,18 @@ def _selftest():
         # The list is alphabetized, which spec/readme-structure.md states and nothing checked until now.
         ("an unsorted tool list is reported", tools_head + "| Tool | Role |\n| --- | --- |\n| [markdownlint-cli2][md-link] | Markdown linter. |\n| [cspell][cspell-link] | Spell checker. |\n" + tools_defs + "[md-link]: https://github.com/DavidAnson/markdownlint-cli2\n", 1),
         ("a sorted tool list is not", tools_head + "| Tool | Role |\n| --- | --- |\n| [cspell][cspell-link] | Spell checker. |\n| [markdownlint-cli2][md-link] | Markdown linter. |\n" + tools_defs + "[md-link]: https://github.com/DavidAnson/markdownlint-cli2\n", 0),
+        # GitHub's Markdown makes the closing pipe optional, so a row written without one is an entry rather than a non-row.
+        # Requiring it read such a table as empty, which scores as clean rather than as unread.
+        ("a row with no trailing pipe is read", tools_head + "| Tool | Role |\n| --- | --- |\n| [cspell][cspell-link] | Spell checker.\n" + tools_defs, 0),
+        ("a row with no trailing pipe is judged like any other", tools_head + "| Tool | Role |\n| --- | --- |\n| [cspell][cspell-link] | Spell-checks the README in CI.\n" + tools_defs, 1),
+        ("a whole table with no trailing pipes is ordered", tools_head + "| Tool | Role\n| --- | ---\n| [markdownlint-cli2][md-link] | Markdown linter.\n| [cspell][cspell-link] | Spell checker.\n" + tools_defs + "[md-link]: https://github.com/DavidAnson/markdownlint-cli2\n", 1),
+        # The License column is forbidden by spec/readme-structure.md, and project-types.json asserted that as `letter` before anything read it.
+        # One finding is raised for the table, read off its header, rather than one per row.
+        ("a License column is reported once", tools_head + "| Tool | Role | License |\n| --- | --- | --- |\n| [cspell][cspell-link] | Spell checker. | MIT |\n| [markdownlint-cli2][md-link] | Markdown linter. | MIT |\n" + tools_defs + "[md-link]: https://github.com/DavidAnson/markdownlint-cli2\n", 1),
+        ("a License column does not stop the rows being read", tools_head + "| Tool | Role | License |\n| --- | --- | --- |\n| [cspell][cspell-link] | Spell-checks the README in CI. | MIT |\n" + tools_defs, 2),
+        ("a table with no License column is not reported", tools_head + "| Tool | Role |\n| --- | --- |\n| [cspell][cspell-link] | Spell checker. |\n" + tools_defs, 0),
+        # A tool whose own role is the word license must not read as the column, since the header is a header.
+        ("a row cell reading License is not the column", tools_head + "| Tool | Role |\n| --- | --- |\n| [Widget][widget-link] | License |\n" + tools_defs, 0),
     ]
     for label, text, wantn in tool_cases:
         got = third_party_tool_findings(text, cat)
