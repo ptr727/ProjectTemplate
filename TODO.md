@@ -502,7 +502,6 @@ Each was checked against the tree and has nothing left to do anywhere. Closing i
 [project-types]: ./spec/project-types.json
 [prose-gate]: ./.github/actions/prose-gate/action.yml
 [readme-sections]: ./spec/readme-sections.json
-[third-party-tools]: ./spec/third-party-tools.json
 [readme-structure]: ./spec/readme-structure.md
 [reports]: ./reports/
 [repos]: ./registry/repos.json
@@ -512,6 +511,7 @@ Each was checked against the tree and has nothing left to do anywhere. Closing i
 [section-model]: ./spec/section-model.md
 [snippets]: ./catalog/snippets/
 [standup]: ./STANDUP.md
+[third-party-tools]: ./spec/third-party-tools.json
 [type-model]: ./spec/type-model.md
 [workflow]: ./WORKFLOW.md
 [workflows]: ./catalog/snippets/workflows/

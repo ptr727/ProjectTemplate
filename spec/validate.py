@@ -76,7 +76,12 @@ def main():
 
     # CI runs no JSON-schema validation, so shape-check the shared tool catalog here.
     # A duplicate name is the failure worth catching: the audit keys on it, so the second entry silently shadows the first and half the fleet is measured against a description nobody can see.
-    tools = load("spec/third-party-tools.json").get("tools")
+    # The top level is read defensively rather than assumed: a malformed file (a bare array, say) would raise
+    # AttributeError off .get and crash the run, which is the opposite of what shape-checking here is for.
+    catalog = load("spec/third-party-tools.json")
+    tools = catalog.get("tools") if isinstance(catalog, dict) else None
+    if not isinstance(catalog, dict):
+        errors.append("third-party-tools.json: top level is not an object")
     if not isinstance(tools, list) or not tools:
         errors.append("third-party-tools.json: 'tools' must be a non-empty array")
     else:
