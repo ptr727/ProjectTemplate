@@ -364,6 +364,9 @@ def tagline(intro):
 _MD_IMAGE_REF = re.compile(r"!\[[^\]]*\]\[([^\]]+)\]")
 _MD_IMAGE_INLINE = re.compile(r"!\[[^\]]*\]\((\S+?)\)")
 _LINK_DEF = re.compile(r"^\[([^\]]+)\]:\s*(\S+)", re.M)
+# A URI scheme, requiring two or more characters so a `C:` drive letter is not read as one.
+# Every scheme a README actually carries (mailto, ftp, ssh, git, tel, data) is longer than that.
+_URI_SCHEME = re.compile(r"[a-z][a-z0-9+.\-]+:", re.I)
 
 
 def readme_region(text, heading):
@@ -514,6 +517,11 @@ def link_kind(url, slug, is_rendered=False, prefixes=()):
     img.shields.io definitions are rendered as images, so a host test classifies nothing usage does not and
     can only contradict the rule it sits beside.
 
+    A reference is local only when it carries no URI scheme, meaning a path inside this repo. A `mailto:`,
+    `ssh:` or `ftp:` target is a link rather than a file, and reading it as local would demand a bare name and
+    the Repo group for it. No fleet README carries one today, so this is a shape the rule has to get right
+    before one does rather than a defect being repaired.
+
     Distribution is scoped to this repo's own URLs, so a link to somebody else's GitHub repo or Docker Hub
     image, which a 3rd Party Tools list is full of, stays external rather than being read as a channel of this
     project's. Those prefixes come from the model rather than from a second list here, since ownership stated
@@ -522,7 +530,7 @@ def link_kind(url, slug, is_rendered=False, prefixes=()):
     """
     if url.startswith("#"):
         return "anchor"
-    if not url.startswith(("http://", "https://")):
+    if not url.startswith(("http://", "https://")) and not _URI_SCHEME.match(url):
         return "local"
     if prefixes and url.lower().startswith(tuple(prefixes)):
         return "distribution"
@@ -1718,6 +1726,10 @@ def _selftest():
         # The owner-scoped prefixes are what separate the two, and they live in the model rather than in the code.
         ("somebody else's NuGet package is not renamed nuget-link", links_ok.replace("[upstream-link]: https://github.com/someone-else/their-repo", "[upstream-link]: https://www.nuget.org/packages/Serilog/"), 0, 0),
         ("this project's own NuGet package is renamed", links_ok.replace("[upstream-link]: https://github.com/someone-else/their-repo", "[upstream-link]: https://www.nuget.org/packages/o.Widget/"), 1, 1),
+        # A scheme makes a target a link rather than a file, so it is named `-link` and grouped External.
+        # Reading `mailto:` as a repo path would demand a bare name and the Repo group for a contact address.
+        ("a mailto target is a URI, not a repo path", links_ok.replace("[upstream-link]: https://github.com/someone-else/their-repo", "[upstream-link]: mailto:someone@example.test"), 0, 0),
+        ("a mailto target named as a repo path is reported", links_ok.replace("[upstream-link]: https://github.com/someone-else/their-repo", "[upstream]: mailto:someone@example.test"), 1, 0),
         # Two names may point at one URL, and only the rendered one is a shield.
         # Keying on the URL instead would make the plain link a shield because its twin is rendered.
         ("a second reference to a rendered URL is not itself a shield", links_ok.replace("[upstream-link]: https://github.com/someone-else/their-repo", "[upstream-link]: https://img.shields.io/github/license/o/r"), 0, 0),
