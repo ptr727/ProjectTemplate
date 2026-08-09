@@ -796,21 +796,22 @@ def readme_shield_findings(text, model, entry):
     # A definition is reported even where nothing renders it, because a retired service left in the reference block is removed with the badge rather than after it.
     # Which of the four it is decides the wording, since a definition nothing renders is not rendering anything and saying so sends the reader looking for a badge that is not on the page.
     # Attribution is by reference name and never by URL: the same endpoint rendered inline leaves this definition unused, so reading the URL alone would credit a render to a reference nothing uses.
-    rendered = shield_endpoints(unfenced, defs)
+    # A set rather than the list shield_endpoints returns, since every use here is membership or a difference, and the names say which of the two namespaces each holds.
+    rendered_urls = set(shield_endpoints(unfenced, defs))
     used_refs = {m.group(1) for m in _MD_IMAGE_REF.finditer(unfenced)}
     for dep in model.get("deprecatedShields", []):
-        defined = set()
+        defined_urls = set()
         for ref, url in sorted(defs.items()):
             if dep["match"] in url:
-                defined.add(url)
+                defined_urls.add(url)
                 if ref in used_refs:
                     verb = f"renders {dep['label']}"
-                elif url in rendered:
+                elif url in rendered_urls:
                     verb = f"defines {dep['label']} and it is rendered elsewhere"
                 else:
                     verb = f"defines {dep['label']} and nothing renders it"
                 findings.append(("LETTER", f"readme: `[{ref}]` {verb}, which is retired - {dep['reason']} (spec/readme-structure.md)"))
-        for url in sorted({u for u in rendered if dep["match"] in u} - defined):
+        for url in sorted({u for u in rendered_urls if dep["match"] in u} - defined_urls):
             findings.append(("LETTER", f"readme: an inline image renders {dep['label']}, which is retired - {dep['reason']} (spec/readme-structure.md)"))
     targets = {(p.get("target") if isinstance(p, dict) else p) for p in entry.get("publish", [])}
     secrets = set(entry.get("requiredSecrets", []))
