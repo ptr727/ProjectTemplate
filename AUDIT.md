@@ -58,7 +58,7 @@ A check with `intentRef`/`workflowRef` points at the prose section that owns the
 - **repo-setup** - every required secret for the repo's publish mechanisms is configured, and no forbidden secret is present (per [`spec/secrets.json`][secrets]).
 - **linter-parity** - one config per linter (`.markdownlint-cli2.jsonc`, `cspell.json`, ruff/pyright, editorconfig/csharpier, actionlint) drives the editor extension, the CLI, and CI, and CI runs each.
 - **recurring-violations** - comments concise and non-narrative, ASCII only (no em-dash, no smart quotes), US spelling, line endings per `.editorconfig`. These are frequent regressions, so this dimension is high priority and always runs, and each check is grep-able (see below).
-- **readme-structure** - the README follows [`spec/readme-structure.md`][readme-structure] (applicable sections, in order).
+- **readme-structure** - the README follows [`spec/readme-structure.md`][readme-structure] (applicable sections, in order). Mechanically checked against the declared model in [`spec/readme-sections.json`][readme-sections]: required sections present, declared sections in their relative order, `License` last, the shields each deliverable implies, the license shield in the closing License section, and the tagline and its mirrors. A heading the model does not name is dropped before the order comparison, so a repo-specific section is never a finding.
 
 ## 5. Assert the Actions Implement WORKFLOW.md
 
@@ -161,6 +161,7 @@ The convergence model: the hub audits and the agent **applies** the fixes via ta
 [governance-branching-model]: ./GOVERNANCE.md#branching-model
 [governance-pr-review-etiquette]: ./GOVERNANCE.md#pr-review-etiquette
 [project-types]: ./spec/project-types.json
+[readme-sections]: ./spec/readme-sections.json
 [readme-structure]: ./spec/readme-structure.md
 [repo-config]: ./repo-config/
 [repo-config-settings]: ./repo-config/settings.json

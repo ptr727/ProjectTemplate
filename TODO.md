@@ -39,9 +39,9 @@ One pull request pointing a hub `uses:` at a hub-owned action, so that the resol
 
 ### The Declared Repository Description
 
-One pull request moving the canonical short description into declared data, which settles the second-paragraph ambiguity by construction rather than by writing an extraction rule the same change then deletes.
+One pull request moving the canonical short description into declared data, so every check and every push reads a field rather than parsing a document, and the About panel gets something that writes it.
 
-**State** `decision`. **Touches** [`registry/repos.json`][repos] and its schema, [`spec/audit.py`][audit], [`spec/readme-structure.md`][readme-structure], and [`CODESTYLE.md`][codestyle]. **Cost** one hub edit plus a carried re-vendor of the `CODESTYLE.md` item, and repos adopt the field one at a time.
+**State** `decision`. **Touches** [`registry/repos.json`][repos] and its schema, [`spec/audit.py`][audit], and `repo-config/configure.sh`. **Cost** one hub edit, and repos adopt the field one at a time. The tagline rule this cluster once carried shipped on 2026-08-08.
 
 - **Declare the description in [`registry/repos.json`][repos] instead of deriving it by parsing the README.** Every check and every push then reads a field.
   - **Blocked by** - Nothing.
@@ -54,14 +54,14 @@ One pull request moving the canonical short description into declared data, whic
   - **Settled** - The field is optional at first so the audit falls back to the README intro while repos adopt it, and it needs a schema entry because `registry/repos.schema.json` sets `additionalProperties: false`.
   - **Settled** - The ask on the Docker repos meanwhile is only that the parsing step is not propagated further.
 
-- **Let the README intro carry more than the tagline, and say which line the mirrors take.** The current pair of rules forbids a README from saying anything further about itself above the fold.
-  - **Blocked by** - The entry above, since taking this first means writing an extraction rule the registry change deletes.
-  - **Issue** - [#577][issue-577], which carries the three surfaces that change together.
-  - **Checked** - `develop` at `b82c1a3` on 2026-08-05, where [`spec/readme-structure.md`][readme-structure] item 1 reads as though the canonical description is the paragraph after the H1 and [`CODESTYLE.md`][codestyle] has `HISTORY.md` copy the same intro paragraph verbatim.
-  - **Open** - Nothing.
-  - **Settled** - The shape is that the first line after the H1 is the tagline, it alone carries the 100-character link-free rule, it alone mirrors to the GitHub About panel, the Docker Hub short description and the `HISTORY.md` opening, and any further paragraph is free prose no mirror reads.
-  - **Settled** - The audit changes with the rule, since it measures the first non-empty line and would otherwise report a legitimate second paragraph.
-  - **Settled** - The cap belongs to a mirror rather than to the reader, which is why declaring the field removes the parser that motivates it.
+- **Close the README-to-About hop, which is the only one nothing writes.** The audit reports a drifted About panel, and no tool sets it.
+  - **Blocked by** - The entry above, since the field is what `repo-config/configure.sh` would set the panel from.
+  - **Issue** - [#577][issue-577], whose tagline half shipped on 2026-08-08.
+  - **Checked** - `develop` on 2026-08-08, where `repo-config/configure.sh` sets every other repository setting and carries no `description` handling, and [`catalog/snippets/workflows/publish-docker-readme-task.yml`][workflows] pushes `github.event.repository.description` to Docker Hub.
+  - **Open** - Nothing beyond sequencing.
+  - **Settled** - The chain is README, then the About panel by hand, then Docker Hub by CI, so the unautomated hop is the first one and it is the one that drifts. PhotoCleaner is the worked case, where the About panel still matched the README and only the Docker Hub short description had diverged.
+  - **Settled** - CI keeps reading `repository.description` rather than the README. Pointing it at the README puts a Markdown parser in a publish job, which PhotoCleaner#32 measured at nine guards, every one of which fails the release rather than the tagline.
+  - **Settled** - The tagline rule itself shipped on 2026-08-08 and is no longer owed here. The extraction rule this entry was once blocked on already existed: [`spec/audit.py`][audit] measured the first line for the About and Docker Hub mirrors all along, and narrowing the `HISTORY.md` mirror to match it was one line, so the sequencing that held the rule behind the registry field was stated more strongly than the code warranted.
 
 ### Content in the Wrong File
 
@@ -122,26 +122,53 @@ One pull request measuring the remaining carried surface against the carry-versu
 
 ### The README Structure Rework
 
-One pull request reworking the README spec to the hand-crafted PlexCleaner shape the maintainer wants, and making the result auditable rather than advisory.
+The spec rework and its audit check shipped. What remains is the per-repo conformance the check now reports, and one section the fleet carries that the model does not name.
 
-**State** `decision`. **Touches** [`spec/readme-structure.md`][readme-structure] and the `readme-structure` dimension in [`spec/audit.py`][audit]. **Cost** one hub edit, and it re-grades every repo's README.
+**State** `backlog`. **Touches** each repo's `README.md` on its next visit, plus [`spec/readme-structure.md`][readme-structure] and [`spec/readme-sections.json`][readme-sections] if `Build Artifacts` is adopted. **Cost** one edit per repo, driven by the finding rather than by a sweep.
 
-- **Encode the distribution channel by deliverable rather than as one fixed label.** Four divergences are already identified against PlexCleaner and this repo.
-  - **Blocked by** - "The Declared Repository Description", since the mirrors settle first.
+- **Work off the conformance backlog the `readme-structure` dimension now reports.** Measured across all 22 cataloged repos on 2026-08-08, against the shipped checks: 73 findings, 71 on sections and 2 on shields, plus the 3 retired-badge findings the entry below carries.
+  - **Blocked by** - Nothing, and no repo is edited by the hub. Each lands on its own next visit.
   - **Issue** - None filed.
-  - **Checked** - `develop` at `1ed0cc8` on 2026-08-03.
-  - **Open** - Nothing.
-  - **Settled** - PlexCleaner ships executables and calls the channel Binary Releases, while the spec fixes the label as Versioned Releases for every repo, so the label belongs in a per-channel table.
-  - **Settled** - The wanted form puts the license shield at the very bottom, inside a closing License section reading that the project is licensed under the MIT License, followed by the shield, immediately before the link definitions, which is where PlexCleaner carries it and where this repo's README now carries it too on the maintainer's instruction. [`spec/readme-structure.md`][readme-structure] still says shields are not a top-level section and live under Build and Distribution, so the hub README is deliberately ahead of the spec here and the spec text is part of this cluster's edit rather than a separate fix.
-  - **Settled** - The Release Notes section closes by pointing at the release history for complete release notes and older versions, which is the wanted form, and PlexCleaner writes that link inline, which the reference-style rule forbids, so the wording is adopted and the reference form kept.
-  - **Settled** - Channel bullets and shields vary by deliverable, meaning GitHub binaries, Docker Hub, NuGet and PyPI each carry a different bullet label and shield set, which is what a per-type table has to encode.
+  - **Checked** - Every repo's default branch on 2026-08-08, with the hub read at its own `develop`.
+  - **Settled** - The shape of the work: 17 repos owe `3rd Party Tools`, 10 owe the `Overview` rename, 9 owe a Table of Contents, 7 owe a License section, and 5 public repos owe `Questions or Issues`.
+  - **Settled** - Three order findings are genuine and each is one move: LanguageTags places Installation after Usage, aiopurpleair places Getting Started after Installation, and PlexCleaner places Questions or Issues immediately after the Table of Contents where the order now puts it ninth.
+  - **Settled** - Two placement findings are genuine: KiCadLibrary carries a `## TODO` after `## License`, which the "TODO.md" rule already forbids, and HomeAutomation-Config renders the license shield twice, once outside the License section.
+  - **Settled** - MediaTools carries a `NuGet Pre-Release` shield that renders the same version as its `NuGet Release` shield, and it is dropped on that repo's next visit. The check does not report it, because a shield class is a floor and an extra shield is never a finding.
+  - **Settled** - Blog is the only repo carrying a `3rd Party Tools` table today, and it needs both fixes the rule now states: drop the License column, and rewrite two of its three roles, since "theme, vendored under `themes/`" and "web server, serving the built site and the redirects" describe this repo's wiring where "static site generator" correctly describes the tool.
 
-- **Decide whether the canonical section order follows PlexCleaner.** This affects every repo plus the audit dimension.
+- **Bring each repo's `3rd Party Tools` entries onto the shared catalog.** Measured on 2026-08-08: 56 findings across four repos, every one of them a link, a description, or an ordering that disagrees with [`spec/third-party-tools.json`][third-party-tools].
   - **Blocked by** - Nothing.
   - **Issue** - None filed.
-  - **Checked** - `develop` at `1ed0cc8` on 2026-08-03.
-  - **Open** - The position of the sections the spec already names, since PlexCleaner places Questions or Issues immediately after the Table of Contents where the spec orders it ninth.
-  - **Settled** - PlexCleaner's Performance Considerations, Runtime Metrics, Custom Plugins, Testing, Development Tooling, Feature Ideas and Sample Media Files are correctly repo-specific under the recurrence rule in [`spec/section-model.md`][section-model] and stay undeclared.
+  - **Checked** - Every repo's default branch on 2026-08-08, with the hub read at its own `develop`, which now conforms.
+  - **Settled** - The bulk is absent descriptions rather than wrong ones: 48 of the 56 are a tool listed with no description at all, across LanguageTags, MediaTools and PlexCleaner, and PlexCleaner alone accounts for 27. Of the remaining eight, three describe a tool differently from the catalog, four link it differently, and one is Blog listing Hugo, PaperMod, Caddy out of alphabetical order.
+  - **Settled** - Twelve tools already appear in more than one repo, which is what makes the catalog worth having before the 17 repos owing the section write their own wording for each.
+  - **Settled** - Four tools are already linked by two different URLs across the fleet, and the catalog picks one each: GitHub Actions takes `github.com/actions`, Dependabot takes `github.com/dependabot`, Nerdbank.GitVersioning takes the project repo rather than its marketplace action, and uv takes `docs.astral.sh/uv/` to match ruff. The hub was the outlier on the first two and is fixed.
+  - **Settled** - PlexCleaner lists Bring Your Own Badge as a tool, so the retired badge service has a fourth touchpoint beyond the three rendering it, and that entry goes with the same deletion.
+  - **Settled** - The catalog is a standard set and not a complete one, so a tool only one repo uses is unaudited. Of the 36 tools the fleet lists today, 24 are used by exactly one repo and are declared only so the second adopter copies rather than invents.
+
+- **Work off the reference-link naming and grouping backlog.** Measured across all 22 repos on 2026-08-08: 55 letter findings on naming and 27 drift findings on grouping.
+  - **Blocked by** - Nothing, and each repo's block is one edit.
+  - **Issue** - None filed.
+  - **Checked** - Every repo's default branch on 2026-08-08, with the hub read at its own `develop`, which now conforms.
+  - **Settled** - The naming half was already the fleet's practice before it was written down: 119 of 122 shield references end `-shield` and 514 of 532 URI references end `-link`, and `actions-link`, `releases-link`, `issues-link` and `discussions-link` are unanimous across every repo carrying them.
+  - **Settled** - The two real naming inconsistencies are the repository root, which 10 of 20 call `github-link` and the rest name for the project, and `./LICENSE`, which 9 repos call `license-link` where a repo-local path is a bare reference.
+  - **Settled** - The grouping half is drift rather than letter because it is not met: the fleet carries seventeen distinct group-header names, and two repos, NxWitness with 116 definitions and ESPHome-NonRoot with 45, carry no group headers at all.
+  - **Settled** - KiCadLibrary is the largest single block at 22 naming findings, almost all of them repo-local paths named `-link`.
+
+- **Delete the retired `byob.yarr.is` last-build badge from the three repos still carrying it.** The service is deprecated and the badge is not required by any shield class, so the fix is a deletion rather than a replacement.
+  - **Blocked by** - Nothing, and each repo's fix is deleting one shield line and one reference definition.
+  - **Issue** - None filed.
+  - **Checked** - Each repo's default branch on 2026-08-08, with the endpoints requested the same day: MediaTools and KiCadLibrary both return **HTTP 404**, so they already render a broken badge, and ESPHome-NonRoot still returns 200.
+  - **Settled** - The audit reports it, so this does not rely on anyone remembering: `deprecatedShields` in [`spec/readme-sections.json`][readme-sections] carries the retired service and the check fires on exactly those three repos.
+  - **Settled** - A dead badge is worse than an absent one, because it renders broken rather than missing and a visitor cannot tell a retired service from a failing build.
+  - **Settled** - All three repos are already non-conformant on other grounds, so this rides their next visit rather than earning a pass of its own.
+
+- **Decide where `## Build Artifacts` belongs.** LanguageTags and aiopurpleair both carry it, opening with the same `**Build process and artifacts**:` line and covering package, versioning, and publishing.
+  - **Blocked by** - Nothing.
+  - **Issue** - None filed.
+  - **Checked** - Both repos' default branches on 2026-08-08, where the section is the only one recurring across repos that [`spec/readme-sections.json`][readme-sections] does not name.
+  - **Open** - Whether it becomes a named optional section, folds into `Build and Distribution`, or moves to [`WORKFLOW.md`][workflow], since its content overlaps both.
+  - **Settled** - It is not a finding today. An unnamed heading is dropped before the order comparison, so the two repos carrying it pass, which is why this is a decision rather than a defect.
 
 ### Two Project Types and a Shared C++ Style
 
@@ -474,6 +501,7 @@ Each was checked against the tree and has nothing left to do anywhere. Closing i
 [operations]: ./OPERATIONS.md
 [project-types]: ./spec/project-types.json
 [prose-gate]: ./.github/actions/prose-gate/action.yml
+[readme-sections]: ./spec/readme-sections.json
 [readme-structure]: ./spec/readme-structure.md
 [reports]: ./reports/
 [repos]: ./registry/repos.json
@@ -483,6 +511,7 @@ Each was checked against the tree and has nothing left to do anywhere. Closing i
 [section-model]: ./spec/section-model.md
 [snippets]: ./catalog/snippets/
 [standup]: ./STANDUP.md
+[third-party-tools]: ./spec/third-party-tools.json
 [type-model]: ./spec/type-model.md
 [workflow]: ./WORKFLOW.md
 [workflows]: ./catalog/snippets/workflows/

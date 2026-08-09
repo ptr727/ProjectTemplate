@@ -73,6 +73,63 @@ def main():
                 errors.append(f"secrets.json: oidc {label} forbids no static credential")
 
     check_secret_set("baseline", secrets.get("baseline"), need_kind=False)
+
+    # The README model is indexed directly by spec/audit.py, so a key that is absent or the wrong type crashes the audit mid-run rather than reporting.
+    # The schema marks each one required, but CI runs no JSON-schema validation, so the guard that actually runs is this one.
+    # Checked as a set rather than one key at a time, since guarding only the keys a review happened to name is how the other four came to be unguarded.
+    readme_model = load("spec/readme-sections.json")
+    if not isinstance(readme_model, dict):
+        errors.append("readme-sections.json: top level is not an object")
+    else:
+        for key, want in (("sections", list), ("shieldClasses", list), ("linkGroups", list),
+                          ("linkNaming", list), ("canonicalLinks", list), ("distribution", dict)):
+            value = readme_model.get(key)
+            if not isinstance(value, want) or not value:
+                errors.append(f"readme-sections.json: '{key}' must be a non-empty {'array' if want is list else 'object'}, and spec/audit.py indexes it directly")
+        # The distribution prefixes are what tell a repo's own URLs from a third party's.
+        # Their absence fails open rather than loud: link_kind would classify every own URL as external, canonical naming would quietly stop being enforced, and the audit would still report green.
+        prefixes = readme_model.get("distribution", {}).get("urlPrefixes") if isinstance(readme_model.get("distribution"), dict) else None
+        if not is_str_list(prefixes) or not prefixes:
+            errors.append("readme-sections.json: 'distribution.urlPrefixes' must be a non-empty array of strings, or the link audit stops distinguishing this repo's URLs from a third party's and silently passes")
+        else:
+            # Every prefix, not merely one of them.
+            # A broad entry added beside a valid one would pass an any() guard while making link_kind read a third party's URL as this repo's own, which is the failure the guard exists to stop.
+            loose = [p for p in prefixes if "{slug}" not in p and "{owner}" not in p]
+            if loose:
+                errors.append(f"readme-sections.json: 'distribution.urlPrefixes' entry {loose[0]!r} carries neither {{slug}} nor {{owner}}, so it is not repo-scoped and would match another owner's URLs")
+        # A canonicalLinks entry naming a destination it cannot match is a name nothing enforces, and audit.py raises on it mid-run rather than reporting.
+        for c in readme_model.get("canonicalLinks", []) if isinstance(readme_model.get("canonicalLinks"), list) else []:
+            if isinstance(c, dict) and "repoPath" not in c and "match" not in c:
+                errors.append(f"readme-sections.json: canonicalLinks entry '{c.get('name')}' carries neither 'repoPath' nor 'match', so it can match no URL")
+
+    # CI runs no JSON-schema validation, so shape-check the shared tool catalog here.
+    # A duplicate name is the failure worth catching: the audit keys on it, so the second entry silently shadows the first and half the fleet is measured against a description nobody can see.
+    # The top level is read defensively rather than assumed: a malformed file (a bare array, say) would raise
+    # AttributeError off .get and crash the run, which is the opposite of what shape-checking here is for.
+    catalog = load("spec/third-party-tools.json")
+    if not isinstance(catalog, dict):
+        # One diagnostic, naming the outermost thing that is wrong.
+        # Reporting the missing 'tools' as well would describe a consequence of this as if it were a second defect.
+        errors.append("third-party-tools.json: top level is not an object")
+    elif not isinstance(catalog.get("tools"), list) or not catalog["tools"]:
+        errors.append("third-party-tools.json: 'tools' must be a non-empty array")
+    else:
+        tools = catalog["tools"]
+        seen = set()
+        for t in tools:
+            name = t.get("name") if isinstance(t, dict) else None
+            if not isinstance(t, dict) or not all(isinstance(t.get(f), str) and t.get(f) for f in ("name", "link", "description")):
+                errors.append(f"third-party-tools.json: entry {name or t!r} needs a non-empty name, link and description")
+                continue
+            if name.lower() in seen:
+                errors.append(f"third-party-tools.json: duplicate tool name '{name}' - the audit keys on it, so the second entry would shadow the first")
+            seen.add(name.lower())
+            desc = t["description"]
+            if not (desc[0].isupper() and desc.endswith(".")):
+                errors.append(f"third-party-tools.json: '{name}' description {desc!r} is not a sentence - open with a capital and close with a full stop")
+        names = [t["name"] for t in tools if isinstance(t, dict) and isinstance(t.get("name"), str)]
+        if names != sorted(names, key=str.lower):
+            errors.append("third-party-tools.json: 'tools' is not sorted by name, which is how a reader finds an entry to copy")
     if not isinstance(mechanisms, dict):
         errors.append("secrets.json: 'mechanisms' is not an object")
     else:
