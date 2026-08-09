@@ -84,7 +84,12 @@ def read_tool(tool: dict) -> tuple[str, str | None, str | None]:
             continue
         if answered is None:
             answered = ' '.join(argv)
-        m = re.search(tool['pattern'], out)
+        try:
+            m = re.search(tool['pattern'], out)
+        except re.error:
+            # A pattern that does not compile is a broken declaration, and the gate reports rather than raising.
+            # A local entry is caught by field_problems and the hub one by spec/validate.py, so this is the backstop for neither having run.
+            return 'unreadable', None, ' '.join(argv)
         if m:
             return 'read', m.group(1), ' '.join(argv)
     if answered is None:
@@ -93,6 +98,47 @@ def read_tool(tool: dict) -> tuple[str, str | None, str | None]:
 
 
 REQUIRED_FIELDS = ('name', 'probes', 'pattern', 'minimum', 'why')
+
+
+def field_problems(entry: dict) -> list[str]:
+    """Type problems among the fields an entry actually carries, named one per problem.
+
+    The hub declaration is shape-checked by spec/validate.py, and a repository's is checked by
+    nothing at all, so the gate cannot assume either the types or the values it reads. Only fields
+    that are present are judged, which is what lets an override carry one field without restating an
+    entry.
+
+    Reading a field for truthiness rather than type is what makes this necessary rather than tidy.
+    `required: 0` is falsy and is not `False`, so a guard written against the literal lets it through
+    and a required tool becomes optional, which is the relaxation the merge rule exists to refuse.
+    """
+    problems = []
+    if 'name' in entry and (not isinstance(entry['name'], str) or not entry['name']):
+        problems.append('name must be a non-empty string')
+    if 'why' in entry and (not isinstance(entry['why'], str) or not entry['why']):
+        problems.append('why must be a non-empty string')
+    if 'required' in entry and not isinstance(entry['required'], bool):
+        problems.append(f'required must be true or false, not {entry["required"]!r}')
+    if 'minimum' in entry and entry['minimum'] is not None:
+        if not isinstance(entry['minimum'], str) or parse_version(entry['minimum']) is None:
+            problems.append(f'minimum must be dot-separated integers or null, not {entry["minimum"]!r}')
+    if 'source' in entry and not isinstance(entry['source'], dict):
+        problems.append('source must be an object')
+    if 'probes' in entry:
+        probes = entry['probes']
+        if (not isinstance(probes, list) or not probes
+                or not all(isinstance(p, list) and p and all(isinstance(a, str) and a for a in p) for p in probes)):
+            problems.append('probes must be a non-empty array of non-empty string arrays')
+    if 'pattern' in entry:
+        pattern = entry['pattern']
+        if not isinstance(pattern, str) or not pattern:
+            problems.append('pattern must be a non-empty string')
+        else:
+            try:
+                re.compile(pattern)
+            except re.error as e:
+                problems.append(f'pattern does not compile ({e})')
+    return problems
 
 
 def merge(base: list[dict], local: list[dict]) -> tuple[list[dict], list[str]]:
@@ -121,6 +167,12 @@ def merge(base: list[dict], local: list[dict]) -> tuple[list[dict], list[str]]:
         if not isinstance(name, str) or not name:
             rejected.append('a local entry carries no name, so it was ignored')
             continue
+        # Types are checked before anything is applied, so a wrong one is refused rather than bypassing a guard written against a literal or crashing a later read.
+        problems = field_problems(entry)
+        if problems:
+            rejected.append(f'local tool {name} was ignored: {"; ".join(problems)}')
+            continue
+
         key = name.lower()
         if key not in by_key:
             missing = [f for f in REQUIRED_FIELDS if f not in entry]

@@ -193,11 +193,47 @@ class TestMerge(unittest.TestCase):
         self.assertEqual(len(rejected), 1)
         self.assertTrue(next(t for t in merged if t['name'] == 'gh').get('required', True))
 
+    def test_a_falsy_non_boolean_cannot_relax_required(self):
+        """`0` is falsy and is not False, so a guard written against the literal would let it through."""
+        merged, rejected = host_gate.merge(self.base(), [{'name': 'gh', 'required': 0}])
+        self.assertTrue(next(t for t in merged if t['name'] == 'gh').get('required', True))
+        self.assertEqual(len(rejected), 1)
+        self.assertIn('required must be true or false', rejected[0])
+
+    def test_a_numeric_minimum_is_refused_rather_than_raising(self):
+        merged, rejected = host_gate.merge(self.base(), [{'name': 'gh', 'minimum': 5}])
+        self.assertEqual(next(t for t in merged if t['name'] == 'gh')['minimum'], '2.47.0')
+        self.assertEqual(len(rejected), 1)
+        self.assertIn('dot-separated integers', rejected[0])
+
+    def test_a_new_tool_with_a_present_but_unusable_field_is_refused(self):
+        """The field is there, so a presence check passes it and the later read is what crashes."""
+        entry = tool('ffmpeg', minimum='6.0')
+        entry['probes'] = None
+        merged, rejected = host_gate.merge(self.base(), [entry])
+        self.assertNotIn('ffmpeg', [t['name'] for t in merged])
+        self.assertIn('probes must be', rejected[0])
+
+    def test_an_uncompilable_pattern_is_refused(self):
+        entry = tool('ffmpeg', minimum='6.0', pattern='(unclosed')
+        merged, rejected = host_gate.merge(self.base(), [entry])
+        self.assertNotIn('ffmpeg', [t['name'] for t in merged])
+        self.assertIn('does not compile', rejected[0])
+
     def test_the_hub_declaration_is_not_mutated(self):
         """The caller's list is reused across runs, so merging must copy rather than edit in place."""
         base = self.base()
         host_gate.merge(base, [{'name': 'gh', 'minimum': '2.60.0'}])
         self.assertEqual(base[0]['minimum'], '2.47.0')
+
+
+class TestUncompilablePatternAtReadTime(unittest.TestCase):
+    """The backstop for a pattern that reached read_tool without either shape check having run."""
+
+    def test_a_bad_pattern_reports_unreadable_rather_than_raising(self):
+        entry = tool('odd', pattern='(unclosed', probes=[[sys.executable, '-c', 'print("v1.0")']])
+        status, version, _ = host_gate.read_tool(entry)
+        self.assertEqual((status, version), ('unreadable', None))
 
 
 class TestMalformedLocalFile(unittest.TestCase):
