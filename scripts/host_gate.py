@@ -161,6 +161,37 @@ def read_declaration(path: Path, what: str) -> list[dict] | str:
     return tools
 
 
+PLATFORM_KEYS = ('linux', 'macos', 'windows')
+
+
+def contract_problems(tools: list[dict]) -> list[str]:
+    """The declared-floor-carries-a-source contract, read on the merged set rather than per file.
+
+    spec/validate.py and the schema both enforce it on the hub declaration, and neither can see the
+    result of layering. A repository adding a floor to a hub entry that never carried a source
+    leaves both files correct on their own and the combination wrong, and the symptom is a failure
+    printing no remedy, which is the one thing requiring a source exists to prevent.
+
+    The platform keys are read here too, since a source naming a key nothing looks up is a source
+    only in shape.
+    """
+    problems = []
+    for t in tools:
+        if t.get('minimum') is None:
+            continue
+        name, src = t['name'], t.get('source')
+        if not isinstance(src, dict) or not src:
+            problems.append(f'{name} declares the {t["minimum"]} floor with no source, so a host below it is told to upgrade and not where from')
+            continue
+        stray = sorted(set(src) - set(PLATFORM_KEYS))
+        if stray:
+            problems.append(f'{name} source names {", ".join(stray)}, which no platform reads - use {", ".join(PLATFORM_KEYS)}')
+        for plat in sorted(set(src) & set(PLATFORM_KEYS)):
+            if not isinstance(src[plat], str) or not src[plat]:
+                problems.append(f'{name} source.{plat} is empty, so a host on that platform is told to upgrade and not where from')
+    return problems
+
+
 def merge(base: list[dict], local: list[dict]) -> tuple[list[dict], list[str]]:
     """The hub declaration with a repository's own layered over it, plus any rejected overrides.
 
@@ -289,7 +320,8 @@ def main(argv: list[str] | None = None) -> int:
         tools, rejected = merge(tools, local)
         NOTES.append(f'{local_path} layered {len(local)} local entry(s) over the hub declaration')
 
-    issues = rejected + check(tools)
+    # The contract is read after layering, since neither file can see what the other adds to it.
+    issues = rejected + contract_problems(tools) + check(tools)
     status = 'FAIL' if issues else 'ok'
     print(f'[{status:4}] host-tools  {len(issues)} issue(s) over {len(tools)} declared tool(s)')
     for i in issues:

@@ -233,6 +233,47 @@ class TestMerge(unittest.TestCase):
         self.assertEqual(base[0]['minimum'], '2.47.0')
 
 
+class TestContractAfterLayering(unittest.TestCase):
+    """A declared floor carries a usable source, read on the merged set.
+
+    The case that motivates it: a repository adds a floor to a hub entry that never had a source.
+    Both files are correct alone, the combination is not, and the symptom is a failure with no
+    remedy printed.
+    """
+
+    def test_a_floor_with_no_source_is_reported(self):
+        merged, _ = host_gate.merge([tool('docker', minimum=None)], [{'name': 'docker', 'minimum': '20.0'}])
+        problems = host_gate.contract_problems(merged)
+        self.assertEqual(len(problems), 1)
+        self.assertIn('no source', problems[0])
+
+    def test_a_new_local_tool_with_a_floor_and_no_source_is_reported(self):
+        merged, rejected = host_gate.merge([], [tool('ffmpeg', minimum='6.0')])
+        self.assertEqual(rejected, [])
+        self.assertEqual(len(host_gate.contract_problems(merged)), 1)
+
+    def test_a_floor_with_a_source_is_not_reported(self):
+        merged, _ = host_gate.merge([tool('docker', minimum=None)],
+                                    [{'name': 'docker', 'minimum': '20.0', 'source': {'linux': 'from here'}}])
+        self.assertEqual(host_gate.contract_problems(merged), [])
+
+    def test_a_source_key_no_platform_reads_is_reported(self):
+        self.assertEqual(len(host_gate.contract_problems(
+            [tool('gh', minimum='2.47.0', source={'Linux': 'from here'})])), 1)
+
+    def test_an_empty_source_value_is_reported(self):
+        problems = host_gate.contract_problems([tool('gh', minimum='2.47.0', source={'linux': ''})])
+        self.assertEqual(len(problems), 1)
+        self.assertIn('source.linux is empty', problems[0])
+
+    def test_no_floor_needs_no_source(self):
+        self.assertEqual(host_gate.contract_problems([tool('docker', minimum=None)]), [])
+
+    def test_the_shipped_declaration_meets_its_own_contract(self):
+        data = json.loads(host_gate.SPEC.read_text(encoding='utf-8'))
+        self.assertEqual(host_gate.contract_problems(data['tools']), [])
+
+
 class TestUncompilablePatternAtReadTime(unittest.TestCase):
     """The backstop for a pattern that reached read_tool without either shape check having run."""
 
