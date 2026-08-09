@@ -76,15 +76,34 @@ Every rule in the default set is clean tree-wide, which is what lets the CI gate
 
 ## `repo_gate.py`
 
-Two deterministic checks:
+Three deterministic checks:
 
 - `sha-pin`: every workflow `uses:` naming an action is a 40-hex commit SHA that resolves, with the one documented `dotnet/nbgv@master` exception allowed. A local reusable workflow (`./.github/workflows/...`) names no action and carries no ref to pin, so it is skipped.
 - `eol`: every path pinned LF in [`.gitattributes`][gitattributes] has the matching [`.editorconfig`][editorconfig] override the line-ending rule requires, with EditorConfig brace syntax expanded. One direction only: an `.editorconfig` LF glob with no git pin is legitimate, since `.editorconfig` governs what the editor writes where git enforces a class it must not guess at.
+- `eol-coverage`: the same pins read against the tree instead. A tracked file opening `#!` that git does not resolve to `eol=lf` is an interpreter line a CRLF checkout breaks, and a pin matching no tracked file is dead unless its block is marked `forward-declared`.
 
 ```sh
 python3 scripts/repo_gate.py
 python3 scripts/repo_gate.py --check sha-pin
 ```
+
+**`eol` and `eol-coverage` are separate checks because they answer different questions**, and widening the first in place would have made three published descriptions of it wrong at once. `eol` compares the two line-ending documents with each other, which is worth asking on its own, and it is document-to-document by design rather than by omission. What it cannot see is the tree: both documents can agree perfectly and both be wrong about the repository they describe, and nothing mechanical ever asked whether a pin binds a file that exists. [`spec/files.json`][files] marks `.gitattributes` as `intent`, so what stood in that gap was an agent reading the file for meaning during an audit.
+
+The gap is measured rather than argued. `ptr727/Blog` at `392de22` carried both shapes while `--check eol` reported `0 issue(s)`: `ops/vps-backup-pull` is an extensionless shebang script systemd runs unattended on a backup host, matched by `*.sh` and by no `.py` pin and left passive by `* -text`, and two pins named `deploy/` paths that have never been tracked in that repository in any commit. Run against the same commit, `eol-coverage` reports all three. The repository is where the issue that raised this came from (`ptr727/ProjectTemplate#633`), and it fixed its own copy first in `ptr727/Blog#69`.
+
+**The dead pin is the worse half, and not because a no-op pin costs anything.** The comment above Blog's two read "the deploy shell is an extensionless shebang script that matches no rule above", so the file asserted the extensionless case was handled while the one real instance sat unpinned twenty lines up. A dead pin does not merely fail to bind. It reads as coverage, which is what hid the live defect from every human and agent who opened that file.
+
+**A pin block marked `forward-declared` is exempt from the dead reading**, because in a carried baseline a pattern matching nothing is a declaration for whichever consumer adds the file, not a dead pin. Three of this repo's pins are exactly that today (`uv.lock`, `Dockerfile`, `*.Dockerfile`), and each goes live the moment a derived repo adds a lockfile or a Dockerfile, which [`.gitattributes`][gitattributes] already said in prose before anything read it. The mark reaches to the next blank line, which is how that file already groups a pin with its rationale, and it travels with the carried copy so a python repo holding the baseline without a lockfile stays exempt too. Two alternatives were rejected. An exception list inside this script restates data the scanned repository already carries and goes stale in the one direction nobody checks. Diffing against the hub's own `.gitattributes` needs no convention at all, and it was rejected because it makes a repository gate change verdict when a file in another repository changes, and it cannot run standalone.
+
+What the mark trades away is stated rather than left to be found: it reaches to the next blank line, so a pin appended directly under a marked block inherits an exemption nobody wrote for it, and that fails open. A case in the suite therefore names the three pins the marking is for and fails the moment a fourth arrives, rather than the parser growing a second rule.
+
+**Matching is gitattributes matching, not pathspec matching.** `git ls-files -- <pattern>` looks like the cheap way to ask whether a pin binds anything and is a different language: there `*` crosses a `/`, so `capture/*.py` also matches `capture/sub/x.py` and a dead pin reads as live. The attribute side has no such risk and takes no such care, since it delegates to `git check-attr` and so cannot disagree with what a checkout actually applies.
+
+**The shebang floor lives in the suite rather than in the check.** A source-only configuration repository shipping no scripts at all is legitimately clean, so a gate that failed on an empty scan would report a false finding in the common fleet case. What must not go unnoticed is this repository's own scan going quiet, and a case holds that instead. Every run still prints what it covered, for the reason `sha-pin` does.
+
+`eol` gained one `note:` of its own. Where `.editorconfig` sets `end_of_line = lf` for `[*]`, the matching override the check looks for is satisfied by the global default for **any** path, one that does not exist included, so the check is vacuously true for every pin it will ever read and its result carries no information about pin content. Blog is shaped that way, and so are the fleet repositories that declare `lineEndings: lf` in [`registry/repos.json`][repos]. The check does not fail there, since nothing is wrong with such a repository, and it says what it did not read.
+
+One question is deliberately **open**: the symmetric reading of `.editorconfig`, a path-specific section naming files that do not exist. It is not implemented here because this repo's own `[.github/workflows/*]` and `[catalog/snippets/workflows/*]` sections are legitimately broad, so the exemption needs measuring against the live corpus before a gate is built on it rather than after.
 
 **`sha-pin` resolves the pin as well as reading its shape**, because forty hex characters is a format any fabricated string satisfies, and an agent hand-writing a plausible SHA into a workflow is a failure this repo has seen rather than a hypothetical one. The `gh-write-guard` hook cannot cover it: the hook watches Bash, and an editor tool writing the same string into a file never reaches it. Resolving also catches the neighboring case, a pin whose commit was reachable only from a branch since squashed and deleted, which breaks a downstream gate long after the change that caused it.
 
@@ -171,4 +190,5 @@ The match is on the block's heading rather than anywhere in the body, and on the
 [governance]: ../GOVERNANCE.md
 [governance-hub-hosted-tooling]: ../GOVERNANCE.md#hub-hosted-tooling
 [prose-gate-action]: ../.github/actions/prose-gate/action.yml
+[repos]: ../registry/repos.json
 [section-model]: ../spec/section-model.md
