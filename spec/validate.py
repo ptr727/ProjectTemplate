@@ -154,8 +154,15 @@ def main():
             # CI runs no JSON-schema validation, so this file is the only thing that reads the declaration before the gate trusts it.
             if "required" in t and not isinstance(t["required"], bool):
                 errors.append(f"host-tools.json: '{name}' required must be true or false, not {t['required']!r}")
+            # Compiled rather than only type-checked, since scripts/host_gate.py names this file as what covers the hub declaration.
+            # An uncompilable pattern would otherwise ship and surface at gate runtime, which is the reader that cannot fix it.
             if not isinstance(t.get("pattern"), str) or not t.get("pattern"):
                 errors.append(f"host-tools.json: '{name}' needs a non-empty pattern to read a version with")
+            else:
+                try:
+                    re.compile(t["pattern"])
+                except re.error as e:
+                    errors.append(f"host-tools.json: '{name}' pattern does not compile ({e})")
             probes = t.get("probes")
             # The emptiness of each argument is read as well as its type, so this says what it claims and agrees with the gate's own check.
             # An empty argument passes a type test and produces a probe that cannot execute.
