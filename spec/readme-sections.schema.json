@@ -3,7 +3,7 @@
     "$id": "https://github.com/ptr727/ProjectTemplate/spec/readme-sections.schema.json",
     "title": "README section and shield model",
     "type": "object",
-    "required": ["sections", "shieldClasses", "linkGroups", "linkNaming", "canonicalLinks"],
+    "required": ["sections", "shieldClasses", "linkGroups", "linkNaming", "canonicalLinks", "distribution"],
     "additionalProperties": false,
     "properties": {
         "$schema": { "type": "string" },

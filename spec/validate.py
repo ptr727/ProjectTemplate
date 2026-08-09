@@ -74,6 +74,19 @@ def main():
 
     check_secret_set("baseline", secrets.get("baseline"), need_kind=False)
 
+    # The README model's distribution prefixes are what tell a repo's own URLs from a third party's.
+    # Their absence fails open rather than loud: link_kind would classify every own URL as external, canonical naming would quietly stop being enforced, and the audit would still report green.
+    # The schema marks the key required, but CI runs no JSON-schema validation, so the guard that actually runs is this one.
+    readme_model = load("spec/readme-sections.json")
+    if not isinstance(readme_model, dict):
+        errors.append("readme-sections.json: top level is not an object")
+    else:
+        prefixes = readme_model.get("distribution", {}).get("urlPrefixes") if isinstance(readme_model.get("distribution"), dict) else None
+        if not is_str_list(prefixes) or not prefixes:
+            errors.append("readme-sections.json: 'distribution.urlPrefixes' must be a non-empty array of strings, or the link audit stops distinguishing this repo's URLs from a third party's and silently passes")
+        elif not any("{slug}" in p or "{owner}" in p for p in prefixes):
+            errors.append("readme-sections.json: no 'distribution.urlPrefixes' entry carries {slug} or {owner}, so the prefixes are not repo-scoped and would match another owner's URLs")
+
     # CI runs no JSON-schema validation, so shape-check the shared tool catalog here.
     # A duplicate name is the failure worth catching: the audit keys on it, so the second entry silently shadows the first and half the fleet is measured against a description nobody can see.
     # The top level is read defensively rather than assumed: a malformed file (a bare array, say) would raise
