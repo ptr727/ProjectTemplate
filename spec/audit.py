@@ -495,10 +495,12 @@ def link_kind(url, slug, rendered=()):
     """Which linkGroups kind a reference definition points at, for the repo at `slug`.
 
     A reference in `rendered`, meaning one the document uses as an image, is a shield whatever host serves it.
-    Keying on img.shields.io alone read a badge from any other host as a plain URI and asked for it to be
-    renamed `-link`, which is a rename away from the convention. The case that found it was a retired
-    last-build service, which deprecatedShields now reports separately, but the rule is about how a reference
-    is used rather than about that one host.
+    Keying on the host read a badge from any other host as a plain URI and asked for it to be renamed `-link`,
+    which is a rename away from the convention. The case that found it was a retired last-build service, which
+    deprecatedShields now reports separately, but the rule is about how a reference is used rather than about
+    any one host, so there is no img.shields.io short-circuit here: across the fleet all 119 img.shields.io
+    definitions are rendered as images, so a host test classifies nothing usage does not and can only
+    contradict the rule it sits beside.
 
     Distribution is scoped to this repo's own URLs, so a link to somebody else's GitHub repo or Docker Hub
     image, which a 3rd Party Tools list is full of, stays external rather than being read as a channel of this
@@ -508,8 +510,6 @@ def link_kind(url, slug, rendered=()):
         return "anchor"
     if not url.startswith(("http://", "https://")):
         return "local"
-    if url.startswith("https://img.shields.io"):
-        return "shield"
     owner = slug.split("/")[0].lower()
     own = (f"https://github.com/{slug}".lower(), f"https://hub.docker.com/r/{owner}/",
            f"https://www.nuget.org/packages/{owner}.", f"https://nuget.org/packages/{owner}.",
@@ -1661,6 +1661,7 @@ def _selftest():
 
     links_ok = (
         "# F\n\nA fixture.\n\n## X\n\n[a](#x) [b][gh] [c][docker-hub-link] [d][agents] [e][upstream-link]\n\n"
+        "![License][license-shield]\n\n"
         "<!-- Sections -->\n\n[x-anchor]: #x\n\n<!-- Shields -->\n\n[license-shield]: https://img.shields.io/github/license/o/r\n\n"
         "<!-- Distribution -->\n\n[actions-link]: https://github.com/o/r/actions\n[docker-hub-link]: https://hub.docker.com/r/o/r\n[github-link]: https://github.com/o/r\n\n"
         "<!-- Repo -->\n\n[agents]: ./AGENTS.md\n[license]: ./LICENSE\n\n"
@@ -1687,6 +1688,9 @@ def _selftest():
         ("groups out of the declared order", swapped, 0, 1),
         ("a group not sorted by reference name", links_ok.replace("[agents]: ./AGENTS.md\n[license]: ./LICENSE\n", "[license]: ./LICENSE\n[agents]: ./AGENTS.md\n"), 0, 1),
         ("a reference in the wrong group", links_ok.replace("[license]: ./LICENSE\n", "").replace("<!-- External -->\n", "<!-- External -->\n\n[license]: ./LICENSE\n"), 0, 1),
+        # A shields.io URL the document never renders is judged by that usage rather than by its host, so it is an ordinary URI.
+        # Across the fleet every one of the 119 img.shields.io definitions is rendered, so a host test decides nothing and can only contradict the rule beside it.
+        ("an unrendered shields.io reference is a URI, not a shield", links_ok.replace("[license-shield]: https://img.shields.io/github/license/o/r\n", "[extra-shield]: https://img.shields.io/badge/never-rendered-blue\n[license-shield]: https://img.shields.io/github/license/o/r\n"), 1, 1),
     ]
     for label, text, want_letter, want_drift in link_cases:
         got = readme_link_findings(text, rm, "o/r")

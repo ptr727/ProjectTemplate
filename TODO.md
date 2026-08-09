@@ -126,7 +126,7 @@ The spec rework and its audit check shipped. What remains is the per-repo confor
 
 **State** `backlog`. **Touches** each repo's `README.md` on its next visit, plus [`spec/readme-structure.md`][readme-structure] and [`spec/readme-sections.json`][readme-sections] if `Build Artifacts` is adopted. **Cost** one edit per repo, driven by the finding rather than by a sweep.
 
-- **Work off the conformance backlog the `readme-structure` dimension now reports.** Measured across all 22 cataloged repos on 2026-08-08: 75 findings, 20 of them in the repos already close to the shape.
+- **Work off the conformance backlog the `readme-structure` dimension now reports.** Measured across all 22 cataloged repos on 2026-08-08, against the shipped checks: 73 findings, 71 on sections and 2 on shields, plus the 3 retired-badge findings the entry below carries.
   - **Blocked by** - Nothing, and no repo is edited by the hub. Each lands on its own next visit.
   - **Issue** - None filed.
   - **Checked** - Every repo's default branch on 2026-08-08, with the hub read at its own `develop`.
@@ -136,17 +136,17 @@ The spec rework and its audit check shipped. What remains is the per-repo confor
   - **Settled** - MediaTools carries a `NuGet Pre-Release` shield that renders the same version as its `NuGet Release` shield, and it is dropped on that repo's next visit. The check does not report it, because a shield class is a floor and an extra shield is never a finding.
   - **Settled** - Blog is the only repo carrying a `3rd Party Tools` table today, and it needs both fixes the rule now states: drop the License column, and rewrite two of its three roles, since "theme, vendored under `themes/`" and "web server, serving the built site and the redirects" describe this repo's wiring where "static site generator" correctly describes the tool.
 
-- **Bring each repo's `3rd Party Tools` entries onto the shared catalog.** Measured on 2026-08-08: 55 findings across five repos, every one of them a link or a description that disagrees with [`spec/third-party-tools.json`][third-party-tools].
+- **Bring each repo's `3rd Party Tools` entries onto the shared catalog.** Measured on 2026-08-08: 54 findings across four repos, every one of them a link or a description that disagrees with [`spec/third-party-tools.json`][third-party-tools].
   - **Blocked by** - Nothing.
   - **Issue** - None filed.
   - **Checked** - Every repo's default branch on 2026-08-08, with the hub read at its own `develop`, which now conforms.
-  - **Settled** - The bulk is absent descriptions rather than wrong ones: LanguageTags, MediaTools and PlexCleaner list bare links, which is 51 of the 55, and PlexCleaner alone is 26.
+  - **Settled** - The bulk is absent descriptions rather than wrong ones: 48 of the 54 are a tool listed with no description at all, across LanguageTags, MediaTools and PlexCleaner, and PlexCleaner alone accounts for 26. The remaining six split evenly, three describing a tool differently from the catalog and three linking it differently.
   - **Settled** - Twelve tools already appear in more than one repo, which is what makes the catalog worth having before the 17 repos owing the section write their own wording for each.
   - **Settled** - Four tools are already linked by two different URLs across the fleet, and the catalog picks one each: GitHub Actions takes `github.com/actions`, Dependabot takes `github.com/dependabot`, Nerdbank.GitVersioning takes the project repo rather than its marketplace action, and uv takes `docs.astral.sh/uv/` to match ruff. The hub was the outlier on the first two and is fixed.
   - **Settled** - PlexCleaner lists Bring Your Own Badge as a tool, so the retired badge service has a fourth touchpoint beyond the three rendering it, and that entry goes with the same deletion.
   - **Settled** - The catalog is a standard set and not a complete one, so a tool only one repo uses is unaudited. Of the 36 tools the fleet lists today, 24 are used by exactly one repo and are declared only so the second adopter copies rather than invents.
 
-- **Work off the reference-link naming and grouping backlog.** Measured across all 22 repos on 2026-08-08: 56 letter findings on naming and 28 drift findings on grouping.
+- **Work off the reference-link naming and grouping backlog.** Measured across all 22 repos on 2026-08-08: 55 letter findings on naming and 27 drift findings on grouping.
   - **Blocked by** - Nothing, and each repo's block is one edit.
   - **Issue** - None filed.
   - **Checked** - Every repo's default branch on 2026-08-08, with the hub read at its own `develop`, which now conforms.

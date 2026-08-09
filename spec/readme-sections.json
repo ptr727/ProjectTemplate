@@ -18,13 +18,13 @@
     ],
     "linkGroups": [
         { "name": "Sections", "holds": "anchor", "note": "In-page anchors, which the auto-generated Table of Contents does not use since it keeps inline links." },
-        { "name": "Shields", "holds": "shield", "note": "Badge URLs under img.shields.io, and nothing else." },
+        { "name": "Shields", "holds": "shield", "note": "Badges, meaning any reference the document renders as an image, whatever host serves it." },
         { "name": "Distribution", "holds": "distribution", "note": "This project's own presence on a platform: its GitHub repository and the pages under it, its Docker Hub images, its NuGet packages, its PyPI packages. Separate from External because a reader looking for where the project ships should not have to pick it out of a list of third-party URLs." },
         { "name": "Repo", "holds": "local", "note": "Files and paths inside this repository." },
         { "name": "External", "holds": "external", "note": "Every other URI, meaning anything that is not this project." }
     ],
     "linkNaming": [
-        { "kind": "shield", "suffix": "-shield", "note": "A badge under img.shields.io." },
+        { "kind": "shield", "suffix": "-shield", "note": "A badge, judged by the document rendering the reference as an image rather than by the host serving it." },
         { "kind": "distribution", "suffix": "-link", "note": "A URI." },
         { "kind": "external", "suffix": "-link", "note": "A URI." },
         { "kind": "anchor", "suffix": "", "note": "An in-page anchor is a bare reference." },
