@@ -77,15 +77,15 @@ def read_tool(tool: dict) -> tuple[str, str | None, str | None]:
     and `read` otherwise. The three are kept apart because they have different remedies: install it,
     fix this file's pattern, or act on the version.
     """
-    # The probe that answered is remembered rather than assumed to be the first one declared.
-    # Naming a probe that never ran sends the reader to fix a pattern against output they cannot reproduce.
-    answered = None
+    # Every probe that answered is remembered, rather than any one of them standing for the rest.
+    # Naming a probe that never ran sends the reader to fix a pattern against output they cannot reproduce, and naming one of several that did is the same error at smaller scale.
+    # The pattern has to match one of these, so all of them are what the reader needs, and picking the first or the last is a guess either way.
+    answered: list[str] = []
     for argv in tool['probes']:
         out = probe(argv)
         if out is None:
             continue
-        if answered is None:
-            answered = ' '.join(argv)
+        answered.append(' '.join(argv))
         try:
             m = re.search(tool['pattern'], out)
         except re.error:
@@ -94,9 +94,9 @@ def read_tool(tool: dict) -> tuple[str, str | None, str | None]:
             return 'unreadable', None, ' '.join(argv)
         if m:
             return 'read', m.group(1), ' '.join(argv)
-    if answered is None:
+    if not answered:
         return 'absent', None, None
-    return 'unreadable', None, answered
+    return 'unreadable', None, '` and `'.join(answered)
 
 
 REQUIRED_FIELDS = ('name', 'probes', 'pattern', 'minimum', 'why')

@@ -100,6 +100,22 @@ class TestReadTool(unittest.TestCase):
         self.assertIn(sys.executable, how)
         self.assertNotIn('xyzzy', how)
 
+    def test_unreadable_names_every_probe_that_answered(self):
+        """The pattern has to match one of them, so citing one of several sends the reader to the wrong output."""
+        entry = tool('odd', probes=[[sys.executable, '-c', 'print("first has none")'],
+                                    [sys.executable, '-c', 'print("second has none")']])
+        status, _, how = host_gate.read_tool(entry)
+        self.assertEqual(status, 'unreadable')
+        self.assertIn('first has none', how)
+        self.assertIn('second has none', how)
+
+    def test_a_probe_that_never_ran_is_still_left_out_of_the_citation(self):
+        entry = tool('odd', probes=[[sys.executable, '-c', 'print("ran")'],
+                                    ['definitely-not-a-real-binary-xyzzy']])
+        _, _, how = host_gate.read_tool(entry)
+        self.assertIn('ran', how)
+        self.assertNotIn('xyzzy', how)
+
 
 class TestCheck(unittest.TestCase):
     def setUp(self):
