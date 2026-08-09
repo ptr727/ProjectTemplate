@@ -7,13 +7,14 @@ remedy line under a floor failure was counted as a second issue. Both are cheap 
 neither was visible from reading the code.
 """
 from __future__ import annotations
+
 import json
 import sys
 import unittest
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
-import host_gate  # noqa: E402
+import host_gate
 
 
 def tool(name, minimum=None, required=True, probes=None, pattern=r'v(\d+(?:\.\d+)*)', **extra):

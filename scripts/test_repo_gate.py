@@ -8,7 +8,15 @@ other half: a check whose scan matches nothing reports zero issues and reads exa
 Run as `python3 scripts/test_repo_gate.py`, or under `python3 -m unittest discover -s scripts`.
 """
 from __future__ import annotations
-import contextlib, io, re, shutil, subprocess, sys, tempfile, unittest
+
+import contextlib
+import io
+import re
+import shutil
+import subprocess
+import sys
+import tempfile
+import unittest
 from pathlib import Path
 from unittest import mock
 

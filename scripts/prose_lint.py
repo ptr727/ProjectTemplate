@@ -17,7 +17,14 @@ these rules, so nothing enforced them before this script. Rules implemented:
 Exit 1 if any violation is found. Read-only, never edits.
 """
 from __future__ import annotations
-import argparse, io, re, subprocess, sys, tokenize, unicodedata
+
+import argparse
+import io
+import re
+import subprocess
+import sys
+import tokenize
+import unicodedata
 from pathlib import Path
 from typing import NamedTuple, TypedDict
 

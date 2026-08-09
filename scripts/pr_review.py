@@ -62,7 +62,15 @@ such failure and no id to hide. See .github/copilot-instructions.md for the runb
 GOVERNANCE.md "Repository Boundaries and Write Safety" for the rules `reply` enforces.
 """
 from __future__ import annotations
-import argparse, io, json, re, subprocess, sys, tarfile, time
+
+import argparse
+import io
+import json
+import re
+import subprocess
+import sys
+import tarfile
+import time
 from datetime import datetime, timezone
 from pathlib import Path
 
@@ -978,7 +986,7 @@ def checks_unreadable(pr: dict) -> bool:
     than as this reading having failed. A silent narrowing is the failure mode this whole script
     is built against, and it does not get an exception for its own newest field.
     """
-    return bool(((pr.get('commits') or {}).get('nodes') or [])) and not head_commit(pr)
+    return bool((pr.get('commits') or {}).get('nodes') or []) and not head_commit(pr)
 
 
 def checks_tally(nodes: list[dict]) -> tuple[int, int]:

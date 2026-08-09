@@ -162,7 +162,7 @@ def driftnote_findings(entry, spec, open_count):
                 out.append(("DRIFT", f"registry: driftNote names check '{cid}', whose type '{owner}' this repo does not declare: {quoted}"))
             else:
                 out.append(("DRIFT", f"registry: driftNote names check '{cid}', which this audit does not evaluate by id (AUDIT.md section 4) - judge it by hand and delete the note once it passes: {quoted}"))
-        marker = next((w for w in PENDING_MARKERS if re.search(rf"\b{re.escape(w)}\b", note, re.I)), None)
+        marker = next((w for w in PENDING_MARKERS if re.search(rf"\b{re.escape(w)}\b", note, re.IGNORECASE)), None)
         if marker and not open_count:
             out.append(("DRIFT", f"registry: driftNote says '{marker}' but the audit is clean - verify and reconcile: {quoted}"))
         elif marker:
@@ -310,7 +310,7 @@ def heading_texts(markdown):
     return {m.group(1).strip().lower() for line in markdown.splitlines() for m in (_HEADING.match(line),) if m}
 
 
-_HTML_COMMENT = re.compile(r"<!--.*?-->", re.S)
+_HTML_COMMENT = re.compile(r"<!--.*?-->", re.DOTALL)
 _MD_LINK_INLINE = re.compile(r"\[([^\]]*)\]\((?:[^()]|\([^()]*\))*\)")  # URL may hold one level of ()
 _MD_LINK_REF = re.compile(r"\[([^\]]*)\]\[[^\]]*\]")
 
@@ -363,10 +363,10 @@ def tagline(intro):
 
 _MD_IMAGE_REF = re.compile(r"!\[[^\]]*\]\[([^\]]+)\]")
 _MD_IMAGE_INLINE = re.compile(r"!\[[^\]]*\]\((\S+?)\)")
-_LINK_DEF = re.compile(r"^\[([^\]]+)\]:\s*(\S+)", re.M)
+_LINK_DEF = re.compile(r"^\[([^\]]+)\]:\s*(\S+)", re.MULTILINE)
 # A URI scheme, requiring two or more characters so a `C:` drive letter is not read as one.
 # Every scheme a README actually carries (mailto, ftp, ssh, git, tel, data) is longer than that.
-_URI_SCHEME = re.compile(r"[a-z][a-z0-9+.\-]+:", re.I)
+_URI_SCHEME = re.compile(r"[a-z][a-z0-9+.\-]+:", re.IGNORECASE)
 
 
 def unfenced_text(text):
@@ -711,10 +711,8 @@ def table_cells(line):
     s = line.strip()
     if "|" not in s:
         return None
-    if s.startswith("|"):
-        s = s[1:]
-    if s.endswith("|"):
-        s = s[:-1]
+    s = s.removeprefix("|")
+    s = s.removesuffix("|")
     return [c.strip() for c in s.split("|")]
 
 
@@ -1210,7 +1208,7 @@ def audit_repo(entry, spec, branch=None):
     # Language ecosystems such as nuget, uv and npm are directory-scoped and not yet cross-checked here.
     db = gh(f"repos/{slug}/contents/.github/dependabot.yml?ref={ground}", ok404=True)
     if db and db.get("content"):
-        declared = set(re.findall(r'^[ \t]*-?[ \t]*package-ecosystem:[ \t]*["\']?([\w-]+)', base64.b64decode(db["content"]).decode("utf-8", "replace"), re.M))
+        declared = set(re.findall(r'^[ \t]*-?[ \t]*package-ecosystem:[ \t]*["\']?([\w-]+)', base64.b64decode(db["content"]).decode("utf-8", "replace"), re.MULTILINE))
         implied = {}
         workflows = gh(f"repos/{slug}/contents/.github/workflows?ref={ground}", ok404=True)
         if isinstance(workflows, list) and any(e["name"].endswith((".yml", ".yaml")) for e in workflows):
@@ -1475,7 +1473,7 @@ def _selftest():
         got = classify_verbatim(down, canon_t, history)
         if got != want:
             ok = False
-        print(f"  {'ok  ' if got == want else 'FAIL'} want={str(want):>8} got={str(got):>8}  verbatim: {label}")
+        print(f"  {'ok  ' if got == want else 'FAIL'} want={want!s:>8} got={got!s:>8}  verbatim: {label}")
     # Action-pin neutralization, where a Dependabot uses:@<sha> bump, meaning both the 40-hex sha and its ` # vN` comment, must not count as verbatim drift, while a changed action name must.
     # This is what lets a verbatim workflow region survive routine action bumps while still catching a real fork.
     pin_a = "      - uses: actions/checkout@" + "a" * 40 + " # v7.0.0\n"
@@ -1713,7 +1711,7 @@ def _selftest():
         "[license-shield]: https://img.shields.io/github/license/o/r\n"
     )
     # The four repos that suffix every heading for the ToC extension must read identically to the plain form.
-    omit_toc = re.sub(r"^(#{2,3} .*)$", r"\1 <!-- omit from toc -->", conformant, flags=re.M)
+    omit_toc = re.sub(r"^(#{2,3} .*)$", r"\1 <!-- omit from toc -->", conformant, flags=re.MULTILINE)
     readme_cases = [
         ("a conformant README, repo-specific section included", conformant, set(), True, 0),
         ("a second intro paragraph is not a finding", conformant.replace("A fixture repository.\n", "A fixture repository.\n\nAnd a clarifying paragraph about it.\n"), set(), True, 0),

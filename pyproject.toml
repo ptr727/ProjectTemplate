@@ -6,6 +6,11 @@ line-length = 100
 
 [tool.ruff.lint]
 extend-select = ["I"]  # isort import ordering, on top of the default rules
+# UP017 rewrites `timezone.utc` to `datetime.UTC`, which needs Python 3.11.
+# `spec/host-tools.json` declares no python3 floor and records why.
+# Every script here is standard library only, so a bare interpreter is enough.
+# Taking the rewrite would create that floor silently, as a lint fix rather than a decision.
+ignore = ["UP017"]
 
 [tool.mypy]
 python_version = "3.13"

@@ -9,7 +9,14 @@ GraphQL payload and asserts the reading, with `gql` replaced so no case reaches 
 Run as `python3 scripts/test_pr_review.py`, or under `python3 -m unittest discover -s scripts`.
 """
 from __future__ import annotations
-import contextlib, io, json, re, subprocess, sys, unittest
+
+import contextlib
+import io
+import json
+import re
+import subprocess
+import sys
+import unittest
 from datetime import datetime, timedelta, timezone
 from itertools import count
 from pathlib import Path

@@ -8,7 +8,15 @@ rather than restating it: a proof that restates the gated data proves only that 
 Run as `python3 scripts/test_prose_lint.py`, or under `python3 -m unittest discover -s scripts`.
 """
 from __future__ import annotations
-import contextlib, io, json, re, subprocess, sys, tempfile, unittest
+
+import contextlib
+import io
+import json
+import re
+import subprocess
+import sys
+import tempfile
+import unittest
 from pathlib import Path
 from unittest import mock
 
@@ -129,14 +137,14 @@ class TestGovernanceCoupling(unittest.TestCase):
 
     def setUp(self) -> None:
         self.doc = GOVERNANCE.read_text(encoding='utf-8')
-        section = re.search(r'^### Character Set$(.*?)^### ', self.doc, re.M | re.S)
+        section = re.search(r'^### Character Set$(.*?)^### ', self.doc, re.MULTILINE | re.DOTALL)
         if section is None:
             self.fail('the Character Set heading moved, so the parse is blind')
         self.section = section.group(1)
 
     def tier_codepoints(self, label: str) -> set[int]:
         """Codepoints named in one tier's bullet, read out of the rule text itself."""
-        m = re.search(rf'^- \*\*Tier {label},(.*?)(?=^- \*\*)', self.section, re.M | re.S)
+        m = re.search(rf'^- \*\*Tier {label},(.*?)(?=^- \*\*)', self.section, re.MULTILINE | re.DOTALL)
         if m is None:
             self.fail(f'the Tier {label} bullet moved, so the parse is blind')
         return {int(h, 16) for h in re.findall(r'U\+([0-9A-Fa-f]{4})', m.group(1))}
