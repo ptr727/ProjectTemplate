@@ -23,7 +23,12 @@ Exit 0 = every required tool is present and at or above its floor. 1 = at least 
 below. 2 = the declaration itself could not be read, which is a defect here rather than on the host.
 """
 from __future__ import annotations
-import argparse, json, re, subprocess, sys
+
+import argparse
+import json
+import re
+import subprocess
+import sys
 from pathlib import Path
 
 SPEC = Path(__file__).resolve().parent.parent / 'spec' / 'host-tools.json'

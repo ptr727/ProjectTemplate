@@ -63,7 +63,7 @@
                 "minimum": {
                     "type": ["string", "null"],
                     "pattern": "^\\d+(\\.\\d+)*$",
-                    "description": "The lowest acceptable version as dot-separated integers, or null where no floor has been measured. A floor is declared only where a version is known to break a documented procedure."
+                    "description": "The lowest acceptable version as dot-separated integers, or null where no floor applies. A floor is either measured, sitting above a version known to break a documented procedure, or a target, naming the version the repo's toolchain is configured for. The why field says which, since the two carry different weight to a host that fails one."
                 },
                 "why": {
                     "type": "string",

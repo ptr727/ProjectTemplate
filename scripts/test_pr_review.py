@@ -9,8 +9,15 @@ GraphQL payload and asserts the reading, with `gql` replaced so no case reaches 
 Run as `python3 scripts/test_pr_review.py`, or under `python3 -m unittest discover -s scripts`.
 """
 from __future__ import annotations
-import contextlib, io, json, re, subprocess, sys, unittest
-from datetime import datetime, timedelta, timezone
+
+import contextlib
+import io
+import json
+import re
+import subprocess
+import sys
+import unittest
+from datetime import UTC, datetime, timedelta
 from itertools import count
 from pathlib import Path
 from unittest import mock
@@ -105,7 +112,7 @@ def thread(tid: str, resolved: bool = False, login: str = pr_review.REVIEWER,
 
 
 # A fixed clock, so a case holds a check at a known age instead of at whatever the suite runs at.
-NOW = datetime(2026, 8, 6, 17, 0, 0, tzinfo=timezone.utc)
+NOW = datetime(2026, 8, 6, 17, 0, 0, tzinfo=UTC)
 
 
 def ago(seconds: int) -> str:
@@ -121,7 +128,7 @@ def ago(seconds: int) -> str:
 
 def real_ago(seconds: int) -> str:
     """A timestamp `seconds` before the real clock, for the `wait` path, which reads that clock."""
-    return (datetime.now(timezone.utc) - timedelta(seconds=seconds)).strftime('%Y-%m-%dT%H:%M:%SZ')
+    return (datetime.now(UTC) - timedelta(seconds=seconds)).strftime('%Y-%m-%dT%H:%M:%SZ')
 
 
 def check(name: str = 'Check pull request workflow status job', status: str = 'COMPLETED',

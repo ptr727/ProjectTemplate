@@ -215,7 +215,7 @@ def main():
         newline, existing = "\n", ""
     for marker, filename in blocks:
         snippet = (HERE / filename).read_text(encoding="utf-8").strip()
-        block_re = re.compile(rf"<!-- {marker} v\d+ start -->.*?<!-- {marker} v\d+ end -->", re.S)
+        block_re = re.compile(rf"<!-- {marker} v\d+ start -->.*?<!-- {marker} v\d+ end -->", re.DOTALL)
         if block_re.search(existing):
             existing, action = block_re.sub(lambda _: snippet, existing), "updated"
         else:

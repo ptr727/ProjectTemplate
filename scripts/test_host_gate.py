@@ -7,13 +7,15 @@ remedy line under a floor failure was counted as a second issue. Both are cheap 
 neither was visible from reading the code.
 """
 from __future__ import annotations
+
 import json
+import re
 import sys
 import unittest
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
-import host_gate  # noqa: E402
+import host_gate
 
 
 def tool(name, minimum=None, required=True, probes=None, pattern=r'v(\d+(?:\.\d+)*)', **extra):
@@ -403,10 +405,76 @@ class TestShippedDeclaration(unittest.TestCase):
             if t['minimum'] is not None:
                 self.assertTrue(t.get('source'), f'{t["name"]} declares a floor and no source to install from')
 
-    def test_the_two_known_defects_are_the_declared_floors(self):
-        """A floor exists only where a defect is known, so this asserts the set rather than a count."""
+    def test_the_declared_floors_are_the_ones_with_a_stated_reason(self):
+        """A floor is justified or it is not there, so this asserts the set rather than a count.
+
+        Two kinds qualify. A measured floor sits above a version known to break a documented
+        procedure, and a target floor names the version the repo's toolchain is configured for.
+        The set is asserted so that adding a floor is a deliberate edit here rather than a silent
+        one in the data, which is what caught the python3 floor being added without this line.
+        """
         floors = {t['name'] for t in self.data['tools'] if t['minimum'] is not None}
-        self.assertEqual(floors, {'gh', 'git-restore-mtime'})
+        self.assertEqual(floors, {'gh', 'git-restore-mtime', 'python3'})
+
+    def test_the_contract_table_carries_every_declared_floor(self):
+        """docs/host-setup.md restates the floors, so the doc goes stale the moment the data moves.
+
+        The table's other columns answer presence, and a tool below its floor answers `--version`
+        like any other, so the Floor column is the only thing there that distinguishes present from
+        sufficient. A number that drifts out of step with the data is worse than an absent one,
+        since a host reads the table and stops.
+        """
+        def norm(text):
+            """A prose label reduced to the identifier it names, so `Python 3` keys as `python3`."""
+            return re.sub(r'[^a-z0-9.]', '', text.lower())
+
+        doc = (host_gate.SPEC.parent.parent / 'docs' / 'host-setup.md').read_text(encoding='utf-8')
+        rows, floor_col = {}, None
+        for ln in doc.splitlines():
+            cells = [c.strip() for c in ln.strip('|').split('|')] if ln.startswith('| ') else None
+            # Reading stops at the end of the contract table rather than at the end of the file.
+            # A later table's first column is a key like any other and would overwrite a tool row.
+            # The document carries a second table today whose keys collide with nothing.
+            # A test that depends on that is a test the next table silently breaks.
+            if floor_col is not None and cells is None:
+                break
+            if cells is None:
+                continue
+            # Every lookup here is on one named cell, never on the row and never on a fixed index.
+            # Searching the row matches the probe command in `Present when` as well.
+            # A table stating a version there would then satisfy this with the Floor column deleted.
+            # That is the failure this test exists to catch rather than to reproduce.
+            if floor_col is None:
+                if 'floor' in [c.lower() for c in cells]:
+                    floor_col = [c.lower() for c in cells].index('floor')
+                continue
+            if cells:
+                rows[norm(cells[0])] = cells
+        self.assertIsNotNone(floor_col, 'docs/host-setup.md has no contract table with a Floor column')
+        for t in self.data['tools']:
+            # An optional tool is deliberately outside the table, which lists what a host must provide.
+            # `git-restore-mtime` carries a floor and no row, and that is correct.
+            if t['minimum'] is None or not t.get('required'):
+                continue
+            key = norm(t['name'])
+            self.assertIn(key, rows, f'{t["name"]} declares a floor and has no row in the contract table')
+            cells = rows[key]
+            self.assertGreater(len(cells), floor_col,
+                               f'the {t["name"]} row has no Floor cell')
+            self.assertIn(t['minimum'], cells[floor_col],
+                          f'{t["name"]} declares {t["minimum"]} and its Floor cell says '
+                          f'{cells[floor_col]!r}')
+
+    def test_a_target_floor_says_so_rather_than_implying_a_defect(self):
+        """The python3 floor is a target, so its `why` has to distinguish itself from a measured one.
+
+        A reader who takes a target floor for a measured one goes looking for a defect report that
+        does not exist, which is the failure the two-kinds wording was written to prevent.
+        """
+        python3 = next(t for t in self.data['tools'] if t['name'] == 'python3')
+        self.assertEqual(python3['minimum'], '3.13')
+        self.assertIn('target', python3['why'])
+        self.assertIn('unverified rather than known broken', python3['why'])
 
 
 if __name__ == '__main__':
