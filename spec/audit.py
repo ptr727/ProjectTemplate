@@ -498,16 +498,21 @@ def distribution_prefixes(model, slug):
                  for p in model.get("distribution", {}).get("urlPrefixes", []))
 
 
-def link_kind(url, slug, rendered=(), prefixes=()):
+def link_kind(url, slug, is_rendered=False, prefixes=()):
     """Which linkGroups kind a reference definition points at, for the repo at `slug`.
 
-    A reference in `rendered`, meaning one the document uses as an image, is a shield whatever host serves it.
-    Keying on the host read a badge from any other host as a plain URI and asked for it to be renamed `-link`,
-    which is a rename away from the convention. The case that found it was a retired last-build service, which
-    deprecatedShields now reports separately, but the rule is about how a reference is used rather than about
-    any one host, so there is no img.shields.io short-circuit here: across the fleet all 119 img.shields.io
-    definitions are rendered as images, so a host test classifies nothing usage does not and can only
-    contradict the rule it sits beside.
+    `is_rendered` says whether this one reference is used as an image, which makes it a shield whatever host
+    serves it. It is per reference rather than per URL deliberately: two names can point at one URL, and
+    keying on the URL would make a plain link a shield because some other reference to the same address is
+    rendered, which the spec's wording ("a badge, judged by the document rendering the reference as an image")
+    does not say.
+
+    Keying on the host instead read a badge from any other host as a plain URI and asked for it to be renamed
+    `-link`, which is a rename away from the convention. The case that found it was a retired last-build
+    service, which deprecatedShields now reports separately, but the rule is about how a reference is used
+    rather than about any one host, so there is no img.shields.io short-circuit here: across the fleet all 119
+    img.shields.io definitions are rendered as images, so a host test classifies nothing usage does not and
+    can only contradict the rule it sits beside.
 
     Distribution is scoped to this repo's own URLs, so a link to somebody else's GitHub repo or Docker Hub
     image, which a 3rd Party Tools list is full of, stays external rather than being read as a channel of this
@@ -521,7 +526,7 @@ def link_kind(url, slug, rendered=(), prefixes=()):
         return "local"
     if prefixes and url.lower().startswith(tuple(prefixes)):
         return "distribution"
-    return "shield" if url in rendered else "external"
+    return "shield" if is_rendered else "external"
 
 
 def canonical_link_entry(url, model, slug):
@@ -558,7 +563,7 @@ def canonical_name_findings(defs, model, slug, rendered=(), prefixes=()):
     """
     findings, hits = [], {}
     for ref, url in defs:
-        if link_kind(url, slug, rendered, prefixes) != "distribution":
+        if link_kind(url, slug, ref in rendered, prefixes) != "distribution":
             continue
         c = canonical_link_entry(url, model, slug)
         if c:
@@ -585,7 +590,6 @@ def readme_link_findings(text, model, slug):
     of every README at once.
     """
     findings = []
-    norm = _HTML_COMMENT.sub(lambda m: "\x00" + m.group(0) + "\x00", normalize(text))
     suffixes = {n["kind"]: n["suffix"] for n in model["linkNaming"]}
     prefixes = distribution_prefixes(model, slug)
     groups = model["linkGroups"]
@@ -619,10 +623,10 @@ def readme_link_findings(text, model, slug):
     # Read over the unfenced text for the same reason the definitions are.
     # An `![alt][ref]` inside a code sample is markup being shown rather than a badge being rendered, and counting it would make a plain link a shield.
     by_ref = dict(all_defs)
-    rendered = {by_ref[m.group(1)] for m in _MD_IMAGE_REF.finditer("\n".join(unfenced)) if m.group(1) in by_ref}
+    rendered = {m.group(1) for m in _MD_IMAGE_REF.finditer("\n".join(unfenced)) if m.group(1) in by_ref}
     described = {"shield": "a badge", "anchor": "an in-page anchor", "local": "a path in this repo"}
     for ref, url in all_defs:
-        kind = link_kind(url, slug, rendered, prefixes)
+        kind = link_kind(url, slug, ref in rendered, prefixes)
         want = suffixes.get(kind, "")
         got = "-shield" if ref.endswith("-shield") else "-link" if ref.endswith("-link") else ""
         if got != want:
@@ -650,7 +654,7 @@ def readme_link_findings(text, model, slug):
         if names != sorted(names):
             findings.append(("DRIFT", f"readme: the `{header}` group is not sorted by reference name (spec/readme-structure.md)"))
         want_kind = holds.get(header.lower())
-        strays = {link_kind(u, slug, rendered, prefixes) for _, u in defs} - {want_kind} if want_kind else set()
+        strays = {link_kind(u, slug, r in rendered, prefixes) for r, u in defs} - {want_kind} if want_kind else set()
         if strays:
             findings.append(("DRIFT", f"readme: the `{header}` group holds {', '.join(sorted(strays))} reference(s) where it holds {want_kind} (spec/readme-structure.md)"))
     return findings
@@ -1714,6 +1718,9 @@ def _selftest():
         # The owner-scoped prefixes are what separate the two, and they live in the model rather than in the code.
         ("somebody else's NuGet package is not renamed nuget-link", links_ok.replace("[upstream-link]: https://github.com/someone-else/their-repo", "[upstream-link]: https://www.nuget.org/packages/Serilog/"), 0, 0),
         ("this project's own NuGet package is renamed", links_ok.replace("[upstream-link]: https://github.com/someone-else/their-repo", "[upstream-link]: https://www.nuget.org/packages/o.Widget/"), 1, 1),
+        # Two names may point at one URL, and only the rendered one is a shield.
+        # Keying on the URL instead would make the plain link a shield because its twin is rendered.
+        ("a second reference to a rendered URL is not itself a shield", links_ok.replace("[upstream-link]: https://github.com/someone-else/their-repo", "[upstream-link]: https://img.shields.io/github/license/o/r"), 0, 0),
     ]
     for label, text, want_letter, want_drift in link_cases:
         got = readme_link_findings(text, rm, "o/r")
