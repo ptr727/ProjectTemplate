@@ -431,15 +431,22 @@ class TestShippedDeclaration(unittest.TestCase):
         doc = (host_gate.SPEC.parent.parent / 'docs' / 'host-setup.md').read_text(encoding='utf-8')
         rows, floor_col = {}, None
         for ln in doc.splitlines():
-            if not ln.startswith('| '):
+            cells = [c.strip() for c in ln.strip('|').split('|')] if ln.startswith('| ') else None
+            # Reading stops at the end of the contract table rather than at the end of the file.
+            # A later table's first column is a key like any other and would overwrite a tool row.
+            # The document carries a second table today whose keys collide with nothing.
+            # A test that depends on that is a test the next table silently breaks.
+            if floor_col is not None and cells is None:
+                break
+            if cells is None:
                 continue
-            cells = [c.strip() for c in ln.strip('|').split('|')]
             # Every lookup here is on one named cell, never on the row and never on a fixed index.
             # Searching the row matches the probe command in `Present when` as well.
             # A table stating a version there would then satisfy this with the Floor column deleted.
             # That is the failure this test exists to catch rather than to reproduce.
-            if floor_col is None and 'floor' in [c.lower() for c in cells]:
-                floor_col = [c.lower() for c in cells].index('floor')
+            if floor_col is None:
+                if 'floor' in [c.lower() for c in cells]:
+                    floor_col = [c.lower() for c in cells].index('floor')
                 continue
             if cells:
                 rows[norm(cells[0])] = cells
