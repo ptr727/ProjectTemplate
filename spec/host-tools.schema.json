@@ -20,6 +20,20 @@
             "type": "object",
             "required": ["name", "probes", "pattern", "minimum", "why"],
             "additionalProperties": false,
+            "allOf": [
+                {
+                    "title": "A declared floor carries a source",
+                    "description": "A host below a floor is told where to install from rather than only to upgrade, which is the whole reason source exists. spec/validate.py enforces this, and encoding it here stops a declaration being schema-valid and validator-invalid at once. A null minimum declares no floor, so the requirement does not apply to it.",
+                    "if": {
+                        "required": ["minimum"],
+                        "properties": { "minimum": { "type": "string" } }
+                    },
+                    "then": {
+                        "required": ["source"],
+                        "properties": { "source": { "minProperties": 1 } }
+                    }
+                }
+            ],
             "properties": {
                 "name": {
                     "type": "string",

@@ -157,7 +157,9 @@ def main():
             if not isinstance(t.get("pattern"), str) or not t.get("pattern"):
                 errors.append(f"host-tools.json: '{name}' needs a non-empty pattern to read a version with")
             probes = t.get("probes")
-            if not isinstance(probes, list) or not probes or not all(isinstance(p, list) and p and all(isinstance(a, str) for a in p) for p in probes):
+            # The emptiness of each argument is read as well as its type, so this says what it claims and agrees with the gate's own check.
+            # An empty argument passes a type test and produces a probe that cannot execute.
+            if not isinstance(probes, list) or not probes or not all(isinstance(p, list) and p and all(isinstance(a, str) and a for a in p) for p in probes):
                 errors.append(f"host-tools.json: '{name}' needs 'probes' as a non-empty array of non-empty string arrays")
             floor = t.get("minimum", False)
             if floor is False:
