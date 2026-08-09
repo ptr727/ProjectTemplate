@@ -252,7 +252,7 @@ def main(argv: list[str] | None = None) -> int:
     try:
         data = json.loads(Path(a.spec).read_text(encoding='utf-8'))
         tools = data['tools']
-    except (OSError, ValueError, KeyError) as e:
+    except (OSError, ValueError, KeyError, TypeError) as e:
         print(f'{a.spec}: cannot read the host tool declaration ({e})', file=sys.stderr)
         return 2
 
@@ -263,7 +263,7 @@ def main(argv: list[str] | None = None) -> int:
     if not a.no_local and local_path.is_file():
         try:
             local = json.loads(local_path.read_text(encoding='utf-8'))['tools']
-        except (OSError, ValueError, KeyError) as e:
+        except (OSError, ValueError, KeyError, TypeError) as e:
             print(f'{local_path}: cannot read the repository host tool declaration ({e})', file=sys.stderr)
             return 2
         # The shape is checked before merging rather than discovered inside it, since a repository file is not validated by anything upstream.

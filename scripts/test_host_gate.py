@@ -258,6 +258,32 @@ class TestMalformedLocalFile(unittest.TestCase):
         with tempfile.TemporaryDirectory() as d:
             self.assertEqual(self.run_against(Path(d), '{not json'), 2)
 
+    def test_a_top_level_that_is_not_an_object_exits_two(self):
+        """Indexing a list or a null with a string raises TypeError, which is not a ValueError."""
+        import tempfile
+        for payload in ('[]', 'null', '"a string"', '3'):
+            with tempfile.TemporaryDirectory() as d:
+                self.assertEqual(self.run_against(Path(d), payload), 2, payload)
+
+
+class TestMalformedHubFile(unittest.TestCase):
+    """The same hole on the hub read, which the docstring says exits 2 with a diagnostic."""
+
+    def test_a_top_level_that_is_not_an_object_exits_two(self):
+        import tempfile
+        for payload in ('[]', 'null', '3'):
+            with tempfile.TemporaryDirectory() as d:
+                spec = Path(d) / 'host-tools.json'
+                spec.write_text(payload, encoding='utf-8')
+                self.assertEqual(host_gate.main(['--spec', str(spec), '--no-local', '--quiet']), 2, payload)
+
+    def test_unparsable_hub_json_exits_two(self):
+        import tempfile
+        with tempfile.TemporaryDirectory() as d:
+            spec = Path(d) / 'host-tools.json'
+            spec.write_text('{not json', encoding='utf-8')
+            self.assertEqual(host_gate.main(['--spec', str(spec), '--no-local', '--quiet']), 2)
+
 
 class TestShippedDeclaration(unittest.TestCase):
     """The file this repo actually ships, read rather than assumed."""
