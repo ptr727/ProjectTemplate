@@ -787,18 +787,22 @@ def readme_shield_findings(text, model, entry):
     repo can be measured against.
     """
     findings = []
-    defs = {m.group(1): m.group(2) for m in _LINK_DEF.finditer(unfenced_text(text))}
+    # One unfenced view serves both passes, so the definitions and the rendered images cannot be read from different documents.
+    unfenced = unfenced_text(text)
+    defs = {m.group(1): m.group(2) for m in _LINK_DEF.finditer(unfenced)}
     # A retired badge service is scanned across the whole document rather than per section, since a dead badge is wrong wherever it sits.
     # It renders broken rather than absent, which a visitor reads as a failing build rather than as a stale badge.
     # Both forms are read, since reading definitions alone made an inline badge invisible rather than wrong, which is the reading shield_endpoints already takes for every other shield.
     # A definition is reported even where nothing renders it, because a retired service left in the reference block is removed with the badge rather than after it.
-    rendered = shield_endpoints(unfenced_text(text), defs)
+    # Which of the three it is decides the wording, since a definition nothing renders is not rendering anything and saying so sends the reader looking for a badge that is not on the page.
+    rendered = shield_endpoints(unfenced, defs)
     for dep in model.get("deprecatedShields", []):
         defined = set()
         for ref, url in sorted(defs.items()):
             if dep["match"] in url:
                 defined.add(url)
-                findings.append(("LETTER", f"readme: `[{ref}]` renders {dep['label']}, which is retired - {dep['reason']} (spec/readme-structure.md)"))
+                verb = f"renders {dep['label']}" if url in rendered else f"defines {dep['label']} and nothing renders it"
+                findings.append(("LETTER", f"readme: `[{ref}]` {verb}, which is retired - {dep['reason']} (spec/readme-structure.md)"))
         for url in sorted({u for u in rendered if dep["match"] in u} - defined):
             findings.append(("LETTER", f"readme: an inline image renders {dep['label']}, which is retired - {dep['reason']} (spec/readme-structure.md)"))
     targets = {(p.get("target") if isinstance(p, dict) else p) for p in entry.get("publish", [])}
@@ -1748,6 +1752,10 @@ def _selftest():
         ("a retired badge written inline is reported", conformant.replace("[![Last Commit][b]][x]", "[![Last Commit][b]][x]\\\n![Last Build](https://byob.yarr.is/o/r/lastbuild)"), {}, 1),
         ("a retired badge defined and rendered is one finding, not two", conformant.replace("[![Last Commit][b]][x]", "[![Last Commit][b]][x]\\\n![Last Build][last-build-shield]").replace("[license-shield]: https://img.shields.io/github/license/o/r\n", "[license-shield]: https://img.shields.io/github/license/o/r\n[last-build-shield]: https://byob.yarr.is/o/r/lastbuild\n"), {}, 1),
         ("a retired badge shown as a fenced sample is markup", conformant.replace("## Overview", "```md\n![Last Build](https://byob.yarr.is/o/r/lastbuild)\n```\n\n## Overview"), {}, 0),
+        # The wording follows which of the three shapes it is, since a definition nothing renders is not rendering anything.
+        # Saying it renders sends the reader looking for a badge that is not on the page.
+        ("an unrendered definition says so rather than claiming a render", conformant.replace("[license-shield]: https://img.shields.io/github/license/o/r\n", "[license-shield]: https://img.shields.io/github/license/o/r\n[last-build-shield]: https://byob.yarr.is/o/r/lastbuild\n"), {}, 1, "nothing renders it"),
+        ("a rendered definition says renders", conformant.replace("[![Last Commit][b]][x]", "[![Last Commit][b]][x]\\\n![Last Build][last-build-shield]").replace("[license-shield]: https://img.shields.io/github/license/o/r\n", "[license-shield]: https://img.shields.io/github/license/o/r\n[last-build-shield]: https://byob.yarr.is/o/r/lastbuild\n"), {}, 1, "renders the byob"),
         ("the pre-release shield is told from the release shield by its query", conformant.replace("?include_prereleases&label=GitHub%20Pre-Release", "?label=Another%20Release"), {}, 1),
         # The license shield is an ordinary member of the base class, addressed to a different section.
         ("the license shield in the closing License section", conformant, {}, 0),
@@ -1759,12 +1767,18 @@ def _selftest():
         ("inline shields count as present", inline_all.replace("PLACEHOLDER-a", "github/actions/workflow/status/o/r").replace("PLACEHOLDER-b", "github/last-commit/o/r").replace("PLACEHOLDER-c", "github/v/release/o/r").replace("PLACEHOLDER-d", "github/v/release/o/r?include_prereleases").replace("PLACEHOLDER-license-shield", "github/license/o/r"), {}, 0),
         ("an inline shield in the wrong section is still exclusive", conformant.replace("## Overview", "![License](https://img.shields.io/github/license/o/r)\n\n## Overview"), {}, 1),
     ]
-    for label, text, ent, wantn in shield_cases:
+    # A case may carry a fifth element, a substring the finding text must contain.
+    # A count alone cannot tell one wording from another, and the wording is the whole subject of some of these cases.
+    for case in shield_cases:
+        label, text, ent, wantn = case[:4]
+        want_text = case[4] if len(case) > 4 else None
         got = readme_shield_findings(text, rm, ent)
-        if len(got) != wantn:
+        good = len(got) == wantn and (want_text is None or any(want_text in t for _, t in got))
+        if not good:
             ok = False
-        print(f"  {'ok  ' if len(got) == wantn else 'FAIL'} want={wantn} got={len(got)}  readme shields: {label}")
-        if len(got) != wantn:
+        shown = f"want={wantn}" if want_text is None else f"want={wantn}+'{want_text}'"
+        print(f"  {'ok  ' if good else 'FAIL'} {shown} got={len(got)}  readme shields: {label}")
+        if not good:
             for _, t in got:
                 print(f"         {t}")
 
