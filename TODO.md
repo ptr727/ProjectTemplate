@@ -345,10 +345,33 @@ The review loop ends by replying on a thread and resolving it, and both halves f
   - **Checked** - `develop` at `0e4a1c2` on 2026-08-08, reading the exit-code table in the `scripts/pr_review.py` module docstring.
   - **Detail** - This is the failure the suppressed-findings count already exists for, where a step that stopped running reads exactly like a step that passed.
 
+### Watching a Downstream Pull Request Touch Hub-Owned Content
+
+One pull request adding the observer the fleet has no equivalent of, reading merged pull requests across the fleet and resolving every changed path against what the hub declares it owns. The tools today read standing state, so a divergence is visible only once it is already there, and a repo-local file the manifest never names is invisible at every stage.
+
+**State** `ready`. **Touches** a new `spec/carry_watch.py` with its self-test, [`reports/`][reports], [`AUDIT.md`][audit-doc], and [`.github/workflows/validate-task.yml`][validate-task]. **Cost** one hub script, hub-only, plus a first run whose output is a triage backlog rather than a change.
+
+- **Read merged fleet pull requests and classify each changed path against the manifest.** The gap is a whole reading rather than a missing field, since nothing anywhere enumerates pull requests.
+  - **Blocked by** - Nothing.
+  - **Issue** - None filed. [#633][issue-633] is the instance that prompted it, raised by a downstream agent after the maintainer noticed it editing hub-managed CI files, and nothing mechanical had reported that.
+  - **Checked** - `develop` at `c2ce145` on 2026-08-08, reading [`spec/files.json`][files], [`spec/divergences.json`][divergences] and [`registry/repos.json`][repos], and running the enumeration query live against the owner.
+  - **Open** - How a window wider than a thousand results is split, since the GitHub search API caps there and a silent truncation is the false clean this whole class of tool exists against. The split has to be visible in the output rather than inferred.
+  - **Open** - Whether a `SECTION` or `CONTRACT` classification reads content in the same pass or defers to a human, since the path alone says a carried file moved and not which region of it.
+  - **Settled** - The enumeration is one query rather than a per-repo loop, measured live: `search(query: "org:ptr727 is:pr is:merged base:main merged:>=<DATE>", type: ISSUE)` returned 112 pull requests over a fortnight with per-pull-request `files` and `repository` inline. The `base:` term comes from each repo's registry `groundTruthBranch` rather than a hardcoded `main`.
+  - **Settled** - It belongs in `spec/` beside [`spec/fidelity_honesty.py`][fidelity-honesty], which is its sibling in every respect that decides placement, being owner-initiated, absent from CI, an importer of `audit` as a library, and a writer of a generated report. [`scripts/`][scripts] holds gates run against one repo named by `--root`.
+  - **Settled** - The classes are `OVERSTEP` for a `verbatim` whole unit, `SECTION` for a path declaring verbatim sections, `CONTRACT` for an `interface` unit, `GAP` for a path the hub tracks that the manifest never names, and `CANDIDATE` for a path absent from the hub changed in a pull request that also touched one of the others.
+  - **Settled** - `intent` and `presence` units are deliberately not watched, being downstream-owned by design, and that exclusion is what makes suppression keyed on the ledger correct rather than over-broad.
+  - **Settled** - `GAP` plus `CANDIDATE` is the pair that means a downstream wired local tooling into a workflow the hub authored, which is exactly `ptr727/Blog#69`: it changed `.gitattributes`, `.github/workflows/validate-task.yml` which is a ledger `gaps` entry dispositioned `investigate`, and a `checks/check-eol-pins.py` the hub has never heard of. A sibling pull request shows the same shape over a whole `checks/` tree.
+  - **Settled** - Triage needs no new store. [`spec/divergences.json`][divergences] already carries `upstream-candidate` in its disposition vocabulary, meaning the downstream carries an improvement the hub should adopt, and nothing in the ledger uses it today. A dispositioned pair prints with its disposition and everything else renders `UNTRIAGED`, which is what [`reports/divergences.md`][divergences-report] already does.
+  - **Settled** - The rule goes in [`AUDIT.md`][audit-doc] section 9 rather than [`GOVERNANCE.md`][governance], whose sections are verbatim fleet law, so an edit there puts every downstream repo into verbatim drift until re-vendored for a sentence that is procedure rather than law.
+  - **Settled** - Two floors are not optional. A run reading zero pull requests reports that rather than a clean zero, and a repo the search surfaces with no registry entry is reported separately, which feeds "Registry Membership Coverage" above.
+  - **Settled** - This is not the deferred audit automation recorded under "Standalone Chores". That entry rejected three scheduled and hook-driven shapes on three blockers, and this is owner-run and on demand like [`spec/fidelity_honesty.py`][fidelity-honesty], so it lands on none of them.
+
 ## Standalone Chores
 
 Small work with no research to preserve, selectable one bullet at a time.
 
+- **Answer the symmetric reading of [`.editorconfig`][editorconfig], a path-specific section naming files that do not exist**, which is the half of [#633][issue-633] the `eol-coverage` check deliberately left open. The dead-pin reading it does ship is the `.gitattributes` side, and the same question on the other document is not the same shape: this repo's `[.github/workflows/*]` and `[catalog/snippets/workflows/*]` sections are legitimately broad, and the issue's own first attempt at it produced false positives because the matcher did not expand brace syntax, which [`scripts/repo_gate.py`][repo-gate] already implements. Measure the exemption against the live corpus before building the gate rather than after, since a stale exemption hands out a work list that damages correct documents, and decide whether `forward-declared` carries across or whether an editorconfig section needs its own marker.
 - **Reconsider whether the pre-commit hook runs the doc gates now that they are diff-scoped.** [`scripts/README.md`][scripts] records the current decision and its reason, that doc linters stay out of the hook so it stays fast, which was sound when the only mode was a whole-tree sweep, and a diff-scoped run finishes in about a second. The failure it would prevent is the most repeated one on record, comment sentences wrapped across lines caught after the commit rather than before it. Weigh it against the standing preference for a fast hook and against a hook that runs the gate from the wrong directory, which is its own false clean.
 - **Audit the fleet's shell surface by size and branching, and decide per script whether Python with unit tests is cheaper.** The evidence is the review record rather than a language preference, since a non-trivial shell script earns findings round after round while every gate under [`scripts/`][scripts] carries a test file beside it and converges in one or two. The measure is lines, branch count, and the review rounds each has cost. `repo-config/configure.sh` and the agent-safety installer are the two worth measuring, and a bootstrap script that needs the Python it exists to install is not a rewrite worth having, which protects the installer more than the config script.
 - **Make a table of contents standard for a long document rather than for the README alone.** [`spec/readme-structure.md`][readme-structure] fixes one at README position 4 and no other hub file carries one, which leaves the three longest documents without it, `CODESTYLE.md` at 516 lines, `GOVERNANCE.md` at 436 and `WORKFLOW.md` at 301, measured on `develop` at `3d1a0b1` on 2026-08-06. Settle the threshold in headings or lines so the audit can check it, and settle how it sits with the reference-link exception, since the four agent-instruction files keep inline links exactly because they are read one section at a time, which is the property that makes a contents list worth having in them. The mechanical constraint is that the list is filled by the Markdown All in One extension on save, so a file nobody opens in the editor grows a stale list, which is worse than absent because it is read as current.
@@ -474,6 +497,7 @@ Each was checked against the tree and has nothing left to do anywhere. Closing i
 [issue-597]: https://github.com/ptr727/ProjectTemplate/issues/597
 [issue-607]: https://github.com/ptr727/ProjectTemplate/issues/607
 [issue-623]: https://github.com/ptr727/ProjectTemplate/issues/623
+[issue-633]: https://github.com/ptr727/ProjectTemplate/issues/633
 
 <!-- Pull requests -->
 
@@ -493,6 +517,8 @@ Each was checked against the tree and has nothing left to do anywhere. Closing i
 [copilot-instructions]: ./.github/copilot-instructions.md
 [divergences]: ./spec/divergences.json
 [divergences-report]: ./reports/divergences.md
+[editorconfig]: ./.editorconfig
+[fidelity-honesty]: ./spec/fidelity_honesty.py
 [files]: ./spec/files.json
 [governance]: ./GOVERNANCE.md
 [markdownlint]: ./.markdownlint-cli2.jsonc
@@ -503,6 +529,7 @@ Each was checked against the tree and has nothing left to do anywhere. Closing i
 [prose-gate]: ./.github/actions/prose-gate/action.yml
 [readme-sections]: ./spec/readme-sections.json
 [readme-structure]: ./spec/readme-structure.md
+[repo-gate]: ./scripts/repo_gate.py
 [reports]: ./reports/
 [repos]: ./registry/repos.json
 [scripts]: ./scripts/README.md
@@ -513,6 +540,7 @@ Each was checked against the tree and has nothing left to do anywhere. Closing i
 [standup]: ./STANDUP.md
 [third-party-tools]: ./spec/third-party-tools.json
 [type-model]: ./spec/type-model.md
+[validate-task]: ./.github/workflows/validate-task.yml
 [workflow]: ./WORKFLOW.md
 [workflows]: ./catalog/snippets/workflows/
 [write-guard]: ./host-setup/agent-safety/gh-write-guard.py
