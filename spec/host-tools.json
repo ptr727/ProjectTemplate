@@ -16,7 +16,7 @@
             "probes": [["gh", "--version"]],
             "pattern": "gh version (\\d+(?:\\.\\d+)*)",
             "minimum": "2.47.0",
-            "why": "The GitHub CLI maintainers name the community-distributed 2.45.x and 2.46.x as broken by deprecated GitHub APIs, so the floor sits immediately above that range rather than at a version anyone has verified good. Two symptoms are recorded in OPERATIONS.md: gh pr edit fails on the Projects-classic projectCards field whichever argument it is given, and exits non-zero having applied nothing, and gh pr checks carries no --json flag, so a watcher built on it prints nothing and a quiet result reads as a passing one.",
+            "why": "The GitHub CLI maintainers name the community-distributed 2.45.x and 2.46.x as broken by deprecated GitHub APIs, so the floor sits immediately above that range rather than at a version anyone has verified good. Two symptoms were observed on a distribution 2.46.0 and re-tested as resolved on 2.97.0, and OPERATIONS.md records both: gh pr edit failed on the Projects-classic projectCards field whichever argument it was given and exited non-zero having applied nothing, and gh pr checks carried no --json flag, so a watcher built on it printed nothing and a quiet result read as a passing one. Neither is visible to a presence check, since a tool old enough to be broken answers --version cleanly.",
             "source": {
                 "linux": "The official apt repository at cli.github.com, per https://github.com/cli/cli/blob/trunk/docs/install_linux.md, and never the distribution's own package.",
                 "macos": "Homebrew, which tracks upstream releases.",

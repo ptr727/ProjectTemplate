@@ -7,7 +7,9 @@ this fleet has actually hit are both version facts that a present, working binar
 
 A stale `gh` is the first. The GitHub CLI maintainers name the community-distributed 2.45.x and
 2.46.x as broken by deprecated GitHub APIs, and a host carrying one answers `gh --version` perfectly
-while `gh pr edit` exits non-zero having applied nothing.
+while `gh pr edit` exits non-zero having applied nothing. That one is measured rather than argued:
+this host carried a distribution 2.46.0, two workarounds were written into OPERATIONS.md as
+permanent behavior, and both symptoms went away on 2.97.0 from the official repository.
 
 An old `git-restore-mtime` is the second, and it is worse, because it fails silently in the
 direction that reads as success: a release before 2025.08 calls `git whatchanged`, current git
