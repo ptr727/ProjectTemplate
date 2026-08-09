@@ -1,0 +1,22 @@
+#!/bin/sh
+# Local pre-commit gate for this repository: the doc checks CI runs, scoped to the diff.
+# Enable it per clone with `git config core.hooksPath .husky`.
+# A clone carries no hooks path, so this file does nothing until that is set.
+# It deliberately does not source `_/husky.sh`.
+# That file is gitignored and arrives with an npm install this repository does not have.
+# Sourcing it would therefore break the hook in a fresh clone.
+# The path is kept for the fleet convention the line-ending pins are written against.
+# What is absent is a decision rather than an oversight.
+# `repo_gate.py --check sha-pin` resolves same-owner pins against the GitHub API.
+# It stays in CI, where a network is assumed, since a hook needing one fails offline.
+# The doc linters that need Docker stay in CI and in the VS Code Lint tasks.
+set -e
+
+# Scoped to what changed against HEAD, which is the policy for prose.
+# A rule is applied as a file is next edited rather than swept across the tree.
+# Whole-tree costs about 2.2 seconds where this costs about 0.2.
+# The scope is the working tree rather than the index.
+# A partially staged file is therefore judged on all of its edits, not only the staged ones.
+# CI re-runs the same rules over the whole tree, which is what makes that affordable here.
+python3 scripts/prose_lint.py . --diff HEAD
+python3 scripts/repo_gate.py --check eol

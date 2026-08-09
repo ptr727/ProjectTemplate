@@ -60,6 +60,11 @@ end_of_line = lf
 [catalog/snippets/husky/pre-commit]
 end_of_line = lf
 
+# This repository's own hook, paired with the `.gitattributes` pin.
+# The git pin alone leaves the editor free to write a CRLF shebang, which would break it.
+[.husky/pre-commit]
+end_of_line = lf
+
 # Linux scripts
 [*.sh]
 end_of_line = lf

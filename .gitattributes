@@ -13,6 +13,8 @@
 *.sh text eol=lf
 # The husky pre-commit snippet is an extensionless shebang script (like a copied .husky/pre-commit).
 catalog/snippets/husky/pre-commit text eol=lf
+# This repository's own hook, which is the extensionless case the comment above names.
+.husky/pre-commit text eol=lf
 
 # Vanilla `.py` follows the CRLF default, since Python's universal newlines accept CRLF and it is commonly edited on Windows.
 # Pin LF only for a `.py` executed directly via its shebang, by path.
