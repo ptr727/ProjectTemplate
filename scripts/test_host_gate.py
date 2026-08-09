@@ -17,11 +17,17 @@ import host_gate  # noqa: E402
 
 
 def tool(name, minimum=None, required=True, probes=None, pattern=r'v(\d+(?:\.\d+)*)', **extra):
-    """A declaration entry, defaulted so a case states only the field it is about."""
+    """A declaration entry, defaulted so a case states only the field it is about.
+
+    The default probe is a Python one-liner rather than `true`, for two reasons. `true` is not a
+    binary on native Windows, and it prints nothing, so a case that forgot to override `probes`
+    would read as `unreadable` and pass or fail for a reason unrelated to what it tests. This one
+    exists wherever the tests run and answers the default pattern.
+    """
     entry = {
         'name': name,
         'required': required,
-        'probes': probes or [['true']],
+        'probes': probes or [[sys.executable, '-c', 'print("v1.0")']],
         'pattern': pattern,
         'minimum': minimum,
         'why': f'{name} exists for a reason.',

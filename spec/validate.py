@@ -161,10 +161,14 @@ def main():
             # An empty argument passes a type test and produces a probe that cannot execute.
             if not isinstance(probes, list) or not probes or not all(isinstance(p, list) and p and all(isinstance(a, str) and a for a in p) for p in probes):
                 errors.append(f"host-tools.json: '{name}' needs 'probes' as a non-empty array of non-empty string arrays")
-            floor = t.get("minimum", False)
-            if floor is False:
+            # Presence is read as presence, since a sentinel default cannot tell a missing key from one holding that same value.
+            # A declared "minimum": false would otherwise be reported as undeclared, sending the reader to add a field that is already there.
+            if "minimum" not in t:
                 errors.append(f"host-tools.json: '{name}' must declare 'minimum', using null where no floor has been measured")
-            elif floor is not None:
+                floor = None
+            else:
+                floor = t["minimum"]
+            if floor is not None:
                 if not isinstance(floor, str) or not re.fullmatch(r"\d+(\.\d+)*", floor):
                     errors.append(f"host-tools.json: '{name}' minimum {floor!r} must be dot-separated integers or null")
                 elif not isinstance(t.get("source"), dict) or not t["source"]:
