@@ -130,6 +130,41 @@ def main():
         names = [t["name"] for t in tools if isinstance(t, dict) and isinstance(t.get("name"), str)]
         if names != sorted(names, key=str.lower):
             errors.append("third-party-tools.json: 'tools' is not sorted by name, which is how a reader finds an entry to copy")
+    # Shape-checked here rather than left to the gate, because a malformed entry is a silently skipped tool.
+    # A floor nobody can compare against reports nothing, which reads exactly like a host that passed.
+    host_tools = load("spec/host-tools.json")
+    if not isinstance(host_tools, dict):
+        errors.append("host-tools.json: top level is not an object")
+    elif not isinstance(host_tools.get("tools"), list) or not host_tools["tools"]:
+        errors.append("host-tools.json: 'tools' must be a non-empty array")
+    else:
+        ht_seen = set()
+        for t in host_tools["tools"]:
+            name = t.get("name") if isinstance(t, dict) else None
+            if not isinstance(t, dict) or not isinstance(name, str) or not name:
+                errors.append(f"host-tools.json: entry {t!r} needs a non-empty name")
+                continue
+            if name in ht_seen:
+                errors.append(f"host-tools.json: duplicate tool name '{name}' - the gate keys on it, so the second entry would shadow the first")
+            ht_seen.add(name)
+            if not isinstance(t.get("why"), str) or not t.get("why"):
+                errors.append(f"host-tools.json: '{name}' needs a non-empty why, which is what keeps a floor from becoming folklore")
+            if not isinstance(t.get("pattern"), str) or not t.get("pattern"):
+                errors.append(f"host-tools.json: '{name}' needs a non-empty pattern to read a version with")
+            probes = t.get("probes")
+            if not isinstance(probes, list) or not probes or not all(isinstance(p, list) and p and all(isinstance(a, str) for a in p) for p in probes):
+                errors.append(f"host-tools.json: '{name}' needs 'probes' as a non-empty array of non-empty string arrays")
+            floor = t.get("minimum", False)
+            if floor is False:
+                errors.append(f"host-tools.json: '{name}' must declare 'minimum', using null where no floor has been measured")
+            elif floor is not None:
+                if not isinstance(floor, str) or not re.fullmatch(r"\d+(\.\d+)*", floor):
+                    errors.append(f"host-tools.json: '{name}' minimum {floor!r} must be dot-separated integers or null")
+                elif not isinstance(t.get("source"), dict) or not t["source"]:
+                    errors.append(f"host-tools.json: '{name}' declares a floor and no 'source', so a host below it is told to upgrade and not where from")
+        ht_names = [t["name"] for t in host_tools["tools"] if isinstance(t, dict) and isinstance(t.get("name"), str)]
+        if ht_names != sorted(ht_names):
+            errors.append("host-tools.json: 'tools' is not sorted by name")
     if not isinstance(mechanisms, dict):
         errors.append("secrets.json: 'mechanisms' is not an object")
     else:

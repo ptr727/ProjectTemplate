@@ -115,6 +115,16 @@ A `note:` line is how a check says it did less than its name. It prints under th
 
 A stale-backticked-path check was built and **rejected**: a template repo legitimately references paths that live in downstream repos, so it produced 34 false positives on a clean tree with no way to separate those from real drift. Doc-to-doc drift is a review lens, not a regex.
 
+## `host_gate.py`
+
+The host contract in [`docs/host-setup.md`][host-setup] as a check, reading the tool floors declared in [`spec/host-tools.json`][host-tools]. It exists because presence is the weaker half of that contract: both host defects this fleet has hit are version facts on a tool that is installed, answers `--version`, and looks healthy.
+
+**A floor is declared only where a version is known to break a documented procedure**, and each one records that defect rather than a preference. Two exist today. A distribution `gh` in the `2.45.x` / `2.46.x` range is named broken by the GitHub CLI maintainers, and both `gh` limitations in [`OPERATIONS.md`][operations] were observed on one. A `git-restore-mtime` before `2025.08` calls `git whatchanged`, which current `git` refuses, so it restores nothing, prints its ordinary statistics and **exits 0**. Everything else is presence-only, which is deliberate, since a floor nobody can justify becomes a host failure nobody can act on.
+
+The three states a tool can be in are kept apart because their remedies differ: **absent** means install it, **unreadable** means the declared pattern is wrong and the fix is in this repo rather than on the host, and **read** means the floor applies. A probe that runs and exits non-zero is not an answer, which is what separates a tool that is missing from one this file cannot parse.
+
+A repository adds its own `host-tools.json` at its root and the gate layers it over the hub's, so a repo needing `ffmpeg`, or needing a tool the fleet calls optional, declares that where it is true. Layering is **tighten-only**: a local entry may add a tool, raise a floor, or turn an optional tool required, and may not lower a floor or turn a required tool optional, because those retire a fleet check from inside the repository it protects. A rejected relaxation is reported rather than dropped.
+
 ## `pr_review.py`
 
 One compact digest of a pull request's Copilot review state, replacing a sequence of one-`gh`-call-per-turn polls. `status` prints the digest, `wait` runs the backoff in-process so a long review wait costs one agent turn instead of one per poll, `reply` answers one thread and resolves it, and `claims` reads the description against the branch it describes. Re-requesting a review stays out and its runbook is in [`.github/copilot-instructions.md`][copilot-instructions].
@@ -189,6 +199,9 @@ The match is on the block's heading rather than anywhere in the body, and on the
 [gitattributes]: ../.gitattributes
 [governance]: ../GOVERNANCE.md
 [governance-hub-hosted-tooling]: ../GOVERNANCE.md#hub-hosted-tooling
+[host-setup]: ../docs/host-setup.md
+[host-tools]: ../spec/host-tools.json
+[operations]: ../OPERATIONS.md
 [prose-gate-action]: ../.github/actions/prose-gate/action.yml
 [repos]: ../registry/repos.json
 [section-model]: ../spec/section-model.md
