@@ -30,6 +30,16 @@
         { "kind": "anchor", "suffix": "", "note": "An in-page anchor is a bare reference." },
         { "kind": "local", "suffix": "", "note": "A path inside this repository is a bare reference." }
     ],
+    "distribution": {
+        "note": "The URL prefixes that make a link this project's own rather than somebody else's, with {slug} the owner/repo pair and {owner} the owner alone. This is the single definition of ownership: link_kind reads it to classify a reference, and a canonicalLinks entry is only ever consulted for a reference already classified distribution. Keeping the two apart matters, because a 3rd Party Tools list is full of other people's GitHub repositories, Docker Hub images and NuGet packages, and a host-only test would rename Serilog's package link to nuget-link. The package prefixes carry the owner because a fleet package is published under the owner's own name, which is what distinguishes it from a dependency on the same host.",
+        "urlPrefixes": [
+            "https://github.com/{slug}",
+            "https://hub.docker.com/r/{owner}/",
+            "https://www.nuget.org/packages/{owner}.",
+            "https://nuget.org/packages/{owner}.",
+            "https://pypi.org/project/{owner}-"
+        ]
+    },
     "canonicalLinks": [
         { "name": "github-link", "repoPath": "" },
         { "name": "actions-link", "repoPath": "/actions" },

@@ -491,7 +491,14 @@ def readme_section_findings(text, model, sel, public):
     return findings
 
 
-def link_kind(url, slug, rendered=()):
+def distribution_prefixes(model, slug):
+    """The URL prefixes that make a link this repo's own, from the model's single declaration of ownership."""
+    owner = slug.split("/")[0]
+    return tuple(p.replace("{slug}", slug).replace("{owner}", owner).lower()
+                 for p in model.get("distribution", {}).get("urlPrefixes", []))
+
+
+def link_kind(url, slug, rendered=(), prefixes=()):
     """Which linkGroups kind a reference definition points at, for the repo at `slug`.
 
     A reference in `rendered`, meaning one the document uses as an image, is a shield whatever host serves it.
@@ -504,17 +511,15 @@ def link_kind(url, slug, rendered=()):
 
     Distribution is scoped to this repo's own URLs, so a link to somebody else's GitHub repo or Docker Hub
     image, which a 3rd Party Tools list is full of, stays external rather than being read as a channel of this
-    project's.
+    project's. Those prefixes come from the model rather than from a second list here, since ownership stated
+    in two places is two things that can disagree, and a canonicalLinks entry is consulted only for a
+    reference this already classified distribution.
     """
     if url.startswith("#"):
         return "anchor"
     if not url.startswith(("http://", "https://")):
         return "local"
-    owner = slug.split("/")[0].lower()
-    own = (f"https://github.com/{slug}".lower(), f"https://hub.docker.com/r/{owner}/",
-           f"https://www.nuget.org/packages/{owner}.", f"https://nuget.org/packages/{owner}.",
-           f"https://pypi.org/project/{owner}-")
-    if url.lower().startswith(own):
+    if prefixes and url.lower().startswith(tuple(prefixes)):
         return "distribution"
     return "shield" if url in rendered else "external"
 
@@ -538,7 +543,7 @@ def canonical_link_entry(url, model, slug):
     return None
 
 
-def canonical_name_findings(defs, model, slug, rendered=()):
+def canonical_name_findings(defs, model, slug, rendered=(), prefixes=()):
     """Reference names against canonicalLinks, resolved over the whole definition set rather than one at a time.
 
     A perTarget destination is one a repo may publish several of, and its rule is a count: the bare canonical
@@ -553,7 +558,7 @@ def canonical_name_findings(defs, model, slug, rendered=()):
     """
     findings, hits = [], {}
     for ref, url in defs:
-        if link_kind(url, slug, rendered) != "distribution":
+        if link_kind(url, slug, rendered, prefixes) != "distribution":
             continue
         c = canonical_link_entry(url, model, slug)
         if c:
@@ -582,14 +587,23 @@ def readme_link_findings(text, model, slug):
     findings = []
     norm = _HTML_COMMENT.sub(lambda m: "\x00" + m.group(0) + "\x00", normalize(text))
     suffixes = {n["kind"]: n["suffix"] for n in model["linkNaming"]}
+    prefixes = distribution_prefixes(model, slug)
     groups = model["linkGroups"]
     declared = [g["name"] for g in groups]
     holds = {g["name"].lower(): g["holds"] for g in groups}
 
     # Walk the definitions in order, tracking which group header each one falls under.
-    seen_headers, current, in_group = [], None, {}
+    # Fenced blocks are skipped, matching ordered_headings and extract_section.
+    # A README documenting badge markup carries `[ref]: url` and `<!-- Shields -->` as samples, and reading those as real definitions invents a group and a definition the document does not have.
+    seen_headers, current, in_group, fenced, unfenced = [], None, {}, False, []
     for ln in normalize(text).split("\n"):
         s = ln.strip()
+        if s.startswith("```") or s.startswith("~~~"):
+            fenced = not fenced
+            continue
+        if fenced:
+            continue
+        unfenced.append(ln)
         h = re.fullmatch(r"<!--\s*(.*?)\s*-->", s)
         if h and "omit from toc" not in h.group(1):
             current = h.group(1)
@@ -602,17 +616,19 @@ def readme_link_findings(text, model, slug):
 
     all_defs = [p for v in in_group.values() for p in v]
     # A reference the document renders as an image is a shield whatever host serves it, so resolve those first.
+    # Read over the unfenced text for the same reason the definitions are.
+    # An `![alt][ref]` inside a code sample is markup being shown rather than a badge being rendered, and counting it would make a plain link a shield.
     by_ref = dict(all_defs)
-    rendered = {by_ref[m.group(1)] for m in _MD_IMAGE_REF.finditer(norm) if m.group(1) in by_ref}
+    rendered = {by_ref[m.group(1)] for m in _MD_IMAGE_REF.finditer("\n".join(unfenced)) if m.group(1) in by_ref}
     described = {"shield": "a badge", "anchor": "an in-page anchor", "local": "a path in this repo"}
     for ref, url in all_defs:
-        kind = link_kind(url, slug, rendered)
+        kind = link_kind(url, slug, rendered, prefixes)
         want = suffixes.get(kind, "")
         got = "-shield" if ref.endswith("-shield") else "-link" if ref.endswith("-link") else ""
         if got != want:
             shown = f"`{want}`" if want else "a bare name with no suffix"
             findings.append(("LETTER", f"readme: the reference `[{ref}]` points at {described.get(kind, 'a URI')} and should end in {shown} (spec/readme-structure.md)"))
-    findings += canonical_name_findings(all_defs, model, slug, rendered)
+    findings += canonical_name_findings(all_defs, model, slug, rendered, prefixes)
 
     unknown = [h for h in seen_headers if h not in declared]
     if unknown:
@@ -634,7 +650,7 @@ def readme_link_findings(text, model, slug):
         if names != sorted(names):
             findings.append(("DRIFT", f"readme: the `{header}` group is not sorted by reference name (spec/readme-structure.md)"))
         want_kind = holds.get(header.lower())
-        strays = {link_kind(u, slug, rendered) for _, u in defs} - {want_kind} if want_kind else set()
+        strays = {link_kind(u, slug, rendered, prefixes) for _, u in defs} - {want_kind} if want_kind else set()
         if strays:
             findings.append(("DRIFT", f"readme: the `{header}` group holds {', '.join(sorted(strays))} reference(s) where it holds {want_kind} (spec/readme-structure.md)"))
     return findings
@@ -1689,8 +1705,15 @@ def _selftest():
         ("a group not sorted by reference name", links_ok.replace("[agents]: ./AGENTS.md\n[license]: ./LICENSE\n", "[license]: ./LICENSE\n[agents]: ./AGENTS.md\n"), 0, 1),
         ("a reference in the wrong group", links_ok.replace("[license]: ./LICENSE\n", "").replace("<!-- External -->\n", "<!-- External -->\n\n[license]: ./LICENSE\n"), 0, 1),
         # A shields.io URL the document never renders is judged by that usage rather than by its host, so it is an ordinary URI.
-        # Across the fleet every one of the 119 img.shields.io definitions is rendered, so a host test decides nothing and can only contradict the rule beside it.
+        # Across the fleet every one of the 119 img.shields.io definitions is rendered, so a host test decides nothing.
         ("an unrendered shields.io reference is a URI, not a shield", links_ok.replace("[license-shield]: https://img.shields.io/github/license/o/r\n", "[extra-shield]: https://img.shields.io/badge/never-rendered-blue\n[license-shield]: https://img.shields.io/github/license/o/r\n"), 1, 1),
+        # A code sample showing badge markup is markup rather than a badge.
+        # Reading a fenced block would invent a group header, two definitions, and a rendered shield the document does not have.
+        ("a fenced code sample is not read as definitions", links_ok + "\n## Sample\n\n```md\n<!-- Other links -->\n\n[wrong-name]: https://example.test/\n![License][license-shield]\n```\n", 0, 0),
+        # A dependency hosted where this project also publishes stays external, so it keeps its own name.
+        # The owner-scoped prefixes are what separate the two, and they live in the model rather than in the code.
+        ("somebody else's NuGet package is not renamed nuget-link", links_ok.replace("[upstream-link]: https://github.com/someone-else/their-repo", "[upstream-link]: https://www.nuget.org/packages/Serilog/"), 0, 0),
+        ("this project's own NuGet package is renamed", links_ok.replace("[upstream-link]: https://github.com/someone-else/their-repo", "[upstream-link]: https://www.nuget.org/packages/o.Widget/"), 1, 1),
     ]
     for label, text, want_letter, want_drift in link_cases:
         got = readme_link_findings(text, rm, "o/r")
