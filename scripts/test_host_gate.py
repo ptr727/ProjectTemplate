@@ -200,6 +200,29 @@ class TestMerge(unittest.TestCase):
         self.assertEqual(base[0]['minimum'], '2.47.0')
 
 
+class TestMalformedLocalFile(unittest.TestCase):
+    """A repository file is validated by nothing upstream, so the gate reports rather than crashes."""
+
+    def run_against(self, tmp, payload):
+        (tmp / 'host-tools.json').write_text(payload, encoding='utf-8')
+        return host_gate.main(['--repo', str(tmp), '--quiet'])
+
+    def test_tools_as_an_object_exits_two_rather_than_raising(self):
+        import tempfile
+        with tempfile.TemporaryDirectory() as d:
+            self.assertEqual(self.run_against(Path(d), '{"tools": {"gh": {}}}'), 2)
+
+    def test_entries_that_are_not_objects_exit_two(self):
+        import tempfile
+        with tempfile.TemporaryDirectory() as d:
+            self.assertEqual(self.run_against(Path(d), '{"tools": ["gh", "git"]}'), 2)
+
+    def test_unparsable_json_exits_two(self):
+        import tempfile
+        with tempfile.TemporaryDirectory() as d:
+            self.assertEqual(self.run_against(Path(d), '{not json'), 2)
+
+
 class TestShippedDeclaration(unittest.TestCase):
     """The file this repo actually ships, read rather than assumed."""
 

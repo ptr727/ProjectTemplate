@@ -214,6 +214,11 @@ def main(argv: list[str] | None = None) -> int:
         except (OSError, ValueError, KeyError) as e:
             print(f'{local_path}: cannot read the repository host tool declaration ({e})', file=sys.stderr)
             return 2
+        # The shape is checked before merging rather than discovered inside it, since a repository file is not validated by anything upstream.
+        # A traceback would report a malformed local file as a defect in this script, which is the wrong reader for the wrong remedy.
+        if not isinstance(local, list) or not all(isinstance(t, dict) for t in local):
+            print(f"{local_path}: 'tools' must be an array of objects", file=sys.stderr)
+            return 2
         tools, rejected = merge(tools, local)
         NOTES.append(f'{local_path} layered {len(local)} local entry(s) over the hub declaration')
 

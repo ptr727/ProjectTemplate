@@ -150,6 +150,10 @@ def main():
             ht_seen.add(name.lower())
             if not isinstance(t.get("why"), str) or not t.get("why"):
                 errors.append(f"host-tools.json: '{name}' needs a non-empty why, which is what keeps a floor from becoming folklore")
+            # Type-checked rather than read for truthiness, since the string "false" is true and would fail every host on a tool nobody requires.
+            # CI runs no JSON-schema validation, so this file is the only thing that reads the declaration before the gate trusts it.
+            if "required" in t and not isinstance(t["required"], bool):
+                errors.append(f"host-tools.json: '{name}' required must be true or false, not {t['required']!r}")
             if not isinstance(t.get("pattern"), str) or not t.get("pattern"):
                 errors.append(f"host-tools.json: '{name}' needs a non-empty pattern to read a version with")
             probes = t.get("probes")
@@ -163,6 +167,16 @@ def main():
                     errors.append(f"host-tools.json: '{name}' minimum {floor!r} must be dot-separated integers or null")
                 elif not isinstance(t.get("source"), dict) or not t["source"]:
                     errors.append(f"host-tools.json: '{name}' declares a floor and no 'source', so a host below it is told to upgrade and not where from")
+                else:
+                    # The keys are read by platform, so a misspelled one drops the remedy on that platform while the object stays non-empty.
+                    # Requiring the object and not its contents is the shape of guard this repo keeps finding: present, and asserting nothing.
+                    platforms = {"linux", "macos", "windows"}
+                    stray = sorted(set(t["source"]) - platforms)
+                    if stray:
+                        errors.append(f"host-tools.json: '{name}' source names {', '.join(stray)}, which no platform reads - use {', '.join(sorted(platforms))}")
+                    for plat, where in t["source"].items():
+                        if not isinstance(where, str) or not where:
+                            errors.append(f"host-tools.json: '{name}' source.{plat} must be a non-empty string")
         ht_names = [t["name"] for t in host_tools["tools"] if isinstance(t, dict) and isinstance(t.get("name"), str)]
         if ht_names != sorted(ht_names, key=str.lower):
             errors.append("host-tools.json: 'tools' is not sorted by name, which is how a reader finds an entry")
