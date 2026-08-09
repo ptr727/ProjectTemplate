@@ -96,7 +96,8 @@ def read_tool(tool: dict) -> tuple[str, str | None, str | None]:
             return 'read', m.group(1), ' '.join(argv)
     if not answered:
         return 'absent', None, None
-    return 'unreadable', None, '` and `'.join(answered)
+    # A plain separator, since the caller is what decides how a command is marked up and doing it here nests the caller's own backticks inside these.
+    return 'unreadable', None, ', '.join(answered)
 
 
 REQUIRED_FIELDS = ('name', 'probes', 'pattern', 'minimum', 'why')

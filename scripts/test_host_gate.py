@@ -108,6 +108,7 @@ class TestReadTool(unittest.TestCase):
         self.assertEqual(status, 'unreadable')
         self.assertIn('first has none', how)
         self.assertIn('second has none', how)
+        self.assertNotIn('`', how, 'markup belongs to the caller, which wraps this in backticks of its own')
 
     def test_a_probe_that_never_ran_is_still_left_out_of_the_citation(self):
         entry = tool('odd', probes=[[sys.executable, '-c', 'print("ran")'],
