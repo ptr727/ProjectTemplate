@@ -369,6 +369,25 @@ _LINK_DEF = re.compile(r"^\[([^\]]+)\]:\s*(\S+)", re.M)
 _URI_SCHEME = re.compile(r"[a-z][a-z0-9+.\-]+:", re.I)
 
 
+def unfenced_text(text):
+    """`text` with every fenced block removed, EOL-normalized.
+
+    Markup shown inside a code sample is being displayed rather than used, so a `[ref]: url`, a
+    `<!-- Shields -->` or an `![alt][ref]` in one is not a definition, a group, or a rendered badge. Kept as
+    one helper because the checkers were fence-aware in some places and blind in others, which is the state
+    that lets a document be read two ways by one audit.
+    """
+    out, fenced = [], False
+    for ln in normalize(text).split("\n"):
+        s = ln.strip()
+        if s.startswith("```") or s.startswith("~~~"):
+            fenced = not fenced
+            continue
+        if not fenced:
+            out.append(ln)
+    return "\n".join(out)
+
+
 def readme_region(text, heading):
     """extract_section against a comment-stripped copy of the document.
 
@@ -605,25 +624,20 @@ def readme_link_findings(text, model, slug):
     holds = {g["name"].lower(): g["holds"] for g in groups}
 
     # Walk the definitions in order, tracking which group header each one falls under.
-    # Fenced blocks are skipped, matching ordered_headings and extract_section.
-    # A README documenting badge markup carries `[ref]: url` and `<!-- Shields -->` as samples, and reading those as real definitions invents a group and a definition the document does not have.
-    seen_headers, current, in_group, fenced, unfenced = [], None, {}, False, []
-    for ln in normalize(text).split("\n"):
+    # A comment counts as a group header only where a definition actually falls under it, since the closed set governs the reference-definition block and not every comment in the file.
+    # A `<!-- markdownlint-disable -->` directive is a comment sitting on its own line too, and reading it as a group reports a header the document never meant to declare.
+    unfenced = unfenced_text(text)
+    seen_headers, current, in_group = [], None, {}
+    for ln in unfenced.split("\n"):
         s = ln.strip()
-        if s.startswith("```") or s.startswith("~~~"):
-            fenced = not fenced
-            continue
-        if fenced:
-            continue
-        unfenced.append(ln)
         h = re.fullmatch(r"<!--\s*(.*?)\s*-->", s)
         if h and "omit from toc" not in h.group(1):
             current = h.group(1)
-            seen_headers.append(current)
-            in_group.setdefault(current, [])
             continue
         d = _LINK_DEF.match(s)
         if d:
+            if current is not None and current not in in_group:
+                seen_headers.append(current)
             in_group.setdefault(current, []).append((d.group(1), d.group(2)))
 
     all_defs = [p for v in in_group.values() for p in v]
@@ -631,7 +645,7 @@ def readme_link_findings(text, model, slug):
     # Read over the unfenced text for the same reason the definitions are.
     # An `![alt][ref]` inside a code sample is markup being shown rather than a badge being rendered, and counting it would make a plain link a shield.
     by_ref = dict(all_defs)
-    rendered = {m.group(1) for m in _MD_IMAGE_REF.finditer("\n".join(unfenced)) if m.group(1) in by_ref}
+    rendered = {m.group(1) for m in _MD_IMAGE_REF.finditer(unfenced) if m.group(1) in by_ref}
     described = {"shield": "a badge", "anchor": "an in-page anchor", "local": "a path in this repo"}
     for ref, url in all_defs:
         kind = link_kind(url, slug, ref in rendered, prefixes)
@@ -688,7 +702,8 @@ def third_party_tool_findings(text, catalog):
     if body is None:
         return []  # the absent section is already one finding from readme_section_findings
     declared = {t["name"].lower(): t for t in catalog["tools"]}
-    defs = {m.group(1): m.group(2) for m in _LINK_DEF.finditer(normalize(text))}
+    # Read over the unfenced text, as readme_link_findings does: a sample footnote is not a definition.
+    defs = {m.group(1): m.group(2) for m in _LINK_DEF.finditer(unfenced_text(text))}
     findings = []
     for ln in body.split("\n"):
         m = _TOOL_ROW.match(ln.strip()) or _TOOL_BULLET.match(ln.strip())
@@ -1726,6 +1741,9 @@ def _selftest():
         # The owner-scoped prefixes are what separate the two, and they live in the model rather than in the code.
         ("somebody else's NuGet package is not renamed nuget-link", links_ok.replace("[upstream-link]: https://github.com/someone-else/their-repo", "[upstream-link]: https://www.nuget.org/packages/Serilog/"), 0, 0),
         ("this project's own NuGet package is renamed", links_ok.replace("[upstream-link]: https://github.com/someone-else/their-repo", "[upstream-link]: https://www.nuget.org/packages/o.Widget/"), 1, 1),
+        # A comment that opens no group is not a group header.
+        # A markdownlint directive sits on its own line exactly like one, and reading it as a group reports a header the document never declared.
+        ("a directive comment is not a link group", "<!-- markdownlint-disable MD033 -->\n" + links_ok, 0, 0),
         # A scheme makes a target a link rather than a file, so it is named `-link` and grouped External.
         # Reading `mailto:` as a repo path would demand a bare name and the Repo group for a contact address.
         ("a mailto target is a URI, not a repo path", links_ok.replace("[upstream-link]: https://github.com/someone-else/their-repo", "[upstream-link]: mailto:someone@example.test"), 0, 0),
@@ -1758,6 +1776,9 @@ def _selftest():
         ("a tool the catalog does not name is not judged", tools_head + "| Tool | Role |\n| --- | --- |\n| [Widget][widget-link] | whatever this repo calls it |\n" + tools_defs, 0),
         ("the bullet form is read like the table form", tools_head + "- [cspell][cspell-link] - Spell checker.\n" + tools_defs, 0),
         ("no section yields nothing, since its absence is already reported", "# F\n\nA fixture.\n\n## Other\n\nx\n", 0),
+        # A definition inside a code sample is markup being shown, so it must not resolve a tool link.
+        # The sample sits after the real definition deliberately, so reading across fences would override it.
+        ("a fenced sample does not supply a tool link", tools_head + "| Tool | Role |\n| --- | --- |\n| [cspell][cspell-link] | Spell checker. |\n" + tools_defs + "\n```md\n[cspell-link]: https://wrong.example/\n```\n", 0),
     ]
     for label, text, wantn in tool_cases:
         got = third_party_tool_findings(text, cat)

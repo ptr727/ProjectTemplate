@@ -84,8 +84,12 @@ def main():
         prefixes = readme_model.get("distribution", {}).get("urlPrefixes") if isinstance(readme_model.get("distribution"), dict) else None
         if not is_str_list(prefixes) or not prefixes:
             errors.append("readme-sections.json: 'distribution.urlPrefixes' must be a non-empty array of strings, or the link audit stops distinguishing this repo's URLs from a third party's and silently passes")
-        elif not any("{slug}" in p or "{owner}" in p for p in prefixes):
-            errors.append("readme-sections.json: no 'distribution.urlPrefixes' entry carries {slug} or {owner}, so the prefixes are not repo-scoped and would match another owner's URLs")
+        else:
+            # Every prefix, not merely one of them.
+            # A broad entry added beside a valid one would pass an any() guard while making link_kind read a third party's URL as this repo's own, which is the failure the guard exists to stop.
+            loose = [p for p in prefixes if "{slug}" not in p and "{owner}" not in p]
+            if loose:
+                errors.append(f"readme-sections.json: 'distribution.urlPrefixes' entry {loose[0]!r} carries neither {{slug}} nor {{owner}}, so it is not repo-scoped and would match another owner's URLs")
 
     # CI runs no JSON-schema validation, so shape-check the shared tool catalog here.
     # A duplicate name is the failure worth catching: the audit keys on it, so the second entry silently shadows the first and half the fleet is measured against a description nobody can see.
