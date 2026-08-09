@@ -35,13 +35,17 @@ house-style prose rules, and with the existing CI linters (markdownlint, cspell,
 actionlint, editorconfig-checker, spec/validate.py).
 """
 from __future__ import annotations
-import argparse, re, subprocess, sys
-from pathlib import Path, PurePosixPath
+
+import argparse
+import re
+import subprocess
+import sys
 from fnmatch import fnmatch
+from pathlib import Path, PurePosixPath
 
 # GOVERNANCE.md documents exactly one floating-ref exception.
 SHA_EXCEPTIONS = {'dotnet/nbgv'}
-USES = re.compile(r'^\s*-?\s*uses:\s*(?P<ref>[^\s#]+)', re.M)
+USES = re.compile(r'^\s*-?\s*uses:\s*(?P<ref>[^\s#]+)', re.MULTILINE)
 PIN = re.compile(r'^[0-9a-f]{40}$')
 WORKFLOW = re.compile(r'workflows/.*\.ya?ml$')
 # What `gh` prints when GitHub answered, as opposed to when nothing was reached at all.

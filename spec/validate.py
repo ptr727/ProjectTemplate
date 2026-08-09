@@ -429,7 +429,7 @@ def main():
         # This is Markdown only, and only where the hub ships the file.
         if path.endswith(".md") and (ROOT / path).exists():
             hub_text = (ROOT / path).read_text(encoding="utf-8", errors="replace")
-            headings = {m.group(1).strip() for m in re.finditer(r"^## (.+?)\s*$", hub_text, re.M)}
+            headings = {m.group(1).strip() for m in re.finditer(r"^## (.+?)\s*$", hub_text, re.MULTILINE)}
             for elt in sections:
                 name = elt.get("name") if isinstance(elt, dict) else elt
                 if isinstance(name, str) and name and name not in headings:

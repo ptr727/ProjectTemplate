@@ -46,17 +46,17 @@ _GH_WRITE_SUB = re.compile(
       | (?:label|secret|variable|ruleset)\s+(?:create|delete|edit|set)
       | gist\s+(?:create|edit|delete)
     )\b""",
-    re.X,
+    re.VERBOSE,
 )
 _GH_API = re.compile(r"\bgh\s+api\b")
-_EXPLICIT_WRITE_METHOD = re.compile(r"(?:--method|-X)\s+(?:POST|PUT|PATCH|DELETE)\b", re.I)
+_EXPLICIT_WRITE_METHOD = re.compile(r"(?:--method|-X)\s+(?:POST|PUT|PATCH|DELETE)\b", re.IGNORECASE)
 # A gh api call with a field flag defaults to POST even without -X, so it is a write.
 _API_FIELD_FLAG = re.compile(r"(?:^|\s)(?:-f|-F|--field|--raw-field|--input)\b")
-_GRAPHQL = re.compile(r"\bgh\s+api\b.*\bgraphql\b", re.S)
+_GRAPHQL = re.compile(r"\bgh\s+api\b.*\bgraphql\b", re.DOTALL)
 _MUTATION = re.compile(r"\bmutation\b")
 # Loose pre-filter only: matches `git` before `push` even with global options between them
 # (git -C <dir> push). _push_arg_lists is the accurate arbiter that confirms an executable push.
-_GIT_PUSH = re.compile(r"\bgit\b.*?\bpush\b", re.S)
+_GIT_PUSH = re.compile(r"\bgit\b.*?\bpush\b", re.DOTALL)
 
 # --- Bypass-of-branch-rule detectors (Rule 4) --------------------------------------------------------
 # A git operation is denied when it would only succeed by bypassing an active branch rule.

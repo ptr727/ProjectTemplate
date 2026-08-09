@@ -62,8 +62,16 @@ such failure and no id to hide. See .github/copilot-instructions.md for the runb
 GOVERNANCE.md "Repository Boundaries and Write Safety" for the rules `reply` enforces.
 """
 from __future__ import annotations
-import argparse, io, json, re, subprocess, sys, tarfile, time
-from datetime import datetime, timezone
+
+import argparse
+import io
+import json
+import re
+import subprocess
+import sys
+import tarfile
+import time
+from datetime import UTC, datetime
 from pathlib import Path
 
 REVIEWER = 'copilot-pull-request-reviewer'
@@ -978,7 +986,7 @@ def checks_unreadable(pr: dict) -> bool:
     than as this reading having failed. A silent narrowing is the failure mode this whole script
     is built against, and it does not get an exception for its own newest field.
     """
-    return bool(((pr.get('commits') or {}).get('nodes') or [])) and not head_commit(pr)
+    return bool((pr.get('commits') or {}).get('nodes') or []) and not head_commit(pr)
 
 
 def checks_tally(nodes: list[dict]) -> tuple[int, int]:
@@ -1056,7 +1064,7 @@ def digest(owner: str, repo: str, num: int, seen: set[str] | None = None,
     """
     pr = gql(Q_FULL, owner, repo, num) if pr is None else pr
     stalled = stall_of(owner, repo, num, pr) if stalled is None else stalled
-    now = datetime.now(timezone.utc) if now is None else now
+    now = datetime.now(UTC) if now is None else now
     head = pr['headRefOid']
     revs = reviewer_nodes(pr, 'reviews')
     # `revs` is every round and `on_head` is the ones that reviewed this commit.
@@ -1664,7 +1672,7 @@ def main(argv: list[str] | None = None) -> int:
     # The stall is re-read here rather than carried out of the loop.
     # A request picked up since that reading would still report as picked up by nothing.
     stalled = stall_of(owner, repo, a.number, final)
-    now = datetime.now(timezone.utc)
+    now = datetime.now(UTC)
     # Parsed here and handed down, so the digest and the exit code share one read of the rollup.
     # Deriving the stuck shapes from that list costs no parse, which is what was doubled.
     checks = check_nodes(final)
