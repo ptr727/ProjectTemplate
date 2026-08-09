@@ -141,6 +141,26 @@ def field_problems(entry: dict) -> list[str]:
     return problems
 
 
+def read_declaration(path: Path, what: str) -> list[dict] | str:
+    """The `tools` array from a declaration file, or a diagnostic string where it cannot be had.
+
+    Both declarations come through here so a shape guard added to one cannot go missing from the
+    other, which is what happened when only the repository-local file was checked. Neither is
+    validated at the point it is read: `spec/validate.py` covers the hub file, and nothing at all
+    covers a repository's, so this reads as though neither had run.
+
+    Returning the diagnostic rather than raising keeps the caller's exit codes in one place, and a
+    `str` is unambiguous against a `list` of entries.
+    """
+    try:
+        tools = json.loads(path.read_text(encoding='utf-8'))['tools']
+    except (OSError, ValueError, KeyError, TypeError) as e:
+        return f'{path}: cannot read the {what} ({e})'
+    if not isinstance(tools, list) or not all(isinstance(t, dict) for t in tools):
+        return f"{path}: 'tools' must be an array of objects"
+    return tools
+
+
 def merge(base: list[dict], local: list[dict]) -> tuple[list[dict], list[str]]:
     """The hub declaration with a repository's own layered over it, plus any rejected overrides.
 
@@ -249,27 +269,22 @@ def main(argv: list[str] | None = None) -> int:
     ap.add_argument('--quiet', action='store_true', help='print failures only, dropping the per-tool notes')
     a = ap.parse_args(argv)
 
-    try:
-        data = json.loads(Path(a.spec).read_text(encoding='utf-8'))
-        tools = data['tools']
-    except (OSError, ValueError, KeyError, TypeError) as e:
-        print(f'{a.spec}: cannot read the host tool declaration ({e})', file=sys.stderr)
+    # One reader for both declarations, so a shape guard added to one cannot go missing from the other.
+    # Checking only the local file was exactly that asymmetry, and the hub file is no better validated at the point it is read.
+    hub = read_declaration(Path(a.spec), 'host tool declaration')
+    if isinstance(hub, str):
+        print(hub, file=sys.stderr)
         return 2
+    tools = hub
 
     NOTES.clear()
     rejected: list[str] = []
     local_path = Path(a.repo) / 'host-tools.json'
     # A repository layering onto the hub is the normal case, and carrying no local file is the common one, so its absence is silent.
     if not a.no_local and local_path.is_file():
-        try:
-            local = json.loads(local_path.read_text(encoding='utf-8'))['tools']
-        except (OSError, ValueError, KeyError, TypeError) as e:
-            print(f'{local_path}: cannot read the repository host tool declaration ({e})', file=sys.stderr)
-            return 2
-        # The shape is checked before merging rather than discovered inside it, since a repository file is not validated by anything upstream.
-        # A traceback would report a malformed local file as a defect in this script, which is the wrong reader for the wrong remedy.
-        if not isinstance(local, list) or not all(isinstance(t, dict) for t in local):
-            print(f"{local_path}: 'tools' must be an array of objects", file=sys.stderr)
+        local = read_declaration(local_path, 'repository host tool declaration')
+        if isinstance(local, str):
+            print(local, file=sys.stderr)
             return 2
         tools, rejected = merge(tools, local)
         NOTES.append(f'{local_path} layered {len(local)} local entry(s) over the hub declaration')

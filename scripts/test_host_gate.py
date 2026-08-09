@@ -284,6 +284,39 @@ class TestMalformedHubFile(unittest.TestCase):
             spec.write_text('{not json', encoding='utf-8')
             self.assertEqual(host_gate.main(['--spec', str(spec), '--no-local', '--quiet']), 2)
 
+    def test_tools_that_is_not_an_array_of_objects_exits_two(self):
+        """The shape guard existed on the local file and not on this one, which is the asymmetry."""
+        import tempfile
+        for payload in ('{"tools": {"gh": {}}}', '{"tools": "gh"}', '{"tools": ["gh"]}', '{"tools": [null]}'):
+            with tempfile.TemporaryDirectory() as d:
+                spec = Path(d) / 'host-tools.json'
+                spec.write_text(payload, encoding='utf-8')
+                self.assertEqual(host_gate.main(['--spec', str(spec), '--no-local', '--quiet']), 2, payload)
+
+
+class TestReadDeclaration(unittest.TestCase):
+    """One reader for both files, so a guard cannot be present on one and absent on the other."""
+
+    def read(self, payload):
+        import tempfile
+        with tempfile.TemporaryDirectory() as d:
+            p = Path(d) / 'host-tools.json'
+            p.write_text(payload, encoding='utf-8')
+            return host_gate.read_declaration(p, 'declaration')
+
+    def test_a_good_file_returns_the_entries(self):
+        got = self.read('{"tools": [{"name": "gh"}]}')
+        self.assertIsInstance(got, list)
+        self.assertEqual(got[0]['name'], 'gh')
+
+    def test_every_bad_shape_returns_a_diagnostic_string(self):
+        for payload in ('[]', 'null', '3', '{"no tools": 1}', '{not json',
+                        '{"tools": {"gh": {}}}', '{"tools": ["gh"]}', '{"tools": [null]}'):
+            self.assertIsInstance(self.read(payload), str, payload)
+
+    def test_a_missing_file_is_a_diagnostic_rather_than_a_raise(self):
+        self.assertIsInstance(host_gate.read_declaration(Path('/definitely/not/here.json'), 'declaration'), str)
+
 
 class TestShippedDeclaration(unittest.TestCase):
     """The file this repo actually ships, read rather than assumed."""
