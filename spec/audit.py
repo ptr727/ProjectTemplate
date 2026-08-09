@@ -631,14 +631,16 @@ def readme_link_findings(text, model, slug):
 
     # Walk the definitions in order, tracking which group header each one falls under.
     # A comment counts as a group header only where a definition actually falls under it, since the closed set governs the reference-definition block and not every comment in the file.
-    # A `<!-- markdownlint-disable -->` directive is a comment sitting on its own line too, and reading it as a group reports a header the document never meant to declare.
+    # A tool directive is skipped outright rather than relying on that, because one placed inside the reference block does have definitions under it and would be reported as an unknown group.
+    # The prefixes are declared in the model rather than guessed from the shape of the text, since which tools a repo instructs is a fact about the fleet rather than something to infer.
     unfenced = unfenced_text(text)
     seen_headers, current, in_group = [], None, {}
     for ln in unfenced.split("\n"):
         s = ln.strip()
         h = re.fullmatch(r"<!--\s*(.*?)\s*-->", s)
         if h and "omit from toc" not in h.group(1):
-            current = h.group(1)
+            if not any(h.group(1).lower().startswith(d.lower()) for d in model.get("directiveComments", [])):
+                current = h.group(1)
             continue
         d = _LINK_DEF.match(s)
         if d:
@@ -711,11 +713,13 @@ def third_party_tool_findings(text, catalog):
     # Read over the unfenced text, as readme_link_findings does: a sample footnote is not a definition.
     defs = {m.group(1): m.group(2) for m in _LINK_DEF.finditer(unfenced_text(text))}
     findings = []
+    listed = []
     for ln in body.split("\n"):
         m = _TOOL_ROW.match(ln.strip()) or _TOOL_BULLET.match(ln.strip())
         if not m:
             continue
         name, ref, desc = m.group(1), m.group(2), m.group(3).strip(" -:")
+        listed.append(name)
         want = declared.get(name.lower())
         if want is None:
             continue
@@ -725,6 +729,10 @@ def third_party_tool_findings(text, catalog):
         if desc != want["description"]:
             shown = f"'{desc}'" if desc else "no description"
             findings.append(("LETTER", f"readme: 3rd Party Tools describes {name} as {shown} where the fleet describes it as '{want['description']}' - a shared tool carries one description (spec/third-party-tools.json)"))
+    # Ordering covers every tool listed, not only the cataloged ones, since a reader scans the whole list.
+    if listed != sorted(listed, key=str.lower):
+        first = next(f"{a} before {b}" for a, b in zip(listed, listed[1:]) if a.lower() > b.lower())
+        findings.append(("LETTER", f"readme: 3rd Party Tools is not alphabetized ({first}) - the list is scanned rather than read (spec/readme-structure.md)"))
     return findings
 
 
@@ -1754,6 +1762,8 @@ def _selftest():
         # A comment that opens no group is not a group header.
         # A markdownlint directive sits on its own line exactly like one, and reading it as a group reports a header the document never declared.
         ("a directive comment is not a link group", "<!-- markdownlint-disable MD033 -->\n" + links_ok, 0, 0),
+        # Also when it sits inside the reference block, where definitions do fall under it.
+        ("a directive inside the reference block is not a link group", links_ok.replace("[agents]: ./AGENTS.md", "<!-- markdownlint-disable MD034 -->\n[agents]: ./AGENTS.md"), 0, 0),
         # A scheme makes a target a link rather than a file, so it is named `-link` and grouped External.
         # Reading `mailto:` as a repo path would demand a bare name and the Repo group for a contact address.
         ("a mailto target is a URI, not a repo path", links_ok.replace("[upstream-link]: https://github.com/someone-else/their-repo", "[upstream-link]: mailto:someone@example.test"), 0, 0),
@@ -1791,6 +1801,9 @@ def _selftest():
         ("a fenced sample does not supply a tool link", tools_head + "| Tool | Role |\n| --- | --- |\n| [cspell][cspell-link] | Spell checker. |\n" + tools_defs + "\n```md\n[cspell-link]: https://wrong.example/\n```\n", 0),
         # A tool table shown as a sample inside the section is markup, not entries.
         ("a fenced tool table is not read as entries", tools_head + "| Tool | Role |\n| --- | --- |\n| [cspell][cspell-link] | Spell checker. |\n\n```md\n| [cspell][cspell-link] | wrong description |\n```\n" + tools_defs, 0),
+        # The list is alphabetized, which spec/readme-structure.md states and nothing checked until now.
+        ("an unsorted tool list is reported", tools_head + "| Tool | Role |\n| --- | --- |\n| [markdownlint-cli2][md-link] | Markdown linter. |\n| [cspell][cspell-link] | Spell checker. |\n" + tools_defs + "[md-link]: https://github.com/DavidAnson/markdownlint-cli2\n", 1),
+        ("a sorted tool list is not", tools_head + "| Tool | Role |\n| --- | --- |\n| [cspell][cspell-link] | Spell checker. |\n| [markdownlint-cli2][md-link] | Markdown linter. |\n" + tools_defs + "[md-link]: https://github.com/DavidAnson/markdownlint-cli2\n", 0),
     ]
     for label, text, wantn in tool_cases:
         got = third_party_tool_findings(text, cat)

@@ -16,6 +16,7 @@
         { "name": "Credits", "ordinal": 13, "required": "optional" },
         { "name": "License", "ordinal": 14, "required": "always", "last": true }
     ],
+    "directiveComments": ["markdownlint", "prettier-ignore", "cspell:", "editorconfig-checker-", "omit from toc"],
     "linkGroups": [
         { "name": "Sections", "holds": "anchor", "note": "In-page anchors, which the auto-generated Table of Contents does not use since it keeps inline links." },
         { "name": "Shields", "holds": "shield", "note": "Badges, meaning any reference the document renders as an image, whatever host serves it." },

@@ -26,6 +26,10 @@
                 }
             }
         },
+        "directiveComments": {
+            "type": "array",
+            "items": { "type": "string", "minLength": 1, "description": "A comment prefix that instructs a tool rather than naming a link group." }
+        },
         "linkGroups": {
             "type": "array",
             "minItems": 1,
