@@ -56,7 +56,7 @@ One pull request moving the canonical short description into declared data, so e
 
 - **Close the README-to-About hop, which is the only one nothing writes.** The audit reports a drifted About panel, and no tool sets it.
   - **Blocked by** - The entry above, since the field is what `repo-config/configure.sh` would set the panel from.
-  - **Issue** - [#577][issue-577], whose tagline half shipped on 2026-08-08.
+  - **Issue** - [#639][issue-639], filed on 2026-08-09 because this entry had been carrying [#577][issue-577], whose body covers only the README tagline and never mentions the About panel, and whose tagline half shipped on 2026-08-08.
   - **Checked** - `develop` on 2026-08-08, where `repo-config/configure.sh` sets every other repository setting and carries no `description` handling, and [`catalog/snippets/workflows/publish-docker-readme-task.yml`][workflows] pushes `github.event.repository.description` to Docker Hub.
   - **Open** - Nothing beyond sequencing.
   - **Settled** - The chain is README, then the About panel by hand, then Docker Hub by CI, so the unautomated hop is the first one and it is the one that drifts. PhotoCleaner is the worked case, where the About panel still matched the README and only the Docker Hub short description had diverged.
@@ -460,7 +460,6 @@ Regenerate [reports/divergences.md][divergences-report] before using it as the w
 Actions on issues that are the maintainer's to take, each carrying its evidence so it is one action rather than a re-derivation.
 
 - **Re-scope [#305][issue-305] to the push half, and make it the tracking issue for the fleet re-vendor sweep.** Most of what it asked for is built, since the fidelity model, the [`spec/files.json`][files] manifest, [`spec/divergences.json`][divergences] with its generated [reports/divergences.md][divergences-report], and [`AUDIT.md`][audit-doc] section 10 together give the canonical-versus-adapted split and the audit path it proposed. What is genuinely still missing is the push half, since every one of those detects drift while the sweep that fixes it is manual. Re-scoped, it carries the "Fleet Sweeps" visit manifest and Blog as the pilot. Closing it against the built machinery is the alternative, and it loses the only tracking issue the sweep would have.
-- **Comment on [#577][issue-577] that it is decided together with the declared description.** Declaring the field in [`registry/repos.json`][repos] makes every mirror read a field rather than parse a paragraph, so taking [#577][issue-577] first means writing an extraction rule the registry change then deletes.
 
 ## Verified Complete, Awaiting Close
 
@@ -498,6 +497,7 @@ Each was checked against the tree and has nothing left to do anywhere. Closing i
 [issue-607]: https://github.com/ptr727/ProjectTemplate/issues/607
 [issue-623]: https://github.com/ptr727/ProjectTemplate/issues/623
 [issue-633]: https://github.com/ptr727/ProjectTemplate/issues/633
+[issue-639]: https://github.com/ptr727/ProjectTemplate/issues/639
 
 <!-- Pull requests -->
 
