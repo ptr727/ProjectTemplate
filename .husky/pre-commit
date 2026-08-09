@@ -23,15 +23,29 @@ set -e
 # The relative paths below would otherwise resolve against whatever directory the caller was in.
 cd "$(git rev-parse --show-toplevel)"
 
+# The interpreter is probed in the order spec/host-tools.json declares, rather than named.
+# On native Windows the python.org install registers `py` and not `python3`.
+# That name resolves to a Microsoft Store alias stub, and Git Bash inherits the Windows PATH.
+# Naming python3 here would fail the hook on a correctly set up Windows host.
+if command -v python3 >/dev/null 2>&1; then
+    PY=python3
+elif command -v py >/dev/null 2>&1; then
+    PY="py -3"
+else
+    echo "pre-commit: no python3 and no py -3 on PATH, so the doc gates did not run." >&2
+    echo "pre-commit: see docs/host-setup.md 'What a Host Must Provide'." >&2
+    exit 1
+fi
+
 # The prose gate is scoped to what changed against HEAD, which is the policy for prose.
 # A rule is applied as a file is next edited rather than swept across the tree.
 # Whole-tree costs about 2.2 seconds where the diff-scoped run costs about 0.13.
 # The scope is the working tree rather than the index.
 # A partially staged file is therefore judged on all of its edits, not only the staged ones.
 # CI re-runs the same rules over the whole tree, which is what makes that affordable here.
-python3 scripts/prose_lint.py . --diff HEAD
+$PY scripts/prose_lint.py . --diff HEAD
 
 # The eol check is repo-wide rather than diff-scoped, and it is here because it is already fast.
 # It reads `.gitattributes` against `.editorconfig` for the whole repository and takes no file list.
 # At about 0.04 seconds there is nothing to scope, so scoping it would only make it wrong.
-python3 scripts/repo_gate.py --check eol
+$PY scripts/repo_gate.py --check eol
