@@ -9,6 +9,7 @@ neither was visible from reading the code.
 from __future__ import annotations
 
 import json
+import re
 import sys
 import unittest
 from pathlib import Path
@@ -424,17 +425,27 @@ class TestShippedDeclaration(unittest.TestCase):
         since a host reads the table and stops.
         """
         doc = (host_gate.SPEC.parent.parent / 'docs' / 'host-setup.md').read_text(encoding='utf-8')
-        table = [ln for ln in doc.splitlines() if ln.startswith('| ') and '|' in ln[2:]]
-        self.assertTrue(table, 'no contract table found in docs/host-setup.md')
+        rows = {}
+        for ln in doc.splitlines():
+            if not ln.startswith('| '):
+                continue
+            cells = [c.strip() for c in ln.strip('|').split('|')]
+            # The row is keyed on its Tool cell alone, never on the whole line.
+            # Matching the line matches the probe command in `Present when` instead.
+            # The key would then be whatever that column said, and the test would pass for the wrong reason.
+            # The label is prose and the name is an identifier, so `Python 3` keys as `python3`.
+            if cells:
+                rows[re.sub(r'[^a-z0-9.]', '', cells[0].lower())] = cells
+        self.assertIn('python3', rows, 'no contract table found in docs/host-setup.md')
         for t in self.data['tools']:
             # An optional tool is deliberately outside the table, which lists what a host must provide.
             # `git-restore-mtime` carries a floor and no row, and that is correct.
             if t['minimum'] is None or not t.get('required'):
                 continue
-            rows = [ln for ln in table if t['name'] in ln or t['name'].rstrip('3') in ln]
-            self.assertTrue(rows, f'{t["name"]} declares a floor and has no row in the contract table')
+            key = re.sub(r'[^a-z0-9.]', '', t['name'].lower())
+            self.assertIn(key, rows, f'{t["name"]} declares a floor and has no row in the contract table')
             self.assertTrue(
-                any(t['minimum'] in ln for ln in rows),
+                any(t['minimum'] in c for c in rows[key]),
                 f'{t["name"]} declares {t["minimum"]} and no table row states it')
 
     def test_a_target_floor_says_so_rather_than_implying_a_defect(self):
