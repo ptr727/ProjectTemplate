@@ -396,8 +396,12 @@ def readme_region(text, heading):
     Markdown All in One extension, and reading them as sectionless reported twelve absent sub-sections that
     were present. Stripping first is confined to the README checks: extract_section itself must keep the
     comment, since the verbatim engine hashes a section's exact bytes.
+
+    Fences are stripped here rather than at each caller. Every region the README checks read comes through
+    this one function, so doing it at the root is what stops a code sample inside a section from being read
+    as a badge, a tool row, or a definition by whichever caller forgot.
     """
-    return extract_section(_HTML_COMMENT.sub("", normalize(text)), heading)
+    return extract_section(_HTML_COMMENT.sub("", unfenced_text(text)), heading)
 
 
 def shield_endpoints(region, defs):
@@ -454,12 +458,10 @@ def ordered_headings(markdown, level):
     inject a phantom section.
     """
     marker = "#" * level + " "
-    out, fenced = [], False
-    for ln in _HTML_COMMENT.sub("", normalize(markdown)).split("\n"):
+    out = []
+    for ln in _HTML_COMMENT.sub("", unfenced_text(markdown)).split("\n"):
         s = ln.strip()
-        if s.startswith("```") or s.startswith("~~~"):
-            fenced = not fenced
-        elif not fenced and s.startswith(marker):
+        if s.startswith(marker):
             out.append(s[len(marker):].strip())
     return out
 
@@ -741,7 +743,7 @@ def readme_shield_findings(text, model, entry):
     repo can be measured against.
     """
     findings = []
-    defs = {m.group(1): m.group(2) for m in _LINK_DEF.finditer(normalize(text))}
+    defs = {m.group(1): m.group(2) for m in _LINK_DEF.finditer(unfenced_text(text))}
     # A retired badge service is scanned across the whole document rather than per section, since a dead badge is wrong wherever it sits.
     # It renders broken rather than absent, which a visitor reads as a failing build rather than as a stale badge.
     for dep in model.get("deprecatedShields", []):
@@ -766,7 +768,7 @@ def readme_shield_findings(text, model, entry):
             continue
         # Rendered elsewhere, which for the license shield is the whole point: it belongs at the bottom and nowhere else.
         # Compared over uses rather than over raw text, so the shield's own `[ref]: url` definition is not read as a second placement.
-        outside = strip_sections(_HTML_COMMENT.sub("", normalize(text)), [sh["in"].split(">")[0].strip()])
+        outside = strip_sections(_HTML_COMMENT.sub("", unfenced_text(text)), [sh["in"].split(">")[0].strip()])
         if any(shield_matches(u, sh) for u in shield_endpoints(outside, defs)):
             findings.append(("LETTER", f"readme: the {sh['label']} shield is rendered outside `{sh['in']}` - it belongs there and nowhere else (spec/readme-structure.md)"))
     return findings
@@ -1685,6 +1687,10 @@ def _selftest():
         ("a caption the repo spells differently is not a finding", conformant.replace("![Release Status]", "![Lint Build]"), {}, 0),
         ("an extra shield beyond the class is not a finding", conformant.replace("[![Last Commit][b]][x]", "[![Last Commit][b]][x]\\\n[![Last Build][a]][x]"), {}, 0),
         ("a shield in the wrong sub-section does not count as present", conformant.replace("[![GitHub Release][c]][x]\\\n", ""), {}, 1),
+        # A badge shown as a code sample is markup, so it satisfies nothing and trips nothing.
+        # Every region the README checks read comes through readme_region, which strips fences at the root.
+        ("a fenced badge sample does not satisfy a required shield", conformant.replace("[![GitHub Release][c]][x]\\\n", "```md\n[![GitHub Release][c]][x]\n```\n"), {}, 1),
+        ("a fenced license shield does not trip the exclusive rule", conformant.replace("## Overview", "```md\n![License][license-shield]\n```\n\n## Overview"), {}, 0),
         ("a retired badge service is reported wherever it sits", conformant.replace("[license-shield]: https://img.shields.io/github/license/o/r\n", "[license-shield]: https://img.shields.io/github/license/o/r\n[last-build-shield]: https://byob.yarr.is/o/r/lastbuild\n"), {}, 1),
         ("the pre-release shield is told from the release shield by its query", conformant.replace("?include_prereleases&label=GitHub%20Pre-Release", "?label=Another%20Release"), {}, 1),
         # The license shield is an ordinary member of the base class, addressed to a different section.
@@ -1783,6 +1789,8 @@ def _selftest():
         # A definition inside a code sample is markup being shown, so it must not resolve a tool link.
         # The sample sits after the real definition deliberately, so reading across fences would override it.
         ("a fenced sample does not supply a tool link", tools_head + "| Tool | Role |\n| --- | --- |\n| [cspell][cspell-link] | Spell checker. |\n" + tools_defs + "\n```md\n[cspell-link]: https://wrong.example/\n```\n", 0),
+        # A tool table shown as a sample inside the section is markup, not entries.
+        ("a fenced tool table is not read as entries", tools_head + "| Tool | Role |\n| --- | --- |\n| [cspell][cspell-link] | Spell checker. |\n\n```md\n| [cspell][cspell-link] | wrong description |\n```\n" + tools_defs, 0),
     ]
     for label, text, wantn in tool_cases:
         got = third_party_tool_findings(text, cat)
