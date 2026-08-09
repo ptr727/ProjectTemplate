@@ -14,13 +14,15 @@ Supported hosts:
 
 This section is the **contract**: which tools a host needs and which repo procedure stops working without each one. It deliberately names no installer, because `winget`, `brew` and `apt` differ per platform while the requirement does not. Per-platform install commands are tracked separately, so this table stays true on every host.
 
-| Tool | Needed by | Present when |
-| --- | --- | --- |
-| `git` | everything, and the identity and signing contract in [`STANDUP.md`][standup] step 0 | `git --version` |
-| `gh` | the PR and review loop, `gh api` queries, `repo-config/configure.sh` | `gh --version` |
-| Python 3 | `scripts/` and `spec/` (standard library only, no packages to install) | `python3 --version`, or `py -3 --version` on native Windows |
-| `docker` | the four linters, which run as pinned images rather than local installs | `docker --version` |
-| `uv` / `uvx` | coverage runs, and the Python toolchain (`ruff`, `pyright` or `mypy`) in a Python repo | `uv --version` |
+| Tool | Needed by | Present when | Floor |
+| --- | --- | --- | --- |
+| `git` | everything, and the identity and signing contract in [`STANDUP.md`][standup] step 0 | `git --version` | none |
+| `gh` | the PR and review loop, `gh api` queries, `repo-config/configure.sh` | `gh --version` | **2.47.0**, measured |
+| Python 3 | `scripts/` and `spec/` (standard library only, no packages to install) | `python3 --version`, or `py -3 --version` on native Windows | **3.13**, target |
+| `docker` | the four linters, which run as pinned images rather than local installs | `docker --version` | none |
+| `uv` / `uvx` | coverage runs, and the Python toolchain (`ruff`, `pyright` or `mypy`) in a Python repo | `uv --version` | none |
+
+The **Floor** column exists because presence and sufficiency are different questions and the answer to the first was being read as the answer to the second. A tool below its floor still answers `--version`, so every other column reports it as fine while `scripts/host_gate.py` fails it. The kind is named beside the number, since a **measured** floor sits above a version known to break a documented procedure and gives a failing host a defect to point at, where a **target** floor names the version the repo's toolchain is configured for and does not. The next section carries the reasoning behind each one.
 
 Two consequences worth reading off the table rather than discovering later. **Python 3 needs no packages**, because every script here is standard library only, so a bare interpreter is enough. And **the linters need only `docker`**, not `node`, `dotnet` or a local `markdownlint`, since each runs as a pinned image, which is what keeps a local run and CI the same check.
 
