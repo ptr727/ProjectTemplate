@@ -424,29 +424,39 @@ class TestShippedDeclaration(unittest.TestCase):
         sufficient. A number that drifts out of step with the data is worse than an absent one,
         since a host reads the table and stops.
         """
+        def norm(text):
+            """A prose label reduced to the identifier it names, so `Python 3` keys as `python3`."""
+            return re.sub(r'[^a-z0-9.]', '', text.lower())
+
         doc = (host_gate.SPEC.parent.parent / 'docs' / 'host-setup.md').read_text(encoding='utf-8')
-        rows = {}
+        rows, floor_col = {}, None
         for ln in doc.splitlines():
             if not ln.startswith('| '):
                 continue
             cells = [c.strip() for c in ln.strip('|').split('|')]
-            # The row is keyed on its Tool cell alone, never on the whole line.
-            # Matching the line matches the probe command in `Present when` instead.
-            # The key would then be whatever that column said, and the test would pass for the wrong reason.
-            # The label is prose and the name is an identifier, so `Python 3` keys as `python3`.
+            # Every lookup here is on one named cell, never on the row and never on a fixed index.
+            # Searching the row matches the probe command in `Present when` as well.
+            # A table stating a version there would then satisfy this with the Floor column deleted.
+            # That is the failure this test exists to catch rather than to reproduce.
+            if floor_col is None and 'floor' in [c.lower() for c in cells]:
+                floor_col = [c.lower() for c in cells].index('floor')
+                continue
             if cells:
-                rows[re.sub(r'[^a-z0-9.]', '', cells[0].lower())] = cells
-        self.assertIn('python3', rows, 'no contract table found in docs/host-setup.md')
+                rows[norm(cells[0])] = cells
+        self.assertIsNotNone(floor_col, 'docs/host-setup.md has no contract table with a Floor column')
         for t in self.data['tools']:
             # An optional tool is deliberately outside the table, which lists what a host must provide.
             # `git-restore-mtime` carries a floor and no row, and that is correct.
             if t['minimum'] is None or not t.get('required'):
                 continue
-            key = re.sub(r'[^a-z0-9.]', '', t['name'].lower())
+            key = norm(t['name'])
             self.assertIn(key, rows, f'{t["name"]} declares a floor and has no row in the contract table')
-            self.assertTrue(
-                any(t['minimum'] in c for c in rows[key]),
-                f'{t["name"]} declares {t["minimum"]} and no table row states it')
+            cells = rows[key]
+            self.assertGreater(len(cells), floor_col,
+                               f'the {t["name"]} row has no Floor cell')
+            self.assertIn(t['minimum'], cells[floor_col],
+                          f'{t["name"]} declares {t["minimum"]} and its Floor cell says '
+                          f'{cells[floor_col]!r}')
 
     def test_a_target_floor_says_so_rather_than_implying_a_defect(self):
         """The python3 floor is a target, so its `why` has to distinguish itself from a measured one.
