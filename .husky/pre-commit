@@ -6,9 +6,15 @@
 # That file is gitignored and arrives with an npm install this repository does not have.
 # Sourcing it would therefore break the hook in a fresh clone.
 # The path is kept for the fleet convention the line-ending pins are written against.
-# What is absent is a decision rather than an oversight.
-# `repo_gate.py --check sha-pin` resolves same-owner pins against the GitHub API.
-# It stays in CI, where a network is assumed, since a hook needing one fails offline.
+#
+# The language-formatting half the fleet convention names is absent here, and measured rather than assumed.
+# This repository declares ruff in `pyproject.toml`, no workflow runs it, and the tree does not pass it.
+# `ruff format --check` reports 13 of 57 files would be reformatted and `ruff check` reports 106 errors.
+# A gate failing on the corpus it guards blocks every commit from the moment it lands.
+# Converging the Python comes first, and the step is added here after that rather than before it.
+#
+# `repo_gate.py --check sha-pin` is absent for a different reason.
+# It resolves same-owner pins against the GitHub API, and a hook needing a network fails offline.
 # The doc linters that need Docker stay in CI and in the VS Code Lint tasks.
 set -e
 
