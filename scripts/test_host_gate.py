@@ -404,10 +404,27 @@ class TestShippedDeclaration(unittest.TestCase):
             if t['minimum'] is not None:
                 self.assertTrue(t.get('source'), f'{t["name"]} declares a floor and no source to install from')
 
-    def test_the_two_known_defects_are_the_declared_floors(self):
-        """A floor exists only where a defect is known, so this asserts the set rather than a count."""
+    def test_the_declared_floors_are_the_ones_with_a_stated_reason(self):
+        """A floor is justified or it is not there, so this asserts the set rather than a count.
+
+        Two kinds qualify. A measured floor sits above a version known to break a documented
+        procedure, and a target floor names the version the repo's toolchain is configured for.
+        The set is asserted so that adding a floor is a deliberate edit here rather than a silent
+        one in the data, which is what caught the python3 floor being added without this line.
+        """
         floors = {t['name'] for t in self.data['tools'] if t['minimum'] is not None}
-        self.assertEqual(floors, {'gh', 'git-restore-mtime'})
+        self.assertEqual(floors, {'gh', 'git-restore-mtime', 'python3'})
+
+    def test_a_target_floor_says_so_rather_than_implying_a_defect(self):
+        """The python3 floor is a target, so its `why` has to distinguish itself from a measured one.
+
+        A reader who takes a target floor for a measured one goes looking for a defect report that
+        does not exist, which is the failure the two-kinds wording was written to prevent.
+        """
+        python3 = next(t for t in self.data['tools'] if t['name'] == 'python3')
+        self.assertEqual(python3['minimum'], '3.13')
+        self.assertIn('target', python3['why'])
+        self.assertIn('unverified rather than known broken', python3['why'])
 
 
 if __name__ == '__main__':

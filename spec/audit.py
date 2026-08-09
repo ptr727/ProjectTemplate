@@ -30,7 +30,7 @@ import subprocess
 import sys
 import urllib.error
 import urllib.request
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from typing import Any
 
 ROOT = pathlib.Path(__file__).resolve().parent.parent
@@ -2041,7 +2041,7 @@ def main(argv=None):
 
     # Findings are a point-in-time snapshot.
     # Stamp the run so anything derived from it, an onboarding issue or a report, carries its own freshness signal and a reader can tell whether it still applies.
-    run_utc = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+    run_utc = datetime.now(UTC).strftime("%Y-%m-%dT%H:%M:%SZ")
     hub = subprocess.run(["git", "rev-parse", "--short", "HEAD"], capture_output=True, text=True, cwd=ROOT)
     hub_sha = hub.stdout.strip() if hub.returncode == 0 else "unknown"
 

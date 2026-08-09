@@ -1,6 +1,6 @@
 {
     "$schema": "./host-tools.schema.json",
-    "note": "The host contract in docs/host-setup.md, as data a gate can read. docs/host-setup.md states which tools a host needs and which repo procedure stops working without each one; this file adds the version floors, and each floor records the defect it encodes rather than a preference. A floor exists only where a specific version is known to break a documented procedure, so most entries carry none and are presence-only, which is deliberate: a floor nobody can justify becomes a host failure nobody can act on. An entry is required unless it declares otherwise, and an optional tool that is absent is skipped rather than failed, since it is needed by one repository rather than by the fleet. Probes are tried in order and the first that runs is the answer, which is how a host whose interpreter is not called python3 still reports a version. The pattern is matched against the probe's combined output and its first capture group is the version, read as dot-separated integers, so a two-part YYYY.MM version compares correctly against a three-part semantic one.",
+    "note": "The host contract in docs/host-setup.md, as data a gate can read. docs/host-setup.md states which tools a host needs and which repo procedure stops working without each one; this file adds the version floors, and each floor records the defect it encodes rather than a preference. A floor is one of two kinds and says which in its own why. A measured floor sits immediately above a version known to break a documented procedure, and is the kind most floors here are. A target floor declares the version the repo's own toolchain is configured for, where a lower interpreter is unverified rather than known broken, and it is honest about that rather than implying a defect nobody found. Everything else is presence-only, which is deliberate: a floor nobody can justify becomes a host failure nobody can act on. An entry is required unless it declares otherwise, and an optional tool that is absent is skipped rather than failed, since it is needed by one repository rather than by the fleet. Probes are tried in order and the first that runs is the answer, which is how a host whose interpreter is not called python3 still reports a version. The pattern is matched against the probe's combined output and its first capture group is the version, read as dot-separated integers, so a two-part YYYY.MM version compares correctly against a three-part semantic one.",
     "tools": [
         {
             "name": "docker",
@@ -49,8 +49,13 @@
             "required": true,
             "probes": [["python3", "--version"], ["py", "-3", "--version"]],
             "pattern": "Python (\\d+(?:\\.\\d+)*)",
-            "minimum": null,
-            "why": "Every script here is standard library only, so a bare interpreter is enough and no package floor exists. No version floor is declared because none has been measured, and the name rather than the version is what differs per platform, which the second probe covers."
+            "minimum": "3.13",
+            "why": "Every script here is standard library only, so a bare interpreter is enough and no package floor exists. The floor is the toolchain target rather than a measured breakage one version below it, which is the one entry here that reads that way and says so rather than implying a defect nobody found. pyproject.toml sets ruff target-version to py313 and mypy python_version to 3.13, so the lint and type results this repo gates on describe 3.13 and describe no other interpreter, and a run below the floor is unverified rather than known broken. Two hard requirements are measured and both sit lower: str.removeprefix and str.removesuffix need 3.9 and are called in spec/audit.py and scripts/prose_lint.py, and datetime.UTC needs 3.11 and is used in spec/audit.py, scripts/pr_review.py and their tests. Those are what an older interpreter actually fails on, as an AttributeError at the call rather than at startup. The name rather than the version is what differs per platform, which the second probe covers.",
+            "source": {
+                "linux": "Whatever the platform provides at or above the floor, since the scripts need an interpreter and no packages, so no distribution or build is pinned here.",
+                "macos": "Whatever the platform provides at or above the floor, on the same reasoning as Linux.",
+                "windows": "The python.org installer, which registers py, python and python3.13 but not python3, so the gate reaches it through the py -3 probe rather than the python3 name that resolves to the Microsoft Store alias stub."
+            }
         },
         {
             "name": "uv",
