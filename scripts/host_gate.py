@@ -75,18 +75,21 @@ def read_tool(tool: dict) -> tuple[str, str | None, str | None]:
     and `read` otherwise. The three are kept apart because they have different remedies: install it,
     fix this file's pattern, or act on the version.
     """
-    ran = False
+    # The probe that answered is remembered rather than assumed to be the first one declared.
+    # Naming a probe that never ran sends the reader to fix a pattern against output they cannot reproduce.
+    answered = None
     for argv in tool['probes']:
         out = probe(argv)
         if out is None:
             continue
-        ran = True
+        if answered is None:
+            answered = ' '.join(argv)
         m = re.search(tool['pattern'], out)
         if m:
             return 'read', m.group(1), ' '.join(argv)
-    if not ran:
+    if answered is None:
         return 'absent', None, None
-    return 'unreadable', None, ' '.join(tool['probes'][0])
+    return 'unreadable', None, answered
 
 
 REQUIRED_FIELDS = ('name', 'probes', 'pattern', 'minimum', 'why')
@@ -105,24 +108,33 @@ def merge(base: list[dict], local: list[dict]) -> tuple[list[dict], list[str]]:
     required tool optional, because those are the edits that quietly retire a fleet check from inside
     the repository it was written to protect. A rejected override is reported rather than dropped,
     so a repository that tried to relax a floor hears about it instead of appearing to succeed.
+
+    Names match without regard to case, so a repository writing `GH` overrides the hub's `gh` rather
+    than silently adding a second entry beside it. Keying on the exact spelling would turn a
+    misspelled override into an addition, which is the one outcome the author could not have
+    intended and the gate would report as success.
     """
-    by_name = {t['name']: dict(t) for t in base}
+    by_key = {t['name'].lower(): dict(t) for t in base}
     rejected = []
     for entry in local:
         name = entry.get('name')
         if not isinstance(name, str) or not name:
             rejected.append('a local entry carries no name, so it was ignored')
             continue
-        if name not in by_name:
+        key = name.lower()
+        if key not in by_key:
             missing = [f for f in REQUIRED_FIELDS if f not in entry]
             if missing:
                 rejected.append(f'local tool {name} adds a new entry without {", ".join(missing)}, so it was ignored')
             else:
-                by_name[name] = dict(entry)
+                by_key[key] = dict(entry)
             continue
 
-        merged = by_name[name]
+        merged = by_key[key]
         for field, value in entry.items():
+            # The hub's spelling of the name stands, since the gate reports under it and a local case variant is an override rather than a rename.
+            if field == 'name':
+                continue
             if field == 'required' and merged.get('required', True) and value is False:
                 rejected.append(f'local tool {name} tried to turn a required tool optional, which is a relaxation, so the hub value stands')
                 continue
@@ -133,7 +145,7 @@ def merge(base: list[dict], local: list[dict]) -> tuple[list[dict], list[str]]:
                     rejected.append(f'local tool {name} tried to lower the floor from {merged["minimum"]} to {value!r}, which is a relaxation, so the hub floor stands')
                     continue
             merged[field] = value
-    return [by_name[n] for n in sorted(by_name)], rejected
+    return [by_key[k] for k in sorted(by_key)], rejected
 
 
 def check(tools: list[dict]) -> list[str]:

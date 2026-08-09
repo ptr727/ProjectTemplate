@@ -85,6 +85,15 @@ class TestReadTool(unittest.TestCase):
         status, version, _ = host_gate.read_tool(entry)
         self.assertEqual((status, version), ('read', '3.13.5'))
 
+    def test_unreadable_names_the_probe_that_answered_not_the_first_declared(self):
+        """Naming a probe that never ran sends the reader to fix a pattern against output they cannot reproduce."""
+        entry = tool('odd', probes=[['definitely-not-a-real-binary-xyzzy'],
+                                    [sys.executable, '-c', 'print("no version here")']])
+        status, _, how = host_gate.read_tool(entry)
+        self.assertEqual(status, 'unreadable')
+        self.assertIn(sys.executable, how)
+        self.assertNotIn('xyzzy', how)
+
 
 class TestCheck(unittest.TestCase):
     def setUp(self):
@@ -168,6 +177,21 @@ class TestMerge(unittest.TestCase):
         self.assertNotIn('ffmpeg', [t['name'] for t in merged])
         self.assertEqual(len(rejected), 1)
         self.assertIn('without', rejected[0])
+
+    def test_a_case_variant_overrides_rather_than_adding_a_second_entry(self):
+        """Keying on the exact spelling would turn a misspelled override into an addition, and report success."""
+        merged, rejected = host_gate.merge(self.base(), [{'name': 'GH', 'minimum': '2.60.0'}])
+        self.assertEqual(rejected, [])
+        self.assertEqual(len(merged), 2)
+        gh = next(t for t in merged if t['name'].lower() == 'gh')
+        self.assertEqual(gh['minimum'], '2.60.0')
+        self.assertEqual(gh['name'], 'gh', 'the hub spelling stands, since the gate reports under it')
+
+    def test_a_case_variant_cannot_relax_either(self):
+        """Otherwise folding case would open the door the tighten-only rule closes."""
+        merged, rejected = host_gate.merge(self.base(), [{'name': 'GH', 'required': False}])
+        self.assertEqual(len(rejected), 1)
+        self.assertTrue(next(t for t in merged if t['name'] == 'gh').get('required', True))
 
     def test_the_hub_declaration_is_not_mutated(self):
         """The caller's list is reused across runs, so merging must copy rather than edit in place."""

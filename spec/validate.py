@@ -144,9 +144,10 @@ def main():
             if not isinstance(t, dict) or not isinstance(name, str) or not name:
                 errors.append(f"host-tools.json: entry {t!r} needs a non-empty name")
                 continue
-            if name in ht_seen:
-                errors.append(f"host-tools.json: duplicate tool name '{name}' - the gate keys on it, so the second entry would shadow the first")
-            ht_seen.add(name)
+            # Case-insensitive, matching the gate, which folds case so a repository writing 'GH' overrides 'gh' rather than adding a second entry.
+            if name.lower() in ht_seen:
+                errors.append(f"host-tools.json: duplicate tool name '{name}' - the gate keys on it without regard to case, so the second entry would shadow the first")
+            ht_seen.add(name.lower())
             if not isinstance(t.get("why"), str) or not t.get("why"):
                 errors.append(f"host-tools.json: '{name}' needs a non-empty why, which is what keeps a floor from becoming folklore")
             if not isinstance(t.get("pattern"), str) or not t.get("pattern"):
@@ -163,8 +164,8 @@ def main():
                 elif not isinstance(t.get("source"), dict) or not t["source"]:
                     errors.append(f"host-tools.json: '{name}' declares a floor and no 'source', so a host below it is told to upgrade and not where from")
         ht_names = [t["name"] for t in host_tools["tools"] if isinstance(t, dict) and isinstance(t.get("name"), str)]
-        if ht_names != sorted(ht_names):
-            errors.append("host-tools.json: 'tools' is not sorted by name")
+        if ht_names != sorted(ht_names, key=str.lower):
+            errors.append("host-tools.json: 'tools' is not sorted by name, which is how a reader finds an entry")
     if not isinstance(mechanisms, dict):
         errors.append("secrets.json: 'mechanisms' is not an object")
     else:
