@@ -74,13 +74,20 @@ def main():
 
     check_secret_set("baseline", secrets.get("baseline"), need_kind=False)
 
-    # The README model's distribution prefixes are what tell a repo's own URLs from a third party's.
-    # Their absence fails open rather than loud: link_kind would classify every own URL as external, canonical naming would quietly stop being enforced, and the audit would still report green.
-    # The schema marks the key required, but CI runs no JSON-schema validation, so the guard that actually runs is this one.
+    # The README model is indexed directly by spec/audit.py, so a key that is absent or the wrong type crashes the audit mid-run rather than reporting.
+    # The schema marks each one required, but CI runs no JSON-schema validation, so the guard that actually runs is this one.
+    # Checked as a set rather than one key at a time, since guarding only the keys a review happened to name is how the other four came to be unguarded.
     readme_model = load("spec/readme-sections.json")
     if not isinstance(readme_model, dict):
         errors.append("readme-sections.json: top level is not an object")
     else:
+        for key, want in (("sections", list), ("shieldClasses", list), ("linkGroups", list),
+                          ("linkNaming", list), ("canonicalLinks", list), ("distribution", dict)):
+            value = readme_model.get(key)
+            if not isinstance(value, want) or not value:
+                errors.append(f"readme-sections.json: '{key}' must be a non-empty {'array' if want is list else 'object'}, and spec/audit.py indexes it directly")
+        # The distribution prefixes are what tell a repo's own URLs from a third party's.
+        # Their absence fails open rather than loud: link_kind would classify every own URL as external, canonical naming would quietly stop being enforced, and the audit would still report green.
         prefixes = readme_model.get("distribution", {}).get("urlPrefixes") if isinstance(readme_model.get("distribution"), dict) else None
         if not is_str_list(prefixes) or not prefixes:
             errors.append("readme-sections.json: 'distribution.urlPrefixes' must be a non-empty array of strings, or the link audit stops distinguishing this repo's URLs from a third party's and silently passes")
