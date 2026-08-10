@@ -474,7 +474,7 @@ class TestShippedDeclaration(unittest.TestCase):
         fails here instead of reading as measured. Both members are named, since a check that only
         counted them would pass on the wrong pair.
         """
-        targets = {'jq': '1.6', 'python3': '3.13'}
+        targets = {'jq': '1.7', 'python3': '3.13'}
         by_name = {t['name']: t for t in self.data['tools']}
         for name, floor in targets.items():
             entry = by_name[name]

@@ -19,7 +19,7 @@ This section is the **contract**: which tools a host needs and which repo proced
 | `git` | everything, and the identity and signing contract in [`STANDUP.md`][standup] step 0 | `git --version` | none |
 | `gh` | the PR and review loop, `gh api` queries, `repo-config/configure.sh` | `gh --version` | **2.47.0**, measured |
 | Python 3 | `scripts/` and `spec/` (standard library only, no packages to install) | `python3 --version`, or `py -3 --version` on native Windows | **3.13**, target |
-| `jq` | the ruleset normalizer in `repo-config/configure.sh`, the ruleset diff in [`AUDIT.md`][audit] section 6, and payload regeneration | `jq --version` | **1.6**, target |
+| `jq` | the ruleset normalizer in `repo-config/configure.sh`, the ruleset diff in [`AUDIT.md`][audit] section 6, and payload regeneration | `jq --version` | **1.7**, target |
 | `docker` | the four linters, which run as pinned images rather than local installs | `docker --version` | none |
 | `uv` / `uvx` | coverage runs, and the Python toolchain (`ruff`, `pyright` or `mypy`) in a Python repo | `uv --version` | none |
 
