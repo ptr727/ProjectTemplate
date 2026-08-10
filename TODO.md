@@ -367,6 +367,22 @@ One pull request adding the observer the fleet has no equivalent of, reading mer
   - **Settled** - Two floors are not optional. A run reading zero pull requests reports that rather than a clean zero, and a repo the search surfaces with no registry entry is reported separately, which feeds "Registry Membership Coverage" above.
   - **Settled** - This is not the deferred audit automation recorded under "Standalone Chores". That entry rejected three scheduled and hook-driven shapes on three blockers, and this is owner-run and on demand like [`spec/fidelity_honesty.py`][fidelity-honesty], so it lands on none of them.
 
+### A Disproof About Carried Text Has Nowhere Fleet-Wide to Live
+
+One pull request deciding whether the review record admits a second class of entry, for a finding raised against text the whole fleet carries rather than against one repository's own file. The record's shape and its per-repository rule are both right and neither covers this case, so the deliverable is a decision about the category rather than a rewrite of what exists.
+
+**State** `decision`. **Touches** [`.github/copilot-instructions.md`][copilot-instructions], and possibly [`spec/section-model.md`][section-model] if the answer is a new carried section. **Cost** one hub edit, plus a fleet-wide re-vendor only if the entries themselves become carried.
+
+- **Decide where a disproof about carried text lives, given that every repository carrying the text will meet the same finding.** The record's preamble says the entries are the hub's own, that a repository carrying the file keeps the shape and the rules rather than the findings, and that it records what it has proved itself. That is correct for a finding about one repository's tree and wrong for one about a canonical every repository holds a copy of.
+  - **Blocked by** - Nothing.
+  - **Issue** - None filed.
+  - **Checked** - `develop` at `7bc6978` on 2026-08-10, against the `keys_unsorted` entry at `.github/copilot-instructions.md` and the preamble sentence beginning "The entries are this repository's own".
+  - **Open** - Whether the answer is a second entry class in the record marked as carried, a fleet-level record somewhere else, or nothing at all on the grounds that independent re-derivation is worth its cost because it catches an entry that has gone stale.
+  - **Settled** - The case is real rather than predicted. A reviewer raised the `keys_unsorted` claim against the section 6 snippet at the hub, it was disproved by running both builtins on `jq-1.5-1-a5b5cbe`, and the same claim was then raised against a downstream repository's carried copy of the same snippet, where it was disproved a second time from the jq 1.5 manual. Two disproofs of one claim about one canonical, and the second could not cite the first.
+  - **Settled** - The independent re-derivation was not wasted, which is what makes this a decision rather than a defect. The second disproof came from the manual where the first came from a binary, so the two cover intent and behavior rather than repeating one another, and a rule that suppressed the second would have lost that.
+  - **Settled** - The current rule is right about what it governs. A repository carrying the hub's findings would carry claims about files it does not have, each naming a revision it never had, which is the staleness the per-repository rule exists to prevent. So the fix cannot be to relax that rule, and any answer has to distinguish the subject of a finding from the repository that filed it.
+  - **Settled** - The cost is bounded and recurring rather than one-off. It falls once per repository per finding, on carried text only, and only where a reviewer raises the same point twice. It is small enough that doing nothing is a legitimate outcome, which is why this is a decision cluster and not a defect.
+
 ### Peer Messaging Between Agents as a Declared Method
 
 One pull request writing down the agent-to-agent messaging this fleet has now used successfully, so it is a method with stated boundaries rather than a capability each session rediscovers. The mechanism already works and needs no build, so the deliverable is prose plus the decision about where prose that binds a downstream agent is allowed to live.
