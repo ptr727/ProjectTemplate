@@ -384,6 +384,63 @@ class TestReadDeclaration(unittest.TestCase):
         self.assertIsInstance(host_gate.read_declaration(Path('/definitely/not/here.json'), 'declaration'), str)
 
 
+class TestLocalOverlay(unittest.TestCase):
+    """This repo's own root host-tools.json, and the schema it points at.
+
+    The overlay borrowed the fleet schema once, and that schema forbids both shapes an overlay is for:
+    `minItems: 1` rejects the empty list a repo with nothing to add carries, and the per-entry
+    `required` list rejects the partial entry that lets a repo raise one floor without restating a
+    tool. Neither is caught by running the gate, because CI runs no JSON-schema validation at all and
+    the pointer's only reader is a schema-aware editor, so the file showed as invalid where it is
+    edited and nowhere else.
+    """
+
+    def setUp(self):
+        self.root = host_gate.SPEC.parent.parent
+        self.overlay = json.loads((self.root / 'host-tools.json').read_text(encoding='utf-8'))
+        self.local_schema = json.loads((self.root / 'spec' / 'host-tools-local.schema.json').read_text(encoding='utf-8'))
+        self.fleet_schema = json.loads((self.root / 'spec' / 'host-tools.schema.json').read_text(encoding='utf-8'))
+
+    def test_the_overlay_points_at_the_overlay_schema(self):
+        self.assertEqual(self.overlay['$schema'], './spec/host-tools-local.schema.json')
+
+    def test_the_two_schemas_differ_where_the_overlay_needs_them_to(self):
+        """Asserted as a difference rather than as two absolute values.
+
+        A change that tightened the overlay schema back to the fleet one would satisfy a check written
+        against either file alone, since each would still be internally consistent.
+        """
+        self.assertEqual(self.fleet_schema['properties']['tools']['minItems'], 1)
+        self.assertEqual(self.local_schema['properties']['tools']['minItems'], 0)
+        self.assertEqual(self.fleet_schema['$defs']['tool']['required'],
+                         ['name', 'probes', 'pattern', 'minimum', 'why'])
+        self.assertEqual(self.local_schema['$defs']['override']['required'], ['name'])
+
+    def test_the_shipped_overlay_satisfies_its_own_schema(self):
+        """The two constraints that moved, checked directly rather than through a validator.
+
+        jsonschema is not installed and CI validates no schema, so a dependency-free check is the only
+        one that runs anywhere.
+        """
+        tools = self.overlay['tools']
+        self.assertIsInstance(tools, list)
+        self.assertGreaterEqual(len(tools), self.local_schema['properties']['tools']['minItems'])
+        allowed = set(self.local_schema['$defs']['override']['properties'])
+        for entry in tools:
+            self.assertIn('name', entry, 'an overlay entry names the tool it overrides')
+            self.assertFalse(set(entry) - allowed, f'unknown overlay field(s) in {entry!r}')
+
+    def test_the_overlay_would_be_invalid_under_the_fleet_schema(self):
+        """The reason the separate schema exists, asserted so it cannot quietly stop being true.
+
+        If the overlay ever satisfies the fleet schema, the split has no justification left and this
+        test says so rather than leaving two schemas nobody can tell apart.
+        """
+        violates_min = len(self.overlay['tools']) < self.fleet_schema['properties']['tools']['minItems']
+        self.assertTrue(violates_min,
+                        'the overlay no longer needs its own schema for the empty-list case')
+
+
 class TestShippedDeclaration(unittest.TestCase):
     """The file this repo actually ships, read rather than assumed."""
 
