@@ -73,7 +73,8 @@ The detector is derived rather than listed: the hub's git-tracked paths minus th
 - **Only a `retire` disposition in [`spec/divergences.json`][divergences] authorizes a deletion.** It records that the file is the hub's content with nothing per-repository in it, and what to reach instead.
 - **An untriaged hit is read before it is touched.** A repository's own content at a path the hub also uses matches this check while carrying nothing of the hub's. The first fleet-wide run found two: a KiCad tooling document at `scripts/README.md`, and per-repository formatting hooks at `.husky/pre-commit`, each of which shares the path and none of the content. Deleting either would have destroyed work the hub never owned.
 - **An `accepted` disposition closes the hit permanently**, whether it is a path collision or a file every repository legitimately owns, such as `LICENSE` and `TODO.md`.
-- **Where a carried document named the deleted path, re-point it at the hub's**, since a pointer that resolves nowhere teaches a reader that a pointer in carried text is decorative.
+- **Sweep every inbound reference to the path, and count that as part of the deletion.** Deleting the file is one edit and finishing the job is usually several, so grep the path tree-wide before deleting and read every hit. Three shapes appear and they are fixed differently. A link whose target has a hub equivalent is **re-pointed** at the hub's, since a pointer that resolves nowhere teaches a reader that a pointer in carried text is decorative. A **runnable command** citing the deleted path is rewritten to the invocation that still works, and this is the one that costs a reader real time, because a documented command fails where a dead link merely disappoints. A mention of a file that has no hub equivalent is **removed** rather than re-pointed, and removing a reference-style link removes its definition with it, per [GOVERNANCE.md "Documentation Style Conventions"][governance-documentation-style], since an orphaned definition fails the no-unused-defs rule and is a gate failure rather than untidiness.
+- **The sweep is measured, not hypothetical.** One repository carries `[configure.sh](./configure.sh)` in its `repo-config/README.md` alongside four commands invoking `./repo-config/configure.sh`, so the retirement of that one file makes five lines of a carried document wrong, two of them commands a reader would run. Another repository's nested `AGENTS.md`, deleted for reasons of its own, had three inbound references across two files, one of them a reference definition that would have been left orphaned.
 
 ## 5. What a Resync Cannot Detect
 
@@ -100,6 +101,7 @@ The other half is section 4 of [`AUDIT.md`][audit]: no check belonging to a proj
 [divergences]: ./spec/divergences.json
 [fidelity-model]: ./spec/fidelity-model.md
 [files]: ./spec/files.json
+[governance-documentation-style]: ./GOVERNANCE.md#documentation-style-conventions
 [governance-hub-hosted-tooling]: ./GOVERNANCE.md#hub-hosted-tooling
 [governance-pr-review-etiquette]: ./GOVERNANCE.md#pr-review-etiquette
 [host-setup]: ./docs/host-setup.md
