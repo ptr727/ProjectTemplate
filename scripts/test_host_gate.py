@@ -404,6 +404,34 @@ class TestLocalOverlay(unittest.TestCase):
     def test_the_overlay_points_at_the_overlay_schema(self):
         self.assertEqual(self.overlay['$schema'], './spec/host-tools-local.schema.json')
 
+    def test_the_two_schemas_agree_on_every_field_they_share(self):
+        """The "only two axes differ" claim, enforced field by field rather than asserted in prose.
+
+        The overlay schema was written by hand from the fleet one and quietly relaxed two more things:
+        `minimum` lost its version pattern and `source` lost its named platforms and its closed
+        property set. A schema-aware editor then accepted a floor the gate rejects and a source key
+        that reaches no platform, while the tests next door said only two axes differed.
+
+        Comparing each shared field is what keeps the duplication honest, since the alternative is a
+        cross-file `$ref` that editors resolve inconsistently. The two intended differences are
+        excluded by name, so adding a third relaxation fails here rather than widening the claim.
+        """
+        fleet = self.fleet_schema['$defs']['tool']['properties']
+        overlay = self.local_schema['$defs']['override']['properties']
+        self.assertEqual(set(fleet), set(overlay), 'the two schemas describe different field sets')
+        # `description` is editor help rather than a constraint, so it is not compared.
+        # `required.default` is excluded because the two files mean different things by an omitted `required`, which this test found rather than assumed.
+        # In the fleet declaration every entry is an addition, so omitting it means true.
+        # In an overlay, merge() applies only the fields an entry carries, so omitting it means inherit the hub's value, and declaring a default of true would tell an editor the opposite.
+        ignore = {'description'}
+        for field in sorted(overlay):
+            drop = ignore | ({'default'} if field == 'required' else set())
+            want = {k: v for k, v in fleet[field].items() if k not in drop}
+            got = {k: v for k, v in overlay[field].items() if k not in drop}
+            self.assertEqual(got, want, f'the overlay constrains {field!r} differently from the fleet schema')
+        self.assertNotIn('default', overlay['required'],
+                         'an omitted `required` in an overlay inherits rather than defaulting to true')
+
     def test_the_two_schemas_differ_where_the_overlay_needs_them_to(self):
         """Asserted as a difference rather than as two absolute values.
 

@@ -2,7 +2,7 @@
     "$schema": "https://json-schema.org/draft/2020-12/schema",
     "$id": "https://github.com/ptr727/ProjectTemplate/spec/host-tools-local.schema.json",
     "title": "Repository host tool overlay",
-    "description": "A repository's own root host-tools.json, which scripts/host_gate.py layers over the fleet declaration in spec/host-tools.json. This is a different format from that file and needs its own schema rather than borrowing it, in two ways a reader hits immediately. An empty tools list is the ordinary case, because a repository with nothing to add still carries the file, where an empty fleet declaration would mean no host contract at all. And an entry may be partial, carrying a name plus only the fields it changes, which is what lets a repository raise one floor without restating a whole tool, where the fleet declaration requires every field of every entry. Only name is required here, since an entry that names no tool cannot be matched against one. The gate rather than this schema is the authority on what an overlay may do: layering is tighten-only, so an entry may add a tool, raise a floor, or turn an optional tool required, and may not lower a floor or turn a required tool optional, and a rejected relaxation is reported rather than dropped. A schema cannot express that, because it compares nothing against the fleet declaration.",
+    "description": "A repository's own root host-tools.json, which scripts/host_gate.py layers over the fleet declaration in spec/host-tools.json. This is a different format from that file and needs its own schema rather than borrowing it, in three ways. An empty tools list is the ordinary case, because a repository with nothing to add still carries the file, where an empty fleet declaration would mean no host contract at all. An entry may be partial, carrying a name plus only the fields it changes, which is what lets a repository raise one floor without restating a whole tool, where the fleet declaration requires every field of every entry. Only name is required here, since an entry that names no tool cannot be matched against one. And an omitted required field means inherit rather than true: scripts/host_gate.py applies only the fields an entry carries, so a default declared here would tell a reader the opposite of what the merge does, which is why this file states none where the fleet declaration states true. Every other constraint matches the fleet schema field for field, and a test asserts that rather than trusting this sentence, because this file was hand-written from that one and drifted on two fields before the test existed. The gate rather than this schema is the authority on what an overlay may do: layering is tighten-only, so an entry may add a tool, raise a floor, or turn an optional tool required, and may not lower a floor or turn a required tool optional, and a rejected relaxation is reported rather than dropped. A schema cannot express that, because it compares nothing against the fleet declaration.",
     "type": "object",
     "required": ["tools"],
     "additionalProperties": false,
@@ -29,9 +29,17 @@
                     "items": { "type": "array", "minItems": 1, "items": { "type": "string", "minLength": 1 } }
                 },
                 "pattern": { "type": "string", "minLength": 1 },
-                "minimum": { "type": ["string", "null"] },
+                "minimum": { "type": ["string", "null"], "pattern": "^\\d+(\\.\\d+)*$" },
                 "why": { "type": "string", "minLength": 1 },
-                "source": { "type": "object" }
+                "source": {
+                    "type": "object",
+                    "additionalProperties": false,
+                    "properties": {
+                        "linux": { "type": "string", "minLength": 1 },
+                        "macos": { "type": "string", "minLength": 1 },
+                        "windows": { "type": "string", "minLength": 1 }
+                    }
+                }
             }
         }
     }
