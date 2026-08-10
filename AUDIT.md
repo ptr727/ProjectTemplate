@@ -81,7 +81,9 @@ Run [`WORKFLOW.md`][workflow]'s methodology against the repo's **own** Actions: 
   # Rules sort on each rule's whole content, matching the key normalize_ruleset in audit.py sorts by.
   # Sorting on .type alone leaves two rules of one type in input order, so a reordered pair would read as drift.
   # canon sorts keys at every depth before serializing, because the committed payload is written key-sorted and the API returns its own order, so a bare tojson gives the same rule two different sort keys.
-  canon='def canon: walk(if type == "object" then to_entries | sort_by(.key) | from_entries else . end);'
+  # It recurses rather than calling walk/1, which arrived in jq 1.6, and no declared floor puts a host above that.
+  # A host on jq 1.5 would not degrade on walk, it would fail to compile the filter and report drift on every ruleset it never compared, which is what repo-config/configure.sh defines its own recursion to avoid.
+  canon='def canon: . as $in | if type == "object" then reduce (keys_unsorted|sort)[] as $k ({}; . + { ($k): ($in[$k]|canon) }) elif type == "array" then map(canon) else . end;'
   norm="$canon"'{name,target,enforcement,conditions,rules} | .rules|=sort_by(canon|tojson)'
   # Model-aware expected payload: an operational repo's develop ruleset diffs against
   # operational/develop.json (registry workflowModel; the same selection audit.py makes).
