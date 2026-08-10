@@ -74,11 +74,13 @@ Run [`WORKFLOW.md`][workflow]'s methodology against the repo's **own** Actions: 
     && echo "settings: in sync" || echo "settings: DRIFT"
   ```
 
-- **Rulesets** - diff each live ruleset against the committed expected payload with a normalized comparison (sort the order-insensitive `rules[]` before diffing so a reordered but equivalent ruleset does not read as drift). The compared subset is `name`, `target`, `enforcement`, `conditions` and `rules`, and `bypass_actors` sits deliberately outside it, which is the same subset [`spec/audit.py`][audit-runner] compares. Who may bypass a ruleset is a per-repository human decision taken in the UI, no payload declares one, and [`repo-config/configure.sh`][repo-config] treats it that way in both modes, writing the live list back unchanged on `apply` and reporting it without asserting on `check`. Comparing it here would contradict that and report a ruleset finding against every repository that has any bypass actor, which is the field's normal state rather than a deviation:
+- **Rulesets** - diff each live ruleset against the committed expected payload with a normalized comparison (sort the order-insensitive `rules[]` on each rule's whole content before diffing, so a reordered but equivalent ruleset does not read as drift). The compared subset is `name`, `target`, `enforcement`, `conditions` and `rules`, and `bypass_actors` sits deliberately outside it, which is the same subset and the same sort key [`spec/audit.py`][audit-runner] uses. Who may bypass a ruleset is a per-repository human decision taken in the UI, no payload declares one, and [`repo-config/configure.sh`][repo-config] treats it that way in both modes, writing the live list back unchanged on `apply` and reporting it without asserting on `check`. Comparing it here would contradict that and report a ruleset finding against every repository that has any bypass actor, which is the field's normal state rather than a deviation:
 
   ```sh
   # bypass_actors stays outside the projection, since no payload declares one and jq cannot sort the null that leaves.
-  norm='{name,target,enforcement,conditions,rules} | .rules|=sort_by(.type)'
+  # Rules sort on their whole content rather than on .type, which is the key audit.py sorts by.
+  # Sorting on .type alone leaves two rules of one type in input order, so a reordered pair would read as drift.
+  norm='{name,target,enforcement,conditions,rules} | .rules|=sort_by(tojson)'
   # Model-aware expected payload: an operational repo's develop ruleset diffs against
   # operational/develop.json (registry workflowModel; the same selection audit.py makes).
   model=$(jq -r --arg n "<repo>" '(.repos[] | select(.name==$n) | .workflowModel) // .defaults.workflowModel // "release"' registry/repos.json)
