@@ -74,10 +74,11 @@ Run [`WORKFLOW.md`][workflow]'s methodology against the repo's **own** Actions: 
     && echo "settings: in sync" || echo "settings: DRIFT"
   ```
 
-- **Rulesets** - diff each live ruleset against the committed expected payload with a normalized comparison (sort the order-insensitive `rules[]` and `bypass_actors[]` before diffing so a reordered but equivalent ruleset does not read as drift):
+- **Rulesets** - diff each live ruleset against the committed expected payload with a normalized comparison (sort the order-insensitive `rules[]` before diffing so a reordered but equivalent ruleset does not read as drift). The compared subset is `name`, `target`, `enforcement`, `conditions` and `rules`, and `bypass_actors` sits deliberately outside it, which is the same subset [`spec/audit.py`][audit-runner] compares. Who may bypass a ruleset is a per-repository human decision taken in the UI, no payload declares one, and [`repo-config/configure.sh`][repo-config] treats it that way in both modes, writing the live list back unchanged on `apply` and reporting it without asserting on `check`. Comparing it here would contradict that and report a ruleset finding against every repository that has any bypass actor, which is the field's normal state rather than a deviation:
 
   ```sh
-  norm='{name,target,enforcement,bypass_actors,conditions,rules} | .rules|=sort_by(.type) | .bypass_actors|=sort_by(.actor_id)'
+  # bypass_actors stays outside the projection, since no payload declares one and jq cannot sort the null that leaves.
+  norm='{name,target,enforcement,conditions,rules} | .rules|=sort_by(.type)'
   # Model-aware expected payload: an operational repo's develop ruleset diffs against
   # operational/develop.json (registry workflowModel; the same selection audit.py makes).
   model=$(jq -r --arg n "<repo>" '(.repos[] | select(.name==$n) | .workflowModel) // .defaults.workflowModel // "release"' registry/repos.json)
@@ -92,7 +93,7 @@ Run [`WORKFLOW.md`][workflow]'s methodology against the repo's **own** Actions: 
     [ "$count" -eq 1 ] || { echo "$b: expected exactly 1 ruleset, found $count (defect/drift)"; continue; }
     id=$(jq --arg n "$b" '.[] | select(.name==$n) | .id' <<<"$rulesets")
     diff <(jq -S "$norm" "$file") \
-         <(gh api "repos/<owner>/<repo>/rulesets/$id" --jq '{name,target,enforcement,bypass_actors,conditions,rules}' | jq -S "$norm") \
+         <(gh api "repos/<owner>/<repo>/rulesets/$id" --jq '{name,target,enforcement,conditions,rules}' | jq -S "$norm") \
       && echo "$b: in sync" || echo "$b: DRIFT"
   done
   ```

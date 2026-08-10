@@ -41,8 +41,9 @@ for name in develop main; do
   count=$(jq --arg n "$name" '[.[] | select(.name==$n)] | length' <<<"$rulesets")
   [ "$count" -eq 1 ] || { echo "expected exactly 1 ruleset named $name, found $count (drift)" >&2; exit 1; }
   id=$(jq --arg n "$name" '.[] | select(.name==$n) | .id' <<<"$rulesets")
+  # bypass_actors is left out, since a payload that declared one would assert this repo's bypass list against every repo diffed on it.
   gh api "repos/$repo/rulesets/$id" \
-    --jq '{name, target, enforcement, bypass_actors, conditions, rules}' \
+    --jq '{name, target, enforcement, conditions, rules}' \
     | jq -S --indent 4 '.' > "$out"
 done
 ```
