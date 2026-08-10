@@ -430,15 +430,43 @@ class TestLocalOverlay(unittest.TestCase):
             self.assertIn('name', entry, 'an overlay entry names the tool it overrides')
             self.assertFalse(set(entry) - allowed, f'unknown overlay field(s) in {entry!r}')
 
-    def test_the_overlay_would_be_invalid_under_the_fleet_schema(self):
-        """The reason the separate schema exists, asserted so it cannot quietly stop being true.
+    def accepts(self, schema, doc):
+        """Whether a document satisfies the two constraints the overlay schema deliberately relaxes.
 
-        If the overlay ever satisfies the fleet schema, the split has no justification left and this
-        test says so rather than leaving two schemas nobody can tell apart.
+        Only `tools.minItems` and the per-entry `required` list are read, which is the whole of what
+        separates these two schemas. It is not a JSON-schema validator and does not pretend to be one:
+        jsonschema is not installed and CI validates no schema, so a dependency-free check of the two
+        axes under discussion is what can actually run.
         """
-        violates_min = len(self.overlay['tools']) < self.fleet_schema['properties']['tools']['minItems']
-        self.assertTrue(violates_min,
-                        'the overlay no longer needs its own schema for the empty-list case')
+        tools = doc['tools']
+        if len(tools) < schema['properties']['tools']['minItems']:
+            return False
+        entry_def = schema['$defs']['tool' if 'tool' in schema['$defs'] else 'override']
+        return all(not set(entry_def['required']) - set(e) for e in tools)
+
+    def test_the_overlay_schema_is_strictly_the_more_permissive_of_the_two(self):
+        """The justification for the split, stated about the schemas rather than about today's data.
+
+        This replaced a check that the shipped overlay violates the fleet schema. That coupled a
+        schema-design invariant to one data instance: an overlay that legitimately grew a full tool
+        entry would satisfy the fleet schema and fail the test, while the split stayed just as
+        justified. What justifies it is that the overlay schema accepts everything the fleet schema
+        does and more, so the assertion is made in both directions over constructed documents.
+        """
+        full = {'name': 'jq', 'probes': [['jq', '--version']], 'pattern': 'jq-(.*)',
+                'minimum': '1.7', 'why': 'because'}
+        empty_list = {'tools': []}
+        partial_entry = {'tools': [{'name': 'jq', 'minimum': '1.7'}]}
+        full_entry = {'tools': [full]}
+
+        # Everything the fleet schema accepts, the overlay schema accepts too.
+        self.assertTrue(self.accepts(self.fleet_schema, full_entry))
+        self.assertTrue(self.accepts(self.local_schema, full_entry))
+
+        # And the overlay accepts two shapes the fleet schema rejects, which is why it exists.
+        for doc, what in ((empty_list, 'an empty tools list'), (partial_entry, 'a partial entry')):
+            self.assertFalse(self.accepts(self.fleet_schema, doc), f'the fleet schema now accepts {what}')
+            self.assertTrue(self.accepts(self.local_schema, doc), f'the overlay schema rejects {what}')
 
 
 class TestShippedDeclaration(unittest.TestCase):
