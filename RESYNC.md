@@ -35,10 +35,15 @@ The identity and signing checks in [`STANDUP.md`][standup] section 0 apply to a 
 Run [`AUDIT.md`][audit] end to end. Three commands cover the mechanized part, and they are not interchangeable. The first reports the findings. The second **runs its own audit** and renders those findings as an issue ready to file, so it is a second measurement rather than a view over the first, and the two can disagree if the repository moves between them. The third is a different tool answering a fleet-wide question. The rest of that file is the half no tool evaluates.
 
 ```shell
-python3 spec/audit.py <Repo>                    # the deterministic findings, read at the registry groundTruthBranch
+python3 spec/audit.py <Repo>                    # the deterministic findings, read at main
+python3 spec/audit.py --branch <ref> <Repo>     # the same, read at a named ref, for convergence still in flight
 python3 spec/audit.py --issue <Repo>            # audits again and renders that run as an issue ready to file, so it can differ from the line above
 python3 spec/fidelity_honesty.py --report       # regenerate reports/divergences.md before using it as a work list
 ```
+
+**The branch is `main`, and the registry field naming it is not a choice a resync makes.** The runner reads the repository's `groundTruthBranch`, and [`AUDIT.md`][audit] section 1 owns what that value may be: `main` is the released and gated state for **both** workflow models, so a field naming `develop` contradicts the procedure rather than configuring it. Every cataloged repository declares `main` or omits the field and takes it as the default, so the first line above reads `main` in every case today.
+
+**`--branch` is the supported way to read something else, and a resync is when it earns its place.** Convergence lands on a feature branch and reaches `main` only after the maintainer merges, so auditing ground truth mid-resync measures the state you are part-way through replacing. Pointing the run at the branch in flight checks the work before it is promoted rather than after. The registry is not edited, the run stays read-only, and the run stamp names the override so a finding from it cannot be mistaken for one against ground truth.
 
 **Regenerate the divergence report rather than reading the committed copy.** It is a live pass over each repository's ground-truth branch, and the checked-in file is only as current as its last run, so a stale one hands out a work list measured against a tree that no longer exists.
 
