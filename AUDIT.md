@@ -74,10 +74,17 @@ Run [`WORKFLOW.md`][workflow]'s methodology against the repo's **own** Actions: 
     && echo "settings: in sync" || echo "settings: DRIFT"
   ```
 
-- **Rulesets** - diff each live ruleset against the committed expected payload with a normalized comparison (sort the order-insensitive `rules[]` and `bypass_actors[]` before diffing so a reordered but equivalent ruleset does not read as drift):
+- **Rulesets** - diff each live ruleset against the committed expected payload with a normalized comparison (sort the order-insensitive `rules[]` on each rule's whole content before diffing, so a reordered but equivalent ruleset does not read as drift). The compared subset is `name`, `target`, `enforcement`, `conditions` and `rules`, and `bypass_actors` sits deliberately outside it, which is the same subset and the same sort key [`spec/audit.py`][audit-runner] uses. Who may bypass a ruleset is a per-repository human decision taken in the UI, no payload declares one, and [`repo-config/configure.sh`][repo-config] treats it that way in both modes, writing the live list back unchanged on `apply` and reporting it without asserting on `check`. Comparing it here would contradict that and report a ruleset finding against every repository that has any bypass actor, which is the field's normal state rather than a deviation:
 
   ```sh
-  norm='{name,target,enforcement,bypass_actors,conditions,rules} | .rules|=sort_by(.type) | .bypass_actors|=sort_by(.actor_id)'
+  # bypass_actors stays outside the projection, since no payload declares one and jq cannot sort the null that leaves.
+  # Rules sort on each rule's whole content, matching the key normalize_ruleset in audit.py sorts by.
+  # Sorting on .type alone leaves two rules of one type in input order, so a reordered pair would read as drift.
+  # canon sorts keys at every depth before serializing, because the committed payload is written key-sorted and the API returns its own order, so a bare tojson gives the same rule two different sort keys.
+  # It recurses rather than calling walk/1, which arrived in jq 1.6, and no declared floor puts a host above that.
+  # A host on jq 1.5 would not degrade on walk, it would fail to compile the filter and report drift on every ruleset it never compared, which is what repo-config/configure.sh defines its own recursion to avoid.
+  canon='def canon: . as $in | if type == "object" then reduce (keys_unsorted|sort)[] as $k ({}; . + { ($k): ($in[$k]|canon) }) elif type == "array" then map(canon) else . end;'
+  norm="$canon"'{name,target,enforcement,conditions,rules} | .rules|=sort_by(canon|tojson)'
   # Model-aware expected payload: an operational repo's develop ruleset diffs against
   # operational/develop.json (registry workflowModel; the same selection audit.py makes).
   model=$(jq -r --arg n "<repo>" '(.repos[] | select(.name==$n) | .workflowModel) // .defaults.workflowModel // "release"' registry/repos.json)
@@ -92,7 +99,7 @@ Run [`WORKFLOW.md`][workflow]'s methodology against the repo's **own** Actions: 
     [ "$count" -eq 1 ] || { echo "$b: expected exactly 1 ruleset, found $count (defect/drift)"; continue; }
     id=$(jq --arg n "$b" '.[] | select(.name==$n) | .id' <<<"$rulesets")
     diff <(jq -S "$norm" "$file") \
-         <(gh api "repos/<owner>/<repo>/rulesets/$id" --jq '{name,target,enforcement,bypass_actors,conditions,rules}' | jq -S "$norm") \
+         <(gh api "repos/<owner>/<repo>/rulesets/$id" --jq '{name,target,enforcement,conditions,rules}' | jq -S "$norm") \
       && echo "$b: in sync" || echo "$b: DRIFT"
   done
   ```
