@@ -80,7 +80,9 @@ Run [`WORKFLOW.md`][workflow]'s methodology against the repo's **own** Actions: 
   # bypass_actors stays outside the projection, since no payload declares one and jq cannot sort the null that leaves.
   # Rules sort on each rule's whole content, matching the key normalize_ruleset in audit.py sorts by.
   # Sorting on .type alone leaves two rules of one type in input order, so a reordered pair would read as drift.
-  norm='{name,target,enforcement,conditions,rules} | .rules|=sort_by(tojson)'
+  # canon sorts keys at every depth before serializing, because the committed payload is written key-sorted and the API returns its own order, so a bare tojson gives the same rule two different sort keys.
+  canon='def canon: walk(if type == "object" then to_entries | sort_by(.key) | from_entries else . end);'
+  norm="$canon"'{name,target,enforcement,conditions,rules} | .rules|=sort_by(canon|tojson)'
   # Model-aware expected payload: an operational repo's develop ruleset diffs against
   # operational/develop.json (registry workflowModel; the same selection audit.py makes).
   model=$(jq -r --arg n "<repo>" '(.repos[] | select(.name==$n) | .workflowModel) // .defaults.workflowModel // "release"' registry/repos.json)
