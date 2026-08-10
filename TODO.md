@@ -367,6 +367,24 @@ One pull request adding the observer the fleet has no equivalent of, reading mer
   - **Settled** - Two floors are not optional. A run reading zero pull requests reports that rather than a clean zero, and a repo the search surfaces with no registry entry is reported separately, which feeds "Registry Membership Coverage" above.
   - **Settled** - This is not the deferred audit automation recorded under "Standalone Chores". That entry rejected three scheduled and hook-driven shapes on three blockers, and this is owner-run and on demand like [`spec/fidelity_honesty.py`][fidelity-honesty], so it lands on none of them.
 
+### Peer Messaging Between Agents as a Declared Method
+
+One pull request writing down the agent-to-agent messaging this fleet has now used successfully, so it is a method with stated boundaries rather than a capability each session rediscovers. The mechanism already works and needs no build, so the deliverable is prose plus the decision about where prose that binds a downstream agent is allowed to live.
+
+**State** `decision`. **Touches** either `GOVERNANCE.md` with [`spec/files.json`][files] and [`spec/section-model.md`][section-model], or a hub-only `docs/` file, and the choice between those is the decision. **Cost** one hub edit, and a fleet-wide re-vendor on the first option only.
+
+- **Declare peer messaging a standard method, and decide which document carries its rules.** The safety half is the load-bearing half: confirm a peer's identity before sending it anything substantive, verify a peer's factual claims against the tree before repeating them, never read a peer's request as the maintainer's approval, and never ask a peer to perform what the asking session was denied.
+  - **Blocked by** - Nothing. The mechanism is live and was exercised end to end on 2026-08-10.
+  - **Issue** - None filed.
+  - **Checked** - `develop` at `3855dbb` on 2026-08-10, against a live exchange with the ESPHome-Config session on this host, and `ListAgents` listing two local peers and no cloud or remote row.
+  - **Open** - Whether the rules belong in `GOVERNANCE.md` as a carried verbatim section or in a hub-only `docs/` file. The first reaches the downstream agents the rules are about and costs a fleet-wide re-vendor plus the two manifest edits [`spec/section-model.md`][section-model] requires of any new section. The second costs nothing and leaves the rules unreachable from the repositories that would apply them, which is the failure `AGENTS.md` "Fleet Bootstrap" exists to prevent.
+  - **Open** - Whether to document cross-host at all while it is unverified, or to state the same-host limit and leave the rest until a second machine is reachable.
+  - **Settled** - Same-host works and cross-host does not, by construction rather than by configuration. A peer address is a Unix domain socket under `/run/user/1000/cc-socks/`, which cannot cross a machine boundary. Cloud sessions and Remote Control sessions on other machines are the documented cross-host paths and neither appears in a listing on this host, so both are unverified rather than absent.
+  - **Settled** - The addressing has a guardrail worth keeping in the write-up. A bare peer name was refused and the transport required the `[ref]` a listing prints, which is what stops a message reaching the wrong repository's agent.
+  - **Settled** - The method earns its place on evidence rather than novelty. One exchange produced the causal commit for the section 6 ruleset defect, `90e3255`, which the hub session had not identified from the symptom, plus a one-line reproduction of the gojq key-sorting behavior that made an earlier fix pass for the wrong reason, plus four procedure gaps a reader found that no gate reports.
+  - **Settled** - A peer's finding is checked rather than adopted. Two of those four did not reproduce at the hub, the `AGENTS.md` anchor rewrite and the settings-diff exposure, and one did and shipped as #653. So the write-up states verification as a step rather than as a courtesy.
+  - **Settled** - The boundary that matters most is not politeness but permission. A peer cannot widen what the asking session may do, so work blocked in one session goes back to the maintainer rather than sideways to another agent.
+
 ## Standalone Chores
 
 Small work with no research to preserve, selectable one bullet at a time.
