@@ -432,7 +432,7 @@ Every repo's GitHub repository details (the About panel) follow a fixed conventi
 
 - [`AGENTS.md`](./AGENTS.md): the agent entry point, carrying context and delegation rules plus the map to the sections below.
 - [`GOVERNANCE.md`](./GOVERNANCE.md), [`CODESTYLE.md`](./CODESTYLE.md), [`WORKFLOW.md`](./WORKFLOW.md), [`AUDIT.md`](./AUDIT.md): the governance and audit docs. This file is the cross-cutting-rules authority.
-- [`spec/`](./spec/): the machine-readable ground truth, covering project-type requirements, the file/section baseline, secrets, and the preferred README structure.
+- [`spec/`](./spec/): the machine-readable ground truth, covering project-type requirements, the file/section baseline, secrets, the host tool contract and its floors, and the preferred README structure.
 - [`registry/repos.json`](./registry/repos.json): the fleet registry, holding every project, its type(s), and its status.
 - [`repo-config/`](./repo-config/): branch rulesets, the fleet settings, and the apply script every repo is configured by, kept out of `.github/` (which is Actions-owned). The payloads carry to the fleet and the script is reached here.
 - [`catalog/`](./catalog/): reusable reference snippets (workflows, configs, devcontainers) the audit compares implementations against.
