@@ -22,6 +22,14 @@ if [ "$(git config --global --get gpg.format)" = ssh ]; then ssh-add -L; else gp
 
 `--global` rather than the effective config, because the effective value depends on where the command runs: inside any existing repository a repo-local override wins, so a bare `git config --get user.email` there reports that repository's identity and hides the host setting this step exists to check. The two scopes together are what make the result sound, since this block proves the host is right and the block below proves nothing shadows it.
 
+**Verify the host's tools in the same step, since identity is only half of what a standup needs from a machine.** The tools carry version floors, and a host below one does not fail cleanly: it answers `--version`, looks healthy, and produces a wrong answer, which is how both host defects this fleet has hit arrived.
+
+```shell
+python3 scripts/host_gate.py --repo <path-to-this-checkout>   # run from a hub checkout, floors from spec/host-tools.json
+```
+
+Pass `--repo`, because that flag is what makes the repo's own `host-tools.json` count. The gate reads that file relative to `--repo`, which defaults to the working directory, so a bare run from a hub checkout layers the hub's declaration instead and prints the same healthy digest either way. A repo carrying no local file is silent by design, so the absence of a layering note is not evidence the flag was unnecessary. A finding here is a **host** misconfiguration to fix on the machine or surface to the maintainer, never something to patch per repo, and [`docs/host-setup.md`][host-setup] is the contract it checks.
+
 The agent check branches rather than listing both forms, because they are alternatives and running the wrong one fails on a correctly configured host: an SSH host need not have `gpg` installed at all. Signing is **SSH or GPG**, so judge the format and its agent together rather than requiring `ssh`: what matters is that the configured format has a matching agent holding the key, which is the check [GOVERNANCE.md "Git and Commit Rules"][governance-git-and-commit-rules] prescribes. Any of these wrong or absent is a **host** misconfiguration to surface to the maintainer ([`docs/host-setup.md`][host-setup] is the setup procedure), not something to patch per repo. Patching it locally hides a broken host that then produces wrong identities in every other repo on that machine.
 
 After `git init` and before the first commit, confirm the repo added no override of its own. This one needs a repository, since `--local` fails outside one. Read it here and run it in section 0B, which places it between the init and the first commit, so nothing here is a prompt to init early:
@@ -104,7 +112,7 @@ Capture the source, verify the capture **against the source**, and hold the veri
 
 ## 2. Carry the Baseline Files
 
-Copy every [`spec/files.json`][files] entry whose `appliesTo` matches the repo's **selector set**, **adapted, not cloned**. The selector set is the repo's `types` plus its `workflowModel`, `releaseTrigger`, and `consumerModel`, so filtering on type alone silently drops the entries a non-type selector carries ([`spec/scope-model.md`][scope-model] defines the four namespaces and how they resolve). The prose files (`CODESTYLE.md`, `README.md`, and the like) describe the repo's own toolchain, so adapt them to reality rather than propagating template specifics verbatim (see the "Adapt before propagating" callout in [`CODESTYLE.md`][codestyle], since a verbatim copy that misdescribes the repo is rejected in review). The baseline covers `WORKFLOW.md`, `version.json`, the two rulesets, `.github/dependabot.yml`, `.editorconfig`, `.gitattributes`, the linter configs, and the per-type files (`.vscode/tasks.json` from the language's snippet, `codecov.yml`, `.dockerignore`, `Docker/README.md`). **Every repo carries `repo-config/main.json`**, and only the `develop` payload varies by workflow model: `repo-config/develop.json` for a release repo, `repo-config/operational/develop.json` for an operational one.
+Copy every [`spec/files.json`][files] entry whose `appliesTo` matches the repo's **selector set**, **adapted, not cloned**. The selector set is the repo's `types` plus its `workflowModel`, `releaseTrigger`, and `consumerModel`, so filtering on type alone silently drops the entries a non-type selector carries ([`spec/scope-model.md`][scope-model] defines the four namespaces and how they resolve). The prose files (`CODESTYLE.md`, `README.md`, and the like) describe the repo's own toolchain, so adapt them to reality rather than propagating template specifics verbatim (see the "Adapt before propagating" callout in [`CODESTYLE.md`][codestyle], since a verbatim copy that misdescribes the repo is rejected in review). The baseline covers `WORKFLOW.md`, `version.json`, the two rulesets, `.github/dependabot.yml`, `.editorconfig`, `.gitattributes`, `host-tools.json`, the linter configs, and the per-type files (`.vscode/tasks.json` from the language's snippet, `codecov.yml`, `.dockerignore`, `Docker/README.md`). **Every repo carries `repo-config/main.json`**, and only the `develop` payload varies by workflow model: `repo-config/develop.json` for a release repo, `repo-config/operational/develop.json` for an operational one.
 
 **`version.json` is a file to carry and a floor to choose.** [`WORKFLOW.md`][workflow] D3.3 makes its `version` field the repo's own major.minor floor, with NBGV appending the git height as the patch, so the number carried in with the file is a claim about a release history the new repo does not have. Set it deliberately, at standup, before the first release:
 
@@ -114,6 +122,8 @@ Copy every [`spec/files.json`][files] entry whose `appliesTo` matches the repo's
 - **Carry only the fields the repo uses.** `nugetPackageVersion` is packaging configuration for a NuGet publisher, so a repo that publishes no package drops the block rather than carrying a setting nothing reads. `publicReleaseRefSpec` names the repo's own default branch, which D3.2 requires it to agree with.
 
 **This decision is effectively one-way, which is why it belongs here.** Once a repo publishes against a floor, lowering it regresses the released version order, so a floor that was never chosen is kept rather than corrected. Inherited floors are the observed failure, not a hypothetical one: four operational config repos run on a floor none of them picked and have released against it.
+
+**`host-tools.json` is carried at the repo's root, and it is not the fleet declaration.** [`spec/host-tools.json`][host-tools] states what every repo's procedures need and is the hub's to change. The carried root file states what this repo needs **beyond** that, so it is where a tool only this repo uses, or a floor only this repo requires, is declared. [`scripts/host_gate.py`][host-gate] layers the root file over the fleet one, tighten-only: an entry may add a tool, raise a floor, or turn an optional tool required, and may not lower a floor or turn a required tool optional, since that retires a fleet check from inside the repo it protects. A rejected relaxation is reported rather than dropped. A repo with nothing to add carries the stub with an empty `tools` list, the same footing as `OPERATIONS.md`, so the declaration is somewhere a reader finds rather than somewhere they must know to look. This repo's own root file is the worked example.
 
 **Repo-specific content has a declared destination, not a judgment call.** The baseline is what a repo *carries*. Anything the repo knows that the fleet does not needs somewhere to live, and improvising a location per repo is what the destinations in [`spec/section-model.md`][section-model] exist to prevent. Four topical docs take it, chosen by what the content **is**:
 
@@ -187,7 +197,9 @@ The same [`AUDIT.md`][audit] run is the on-demand audit for any known repo, and 
 [governance]: ./GOVERNANCE.md
 [governance-git-and-commit-rules]: ./GOVERNANCE.md#git-and-commit-rules
 [governance-repository-boundaries-and-write-safety]: ./GOVERNANCE.md#repository-boundaries-and-write-safety
+[host-gate]: ./scripts/host_gate.py
 [host-setup]: ./docs/host-setup.md
+[host-tools]: ./spec/host-tools.json
 [matrix]: ./reports/conformance-matrix.md
 [project-types]: ./spec/project-types.json
 [readme-structure]: ./spec/readme-structure.md

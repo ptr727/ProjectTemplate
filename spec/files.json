@@ -17,6 +17,7 @@
         { "path": ".markdownlint-cli2.jsonc", "fidelity": "verbatim", "whole": true, "appliesTo": "*" },
         { "path": "cspell.json", "fidelity": "intent", "whole": true, "appliesTo": "*" },
         { "path": ".gitignore", "appliesTo": "*" },
+        { "path": "host-tools.json", "appliesTo": "*" },
         { "path": "version.json", "fidelity": "intent", "intentRef": "WORKFLOW.md#d3---versioning-and-classification", "appliesTo": "*" },
         { "path": "repo-config/develop.json", "fidelity": "verbatim", "whole": true, "appliesTo": ["release"] },
         { "path": "repo-config/operational/develop.json", "fidelity": "verbatim", "whole": true, "appliesTo": ["operational"] },

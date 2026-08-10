@@ -414,7 +414,7 @@ class TestShippedDeclaration(unittest.TestCase):
         one in the data, which is what caught the python3 floor being added without this line.
         """
         floors = {t['name'] for t in self.data['tools'] if t['minimum'] is not None}
-        self.assertEqual(floors, {'gh', 'git-restore-mtime', 'python3'})
+        self.assertEqual(floors, {'gh', 'git-restore-mtime', 'jq', 'python3'})
 
     def test_the_contract_table_carries_every_declared_floor(self):
         """docs/host-setup.md restates the floors, so the doc goes stale the moment the data moves.
@@ -466,15 +466,21 @@ class TestShippedDeclaration(unittest.TestCase):
                           f'{cells[floor_col]!r}')
 
     def test_a_target_floor_says_so_rather_than_implying_a_defect(self):
-        """The python3 floor is a target, so its `why` has to distinguish itself from a measured one.
+        """A target floor's `why` has to distinguish itself from a measured one.
 
         A reader who takes a target floor for a measured one goes looking for a defect report that
         does not exist, which is the failure the two-kinds wording was written to prevent.
+        The set is asserted rather than one entry, so a third target floor added without the wording
+        fails here instead of reading as measured. Both members are named, since a check that only
+        counted them would pass on the wrong pair.
         """
-        python3 = next(t for t in self.data['tools'] if t['name'] == 'python3')
-        self.assertEqual(python3['minimum'], '3.13')
-        self.assertIn('target', python3['why'])
-        self.assertIn('unverified rather than known broken', python3['why'])
+        targets = {'jq': '1.6', 'python3': '3.13'}
+        by_name = {t['name']: t for t in self.data['tools']}
+        for name, floor in targets.items():
+            entry = by_name[name]
+            self.assertEqual(entry['minimum'], floor)
+            self.assertIn('target', entry['why'])
+            self.assertIn('unverified rather than known broken', entry['why'])
 
 
 if __name__ == '__main__':
