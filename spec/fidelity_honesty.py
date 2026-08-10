@@ -14,18 +14,17 @@ level up. It answers two questions the audit cannot:
   2. Which `verbatim` units have a downstream copy that diverges in a NON-stale way? That is either a
      mis-set label (the content legitimately varies -> should be intent) or real drift to chase.
 
-It also runs a manifest-gap pass: a file present in BOTH the hub and a reference adopter but absent from
-the manifest is carried-but-untracked (exactly the configure.sh / settings.json bug).
+It also runs a manifest-gap pass over the whole fleet: a file the hub tracks, the manifest does not declare,
+and a repo carries anyway is hub-hosted content in a repo that should not hold it (exactly the configure.sh /
+settings.json bug). Each gap names its carriers, so a `retire` disposition reads as a deletion work list.
 
-Usage: python3 spec/fidelity_honesty.py [reference-repo-for-manifest-gap]   (default: Financial-Modeling)
+Usage: python3 spec/fidelity_honesty.py [--report]
 """
 import base64
-import subprocess
 import sys
 
 import audit  # sibling, import-safe (its main is guarded)
 
-REF_ADOPTER = "Financial-Modeling"  # a well-adopted repo, used only for the manifest-gap pass
 REPORT_PATH = "reports/divergences.md"  # the generated, checked-in burn-down report (--report)
 
 
@@ -128,32 +127,31 @@ def fidelity_pass(spec):
     return spreads, promote, mislabel
 
 
-def manifest_gap_pass(spec, ref_repo):
-    """Files present in BOTH the hub and the reference adopter but absent from the manifest."""
-    listed = {e["path"] for e in spec["files"]["baseline"]}
-    entry = next((r for r in spec["registry"]["repos"] if r["name"] == ref_repo), None)
-    if entry is None:
-        return None, []
-    slug = audit.repo_slug(entry)
-    ground = entry.get("groundTruthBranch", "main")
-    # The git/trees endpoint takes a tree SHA rather than a ref name, so resolve the branch to its tree SHA first, as audit.py does.
-    # Passing the branch name can 404 and silently drop the whole check.
-    # Fail loud on an unreadable reference adopter: an empty gaps list would report "none" (a false clean).
-    br = audit.gh(f"repos/{slug}/branches/{ground}", ok404=True)
-    if not br or "commit" not in br:
-        raise RuntimeError(f"could not read {slug}@{ground} (missing branch?) - cannot run the manifest-gap pass")
-    tree = audit.gh(f"repos/{slug}/git/trees/{br['commit']['commit']['tree']['sha']}?recursive=1", ok404=True)
-    if not tree or "tree" not in tree:
-        raise RuntimeError(f"could not read the tree for {slug}@{ground} - cannot run the manifest-gap pass")
-    # The hub's tracked files (git ls-files), not a filesystem walk: a walk pulls in untracked local cruft
-    # (__pycache__, a local .venv) and would make the gap report depend on working-tree state.
-    r = subprocess.run(["git", "ls-files"], cwd=audit.ROOT, capture_output=True, text=True)
-    if r.returncode != 0:  # fail loud: an empty set would masquerade as "no gaps" (a false clean)
-        raise RuntimeError(f"git ls-files failed in {audit.ROOT}: {r.stderr.strip() or 'non-zero exit'}")
-    hub_files = set(r.stdout.splitlines())
-    gaps = sorted(n["path"] for n in tree["tree"]
-                  if n.get("type") == "blob" and n["path"] in hub_files and n["path"] not in listed)
-    return slug, gaps
+def manifest_gap_pass(spec):
+    """Hub-tracked, manifest-undeclared files, mapped to every cataloged repo that carries one.
+
+    Read fleet-wide rather than against a single reference adopter. A gap is a repo-by-repo fact, so one
+    adopter answers only for its own tree: a file five repos carry and that adopter does not was invisible,
+    which is the shape of the deletion this pass exists to find. Widening it also makes the result a work
+    list rather than a hint, since the carriers are named.
+    A repo whose tree cannot be read in full is reported rather than skipped, because an unread tree
+    contributes no gaps and reads exactly like a repo that carries none.
+    """
+    hub_only = audit.hub_only_paths(spec)
+    gaps, unreadable = {}, []
+    for entry in spec["registry"]["repos"]:
+        if entry.get("status") != "cataloged" or entry.get("name") == audit.HUB_NAME:
+            continue
+        slug = audit.repo_slug(entry)
+        ground = entry.get("groundTruthBranch", "main")
+        br = audit.gh(f"repos/{slug}/branches/{ground}", ok404=True)
+        carried = audit.repo_tree(slug, br) if br else None
+        if carried is None:
+            unreadable.append(entry["name"])
+            continue
+        for path in carried & hub_only:
+            gaps.setdefault(path, []).append(entry["name"])
+    return {p: sorted(r) for p, r in sorted(gaps.items())}, unreadable
 
 
 def load_ledger():
@@ -178,7 +176,7 @@ def _fmt(repos):
     return ", ".join(sorted(repos)) if repos else "-"
 
 
-def render_report(spreads, promote, gaps, ledger):
+def render_report(spreads, promote, gaps, unreadable, ledger):
     """Join the live passes against the curated ledger into the checked-in burn-down Markdown.
 
     A recorded disposition still matching a live divergence is a burn-down row. A live divergence (a
@@ -264,8 +262,8 @@ def render_report(spreads, promote, gaps, ledger):
         w("")
         for entry, live, gone, unk in rows:
             trk = f" (tracking: {entry['tracking']})" if entry.get("tracking") else ""
-            if live is None:  # a manifest-gap disposition (not repo-scoped)
-                w(f"- **{entry['path']}** (manifest gap){trk} - {entry['reason']}")
+            if live is None:  # a manifest-gap disposition, whose carriers come from the gap pass rather than from the ledger row
+                w(f"- **{entry['path']}** (manifest gap, carried by {_fmt(gaps.get(entry['path'], []))}){trk} - {entry['reason']}")
             else:
                 extra = f" _(recorded {_fmt(gone)} now resolved)_" if gone else ""
                 extra += f" _(unavailable, unverified: {_fmt(unk)})_" if unk else ""
@@ -283,7 +281,11 @@ def render_report(spreads, promote, gaps, ledger):
         for path, repos in untriaged_absent:
             w(f"- **{path}** - **not carried** by {_fmt(repos)}, so the section never arrived rather than being edited (verbatim canonical)")
         for g in untriaged_gaps:
-            w(f"- **{g}** - carried by the reference adopter but not in the manifest")
+            w(f"- **{g}** - hub-hosted and undeclared in the manifest, carried by {_fmt(gaps.get(g, []))}")
+        w("")
+
+    if unreadable:
+        w(f"**Tree unreadable, so no manifest gap was measured for {_fmt(unreadable)}.** An unread tree contributes no gaps and reads exactly like a repo carrying none, so it is named rather than counted as clean.")
         w("")
 
     w("## Mechanical re-vendor (verbatim stale copies)")
@@ -321,23 +323,15 @@ def render_report(spreads, promote, gaps, ledger):
 def main():
     argv = sys.argv[1:]
     report_mode = "--report" in argv
-    positional = [a for a in argv if not a.startswith("-")]
-    ref_repo = positional[0] if positional else REF_ADOPTER
     spec = {
         "registry": audit.load("registry/repos.json"),
         "files": audit.load("spec/files.json"),
     }
-    # Fail loud on an unresolvable reference adopter: its empty gap section would read as a false clean.
-    if report_mode and not any(isinstance(r, dict) and r.get("name") == ref_repo
-                               for r in spec["registry"].get("repos", [])):
-        print(f"error: reference adopter '{ref_repo}' not found in the registry - "
-              f"cannot run the manifest-gap pass for the report", file=sys.stderr)
-        return 1
     spreads, promote, mislabel = fidelity_pass(spec)
-    slug, gaps = manifest_gap_pass(spec, ref_repo)
+    gaps, unreadable = manifest_gap_pass(spec)
 
     if report_mode:
-        content = render_report(spreads, promote, gaps, load_ledger())
+        content = render_report(spreads, promote, gaps, unreadable, load_ledger())
         # CRLF matches the fleet default, since reports/*.md is CRLF.
         # Bytes are written so the local platform does not re-translate them.
         # Git dates the file, so no timestamp is embedded, which would churn on every regeneration.
@@ -370,14 +364,13 @@ def main():
     for e, spread in mislabel:
         print(f"   {e['path']}: differs in {', '.join(spread['differs'])}")
 
-    print(f"\n== Manifest gap: files carried by {ref_repo} + present at the hub but NOT in the manifest ==")
-    if slug is None:
-        print(f"   {ref_repo} not found in the registry")
-    elif not gaps:
-        print("   none - the manifest covers every hub file the reference adopter also carries")
-    else:
-        for g in gaps:
-            print(f"   UNTRACKED  {g}")
+    print("\n== Manifest gap: hub-tracked files NOT in the manifest that a repo carries anyway ==")
+    if not gaps:
+        print("   none - no cataloged repo carries a hub-hosted file")
+    for path, repos in gaps.items():
+        print(f"   UNTRACKED  {path} :: {', '.join(repos)}")
+    if unreadable:
+        print(f"   tree unreadable, gap unmeasured: {', '.join(unreadable)}")
     return 0
 
 

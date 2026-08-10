@@ -14,7 +14,7 @@ The verdict vocabulary is [`WORKFLOW.md`][workflow]'s: **operational / not opera
 This audit is not occasional. Run it whenever you **create, adopt, or materially change** a fleet repo, and on demand for any known repo:
 
 - **Onboarding a repo is complete only when it either passes this audit** (operational on every applicable check) **or carries a committed `reports/<repo>/audit.md` plus a tracking issue** enumerating every residual delta. A repo that is partially set up but never audited is itself a **defect**, the exact state this process prevents. The create-to-conformance counterpart is [`STANDUP.md`][standup]. Because both read the same manifests, a repo stood up by that file passes this audit by construction.
-- **Touching a repo** (any conformance-affecting change) ends by re-running the applicable checks and **reconciling the registry entry to reality**: `status`, `types`, `releaseTrigger`, `workflowModel`, `driftNotes`. The registry records reality, not intent. [`spec/validate.py`][validate] proves the catalog is self-consistent, not that it matches the live repo. Closing that gap is this audit's job. The deterministic subset (settings, rulesets, secret names, file presence, per-scope Markdown section presence, workflow interface conformance, verbatim content, branch facts) is mechanized in [`spec/audit.py`][audit-runner]: owner-initiated, run on demand when onboarding a repo, on suspected drift, or before fleet-wide changes. A required section missing from a carried Markdown file is a **drift finding**, not a letter, because a heading rename reads as missing and equivalence is judged by hand. A carried `interface` workflow (spec/fidelity-model.md) is checked by name and wiring (required jobs, the ruleset-bound check name, the artifact-name handoff, and the forbidden `artifact-ids:` fork), all at **drift**, since the body is owned and a rename is a hint to verify. A carried `verbatim` unit, whether a whole file (`.markdownlint-cli2.jsonc`) or a canonical workflow job region (the `github-release` job), is content-hashed against the hub's canonical after line-ending normalization. A mismatch is classified **stale** (matches a past hub revision, re-vendor) or **modified** (matches none, the repo changed fixed content), both at **drift**, since equivalence is intent-governed and a byte diff is a hint to review.
+- **Touching a repo** (any conformance-affecting change) ends by re-running the applicable checks and **reconciling the registry entry to reality**: `status`, `types`, `releaseTrigger`, `workflowModel`, `driftNotes`. The registry records reality, not intent. [`spec/validate.py`][validate] proves the catalog is self-consistent, not that it matches the live repo. Closing that gap is this audit's job. The deterministic subset (settings, rulesets, secret names, file presence, per-scope Markdown section presence, workflow interface conformance, verbatim content, hub-hosted files a repo carries, branch facts) is mechanized in [`spec/audit.py`][audit-runner]: owner-initiated, run on demand when onboarding a repo, on suspected drift, or before fleet-wide changes. A required section missing from a carried Markdown file is a **drift finding**, not a letter, because a heading rename reads as missing and equivalence is judged by hand. A carried `interface` workflow (spec/fidelity-model.md) is checked by name and wiring (required jobs, the ruleset-bound check name, the artifact-name handoff, and the forbidden `artifact-ids:` fork), all at **drift**, since the body is owned and a rename is a hint to verify. A carried `verbatim` unit, whether a whole file (`.markdownlint-cli2.jsonc`) or a canonical workflow job region (the `github-release` job), is content-hashed against the hub's canonical after line-ending normalization. A mismatch is classified **stale** (matches a past hub revision, re-vendor) or **modified** (matches none, the repo changed fixed content), both at **drift**, since equivalence is intent-governed and a byte diff is a hint to review.
 
 ## 1. Scope and Ground-Truth Branch
 
@@ -57,6 +57,7 @@ A check with `intentRef`/`workflowRef` points at the prose section that owns the
 - **docker** - registry layer cache (`buildcache-<branch>`, never `type=gha`), the size-limited Docker Hub README is published via the docker-readme task, and the image always re-pushes on publish.
 - **hugo** - the build fails on a generator warning, the URL-parity gate asserts a length floor before comparing, the rendered output is untracked, the generator is pinned by version and checksum and declared once, a vendored tree records its upstream ref, and the deploy asserts what the host serves (the release id and the environment). Retention is bounded by a declared count with one side recorded as owning the prune, which is the deploy where its credential can observe the destination and the host where that credential is confined write-only, so grade which shape the repo uses rather than looking for a prune step. Deploy credentials are per-environment, which `spec/secrets.json` cannot express, so a clean **repo-setup** verdict says nothing about whether the environments are configured.
 - **branch-model** - `main` and `develop` both exist and are protected, and the live rulesets match [`repo-config/*.json`][repo-config] by normalized diff (below).
+- **carried-scope** - the repo carries no file the hub hosts rather than carries. The set is derived, not listed: the hub's git-tracked paths minus the [`spec/files.json`][files] baseline, so a file dropped from the manifest starts being reported on the next run with no retirement list to remember to edit. The remedy is the opposite of every other file finding, a **deletion**, since the repo reaches the hub's copy per [GOVERNANCE.md "Hub-Hosted Tooling"][governance-hub-hosted-tooling]. The match is on path alone, so a hit is a candidate and not a verdict: a repo's own content at a path the hub also uses matches while carrying nothing of the hub's, which the first fleet run showed twice, a KiCad tooling doc at `scripts/README.md` and per-repo formatting hooks at `.husky/pre-commit`. A [`spec/divergences.json`][divergences] `gaps` disposition decides which case a hit is, so only `retire` asserts a deletion, `accepted` closes a collision or a repo-owned file, and an untriaged hit is read before it is acted on.
 - **repo-setup** - every required secret for the repo's publish mechanisms is configured, and no forbidden secret is present (per [`spec/secrets.json`][secrets]).
 - **linter-parity** - one config per linter (`.markdownlint-cli2.jsonc`, `cspell.json`, ruff/pyright, editorconfig/csharpier, actionlint) drives the editor extension, the CLI, and CI, and CI runs each.
 - **recurring-violations** - comments concise and non-narrative, ASCII only (no em-dash, no smart quotes), US spelling, line endings per `.editorconfig`. These are frequent regressions, so this dimension is high priority and always runs, and each check is grep-able (see below).
@@ -76,10 +77,17 @@ Run [`WORKFLOW.md`][workflow]'s methodology against the repo's **own** Actions: 
     && echo "settings: in sync" || echo "settings: DRIFT"
   ```
 
-- **Rulesets** - diff each live ruleset against the committed expected payload with a normalized comparison (sort the order-insensitive `rules[]` and `bypass_actors[]` before diffing so a reordered but equivalent ruleset does not read as drift):
+- **Rulesets** - diff each live ruleset against the committed expected payload with a normalized comparison (sort the order-insensitive `rules[]` on each rule's whole content before diffing, so a reordered but equivalent ruleset does not read as drift). The compared subset is `name`, `target`, `enforcement`, `conditions` and `rules`, and `bypass_actors` sits deliberately outside it, which is the same subset and the same sort key [`spec/audit.py`][audit-runner] uses. Who may bypass a ruleset is a per-repository human decision taken in the UI, no payload declares one, and [`repo-config/configure.sh`][repo-config] treats it that way in both modes, writing the live list back unchanged on `apply` and reporting it without asserting on `check`. Comparing it here would contradict that and report a ruleset finding against every repository that has any bypass actor, which is the field's normal state rather than a deviation:
 
   ```sh
-  norm='{name,target,enforcement,bypass_actors,conditions,rules} | .rules|=sort_by(.type) | .bypass_actors|=sort_by(.actor_id)'
+  # bypass_actors stays outside the projection, since no payload declares one and jq cannot sort the null that leaves.
+  # Rules sort on each rule's whole content, matching the key normalize_ruleset in audit.py sorts by.
+  # Sorting on .type alone leaves two rules of one type in input order, so a reordered pair would read as drift.
+  # canon sorts keys at every depth before serializing, because the committed payload is written key-sorted and the API returns its own order, so a bare tojson gives the same rule two different sort keys.
+  # It recurses rather than calling walk/1, which arrived in jq 1.6, and no declared floor puts a host above that.
+  # A host on jq 1.5 would not degrade on walk, it would fail to compile the filter and report drift on every ruleset it never compared, which is what repo-config/configure.sh defines its own recursion to avoid.
+  canon='def canon: . as $in | if type == "object" then reduce (keys_unsorted|sort)[] as $k ({}; . + { ($k): ($in[$k]|canon) }) elif type == "array" then map(canon) else . end;'
+  norm="$canon"'{name,target,enforcement,conditions,rules} | .rules|=sort_by(canon|tojson)'
   # Model-aware expected payload: an operational repo's develop ruleset diffs against
   # operational/develop.json (registry workflowModel; the same selection audit.py makes).
   model=$(jq -r --arg n "<repo>" '(.repos[] | select(.name==$n) | .workflowModel) // .defaults.workflowModel // "release"' registry/repos.json)
@@ -94,7 +102,7 @@ Run [`WORKFLOW.md`][workflow]'s methodology against the repo's **own** Actions: 
     [ "$count" -eq 1 ] || { echo "$b: expected exactly 1 ruleset, found $count (defect/drift)"; continue; }
     id=$(jq --arg n "$b" '.[] | select(.name==$n) | .id' <<<"$rulesets")
     diff <(jq -S "$norm" "$file") \
-         <(gh api "repos/<owner>/<repo>/rulesets/$id" --jq '{name,target,enforcement,bypass_actors,conditions,rules}' | jq -S "$norm") \
+         <(gh api "repos/<owner>/<repo>/rulesets/$id" --jq '{name,target,enforcement,conditions,rules}' | jq -S "$norm") \
       && echo "$b: in sync" || echo "$b: DRIFT"
   done
   ```
@@ -149,6 +157,7 @@ Sections 1-9 (the audit and its report) are **read-only** and never touch the ta
 - **Drive the PR's Copilot review to green** - the same loop this repo runs (see [GOVERNANCE.md "PR Review Etiquette"][governance-pr-review-etiquette] and the [Copilot review runbook][copilot-runbook] in `.github/copilot-instructions.md`): request review on every push, address and resolve every thread, and confirm the review covers the head SHA.
 - **Merge only with explicit maintainer approval.** The agent drives to green and stops. The maintainer merges.
 - **One focused PR per drift class**, cross-referencing the audit finding. A sprawling all-drifts PR draws many review rounds and never feels done.
+- **A `hub-only:` finding converges by deleting the file, not by updating it.** It is the one class where the fix removes content, so it is easy to convert into a re-vendor by reflex and end up refreshing a copy that should not exist. Delete the repo's copy, reach the hub's per [GOVERNANCE.md "Hub-Hosted Tooling"][governance-hub-hosted-tooling], and where a carried doc named the local path, point it at the hub's. Confirm the disposition is `retire` before deleting anything: an untriaged hit may be the repo's own content at a shared path, and deleting that destroys work the hub never owned.
 - **Fix systemic drift in the hub, not per repo.** When many repos share a drift, fix the spec/rule (or add a machine check) here and let a re-audit re-flag it, rather than hand-patching each repo for the shared cause.
 
 The convergence model: the hub audits and the agent **applies** the fixes via target PRs, and the maintainer gates every merge. It supersedes any "the hub only reports; downstream operators apply by hand" framing.
@@ -159,8 +168,11 @@ The convergence model: the hub audits and the agent **applies** the fixes via ta
 [audit-runner]: ./spec/audit.py
 [codestyle]: ./CODESTYLE.md
 [copilot-runbook]: ./.github/copilot-instructions.md
+[divergences]: ./spec/divergences.json
+[files]: ./spec/files.json
 [governance]: ./GOVERNANCE.md
 [governance-branching-model]: ./GOVERNANCE.md#branching-model
+[governance-hub-hosted-tooling]: ./GOVERNANCE.md#hub-hosted-tooling
 [governance-pr-review-etiquette]: ./GOVERNANCE.md#pr-review-etiquette
 [project-types]: ./spec/project-types.json
 [readme-sections]: ./spec/readme-sections.json

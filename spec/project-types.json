@@ -147,6 +147,12 @@
                 { "id": "branch.operational.prtriggers", "verdict": "letter", "assert": "The operational repo's lint/validation workflow triggers on pull_request with branches: [ main, develop ], plus push to develop and workflow_dispatch. A pull_request set naming main alone leaves a PR into develop matching no trigger, so it merges with no validation at all (WORKFLOW.md D1.2). The develop result is reported, not required: the required status check stays on main only, since requiring it on develop would gate the direct push the model allows. N/A for release repos.", "workflowRef": "WORKFLOW.md#6-per-project-type-test-walkthroughs" }
             ]
         },
+        "carried-scope": {
+            "appliesTo": "*",
+            "checks": [
+                { "id": "carried.hubonly.absent", "verdict": "letter", "assert": "The repo carries no file the hub hosts rather than carries. spec/audit.py derives the set as the hub's git-tracked paths minus the spec/files.json baseline, and reports each one the repo's ground-truth branch also holds. The remedy is a deletion rather than a re-vendor, since the repo reaches the hub's copy per GOVERNANCE.md 'Hub-Hosted Tooling'. The match is on path alone, so a repo's own content at a path the hub also uses matches without carrying anything of the hub's, and a spec/divergences.json 'gaps' disposition decides which case a hit is: 'retire' asserts a deletion, 'accepted' closes a path collision or a repo-owned file, and an untriaged hit is read before it is acted on.", "intentRef": "GOVERNANCE.md#hub-hosted-tooling" }
+            ]
+        },
         "repo-setup": {
             "appliesTo": "*",
             "checks": [
