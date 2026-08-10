@@ -16,7 +16,7 @@ Three states look similar from inside a repository and take different procedures
 
 ## 1. Reach the Hub, and Verify the Host
 
-**Fetch a hub checkout of your own immediately before reading it.** A clone is whatever it last fetched rather than the branch it names, so a stale one answers confidently instead of failing, and a resync driven from a stale hub converges a repository onto a revision that is already history. Read `main`, the promoted and gated state, per [GOVERNANCE.md "Hub-Hosted Tooling"][governance-hub-hosted-tooling]. Work only in that checkout rather than in one another task is using.
+**Fetch a hub checkout of your own immediately before reading it.** A clone is whatever it last fetched rather than the branch it names, so a stale one answers confidently instead of failing, and a resync driven from a stale hub converges a repository onto a revision that is already history. Read `main`, the promoted and gated state, per [GOVERNANCE.md "Hub-Hosted Tooling"][governance-hub-hosted-tooling]. Work only in that checkout rather than in one that another task is using.
 
 **Verify the host before running any hub tool.** The tools carry version floors, and a host below one does not fail cleanly: it answers `--version`, looks healthy, and produces a wrong answer. Both host defects this fleet has hit were version facts on a tool that was installed.
 
@@ -32,7 +32,7 @@ The identity and signing checks in [`STANDUP.md`][standup] section 0 apply to a 
 
 ## 2. Measure, Before Changing Anything
 
-Run [`AUDIT.md`][audit] end to end. The mechanized subset is one command, and the rest of that file is the half no tool evaluates:
+Run [`AUDIT.md`][audit] end to end. Three commands cover the mechanized part, and they are not interchangeable: the first produces the findings, the second renders that same run as a filable issue rather than measuring again, and the third refreshes the fleet-wide ledger, which is a different tool over a different question. The rest of that file is the half no tool evaluates.
 
 ```shell
 python3 spec/audit.py <Repo>                    # the deterministic findings, read at the registry groundTruthBranch
