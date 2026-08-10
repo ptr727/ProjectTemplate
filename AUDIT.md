@@ -78,7 +78,7 @@ Run [`WORKFLOW.md`][workflow]'s methodology against the repo's **own** Actions: 
 
   ```sh
   # bypass_actors stays outside the projection, since no payload declares one and jq cannot sort the null that leaves.
-  # Rules sort on their whole content rather than on .type, which is the key audit.py sorts by.
+  # Rules sort on each rule's whole content, matching the key normalize_ruleset in audit.py sorts by.
   # Sorting on .type alone leaves two rules of one type in input order, so a reordered pair would read as drift.
   norm='{name,target,enforcement,conditions,rules} | .rules|=sort_by(tojson)'
   # Model-aware expected payload: an operational repo's develop ruleset diffs against
