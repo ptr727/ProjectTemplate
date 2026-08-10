@@ -49,7 +49,7 @@ A section is one of the following. Fidelity is declared in [files.json][files], 
 
 **Devcontainer content.** A devcontainer is optional infrastructure, not required by any repo type. An operational (live config) repo is edited and deployed live and typically has none, so its Devcontainer section states that plainly. A repo that keeps one (a code repo's toolchain, or an offline-debugging aid for a config repo) describes it. The section is present in every carried `GOVERNANCE.md` so the development model is always answered, even when the answer is none.
 
-**Not carried (hub-only).** `Repository Onboarding and Conformance` lives in the hub's `GOVERNANCE.md` as hub-audit context (reconciling the registry, the STANDUP cold-start, the conformance matrix) but is not a carried section, since a downstream agent never runs those. Its one universal rule, that a repo is done when it passes `AUDIT.md` for its type, is carried in `AUDIT.md` itself. Like the model docs and `STANDUP.md`, it is hub machinery, not fleet law.
+**Not carried (hub-only).** `Repository Onboarding and Conformance` lives in the hub's `GOVERNANCE.md` as hub-audit context (reconciling the registry, the STANDUP cold-start, the conformance matrix) but is not a carried section, since a downstream agent never runs those. Its one universal rule, that a repo is done when it passes `AUDIT.md` for its type, is carried in `AUDIT.md` itself. Like the model docs, `STANDUP.md` and `RESYNC.md`, it is hub machinery, not fleet law.
 
 ## Changing the structure carries review weight
 

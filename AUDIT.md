@@ -5,6 +5,8 @@ How an agent audits a repository against the fleet ground truth in this repo and
 The verdict vocabulary is [`WORKFLOW.md`][workflow]'s: **operational / not operational**, **N/A**,
 **defect**, and the applicable/absent rule. Do not invent a parallel scheme.
 
+**This file measures. It does not decide the order a finding is applied in.** Section 10 states that converging is a separate phase and how a fix ships, and [`RESYNC.md`][resync] is that phase for a repository that is already stood up and has fallen behind, sequencing the remedies so the rules land before the files they govern and a deletion lands before the re-vendor that would otherwise refresh it.
+
 ## 0. When to Run and What "Done" Means
 
 **Start here only if the repo already carries its instruction set.** This file measures a repo against the fleet ground truth, and measuring assumes the thing being measured arrived. A repo holding no carried files, or a partial set, has a baseline that never arrived rather than drift to report, so it goes to [`STANDUP.md`][standup] sections 1A and 2 first and comes back here afterwards. The `AGENTS.md` "Fleet Bootstrap" section states that routing in the repo itself, byte-locked, so an agent finds it without knowing this file exists. Running the audit against a repo with nothing to audit produces a report that is all absences, which reads as a catastrophic result rather than as a repo that was never stood up.
@@ -167,6 +169,7 @@ The convergence model: the hub audits and the agent **applies** the fixes via ta
 [repo-config-settings]: ./repo-config/settings.json
 [reports]: ./reports/
 [repos]: ./registry/repos.json
+[resync]: ./RESYNC.md
 [scope-model]: ./spec/scope-model.md
 [secrets]: ./spec/secrets.json
 [spec]: ./spec/
