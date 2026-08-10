@@ -87,7 +87,7 @@ This repo is the single home for those rules, a machine-readable spec they are c
 - **[STANDUP.md][standup]** - how an agent stands a repository up and carries the baseline it is owed.
 - **[AUDIT.md][audit]** - how an agent audits a repository against the spec and reports drift.
 - **[RESYNC.md][resync]** - how an agent brings an already-stood-up repository back into line, in the order the remedies require.
-- **[spec/][spec]** - the machine-readable ground truth: project-type requirements, the file/section baseline, required/forbidden secrets, and the preferred README structure.
+- **[spec/][spec]** - the machine-readable ground truth: project-type requirements, the file/section baseline, required/forbidden secrets, the host tool contract and its version floors, and the preferred README structure.
 - **[registry/repos.json][repos]** - the fleet registry: every project, its type(s), publish mechanism, and status (cataloged or standardization backlog).
 - **[repo-config/][repo-config]** - branch rulesets and the apply script (kept out of `.github/`, which is Actions-owned), plus the GitHub setup reference.
 - **[host-setup/][host-setup-dir]** - the host guardrail kit, which is per machine rather than per repository.
