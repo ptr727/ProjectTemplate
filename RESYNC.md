@@ -36,7 +36,7 @@ Run [`AUDIT.md`][audit] end to end. Three commands cover the mechanized part, an
 
 ```shell
 python3 spec/audit.py <Repo>                    # the deterministic findings, read at the registry groundTruthBranch
-python3 spec/audit.py --issue <Repo>            # the same findings as a ready-to-file convergence issue
+python3 spec/audit.py --issue <Repo>            # audits again and renders that run as a filable issue, so it can differ from the line above
 python3 spec/fidelity_honesty.py --report       # regenerate reports/divergences.md before using it as a work list
 ```
 
