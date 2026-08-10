@@ -4,8 +4,10 @@
 Compares each cataloged registry repo against the ground truth in this repo - general settings
 (repo-config/settings.json), branch rulesets (normalized diff vs the model's payloads), secret
 names (spec/secrets.json; values are never read), baseline/per-type file presence and per-scope
-Markdown section presence on the ground-truth branch (spec/files.json, spec/scope-model.md), and
-branch-model facts (main/develop existence, develop behind main). Owner-initiated: run it when
+Markdown section presence on the ground-truth branch (spec/files.json, spec/scope-model.md),
+hub-hosted files a repo carries and should delete (git-tracked here and undeclared in the manifest,
+triaged by spec/divergences.json), and branch-model facts (main/develop existence, develop behind
+main). Owner-initiated: run it when
 onboarding a repo, when drift is suspected, or before fleet-wide changes. Read-only - it never
 modifies a target.
 
@@ -60,6 +62,69 @@ CHECK_ID_RE = re.compile(r"\(([a-z][a-z0-9-]*(?:\.[a-z0-9-]+)+)\)")
 
 def load(rel):
     return json.loads((ROOT / rel).read_text(encoding="utf-8"))
+
+
+@functools.cache
+def hub_tracked():
+    """The hub's own git-tracked paths, which is what "hub-side" means for the hub-only comparison.
+
+    git ls-files rather than a filesystem walk, since a walk picks up __pycache__ and a local .venv and
+    would make the result depend on working-tree state.
+    A non-zero exit raises rather than returning an empty set, which would read as "the hub tracks nothing"
+    and silently clear every hub-only finding.
+    """
+    r = subprocess.run(["git", "ls-files"], cwd=ROOT, capture_output=True, text=True)
+    if r.returncode != 0:
+        raise RuntimeError(f"git ls-files failed in {ROOT}: {r.stderr.strip() or 'non-zero exit'}")
+    return frozenset(r.stdout.splitlines())
+
+
+def hub_only_paths(spec):
+    """Hub-tracked paths the manifest does not declare, so a downstream copy is hub-hosted content rather than a carry.
+
+    This is the deletion detector: the manifest says what a repo carries, so a file the hub tracks and the
+    manifest omits is the hub's own, and a downstream copy of one is drift whose remedy is a deletion.
+    Deriving it this way rather than from a hand-kept retirement list means a file dropped from the manifest
+    starts being detected on the next run, with no second place to remember to edit.
+
+    A hit is a candidate rather than a verdict, because the match is on path alone.
+    A repo whose own content sits at a path the hub also uses matches without carrying anything of the hub's,
+    which the first fleet run showed twice: a KiCad tooling doc at scripts/README.md, and per-repo formatting
+    hooks at .husky/pre-commit.
+    So only a `retire` disposition in spec/divergences.json asserts a deletion, and an untriaged hit asks for
+    the file to be read.
+    """
+    return hub_tracked() - {e["path"] for e in spec["files"]["baseline"]}
+
+
+def gap_dispositions(spec):
+    """The curated ledger's manifest-gap dispositions, as path -> (disposition, reason).
+
+    A gap the ledger triages is judged by its disposition rather than reported raw, so an accepted one
+    (every repo owns its LICENSE) is not a finding and a retired one names the deletion.
+    """
+    out = {}
+    for g in spec.get("divergences", {}).get("gaps", []):
+        if isinstance(g, dict) and isinstance(g.get("path"), str) and isinstance(g.get("disposition"), str):
+            out[g["path"]] = (g["disposition"], g.get("reason", ""))
+    return out
+
+
+def repo_tree(slug, ground_head):
+    """Every blob path on a repo's ground-truth branch, or None where it could not be read in full.
+
+    The trees endpoint takes a tree sha rather than a ref name, so the branch payload already read is
+    resolved to its tree instead of passing the branch name, which 404s.
+    A truncated response returns None rather than a partial set, since a partial tree cannot distinguish a
+    file the repo does not carry from one the response stopped short of.
+    """
+    sha = (((ground_head or {}).get("commit") or {}).get("commit") or {}).get("tree", {}).get("sha")
+    if not sha:
+        return None
+    tree = gh(f"repos/{slug}/git/trees/{sha}?recursive=1", ok404=True)
+    if not tree or "tree" not in tree or tree.get("truncated"):
+        return None
+    return {n["path"] for n in tree["tree"] if n.get("type") == "blob"}
 
 
 def hub_name():
@@ -1321,6 +1386,29 @@ def audit_repo(entry, spec, branch=None):
             elif template_ref_outside_verbatim(text, verbatim_secs[path], HUB_NAME):
                 findings.append(("DRIFT", f"carried: {path} references the template repo by name or link outside its verbatim sections (the coordination flow is machinery this repo's readers should not see; state the behavior, not the destination)"))
 
+    # --- Hub-only files a repo carries and should not ---
+    # The manifest declares what a repo carries, so a path the hub tracks and the manifest omits is hub-hosted content per GOVERNANCE.md "Hub-Hosted Tooling".
+    # A downstream copy of one is drift whose remedy is a deletion rather than a re-vendor, which no other check reports: every check above reads a path the manifest names, so nothing looks at what a repo carries beyond the baseline.
+    # Skipped for the hub, whose own tracked files are the source and are all "hub-only" by construction.
+    if entry.get("name") != HUB_NAME:
+        carried = repo_tree(slug, ground_head)
+        if carried is None:
+            findings.append(("DRIFT", f"hub-only: could not read the file tree for {slug}@{ground} in full, so no hub-hosted file this repo carries was checked; verify by hand"))
+        else:
+            disp = gap_dispositions(spec)
+            for path in sorted(carried & hub_only_paths(spec)):
+                kind = disp.get(path, ("", ""))[0]
+                # The ledger's reason is not quoted here, since slicing a sentence out of it cuts at the first period, which lands inside a filename like GOVERNANCE.md.
+                # The path names the row to read instead.
+                if kind == "accepted":
+                    continue  # a triaged permanent divergence, so not a finding
+                if kind == "retire":
+                    findings.append(("DRIFT", f"hub-only: delete this repo's {path} - the hub hosts it and no repo carries it (spec/divergences.json 'gaps' records why, and what to reach instead)"))
+                elif kind:
+                    findings.append(("DRIFT", f"hub-only: {path} is undeclared in spec/files.json and this repo carries it - the ledger dispositions it '{kind}', so settle that before converging"))
+                else:
+                    findings.append(("DRIFT", f"hub-only: {path} is undeclared in spec/files.json and this repo carries it - read the file and triage it in spec/divergences.json 'gaps' (this repo's own content at a shared path, a carry to declare, or a hub copy to delete)"))
+
     # --- HISTORY.md mirrors the README opening ---
     # Per spec/readme-structure.md "HISTORY.md", the changelog opens as the README's twin, carrying the same H1 title and the same tagline.
     # The mirror is the tagline alone, not the whole intro region: a README may carry further clarifying paragraphs, and HISTORY.md does not repeat them.
@@ -1944,6 +2032,50 @@ def _selftest():
     else:
         print("  ok   missing ground branch: the branch facts, then one error naming the ref, no letters")
 
+    # The hub-only set is the manifest subtracted from the hub's tracked files, so a declared path must never appear in it.
+    # Asserted against the live manifest rather than a fixture, since the failure this guards is a declared path leaking into the deletion list, which only the real pairing can show.
+    declared = {e["path"] for e in load("spec/files.json")["baseline"]}
+    hub_only = hub_only_paths({"files": load("spec/files.json")})
+    leaked = sorted(declared & hub_only)
+    if leaked or not hub_only:
+        ok = False
+        print(f"  FAIL hub-only set -> {len(hub_only)} paths, {len(leaked)} declared leaked: {leaked}")
+    else:
+        print(f"  ok   hub-only set excludes every declared path ({len(hub_only)} hub-hosted paths, {len(declared)} declared)")
+
+    # A malformed ledger row is dropped rather than raising, so a hand-edit cannot take the audit down with it.
+    # The well-formed rows around it still resolve, which is what keeps a typo from silently clearing every disposition.
+    led = {"divergences": {"gaps": [
+        {"path": "a/b.sh", "disposition": "retire", "reason": "r"},
+        {"path": "c/d.md", "disposition": "accepted"},
+        {"path": "no-disposition.md"},
+        {"disposition": "retire"},
+        "not-an-object",
+    ]}}
+    got_disp = gap_dispositions(led)
+    if got_disp != {"a/b.sh": ("retire", "r"), "c/d.md": ("accepted", "")}:
+        ok = False
+        print(f"  FAIL gap disposition parsing -> {got_disp}")
+    else:
+        print("  ok   gap dispositions: well-formed rows parse, a row missing path or disposition is dropped")
+
+    # A truncated or unreadable tree returns None so the caller reports it, rather than a partial set that reads as a repo carrying nothing.
+    # A partial tree cannot tell a file the repo does not have from one the response stopped short of, and the second is the silent-narrowing case.
+    real_gh = globals()["gh"]
+    head = {"commit": {"commit": {"tree": {"sha": "deadbeef"}}}}
+    try:
+        globals()["gh"] = lambda path, ok404=False: {"tree": [{"path": "x", "type": "blob"}], "truncated": True}
+        truncated = repo_tree("o/r", head)
+        globals()["gh"] = lambda path, ok404=False: {"tree": [{"path": "x", "type": "blob"}, {"path": "d", "type": "tree"}], "truncated": False}
+        whole = repo_tree("o/r", head)
+    finally:
+        globals()["gh"] = real_gh
+    if truncated is not None or repo_tree("o/r", {"commit": {}}) is not None or whole != {"x"}:
+        ok = False
+        print(f"  FAIL repo_tree -> truncated={truncated}, whole={whole}")
+    else:
+        print("  ok   repo_tree: a truncated tree and a missing tree sha both return None, and a whole one drops non-blobs")
+
     print("SELFTEST PASS" if ok else "SELFTEST FAIL")
     return 0 if ok else 1
 
@@ -1988,8 +2120,9 @@ def render_issue(entry, findings, ground, audited_sha, run_utc, hub_sha):
         w("")
         w("Divergences from the hub canonical. A `verbatim:` file or section re-vendors the current hub copy "
           "byte-for-byte (a `section` re-vendors just that one `## heading` block). An `interface:` item must "
-          "honor the named workflow contract. A stale-but-present copy is re-vendored. A genuinely repo-specific "
-          "difference is judged by meaning per AUDIT.md.")
+          "honor the named workflow contract. A stale-but-present copy is re-vendored. A `hub-only:` item is the "
+          "opposite remedy, a file the hub hosts rather than carries, so the copy here is deleted and the hub's "
+          "is reached instead. A genuinely repo-specific difference is judged by meaning per AUDIT.md.")
         w("")
         for t in drift:
             w(f"- {t}")
@@ -2028,6 +2161,7 @@ def main(argv=None):
         "types": load("spec/project-types.json"),
         "readme": load("spec/readme-sections.json"),
         "tools": load("spec/third-party-tools.json"),
+        "divergences": load("spec/divergences.json"),
     }
     issue_mode = a.issue
     wanted = {n.lower() for n in a.names}
