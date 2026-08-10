@@ -239,7 +239,7 @@ check_ruleset() { # payload-file - the live ruleset must match the committed pol
     # Dropping that would turn array order into false drift.
     # A scalar array sorts directly, and required_status_checks sorts by context, its identifying field.
     local ptypes norm
-    # The walk/1 builtin arrived in jq 1.6, so it is defined here rather than called.
+    # The walk/1 builtin arrived in jq 1.6, which the declared floor makes available, and it is defined here rather than called so the filter also compiles below the floor.
     # A host on jq 1.5 would otherwise not degrade, it would fail to compile the filter.
     # The check_ruleset function would then report drift on every parameterized rule it never actually compared.
     # That is the inverse of the false clean this comparison was written to close, so the portable definition is worth its length.

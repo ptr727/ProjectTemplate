@@ -16,6 +16,14 @@ This audit is not occasional. Run it whenever you **create, adopt, or materially
 - **Onboarding a repo is complete only when it either passes this audit** (operational on every applicable check) **or carries a committed `reports/<repo>/audit.md` plus a tracking issue** enumerating every residual delta. A repo that is partially set up but never audited is itself a **defect**, the exact state this process prevents. The create-to-conformance counterpart is [`STANDUP.md`][standup]. Because both read the same manifests, a repo stood up by that file passes this audit by construction.
 - **Touching a repo** (any conformance-affecting change) ends by re-running the applicable checks and **reconciling the registry entry to reality**: `status`, `types`, `releaseTrigger`, `workflowModel`, `driftNotes`. The registry records reality, not intent. [`spec/validate.py`][validate] proves the catalog is self-consistent, not that it matches the live repo. Closing that gap is this audit's job. The deterministic subset (settings, rulesets, secret names, file presence, per-scope Markdown section presence, workflow interface conformance, verbatim content, hub-hosted files a repo carries, branch facts) is mechanized in [`spec/audit.py`][audit-runner]: owner-initiated, run on demand when onboarding a repo, on suspected drift, or before fleet-wide changes. A required section missing from a carried Markdown file is a **drift finding**, not a letter, because a heading rename reads as missing and equivalence is judged by hand. A carried `interface` workflow (spec/fidelity-model.md) is checked by name and wiring (required jobs, the ruleset-bound check name, the artifact-name handoff, and the forbidden `artifact-ids:` fork), all at **drift**, since the body is owned and a rename is a hint to verify. A carried `verbatim` unit, whether a whole file (`.markdownlint-cli2.jsonc`) or a canonical workflow job region (the `github-release` job), is content-hashed against the hub's canonical after line-ending normalization. A mismatch is classified **stale** (matches a past hub revision, re-vendor) or **modified** (matches none, the repo changed fixed content), both at **drift**, since equivalence is intent-governed and a byte diff is a hint to review.
 
+**Verify the host before running any hub tool.** The tools carry version floors, and a host below one answers `--version`, looks healthy, and produces a wrong answer, so a clean audit run from a broken host is a clean-looking result rather than a result.
+
+```shell
+python3 scripts/host_gate.py --repo <path-to-target-checkout>   # run from a hub checkout, floors from spec/host-tools.json
+```
+
+Pass `--repo`, since the gate reads the target's own `host-tools.json` relative to it and defaults to the working directory. Omitting it does not read the target's declaration at all, so every floor that repo adds goes unapplied, and the run reports nothing about the omission. A finding is a **host** misconfiguration rather than a repo one, and [`docs/host-setup.md`][host-setup] is the contract it checks.
+
 ## 1. Scope and Ground-Truth Branch
 
 Audit one repository at a time. Read the target's **`main` branch** as ground truth: `main` is the released, authoritative state. Read `develop` only to detect divergence. A stale or diverged `develop` (behind `main`, or diverged) is reported as a **drift finding**, never audited as the truth. Do not treat a `develop`-only file as present if it is absent on `main`.
@@ -84,7 +92,7 @@ Run [`WORKFLOW.md`][workflow]'s methodology against the repo's **own** Actions: 
   # Rules sort on each rule's whole content, matching the key normalize_ruleset in audit.py sorts by.
   # Sorting on .type alone leaves two rules of one type in input order, so a reordered pair would read as drift.
   # canon sorts keys at every depth before serializing, because the committed payload is written key-sorted and the API returns its own order, so a bare tojson gives the same rule two different sort keys.
-  # It recurses rather than calling walk/1, which arrived in jq 1.6, and no declared floor puts a host above that.
+  # It recurses rather than calling walk/1, which the declared floor does make available, because the recursion costs nothing and compiles below the floor as well.
   # A host on jq 1.5 would not degrade on walk, it would fail to compile the filter and report drift on every ruleset it never compared, which is what repo-config/configure.sh defines its own recursion to avoid.
   canon='def canon: . as $in | if type == "object" then reduce (keys_unsorted|sort)[] as $k ({}; . + { ($k): ($in[$k]|canon) }) elif type == "array" then map(canon) else . end;'
   norm="$canon"'{name,target,enforcement,conditions,rules} | .rules|=sort_by(canon|tojson)'
@@ -174,6 +182,7 @@ The convergence model: the hub audits and the agent **applies** the fixes via ta
 [governance-branching-model]: ./GOVERNANCE.md#branching-model
 [governance-hub-hosted-tooling]: ./GOVERNANCE.md#hub-hosted-tooling
 [governance-pr-review-etiquette]: ./GOVERNANCE.md#pr-review-etiquette
+[host-setup]: ./docs/host-setup.md
 [project-types]: ./spec/project-types.json
 [readme-sections]: ./spec/readme-sections.json
 [readme-structure]: ./spec/readme-structure.md

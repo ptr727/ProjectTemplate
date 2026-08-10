@@ -14,6 +14,8 @@ Three states look similar from inside a repository and take different procedures
 
 **The distinction is measured, not assumed.** `spec/audit.py <Repo>` reports an absent carried file as a `LETTER` and a present-but-stale one as a `DRIFT`, so the finding kinds themselves say which procedure the repository is owed. A run that is mostly letters is a repository that needs [`STANDUP.md`][standup].
 
+**A few letters are not that, and the ordinary cause is the baseline having grown.** When the manifest gains an entry, every repository in the fleet reports that one file absent on its next audit, all at once and through no fault of its own. That is a file to carry inside a resync, at the point in section 3 where its class belongs, rather than evidence the repository was never stood up. Read the letters before routing on their count: a handful naming files the hub added recently is a resync, and a baseline's worth naming the instruction set is a standup.
+
 ## 1. Reach the Hub, and Verify the Host
 
 **Fetch a hub checkout of your own immediately before reading it.** A clone is whatever it last fetched rather than the branch it names, so a stale one answers confidently instead of failing, and a resync driven from a stale hub converges a repository onto a revision that is already history. Read `main`, the promoted and gated state, per [GOVERNANCE.md "Hub-Hosted Tooling"][governance-hub-hosted-tooling]. Work only in that checkout rather than in one that another task is using.
