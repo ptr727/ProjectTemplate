@@ -32,11 +32,11 @@ The identity and signing checks in [`STANDUP.md`][standup] section 0 apply to a 
 
 ## 2. Measure, Before Changing Anything
 
-Run [`AUDIT.md`][audit] end to end. Three commands cover the mechanized part, and they are not interchangeable. The first reports the findings. The second **runs its own audit** and renders those findings as a filable issue, so it is a second measurement rather than a view over the first, and the two can disagree if the repository moves between them. The third is a different tool answering a fleet-wide question. The rest of that file is the half no tool evaluates.
+Run [`AUDIT.md`][audit] end to end. Three commands cover the mechanized part, and they are not interchangeable. The first reports the findings. The second **runs its own audit** and renders those findings as an issue ready to file, so it is a second measurement rather than a view over the first, and the two can disagree if the repository moves between them. The third is a different tool answering a fleet-wide question. The rest of that file is the half no tool evaluates.
 
 ```shell
 python3 spec/audit.py <Repo>                    # the deterministic findings, read at the registry groundTruthBranch
-python3 spec/audit.py --issue <Repo>            # audits again and renders that run as a filable issue, so it can differ from the line above
+python3 spec/audit.py --issue <Repo>            # audits again and renders that run as an issue ready to file, so it can differ from the line above
 python3 spec/fidelity_honesty.py --report       # regenerate reports/divergences.md before using it as a work list
 ```
 
