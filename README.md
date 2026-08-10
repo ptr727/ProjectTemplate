@@ -35,7 +35,8 @@ This repo has two kinds of reader, a human and an AI coding agent, and they ente
 | --- | --- | --- |
 | Browsing GitHub | What is this, and why does it exist? | [What This Repo Is][what-this-repo-is] and [What It Achieves][what-it-achieves] |
 | Setting up a machine where an agent runs | How do I deploy the host guardrails? | [`docs/host-setup.md`][host-setup] |
-| Adopting the rules in a repository | How do I stand a repo up, or bring an existing one into line? | [`STANDUP.md`][standup], then [`AUDIT.md`][audit] |
+| Adopting the rules in a repository | How do I stand a repo up? | [`STANDUP.md`][standup], then [`AUDIT.md`][audit] |
+| Keeping a repository in line | It is stood up already. How do I bring it up to the current rules? | [`RESYNC.md`][resync] |
 | Blocked by a rule | How do I diverge from one, or grant a write the guard denies? | [Diverging From a Rule][diverging-from-a-rule] |
 | Reporting a defect or proposing a rule | Where does that go, and what does it need? | [Questions or Issues][questions-or-issues] |
 | An AI coding agent | Which document governs the task in front of me? | [`AGENTS.md`][agents] |
@@ -85,7 +86,8 @@ This repo is the single home for those rules, a machine-readable spec they are c
 - **[WORKFLOW.md][workflow]** - the CI/CD workflow contract (behavioral guarantees D1-D9) and its audit methodology.
 - **[STANDUP.md][standup]** - how an agent stands a repository up and carries the baseline it is owed.
 - **[AUDIT.md][audit]** - how an agent audits a repository against the spec and reports drift.
-- **[spec/][spec]** - the machine-readable ground truth: project-type requirements, the file/section baseline, required/forbidden secrets, and the preferred README structure.
+- **[RESYNC.md][resync]** - how an agent brings an already-stood-up repository back into line, in the order the remedies require.
+- **[spec/][spec]** - the machine-readable ground truth: project-type requirements, the file/section baseline, required/forbidden secrets, the host tool contract and its version floors, and the preferred README structure.
 - **[registry/repos.json][repos]** - the fleet registry: every project, its type(s), publish mechanism, and status (cataloged or standardization backlog).
 - **[repo-config/][repo-config]** - branch rulesets and the apply script (kept out of `.github/`, which is Actions-owned), plus the GitHub setup reference.
 - **[host-setup/][host-setup-dir]** - the host guardrail kit, which is per machine rather than per repository.
@@ -99,6 +101,7 @@ This repo is the single home for those rules, a machine-readable spec they are c
 - **The fleet** - the projects listed in [registry/repos.json][repos], each audited downward against the ground truth here rather than negotiating its own.
 - **Stand a repository up** - carry the baseline a project is owed for its declared types and workflow model, per [STANDUP.md][standup]. An absent file is a baseline that never arrived rather than drift.
 - **Audit a repository** - read a live project against the spec and report its drift, per [AUDIT.md][audit]. The audit never edits what it measures, so a fix is a separate change.
+- **Resync a repository** - bring an already-stood-up project up to the current hub, per [RESYNC.md][resync]. It audits for the findings and then applies them in order, which includes deleting what the hub hosts rather than carries.
 - **Close the review loop** - request a review on every push, confirm it covered the head commit, triage every finding, reply and resolve, and escalate when stuck, per [GOVERNANCE.md "PR Review Etiquette"][governance-pr-review-etiquette].
 - **Carried against reached** - a project carries the content it is audited against and reaches the machinery that is identical everywhere, per [GOVERNANCE.md "Hub-Hosted Tooling"][governance-hub-hosted-tooling].
 
@@ -155,6 +158,8 @@ Restart Claude Code sessions on the machine afterward so the hook and the `CLAUD
 A repository that does not exist yet is stood up with [`STANDUP.md`][standup], which is ordered rather than a menu: verify commit identity and signing before the first commit, hand the maintainer what only they can supply, classify the repo and write its [registry][repos] entry, carry the instruction set before authoring anything of your own, then carry the remaining baseline, the workflows, and the settings. The two steps with a closing window are first, because signing has to be live before the first commit and the rules have to be loaded before the first authored file.
 
 A repository that already exists is measured with [`AUDIT.md`][audit] instead. The audit is read-only and ends in a report under [reports/][reports], so nothing is changed by measuring, and applying what it found is a separate reviewable change per its section 10. Onboarding is complete when the repo passes, or carries a committed report plus a tracking issue for the residual deltas, per [GOVERNANCE.md "Repository Onboarding and Conformance"][governance-repository-onboarding-and-conformance].
+
+A repository that is stood up already and has fallen behind is resynced with [`RESYNC.md`][resync], which is the third entry point and the one a request to sync a repository with the hub resolves to. It runs the audit for the findings and then applies them in an order that matters: the rules first, because they govern what comes after them, then the deletions, because a re-vendor would otherwise refresh a file that is about to go, then the re-vendors, the workflow contracts, and the repository configuration. It also states what the measurement cannot see, since a carried file at `intent` fidelity is checked for presence alone and a hub revision inside one raises no finding at all.
 
 The mechanical helpers that go with those procedures are documented beside them: [`docs/repo-config-carry.md`][repo-config-carry] for branch rulesets and repository settings, and [`docs/content-import.md`][content-import] for importing existing content into a new repo.
 
@@ -330,6 +335,7 @@ Licensed under the [MIT License][license]\
 [repo-config-carry]: ./docs/repo-config-carry.md
 [reports]: ./reports/
 [repos]: ./registry/repos.json
+[resync]: ./RESYNC.md
 [scripts]: ./scripts/
 [spec]: ./spec/
 [ssh-signing]: ./docs/ssh-signing.md

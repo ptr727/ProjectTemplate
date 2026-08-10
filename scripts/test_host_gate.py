@@ -384,6 +384,119 @@ class TestReadDeclaration(unittest.TestCase):
         self.assertIsInstance(host_gate.read_declaration(Path('/definitely/not/here.json'), 'declaration'), str)
 
 
+class TestLocalOverlay(unittest.TestCase):
+    """This repo's own root host-tools.json, and the schema it points at.
+
+    The overlay borrowed the fleet schema once, and that schema forbids both shapes an overlay is for:
+    `minItems: 1` rejects the empty list a repo with nothing to add carries, and the per-entry
+    `required` list rejects the partial entry that lets a repo raise one floor without restating a
+    tool. Neither is caught by running the gate, because CI runs no JSON-schema validation at all and
+    the pointer's only reader is a schema-aware editor, so the file showed as invalid where it is
+    edited and nowhere else.
+    """
+
+    def setUp(self):
+        self.root = host_gate.SPEC.parent.parent
+        self.overlay = json.loads((self.root / 'host-tools.json').read_text(encoding='utf-8'))
+        self.local_schema = json.loads((self.root / 'spec' / 'host-tools-local.schema.json').read_text(encoding='utf-8'))
+        self.fleet_schema = json.loads((self.root / 'spec' / 'host-tools.schema.json').read_text(encoding='utf-8'))
+
+    def test_the_overlay_points_at_the_overlay_schema(self):
+        self.assertEqual(self.overlay['$schema'], './spec/host-tools-local.schema.json')
+
+    def test_the_two_schemas_agree_on_every_field_they_share(self):
+        """The "only two axes differ" claim, enforced field by field rather than asserted in prose.
+
+        The overlay schema was written by hand from the fleet one and quietly relaxed two more things:
+        `minimum` lost its version pattern and `source` lost its named platforms and its closed
+        property set. A schema-aware editor then accepted a floor the gate rejects and a source key
+        that reaches no platform, while the tests next door said only two axes differed.
+
+        Comparing each shared field is what keeps the duplication honest, since the alternative is a
+        cross-file `$ref` that editors resolve inconsistently. The two intended differences are
+        excluded by name, so adding a third relaxation fails here rather than widening the claim.
+        """
+        fleet = self.fleet_schema['$defs']['tool']['properties']
+        overlay = self.local_schema['$defs']['override']['properties']
+        self.assertEqual(set(fleet), set(overlay), 'the two schemas describe different field sets')
+        # `description` is editor help rather than a constraint, so it is not compared.
+        # `required.default` is excluded because the two files mean different things by an omitted `required`, which this test found rather than assumed.
+        # In the fleet declaration every entry is an addition, so omitting it means true.
+        # In an overlay, merge() applies only the fields an entry carries, so omitting it means inherit the hub's value, and declaring a default of true would tell an editor the opposite.
+        ignore = {'description'}
+        for field in sorted(overlay):
+            drop = ignore | ({'default'} if field == 'required' else set())
+            want = {k: v for k, v in fleet[field].items() if k not in drop}
+            got = {k: v for k, v in overlay[field].items() if k not in drop}
+            self.assertEqual(got, want, f'the overlay constrains {field!r} differently from the fleet schema')
+        self.assertNotIn('default', overlay['required'],
+                         'an omitted `required` in an overlay inherits rather than defaulting to true')
+
+    def test_the_two_schemas_differ_where_the_overlay_needs_them_to(self):
+        """Asserted as a difference rather than as two absolute values.
+
+        A change that tightened the overlay schema back to the fleet one would satisfy a check written
+        against either file alone, since each would still be internally consistent.
+        """
+        self.assertEqual(self.fleet_schema['properties']['tools']['minItems'], 1)
+        self.assertEqual(self.local_schema['properties']['tools']['minItems'], 0)
+        self.assertEqual(self.fleet_schema['$defs']['tool']['required'],
+                         ['name', 'probes', 'pattern', 'minimum', 'why'])
+        self.assertEqual(self.local_schema['$defs']['override']['required'], ['name'])
+
+    def test_the_shipped_overlay_satisfies_its_own_schema(self):
+        """The two constraints that moved, checked directly rather than through a validator.
+
+        jsonschema is not installed and CI validates no schema, so a dependency-free check is the only
+        one that runs anywhere.
+        """
+        tools = self.overlay['tools']
+        self.assertIsInstance(tools, list)
+        self.assertGreaterEqual(len(tools), self.local_schema['properties']['tools']['minItems'])
+        allowed = set(self.local_schema['$defs']['override']['properties'])
+        for entry in tools:
+            self.assertIn('name', entry, 'an overlay entry names the tool it overrides')
+            self.assertFalse(set(entry) - allowed, f'unknown overlay field(s) in {entry!r}')
+
+    def accepts(self, schema, doc):
+        """Whether a document satisfies the two constraints the overlay schema deliberately relaxes.
+
+        Only `tools.minItems` and the per-entry `required` list are read, which is the whole of what
+        separates these two schemas. It is not a JSON-schema validator and does not pretend to be one:
+        jsonschema is not installed and CI validates no schema, so a dependency-free check of the two
+        axes under discussion is what can actually run.
+        """
+        tools = doc['tools']
+        if len(tools) < schema['properties']['tools']['minItems']:
+            return False
+        entry_def = schema['$defs']['tool' if 'tool' in schema['$defs'] else 'override']
+        return all(not set(entry_def['required']) - set(e) for e in tools)
+
+    def test_the_overlay_schema_is_strictly_the_more_permissive_of_the_two(self):
+        """The justification for the split, stated about the schemas rather than about today's data.
+
+        This replaced a check that the shipped overlay violates the fleet schema. That coupled a
+        schema-design invariant to one data instance: an overlay that legitimately grew a full tool
+        entry would satisfy the fleet schema and fail the test, while the split stayed just as
+        justified. What justifies it is that the overlay schema accepts everything the fleet schema
+        does and more, so the assertion is made in both directions over constructed documents.
+        """
+        full = {'name': 'jq', 'probes': [['jq', '--version']], 'pattern': 'jq-(.*)',
+                'minimum': '1.7', 'why': 'because'}
+        empty_list = {'tools': []}
+        partial_entry = {'tools': [{'name': 'jq', 'minimum': '1.7'}]}
+        full_entry = {'tools': [full]}
+
+        # Everything the fleet schema accepts, the overlay schema accepts too.
+        self.assertTrue(self.accepts(self.fleet_schema, full_entry))
+        self.assertTrue(self.accepts(self.local_schema, full_entry))
+
+        # And the overlay accepts two shapes the fleet schema rejects, which is why it exists.
+        for doc, what in ((empty_list, 'an empty tools list'), (partial_entry, 'a partial entry')):
+            self.assertFalse(self.accepts(self.fleet_schema, doc), f'the fleet schema now accepts {what}')
+            self.assertTrue(self.accepts(self.local_schema, doc), f'the overlay schema rejects {what}')
+
+
 class TestShippedDeclaration(unittest.TestCase):
     """The file this repo actually ships, read rather than assumed."""
 
@@ -414,7 +527,7 @@ class TestShippedDeclaration(unittest.TestCase):
         one in the data, which is what caught the python3 floor being added without this line.
         """
         floors = {t['name'] for t in self.data['tools'] if t['minimum'] is not None}
-        self.assertEqual(floors, {'gh', 'git-restore-mtime', 'python3'})
+        self.assertEqual(floors, {'gh', 'git-restore-mtime', 'jq', 'python3'})
 
     def test_the_contract_table_carries_every_declared_floor(self):
         """docs/host-setup.md restates the floors, so the doc goes stale the moment the data moves.
@@ -466,15 +579,21 @@ class TestShippedDeclaration(unittest.TestCase):
                           f'{cells[floor_col]!r}')
 
     def test_a_target_floor_says_so_rather_than_implying_a_defect(self):
-        """The python3 floor is a target, so its `why` has to distinguish itself from a measured one.
+        """A target floor's `why` has to distinguish itself from a measured one.
 
         A reader who takes a target floor for a measured one goes looking for a defect report that
         does not exist, which is the failure the two-kinds wording was written to prevent.
+        The set is asserted rather than one entry, so a third target floor added without the wording
+        fails here instead of reading as measured. Both members are named, since a check that only
+        counted them would pass on the wrong pair.
         """
-        python3 = next(t for t in self.data['tools'] if t['name'] == 'python3')
-        self.assertEqual(python3['minimum'], '3.13')
-        self.assertIn('target', python3['why'])
-        self.assertIn('unverified rather than known broken', python3['why'])
+        targets = {'jq': '1.7', 'python3': '3.13'}
+        by_name = {t['name']: t for t in self.data['tools']}
+        for name, floor in targets.items():
+            entry = by_name[name]
+            self.assertEqual(entry['minimum'], floor)
+            self.assertIn('target', entry['why'])
+            self.assertIn('unverified rather than known broken', entry['why'])
 
 
 if __name__ == '__main__':

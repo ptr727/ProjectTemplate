@@ -293,7 +293,10 @@ def check(tools: list[dict]) -> list[str]:
         elif compare(found, floor) < 0:
             # The remedy rides on the finding rather than beside it, since a separate line would count as a second issue.
             src = (tool.get('source') or {}).get('linux' if sys.platform.startswith('linux') else 'macos' if sys.platform == 'darwin' else 'windows')
-            issues.append(f'{name} {version} is below the {floor_text} floor - {tool["why"]}'
+            # The head line stays the scannable fact and the rationale follows it, rather than being inlined into it.
+            # An entry's why runs to a paragraph, so inlining made the one line a reader scans in CI output unreadable, and the longest entry is not the one that needs it least.
+            issues.append(f'{name} {version} is below the {floor_text} floor'
+                          + f'\nWHY: {tool["why"]}'
                           + (f'\nINSTALL FROM: {src}' if src else ''))
         else:
             NOTES.append(f'{name} {version} meets the {floor_text} floor')
@@ -333,10 +336,11 @@ def main(argv: list[str] | None = None) -> int:
     status = 'FAIL' if issues else 'ok'
     print(f'[{status:4}] host-tools  {len(issues)} issue(s) over {len(tools)} declared tool(s)')
     for i in issues:
-        # A finding may carry a continuation line, which is indented under it rather than counted beside it.
-        head, _, tail = i.partition('\n')
+        # A finding may carry continuation lines, indented under it rather than counted beside it.
+        # Every line is split rather than only the first, since partitioning once leaves later newlines inside one printed line and loses the indent on all but the first.
+        head, *rest = i.split('\n')
         print(f'         {head}')
-        if tail:
+        for tail in rest:
             print(f'           {tail}')
     if not a.quiet:
         # After the findings and outside the count, since a note is not one.
