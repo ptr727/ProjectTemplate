@@ -20,7 +20,7 @@ This audit is not occasional. Run it whenever you **create, adopt, or materially
 python3 scripts/host_gate.py --repo <path-to-target-checkout>   # run from a hub checkout, floors from spec/host-tools.json
 ```
 
-Pass `--repo`, since the gate reads the target's own `host-tools.json` relative to it and defaults to the working directory, so a bare run layers the hub's declaration and prints the same digest either way. A finding is a **host** misconfiguration rather than a repo one, and [`docs/host-setup.md`][host-setup] is the contract it checks.
+Pass `--repo`, since the gate reads the target's own `host-tools.json` relative to it and defaults to the working directory. Omitting it does not read the target's declaration at all, so every floor that repo adds goes unapplied, and the run reports nothing about the omission. A finding is a **host** misconfiguration rather than a repo one, and [`docs/host-setup.md`][host-setup] is the contract it checks.
 
 ## 1. Scope and Ground-Truth Branch
 

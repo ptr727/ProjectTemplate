@@ -25,10 +25,18 @@ if [ "$(git config --global --get gpg.format)" = ssh ]; then ssh-add -L; else gp
 **Verify the host's tools in the same step, since identity is only half of what a standup needs from a machine.** The tools carry version floors, and a host below one does not fail cleanly: it answers `--version`, looks healthy, and produces a wrong answer, which is how both host defects this fleet has hit arrived.
 
 ```shell
-python3 scripts/host_gate.py --repo <path-to-this-checkout>   # run from a hub checkout, floors from spec/host-tools.json
+python3 scripts/host_gate.py            # from a hub checkout, against the fleet floors in spec/host-tools.json
 ```
 
-Pass `--repo`, because that flag is what makes the repo's own `host-tools.json` count. The gate reads that file relative to `--repo`, which defaults to the working directory, so a bare run from a hub checkout layers the hub's declaration instead and prints the same healthy digest either way. A repo carrying no local file is silent by design, so the absence of a layering note is not evidence the flag was unnecessary. A finding here is a **host** misconfiguration to fix on the machine or surface to the maintainer, never something to patch per repo, and [`docs/host-setup.md`][host-setup] is the contract it checks.
+**No `--repo` here, and that is the one place in these procedures where it is omitted deliberately.** The flag points the gate at a repo's own `host-tools.json` so its floors are layered over the fleet ones, and at this step there is no repo to point it at: the target does not exist yet, since this section runs before the `git init` in section 0B, and the file itself arrives with the baseline in section 2. So this run checks the fleet floors, which is all that is knowable now.
+
+**Re-run it with `--repo` once section 2 has carried the file**, because a bare run does not read the target's declaration at all, so any floor that repo adds goes unapplied and the run cannot tell you it was skipped:
+
+```shell
+python3 scripts/host_gate.py --repo <path-to-target-checkout>   # after section 2, so the repo's own floors count
+```
+
+A finding at either point is a **host** misconfiguration to fix on the machine or surface to the maintainer, never something to patch per repo, and [`docs/host-setup.md`][host-setup] is the contract it checks.
 
 The agent check branches rather than listing both forms, because they are alternatives and running the wrong one fails on a correctly configured host: an SSH host need not have `gpg` installed at all. Signing is **SSH or GPG**, so judge the format and its agent together rather than requiring `ssh`: what matters is that the configured format has a matching agent holding the key, which is the check [GOVERNANCE.md "Git and Commit Rules"][governance-git-and-commit-rules] prescribes. Any of these wrong or absent is a **host** misconfiguration to surface to the maintainer ([`docs/host-setup.md`][host-setup] is the setup procedure), not something to patch per repo. Patching it locally hides a broken host that then produces wrong identities in every other repo on that machine.
 
