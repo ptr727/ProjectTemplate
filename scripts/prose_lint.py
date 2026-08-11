@@ -199,6 +199,15 @@ def repo_prefix(root: Path) -> str:
     return r.stdout.strip() if r.returncode == 0 else ''
 
 
+def quoted(paths) -> str:
+    """Paths as a sorted, quoted, comma-joined list for an error message.
+
+    Quoted because a path holding a space or a comma is indistinguishable from two paths once
+    joined, which makes the message unreadable exactly when it names something unexpected.
+    """
+    return ', '.join(repr(str(p)) for p in sorted(paths))
+
+
 def repo_root(path: Path) -> str:
     """The repository top level containing `path`, or '' when git cannot say."""
     start = path if path.is_dir() else path.parent
@@ -1114,16 +1123,16 @@ def main(argv: list[str] | None = None) -> int:
     # `discover` reads a non-file, non-directory argument as `.`, so a typo scanned the caller's directory while the rule set anchored on the missing path's parent.
     absent = [p for p in scan_paths if not Path(p).exists()]
     if absent:
-        print(f"error: requested path(s) do not exist: {', '.join(sorted(absent))}. Refusing "
-              'rather than falling back to the current directory, which would scan one tree and '
-              'choose the rule set from another.', file=sys.stderr)
+        # Quoted, since a path holding a space or a comma is unreadable in a bare comma-joined list.
+        print(f"error: requested path(s) do not exist: {quoted(absent)}. Refusing rather than "
+              'falling back to the current directory, which would scan one tree and choose the '
+              'rule set from another.', file=sys.stderr)
         return 2
     git_roots = {found for found in (repo_root(Path(p)) for p in scan_paths) if found}
     if len(git_roots) > 1:
-        print('error: the requested paths span more than one repository (' +
-              ', '.join(sorted(git_roots)) + '). Each declares its own workflow model, so no '
-              'single rule set is correct for all of them. Run the gate once per repository.',
-              file=sys.stderr)
+        print(f'error: the requested paths span more than one repository ({quoted(git_roots)}). '
+              'Each declares its own workflow model, so no single rule set is correct for all of '
+              'them. Run the gate once per repository.', file=sys.stderr)
         return 2
     # A file anchors on its own parent rather than on `.`, which is where the caller stands.
     if git_roots:

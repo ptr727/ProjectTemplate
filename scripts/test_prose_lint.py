@@ -1868,6 +1868,21 @@ class TestScanRootDecidesTheRuleSet(unittest.TestCase):
                 [str(self.tmp / 'no-such-dir'), '--check', 'home-path']))
         self.assertIn('do not exist', self.err.getvalue())
 
+    def test_a_path_holding_a_space_or_comma_is_quoted_in_the_refusal(self) -> None:
+        """Joined bare, one path with a comma in it reads as two paths and the message misleads."""
+        awkward = self.tmp / 'a dir, with comma'
+        with mock.patch.object(prose_lint, 'repo_root', return_value=''):
+            self.assertEqual(2, prose_lint.main([str(awkward), '--check', 'home-path']))
+        self.assertIn(repr(str(awkward)), self.err.getvalue())
+
+    def test_repository_roots_are_quoted_in_the_span_refusal(self) -> None:
+        spaced = self.tmp / 'root with space'
+        spaced.mkdir()
+        with mock.patch.object(prose_lint, 'repo_root', side_effect=lambda p: str(Path(p))):
+            self.assertEqual(2, prose_lint.main(
+                [str(self.release), str(spaced), '--check', 'home-path']))
+        self.assertIn(repr(str(spaced)), self.err.getvalue())
+
     def test_an_existing_path_is_not_refused_by_that_check(self) -> None:
         """The guard must not reject the ordinary case it sits in front of."""
         good = self.tmp / 'good.md'
