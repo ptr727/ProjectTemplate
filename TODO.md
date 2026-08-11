@@ -495,6 +495,7 @@ Regenerate [reports/divergences.md][divergences-report] before using it as the w
 Actions on issues that are the maintainer's to take, each carrying its evidence so it is one action rather than a re-derivation.
 
 - **Re-scope [#305][issue-305] to the push half, and make it the tracking issue for the fleet re-vendor sweep.** Most of what it asked for is built, since the fidelity model, the [`spec/files.json`][files] manifest, [`spec/divergences.json`][divergences] with its generated [reports/divergences.md][divergences-report], and [`AUDIT.md`][audit-doc] section 10 together give the canonical-versus-adapted split and the audit path it proposed. What is genuinely still missing is the push half, since every one of those detects drift while the sweep that fixes it is manual. Re-scoped, it carries the "Fleet Sweeps" visit manifest and Blog as the pilot. Closing it against the built machinery is the alternative, and it loses the only tracking issue the sweep would have.
+- **Decide which `install-tools.sh` failures are collected and which end the run.** [`apply_tool`][install-tools] collects a non-zero return from a tool's install function, so one failure does not strand the rest, and several install paths call `die` instead and end the whole run. Two kinds are mixed there. A refusal is deliberate and should stay fatal: an unverifiable keyring, a checksum mismatch, or a declined prompt each mean nobody vouched for what would be installed, and continuing past one is worse than stopping. An upstream lookup that cannot be answered is the case the collection exists for, and `node_install` failing to read the current long term support line, `uv_install` finding no build for the architecture, and `dotnet_install` finding no package for the distribution each end the run today, which is one unreachable upstream stranding every tool after it. Changing those three to return non-zero is a behavior change across the install path, so it wants its own verification on each supported distribution rather than riding along with a migration. Raised by review on [#667][pr-667], where the comment above `apply_tool` claimed the collecting behavior for all of them and now states the split.
 
 ## Verified Complete, Awaiting Close
 
@@ -533,6 +534,7 @@ Nothing is awaiting close today. [#578][issue-578] was the last entry here and c
 
 [pr-591]: https://github.com/ptr727/ProjectTemplate/pull/591
 [pr-620]: https://github.com/ptr727/ProjectTemplate/pull/620
+[pr-667]: https://github.com/ptr727/ProjectTemplate/pull/667
 
 <!-- Upstream -->
 
@@ -551,6 +553,7 @@ Nothing is awaiting close today. [#578][issue-578] was the last entry here and c
 [fidelity-honesty]: ./spec/fidelity_honesty.py
 [files]: ./spec/files.json
 [governance]: ./GOVERNANCE.md
+[install-tools]: ./host-setup/linux/install-tools.sh
 [markdownlint]: ./.markdownlint-cli2.jsonc
 [matrix]: ./reports/conformance-matrix.md
 [merge-bot]: ./.github/workflows/merge-bot-pull-request.yml
