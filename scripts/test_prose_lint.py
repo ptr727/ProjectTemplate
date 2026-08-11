@@ -2210,6 +2210,38 @@ class TestTheScanScopeIsTheScopeReported(unittest.TestCase):
         self.git(there, 'commit', '-qam', 'change')
         self.assertEqual(1, self.run_in(here, str(there), '--diff', 'HEAD~1'))
 
+    def test_a_subtree_argument_reads_the_untracked_files_inside_it(self) -> None:
+        """`git ls-files` prints names relative to its `-C` directory, for `--others` as well.
+
+        Review read it the other way round and proposed joining both lists on the repository top
+        level instead, which would point every name at the wrong place and drop the subtree
+        silently. Measured on git 2.51: `git -C sub ls-files --others` prints `untracked.md` and
+        `deep/untracked2.md`, not the `sub/` forms. The tracked half of this is pinned by
+        TestDiscovery, and the untracked half is pinned here because the two lists are joined the
+        same way and a reader has no reason to expect them to differ.
+
+        The keys reported stay repository-relative whichever form the argument took, which is what
+        makes a finding in a subtree name a path the repository recognizes.
+
+        The discovered count is asserted rather than the findings alone. Listing from the top level
+        instead reads the whole repository, and every file outside the subtree was clean, so the
+        findings agreed under both and proved nothing. What the argument narrows is the count.
+        """
+        root = self.repo()
+        (root / 'sub' / 'deep').mkdir(parents=True)
+        (root / 'sub' / 'near.md').write_text(self.BAIT, encoding='utf-8')
+        (root / 'sub' / 'deep' / 'far.md').write_text(self.BAIT, encoding='utf-8')
+        for arg in ('sub', str(root / 'sub')):
+            with self.subTest(arg=arg):
+                err = self.enterContext(contextlib.redirect_stderr(io.StringIO()))
+                with contextlib.redirect_stdout(io.StringIO()) as out:
+                    self.assertEqual(1, self.run_in(root, arg, '--diff', 'HEAD'))
+                reported = sorted(line.split(':')[0] for line in out.getvalue().splitlines()
+                                  if line.strip())
+                self.assertEqual(['sub/deep/far.md', 'sub/near.md'], reported)
+                # DOC.md sits outside the subtree, so a run that reads three files read too much.
+                self.assertIn('2 of 2 file(s) read', err.getvalue())
+
     def test_a_relative_diff_setting_does_not_re_anchor_the_keys(self) -> None:
         """`diff.relative` anchors a diff's paths on the process's directory, not the repository.
 
