@@ -34,10 +34,21 @@ HERE = pathlib.Path(__file__).resolve().parent
 # A reader that predates a field needs to know the shape changed rather than infer it from a missing key.
 STAMP_VERSION = 1
 
-# The files whose bytes this kit actually places on a machine.
+# The marker-delimited blocks this kit maintains in CLAUDE.md, in the order they are written and hashed.
+# One list rather than the marker pair repeated at each reader.
+# A block added to one reader and not the others is installed and then never checked by what reports on it.
+CLAUDE_MD_BLOCKS = (
+    ("agent-safety", "claude-md-safety.md"),
+    ("fleet-bootstrap", "claude-md-fleet.md"),
+)
+BLOCK_MARKERS = tuple(marker for marker, _ in CLAUDE_MD_BLOCKS)
+
+# The files whose bytes this kit actually places on a machine, the hook first and then each block.
+# Derived rather than listed, so a block added above enters the digest without a second edit.
+# Written out, this list and the block list drifted apart silently and the digest stopped covering a file.
 # The digest is taken over these rather than over the commit, since it is the content that runs.
 # A clean commit and a dirty checkout install different bytes while reporting the same SHA.
-PAYLOAD_FILES = ("gh-write-guard.py", "claude-md-safety.md", "claude-md-fleet.md")
+PAYLOAD_FILES = ("gh-write-guard.py",) + tuple(filename for _, filename in CLAUDE_MD_BLOCKS)
 
 # Distinguishes an absent key from one holding an explicit null, which `dict.get` reports alike.
 # The two need different answers, since a gap is filled and a null is a settings error.
@@ -182,7 +193,7 @@ def blocks_present(claude_md):
         return {}
     text = claude_md.read_text(encoding="utf-8", errors="replace")
     found = {}
-    for marker in ("agent-safety", "fleet-bootstrap"):
+    for marker in BLOCK_MARKERS:
         # A start marker alone is a half-written block, which a presence check reads as installed.
         # Exactly one pair, since the installer writes one and a duplicate is a corrupted file.
         # Two blocks mean the second silently governs, and reporting the first as current hides that.
@@ -205,7 +216,7 @@ def marker_corruption(claude_md):
     text = claude_md.read_text(encoding="utf-8", errors="replace")
     valid = blocks_present(claude_md)
     out = []
-    for marker in ("agent-safety", "fleet-bootstrap"):
+    for marker in BLOCK_MARKERS:
         if re.search(rf"<!-- {marker} v\d+ (?:start|end) -->", text) and marker not in valid:
             out.append(f"the {marker} markers in CLAUDE.md are duplicated or incomplete")
     return out
@@ -228,7 +239,7 @@ def installed_digest(claude_home):
     h = hashlib.sha256()
     h.update(normalized(hook.read_bytes()))
     text = normalized(claude_md.read_text(encoding="utf-8", errors="replace"))
-    for marker in ("agent-safety", "fleet-bootstrap"):
+    for marker in BLOCK_MARKERS:
         found = re.search(rf"<!-- {marker} v\d+ start -->.*?<!-- {marker} v\d+ end -->", text, re.DOTALL)
         if not found:
             return None
@@ -548,7 +559,6 @@ def main():
     # The two blocks install and update independently, so one can change without rewriting the other.
     # The safety block states restrictions only.
     # The fleet block enables, so it stays separate from a block whose own text says nothing in it widens a permission.
-    blocks = [("agent-safety", "claude-md-safety.md"), ("fleet-bootstrap", "claude-md-fleet.md")]
     # Preserve CLAUDE.md's existing line endings: work in \n internally, write back with its own ending.
     if claude_md.exists():
         raw = claude_md.read_bytes()
@@ -556,7 +566,7 @@ def main():
         existing = normalized(raw.decode("utf-8"))
     else:
         newline, existing = "\n", ""
-    for marker, filename in blocks:
+    for marker, filename in CLAUDE_MD_BLOCKS:
         snippet = (HERE / filename).read_text(encoding="utf-8").strip()
         block_re = re.compile(rf"<!-- {marker} v\d+ start -->.*?<!-- {marker} v\d+ end -->", re.DOTALL)
         if block_re.search(existing):

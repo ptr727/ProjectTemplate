@@ -465,13 +465,34 @@ class TestStampContent(StampCase):
             target.write_bytes(original)
 
     def test_every_deployed_file_is_in_the_digest(self):
-        """The inverse: the kit copies gh-write-guard.py and both snippets, and each must be covered."""
+        """The inverse: the kit copies gh-write-guard.py and every snippet, and each must be covered.
+
+        The source scan alone was a false positive. It matched only literal `HERE / "..."` reads,
+        which is the hook and nothing else, while the snippet names came from a list inside `main`.
+        A new snippet passed it while being absent from the digest, so the two sources of truth are
+        both checked now, and the derivation below is what actually makes the gap impossible.
+        """
         source = INSTALL.read_text(encoding="utf-8")
-        for name in re.findall(r'HERE / "([^"]+\.(?:py|md))"', source):
-            if name == "install.py":
-                continue
+        named = {name for name in re.findall(r'HERE / "([^"]+\.(?:py|md))"', source)}
+        named |= {filename for _, filename in install.CLAUDE_MD_BLOCKS}
+        named.discard("install.py")
+        # The hook is the only literal read; every other entry arrives from the block list.
+        self.assertGreater(len(named), 1, "the scan matched only one file, so it is not covering the blocks")
+        for name in sorted(named):
             self.assertIn(name, install.PAYLOAD_FILES,
                           f"install.py reads {name} but PAYLOAD_FILES omits it, so the digest misses it")
+
+    def test_the_payload_list_is_derived_from_the_block_list(self):
+        """Written out by hand, the two drifted and the digest stopped covering a deployed file."""
+        self.assertEqual(install.PAYLOAD_FILES,
+                         ("gh-write-guard.py",) + tuple(f for _, f in install.CLAUDE_MD_BLOCKS))
+
+    def test_every_reader_uses_the_same_marker_list(self):
+        """Three readers each carried their own marker pair, so a new block could reach one only."""
+        source = INSTALL.read_text(encoding="utf-8")
+        self.assertNotIn('("agent-safety", "fleet-bootstrap")', source,
+                         "a reader is carrying its own marker pair instead of BLOCK_MARKERS")
+        self.assertEqual(install.BLOCK_MARKERS, tuple(m for m, _ in install.CLAUDE_MD_BLOCKS))
 
     def test_the_one_line_summary_names_the_host_and_the_commit(self):
         self.install()
