@@ -1122,12 +1122,14 @@ def main(argv: list[str] | None = None) -> int:
               file=sys.stderr)
         return 2
     # With one repository in play, the model is that repository's own.
-    # With none, anchor the way discovery does, so the rule set is decided over the tree that will actually be read.
+    # With none, a file anchors on its own parent rather than on `.`, which is where the caller stands.
+    # Anchoring a loose file on `.` reintroduces this defect in miniature, exempting a file the caller's repository does not contain.
+    # A bare filename still anchors on `.`, correctly, since that is the directory holding it.
     if git_roots:
         scan_root = Path(next(iter(git_roots)))
     else:
         first = Path(scan_paths[0])
-        scan_root = first if first.is_dir() else Path('.')
+        scan_root = first if first.is_dir() else first.parent
 
     # An operational repository's runbook carries the literal path an operator types.
     # That is the repository's own content, not an agent quoting an environment it observed.

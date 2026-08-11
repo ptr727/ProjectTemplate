@@ -1881,19 +1881,35 @@ class TestScanRootDecidesTheRuleSet(unittest.TestCase):
                 [str(self.release), str(loose), '--check', 'home-path']))
         self.assertNotIn('more than one repository', self.err.getvalue())
 
-    def test_a_path_under_no_repository_falls_back_to_itself_rather_than_the_caller(self) -> None:
+    def test_a_loose_file_anchors_on_its_own_parent_rather_than_on_the_caller(self) -> None:
         """The fallback must not reintroduce the dependency the fix removes.
 
-        `repo_root` returns '' for a path git cannot place, and resolving that to `.` would put the
-        caller's directory back in charge of the verdict.
+        A *file* argument is the case that matters. Anchoring it on `.` puts the caller's directory
+        back in charge, so scanning a loose file from inside an operational repository exempts it.
+        Passing a directory here would not exercise that branch at all, which is how the earlier
+        version of this test let the regression through.
         """
         loose = self.tmp / 'loose'
         loose.mkdir()
         bait = loose / 'notes.md'
         bait.write_text(f'Deploy into {NIX_HOME}/stack here.\n', encoding='utf-8')
+        # The caller stands somewhere operational; the scanned file's own directory does not.
         with mock.patch.object(prose_lint, 'repo_root', return_value=''), \
+                mock.patch.object(prose_lint, 'operational_checkout',
+                                  side_effect=lambda root: Path(root) == Path('.')), \
                 mock.patch.object(prose_lint, 'discover', return_value=[bait]):
-            # Not a repository, so it carries no operational payload and the rule stays on.
+            self.assertEqual(1, prose_lint.main([str(bait), '--check', 'home-path']))
+        self.assertNotIn('operational repository', self.err.getvalue())
+
+    def test_a_loose_directory_anchors_on_itself(self) -> None:
+        loose = self.tmp / 'loose'
+        loose.mkdir()
+        bait = loose / 'notes.md'
+        bait.write_text(f'Deploy into {NIX_HOME}/stack here.\n', encoding='utf-8')
+        with mock.patch.object(prose_lint, 'repo_root', return_value=''), \
+                mock.patch.object(prose_lint, 'operational_checkout',
+                                  side_effect=lambda root: Path(root) == Path('.')), \
+                mock.patch.object(prose_lint, 'discover', return_value=[bait]):
             self.assertEqual(1, prose_lint.main([str(loose), '--check', 'home-path']))
         self.assertNotIn('operational repository', self.err.getvalue())
 
