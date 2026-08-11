@@ -412,6 +412,29 @@ class TestStampContent(StampCase):
         finally:
             target.write_bytes(original)
 
+    def test_a_bare_cr_in_a_snippet_is_not_reported_as_drift(self):
+        """The installer reads snippets in text mode, so a bare CR arrives and installs as a newline.
+
+        A digest normalizing CRLF but not CR reported the machine STALE against its own content.
+        """
+        baseline = install.payload_digest()
+        target = HERE / "claude-md-safety.md"
+        original = target.read_bytes()
+        try:
+            # Built from the normalized form, since the snippets are CRLF in this repo.
+            # A blind newline replace would turn each CRLF into a doubled CR rather than a bare one.
+            target.write_bytes(install.normalized(original).replace(b"\n", b"\r"))
+            self.assertEqual(install.payload_digest(), baseline)
+        finally:
+            target.write_bytes(original)
+
+    def test_every_normalization_site_agrees(self):
+        """The two digests must normalize identically, or a machine drifts against nothing."""
+        for raw, want in ((b"a\r\nb", b"a\nb"), (b"a\rb", b"a\nb"), (b"a\nb", b"a\nb")):
+            self.assertEqual(install.normalized(raw), want)
+        for raw, want in (("a\r\nb", "a\nb"), ("a\rb", "a\nb"), ("a\nb", "a\nb")):
+            self.assertEqual(install.normalized(raw), want)
+
     def test_a_real_edit_to_a_snippet_is_still_reported(self):
         """The normalization must not swallow a change that does reach the installed block."""
         baseline = install.payload_digest()

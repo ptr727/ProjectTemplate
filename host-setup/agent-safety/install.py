@@ -136,6 +136,19 @@ def source_ref():
     return ref
 
 
+def normalized(data):
+    """Line endings reduced to newlines, covering CRLF and a bare CR.
+
+    One helper rather than a replace at each site. Both digests have to normalize identically or a
+    machine drifts on nothing, and a site that handled CRLF while missing CR did exactly that: the
+    installer reads a snippet in text mode, so a bare CR arrives as a newline and installs as one,
+    while a digest that left it alone reported the machine STALE against its own content.
+    """
+    if isinstance(data, bytes):
+        return data.replace(b"\r\n", b"\n").replace(b"\r", b"\n")
+    return data.replace("\r\n", "\n").replace("\r", "\n")
+
+
 def payload_digest():
     """One digest over the content this kit installs, normalized the way the installer writes it.
 
@@ -150,7 +163,7 @@ def payload_digest():
     """
     h = hashlib.sha256()
     for name in PAYLOAD_FILES:
-        raw = (HERE / name).read_bytes().replace(b"\r\n", b"\n")
+        raw = normalized((HERE / name).read_bytes())
         # A snippet is embedded stripped, so trailing whitespace is not installed content.
         # The hook is copied byte for byte, so nothing about it is stripped.
         if name.endswith(".md"):
@@ -213,8 +226,8 @@ def installed_digest(claude_home):
     if not hook.is_file() or not claude_md.is_file():
         return None
     h = hashlib.sha256()
-    h.update(hook.read_bytes().replace(b"\r\n", b"\n"))
-    text = claude_md.read_text(encoding="utf-8", errors="replace").replace("\r\n", "\n")
+    h.update(normalized(hook.read_bytes()))
+    text = normalized(claude_md.read_text(encoding="utf-8", errors="replace"))
     for marker in ("agent-safety", "fleet-bootstrap"):
         found = re.search(rf"<!-- {marker} v\d+ start -->.*?<!-- {marker} v\d+ end -->", text, re.DOTALL)
         if not found:
@@ -536,7 +549,7 @@ def main():
     if claude_md.exists():
         raw = claude_md.read_bytes()
         newline = "\r\n" if b"\r\n" in raw else "\n"
-        existing = raw.decode("utf-8").replace("\r\n", "\n").replace("\r", "\n")
+        existing = normalized(raw.decode("utf-8"))
     else:
         newline, existing = "\n", ""
     for marker, filename in blocks:
