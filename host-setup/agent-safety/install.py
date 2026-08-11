@@ -137,14 +137,25 @@ def source_ref():
 
 
 def payload_digest():
-    """One digest over the bytes this kit installs, in a fixed order.
+    """One digest over the content this kit installs, normalized the way the installer writes it.
+
+    Over raw bytes this reported drift a reinstall could not clear: the snippets are embedded with
+    `.strip()`, so a trailing newline moved the digest while the installed block stayed identical,
+    and the machine was told to re-run something that would write the same file. Line endings
+    normalize for the same reason.
 
     Fixed order because a set of files has none, and a digest that depends on directory listing
-    order reports drift on a machine where nothing changed.
+    order reports drift on a machine where nothing changed. The order matches the one
+    `installed_digest` reads, so the two are directly comparable: the hook, then each block.
     """
     h = hashlib.sha256()
     for name in PAYLOAD_FILES:
-        h.update((HERE / name).read_bytes())
+        raw = (HERE / name).read_bytes().replace(b"\r\n", b"\n")
+        # A snippet is embedded stripped, so trailing whitespace is not installed content.
+        # The hook is copied byte for byte, so nothing about it is stripped.
+        if name.endswith(".md"):
+            raw = raw.decode("utf-8").strip().encode("utf-8")
+        h.update(raw)
     return h.hexdigest()[:16]
 
 
@@ -194,13 +205,6 @@ def installed_digest(claude_home):
     return h.hexdigest()[:16]
 
 
-def expected_installed_digest():
-    """The same digest computed from this checkout, naming what a run here would leave behind."""
-    h = hashlib.sha256()
-    h.update((HERE / "gh-write-guard.py").read_bytes().replace(b"\r\n", b"\n"))
-    for filename in ("claude-md-safety.md", "claude-md-fleet.md"):
-        h.update((HERE / filename).read_text(encoding="utf-8").strip().replace("\r\n", "\n").encode("utf-8"))
-    return h.hexdigest()[:16]
 
 
 def build_stamp(claude_home, installed):
@@ -270,7 +274,7 @@ def report(claude_home):
     live_installed = installed_digest(claude_home)
     if live_installed is None:
         problems.append("the deployed hook or CLAUDE.md is missing, so the kit is not fully installed")
-    elif live_installed != expected_installed_digest():
+    elif live_installed != current:
         problems.append("the installed content differs from what this checkout would write")
     if live != stamp.get("blocks"):
         problems.append(f"CLAUDE.md now holds {live or 'no blocks'}, where the stamp recorded {stamp.get('blocks') or 'none'}")

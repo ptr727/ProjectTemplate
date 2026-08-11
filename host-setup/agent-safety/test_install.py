@@ -231,17 +231,48 @@ class TestStampContent(StampCase):
         self.assertIn(stamp["source"]["vcs"], ("git", "none"))
 
     def test_the_digest_covers_every_file_the_kit_installs(self):
-        """A file added to the kit but left out of the digest is drift the report cannot see."""
+        """A file added to the kit but left out of the digest is drift the report cannot see.
+
+        The sentinel is non-whitespace deliberately. A snippet is embedded stripped, so appending a
+        newline is not a change to installed content and this would assert the wrong thing.
+        """
         baseline = install.payload_digest()
         for name in install.PAYLOAD_FILES:
             target = HERE / name
             original = target.read_bytes()
             try:
-                target.write_bytes(original + b"\n")
+                target.write_bytes(original + b"\n# sentinel\n")
                 self.assertNotEqual(install.payload_digest(), baseline,
                                     f"{name} is in PAYLOAD_FILES but changing it did not move the digest")
             finally:
                 target.write_bytes(original)
+
+    def test_trailing_whitespace_on_a_snippet_is_not_reported_as_drift(self):
+        """The installer strips a snippet before embedding it, so this changes nothing installed.
+
+        Hashing raw bytes reported STALE here and sent the operator to re-run an installer that
+        would write the identical block.
+        """
+        baseline = install.payload_digest()
+        target = HERE / "claude-md-safety.md"
+        original = target.read_bytes()
+        try:
+            target.write_bytes(original + b"\n\n")
+            self.assertEqual(install.payload_digest(), baseline)
+        finally:
+            target.write_bytes(original)
+
+    def test_a_real_edit_to_a_snippet_is_still_reported(self):
+        """The normalization must not swallow a change that does reach the installed block."""
+        baseline = install.payload_digest()
+        target = HERE / "claude-md-safety.md"
+        original = target.read_bytes()
+        try:
+            target.write_bytes(original.replace(b"<!-- agent-safety v1 end -->",
+                                                b"Weakened by hand.\n<!-- agent-safety v1 end -->"))
+            self.assertNotEqual(install.payload_digest(), baseline)
+        finally:
+            target.write_bytes(original)
 
     def test_every_deployed_file_is_in_the_digest(self):
         """The inverse: the kit copies gh-write-guard.py and both snippets, and each must be covered."""
