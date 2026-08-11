@@ -60,7 +60,8 @@ jobs:
           done
           python3 spec/validate.py
 
-      # Each gate in scripts/ is proven by a case that reintroduces the fault it catches.
+      # Each gate here is proven by a case that reintroduces the fault it catches, wherever it lives.
+      # Three of these are host-setup/ rather than scripts/, since the agent-safety kit is gated the same way.
       # Standard library only, so no install step and no dependency to pin.
       # The audit engine self-test is offline, so it runs here rather than only on an owner sweep.
       # The write-guard self-test is offline too, and it otherwise runs only when a host installs the hook, which is where a regression in it would surface as a broken machine.
@@ -73,6 +74,7 @@ jobs:
           python3 scripts/test_pr_review.py
           python3 spec/audit.py --selftest
           python3 host-setup/agent-safety/gh-write-guard.py --selftest
+          python3 host-setup/agent-safety/test_install.py
 
       - name: Check repo gates step
         run: python3 scripts/repo_gate.py
