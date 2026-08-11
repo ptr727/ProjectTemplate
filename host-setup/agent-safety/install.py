@@ -116,7 +116,12 @@ def source_ref():
     to prevent. A checkout that is not a git tree at all (an extracted tarball) says so.
     """
     def git(*args):
-        r = subprocess.run(["git", "-C", str(HERE), *args], capture_output=True, text=True)
+        # A host with no git is the normal case for a tarball install, and it is not an error here.
+        # Letting FileNotFoundError escape would crash both the install and the read-only report.
+        try:
+            r = subprocess.run(["git", "-C", str(HERE), *args], capture_output=True, text=True)
+        except OSError:
+            return None
         return r.stdout.strip() if r.returncode == 0 else None
 
     sha = git("rev-parse", "HEAD")
@@ -155,11 +160,47 @@ def blocks_present(claude_md):
     found = {}
     for marker in ("agent-safety", "fleet-bootstrap"):
         # A start marker alone is a half-written block, which a presence check reads as installed.
+        # Exactly one pair, since the installer writes one and a duplicate is a corrupted file.
+        # Two blocks mean the second silently governs, and reporting the first as current hides that.
         starts = re.findall(rf"<!-- {marker} (v\d+) start -->", text)
         ends = re.findall(rf"<!-- {marker} (v\d+) end -->", text)
-        if starts and starts == ends:
+        if len(starts) == 1 and starts == ends:
             found[marker] = starts[0]
     return found
+
+
+def installed_digest(claude_home):
+    """A digest over the bytes actually on this machine, or None where the kit is not fully there.
+
+    Markers and versions answer whether a block is present, and nothing about its content, so a
+    block edited between its own markers reports current under a presence check. The hook is not
+    marker-delimited at all, so a modified or deleted one is invisible the same way.
+
+    Line endings are normalized first: CLAUDE.md keeps whatever endings it had, and a machine that
+    holds identical text with CRLF is current rather than drifted.
+    """
+    hook = claude_home / "hooks" / "gh-write-guard.py"
+    claude_md = claude_home / "CLAUDE.md"
+    if not hook.is_file() or not claude_md.is_file():
+        return None
+    h = hashlib.sha256()
+    h.update(hook.read_bytes().replace(b"\r\n", b"\n"))
+    text = claude_md.read_text(encoding="utf-8", errors="replace").replace("\r\n", "\n")
+    for marker in ("agent-safety", "fleet-bootstrap"):
+        found = re.search(rf"<!-- {marker} v\d+ start -->.*?<!-- {marker} v\d+ end -->", text, re.DOTALL)
+        if not found:
+            return None
+        h.update(found.group(0).encode("utf-8"))
+    return h.hexdigest()[:16]
+
+
+def expected_installed_digest():
+    """The same digest computed from this checkout, naming what a run here would leave behind."""
+    h = hashlib.sha256()
+    h.update((HERE / "gh-write-guard.py").read_bytes().replace(b"\r\n", b"\n"))
+    for filename in ("claude-md-safety.md", "claude-md-fleet.md"):
+        h.update((HERE / filename).read_text(encoding="utf-8").strip().replace("\r\n", "\n").encode("utf-8"))
+    return h.hexdigest()[:16]
 
 
 def build_stamp(claude_home, installed):
@@ -169,9 +210,15 @@ def build_stamp(claude_home, installed):
         "host": host_facts(),
         "source": source_ref(),
         "payloadDigest": payload_digest(),
+        "installedDigest": installed_digest(claude_home),
         "blocks": blocks_present(claude_home / "CLAUDE.md"),
         "installedUtc": installed,
     }
+
+
+# Checked before a stamp is read, so a hand-edited or older-format file gives a verdict rather than a traceback.
+# A partial write produces valid JSON with keys missing.
+STAMP_REQUIRED = ("host", "source", "payloadDigest", "blocks", "installedUtc")
 
 
 def stamp_line(stamp):
@@ -205,13 +252,26 @@ def report(claude_home):
     except (json.JSONDecodeError, OSError) as e:
         sys.stderr.write(f"Stamp at {path} is unreadable ({e}). Re-run the installer to rewrite it.\n")
         return 2
+    # Valid JSON is not a usable stamp: a hand edit or an older format parses and then breaks the read.
+    missing = [k for k in STAMP_REQUIRED if k not in stamp] if isinstance(stamp, dict) else ["everything"]
+    if missing:
+        sys.stderr.write(f"Stamp at {path} is missing {', '.join(missing)}. "
+                         "Re-run the installer to rewrite it.\n")
+        return 2
     print(f"This machine:  {stamp_line(stamp)}")
-    # The stamp says what was installed; the file says what is there now.
+    # The stamp says what was installed; the machine says what is there now.
     # A block edited or deleted by hand since the install makes both true and only the second current.
     live = blocks_present(claude_home / "CLAUDE.md")
     problems = []
     if stamp.get("payloadDigest") != current:
         problems.append("payload digest differs from this checkout")
+    # Markers answer presence and say nothing about content, so the installed bytes are compared too.
+    # This is what catches a block edited between its own markers, and a modified or deleted hook.
+    live_installed = installed_digest(claude_home)
+    if live_installed is None:
+        problems.append("the deployed hook or CLAUDE.md is missing, so the kit is not fully installed")
+    elif live_installed != expected_installed_digest():
+        problems.append("the installed content differs from what this checkout would write")
     if live != stamp.get("blocks"):
         problems.append(f"CLAUDE.md now holds {live or 'no blocks'}, where the stamp recorded {stamp.get('blocks') or 'none'}")
     if stamp.get("source", {}).get("dirty"):

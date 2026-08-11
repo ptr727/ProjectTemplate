@@ -122,6 +122,103 @@ class TestBlocksPresent(StampCase):
         self.assertEqual(install.blocks_present(self.home / "nothing.md"), {})
 
 
+class TestInstalledContent(StampCase):
+    """Presence is not currency. These are the cases markers and versions cannot see."""
+
+    def test_a_block_edited_between_its_own_markers_reports_stale(self):
+        """The marker and version are untouched, so a presence check calls this machine current."""
+        self.install()
+        text = self.md.read_text(encoding="utf-8")
+        edited = text.replace("<!-- agent-safety v1 start -->",
+                              "<!-- agent-safety v1 start -->\nSomeone weakened this rule by hand.")
+        self.assertNotEqual(edited, text)
+        self.md.write_text(edited, encoding="utf-8")
+        # Presence is unchanged: the markers and versions still read exactly as before.
+        self.assertEqual(install.blocks_present(self.md), {"agent-safety": "v1", "fleet-bootstrap": "v1"})
+        r = run(self.home, "--report")
+        self.assertEqual(r.returncode, 1, r.stdout + r.stderr)
+        self.assertIn("installed content differs", r.stdout)
+
+    def test_a_modified_hook_reports_stale(self):
+        """The hook is not marker-delimited, so nothing else on this machine would notice."""
+        self.install()
+        hook = self.home / "hooks" / "gh-write-guard.py"
+        hook.write_text(hook.read_text(encoding="utf-8") + "\n# neutered\n", encoding="utf-8")
+        r = run(self.home, "--report")
+        self.assertEqual(r.returncode, 1, r.stdout + r.stderr)
+        self.assertIn("installed content differs", r.stdout)
+
+    def test_a_deleted_hook_reports_stale_rather_than_crashing(self):
+        self.install()
+        (self.home / "hooks" / "gh-write-guard.py").unlink()
+        r = run(self.home, "--report")
+        self.assertEqual(r.returncode, 1, r.stdout + r.stderr)
+        self.assertIn("not fully installed", r.stdout)
+
+    def test_identical_content_with_crlf_is_current_rather_than_stale(self):
+        """CLAUDE.md keeps the endings it had, and a Windows host is not drifted for that alone."""
+        self.install()
+        raw = self.md.read_bytes()
+        self.md.write_bytes(raw.replace(b"\n", b"\r\n"))
+        r = run(self.home, "--report")
+        self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
+        self.assertIn("CURRENT", r.stdout)
+
+    def test_reinstalling_clears_an_edited_block(self):
+        self.install()
+        text = self.md.read_text(encoding="utf-8")
+        self.md.write_text(text.replace("<!-- agent-safety v1 start -->",
+                                        "<!-- agent-safety v1 start -->\nedited"), encoding="utf-8")
+        self.assertEqual(run(self.home, "--report").returncode, 1)
+        self.install()
+        self.assertEqual(run(self.home, "--report").returncode, 0)
+
+
+class TestDuplicateBlocks(StampCase):
+    def test_a_duplicated_block_is_not_reported_as_present(self):
+        """Two blocks mean the second silently governs, and naming the first hides that."""
+        self.install()
+        text = self.md.read_text(encoding="utf-8")
+        block = re.search(r"<!-- agent-safety v1 start -->.*?<!-- agent-safety v1 end -->",
+                          text, re.DOTALL).group(0)
+        self.md.write_text(text + "\n" + block + "\n", encoding="utf-8")
+        self.assertNotIn("agent-safety", install.blocks_present(self.md))
+
+    def test_a_duplicated_block_reports_stale_rather_than_current(self):
+        self.install()
+        text = self.md.read_text(encoding="utf-8")
+        block = re.search(r"<!-- agent-safety v1 start -->.*?<!-- agent-safety v1 end -->",
+                          text, re.DOTALL).group(0)
+        self.md.write_text(text + "\n" + block + "\n", encoding="utf-8")
+        r = run(self.home, "--report")
+        self.assertEqual(r.returncode, 1, r.stdout + r.stderr)
+
+
+class TestDegradedEnvironments(StampCase):
+    def test_a_host_without_git_stamps_rather_than_crashing(self):
+        """A tarball install on a minimal host has no git, which is normal rather than an error."""
+        env = dict(os.environ, CLAUDE_HOME=str(self.home), PATH="")
+        r = subprocess.run([sys.executable, str(INSTALL)], capture_output=True, text=True, env=env)
+        self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
+        stamp = json.loads(self.stamp.read_text(encoding="utf-8"))
+        self.assertEqual(stamp["source"]["vcs"], "none")
+
+    def test_a_stamp_missing_required_keys_gives_a_verdict_rather_than_a_traceback(self):
+        self.install()
+        self.stamp.write_text(json.dumps({"stampVersion": 1}) + "\n", encoding="utf-8")
+        r = run(self.home, "--report")
+        self.assertEqual(r.returncode, 2)
+        self.assertIn("missing", r.stderr)
+        self.assertNotIn("Traceback", r.stderr)
+
+    def test_a_stamp_holding_a_non_object_gives_a_verdict_rather_than_a_traceback(self):
+        self.install()
+        self.stamp.write_text("[]\n", encoding="utf-8")
+        r = run(self.home, "--report")
+        self.assertEqual(r.returncode, 2)
+        self.assertNotIn("Traceback", r.stderr)
+
+
 class TestStampContent(StampCase):
     def test_the_stamp_names_the_machine_the_source_and_what_was_installed(self):
         self.install()
