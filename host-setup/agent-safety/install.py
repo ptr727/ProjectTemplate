@@ -294,7 +294,9 @@ def registration_problems(claude_home):
         return ["settings.json is missing, so the hook is not registered"]
     try:
         data = json.loads(settings.read_text(encoding="utf-8") or "{}")
-    except (json.JSONDecodeError, OSError) as e:
+    # ValueError rather than JSONDecodeError, since it also covers UnicodeDecodeError.
+    # A partially written or non-UTF-8 file raises that before the JSON parser is ever reached.
+    except (ValueError, OSError) as e:
         return [f"settings.json cannot be read ({e})"]
     if not isinstance(data, dict):
         return ["settings.json does not hold an object at its root"]
@@ -353,7 +355,9 @@ def report(claude_home):
         return 2
     try:
         stamp = json.loads(path.read_text(encoding="utf-8"))
-    except (json.JSONDecodeError, OSError) as e:
+    # ValueError rather than JSONDecodeError, since it also covers UnicodeDecodeError.
+    # A partially written or non-UTF-8 file raises that before the JSON parser is ever reached.
+    except (ValueError, OSError) as e:
         sys.stderr.write(f"Stamp at {path} is unreadable ({e}). Re-run the installer to rewrite it.\n")
         return 2
     # Valid JSON is not a usable stamp: a hand edit or an older format parses and then breaks the read.

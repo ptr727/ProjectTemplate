@@ -211,6 +211,23 @@ class TestDegradedEnvironments(StampCase):
         self.assertIn("missing", r.stderr)
         self.assertNotIn("Traceback", r.stderr)
 
+    def test_a_stamp_holding_invalid_utf8_gives_a_verdict_rather_than_a_traceback(self):
+        """A partial write leaves bytes no decoder accepts, which raises before JSON is reached."""
+        self.install()
+        self.stamp.write_bytes(b'{"host": "\xff\xfe not utf-8"}')
+        r = run(self.home, "--report")
+        self.assertEqual(r.returncode, 2, r.stdout + r.stderr)
+        self.assertIn("unreadable", r.stderr)
+        self.assertNotIn("Traceback", r.stderr)
+
+    def test_settings_holding_invalid_utf8_reports_stale_rather_than_a_traceback(self):
+        """The registration read has the same shape and needed the same widening."""
+        self.install()
+        (self.home / "settings.json").write_bytes(b'{"hooks": "\xff\xfe"}')
+        r = run(self.home, "--report")
+        self.assertEqual(r.returncode, 1, r.stdout + r.stderr)
+        self.assertNotIn("Traceback", r.stderr)
+
     def test_a_stamp_holding_a_non_object_gives_a_verdict_rather_than_a_traceback(self):
         self.install()
         self.stamp.write_text("[]\n", encoding="utf-8")
