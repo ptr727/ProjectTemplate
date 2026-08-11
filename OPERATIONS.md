@@ -36,7 +36,9 @@ Scope a run to what changed, which matches the correct-as-next-edited rule:
 python3 scripts/prose_lint.py . --diff origin/develop
 ```
 
-Whole-tree discovery reads only files git tracks, so `python3 scripts/prose_lint.py .` and `--diff` do not see a new file until it is staged, and a clean whole-tree run proves nothing about an unstaged one. An explicit path is always read, tracked or not, so name a new file directly to check it before staging.
+Discovery reads what git tracks plus what it is not ignoring, so a new file is read before it is staged and a `--diff` run counts every line of one as added. Reading the tracked list alone meant a new file was invisible to both modes until it was staged, which reported clean on exactly the file a change existed to add. An ignored path stays out, since a build output is not authored text, and an explicit path is always read whatever git says about it. That holds where git can describe the tree. Where it cannot, the run warns on stderr and falls back to a filesystem walk that skips the generated roots by name and applies no ignore rules.
+
+Every run states its scope on stderr, as the files read and, for a diff-scoped run, the changed lines inside them. A gate that read nothing otherwise prints what a gate with nothing to report prints, and each false clean found so far exited 0 in silence.
 
 ## Runbooks
 

@@ -91,11 +91,66 @@ def rel(path: Path) -> str:
     return path.as_posix().removeprefix('./')
 
 
-def changed_lines(base: str) -> dict[str, set[int]] | None:
-    """Map path -> set of line numbers added/changed vs `base`. None if git fails."""
+def repo_key(path: Path, root: Path) -> str:
+    """The repository-relative posix key that joins a scanned file to a diff entry.
+
+    A diff names every file relative to the repository top level, while a path argument arrives
+    absolute, relative to a subdirectory, or dotted. The two are compared here and nowhere else,
+    since comparing them in whatever form each happened to arrive in is what let an absolute path
+    argument match no diff entry at all and report a clean run over a tree it had read in full.
+
+    A path outside `root` has no repository-relative form and keeps its own, so nothing in a diff
+    can match it. That is the honest answer rather than a coincidental one.
+    """
     try:
-        d = subprocess.run(['git', 'diff', '--unified=0', '--no-color', base, '--'],
-                           capture_output=True, text=True, check=True).stdout
+        return path.resolve().relative_to(root.resolve()).as_posix()
+    except (ValueError, OSError):
+        return rel(path)
+
+
+def all_lines(path: Path) -> set[int]:
+    """Every line number in `path`, which is the changed scope of a file that is entirely new."""
+    try:
+        return set(range(1, len(path.read_bytes().splitlines()) + 1))
+    except OSError:
+        return set()
+
+
+def untracked_paths(root: Path) -> list[str]:
+    """Paths relative to `root` that git holds no history for and is not ignoring.
+
+    They are repository-relative only where `root` is the repository top level, which is how
+    `changed_lines` calls it, since a diff key is repository-relative. `discover` passes the
+    directory it was asked about and joins the names onto it, so both readings hold at once.
+
+    An untracked file is the whole of what a change adds and `git diff` never names one, so a
+    scope built from the diff alone reads a new file as absent rather than as new. `git ls-files`
+    omits it too, so this is not a diff-mode quirk: a whole-tree sweep passed over it as well.
+    Ignored paths stay out, since a build output is not authored text.
+    """
+    try:
+        r = subprocess.run(['git', '-C', str(root), 'ls-files', '-z', '--others',
+                            '--exclude-standard'], capture_output=True, text=True)
+    except (OSError, ValueError):
+        return []
+    if r.returncode != 0:
+        return []
+    return [name for name in r.stdout.split('\0') if name]
+
+
+def changed_lines(base: str, root: Path) -> dict[str, set[int]] | None:
+    """Map repository-relative path -> line numbers this working tree adds vs `base`.
+
+    None if git fails. The diff is taken at `root`, the repository being scanned, rather than
+    wherever the process happens to stand. Keys anchored on the working directory match nothing
+    once the two differ, and a `diff.relative` setting would re-anchor them the same way.
+
+    An untracked file counts as added in full, since a change whose whole point is adding a file
+    otherwise scopes to nothing and reports a clean run on exactly the file it added.
+    """
+    try:
+        d = subprocess.run(['git', '-C', str(root), 'diff', '--unified=0', '--no-color', base,
+                            '--'], capture_output=True, text=True, check=True).stdout
     except (subprocess.CalledProcessError, FileNotFoundError):
         return None
     out: dict[str, set[int]] = {}
@@ -110,6 +165,10 @@ def changed_lines(base: str) -> dict[str, set[int]] | None:
                 start = int(m.group(1))
                 count = int(m.group(2) or 1)
                 out[cur].update(range(start, start + count))
+    for name in untracked_paths(root):
+        target = root / name
+        if is_text(target):
+            out[name] = all_lines(target)
     return out
 
 
@@ -132,18 +191,18 @@ def asked_about(key: str, paths: list[str]) -> bool:
 
 
 def unread_diff_files(scope: dict[str, set[int]], paths: list[str],
-                      excludes: tuple[str, ...]) -> list[str]:
+                      excludes: tuple[str, ...], root: Path) -> list[str]:
     """Files the diff names that this run was asked about and could have read, in sorted order.
 
-    Keys are resolved against the repository top level rather than the working directory, because
-    `git diff` reports repository-relative paths while discovery keys off the directory the run
-    started in. Reading them against the working directory would make this list empty from a
-    subdirectory, which is the one place it most needs to be full.
+    Both sides are read against `root`, the repository being scanned, because `git diff` reports
+    repository-relative paths while a request arrives in whatever form the caller typed. Reading
+    either against the working directory empties this list from a subdirectory and empties it for
+    an absolute path argument, which are the two places it most needs to be full.
     """
-    root = Path(repo_root(Path('.')) or '.')
+    asked = [repo_key(Path(p), root) for p in paths]
     out: list[str] = []
     for key in sorted(scope):
-        if not asked_about(key, paths):
+        if not asked_about(key, asked):
             continue
         if any(x in key for x in excludes):
             continue
@@ -153,6 +212,24 @@ def unread_diff_files(scope: dict[str, set[int]], paths: list[str],
         if target.is_file() and is_text(target):
             out.append(key)
     return out
+
+
+def scope_note(read: int, discovered: int, lines: int | None, base: str | None) -> str:
+    """What the run actually read, stated on every verdict rather than only on a busy one.
+
+    Five routes to a false clean are on record and every one of them exits 0 in silence: an
+    unresolvable base widening to a whole-tree scan, a diff taken in one repository while scanning
+    another, a path under no repository, an absolute path argument whose keys matched no diff
+    entry, and an untracked file no diff names. Each guard so far closes the route a reviewer
+    happened to see, and the sixth is found that way or not at all. What every one of them shares
+    is that a scope of nothing prints exactly what a clean tree prints, which is a property of the
+    output and not of any single route. Stating the scope is what a reader needs to tell "read
+    nothing" from "found nothing", so it is printed even when the count is the whole tree.
+    """
+    if base is None:
+        return f'scope: {read} file(s) read, whole tree'
+    return (f'scope: {read} of {discovered} file(s) read, {lines} changed line(s), '
+            f'diff against {base!r}')
 
 
 def home_path_findings(lineno: int, line: str) -> list[tuple[int, str, str]]:
@@ -182,21 +259,6 @@ def operational_checkout(root: Path) -> bool:
     """
     return ((root / 'repo-config' / 'operational' / 'develop.json').is_file()
             and not (root / 'repo-config' / 'develop.json').is_file())
-
-
-def repo_prefix(root: Path) -> str:
-    """Where `root` sits inside its repository, as a posix prefix, or '' when git cannot say.
-
-    The generated-tree decision has to be made against the repository-relative path. Reading the
-    filesystem path instead lets a directory *above* the checkout decide it, so a repository
-    cloned under a parent named `reports` had its own `reports/` tree scanned as authored.
-    """
-    try:
-        r = subprocess.run(['git', '-C', str(root), 'rev-parse', '--show-prefix'],
-                           capture_output=True, text=True)
-    except (OSError, ValueError):
-        return ''
-    return r.stdout.strip() if r.returncode == 0 else ''
 
 
 def quoted(paths) -> str:
@@ -254,48 +316,61 @@ def is_text(path: Path) -> bool:
         return False
 
 
-def discover(paths: list[str], excludes: tuple[str, ...] = ()) -> list[Path]:
-    """Every authored text file the rules govern, scoped by what git tracks.
+def discover(paths: list[str], excludes: tuple[str, ...] = (),
+             root: Path | None = None) -> list[Path]:
+    """Every authored text file the rules govern, scoped by git where git can answer.
+
+    Where it cannot, the fallback walk applies no ignore rules at all and asserts the generated
+    roots by name instead, so the scoping there is weaker than the paragraph below describes. It
+    warns on stderr, since a quieter file set that reads the same is how a sweep stops covering
+    what it claims to.
 
     The line-endings rule already requires a repo-wide sweep be scoped to `git ls-files` rather
     than a directory list, which covers what its author thought of and silently stops covering
     whatever is added next. An extension allowlist has that same defect, so the filter here is
-    whether the file is text, not whether its suffix was thought of.
+    whether the file is text, not whether its suffix was thought of. An untracked file is authored
+    text the same way, and reading only the tracked list passed over a new file until it was
+    staged, so a clean sweep proved nothing about the one file a change existed to add.
+
+    `root` is the repository every path is judged against, passed in so that the caller's verdict
+    and this file set are keyed alike. Judging against the filesystem path instead lets a
+    directory *above* the checkout decide: a repository cloned under a parent named `reports` had
+    its own `reports/` tree scanned as authored, and an absolute argument carried its whole parent
+    chain into every `--exclude` test.
 
     An explicit file argument bypasses discovery, so a single file can always be checked directly.
     """
-    found: list[Path] = []
+    found: list[tuple[Path, str]] = []
     for raw in paths:
         p = Path(raw)
+        base = p if p.is_dir() else (p.parent if p.is_file() else Path('.'))
+        anchor = root if root is not None else Path(repo_root(base) or base)
         if p.is_file():
-            found.append(p)
+            found.append((p, repo_key(p, anchor)))
             continue
-        root = p if p.is_dir() else Path('.')
-        tracked = tracked_paths(root)
-        if tracked is None:
-            print(f'warning: git cannot describe {root}, falling back to a filesystem walk',
+        candidates = tracked_paths(base)
+        # `tracked_paths` answers None for a tree git cannot describe and for an empty answer.
+        # Only the first of those justifies a walk.
+        # Whether git can describe a tree is settled by asking git, never by its answer's size.
+        # Read as emptiness, a subtree of new files fell back and scanned the ignored ones under it.
+        # It also printed that git could not describe a tree git describes fine.
+        if candidates is None and not repo_root(base):
+            print(f'warning: git cannot describe {base}, falling back to a filesystem walk',
                   file=sys.stderr)
-            tracked = walk_paths(root)
-        # Judge against the repository-relative path, never the filesystem one.
-        # A directory above the checkout must not decide whether a file is generated.
-        # An absolute argument otherwise carried its whole parent chain into the test.
-        prefix = repo_prefix(root)
-        for q in tracked:
-            try:
-                inside = Path(prefix) / q.relative_to(root)
-            except ValueError:
-                # Unreachable while both come from the same root, and kept safe rather than tidy.
-                # With no repository-relative path there is nothing to judge, so scan the file.
-                # Skipping on doubt is how a gate reports clean over what it never read.
-                found.append(q)
-                continue
-            if GENERATED_TREES.isdisjoint(inside.parts):
-                found.append(q)
-            elif not GENERATED_TREES.isdisjoint(Path(prefix).parts):
-                # The root named is itself inside a generated tree, so it was asked for.
-                found.append(q)
-    keep = [p for p in found
-            if not any(x in rel(p) for x in excludes) and p.is_file() and is_text(p)]
+            # A walk reports what is on disk, so it carries the untracked files already.
+            # It applies no ignore rules, which is why it is reserved for having no other answer.
+            candidates = walk_paths(base)
+        else:
+            candidates = (candidates or []) + [base / name for name in untracked_paths(base)]
+        # The path named is itself inside a generated tree, so that tree was asked for.
+        asked_inside_generated = not GENERATED_TREES.isdisjoint(Path(repo_key(base,
+                                                                             anchor)).parts)
+        for q in candidates:
+            key = repo_key(q, anchor)
+            if GENERATED_TREES.isdisjoint(Path(key).parts) or asked_inside_generated:
+                found.append((q, key))
+    keep = [q for q, key in found
+            if not any(x in key for x in excludes) and q.is_file() and is_text(q)]
     return sorted(set(keep))
 
 
@@ -1151,36 +1226,25 @@ def main(argv: list[str] | None = None) -> int:
         print('note: home-path is not checked in an operational repository, where an absolute '
               'path is the operator instruction rather than observed data.', file=sys.stderr)
 
-    # Checked before discovery, which reads every tracked file to classify it as text.
-    # A run this rejects would otherwise pay that cost and throw the result away.
-    # `--list-files` is exempt, since it reports the scan scope and never consults the diff.
-    if a.diff and not a.list_files:
-        # `git diff` runs in the current directory while the paths may name another checkout.
-        # Scanning one repository and diffing another intersects to nothing.
-        # The run then reports clean, which is the false clean this gate exists to prevent.
-        # It cost a real verification once, where a branch read zero from the wrong directory.
-        # A path under no repository at all fails the same way, and more quietly.
-        # Discovery walks the filesystem, then every absolute key misses the repo-relative ones.
-        # Requiring the same root covers both, where testing for a different one did not.
-        here = repo_root(Path('.'))
-        for raw in (a.paths or ['.']):
-            there = repo_root(Path(raw))
-            if here and there != here:
-                where = there or 'no git repository'
-                print(f'error: --diff resolves against {here}, but {raw} is in {where}. '
-                      'Run the gate from the repository being scanned, since a diff taken '
-                      'elsewhere scopes every finding away and reports a false clean.',
-                      file=sys.stderr)
-                return 2
-
-    files = discover(a.paths or ['.'], tuple(a.exclude))
+    # Every input to a verdict is read from the repository scanned rather than from the process.
+    # That covers the rule set above, the file set, the diff, and the keys joining the last two.
+    # An earlier guard refused a scan of one repository while the process stood in another.
+    # The diff was taken where the process stood, which intersected the scan to nothing.
+    # Anchoring the diff on the scan root is what that guard was approximating.
+    # It answers the case correctly rather than refusing it.
+    # A path under no repository now fails at the diff itself, which is the honest error.
+    files = discover(a.paths or ['.'], tuple(a.exclude), scan_root)
+    # Computed once, by the helper and the root discovery used.
+    # A key derived twice is a key that can disagree with itself.
+    keys = {f: repo_key(f, scan_root) for f in files}
 
     if a.list_files:
         for f in files:
-            print(rel(f))
+            print(keys[f])
         return 0
 
-    scope = changed_lines(a.diff) if a.diff else None
+    discovered = len(files)
+    scope = changed_lines(a.diff, scan_root) if a.diff else None
     if a.diff and scope is None:
         # Widening to the whole tree answers a different question, and answers it silently.
         # A caller scoping to a change gets the backlog reported as though the change made it.
@@ -1192,7 +1256,7 @@ def main(argv: list[str] | None = None) -> int:
               'checkout carries its history.', file=sys.stderr)
         return 2
     if scope is not None:
-        matched = [f for f in files if rel(f) in scope]
+        matched = [f for f in files if keys[f] in scope]
         # The floor every verdict below rests on, asserted rather than guarded.
         # Each route to a false clean so far was closed after a reviewer saw it.
         # The next is closed that way or not at all, which is what a floor covers.
@@ -1202,7 +1266,7 @@ def main(argv: list[str] | None = None) -> int:
         # An image or a lock file is that case.
         # So the comparison is against the diff's own list of files this run could have read.
         if scope and not matched:
-            unread = unread_diff_files(scope, a.paths or ['.'], tuple(a.exclude))
+            unread = unread_diff_files(scope, a.paths or ['.'], tuple(a.exclude), scan_root)
             if unread:
                 shown = ', '.join(unread[:5]) + (' and more' if len(unread) > 5 else '')
                 print(f'error: the diff against {a.diff!r} names {len(unread)} readable file(s) '
@@ -1218,16 +1282,18 @@ def main(argv: list[str] | None = None) -> int:
     bykind: dict[str, int] = {}
     byfile: dict[str, int] = {}
     for f in files:
-        allowed = scope.get(rel(f)) if scope is not None else None
+        allowed = scope.get(keys[f]) if scope is not None else None
         for ln, kind, msg in check_file(f, rules):
             if allowed is not None and ln not in allowed:
                 continue
             total += 1
             bykind[kind] = bykind.get(kind, 0) + 1
-            byfile[rel(f)] = byfile.get(rel(f), 0) + 1
+            byfile[keys[f]] = byfile.get(keys[f], 0) + 1
             if not a.summary:
-                print(f'{rel(f)}:{ln}: {kind}: {msg}')
+                print(f'{keys[f]}:{ln}: {kind}: {msg}')
 
+    inscope = sum(len(scope[keys[f]]) for f in files) if scope is not None else None
+    print(scope_note(len(files), discovered, inscope, a.diff), file=sys.stderr)
     if a.summary or total:
         print(f'\n{total} violation(s) across {len(byfile)} file(s)', file=sys.stderr)
         for k, v in sorted(bykind.items(), key=lambda kv: -kv[1]):
