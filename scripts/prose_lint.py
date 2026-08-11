@@ -1110,6 +1110,14 @@ def main(argv: list[str] | None = None) -> int:
     # Only a repository declares a model, so two of them refuse and anything else resolves to one anchor.
     # TestScanRootDecidesTheRuleSet carries the cases and the reason each one exists.
     scan_paths = a.paths or ['.']
+    # A path that does not exist is refused rather than absorbed.
+    # `discover` reads a non-file, non-directory argument as `.`, so a typo scanned the caller's directory while the rule set anchored on the missing path's parent.
+    absent = [p for p in scan_paths if not Path(p).exists()]
+    if absent:
+        print(f"error: requested path(s) do not exist: {', '.join(sorted(absent))}. Refusing "
+              'rather than falling back to the current directory, which would scan one tree and '
+              'choose the rule set from another.', file=sys.stderr)
+        return 2
     git_roots = {found for found in (repo_root(Path(p)) for p in scan_paths) if found}
     if len(git_roots) > 1:
         print('error: the requested paths span more than one repository (' +

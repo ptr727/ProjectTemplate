@@ -1528,20 +1528,26 @@ class TestCli(unittest.TestCase):
         repository-relative ones, so the scope drops every file and the run exits 0. Testing for
         a *different* root missed this, because there is no root to differ from.
         """
+        # A real directory, since a path that does not exist is refused earlier for another reason.
+        # That would pass this assertion without ever exercising the diff guard.
+        loose = self.tmp / 'loose'
+        loose.mkdir()
         with mock.patch.object(prose_lint, 'repo_root',
                                side_effect=lambda p: '/hub' if str(p) == '.' else ''), \
                 contextlib.redirect_stderr(io.StringIO()) as err:
-            self.assertEqual(2, prose_lint.main(['--diff', 'HEAD', '/tmp/loose']))
+            self.assertEqual(2, prose_lint.main(['--diff', 'HEAD', str(loose)]))
         self.assertIn('no git repository', err.getvalue())
 
     def test_list_files_still_reports_scope_across_repositories(self) -> None:
         """It reports the scan scope and never consults the diff, so the guard must not stop it."""
         clean = self.tmp / 'clean.md'
         clean.write_text('fine\n', encoding='utf-8')
+        other = self.tmp / 'other'
+        other.mkdir()
         with mock.patch.object(prose_lint, 'repo_root',
                                side_effect=lambda p: '/hub' if str(p) == '.' else '/other'), \
                 mock.patch.object(prose_lint, 'discover', return_value=[clean]):
-            self.assertEqual(0, prose_lint.main(['--list-files', '--diff', 'HEAD', '/other/tree']))
+            self.assertEqual(0, prose_lint.main(['--list-files', '--diff', 'HEAD', str(other)]))
 
     def test_a_matching_repository_is_not_refused(self) -> None:
         """The guard must not reject the ordinary case it sits in front of."""
@@ -1850,6 +1856,26 @@ class TestScanRootDecidesTheRuleSet(unittest.TestCase):
             self.assertEqual(2, prose_lint.main(
                 [str(self.release), str(self.operational), '--check', 'home-path']))
         self.assertIn('more than one repository', self.err.getvalue())
+
+    def test_a_path_that_does_not_exist_is_refused_rather_than_absorbed(self) -> None:
+        """`discover` reads a non-file, non-directory argument as `.`.
+
+        A typo therefore scanned the caller's directory while the rule set anchored on the missing
+        path's parent, so the run described one tree and judged it by another.
+        """
+        with mock.patch.object(prose_lint, 'repo_root', return_value=''):
+            self.assertEqual(2, prose_lint.main(
+                [str(self.tmp / 'no-such-dir'), '--check', 'home-path']))
+        self.assertIn('do not exist', self.err.getvalue())
+
+    def test_an_existing_path_is_not_refused_by_that_check(self) -> None:
+        """The guard must not reject the ordinary case it sits in front of."""
+        good = self.tmp / 'good.md'
+        good.write_text('Nothing here breaks a rule.\n', encoding='utf-8')
+        with mock.patch.object(prose_lint, 'repo_root', return_value=''), \
+                mock.patch.object(prose_lint, 'discover', return_value=[good]):
+            self.assertEqual(0, prose_lint.main([str(good), '--check', 'home-path']))
+        self.assertNotIn('do not exist', self.err.getvalue())
 
     def test_several_paths_under_no_repository_are_not_a_conflict(self) -> None:
         """Only a repository declares a model, so two loose paths are not ambiguous.
