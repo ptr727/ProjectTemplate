@@ -2088,8 +2088,8 @@ class TestTheScanScopeIsTheScopeReported(unittest.TestCase):
     Every false clean on record lives in the join between two coordinate systems: a diff names
     files relative to the repository top level, and a path argument arrives in whatever form the
     caller typed. Mocking `repo_root` or `discover` supplies that join already made, so the cases
-    below build repositories and let git answer. Two defects were reported clean by a suite of 209
-    passing tests, and both are here.
+    below build repositories and let git answer. Both defects were reported clean by the 210-case
+    suite at `e2a99f1`, which was green in full, and both are here.
 
     The invariant: the rule set, the file set, the diff, and the keys that join the last two are
     all read from the repository being scanned, and none of them from the directory the process
