@@ -409,16 +409,19 @@ The Docker invocations below are the same ones the VS Code tasks use, for ad-hoc
       Set-PSRepository PSGallery -InstallationPolicy Trusted
       Install-Module PSScriptAnalyzer -RequiredVersion 1.23.0 -Force -Scope AllUsers
       Import-Module PSScriptAnalyzer
-      $files = $env:PS_SCRIPTS -split "`n" | Where-Object { $_ }
+      $files = $env:PS_SCRIPTS -split "\s+" | Where-Object { $_ }
+      if (-not $files) { Write-Host "no PowerShell scripts are tracked"; exit 0 }
       $found = @()
       foreach ($file in $files) { $found += Invoke-ScriptAnalyzer -Path $file -Settings ./PSScriptAnalyzerSettings.psd1 }
       Write-Host "Checked $($files.Count) file(s)"
-      if ($found) { $found | Format-Table -AutoSize | Out-String -Width 200 | Write-Host; exit 1 }
+      if ($found) { $found | Format-Table RuleName,Severity,ScriptName,Line,Message -AutoSize | Out-String -Width 200 | Write-Host; exit 1 }
       Write-Host "no findings"
     '
   ```
 
   The module version is pinned beside the image, because the image alone does not fix it and a floating install makes a local run a different check from CI. 1.23.0 rather than the newest, since 1.24.0 needs a newer `System.Management.Automation` than the image carries and fails to import after installing cleanly. The file list comes from `git ls-files` for the same reason the shellcheck step uses it, and the count is printed because a run that read no files reports the same clean as one that read them all.
+
+  **The list splits on whitespace rather than on a newline, and the regex is double-quoted.** A shell joins the file list with newlines and PowerShell joins it with spaces, so a newline-only split hands the analyzer one path holding every file, which it reports as one file it cannot find followed by a clean run over nothing. The double quotes are what let the whole invocation stay inside the single-quoted `-Command` a shell passes, since PowerShell escapes with a backtick and leaves the backslash alone. Run verbatim it reports `Checked 5 file(s)` from either shell.
 
   In a configured editor the davidanson extension is enough. Use the Docker CLI when there's no IDE (agent/headless) or to confirm a clean run before pushing.
 

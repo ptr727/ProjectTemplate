@@ -86,8 +86,14 @@ def declared_windows_tools() -> set[str]:
         failures.append('install-tools.ps1 declares no $TOOLS registry, so coverage cannot be checked')
         return set()
 
+    # A missing close marker is a failure rather than a scan to end of file.
+    # Reading on past the registry collects every later `Name = '...'` in the script, so a broken registry answers with a larger tool set than it declares and the coverage check below passes on it.
     closed = PS_TOOLS_CLOSE.search(text, opened.end())
-    body = text[opened.end():closed.start() if closed else len(text)]
+    if not closed:
+        failures.append('install-tools.ps1 opens a $TOOLS registry this cannot find the end of, so coverage cannot be checked')
+        return set()
+
+    body = text[opened.end():closed.start()]
     names = set(PS_TOOL_NAME.findall(body))
     if not names:
         failures.append('install-tools.ps1 declares a $TOOLS registry with no Name fields this can read')
