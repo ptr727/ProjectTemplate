@@ -194,7 +194,14 @@ function Resolve-InstalledVersion {
     if ($Version.Count -eq 1) { return $Version[0] }
     $majors = @($Version | ForEach-Object { ($_ -split '\.')[0] } | Sort-Object -Unique)
     if ($majors.Count -ne 1) { return $null }
-    return (@($Version | Sort-Object { Get-VersionKey $_ }) | Select-Object -Last 1)
+
+    # Compared component by component rather than sorted, because Sort-Object orders a version as text and 10.0.9 then outranks 10.0.10.
+    # Three side by side dotnet builds hid this, since 110, 204 and 302 are all three digits and sort the same either way.
+    $newest = $Version[0]
+    foreach ($candidate in $Version) {
+        if ((Compare-HostVersion $candidate $newest) -gt 0) { $newest = $candidate }
+    }
+    return $newest
 }
 
 # What the source carries now, read without installing anything.
