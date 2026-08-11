@@ -218,6 +218,28 @@ class TestDegradedEnvironments(StampCase):
         self.assertEqual(r.returncode, 2)
         self.assertNotIn("Traceback", r.stderr)
 
+    def test_every_required_key_holding_the_wrong_type_gives_a_verdict(self):
+        """Presence is not shape. Each of these carries every key and crashes a key-only check."""
+        self.install()
+        good = json.loads(self.stamp.read_text(encoding="utf-8"))
+        for key, bad in (("host", "server"), ("source", "git"), ("payloadDigest", 12),
+                         ("blocks", ["agent-safety"]), ("installedUtc", None)):
+            with self.subTest(key=key):
+                broken = dict(good, **{key: bad})
+                self.stamp.write_text(json.dumps(broken) + "\n", encoding="utf-8")
+                r = run(self.home, "--report")
+                self.assertEqual(r.returncode, 2, r.stdout + r.stderr)
+                self.assertIn(key, r.stderr)
+                self.assertNotIn("Traceback", r.stderr)
+
+    def test_the_formatter_stays_printable_on_a_stamp_the_validator_would_reject(self):
+        """Belt and braces: a formatter that raises turns a verdict into the crash it reports on."""
+        for broken in ({}, {"host": None, "source": None},
+                       {"host": {}, "source": {}, "blocks": None},
+                       {"host": {"hostname": "h"}, "source": {"commit": 12345}}):
+            with self.subTest(stamp=broken):
+                self.assertIsInstance(install.stamp_line(broken), str)
+
 
 class TestStampContent(StampCase):
     def test_the_stamp_names_the_machine_the_source_and_what_was_installed(self):

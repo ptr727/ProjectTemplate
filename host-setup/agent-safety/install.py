@@ -221,20 +221,47 @@ def build_stamp(claude_home, installed):
 
 
 # Checked before a stamp is read, so a hand-edited or older-format file gives a verdict rather than a traceback.
-# A partial write produces valid JSON with keys missing.
-STAMP_REQUIRED = ("host", "source", "payloadDigest", "blocks", "installedUtc")
+# Shape rather than presence: a partial write leaves keys missing, and a hand edit leaves a key holding the wrong type.
+# A key check alone passes `"source": "git"` and then raises inside the line that formats it, which is the crash it was added to prevent.
+STAMP_SHAPE = {
+    "host": dict,
+    "source": dict,
+    "payloadDigest": str,
+    "blocks": dict,
+    "installedUtc": str,
+}
+
+
+def stamp_problems(stamp):
+    """What makes this stamp unusable, in reading order, or an empty list where it is fine."""
+    if not isinstance(stamp, dict):
+        return [f"its root is {type(stamp).__name__} where an object is required"]
+    out = []
+    for key, want in STAMP_SHAPE.items():
+        if key not in stamp:
+            out.append(f"{key} is missing")
+        elif not isinstance(stamp[key], want):
+            out.append(f"{key} is {type(stamp[key]).__name__} where {want.__name__} is required")
+    return out
 
 
 def stamp_line(stamp):
-    """One line naming the machine and what it carries, short enough to paste into a checklist."""
-    host = stamp["host"]
-    src = stamp["source"]
-    where = host.get("distro") or f"{host['system']} {host['release']}"
+    """One line naming the machine and what it carries, short enough to paste into a checklist.
+
+    Every read is total. The caller validates the shape first, and this stays printable anyway,
+    since a formatter that raises turns a verdict about a broken stamp into a traceback.
+    """
+    host = stamp.get("host") or {}
+    src = stamp.get("source") or {}
+    where = host.get("distro") or f"{host.get('system', 'unknown')} {host.get('release', '')}".strip()
     if host.get("wsl"):
         where += " (WSL)"
-    commit = src.get("commit", "unknown")[:7] + ("-dirty" if src.get("dirty") else "")
-    blocks = ", ".join(f"{k} {v}" for k, v in sorted(stamp["blocks"].items())) or "none"
-    return f"{host['hostname']} | {where} | hub {commit} | payload {stamp['payloadDigest']} | {blocks} | {stamp['installedUtc']}"
+    commit = str(src.get("commit", "unknown"))[:7] + ("-dirty" if src.get("dirty") else "")
+    held = stamp.get("blocks")
+    blocks = ", ".join(f"{k} {v}" for k, v in sorted(held.items())) if isinstance(held, dict) and held else "none"
+    return (f"{host.get('hostname', 'unknown')} | {where} | hub {commit} | "
+            f"payload {stamp.get('payloadDigest', 'unknown')} | {blocks} | "
+            f"{stamp.get('installedUtc', 'unknown')}")
 
 
 def report(claude_home):
@@ -257,9 +284,9 @@ def report(claude_home):
         sys.stderr.write(f"Stamp at {path} is unreadable ({e}). Re-run the installer to rewrite it.\n")
         return 2
     # Valid JSON is not a usable stamp: a hand edit or an older format parses and then breaks the read.
-    missing = [k for k in STAMP_REQUIRED if k not in stamp] if isinstance(stamp, dict) else ["everything"]
-    if missing:
-        sys.stderr.write(f"Stamp at {path} is missing {', '.join(missing)}. "
+    problems = stamp_problems(stamp)
+    if problems:
+        sys.stderr.write(f"Stamp at {path} is unusable: {'; '.join(problems)}. "
                          "Re-run the installer to rewrite it.\n")
         return 2
     print(f"This machine:  {stamp_line(stamp)}")
