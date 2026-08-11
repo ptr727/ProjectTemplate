@@ -351,11 +351,14 @@ function Get-ToolState {
     $state = @{
         Installed = $null
         Rows      = @()
+        # Whether the installed state was read at all, kept apart from what it said.
+        # Folding a failed read into an empty list would report a tool whose state is unknown as one that is not installed, and an install would then run against a host nobody measured.
+        Readable  = ($null -ne $rows)
         Available = (Get-WingetAvailable -Id $Tool.Package)
         Scope     = @()
         Status    = 'unknown'
     }
-    if ($null -ne $rows) {
+    if ($state.Readable) {
         $state.Rows = $rows
         $state.Installed = Resolve-InstalledVersion -Version $rows
         if ($rows.Count -gt 0) { $state.Scope = Get-WingetScope -Id $Tool.Package }
@@ -368,6 +371,7 @@ function Get-ToolState {
 # The three Windows meanings sit beside the five the Linux peer carries, and each names a different reason a version comparison would mislead.
 function Get-ToolStatus {
     param([Parameter(Mandatory)][hashtable]$Tool, [Parameter(Mandatory)][hashtable]$State)
+    if (-not $State.Readable) { return 'unreadable' }
     if ($State.Rows.Count -eq 0) {
         # A tool answering on PATH that winget knows no package for is one winget cannot manage at all.
         if (Get-Command $Tool.Probe -ErrorAction SilentlyContinue) { return 'unmanaged' }
@@ -403,6 +407,9 @@ function Add-ToolNote {
     }
     if ($State.Status -eq 'unmanaged') {
         note $Tool.Name 'answers on PATH and winget knows no package for it, so winget cannot upgrade it and -Reinstall does not apply'
+    }
+    if ($State.Status -eq 'unreadable') {
+        note $Tool.Name 'winget did not answer what is installed, so this row reports nothing rather than reporting it as absent'
     }
     if ($State.Status -eq 'self-updating') {
         note $Tool.Name 'updates itself, so the version winget reports is the one it was installed at rather than the one it runs'
@@ -459,6 +466,14 @@ function Invoke-ToolApply {
 
     if ($state.Status -eq 'unmanaged') {
         log "${ToolName}: answers on PATH and winget knows no package for it, leaving it alone"
+        return
+    }
+
+    # Collected rather than fatal, on the same rule as a failed install, and never installed past.
+    # Installing against a state nobody could read is how a second copy lands beside a first one that was there all along.
+    if ($state.Status -eq 'unreadable') {
+        warn "$ToolName skipped, winget did not answer what is installed and this will not install against an unknown state"
+        $script:FAILED += $ToolName
         return
     }
 

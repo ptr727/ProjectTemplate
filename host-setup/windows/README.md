@@ -43,6 +43,8 @@ Nothing here elevates itself. A run that is already elevated says so and carries
 
 **`-Reinstall` is the only action that removes anything**, and it always asks first. An `-Upgrade` whose `-Scope` disagrees with the installed copy refuses and names it, rather than upgrading in place or adding a second copy.
 
+**A state that could not be read is never reported as an absence.** Where `winget` does not answer what is installed, the tool reports `unreadable` rather than `missing`, and an install or upgrade skips it and collects it as a failure. Installing against a state nobody measured is how a second copy lands beside a first one that was there all along.
+
 **What provenance can and cannot be detected.** Scope is solid, and so is a tool that answers on `PATH` while `winget` knows no package for it, which reports as `unmanaged`. Whether a package was installed *by* winget is not solid and is not claimed: winget runs the vendor's own installer for an `exe` or an `msi`, so the resulting uninstall entry is identical whether winget invoked it or a person did. The one positive marker is the uninstall key winget writes for itself on a portable or archive package, which the report names where it is present and says nothing about where it is absent.
 
 ## Self-Updating Packages
