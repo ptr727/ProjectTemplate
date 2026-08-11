@@ -224,6 +224,7 @@ def build_stamp(claude_home, installed):
 # Shape rather than presence: a partial write leaves keys missing, and a hand edit leaves a key holding the wrong type.
 # A key check alone passes `"source": "git"` and then raises inside the line that formats it, which is the crash it was added to prevent.
 STAMP_SHAPE = {
+    "stampVersion": int,
     "host": dict,
     "source": dict,
     "payloadDigest": str,
@@ -242,6 +243,47 @@ def stamp_problems(stamp):
             out.append(f"{key} is missing")
         elif not isinstance(stamp[key], want):
             out.append(f"{key} is {type(stamp[key]).__name__} where {want.__name__} is required")
+    # The version carries the format rather than the content, so a mismatch either way is unreadable.
+    # A newer stamp holds fields this code does not know, and an older one lacks fields it reads.
+    # Carrying the field and never checking it is the version telling nobody anything.
+    if stamp.get("stampVersion") not in (None, STAMP_VERSION) and isinstance(stamp.get("stampVersion"), int):
+        out.append(f"stampVersion is {stamp['stampVersion']} where this installer writes {STAMP_VERSION}")
+    return out
+
+
+def registration_problems(claude_home):
+    """Whether settings.json still wires the kit in, which decides if any of it actually runs.
+
+    The hook's bytes being correct says nothing about whether Claude Code invokes it. An entry
+    removed from settings.json leaves a machine carrying a complete, current, and entirely inert
+    kit, which every other check here reports as fine.
+    """
+    settings = claude_home / "settings.json"
+    if not settings.is_file():
+        return ["settings.json is missing, so the hook is not registered"]
+    try:
+        data = json.loads(settings.read_text(encoding="utf-8") or "{}")
+    except (json.JSONDecodeError, OSError) as e:
+        return [f"settings.json cannot be read ({e})"]
+    if not isinstance(data, dict):
+        return ["settings.json does not hold an object at its root"]
+    out = []
+    groups = data.get("hooks", {}).get("PreToolUse") if isinstance(data.get("hooks"), dict) else None
+    registered = 0
+    for group in groups or []:
+        if not isinstance(group, dict):
+            continue
+        for hook in group.get("hooks") or []:
+            if isinstance(hook, dict) and "gh-write-guard" in str(hook.get("command", "")):
+                registered += 1
+    if registered == 0:
+        out.append("the PreToolUse hook is not registered in settings.json, so the guard never runs")
+    elif registered > 1:
+        out.append(f"the PreToolUse hook is registered {registered} times, so it runs more than once")
+    allow = data.get("permissions", {}).get("allow") if isinstance(data.get("permissions"), dict) else None
+    for _, rule in MANAGED_PERMISSIONS:
+        if not isinstance(allow, list) or rule not in allow:
+            out.append(f"the permission rule {rule} is absent from settings.json")
     return out
 
 
@@ -303,6 +345,8 @@ def report(claude_home):
         problems.append("the deployed hook or CLAUDE.md is missing, so the kit is not fully installed")
     elif live_installed != current:
         problems.append("the installed content differs from what this checkout would write")
+    # Correct bytes on disk are not a running guard, so the wiring is checked as well.
+    problems.extend(registration_problems(claude_home))
     if live != stamp.get("blocks"):
         problems.append(f"CLAUDE.md now holds {live or 'no blocks'}, where the stamp recorded {stamp.get('blocks') or 'none'}")
     if stamp.get("source", {}).get("dirty"):

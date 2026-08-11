@@ -241,6 +241,82 @@ class TestDegradedEnvironments(StampCase):
                 self.assertIsInstance(install.stamp_line(broken), str)
 
 
+class TestRegistration(StampCase):
+    """Correct bytes on disk are not a running guard. These are the inert-kit cases."""
+
+    def _settings(self):
+        return json.loads((self.home / "settings.json").read_text(encoding="utf-8"))
+
+    def _write(self, data):
+        (self.home / "settings.json").write_text(json.dumps(data, indent=2) + "\n", encoding="utf-8")
+
+    def test_an_unregistered_hook_reports_stale_rather_than_current(self):
+        """Every byte is correct and the guard never runs, which every other check calls fine."""
+        self.install()
+        data = self._settings()
+        data["hooks"]["PreToolUse"] = []
+        self._write(data)
+        r = run(self.home, "--report")
+        self.assertEqual(r.returncode, 1, r.stdout + r.stderr)
+        self.assertIn("never runs", r.stdout)
+
+    def test_a_removed_permission_rule_reports_stale(self):
+        self.install()
+        data = self._settings()
+        data["permissions"]["allow"] = []
+        self._write(data)
+        r = run(self.home, "--report")
+        self.assertEqual(r.returncode, 1, r.stdout + r.stderr)
+        self.assertIn("permission rule", r.stdout)
+
+    def test_a_duplicated_hook_registration_reports_stale(self):
+        self.install()
+        data = self._settings()
+        group = data["hooks"]["PreToolUse"][0]
+        group["hooks"].append(dict(group["hooks"][0]))
+        self._write(data)
+        r = run(self.home, "--report")
+        self.assertEqual(r.returncode, 1, r.stdout + r.stderr)
+        self.assertIn("more than once", r.stdout)
+
+    def test_a_deleted_settings_file_reports_stale_rather_than_crashing(self):
+        self.install()
+        (self.home / "settings.json").unlink()
+        r = run(self.home, "--report")
+        self.assertEqual(r.returncode, 1, r.stdout + r.stderr)
+        self.assertNotIn("Traceback", r.stderr)
+
+    def test_reinstalling_clears_an_unregistered_hook(self):
+        self.install()
+        data = self._settings()
+        data["hooks"]["PreToolUse"] = []
+        self._write(data)
+        self.assertEqual(run(self.home, "--report").returncode, 1)
+        self.install()
+        self.assertEqual(run(self.home, "--report").returncode, 0)
+
+
+class TestStampVersion(StampCase):
+    def test_a_stamp_from_a_different_format_version_is_rejected(self):
+        """The field exists so a shape change is detectable, which needs it to be read."""
+        self.install()
+        stamp = json.loads(self.stamp.read_text(encoding="utf-8"))
+        stamp["stampVersion"] = install.STAMP_VERSION + 1
+        self.stamp.write_text(json.dumps(stamp) + "\n", encoding="utf-8")
+        r = run(self.home, "--report")
+        self.assertEqual(r.returncode, 2, r.stdout + r.stderr)
+        self.assertIn("stampVersion", r.stderr)
+
+    def test_a_stamp_version_of_the_wrong_type_is_rejected(self):
+        self.install()
+        stamp = json.loads(self.stamp.read_text(encoding="utf-8"))
+        stamp["stampVersion"] = "1"
+        self.stamp.write_text(json.dumps(stamp) + "\n", encoding="utf-8")
+        r = run(self.home, "--report")
+        self.assertEqual(r.returncode, 2, r.stdout + r.stderr)
+        self.assertIn("stampVersion", r.stderr)
+
+
 class TestStampContent(StampCase):
     def test_the_stamp_names_the_machine_the_source_and_what_was_installed(self):
         self.install()
