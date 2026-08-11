@@ -1119,14 +1119,15 @@ def main(argv: list[str] | None = None) -> int:
     # Only a repository declares a model, so two of them refuse and anything else resolves to one anchor.
     # TestScanRootDecidesTheRuleSet carries the cases and the reason each one exists.
     scan_paths = a.paths or ['.']
-    # A path that does not exist is refused rather than absorbed.
-    # `discover` reads a non-file, non-directory argument as `.`, so a typo scanned the caller's directory while the rule set anchored on the missing path's parent.
-    absent = [p for p in scan_paths if not Path(p).exists()]
-    if absent:
+    # Anything that is not a file or a directory is refused rather than absorbed.
+    # `discover` reads such an argument as `.`, so it scanned the caller's directory while the rule set anchored on the argument's parent.
+    # Tested for what it is rather than for whether it exists, since a FIFO, a socket, and a device all exist and are none of the two.
+    unusable = [p for p in scan_paths if not (Path(p).is_file() or Path(p).is_dir())]
+    if unusable:
         # Quoted, since a path holding a space or a comma is unreadable in a bare comma-joined list.
-        print(f"error: requested path(s) do not exist: {quoted(absent)}. Refusing rather than "
-              'falling back to the current directory, which would scan one tree and choose the '
-              'rule set from another.', file=sys.stderr)
+        print(f"error: requested path(s) are not a file or a directory: {quoted(unusable)}. "
+              'Refusing rather than falling back to the current directory, which would scan one '
+              'tree and choose the rule set from another.', file=sys.stderr)
         return 2
     git_roots = {found for found in (repo_root(Path(p)) for p in scan_paths) if found}
     if len(git_roots) > 1:

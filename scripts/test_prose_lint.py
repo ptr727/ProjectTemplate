@@ -12,6 +12,7 @@ from __future__ import annotations
 import contextlib
 import io
 import json
+import os
 import re
 import subprocess
 import sys
@@ -1866,7 +1867,20 @@ class TestScanRootDecidesTheRuleSet(unittest.TestCase):
         with mock.patch.object(prose_lint, 'repo_root', return_value=''):
             self.assertEqual(2, prose_lint.main(
                 [str(self.tmp / 'no-such-dir'), '--check', 'home-path']))
-        self.assertIn('do not exist', self.err.getvalue())
+        self.assertIn('not a file or a directory', self.err.getvalue())
+
+    @unittest.skipUnless(hasattr(os, 'mkfifo'), 'mkfifo is POSIX only')
+    def test_a_path_that_exists_but_is_neither_a_file_nor_a_directory_is_refused(self) -> None:
+        """A FIFO, a socket, and a device all exist, and `discover` reads each of them as `.`.
+
+        Testing for existence therefore left the hole open on everything that is not a typo.
+        """
+        fifo = self.tmp / 'a-fifo'
+        os.mkfifo(fifo)
+        self.assertTrue(fifo.exists())
+        with mock.patch.object(prose_lint, 'repo_root', return_value=''):
+            self.assertEqual(2, prose_lint.main([str(fifo), '--check', 'home-path']))
+        self.assertIn('not a file or a directory', self.err.getvalue())
 
     def test_a_path_holding_a_space_or_comma_is_quoted_in_the_refusal(self) -> None:
         """Joined bare, one path with a comma in it reads as two paths and the message misleads."""
