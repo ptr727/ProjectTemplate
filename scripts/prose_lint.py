@@ -117,7 +117,11 @@ def all_lines(path: Path) -> set[int]:
 
 
 def untracked_paths(root: Path) -> list[str]:
-    """Repository-relative paths git holds no history for and is not ignoring.
+    """Paths relative to `root` that git holds no history for and is not ignoring.
+
+    They are repository-relative only where `root` is the repository top level, which is how
+    `changed_lines` calls it, since a diff key is repository-relative. `discover` passes the
+    directory it was asked about and joins the names onto it, so both readings hold at once.
 
     An untracked file is the whole of what a change adds and `git diff` never names one, so a
     scope built from the diff alone reads a new file as absent rather than as new. `git ls-files`
@@ -314,7 +318,12 @@ def is_text(path: Path) -> bool:
 
 def discover(paths: list[str], excludes: tuple[str, ...] = (),
              root: Path | None = None) -> list[Path]:
-    """Every authored text file the rules govern, scoped by what git holds and is not ignoring.
+    """Every authored text file the rules govern, scoped by git where git can answer.
+
+    Where it cannot, the fallback walk applies no ignore rules at all and asserts the generated
+    roots by name instead, so the scoping there is weaker than the paragraph below describes. It
+    warns on stderr, since a quieter file set that reads the same is how a sweep stops covering
+    what it claims to.
 
     The line-endings rule already requires a repo-wide sweep be scoped to `git ls-files` rather
     than a directory list, which covers what its author thought of and silently stops covering
