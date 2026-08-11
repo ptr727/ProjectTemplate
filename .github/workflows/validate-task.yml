@@ -44,6 +44,14 @@ jobs:
       - name: Check EditorConfig step
         run: docker run --rm --pull=always -v "$PWD":/check --workdir /check mstruebing/editorconfig-checker:latest
 
+      # The file list comes from git rather than a glob, so a script added later is gated without editing this step.
+      # A finding that is correct for the shell and wrong for the program it quotes carries an inline disable naming the reason, as repo-config/configure.sh does for its jq filter.
+      - name: Check shell scripts step
+        run: |
+          set -Eeuo pipefail
+          mapfile -t scripts < <(git ls-files '*.sh')
+          docker run --rm --pull=always -v "$PWD":/mnt --workdir /mnt koalaman/shellcheck:stable "${scripts[@]}"
+
       - name: Validate registry and spec step
         run: |
           set -Eeuo pipefail
@@ -59,6 +67,7 @@ jobs:
       - name: Run script self-tests step
         run: |
           set -Eeuo pipefail
+          python3 scripts/test_host_gate.py
           python3 scripts/test_prose_lint.py
           python3 scripts/test_repo_gate.py
           python3 scripts/test_pr_review.py
