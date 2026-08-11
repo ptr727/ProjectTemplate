@@ -278,10 +278,18 @@ github_auth_key_registered() {
 }
 
 github_signing_key_registered() {
-    local body payload keys
+    local body payload matches keys rc=0
     body=$(key_body) || return 2
     payload=$(fetch "https://api.github.com/users/$GITHUB_USER/ssh_signing_keys") || return 2
-    keys=$(grep -oE '"key": *"[^"]*"' <<< "$payload" | sed 's/"key": *"//; s/"$//') || return 2
+
+    # An account with no signing key returns an empty list, so grep matches nothing and exits 1.
+    # Under pipefail that became the pipeline's status and mapped to "could not be read", which reported a definite no as a network problem and skipped the registration prompt.
+    # An account with no signing key is exactly the account this function exists to prompt.
+    # Grep's 1 is therefore an empty list and only a higher status is a failure to read.
+    matches=$(grep -oE '"key": *"[^"]*"' <<< "$payload") || rc=$?
+    ((rc <= 1)) || return 2
+    keys=$(sed 's/"key": *"//; s/"$//' <<< "$matches")
+
     grep -qxF "$body" <<< "$keys"
 }
 
