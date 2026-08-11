@@ -349,13 +349,19 @@ def discover(paths: list[str], excludes: tuple[str, ...] = (),
             found.append((p, repo_key(p, anchor)))
             continue
         candidates = tracked_paths(base)
-        if candidates is None:
+        # `tracked_paths` answers None for a tree git cannot describe and for an empty answer.
+        # Only the first of those justifies a walk.
+        # Whether git can describe a tree is settled by asking git, never by its answer's size.
+        # Read as emptiness, a subtree of new files fell back and scanned the ignored ones under it.
+        # It also printed that git could not describe a tree git describes fine.
+        if candidates is None and not repo_root(base):
             print(f'warning: git cannot describe {base}, falling back to a filesystem walk',
                   file=sys.stderr)
             # A walk reports what is on disk, so it carries the untracked files already.
+            # It applies no ignore rules, which is why it is reserved for having no other answer.
             candidates = walk_paths(base)
         else:
-            candidates = candidates + [base / name for name in untracked_paths(base)]
+            candidates = (candidates or []) + [base / name for name in untracked_paths(base)]
         # The path named is itself inside a generated tree, so that tree was asked for.
         asked_inside_generated = not GENERATED_TREES.isdisjoint(Path(repo_key(base,
                                                                              anchor)).parts)

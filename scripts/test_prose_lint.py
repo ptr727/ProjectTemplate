@@ -2242,6 +2242,30 @@ class TestTheScanScopeIsTheScopeReported(unittest.TestCase):
                 # DOC.md sits outside the subtree, so a run that reads three files read too much.
                 self.assertIn('2 of 2 file(s) read', err.getvalue())
 
+    def test_a_subtree_holding_no_tracked_file_is_still_described_by_git(self) -> None:
+        """The walk is for a tree git cannot describe, not for one whose answer is empty.
+
+        `tracked_paths` returns None for both, deliberately, because an initialized but empty
+        checkout answering with an empty list would scan nothing and read as a pass. Reading that
+        None as "git cannot describe this" sent a subtree holding only new files down the walk,
+        which applies no ignore rules, so a build output under it was scanned and reported. The
+        run also printed that git could not describe a tree git describes perfectly well.
+
+        Whether git can describe a tree is settled by asking git, never by the size of its answer.
+        """
+        root = self.repo()
+        (root / '.gitignore').write_text('newdir/ignored.md\n', encoding='utf-8')
+        self.git(root, 'add', '.gitignore')
+        self.git(root, 'commit', '-qm', 'ignore')
+        (root / 'newdir').mkdir()
+        (root / 'newdir' / 'authored.md').write_text(self.BAIT, encoding='utf-8')
+        (root / 'newdir' / 'ignored.md').write_text(self.BAIT, encoding='utf-8')
+        with contextlib.redirect_stdout(io.StringIO()) as out:
+            self.assertEqual(1, self.run_in(root, 'newdir'))
+        reported = sorted(line.split(':')[0] for line in out.getvalue().splitlines() if line.strip())
+        self.assertEqual(['newdir/authored.md'], reported)
+        self.assertNotIn('git cannot describe', self.err.getvalue())
+
     def test_a_relative_diff_setting_does_not_re_anchor_the_keys(self) -> None:
         """`diff.relative` anchors a diff's paths on the process's directory, not the repository.
 
