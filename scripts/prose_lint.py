@@ -1106,13 +1106,9 @@ def main(argv: list[str] | None = None) -> int:
 
     rules = set(a.checks or DEFAULT_RULES)
 
-    # The rule set is decided by the repository being scanned, never by the directory the caller stands in.
-    # Reading it from `.` discarded home-path on a release repository whenever the caller happened to stand in an operational one.
-    # That silenced the rule that exists because real paths reached a public comment, announcing it on stderr and exiting 0.
-    # A run spanning two repositories refuses instead of picking one, since the two can declare different models and one rule set cannot be right for both.
-    # Only a repository declares a workflow model, so only distinct repositories are ambiguous.
-    # Two loose paths under no repository are not a conflict.
-    # Refusing on them would break the ordinary multi-file invocation outside a checkout, where every argument resolves somewhere different.
+    # The invariant: the rule set is decided by what is scanned, and no path here reads the working directory to decide it.
+    # Only a repository declares a model, so two of them refuse and anything else resolves to one anchor.
+    # TestScanRootDecidesTheRuleSet carries the cases and the reason each one exists.
     scan_paths = a.paths or ['.']
     git_roots = {found for found in (repo_root(Path(p)) for p in scan_paths) if found}
     if len(git_roots) > 1:
@@ -1121,10 +1117,7 @@ def main(argv: list[str] | None = None) -> int:
               'single rule set is correct for all of them. Run the gate once per repository.',
               file=sys.stderr)
         return 2
-    # With one repository in play, the model is that repository's own.
-    # With none, a file anchors on its own parent rather than on `.`, which is where the caller stands.
-    # Anchoring a loose file on `.` reintroduces this defect in miniature, exempting a file the caller's repository does not contain.
-    # A bare filename still anchors on `.`, correctly, since that is the directory holding it.
+    # A file anchors on its own parent rather than on `.`, which is where the caller stands.
     if git_roots:
         scan_root = Path(next(iter(git_roots)))
     else:
