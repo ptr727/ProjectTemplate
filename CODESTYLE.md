@@ -488,6 +488,16 @@ Before pushing or opening a PR:
 - The CI gate is `uv run ruff check`, `uv run ruff format --check`, the repo's type checker (`uv run pyright` or `uv run mypy src`), and `uv run pytest`, the same commands as the local loop above, run from the Python project directory. (Invoke them as separate steps, not `&&`-chained, so the runner shell is irrelevant.)
 - Markdown in this directory follows the repo-wide [Markdown and Spelling][markdown-and-spelling] rules.
 
+## Shell
+
+Bash, and only where a program cannot be Python: a bootstrap that installs the interpreter cannot be written in it, and a host tool that must run before a development toolchain exists cannot depend on one. Everything else is Python, with a test beside it.
+
+- **`set -Eeuo pipefail`, first line after the shebang.** Without `-e` a failed command in the middle of a sequence lets the rest run against a state nobody checked, and without `pipefail` a pipeline reports the exit of its last stage, so a fetch that failed reads as an answer when a parser downstream succeeds on an empty input. `-E` carries an `ERR` trap into functions and command substitutions, so a script that later adds one is not surprised by where it does not fire.
+- **A reader that stops early needs its producer read first.** Under `pipefail`, a producer writing to a closed pipe exits non-zero, so `curl ... | grep -q` reports a successful fetch as a failure whenever the match is found early enough. Capture the output, then search it.
+- **Self-locating, never dependent on the caller's directory.** A script resolves its own directory from `BASH_SOURCE` and references its payloads through it, since the working directory at invocation is not a property of the script.
+- **`shellcheck` clean, and a deliberate exception carries its reason inline.** A `# shellcheck disable=SCxxxx` names why the rule does not apply here, so the next reader can tell a considered exception from an unread warning. [`repo-config/configure.sh`](./repo-config/configure.sh) is the worked example, carrying five `SC2016` disables where a single-quoted `jq` program must stay unexpanded, each with its reason on the same line.
+- **Comments say why, never what.** The code states what it does. A comment restating it goes stale silently, where a comment carrying a reason fails visibly when the reason stops being true.
+
 <!-- Repo -->
 
 [analyzer-diagnostics-and-suppressions]: #analyzer-diagnostics-and-suppressions

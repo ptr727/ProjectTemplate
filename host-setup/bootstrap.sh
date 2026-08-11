@@ -1,0 +1,275 @@
+#!/usr/bin/env bash
+
+# Stands a host up from nothing, by fetching this repository and handing control to the host tooling inside it.
+# It is the one file fetched on its own, because a host with no git and no checkout is what it exists to fix.
+# It reads no payload, no table, and no sibling module: it obtains a tree and runs one entry point inside that tree.
+#
+# A tarball rather than a clone, because a clone needs git on a host that may not have it, and because a tarball of a resolved commit cannot be stale.
+# The commit it resolved is printed before anything runs, so a run says which revision of the fleet's tooling it used.
+
+set -Eeuo pipefail
+
+readonly REPO="ptr727/ProjectTemplate"
+readonly DEFAULT_REF="main"
+
+MODE=""
+REF="$DEFAULT_REF"
+DIR="${XDG_CACHE_HOME:-$HOME/.cache}/host-setup"
+KEEP=false
+DRY_RUN=false
+ASSUME_YES=false
+RESOLVED=""
+TREE=""
+
+# --- Output ---
+
+log() { printf '%s\n' "$*"; }
+info() { printf '  %s\n' "$*"; }
+step() { printf '\n==> %s\n' "$*"; }
+warn() { printf 'WARNING: %s\n' "$*" >&2; }
+die() {
+    printf 'ERROR: %s\n' "$*" >&2
+    exit 1
+}
+
+usage() {
+    cat <<'EOF'
+Usage: bootstrap.sh [action] [options]
+
+Stands a host up: upgrades its packages, installs the host tools, and configures git and GitHub.
+Fetches this repository and runs the tooling from that tree, so the tools and the rules that
+describe them come from one revision rather than from whatever a host happens to hold.
+
+Actions, the last one given wins, default --report on a terminal is the menu:
+  -r, --report      Report what each tool would do, change nothing
+      --host        Upgrade packages, install the tools, configure git and GitHub
+      --dev         As --host, and add the tools a development machine needs
+      --upgrade     Upgrade the packages of the current release only
+      --tools       Install the host tools only
+      --github      Configure git, the SSH key, and commit signing only
+      --release     Upgrade to the next distribution release, on its own
+  -h, --help        Show this help
+
+Options:
+  -y, --yes         Do not prompt, and pass the same to each tool
+  -n, --dry-run     Print what each step would run, change nothing
+      --ref REF     Branch, tag, pull request ref, or commit to run from, default main
+      --dir PATH    Where the tree is extracted, default ${XDG_CACHE_HOME:-~/.cache}/host-setup
+      --keep        Leave the extracted tree in place, which is removed by default
+
+With no action on a terminal, the menu asks. With no action and no terminal, the report runs, since
+a pipe is not a place to answer a question.
+
+Examples:
+  bootstrap.sh                          Ask what to do
+  bootstrap.sh --report                 Report only
+  bootstrap.sh --host --yes             Stand a host up unattended
+  bootstrap.sh --ref develop --report   Report using the tooling on develop
+  bootstrap.sh --tools --dry-run        Show what installing the tools would run
+EOF
+}
+
+# --- Fetch ---
+
+fetch() {
+    command -v curl > /dev/null || return 1
+    curl -fsSL --retry 2 --connect-timeout 15 "$@"
+}
+
+# Resolve the ref to the commit it names, so the run reports a revision rather than a moving name.
+# The plain-text accept header returns the commit alone, which keeps this free of a JSON parser on a host that has none.
+resolve_ref() {
+    local sha
+    sha=$(fetch -H 'Accept: application/vnd.github.sha' "https://api.github.com/repos/$REPO/commits/$REF" 2> /dev/null) || sha=""
+
+    if [[ -n $sha ]]; then
+        RESOLVED="$sha"
+        return 0
+    fi
+
+    # An unauthenticated request is rate limited per address, so a busy network can lose the lookup while the download itself is fine.
+    # The run continues and says it cannot name its own revision, which is worth a warning rather than a refusal.
+    warn "Could not resolve $REF to a commit, so this run cannot be attributed to one"
+    RESOLVED=""
+    return 0
+}
+
+download_tree() {
+    local archive="$DIR/tree.tar.gz" want="${RESOLVED:-$REF}"
+
+    step "Fetching $REPO at $REF"
+    [[ -n $RESOLVED ]] && info "Commit: $RESOLVED"
+
+    mkdir -p "$DIR"
+    fetch -o "$archive" "https://codeload.github.com/$REPO/tar.gz/$want" ||
+        die "Could not download $REPO at $REF. Check the ref exists and that this host reaches codeload.github.com."
+
+    # The archive holds one top-level directory named for the repository and the revision.
+    # Extracting into a directory of our own keeps a second run from reading the first one's tree.
+    rm -rf "$DIR/tree"
+    mkdir -p "$DIR/tree"
+    tar -xzf "$archive" -C "$DIR/tree" --strip-components=1 ||
+        die "Could not extract the downloaded archive"
+    rm -f "$archive"
+
+    TREE="$DIR/tree"
+    info "Extracted to $TREE"
+}
+
+cleanup() {
+    [[ $KEEP == true ]] && return 0
+    [[ -n $TREE && -d $TREE ]] || return 0
+    rm -rf "$TREE"
+}
+
+# --- Handoff ---
+
+# Every tool runs from inside the fetched tree, and this is the only place a path inside it is named.
+run_tool() {
+    local tool="$1"
+    shift
+
+    local path="$TREE/host-setup/linux/$tool"
+    [[ -x $path ]] || die "The fetched tree carries no $tool at host-setup/linux, so this ref is not one to bootstrap from"
+
+    local -a flags=()
+    [[ $ASSUME_YES == true ]] && flags+=(--yes)
+    [[ $DRY_RUN == true ]] && flags+=(--dry-run)
+
+    "$path" "$@" "${flags[@]}"
+}
+
+report() {
+    run_tool upgrade-host.sh --status
+    run_tool install-tools.sh --report
+    run_tool setup-github.sh --status
+}
+
+# The order is fixed rather than chosen.
+# Packages come first so a keyring or a repository is added against a current apt state, and GitHub comes last because it is the only step that waits on a person in a browser.
+stand_up() {
+    local profile="$1"
+
+    run_tool upgrade-host.sh --packages
+    if [[ $profile == "dev" ]]; then
+        run_tool install-tools.sh --install --optional
+    else
+        run_tool install-tools.sh --install
+    fi
+    run_tool setup-github.sh --configure
+}
+
+# Names the host in the menu heading.
+# Sourcing happens inside the command substitution that calls this, so the variables it defines do not reach the caller.
+host_description() {
+    [[ -r /etc/os-release ]] || {
+        printf 'this host'
+        return 0
+    }
+    # shellcheck disable=SC1091  # A host file, not present at lint time.
+    . /etc/os-release
+    printf '%s %s' "${ID:-a host}" "${VERSION_ID:-}"
+}
+
+menu() {
+    log "Standing up $(host_description)"
+    log ""
+    log "  1  Report only, change nothing"
+    log "  2  Upgrade the packages of the current release"
+    log "  3  Install the host tools"
+    log "  4  Configure git and GitHub"
+    log "  5  All of the above, which is a host stood up"
+    log "  6  All of the above plus the development tools"
+    log "  q  Quit"
+    log ""
+
+    local choice
+    read -r -p "Choose: " choice
+    case "$choice" in
+        1) MODE="report" ;;
+        2) MODE="upgrade" ;;
+        3) MODE="tools" ;;
+        4) MODE="github" ;;
+        5) MODE="host" ;;
+        6) MODE="dev" ;;
+        q | Q) exit 0 ;;
+        *) die "Not one of the choices" ;;
+    esac
+}
+
+# --- Entry ---
+
+parse_args() {
+    while [[ $# -gt 0 ]]; do
+        case "$1" in
+            -r | --report) MODE="report" ;;
+            --host) MODE="host" ;;
+            --dev) MODE="dev" ;;
+            --upgrade) MODE="upgrade" ;;
+            --tools) MODE="tools" ;;
+            --github) MODE="github" ;;
+            --release) MODE="release" ;;
+            -y | --yes) ASSUME_YES=true ;;
+            -n | --dry-run) DRY_RUN=true ;;
+            --keep) KEEP=true ;;
+            --ref)
+                [[ $# -ge 2 ]] || die "--ref takes a branch, tag, pull request ref, or commit"
+                REF="$2"
+                shift
+                ;;
+            --dir)
+                [[ $# -ge 2 ]] || die "--dir takes a path"
+                DIR="$2"
+                shift
+                ;;
+            -h | --help)
+                usage
+                exit 0
+                ;;
+            *) die "Unknown option \"$1\", --help lists the options" ;;
+        esac
+        shift
+    done
+}
+
+main() {
+    parse_args "$@"
+
+    command -v curl > /dev/null ||
+        die "curl is required to fetch the tooling. Install it with this host's package manager, then run this again."
+    command -v tar > /dev/null || die "tar is required to unpack the tooling"
+
+    # A run with no action and no terminal reports rather than guessing, which is what a pipe into a shell is.
+    # The remedy is printed rather than assumed, since somebody reaching this has just pasted a one-line install.
+    if [[ -z $MODE ]]; then
+        if [[ -t 0 ]]; then
+            menu
+        else
+            MODE="report"
+            warn "No action given and no terminal to ask on, so this is a report"
+            info "Download the file and run it, rather than piping it, to reach the menu:"
+            info "  curl -fsSLo bootstrap.sh https://raw.githubusercontent.com/$REPO/$DEFAULT_REF/host-setup/bootstrap.sh"
+            info "  bash bootstrap.sh"
+        fi
+    fi
+
+    trap cleanup EXIT
+    resolve_ref
+    download_tree
+
+    case "$MODE" in
+        report) report ;;
+        upgrade) run_tool upgrade-host.sh --packages ;;
+        tools) run_tool install-tools.sh --install ;;
+        github) run_tool setup-github.sh --configure ;;
+        release) run_tool upgrade-host.sh --release ;;
+        host) stand_up host ;;
+        dev) stand_up dev ;;
+    esac
+
+    step "Done"
+    [[ $KEEP == true ]] && info "The fetched tree is at $TREE"
+    return 0
+}
+
+main "$@"

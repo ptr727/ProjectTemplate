@@ -34,6 +34,7 @@ scripts/test_repo_gate.py text eol=lf
 scripts/test_pr_review.py text eol=lf
 scripts/host_gate.py text eol=lf
 scripts/test_host_gate.py text eol=lf
+scripts/test_bootstrap.py text eol=lf
 
 # The uv tool regenerates uv.lock with LF on every platform, so pin it here.
 # That makes git enforce LF on checkout and renormalize, so a CRLF-default repo does not fight the tool on every `uv lock` or `uv sync`.

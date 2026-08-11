@@ -12,7 +12,7 @@ Supported hosts:
 
 ## What a Host Must Provide
 
-This section is the **contract**: which tools a host needs and which repo procedure stops working without each one. It deliberately names no installer, because `winget`, `brew` and `apt` differ per platform while the requirement does not. Per-platform install commands are tracked separately, so this table stays true on every host.
+This section is the **contract**: which tools a host needs and which repo procedure stops working without each one. It deliberately names no installer, because `winget`, `brew` and `apt` differ per platform while the requirement does not. Per-platform install commands are tracked separately, in [`host-setup/`][host-setup-dir], so this table stays true on every host.
 
 | Tool | Needed by | Present when | Floor |
 | --- | --- | --- | --- |
@@ -38,6 +38,14 @@ Presence is the weaker half of this contract. Both host defects this fleet has a
 **`gh` must not come from the distribution's package on Linux.** This is the one place this document names a source, because here the source *is* the requirement rather than a convenience. The GitHub CLI maintainers state that the community-distributed `2.45.x` / `2.46.x` is **broken by deprecated GitHub APIs**, so install from the official apt repository at [cli.github.com][cli-install-link] and upgrade from there. Both `gh` limitations recorded in [`OPERATIONS.md`][operations] were observed on a host carrying a distribution `gh 2.46.0`, and both are the deprecation class that note describes. On **Windows** `winget` tracks upstream releases, and on macOS Homebrew does, so neither raises this hazard and neither needs a note of its own.
 
 **`git-restore-mtime` must not come from it either, where a repo uses it.** Debian and Ubuntu package **2022.12**, which shells out to `git whatchanged`. Current `git` refuses that without a hidden opt-in flag a caller cannot pass through, so the tool restores nothing, prints its ordinary statistics and **exits 0**. A deploy keyed on mtimes then ships a full copy and reports success. Take the upstream release from [git-tools][git-tools-link], or in CI the [action][git-restore-mtime-action-link] that vendors it. Note the direction of that interaction: a **newer** `git` is the trigger rather than the remedy, so a host old enough to still allow `whatchanged` hides the defect rather than avoiding it. No procedure in this repo needs the tool, so the gate declares it **optional** and skips it when absent.
+
+**The rest of the table takes the distribution's package, and two more do not.** `git`, `docker` and the Python interpreter come from the distribution, because each keeps up well enough that a second source buys nothing and costs a repository to trust. `jq` is the same on a current Debian or Ubuntu, which carries a version at or above the floor, and the upstream release binary is the answer only where it does not. `uv` is published by its authors as a release archive and packaged by neither distribution, so upstream is the only source there is. Where a repository needs `node`, the distribution's package trails upstream by whole release lines, so it comes from the NodeSource repository on the line upstream currently carries as long term support. Where a repository needs `dotnet`, the distribution's feed is preferred where it carries an SDK and Microsoft's feed is the fallback, because mixing the two is what breaks a host rather than either one alone, and Microsoft's carries `amd64` only.
+
+Neither `node` nor `dotnet` is in the table above, deliberately: they serve the repositories that need them rather than the fleet contract, and a repository needing one declares it in a `host-tools.json` of its own, which [`scripts/host_gate.py`][host-gate] merges over this one. The merge tightens only, so a repository may raise a floor or add one and may not lower or remove one.
+
+**A host being stood up needs no Python.** The tooling under [`host-setup/`][host-setup-dir] is shell, deliberately, because requiring an interpreter to upgrade a package or install a tool would make the first step of standing a host up depend on the thing that step exists to provide. The Python floor above is a development requirement, meaning [`scripts/`][scripts-dir] and [`spec/`][spec-dir], and a host that only runs services never has to meet it. `bootstrap.sh` needs `curl` and `tar`, both of which a base install carries or can install without a network tool of its own.
+
+**Standing a host up.** [`host-setup/`][host-setup-dir] carries the tooling that makes a host satisfy this contract, and its README is the usage. A host with nothing runs [`host-setup/bootstrap.sh`][bootstrap], which fetches this repository and runs that tooling from the fetched tree. It is not called by [`scripts/host_gate.py`][host-gate] and it does not call it: the gate measures a host against the floors above, and the tooling is a remedy a person chooses when the gate reports a gap.
 
 A repository that needs more than the fleet does adds its own `host-tools.json` at its root, which the gate layers over the hub's. It may add a tool nobody else uses, raise a floor, or turn an optional tool required. It may **not** lower a floor or turn a required tool optional, since those edits retire a fleet check from inside the repository it protects, and the gate reports a rejected relaxation rather than dropping it.
 
@@ -243,9 +251,13 @@ A host that fails any row is not ready for the procedure that row names, and the
 
 [agent-safety]: ../host-setup/agent-safety/README.md
 [audit]: ../AUDIT.md
+[bootstrap]: ../host-setup/bootstrap.sh
 [devcontainer]: ./devcontainer.md
 [governance-git-and-commit-rules]: ../GOVERNANCE.md#git-and-commit-rules
 [host-gate]: ../scripts/host_gate.py
+[host-setup-dir]: ../host-setup/
+[scripts-dir]: ../scripts/
+[spec-dir]: ../spec/
 [host-tools]: ../spec/host-tools.json
 [issue-483]: https://github.com/ptr727/ProjectTemplate/issues/483
 [operations]: ../OPERATIONS.md

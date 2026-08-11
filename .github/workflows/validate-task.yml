@@ -61,13 +61,14 @@ jobs:
           python3 spec/validate.py
 
       # Each gate here is proven by a case that reintroduces the fault it catches, wherever it lives.
-      # Three of these are host-setup/ rather than scripts/, since the agent-safety kit is gated the same way.
+      # A test sits with the layer that owns it rather than beside the file it names, so a read-only gate over the spec and the host tooling is scripts/ even where its subject is shell, and the agent-safety kit carries its own because it ships as a unit.
       # Standard library only, so no install step and no dependency to pin.
       # The audit engine self-test is offline, so it runs here rather than only on an owner sweep.
       # The write-guard self-test is offline too, and it otherwise runs only when a host installs the hook, which is where a regression in it would surface as a broken machine.
       - name: Run script self-tests step
         run: |
           set -Eeuo pipefail
+          python3 scripts/test_bootstrap.py
           python3 scripts/test_host_gate.py
           python3 scripts/test_prose_lint.py
           python3 scripts/test_repo_gate.py
