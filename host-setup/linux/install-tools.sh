@@ -728,7 +728,9 @@ report() {
 }
 
 # Install or upgrade one tool.
-# A failure is collected rather than fatal, so one unreachable upstream does not strand the rest of the run.
+# A tool whose install returns non-zero is collected rather than fatal, so one failure does not strand the rest of the run.
+# A refusal is not a failure and does end the run: an unverifiable keyring, a checksum mismatch, or a declined prompt stops everything rather than being collected, because continuing past one would install something nobody vouched for.
+# Some upstream lookups also end the run today where collecting them would match the intent above, which TODO.md records rather than changes here.
 apply_tool() {
     local tool="$1" installed target status
     installed=$("$(tool_function "$tool" version)" 2> /dev/null || true)

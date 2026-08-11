@@ -94,10 +94,24 @@ resolve_ref() {
     return 0
 }
 
-# The two paths this script creates under DIR, named in one place so the trap and the download agree.
+# The paths this script creates under DIR, named in one place so the trap and the download agree.
 # DIR itself is never removed, since --dir may name a directory the caller owns and put other things in.
 tree_path() { printf '%s\n' "$DIR/tree"; }
 archive_path() { printf '%s\n' "$DIR/tree.tar.gz"; }
+marker_path() { printf '%s\n' "$DIR/tree/.bootstrap-owned"; }
+
+# A tree carries a marker this loader wrote, and a tree without one is somebody else's.
+# DIR is a caller-supplied path, so 'tree' under it is not necessarily ours: pointing --dir at a directory that already holds one would otherwise have this remove it, both before extracting and again on exit.
+tree_is_ours() { [[ -e $(marker_path) ]]; }
+
+# Refuses to remove a tree this run did not create, rather than trusting the name.
+remove_tree() {
+    local tree
+    tree=$(tree_path)
+    [[ -e $tree ]] || return 0
+    tree_is_ours || die "$tree exists and this loader did not create it, so it will not be removed. Choose another --dir."
+    rm -rf "$tree"
+}
 
 download_tree() {
     local archive tree want="${RESOLVED:-$REF}"
@@ -113,8 +127,9 @@ download_tree() {
     # The archive holds one top-level directory named for the repository and the revision.
     # Extracting into a directory of our own keeps a second run from reading the first one's tree.
     tree=$(tree_path)
-    rm -rf "$tree"
+    remove_tree
     mkdir -p "$tree"
+    touch "$(marker_path)"
     tar -xzf "$archive" -C "$tree" --strip-components=1 ||
         die "Could not extract the downloaded archive"
     rm -f "$archive"
@@ -125,9 +140,16 @@ download_tree() {
 
 cleanup() {
     [[ $KEEP == true ]] && return 0
+    # A tree that is not ours was already refused where it mattered, at the download.
+    # Refusing again from the exit trap would print the same error a second time, after the one that actually stopped the run.
+    if [[ -e $(tree_path) ]] && ! tree_is_ours; then
+        rm -f "$(archive_path)"
+        return 0
+    fi
     # Removes what this run created rather than what it finished, because TREE is set only once extraction has succeeded.
     # A failed extract leaves both the archive and a part-written tree, so keying the cleanup on TREE left a tarball in the cache on every failed attempt.
-    rm -rf "$(tree_path)" "$(archive_path)"
+    remove_tree
+    rm -f "$(archive_path)"
 }
 
 # --- Handoff ---
@@ -227,7 +249,10 @@ parse_args() {
                 ;;
             --dir)
                 [[ $# -ge 2 ]] || die "--dir takes a path"
-                DIR="$2"
+                # An absolute path, and never the root, since everything below is created and removed under it.
+                [[ $2 == /* ]] || die "--dir takes an absolute path, and \"$2\" is relative"
+                [[ $2 != "/" ]] || die "--dir may not be the root directory"
+                DIR="${2%/}"
                 shift
                 ;;
             -h | --help)

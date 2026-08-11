@@ -13,7 +13,7 @@ What a machine needs before it can be worked in, and the tooling that puts it th
 Three lines, on a host that has nothing:
 
 ```shell
-sudo apt-get update && sudo apt-get install -y curl ca-certificates
+sudo apt-get update && sudo apt-get install -y curl ca-certificates tar
 curl -fsSLo bootstrap.sh https://raw.githubusercontent.com/ptr727/ProjectTemplate/main/host-setup/bootstrap.sh
 bash bootstrap.sh
 ```
