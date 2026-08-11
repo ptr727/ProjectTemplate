@@ -1202,7 +1202,6 @@ class TestDiscovery(unittest.TestCase):
         (repo / 'authored.md').write_text('fine\n', encoding='utf-8')
         (repo / 'reports' / 'audit.md').write_text('fine\n', encoding='utf-8')
         with mock.patch.object(prose_lint, 'tracked_paths', return_value=None), \
-                mock.patch.object(prose_lint, 'repo_prefix', return_value=''), \
                 contextlib.redirect_stderr(io.StringIO()):
             found = prose_lint.discover([str(repo)])
         self.assertEqual(['authored.md'], [p.name for p in found])
@@ -1436,9 +1435,12 @@ class TestChangedLines(unittest.TestCase):
     )
 
     def run_diff(self, stdout: str = '', returncode: int = 0):
+        # Untracked files are a second source for the same map and are asserted separately.
+        # The parse is read here alone rather than through whatever the tree happens to hold.
         done = subprocess.CompletedProcess(args=[], returncode=returncode, stdout=stdout, stderr='')
-        with mock.patch.object(prose_lint.subprocess, 'run', return_value=done):
-            return prose_lint.changed_lines('origin/develop')
+        with mock.patch.object(prose_lint.subprocess, 'run', return_value=done), \
+                mock.patch.object(prose_lint, 'untracked_paths', return_value=[]):
+            return prose_lint.changed_lines('origin/develop', Path('.'))
 
     def test_each_hunk_maps_to_the_lines_it_adds(self) -> None:
         """A single-line hunk carries no count, and a deletion-only hunk adds nothing."""
@@ -1458,9 +1460,9 @@ class TestChangedLines(unittest.TestCase):
         """An empty scope filters every file out and reports a clean run, which is a false pass."""
         with mock.patch.object(prose_lint.subprocess, 'run',
                                side_effect=subprocess.CalledProcessError(1, 'git')):
-            self.assertIsNone(prose_lint.changed_lines('origin/develop'))
+            self.assertIsNone(prose_lint.changed_lines('origin/develop', Path('.')))
         with mock.patch.object(prose_lint.subprocess, 'run', side_effect=FileNotFoundError):
-            self.assertIsNone(prose_lint.changed_lines('origin/develop'))
+            self.assertIsNone(prose_lint.changed_lines('origin/develop', Path('.')))
 
 
 class TestCli(unittest.TestCase):
@@ -1508,39 +1510,24 @@ class TestCli(unittest.TestCase):
         with mock.patch.object(prose_lint, 'discover', return_value=[bait]):
             self.assertEqual(1, prose_lint.main([]))
 
-    def test_diffing_one_repository_while_scanning_another_is_refused(self) -> None:
-        """The intersection is empty, so it reports a clean run over an unchecked tree.
+    def test_a_path_under_no_repository_is_refused_rather_than_scoped_to_nothing(self) -> None:
+        """A diff needs a repository, and having none is an error rather than an empty scope.
 
-        `git diff` runs in the current directory while the paths may name another checkout.
-        A PhotoCleaner branch reported zero findings when the gate was run from the hub's
-        directory and three when run from its own, and the zero was believed.
-        """
-        with mock.patch.object(prose_lint, 'repo_root',
-                               side_effect=lambda p: '/hub' if str(p) == '.' else '/other'), \
-                mock.patch.object(prose_lint, 'discover') as disc:
-            self.assertEqual(2, prose_lint.main(['--diff', 'HEAD', '/other/tree']))
-        # Refused before discovery, which reads every tracked file to classify it as text.
-        disc.assert_not_called()
-
-    def test_a_path_under_no_repository_is_refused_too(self) -> None:
-        """It fails the same way as a different repository, and more quietly.
-
-        Discovery falls back to a filesystem walk, then every absolute key misses the diff's
-        repository-relative ones, so the scope drops every file and the run exits 0. Testing for
-        a *different* root missed this, because there is no root to differ from.
+        Discovery falls back to a filesystem walk, and an empty scope would drop every file it
+        found and report a clean run. The refusal now comes from the diff itself, which is where
+        the impossibility actually is: a guard comparing the scan root against the process's own
+        root could not see this at all, because there is no root to differ from.
         """
         # A real directory, since a path that does not exist is refused earlier for another reason.
-        # That would pass this assertion without ever exercising the diff guard.
+        # That would pass this assertion without ever reaching the diff.
         loose = self.tmp / 'loose'
         loose.mkdir()
-        with mock.patch.object(prose_lint, 'repo_root',
-                               side_effect=lambda p: '/hub' if str(p) == '.' else ''), \
-                contextlib.redirect_stderr(io.StringIO()) as err:
+        with contextlib.redirect_stderr(io.StringIO()) as err:
             self.assertEqual(2, prose_lint.main(['--diff', 'HEAD', str(loose)]))
-        self.assertIn('no git repository', err.getvalue())
+        self.assertIn('cannot diff against', err.getvalue())
 
     def test_list_files_still_reports_scope_across_repositories(self) -> None:
-        """It reports the scan scope and never consults the diff, so the guard must not stop it."""
+        """It reports the scan scope and never consults the diff, so no diff failure reaches it."""
         clean = self.tmp / 'clean.md'
         clean.write_text('fine\n', encoding='utf-8')
         other = self.tmp / 'other'
@@ -1551,7 +1538,7 @@ class TestCli(unittest.TestCase):
             self.assertEqual(0, prose_lint.main(['--list-files', '--diff', 'HEAD', str(other)]))
 
     def test_a_matching_repository_is_not_refused(self) -> None:
-        """The guard must not reject the ordinary case it sits in front of."""
+        """The ordinary case, kept as the floor under every narrowing rule above it."""
         clean = self.tmp / 'clean.md'
         clean.write_text('Nothing here breaks a rule.\n', encoding='utf-8')
         with mock.patch.object(prose_lint, 'repo_root', return_value='/hub'), \
@@ -2034,8 +2021,7 @@ class TestDiffScopeFloor(unittest.TestCase):
         bait.write_text(f'{DUP} thing\n', encoding='utf-8')
         with mock.patch.object(prose_lint, 'repo_root', return_value=str(self.tmp)), \
                 mock.patch.object(prose_lint, 'discover', return_value=[bait]), \
-                mock.patch.object(prose_lint, 'changed_lines',
-                                  return_value={prose_lint.rel(bait): {1}}):
+                mock.patch.object(prose_lint, 'changed_lines', return_value={'bait.md': {1}}):
             self.assertEqual(1, prose_lint.main(['--check', 'dupword', '--diff', 'HEAD']))
 
     def test_a_deliberately_narrowed_scan_is_not_told_the_narrowing_is_a_defect(self) -> None:
@@ -2083,8 +2069,7 @@ class TestDiffScopeFloor(unittest.TestCase):
         (self.tmp / 'scripts').mkdir()
         nested = self.tmp / 'scripts' / 'tool.py'
         nested.write_text('# A clean comment.\n', encoding='utf-8')
-        with mock.patch.object(prose_lint, 'repo_root', return_value=str(self.tmp)):
-            found = prose_lint.unread_diff_files({'scripts/tool.py': {1}}, ['.'], ())
+        found = prose_lint.unread_diff_files({'scripts/tool.py': {1}}, ['.'], (), self.tmp)
         self.assertEqual(['scripts/tool.py'], found)
 
     def test_asked_about_reads_a_prefix_as_a_directory_boundary(self) -> None:
@@ -2095,6 +2080,188 @@ class TestDiffScopeFloor(unittest.TestCase):
         self.assertTrue(prose_lint.asked_about('anything/at/all.md', ['.']))
         self.assertFalse(prose_lint.asked_about('catalogue/x.md', ['catalog']))
         self.assertFalse(prose_lint.asked_about('docs/x.md', ['catalog']))
+
+
+class TestTheScanScopeIsTheScopeReported(unittest.TestCase):
+    """What the run read, against real repositories rather than a mocked answer about them.
+
+    Every false clean on record lives in the join between two coordinate systems: a diff names
+    files relative to the repository top level, and a path argument arrives in whatever form the
+    caller typed. Mocking `repo_root` or `discover` supplies that join already made, so the cases
+    below build repositories and let git answer. Two defects were reported clean by a suite of 209
+    passing tests, and both are here.
+
+    The invariant: the rule set, the file set, the diff, and the keys that join the last two are
+    all read from the repository being scanned, and none of them from the directory the process
+    happens to stand in. A verdict states the scope it covered, since reading nothing prints what
+    finding nothing prints otherwise.
+    """
+
+    BAIT = '# New\n\nA line with a repeated the the word in it.\n'
+
+    def setUp(self) -> None:
+        self.tmp = Path(self.enterContext(tempfile.TemporaryDirectory()))
+        self.enterContext(contextlib.redirect_stdout(io.StringIO()))
+        self.err = self.enterContext(contextlib.redirect_stderr(io.StringIO()))
+
+    def git(self, root: Path, *args: str) -> None:
+        # Signing is disabled explicitly, since a host that signs by default cannot commit here.
+        subprocess.run(['git', '-C', str(root), '-c', 'user.email=gate@example.invalid',
+                        '-c', 'user.name=gate test', '-c', 'commit.gpgsign=false', *args],
+                       check=True, capture_output=True)
+
+    def repo(self, name: str = 'repo') -> Path:
+        """A real repository holding one committed clean file, which is the base every case diffs."""
+        root = self.tmp / name
+        root.mkdir()
+        self.git(root, 'init', '-q')
+        (root / 'DOC.md').write_text('# Doc\n\nA clean line.\n', encoding='utf-8')
+        self.git(root, 'add', '-A')
+        self.git(root, 'commit', '-qm', 'base')
+        return root
+
+    def run_in(self, cwd: Path, *argv: str) -> int:
+        with contextlib.chdir(cwd):
+            return prose_lint.main(['--check', 'dupword', *argv])
+
+    def test_an_absolute_path_argument_reads_what_the_relative_one_reads(self) -> None:
+        """The reported defect: same directory, same repository, same ref, and a clean verdict.
+
+        `prose_lint.py . --diff BASE` reported the finding while `prose_lint.py /abs/path --diff
+        BASE` reported nothing and exited 0. Discovery returned absolute paths and the diff named
+        repository-relative ones, so the intersection was empty and an empty intersection is what
+        a clean tree looks like. The same-root guard could not fire, because the run genuinely was
+        in the right repository.
+        """
+        root = self.repo()
+        (root / 'DOC.md').write_text(self.BAIT, encoding='utf-8')
+        self.git(root, 'commit', '-qam', 'change')
+        self.assertEqual(1, self.run_in(root, '.', '--diff', 'HEAD~1'))
+        self.assertEqual(1, self.run_in(root, str(root), '--diff', 'HEAD~1'))
+
+    def test_an_untracked_file_is_in_the_scope_of_the_change_that_adds_it(self) -> None:
+        """The second reported defect, on identical bytes either side of a `git add`.
+
+        A new file read clean while unstaged and reported its findings the moment it was
+        committed. `git diff` never names an untracked file, so a change whose whole point is
+        adding one scoped to nothing, and a change is exactly when a new file is most worth
+        reading.
+        """
+        root = self.repo()
+        (root / 'NEW.md').write_text(self.BAIT, encoding='utf-8')
+        self.assertEqual(1, self.run_in(root, '.', '--diff', 'HEAD'))
+        self.git(root, 'add', 'NEW.md')
+        self.assertEqual(1, self.run_in(root, '.', '--diff', 'HEAD'))
+
+    def test_an_untracked_file_is_read_by_a_whole_tree_sweep_too(self) -> None:
+        """`git ls-files` omits it as well, so the hole was never particular to `--diff`.
+
+        A sweep was the documented way to check what a diff-scoped run might have missed, and it
+        passed over the same file for its own reason.
+        """
+        root = self.repo()
+        (root / 'NEW.md').write_text(self.BAIT, encoding='utf-8')
+        self.assertEqual(1, self.run_in(root, '.'))
+
+    def test_an_ignored_file_is_read_by_neither(self) -> None:
+        """A build output is not authored text, so the widening stops where git's own rule does."""
+        root = self.repo()
+        (root / '.gitignore').write_text('generated/\n', encoding='utf-8')
+        self.git(root, 'add', '.gitignore')
+        self.git(root, 'commit', '-qm', 'ignore')
+        (root / 'generated').mkdir()
+        (root / 'generated' / 'out.md').write_text(self.BAIT, encoding='utf-8')
+        self.assertEqual(0, self.run_in(root, '.'))
+        self.assertEqual(0, self.run_in(root, '.', '--diff', 'HEAD'))
+
+    def test_a_generated_tree_stays_out_when_the_file_in_it_is_untracked(self) -> None:
+        """The generated-tree rule is about who wrote the prose, so tracking does not change it."""
+        root = self.repo()
+        (root / 'reports').mkdir()
+        (root / 'reports' / 'audit.md').write_text(self.BAIT, encoding='utf-8')
+        self.assertEqual(0, self.run_in(root, '.'))
+
+    def test_a_binary_file_is_not_read_because_it_is_untracked(self) -> None:
+        """The text test decides what the rules can read, and it is applied to both sources."""
+        root = self.repo()
+        (root / 'logo.png').write_bytes(b'\x89PNG\r\n\x1a\n\x00 the the')
+        self.assertEqual(0, self.run_in(root, '.', '--diff', 'HEAD'))
+
+    def test_a_run_from_a_subdirectory_keys_on_the_repository(self) -> None:
+        """It used to be refused with advice to run from the top level, which was the guard talking.
+
+        The keys differed rather than the repositories, so anchoring both sides on the scanned
+        repository answers the case instead of turning it away.
+        """
+        root = self.repo()
+        (root / 'sub').mkdir()
+        (root / 'sub' / 'note.md').write_text(self.BAIT, encoding='utf-8')
+        self.assertEqual(1, self.run_in(root / 'sub', '.', '--diff', 'HEAD'))
+
+    def test_scanning_one_repository_while_standing_in_another_diffs_the_one_scanned(self) -> None:
+        """A refusal was standing in for this, because the diff was taken where the process stood.
+
+        The rule set already came from the scanned repository. The diff and the keys now come from
+        there too, which is the whole of what the earlier guard was approximating.
+        """
+        here = self.repo('here')
+        there = self.repo('there')
+        (there / 'DOC.md').write_text(self.BAIT, encoding='utf-8')
+        self.git(there, 'commit', '-qam', 'change')
+        self.assertEqual(1, self.run_in(here, str(there), '--diff', 'HEAD~1'))
+
+    def test_a_relative_diff_setting_does_not_re_anchor_the_keys(self) -> None:
+        """`diff.relative` anchors a diff's paths on the process's directory, not the repository.
+
+        This case passed before the fix too, because both sides were anchored on that directory
+        and agreed by accident. It is pinned because only one side moved: the keys must come from
+        the repository whatever the caller's configuration says, and a setting is an input shape
+        like any other.
+        """
+        root = self.repo()
+        self.git(root, 'config', 'diff.relative', 'true')
+        (root / 'sub').mkdir()
+        (root / 'sub' / 'note.md').write_text('A clean line.\n', encoding='utf-8')
+        self.git(root, 'add', '-A')
+        self.git(root, 'commit', '-qm', 'sub')
+        (root / 'sub' / 'note.md').write_text(self.BAIT, encoding='utf-8')
+        self.assertEqual(1, self.run_in(root / 'sub', '.', '--diff', 'HEAD~1'))
+
+    def test_a_clean_run_states_what_it_read(self) -> None:
+        """The class the two defects belong to, which no per-route guard covers.
+
+        Both exited 0 in silence, and so did the three routes closed before them. A reader cannot
+        tell a gate that read nothing from a gate with nothing to report unless the run says which
+        it was, so the count is printed on a clean verdict rather than only on a busy one.
+        """
+        root = self.repo()
+        self.assertEqual(0, self.run_in(root, '.'))
+        self.assertIn('1 file(s) read, whole tree', self.err.getvalue())
+
+    def test_a_scope_of_nothing_is_reported_as_nothing(self) -> None:
+        """A change the rules cannot read is honestly clean, and says so as a count of zero."""
+        root = self.repo()
+        (root / 'logo.png').write_bytes(b'\x89PNG\r\n\x1a\n\x00binary')
+        self.git(root, 'add', '-A')
+        self.git(root, 'commit', '-qm', 'add a logo')
+        self.assertEqual(0, self.run_in(root, '.', '--diff', 'HEAD~1'))
+        self.assertIn('0 of 1 file(s) read, 0 changed line(s)', self.err.getvalue())
+
+    def test_the_reported_scope_counts_only_what_the_verdict_covered(self) -> None:
+        """A count wider than the read is the same lie in a smaller font.
+
+        The narrowed file set and the lines inside it are what the findings were drawn from, so
+        those are what the note states, with the discovered total beside them for contrast.
+        """
+        root = self.repo()
+        (root / 'OTHER.md').write_text('# Other\n\nA clean line.\n', encoding='utf-8')
+        self.git(root, 'add', '-A')
+        self.git(root, 'commit', '-qm', 'other')
+        (root / 'DOC.md').write_text(self.BAIT, encoding='utf-8')
+        self.git(root, 'commit', '-qam', 'change')
+        self.assertEqual(1, self.run_in(root, '.', '--diff', 'HEAD~1'))
+        # Two of the three lines changed, since the blank line between them did not.
+        self.assertIn('1 of 2 file(s) read, 2 changed line(s)', self.err.getvalue())
 
 
 class TestHarness(unittest.TestCase):
