@@ -256,11 +256,11 @@ A host that fails any row is not ready for the procedure that row names, and the
 [governance-git-and-commit-rules]: ../GOVERNANCE.md#git-and-commit-rules
 [host-gate]: ../scripts/host_gate.py
 [host-setup-dir]: ../host-setup/
-[scripts-dir]: ../scripts/
-[spec-dir]: ../spec/
 [host-tools]: ../spec/host-tools.json
 [issue-483]: https://github.com/ptr727/ProjectTemplate/issues/483
 [operations]: ../OPERATIONS.md
+[scripts-dir]: ../scripts/
+[spec-dir]: ../spec/
 [ssh-signing]: ./ssh-signing.md
 [standup]: ../STANDUP.md
 [write-guard]: ../host-setup/agent-safety/gh-write-guard.py
