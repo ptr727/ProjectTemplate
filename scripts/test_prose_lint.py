@@ -1849,23 +1849,37 @@ class TestScanRootDecidesTheRuleSet(unittest.TestCase):
         with mock.patch.object(prose_lint, 'repo_root', side_effect=lambda p: str(Path(p))):
             self.assertEqual(2, prose_lint.main(
                 [str(self.release), str(self.operational), '--check', 'home-path']))
-        self.assertIn('more than one root', self.err.getvalue())
+        self.assertIn('more than one repository', self.err.getvalue())
 
-    def test_the_refusal_does_not_call_a_non_repository_path_a_repository(self) -> None:
-        """`repo_root` returns '' for a path git cannot place, and that root is not a repository.
+    def test_several_paths_under_no_repository_are_not_a_conflict(self) -> None:
+        """Only a repository declares a model, so two loose paths are not ambiguous.
 
-        Naming it as one sends the reader looking for a workflow model in a directory that
-        declares none.
+        Refusing on distinct filesystem paths broke the ordinary multi-file invocation outside a
+        checkout, where every argument resolves somewhere different.
         """
         loose = self.tmp / 'loose'
+        (loose / 'docs').mkdir(parents=True)
+        one, two = loose / 'a.md', loose / 'docs' / 'b.md'
+        for target in (one, two):
+            target.write_text('Nothing to find here.\n', encoding='utf-8')
+        with mock.patch.object(prose_lint, 'repo_root', return_value=''), \
+                mock.patch.object(prose_lint, 'discover', return_value=[one, two]):
+            self.assertEqual(0, prose_lint.main([str(one), str(two), '--check', 'home-path']))
+        self.assertNotIn('more than one repository', self.err.getvalue())
+
+    def test_one_repository_plus_a_loose_path_is_not_a_conflict(self) -> None:
+        """One model is in play, so there is nothing to disambiguate."""
+        loose = self.tmp / 'loose'
         loose.mkdir()
+        bait = loose / 'notes.md'
+        bait.write_text(f'Deploy into {NIX_HOME}/stack here.\n', encoding='utf-8')
         with mock.patch.object(prose_lint, 'repo_root',
-                               side_effect=lambda p: str(self.release) if Path(p) == self.release else ''):
-            self.assertEqual(2, prose_lint.main(
+                               side_effect=lambda p: str(self.release) if Path(p) == self.release else ''), \
+                mock.patch.object(prose_lint, 'discover', return_value=[bait]):
+            # The one repository in play is a release repo, so home-path stays on and finds it.
+            self.assertEqual(1, prose_lint.main(
                 [str(self.release), str(loose), '--check', 'home-path']))
-        message = self.err.getvalue()
-        self.assertIn('no git repository', message)
-        self.assertIn(str(loose), message)
+        self.assertNotIn('more than one repository', self.err.getvalue())
 
     def test_a_path_under_no_repository_falls_back_to_itself_rather_than_the_caller(self) -> None:
         """The fallback must not reintroduce the dependency the fix removes.
