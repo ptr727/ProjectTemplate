@@ -288,11 +288,13 @@ function Invoke-WingetUpgrade {
     return (run 'winget' @arguments)
 }
 
+# The scope to remove from is the one the copy was found in, which the caller passes, rather than the one the caller asked to end up in.
+# Removing in the requested scope finds nothing where the copy sits in the other one, so the old copy survives and the install that follows adds a second beside it, which is the state -Reinstall exists to clear.
 function Invoke-WingetRemove {
-    param([Parameter(Mandatory)][string]$Id)
+    param([Parameter(Mandatory)][string]$Id, [string]$InScope)
     $arguments = @('uninstall', '--id', $Id, '--exact', '--disable-interactivity', '--silent')
-    if ($script:WANT_SCOPE) { $arguments += @('--scope', $script:WANT_SCOPE) }
-    return (run 'winget' @arguments)
+    if ($InScope) { $arguments += @('--scope', $InScope) }
+    return (run -Command 'winget' -Arguments $arguments)
 }
 
 # --- Tools ---
@@ -487,13 +489,19 @@ function Invoke-ToolApply {
         if ($state.Rows.Count -eq 0) {
             log "${ToolName}: not installed, so there is nothing to remove"
         } else {
-            if (-not (confirm "Remove $($record.Package) at $($state.Rows -join ', ') and install it again?")) {
+            $where = if ($state.Scope.Count -gt 0) { " installed $($state.Scope -join ' and ') wide" } else { '' }
+            if (-not (confirm "Remove $($record.Package) at $($state.Rows -join ', ')$where and install it again?")) {
                 die 'Declined'
             }
-            if ((Invoke-WingetRemove -Id $record.Package) -ne 0) {
-                warn "$ToolName failed to uninstall"
-                $script:FAILED += $ToolName
-                return
+            # Every copy is removed, each in the scope it was found in, since a tool present in both scopes is exactly the shadowing this action exists to clear.
+            # An empty scope means winget reported none, and there the removal names none either and lets winget act on what it finds.
+            $found = if ($state.Scope.Count -gt 0) { $state.Scope } else { @('') }
+            foreach ($scope in $found) {
+                if ((Invoke-WingetRemove -Id $record.Package -InScope $scope) -ne 0) {
+                    warn "$ToolName failed to uninstall$(if ($scope) { " the $scope wide copy" })"
+                    $script:FAILED += $ToolName
+                    return
+                }
             }
         }
     } elseif ($state.Status -eq 'current') {

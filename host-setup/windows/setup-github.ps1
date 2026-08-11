@@ -139,9 +139,11 @@ function confirm {
 
 # Both git and ssh ship with Git for Windows, and neither is installed from here.
 # Installing them belongs to install-tools.ps1, so a gap is named with the command that closes it rather than closed twice in two scripts.
+# Every executable this script calls is named, rather than the three it is most obviously about.
+# One left out fails partway through with whatever that command says when it is missing, in place of the one message here that names the remedy.
 function Test-Prerequisite {
     $absent = @()
-    foreach ($tool in 'git', 'ssh', 'ssh-keygen') {
+    foreach ($tool in 'git', 'ssh', 'ssh-keygen', 'ssh-keyscan', 'ssh-add') {
         if (-not (Get-Command $tool -ErrorAction SilentlyContinue)) { $absent += $tool }
     }
     if ($absent.Count -eq 0) { return }
