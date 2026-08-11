@@ -18,13 +18,14 @@ catalog/snippets/husky/pre-commit text eol=lf
 
 # Vanilla `.py` follows the CRLF default, since Python's universal newlines accept CRLF and it is commonly edited on Windows.
 # Pin LF only for a `.py` executed directly via its shebang, by path.
-# Those are the CI validation entry point, the fleet-audit runner, the agent-safety hook and its installer, and the repo lint and review scripts with their tests.
+# Those are the CI validation entry point, the fleet-audit runner, the agent-safety hook and its installer with the installer's tests, and the repo lint and review scripts with their tests.
 # Do not re-add a blanket `*.py text eol=lf`.
 spec/validate.py text eol=lf
 spec/audit.py text eol=lf
 spec/fidelity_honesty.py text eol=lf
 host-setup/agent-safety/gh-write-guard.py text eol=lf
 host-setup/agent-safety/install.py text eol=lf
+host-setup/agent-safety/test_install.py text eol=lf
 scripts/prose_lint.py text eol=lf
 scripts/repo_gate.py text eol=lf
 scripts/pr_review.py text eol=lf
@@ -33,6 +34,7 @@ scripts/test_repo_gate.py text eol=lf
 scripts/test_pr_review.py text eol=lf
 scripts/host_gate.py text eol=lf
 scripts/test_host_gate.py text eol=lf
+scripts/test_bootstrap.py text eol=lf
 
 # The uv tool regenerates uv.lock with LF on every platform, so pin it here.
 # That makes git enforce LF on checkout and renormalize, so a CRLF-default repo does not fight the tool on every `uv lock` or `uv sync`.
