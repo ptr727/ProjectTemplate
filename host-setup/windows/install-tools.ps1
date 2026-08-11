@@ -293,10 +293,13 @@ function Invoke-WingetInstall {
     return (run 'winget' @arguments)
 }
 
+# An upgrade takes the named scope too, on the same rule as an install.
+# Reaching here with a scope that disagrees with the installed copy is already refused, so the scope named here is one a copy sits in, and passing it is what says which copy to move where a tool is installed in both.
 function Invoke-WingetUpgrade {
     param([Parameter(Mandatory)][string]$Id)
     $arguments = @('upgrade', '--id', $Id, '--exact', '--source', 'winget', '--disable-interactivity',
         '--accept-source-agreements', '--accept-package-agreements', '--silent', '--include-unknown')
+    if ($script:WANT_SCOPE) { $arguments += @('--scope', $script:WANT_SCOPE) }
     return (run 'winget' @arguments)
 }
 
