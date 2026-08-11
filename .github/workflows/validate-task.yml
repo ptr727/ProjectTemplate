@@ -64,6 +64,7 @@ jobs:
           python3 scripts/test_pr_review.py
           python3 spec/audit.py --selftest
           python3 host-setup/agent-safety/gh-write-guard.py --selftest
+          python3 host-setup/agent-safety/test_install.py
 
       - name: Check repo gates step
         run: python3 scripts/repo_gate.py
