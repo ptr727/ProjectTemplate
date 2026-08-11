@@ -286,6 +286,8 @@ github_signing_key_registered() {
 }
 
 # A registration is a browser step, so this prints what to paste and where, then stops.
+# The consequence of not registering differs per caller, so each says its own rather than this saying one for all.
+# Authentication failing stops everything that reaches GitHub, signing not being registered stops nothing locally, and a host authenticating with another key is working and not managed.
 registration_needed() {
     local kind="$1" type="$2"
     log ""
@@ -294,9 +296,14 @@ registration_needed() {
     info "2. Set the key type to \"$type key\""
     info "3. Paste the key below, and give it this host's name"
     log ""
-    cat "$KEY.pub"
+    # A dry run reports what it would create rather than creating it, so the key this block exists to print may not be there.
+    # Reaching for it anyway ends the run on a cat error, at the one line the reader came for.
+    if [[ -f $KEY.pub ]]; then
+        cat "$KEY.pub"
+    else
+        info "No key at $KEY.pub yet, so there is nothing to paste. A run that is not a dry run creates it."
+    fi
     log ""
-    info "Then run this again. Nothing after this point works until the key is registered."
 }
 
 # --- git configuration ---
@@ -548,12 +555,15 @@ configure() {
     resolve_github_user
     if [[ -z $GITHUB_USER ]]; then
         registration_needed "authentication" "Authentication"
-        die "SSH authentication to GitHub failed"
+        die "SSH authentication to GitHub failed. Nothing that reaches GitHub works until the key is registered."
     fi
     if [[ $MANAGED_KEY_AUTHENTICATES == true ]]; then
         info "Authenticated as $GITHUB_USER, with the managed key"
     else
-        info "Authenticated as $GITHUB_USER, with a key other than the managed one"
+        # The host reaches GitHub, so this is not a failure, and the key this script manages is still not the one doing it.
+        # Reporting it as an ordinary line let a run end in "Done" on a host whose managed key was registered nowhere, which is the state this script exists to leave behind.
+        registration_needed "authentication" "Authentication"
+        warn "This host authenticates with a key other than the managed one, so the managed key is registered nowhere and revoking this host alone would not cut its access"
     fi
 
     # Signing is the second gate.

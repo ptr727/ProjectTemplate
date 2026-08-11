@@ -94,8 +94,14 @@ resolve_ref() {
     return 0
 }
 
+# The two paths this script creates under DIR, named in one place so the trap and the download agree.
+# DIR itself is never removed, since --dir may name a directory the caller owns and put other things in.
+tree_path() { printf '%s\n' "$DIR/tree"; }
+archive_path() { printf '%s\n' "$DIR/tree.tar.gz"; }
+
 download_tree() {
-    local archive="$DIR/tree.tar.gz" want="${RESOLVED:-$REF}"
+    local archive tree want="${RESOLVED:-$REF}"
+    archive=$(archive_path)
 
     step "Fetching $REPO at $REF"
     [[ -n $RESOLVED ]] && info "Commit: $RESOLVED"
@@ -106,20 +112,22 @@ download_tree() {
 
     # The archive holds one top-level directory named for the repository and the revision.
     # Extracting into a directory of our own keeps a second run from reading the first one's tree.
-    rm -rf "$DIR/tree"
-    mkdir -p "$DIR/tree"
-    tar -xzf "$archive" -C "$DIR/tree" --strip-components=1 ||
+    tree=$(tree_path)
+    rm -rf "$tree"
+    mkdir -p "$tree"
+    tar -xzf "$archive" -C "$tree" --strip-components=1 ||
         die "Could not extract the downloaded archive"
     rm -f "$archive"
 
-    TREE="$DIR/tree"
+    TREE="$tree"
     info "Extracted to $TREE"
 }
 
 cleanup() {
     [[ $KEEP == true ]] && return 0
-    [[ -n $TREE && -d $TREE ]] || return 0
-    rm -rf "$TREE"
+    # Removes what this run created rather than what it finished, because TREE is set only once extraction has succeeded.
+    # A failed extract leaves both the archive and a part-written tree, so keying the cleanup on TREE left a tarball in the cache on every failed attempt.
+    rm -rf "$(tree_path)" "$(archive_path)"
 }
 
 # --- Handoff ---
