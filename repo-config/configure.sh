@@ -243,6 +243,7 @@ check_ruleset() { # payload-file - the live ruleset must match the committed pol
     # A host on jq 1.5 would otherwise not degrade, it would fail to compile the filter.
     # The check_ruleset function would then report drift on every parameterized rule it never actually compared.
     # That is the inverse of the false clean this comparison was written to close, so the portable definition is worth its length.
+    # shellcheck disable=SC2016  # $in and $k are jq's variables, not shell expansions
     norm='def w(f): . as $in
             | if type == "object" then reduce keys_unsorted[] as $k ({}; . + { ($k): ($in[$k] | w(f)) }) | f
               elif type == "array" then map(w(f)) | f
