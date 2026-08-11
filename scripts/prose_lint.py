@@ -199,6 +199,15 @@ def repo_prefix(root: Path) -> str:
     return r.stdout.strip() if r.returncode == 0 else ''
 
 
+def quoted(paths) -> str:
+    """Paths as a sorted, quoted, comma-joined list for an error message.
+
+    Quoted because a path holding a space or a comma is indistinguishable from two paths once
+    joined, which makes the message unreadable exactly when it names something unexpected.
+    """
+    return ', '.join(repr(str(p)) for p in sorted(paths))
+
+
 def repo_root(path: Path) -> str:
     """The repository top level containing `path`, or '' when git cannot say."""
     start = path if path.is_dir() else path.parent
@@ -1106,11 +1115,38 @@ def main(argv: list[str] | None = None) -> int:
 
     rules = set(a.checks or DEFAULT_RULES)
 
+    # The invariant: the rule set is decided by what is scanned, and no path here reads the working directory to decide it.
+    # Only a repository declares a model, so two of them refuse and anything else resolves to one anchor.
+    # TestScanRootDecidesTheRuleSet carries the cases and the reason each one exists.
+    scan_paths = a.paths or ['.']
+    # Anything that is not a file or a directory is refused rather than absorbed.
+    # `discover` reads such an argument as `.`, so it scanned the caller's directory while the rule set anchored on the argument's parent.
+    # Tested for what it is rather than for whether it exists, since a FIFO, a socket, and a device all exist and are none of the two.
+    unusable = [p for p in scan_paths if not (Path(p).is_file() or Path(p).is_dir())]
+    if unusable:
+        # Quoted, since a path holding a space or a comma is unreadable in a bare comma-joined list.
+        print(f"error: requested path(s) are not a file or a directory: {quoted(unusable)}. "
+              'Refusing rather than falling back to the current directory, which would scan one '
+              'tree and choose the rule set from another.', file=sys.stderr)
+        return 2
+    git_roots = {found for found in (repo_root(Path(p)) for p in scan_paths) if found}
+    if len(git_roots) > 1:
+        print(f'error: the requested paths span more than one repository ({quoted(git_roots)}). '
+              'Each declares its own workflow model, so no single rule set is correct for all of '
+              'them. Run the gate once per repository.', file=sys.stderr)
+        return 2
+    # A file anchors on its own parent rather than on `.`, which is where the caller stands.
+    if git_roots:
+        scan_root = Path(next(iter(git_roots)))
+    else:
+        first = Path(scan_paths[0])
+        scan_root = first if first.is_dir() else first.parent
+
     # An operational repository's runbook carries the literal path an operator types.
     # That is the repository's own content, not an agent quoting an environment it observed.
     # The skip is announced, since a rule that silently stops running reads as one that passed.
     # That is the same failure the diff-scope floor below exists to prevent.
-    if 'home-path' in rules and operational_checkout(Path(repo_root(Path('.')) or '.')):
+    if 'home-path' in rules and operational_checkout(scan_root):
         rules.discard('home-path')
         print('note: home-path is not checked in an operational repository, where an absolute '
               'path is the operator instruction rather than observed data.', file=sys.stderr)

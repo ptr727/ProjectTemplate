@@ -12,6 +12,7 @@ from __future__ import annotations
 import contextlib
 import io
 import json
+import os
 import re
 import subprocess
 import sys
@@ -1528,20 +1529,26 @@ class TestCli(unittest.TestCase):
         repository-relative ones, so the scope drops every file and the run exits 0. Testing for
         a *different* root missed this, because there is no root to differ from.
         """
+        # A real directory, since a path that does not exist is refused earlier for another reason.
+        # That would pass this assertion without ever exercising the diff guard.
+        loose = self.tmp / 'loose'
+        loose.mkdir()
         with mock.patch.object(prose_lint, 'repo_root',
                                side_effect=lambda p: '/hub' if str(p) == '.' else ''), \
                 contextlib.redirect_stderr(io.StringIO()) as err:
-            self.assertEqual(2, prose_lint.main(['--diff', 'HEAD', '/tmp/loose']))
+            self.assertEqual(2, prose_lint.main(['--diff', 'HEAD', str(loose)]))
         self.assertIn('no git repository', err.getvalue())
 
     def test_list_files_still_reports_scope_across_repositories(self) -> None:
         """It reports the scan scope and never consults the diff, so the guard must not stop it."""
         clean = self.tmp / 'clean.md'
         clean.write_text('fine\n', encoding='utf-8')
+        other = self.tmp / 'other'
+        other.mkdir()
         with mock.patch.object(prose_lint, 'repo_root',
                                side_effect=lambda p: '/hub' if str(p) == '.' else '/other'), \
                 mock.patch.object(prose_lint, 'discover', return_value=[clean]):
-            self.assertEqual(0, prose_lint.main(['--list-files', '--diff', 'HEAD', '/other/tree']))
+            self.assertEqual(0, prose_lint.main(['--list-files', '--diff', 'HEAD', str(other)]))
 
     def test_a_matching_repository_is_not_refused(self) -> None:
         """The guard must not reject the ordinary case it sits in front of."""
@@ -1792,6 +1799,174 @@ class TestOperationalExemption(unittest.TestCase):
         with mock.patch.object(prose_lint, 'repo_root', return_value=str(self.tmp)), \
                 mock.patch.object(prose_lint, 'discover', return_value=[bait]):
             self.assertEqual(1, prose_lint.main(['--check', 'home-path']))
+
+
+class TestScanRootDecidesTheRuleSet(unittest.TestCase):
+    """The rule set follows the repository being scanned, never the directory the caller stands in.
+
+    Read from `.`, the exemption discarded home-path on a release repository whenever the caller
+    happened to stand in an operational one, announced the skip on stderr, and exited 0. That
+    silences the rule that exists because real paths reached a public comment.
+
+    Every case here gives the two roots *different* models. `TestOperationalExemption` above mocks
+    `repo_root` to one value for every argument, which cannot tell the caller's repository from the
+    scanned one, and is why this defect survived it.
+    """
+
+    def setUp(self) -> None:
+        self.tmp = Path(self.enterContext(tempfile.TemporaryDirectory()))
+        self.enterContext(contextlib.redirect_stdout(io.StringIO()))
+        self.err = self.enterContext(contextlib.redirect_stderr(io.StringIO()))
+        self.operational = self._repo('operational', ('repo-config', 'operational', 'develop.json'))
+        self.release = self._repo('release', ('repo-config', 'develop.json'))
+        self.bait = self.release / 'runbook.md'
+        self.bait.write_text(f'Deploy into {NIX_HOME}/stack here.\n', encoding='utf-8')
+
+    def _repo(self, name: str, payload: tuple[str, ...]) -> Path:
+        root = self.tmp / name
+        target = root.joinpath(*payload)
+        target.parent.mkdir(parents=True, exist_ok=True)
+        target.write_text('{}\n', encoding='utf-8')
+        return root
+
+    def _roots(self, cwd: Path, scanned: Path):
+        """Resolve `.` to one repository and every other path to another."""
+        return lambda p: str(cwd) if str(p) == '.' else str(scanned)
+
+    def test_standing_in_an_operational_repo_does_not_exempt_a_release_repo(self) -> None:
+        """The defect: the caller's directory turned the rule off on the repository being scanned."""
+        with mock.patch.object(prose_lint, 'repo_root',
+                               side_effect=self._roots(self.operational, self.release)), \
+                mock.patch.object(prose_lint, 'discover', return_value=[self.bait]):
+            self.assertEqual(1, prose_lint.main([str(self.release), '--check', 'home-path']))
+        self.assertNotIn('operational repository', self.err.getvalue())
+
+    def test_standing_in_a_release_repo_does_not_un_exempt_an_operational_repo(self) -> None:
+        """The inverse error, which reports a finding the exemption exists to suppress."""
+        runbook = self.operational / 'runbook.md'
+        runbook.write_text(f'Deploy into {NIX_HOME}/stack here.\n', encoding='utf-8')
+        with mock.patch.object(prose_lint, 'repo_root',
+                               side_effect=self._roots(self.release, self.operational)), \
+                mock.patch.object(prose_lint, 'discover', return_value=[runbook]):
+            self.assertEqual(0, prose_lint.main([str(self.operational), '--check', 'home-path']))
+        self.assertIn('operational repository', self.err.getvalue())
+
+    def test_paths_spanning_two_repositories_refuse_rather_than_pick_one(self) -> None:
+        """Two repositories declare two models, and one rule set cannot be correct for both."""
+        with mock.patch.object(prose_lint, 'repo_root', side_effect=lambda p: str(Path(p))):
+            self.assertEqual(2, prose_lint.main(
+                [str(self.release), str(self.operational), '--check', 'home-path']))
+        self.assertIn('more than one repository', self.err.getvalue())
+
+    def test_a_path_that_does_not_exist_is_refused_rather_than_absorbed(self) -> None:
+        """`discover` reads a non-file, non-directory argument as `.`.
+
+        A typo therefore scanned the caller's directory while the rule set anchored on the missing
+        path's parent, so the run described one tree and judged it by another.
+        """
+        with mock.patch.object(prose_lint, 'repo_root', return_value=''):
+            self.assertEqual(2, prose_lint.main(
+                [str(self.tmp / 'no-such-dir'), '--check', 'home-path']))
+        self.assertIn('not a file or a directory', self.err.getvalue())
+
+    @unittest.skipUnless(hasattr(os, 'mkfifo'), 'mkfifo is POSIX only')
+    def test_a_path_that_exists_but_is_neither_a_file_nor_a_directory_is_refused(self) -> None:
+        """A FIFO, a socket, and a device all exist, and `discover` reads each of them as `.`.
+
+        Testing for existence therefore left the hole open on everything that is not a typo.
+        """
+        fifo = self.tmp / 'a-fifo'
+        os.mkfifo(fifo)
+        self.assertTrue(fifo.exists())
+        with mock.patch.object(prose_lint, 'repo_root', return_value=''):
+            self.assertEqual(2, prose_lint.main([str(fifo), '--check', 'home-path']))
+        self.assertIn('not a file or a directory', self.err.getvalue())
+
+    def test_a_path_holding_a_space_or_comma_is_quoted_in_the_refusal(self) -> None:
+        """Joined bare, one path with a comma in it reads as two paths and the message misleads."""
+        awkward = self.tmp / 'a dir, with comma'
+        with mock.patch.object(prose_lint, 'repo_root', return_value=''):
+            self.assertEqual(2, prose_lint.main([str(awkward), '--check', 'home-path']))
+        self.assertIn(repr(str(awkward)), self.err.getvalue())
+
+    def test_repository_roots_are_quoted_in_the_span_refusal(self) -> None:
+        spaced = self.tmp / 'root with space'
+        spaced.mkdir()
+        with mock.patch.object(prose_lint, 'repo_root', side_effect=lambda p: str(Path(p))):
+            self.assertEqual(2, prose_lint.main(
+                [str(self.release), str(spaced), '--check', 'home-path']))
+        self.assertIn(repr(str(spaced)), self.err.getvalue())
+
+    def test_an_existing_path_is_not_refused_by_that_check(self) -> None:
+        """The guard must not reject the ordinary case it sits in front of."""
+        good = self.tmp / 'good.md'
+        good.write_text('Nothing here breaks a rule.\n', encoding='utf-8')
+        with mock.patch.object(prose_lint, 'repo_root', return_value=''), \
+                mock.patch.object(prose_lint, 'discover', return_value=[good]):
+            self.assertEqual(0, prose_lint.main([str(good), '--check', 'home-path']))
+        self.assertNotIn('do not exist', self.err.getvalue())
+
+    def test_several_paths_under_no_repository_are_not_a_conflict(self) -> None:
+        """Only a repository declares a model, so two loose paths are not ambiguous.
+
+        Refusing on distinct filesystem paths broke the ordinary multi-file invocation outside a
+        checkout, where every argument resolves somewhere different.
+        """
+        loose = self.tmp / 'loose'
+        (loose / 'docs').mkdir(parents=True)
+        one, two = loose / 'a.md', loose / 'docs' / 'b.md'
+        for target in (one, two):
+            target.write_text('Nothing to find here.\n', encoding='utf-8')
+        with mock.patch.object(prose_lint, 'repo_root', return_value=''), \
+                mock.patch.object(prose_lint, 'discover', return_value=[one, two]):
+            self.assertEqual(0, prose_lint.main([str(one), str(two), '--check', 'home-path']))
+        self.assertNotIn('more than one repository', self.err.getvalue())
+
+    def test_one_repository_plus_a_loose_path_is_not_a_conflict(self) -> None:
+        """One model is in play, so there is nothing to disambiguate."""
+        loose = self.tmp / 'loose'
+        loose.mkdir()
+        bait = loose / 'notes.md'
+        bait.write_text(f'Deploy into {NIX_HOME}/stack here.\n', encoding='utf-8')
+        with mock.patch.object(prose_lint, 'repo_root',
+                               side_effect=lambda p: str(self.release) if Path(p) == self.release else ''), \
+                mock.patch.object(prose_lint, 'discover', return_value=[bait]):
+            # The one repository in play is a release repo, so home-path stays on and finds it.
+            self.assertEqual(1, prose_lint.main(
+                [str(self.release), str(loose), '--check', 'home-path']))
+        self.assertNotIn('more than one repository', self.err.getvalue())
+
+    def test_a_loose_file_anchors_on_its_own_parent_rather_than_on_the_caller(self) -> None:
+        """The fallback must not reintroduce the dependency the fix removes.
+
+        A *file* argument is the case that matters. Anchoring it on `.` puts the caller's directory
+        back in charge, so scanning a loose file from inside an operational repository exempts it.
+        Passing a directory here would not exercise that branch at all, which is how the earlier
+        version of this test let the regression through.
+        """
+        loose = self.tmp / 'loose'
+        loose.mkdir()
+        bait = loose / 'notes.md'
+        bait.write_text(f'Deploy into {NIX_HOME}/stack here.\n', encoding='utf-8')
+        # The caller stands somewhere operational; the scanned file's own directory does not.
+        with mock.patch.object(prose_lint, 'repo_root', return_value=''), \
+                mock.patch.object(prose_lint, 'operational_checkout',
+                                  side_effect=lambda root: Path(root) == Path('.')), \
+                mock.patch.object(prose_lint, 'discover', return_value=[bait]):
+            self.assertEqual(1, prose_lint.main([str(bait), '--check', 'home-path']))
+        self.assertNotIn('operational repository', self.err.getvalue())
+
+    def test_a_loose_directory_anchors_on_itself(self) -> None:
+        loose = self.tmp / 'loose'
+        loose.mkdir()
+        bait = loose / 'notes.md'
+        bait.write_text(f'Deploy into {NIX_HOME}/stack here.\n', encoding='utf-8')
+        with mock.patch.object(prose_lint, 'repo_root', return_value=''), \
+                mock.patch.object(prose_lint, 'operational_checkout',
+                                  side_effect=lambda root: Path(root) == Path('.')), \
+                mock.patch.object(prose_lint, 'discover', return_value=[bait]):
+            self.assertEqual(1, prose_lint.main([str(loose), '--check', 'home-path']))
+        self.assertNotIn('operational repository', self.err.getvalue())
 
 
 class TestDiffScopeFloor(unittest.TestCase):
