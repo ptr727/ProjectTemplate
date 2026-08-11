@@ -1106,11 +1106,25 @@ def main(argv: list[str] | None = None) -> int:
 
     rules = set(a.checks or DEFAULT_RULES)
 
+    # The rule set is decided by the repository being scanned, never by the directory the caller stands in.
+    # Reading it from `.` discarded home-path on a release repository whenever the caller happened to stand in an operational one.
+    # That silenced the rule that exists because real paths reached a public comment, announcing it on stderr and exiting 0.
+    # A run spanning two repositories refuses instead of picking one, since the two can declare different models and one rule set cannot be right for both.
+    scan_paths = a.paths or ['.']
+    scan_roots = {repo_root(Path(p)) or str(Path(p).resolve()) for p in scan_paths}
+    if len(scan_roots) > 1:
+        print('error: the requested paths span more than one repository (' +
+              ', '.join(sorted(scan_roots)) + '). Each declares its own workflow model, so one '
+              'rule set cannot be correct for both. Run the gate once per repository.',
+              file=sys.stderr)
+        return 2
+    scan_root = Path(scan_roots.pop())
+
     # An operational repository's runbook carries the literal path an operator types.
     # That is the repository's own content, not an agent quoting an environment it observed.
     # The skip is announced, since a rule that silently stops running reads as one that passed.
     # That is the same failure the diff-scope floor below exists to prevent.
-    if 'home-path' in rules and operational_checkout(Path(repo_root(Path('.')) or '.')):
+    if 'home-path' in rules and operational_checkout(scan_root):
         rules.discard('home-path')
         print('note: home-path is not checked in an operational repository, where an absolute '
               'path is the operator instruction rather than observed data.', file=sys.stderr)

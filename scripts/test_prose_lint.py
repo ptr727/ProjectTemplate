@@ -1794,6 +1794,80 @@ class TestOperationalExemption(unittest.TestCase):
             self.assertEqual(1, prose_lint.main(['--check', 'home-path']))
 
 
+class TestScanRootDecidesTheRuleSet(unittest.TestCase):
+    """The rule set follows the repository being scanned, never the directory the caller stands in.
+
+    Read from `.`, the exemption discarded home-path on a release repository whenever the caller
+    happened to stand in an operational one, announced the skip on stderr, and exited 0. That
+    silences the rule that exists because real paths reached a public comment.
+
+    Every case here gives the two roots *different* models. `TestOperationalExemption` above mocks
+    `repo_root` to one value for every argument, which cannot tell the caller's repository from the
+    scanned one, and is why this defect survived it.
+    """
+
+    def setUp(self) -> None:
+        self.tmp = Path(self.enterContext(tempfile.TemporaryDirectory()))
+        self.enterContext(contextlib.redirect_stdout(io.StringIO()))
+        self.err = self.enterContext(contextlib.redirect_stderr(io.StringIO()))
+        self.operational = self._repo('operational', ('repo-config', 'operational', 'develop.json'))
+        self.release = self._repo('release', ('repo-config', 'develop.json'))
+        self.bait = self.release / 'runbook.md'
+        self.bait.write_text(f'Deploy into {NIX_HOME}/stack here.\n', encoding='utf-8')
+
+    def _repo(self, name: str, payload: tuple[str, ...]) -> Path:
+        root = self.tmp / name
+        target = root.joinpath(*payload)
+        target.parent.mkdir(parents=True, exist_ok=True)
+        target.write_text('{}\n', encoding='utf-8')
+        return root
+
+    def _roots(self, cwd: Path, scanned: Path):
+        """Resolve `.` to one repository and every other path to another."""
+        return lambda p: str(cwd) if str(p) == '.' else str(scanned)
+
+    def test_standing_in_an_operational_repo_does_not_exempt_a_release_repo(self) -> None:
+        """The defect: the caller's directory turned the rule off on the repository being scanned."""
+        with mock.patch.object(prose_lint, 'repo_root',
+                               side_effect=self._roots(self.operational, self.release)), \
+                mock.patch.object(prose_lint, 'discover', return_value=[self.bait]):
+            self.assertEqual(1, prose_lint.main([str(self.release), '--check', 'home-path']))
+        self.assertNotIn('operational repository', self.err.getvalue())
+
+    def test_standing_in_a_release_repo_does_not_un_exempt_an_operational_repo(self) -> None:
+        """The inverse error, which reports a finding the exemption exists to suppress."""
+        runbook = self.operational / 'runbook.md'
+        runbook.write_text(f'Deploy into {NIX_HOME}/stack here.\n', encoding='utf-8')
+        with mock.patch.object(prose_lint, 'repo_root',
+                               side_effect=self._roots(self.release, self.operational)), \
+                mock.patch.object(prose_lint, 'discover', return_value=[runbook]):
+            self.assertEqual(0, prose_lint.main([str(self.operational), '--check', 'home-path']))
+        self.assertIn('operational repository', self.err.getvalue())
+
+    def test_paths_spanning_two_repositories_refuse_rather_than_pick_one(self) -> None:
+        """Two repositories declare two models, and one rule set cannot be correct for both."""
+        with mock.patch.object(prose_lint, 'repo_root', side_effect=lambda p: str(Path(p))):
+            self.assertEqual(2, prose_lint.main(
+                [str(self.release), str(self.operational), '--check', 'home-path']))
+        self.assertIn('span more than one repository', self.err.getvalue())
+
+    def test_a_path_under_no_repository_falls_back_to_itself_rather_than_the_caller(self) -> None:
+        """The fallback must not reintroduce the dependency the fix removes.
+
+        `repo_root` returns '' for a path git cannot place, and resolving that to `.` would put the
+        caller's directory back in charge of the verdict.
+        """
+        loose = self.tmp / 'loose'
+        loose.mkdir()
+        bait = loose / 'notes.md'
+        bait.write_text(f'Deploy into {NIX_HOME}/stack here.\n', encoding='utf-8')
+        with mock.patch.object(prose_lint, 'repo_root', return_value=''), \
+                mock.patch.object(prose_lint, 'discover', return_value=[bait]):
+            # Not a repository, so it carries no operational payload and the rule stays on.
+            self.assertEqual(1, prose_lint.main([str(loose), '--check', 'home-path']))
+        self.assertNotIn('operational repository', self.err.getvalue())
+
+
 class TestDiffScopeFloor(unittest.TestCase):
     """The assertion every `--diff` verdict rests on, that the run matched something it was given.
 
