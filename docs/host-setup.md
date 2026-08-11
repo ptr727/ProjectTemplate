@@ -8,7 +8,7 @@ Supported hosts:
 - **macOS** - both the devcontainer flow and the host-install flow.
 - **Windows** - the devcontainer flow requires **WSL2**, and native Windows (PowerShell + winget) is supported only for the host-install flow described in `README.md`. The bind-mounts in `.devcontainer/dotnet/devcontainer.json` and `.devcontainer/python/devcontainer.json` rely on POSIX paths and only work from Linux/macOS/WSL2.
 
-> **Shell assumptions in this doc**: every command snippet below assumes a **POSIX shell** (bash/zsh) and POSIX path conventions (`~/.ssh/...`, `mkdir -p`, `$(...)` command substitution), with one exception. A block marked `powershell` is the **Windows-native** form of the step it sits in, meant to run in PowerShell rather than translated. On Windows, run the POSIX snippets from **WSL2** or **Git Bash**, since they will not work as-is in PowerShell or `cmd.exe`. The git config and `gh` commands are portable, and only the file and path manipulation differs by shell.
+> **Shell assumptions in this doc**: every command snippet below assumes a **POSIX shell** (bash/zsh) and POSIX path conventions (`~/.ssh/...`, `mkdir -p`, `$(...)` command substitution), except where a block is marked `powershell`. Such a block is the **Windows-native** form of the step it sits in, meant to run in PowerShell rather than translated. On Windows, run the POSIX snippets from **WSL2** or **Git Bash**, since they will not work as-is in PowerShell or `cmd.exe`. The git config and `gh` commands are portable, and only the file and path manipulation differs by shell.
 
 ## What a Host Must Provide
 
@@ -45,7 +45,7 @@ Neither `node` nor `dotnet` is in the table above, deliberately: they serve the 
 
 **A host being stood up needs no Python.** The tooling under [`host-setup/`][host-setup-dir] is shell, deliberately, because requiring an interpreter to upgrade a package or install a tool would make the first step of standing a host up depend on the thing that step exists to provide. The Python floor above is a development requirement, meaning [`scripts/`][scripts-dir] and [`spec/`][spec-dir], and a host that only runs services never has to meet it. `bootstrap.sh` needs `curl` and `tar`, both of which a base install carries or can install without a network tool of its own.
 
-**Standing a host up.** [`host-setup/`][host-setup-dir] carries the tooling that makes a host satisfy this contract, and its README is the usage. A host with nothing runs [`host-setup/bootstrap.sh`][bootstrap], which fetches this repository and runs that tooling from the fetched tree. It is not called by [`scripts/host_gate.py`][host-gate] and it does not call it: the gate measures a host against the floors above, and the tooling is a remedy a person chooses when the gate reports a gap.
+**Standing a host up.** [`host-setup/`][host-setup-dir] carries the tooling that makes a host satisfy this contract, and its README is the usage. A host with nothing runs [`host-setup/bootstrap.sh`][bootstrap], which fetches this repository and runs that tooling from the fetched tree. A native Windows host runs the PowerShell peers in [`host-setup/windows/`][host-setup-windows] from a checkout instead, since no loader reaches those yet. It is not called by [`scripts/host_gate.py`][host-gate] and it does not call it: the gate measures a host against the floors above, and the tooling is a remedy a person chooses when the gate reports a gap.
 
 A repository that needs more than the fleet does adds its own `host-tools.json` at its root, which the gate layers over the hub's. It may add a tool nobody else uses, raise a floor, or turn an optional tool required. It may **not** lower a floor or turn a required tool optional, since those edits retire a fleet check from inside the repository it protects, and the gate reports a rejected relaxation rather than dropping it.
 
@@ -228,7 +228,20 @@ If signing fails locally, the devcontainer will fail too, so fix here first.
 
 The gate replaced a line that ran `--version` on each tool and read only whether it answered. That form reported a host carrying the broken `gh` as fully set up, which is the failure it exists to stop. It exits non-zero on a missing required tool or one below its floor, prints the defect behind the floor rather than the number alone, and names where to install from.
 
-**This block is POSIX, and on native Windows the interpreter line needs translating**, since `python3` is the one name a correctly set-up Windows host does not have. Read it as `py -3 scripts/host_gate.py` there, matching the contract table above, and run the rest from WSL2 or Git Bash per the shell note. Git Bash inherits the Windows `PATH`, so `python3` reaches the same Store alias stub it does in PowerShell and reports a working interpreter as missing. A PowerShell equivalent of this block is deliberately **not** given here, because it has not been run on a Windows host, and an unverified verification command is worse than none. [#483][issue-483] is where one belongs once someone has executed it.
+**This block is POSIX, and on native Windows two lines need translating.** Run the POSIX form from WSL2 or Git Bash per the shell note, or use the PowerShell form below. Git Bash inherits the Windows `PATH`, so `python3` reaches the same Store alias stub it does in PowerShell and reports a working interpreter as missing.
+
+```powershell
+py -3 scripts/host_gate.py                   # presence and version floors, from spec/host-tools.json
+git config --global --list | Select-String "user\.|signing|gpg\."
+ssh-add -L                                   # should list your public key
+git -c gpg.format=ssh commit -S --allow-empty -m "verify-signing"
+git log --show-signature -1
+gh auth status
+```
+
+Verified on Windows 11 Pro 10.0.26200 with PowerShell 7.6.4, where `py -3 scripts/host_gate.py` exits 0 over seven declared tools. It was supplied under [#483][issue-483], which had deferred it until somebody had executed it on a Windows host. Only two lines differ from the POSIX block: the interpreter, and the filter, because `grep` has no Windows peer and `Select-String` is the one that ships.
+
+**`py -3` rather than `python`, and the reason is not only the Store stub.** Both names reach the same interpreter on a correctly set-up host, so the stub rules out `python3` and chooses nothing between the other two. What chooses is that an activated virtual environment puts its own interpreter first, so `python` resolves to that environment's. That is right for running project code and wrong here, because this gate measures **the host's** interpreter against a floor, and run as `python` from an activated environment it grades the environment instead. `py` is the launcher and reaches a registered system interpreter whatever is active. The prescription is therefore narrow: `py -3` for this gate, and `python` for everything else.
 
 **What the host can do once this passes**, which is the point of the contract above:
 
@@ -256,6 +269,7 @@ A host that fails any row is not ready for the procedure that row names, and the
 [governance-git-and-commit-rules]: ../GOVERNANCE.md#git-and-commit-rules
 [host-gate]: ../scripts/host_gate.py
 [host-setup-dir]: ../host-setup/
+[host-setup-windows]: ../host-setup/windows/
 [host-tools]: ../spec/host-tools.json
 [issue-483]: https://github.com/ptr727/ProjectTemplate/issues/483
 [operations]: ../OPERATIONS.md

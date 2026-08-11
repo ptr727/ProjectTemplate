@@ -369,7 +369,7 @@ CI runs the full lint set, but run the linters locally before pushing to catch i
 
 **Each surface runs the lint with the tool that fits it, all from the same config files** (`.markdownlint-cli2.jsonc`, `cspell.json`, `.editorconfig`):
 
-- **CI (authoritative)** runs **markdownlint-cli2**, **cspell**, and **actionlint** as pinned action wrappers (Dependabot bumps them), plus **editorconfig-checker** via Docker `:latest` (its action only installs the CLI, so the Docker one-liner is what actually runs the check). markdownlint covers all `**/*.md`, and **cspell is scoped to `README.md` + `HISTORY.md`** (see [CODESTYLE.md](./CODESTYLE.md) "Markdown and Spelling" for why), matching the cspell one-liner below.
+- **CI (authoritative)** runs **markdownlint-cli2**, **cspell**, and **actionlint** as pinned action wrappers (Dependabot bumps them), plus **editorconfig-checker** and **PSScriptAnalyzer** via Docker `:latest` (editorconfig-checker's action only installs the CLI, and PSScriptAnalyzer has no action, so the Docker one-liner is what actually runs each check). markdownlint covers all `**/*.md`, and **cspell is scoped to `README.md` + `HISTORY.md`** (see [CODESTYLE.md](./CODESTYLE.md) "Markdown and Spelling" for why), matching the cspell one-liner below.
 - **The `.husky/pre-commit` hook** runs **language formatting** and the **diff-scoped doc gates**, never Docker and never a network call, so it stays fast. The formatting half is whatever the repo's own language needs, CSharpier and `dotnet format` for .NET or ruff for Python, via native tooling. A repo adds each half once its tree passes that half, since a gate that fails on the corpus it guards blocks every commit from the moment it lands, so a hook running one half is a repo mid-convergence rather than a repo out of conformance. The doc half runs each gate at the scope that fits it. The prose gate is scoped to what the commit changes rather than swept over the tree, which is the difference between about 2.2 seconds and about 0.13 and is what makes it affordable in a hook at all. A whole-repo check belongs there too when it is already fast and takes no file list, which the line-ending consistency check is, so scope is a property of the gate rather than a rule the hook applies to all of them. `repo_gate.py --check sha-pin` stays out, since it resolves a same-owner pin against the GitHub API and a hook that needs a network fails offline. A repo enables the hook per clone with `git config core.hooksPath .husky`, and CI remains the authoritative run either way.
 - **The VS Code Lint tasks** run the full doc-lint set via Docker `:latest` on demand, the local surface for Markdown, spelling, workflow, and EditorConfig checks.
 
@@ -400,6 +400,25 @@ The Docker invocations below are the same ones the VS Code tasks use, for ad-hoc
   ```sh
   docker run --rm --pull=always -v "$PWD":/workdir --workdir /workdir ghcr.io/streetsidesoftware/cspell:latest --no-progress README.md HISTORY.md
   ```
+
+- **PSScriptAnalyzer** (PowerShell, the peer of the shellcheck step, with the excluded rules and their reasons in [`PSScriptAnalyzerSettings.psd1`](./PSScriptAnalyzerSettings.psd1)):
+
+  ```sh
+  docker run --rm --pull=always -e PS_SCRIPTS="$(git ls-files '*.ps1')" -v "$PWD":/mnt --workdir /mnt mcr.microsoft.com/powershell:latest \
+    pwsh -NoProfile -Command '
+      Set-PSRepository PSGallery -InstallationPolicy Trusted
+      Install-Module PSScriptAnalyzer -RequiredVersion 1.23.0 -Force -Scope AllUsers
+      Import-Module PSScriptAnalyzer
+      $files = $env:PS_SCRIPTS -split "`n" | Where-Object { $_ }
+      $found = @()
+      foreach ($file in $files) { $found += Invoke-ScriptAnalyzer -Path $file -Settings ./PSScriptAnalyzerSettings.psd1 }
+      Write-Host "Checked $($files.Count) file(s)"
+      if ($found) { $found | Format-Table -AutoSize | Out-String -Width 200 | Write-Host; exit 1 }
+      Write-Host "no findings"
+    '
+  ```
+
+  The module version is pinned beside the image, because the image alone does not fix it and a floating install makes a local run a different check from CI. 1.23.0 rather than the newest, since 1.24.0 needs a newer `System.Management.Automation` than the image carries and fails to import after installing cleanly. The file list comes from `git ls-files` for the same reason the shellcheck step uses it, and the count is printed because a run that read no files reports the same clean as one that read them all.
 
   In a configured editor the davidanson extension is enough. Use the Docker CLI when there's no IDE (agent/headless) or to confirm a clean run before pushing.
 

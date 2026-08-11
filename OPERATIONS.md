@@ -22,6 +22,8 @@ python3 scripts/prose_lint.py . --check charset-unknown --summary
 for f in registry/*.json spec/*.json repo-config/*.json; do jq empty "$f"; done
 python3 spec/validate.py
 docker run --rm --pull=always -v "$PWD":/check --workdir /check mstruebing/editorconfig-checker:latest
+docker run --rm --pull=always -v "$PWD":/mnt --workdir /mnt koalaman/shellcheck:stable $(git ls-files '*.sh')
+docker run --rm --pull=always -e PS_SCRIPTS="$(git ls-files '*.ps1')" -v "$PWD":/mnt --workdir /mnt mcr.microsoft.com/powershell:latest pwsh -NoProfile -Command 'Set-PSRepository PSGallery -InstallationPolicy Trusted; Install-Module PSScriptAnalyzer -RequiredVersion 1.23.0 -Force -Scope AllUsers; Import-Module PSScriptAnalyzer; $files = $env:PS_SCRIPTS -split "`n" | Where-Object { $_ }; $found = @(); foreach ($f in $files) { $found += Invoke-ScriptAnalyzer -Path $f -Settings ./PSScriptAnalyzerSettings.psd1 }; Write-Host "Checked $($files.Count) file(s)"; if ($found) { $found | Format-Table -AutoSize | Out-String -Width 200 | Write-Host; exit 1 }; Write-Host "no findings"'
 ```
 
 Two gaps in that list are CI's rather than this runbook's, reproduced here so a local run matches CI rather than quietly exceeding it. The `jq` glob covers `repo-config/*.json` and does not reach `repo-config/operational/develop.json`, so a malformed operational payload passes. The second is that `sentence-split` is implemented and tested but named by no invocation, so nothing runs it.

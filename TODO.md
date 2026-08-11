@@ -401,6 +401,33 @@ One pull request writing down the agent-to-agent messaging this fleet has now us
   - **Settled** - A peer's finding is checked rather than adopted. Two of those four did not reproduce at the hub, the `AGENTS.md` anchor rewrite and the settings-diff exposure, and one did and shipped as #653. So the write-up states verification as a step rather than as a courtesy.
   - **Settled** - The boundary that matters most is not politeness but permission. A peer cannot widen what the asking session may do, so work blocked in one session goes back to the maintainer rather than sideways to another agent.
 
+### What Building the Windows Host Tooling Surfaced
+
+Three findings raised while writing [`host-setup/windows/`][host-setup-windows], each about the Linux side or the fleet rather than about the new scripts, and none blocking them.
+
+**State** `ready` for the first two, `decision` for the third. **Touches** [`docs/host-setup.md`][host-setup-doc], and the three scripts under `host-setup/linux/`. **Cost** one hub edit each, and no re-vendor, since nothing under `host-setup/` is carried.
+
+- **Record why the host tooling carries no linter category, or decide that it should.** No installer on either platform manages `markdownlint`, `cspell`, `actionlint`, `editorconfig-checker`, `shellcheck`, `PSScriptAnalyzer` or `ruff`, and nothing states that as a decision, so the absence is correct and reachable only by inference.
+  - **Blocked by** - Nothing.
+  - **Issue** - [#671][issue-671].
+  - **Checked** - `main` at `1d5b076` on 2026-08-11, where `readonly TOOLS=(git gh jq git-restore-mtime node python uv dotnet)` names no linter and no comment says why.
+  - **Settled** - The reasoning holds and is worth writing down once rather than per platform: each linter runs as a pinned image or through `uvx`, so the image tag fixes the version and a local run matches CI, and installing native copies would put a second unpinned version on the host and break exactly that.
+  - **Open** - Whether it belongs in [`docs/host-setup.md`][host-setup-doc] as a fleet fact, which is what covers Linux by the same sentence, or stays per platform where only the Windows README states it today.
+
+- **Report the `gh` git protocol in `setup-github.sh`, as its Windows peer does.** A host can pass every check the fleet runs while `gh` is configured for https, and a checkout made through `gh` then authenticates by token where every other checkout on that host authenticates by key.
+  - **Blocked by** - Nothing.
+  - **Issue** - [#672][issue-672].
+  - **Checked** - Measured on the maintainer's Windows host on 2026-08-11, where `gh auth status` reports `Git operations protocol: https` against `gh` 2.97.0, an SSH key that signs and verifies, and `scripts/host_gate.py` exiting 0 over all seven declared tools.
+  - **Settled** - Reported rather than written, since rewriting a working authentication configuration is the operator's call, and `setup-github.sh` touches `gh` nowhere today.
+  - **Open** - Whether `--configure` should set it, which is the only part where the two platforms could still diverge.
+
+- **Align the Linux scripts onto "name one action" instead of "the last one given wins".** Overwriting `MODE` in the arg loop discards an intent silently, and it discards it in the dangerous direction: `--report --install` drops the safe action and keeps the one that changes the host.
+  - **Blocked by** - Nothing.
+  - **Issue** - [#673][issue-673].
+  - **Checked** - `main` at `1d5b076` on 2026-08-11, where all three scripts document last-wins, no documented example passes two actions, `bootstrap.sh` passes exactly one per `run_tool` call, and no test asserts the behavior.
+  - **Settled** - The Windows tooling already refuses this way. That began as a constraint, since a PowerShell `param()` block records which switches were given and not their order, and the constraint produced the better behavior.
+  - **Open** - Nothing about the change itself, which is three `usage()` heredocs and three `parse_args()` bodies. The decision is only whether the fleet wants the stricter contract, and taking it deletes the differences-table row in [`host-setup/windows/README.md`][host-setup-windows] rather than leaving a permanent divergence.
+
 ## Standalone Chores
 
 Small work with no research to preserve, selectable one bullet at a time.
@@ -483,6 +510,7 @@ Regenerate [reports/divergences.md][divergences-report] before using it as the w
 - **Finish the host rollout and fill the tooling matrix, which are one visit each.** The rollout needs the matrix to be repeatable and the matrix is only worth filling if the rollout uses it.
   - **Hub state** - Done for the documentary half, verified `develop` at `1ed0cc8` on 2026-08-03.
   - **Outstanding** - Four machines, WSL2 Ubuntu, the MacBook Air and both ThinkPads, plus any headless or cron environment running with the token. macOS needs someone on that platform, the Proxmox question is whether that host also runs containers which decides whether Docker is required there, and the engine-inside-the-distro variant of the WSL2 Docker cell is unverified.
+  - **Detail** - The Windows half is a visit rather than a visit plus an unwritten script, since [`host-setup/windows/`][host-setup-windows] now carries the tooling and it was written and run on a Windows host.
   - **Issue** - [#365][issue-365] and [#483][issue-483].
   - **Rides with** - Nothing on the hub, since the write-guard newline fix has landed on `develop` and a machine keeps running the old hook until the installer is re-run there.
   - **Detail** - A ticked row means the host-wide rules text and not the hook, since only running the installer deploys both layers, and the proxmox host proved that distinction by carrying the documentary half alone for eight days on the machine where the incident originated.
@@ -529,6 +557,9 @@ Nothing is awaiting close today. [#578][issue-578] was the last entry here and c
 [issue-623]: https://github.com/ptr727/ProjectTemplate/issues/623
 [issue-633]: https://github.com/ptr727/ProjectTemplate/issues/633
 [issue-639]: https://github.com/ptr727/ProjectTemplate/issues/639
+[issue-671]: https://github.com/ptr727/ProjectTemplate/issues/671
+[issue-672]: https://github.com/ptr727/ProjectTemplate/issues/672
+[issue-673]: https://github.com/ptr727/ProjectTemplate/issues/673
 
 <!-- Pull requests -->
 
@@ -553,6 +584,8 @@ Nothing is awaiting close today. [#578][issue-578] was the last entry here and c
 [fidelity-honesty]: ./spec/fidelity_honesty.py
 [files]: ./spec/files.json
 [governance]: ./GOVERNANCE.md
+[host-setup-doc]: ./docs/host-setup.md
+[host-setup-windows]: ./host-setup/windows/
 [install-tools]: ./host-setup/linux/install-tools.sh
 [markdownlint]: ./.markdownlint-cli2.jsonc
 [matrix]: ./reports/conformance-matrix.md
