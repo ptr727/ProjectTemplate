@@ -70,6 +70,18 @@ function die { param([string]$Message) [Console]::Error.WriteLine("ERROR: $Messa
 
 function note { param([string]$Tool, [string]$Message) $script:NOTES += "${Tool}: $Message" }
 
+# A path with the home directory replaced by the variable that names it.
+# A report is written to be pasted into an issue or a pull request, so a path it prints carries the account name into wherever it is pasted, and the comments here already avoid writing one for the same reason.
+# The variable is what a reader expands themselves, so the path stays as actionable as it was.
+function Hide-Home {
+    param([string]$Path)
+    if (-not $Path -or -not $HOME) { return $Path }
+    if ($Path.StartsWith($HOME, [StringComparison]::OrdinalIgnoreCase)) {
+        return '%USERPROFILE%' + $Path.Substring($HOME.Length)
+    }
+    return $Path
+}
+
 function usage {
     # The closing marker of a here-string has to sit at column 0, so this block is deliberately unindented.
     Write-Host @'
@@ -395,7 +407,7 @@ function Add-ToolNote {
         note 'python' 'python3 resolves to the Microsoft Store alias stub under %LOCALAPPDATA%\Microsoft\WindowsApps, so py -3 is the name this contract uses here'
         $resolved = Get-Command python -ErrorAction SilentlyContinue
         if ($resolved -and $resolved.Source -notmatch 'Python\d') {
-            note 'python' "python resolves to $($resolved.Source), which is not the interpreter winget installed"
+            note 'python' "python resolves to $(Hide-Home $resolved.Source), which is not the interpreter winget installed"
         }
     }
     if ($State.Scope.Count -gt 1) {
