@@ -4,9 +4,9 @@ What a machine needs before it can be worked in, and the tooling that puts it th
 
 ## What Is Here
 
-- [`bootstrap.sh`](./bootstrap.sh) stands a host up from nothing. It is the one file fetched on its own, because a host with no git and no checkout is what it exists to fix. It fetches this repository and runs the tooling from that tree.
-- [`linux/`](./linux/) holds the tooling itself, for Debian and Ubuntu based hosts, Proxmox and WSL included. `install-tools.sh` installs and upgrades the host tools, `upgrade-host.sh` upgrades the packages of the current release or moves to the next one, and `setup-github.sh` configures the SSH key, git, and commit signing.
-- [`agent-safety/`](./agent-safety/) holds the write-safety guards, deployed per machine and per account.
+- [`bootstrap.sh`][bootstrap] stands a host up from nothing. It is the one file fetched on its own, because a host with no git and no checkout is what it exists to fix. It fetches this repository and runs the tooling from that tree.
+- [`linux/`][linux] holds the tooling itself, for Debian and Ubuntu based hosts, Proxmox and WSL included. `install-tools.sh` installs and upgrades the host tools, `upgrade-host.sh` upgrades the packages of the current release or moves to the next one, and `setup-github.sh` configures the SSH key, git, and commit signing.
+- [`agent-safety/`][agent-safety] holds the write-safety guards, deployed per machine and per account.
 
 ## Standing a Host Up
 
@@ -54,7 +54,10 @@ host-setup/linux/setup-github.sh --status
 
 <!-- Repo -->
 
+[agent-safety]: ./agent-safety/
 [audit]: ../AUDIT.md
+[bootstrap]: ./bootstrap.sh
 [host-gate]: ../scripts/host_gate.py
 [host-setup]: ../docs/host-setup.md
+[linux]: ./linux/
 [test-bootstrap]: ../scripts/test_bootstrap.py

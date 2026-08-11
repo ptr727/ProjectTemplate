@@ -61,7 +61,13 @@ def declared_tools() -> set[str]:
 
 
 def spec_tools() -> list[dict]:
-    return json.loads(HOST_TOOLS.read_text(encoding='utf-8'))['tools']
+    """The tools the spec declares, or an empty list and a recorded failure."""
+    # A malformed or unreadable spec is a finding this file reports beside the others, rather than a traceback that ends the run and takes the checks after it with it.
+    try:
+        return json.loads(HOST_TOOLS.read_text(encoding='utf-8'))['tools']
+    except (OSError, ValueError, KeyError) as error:
+        failures.append(f'{HOST_TOOLS.name} could not be read as a tool declaration: {error}')
+        return []
 
 
 def test_loader_reads_one_path_into_the_tree() -> None:
@@ -105,9 +111,10 @@ def test_every_required_linux_tool_is_installable() -> None:
         name = tool['name']
         if not tool.get('required', False):
             continue
-        if not tool.get('source', {}).get('linux'):
-            continue
 
+        # Every required tool is checked, including one whose declaration names no Linux source.
+        # A tool is in scope because the spec requires it, never because its declaration happens to describe where Linux gets it.
+        # Reading a missing `source.linux` as "not a Linux tool" skipped docker, git and uv, which is half the required set and the whole of what NOT_MANAGED exists to record.
         expected = ALIASES.get(name, name)
         if name in NOT_MANAGED:
             check(
