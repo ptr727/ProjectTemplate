@@ -1849,7 +1849,23 @@ class TestScanRootDecidesTheRuleSet(unittest.TestCase):
         with mock.patch.object(prose_lint, 'repo_root', side_effect=lambda p: str(Path(p))):
             self.assertEqual(2, prose_lint.main(
                 [str(self.release), str(self.operational), '--check', 'home-path']))
-        self.assertIn('span more than one repository', self.err.getvalue())
+        self.assertIn('more than one root', self.err.getvalue())
+
+    def test_the_refusal_does_not_call_a_non_repository_path_a_repository(self) -> None:
+        """`repo_root` returns '' for a path git cannot place, and that root is not a repository.
+
+        Naming it as one sends the reader looking for a workflow model in a directory that
+        declares none.
+        """
+        loose = self.tmp / 'loose'
+        loose.mkdir()
+        with mock.patch.object(prose_lint, 'repo_root',
+                               side_effect=lambda p: str(self.release) if Path(p) == self.release else ''):
+            self.assertEqual(2, prose_lint.main(
+                [str(self.release), str(loose), '--check', 'home-path']))
+        message = self.err.getvalue()
+        self.assertIn('no git repository', message)
+        self.assertIn(str(loose), message)
 
     def test_a_path_under_no_repository_falls_back_to_itself_rather_than_the_caller(self) -> None:
         """The fallback must not reintroduce the dependency the fix removes.

@@ -1110,15 +1110,20 @@ def main(argv: list[str] | None = None) -> int:
     # Reading it from `.` discarded home-path on a release repository whenever the caller happened to stand in an operational one.
     # That silenced the rule that exists because real paths reached a public comment, announcing it on stderr and exiting 0.
     # A run spanning two repositories refuses instead of picking one, since the two can declare different models and one rule set cannot be right for both.
-    scan_paths = a.paths or ['.']
-    scan_roots = {repo_root(Path(p)) or str(Path(p).resolve()) for p in scan_paths}
+    # A path git cannot place resolves to itself, so the roots are not all repositories.
+    # The refusal below names which is which rather than calling every one of them a repository.
+    scan_roots = {}
+    for raw in (a.paths or ['.']):
+        found = repo_root(Path(raw))
+        scan_roots[found or str(Path(raw).resolve())] = bool(found)
     if len(scan_roots) > 1:
-        print('error: the requested paths span more than one repository (' +
-              ', '.join(sorted(scan_roots)) + '). Each declares its own workflow model, so one '
-              'rule set cannot be correct for both. Run the gate once per repository.',
-              file=sys.stderr)
+        named = ', '.join(root + ('' if is_repo else ' (no git repository)')
+                          for root, is_repo in sorted(scan_roots.items()))
+        print(f'error: the requested paths resolve to more than one root ({named}). A repository '
+              'declares its own workflow model, so no single rule set is correct for all of them. '
+              'Run the gate once per root.', file=sys.stderr)
         return 2
-    scan_root = Path(scan_roots.pop())
+    scan_root = Path(next(iter(scan_roots)))
 
     # An operational repository's runbook carries the literal path an operator types.
     # That is the repository's own content, not an agent quoting an environment it observed.
