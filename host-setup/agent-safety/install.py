@@ -180,6 +180,24 @@ def blocks_present(claude_md):
     return found
 
 
+def marker_corruption(claude_md):
+    """Markers present in the file that yield no valid block, meaning duplicated or half-written.
+
+    Judged against the file alone, never against the stamp. An install onto an already-corrupted
+    CLAUDE.md records the same empty block set it reads, so the stamp and the file agree and the
+    corruption reads as a match. Two wrong answers agreeing is the failure this exists to catch.
+    """
+    if not claude_md.is_file():
+        return []
+    text = claude_md.read_text(encoding="utf-8", errors="replace")
+    valid = blocks_present(claude_md)
+    out = []
+    for marker in ("agent-safety", "fleet-bootstrap"):
+        if re.search(rf"<!-- {marker} v\d+ (?:start|end) -->", text) and marker not in valid:
+            out.append(f"the {marker} markers in CLAUDE.md are duplicated or incomplete")
+    return out
+
+
 def installed_digest(claude_home):
     """A digest over the bytes actually on this machine, or None where the kit is not fully there.
 
@@ -347,6 +365,9 @@ def report(claude_home):
         problems.append("the installed content differs from what this checkout would write")
     # Correct bytes on disk are not a running guard, so the wiring is checked as well.
     problems.extend(registration_problems(claude_home))
+    # Read from the file rather than compared against the stamp.
+    # An install onto a corrupted file writes the corruption into the stamp, and the two then agree.
+    problems.extend(marker_corruption(claude_home / "CLAUDE.md"))
     if live != stamp.get("blocks"):
         problems.append(f"CLAUDE.md now holds {live or 'no blocks'}, where the stamp recorded {stamp.get('blocks') or 'none'}")
     if stamp.get("source", {}).get("dirty"):
@@ -522,7 +543,17 @@ def main():
         snippet = (HERE / filename).read_text(encoding="utf-8").strip()
         block_re = re.compile(rf"<!-- {marker} v\d+ start -->.*?<!-- {marker} v\d+ end -->", re.DOTALL)
         if block_re.search(existing):
-            existing, action = block_re.sub(lambda _: snippet, existing), "updated"
+            # Keep the first occurrence and drop any duplicate, rather than rewriting each in place.
+            # Substituting every match preserved the duplication, so a file arriving with two blocks kept two.
+            # The report's own remedy of re-running could then never clear it.
+            written = []
+
+            def once(_match, _snippet=snippet, _written=written):
+                _written.append(True)
+                return _snippet if len(_written) == 1 else ""
+
+            existing = block_re.sub(once, existing)
+            action = "updated" if len(written) == 1 else f"updated, {len(written) - 1} duplicate(s) removed"
         else:
             sep = "" if existing == "" or existing.endswith("\n\n") else ("\n" if existing.endswith("\n") else "\n\n")
             existing, action = existing + sep + snippet + "\n", "appended"

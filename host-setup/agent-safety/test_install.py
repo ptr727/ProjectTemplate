@@ -296,6 +296,58 @@ class TestRegistration(StampCase):
         self.assertEqual(run(self.home, "--report").returncode, 0)
 
 
+class TestPreexistingCorruption(StampCase):
+    """A file corrupted before the install, where the stamp records the corruption and agrees."""
+
+    def _duplicate(self, marker="agent-safety"):
+        text = self.md.read_text(encoding="utf-8")
+        block = re.search(rf"<!-- {marker} v1 start -->.*?<!-- {marker} v1 end -->",
+                          text, re.DOTALL).group(0)
+        self.md.write_text(text + "\n" + block + "\n", encoding="utf-8")
+
+    def test_installing_onto_a_duplicated_block_does_not_report_current(self):
+        """The stamp is built from the same empty block set the file yields, so both agree."""
+        self.install()
+        self._duplicate()
+        # Install again: the stamp is now written from a file that already carries the duplicate.
+        self.install()
+        r = run(self.home, "--report")
+        self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
+        # The install collapsed it, which is why this is CURRENT rather than a standing STALE.
+        self.assertEqual(install.blocks_present(self.md), {"agent-safety": "v1", "fleet-bootstrap": "v1"})
+
+    def test_the_installer_collapses_a_duplicate_rather_than_preserving_it(self):
+        """Substituting every match kept both blocks, so the printed remedy never worked."""
+        self.install()
+        self._duplicate()
+        self.assertEqual(install.blocks_present(self.md), {"fleet-bootstrap": "v1"})
+        self.install()
+        text = self.md.read_text(encoding="utf-8")
+        self.assertEqual(len(re.findall(r"<!-- agent-safety v1 start -->", text)), 1)
+
+    def test_markers_that_yield_no_valid_block_are_reported_regardless_of_the_stamp(self):
+        """A stamp recording no blocks must not agree its way into a clean verdict."""
+        self.install()
+        self._duplicate()
+        stamp = json.loads(self.stamp.read_text(encoding="utf-8"))
+        stamp["blocks"] = {}
+        self.stamp.write_text(json.dumps(stamp) + "\n", encoding="utf-8")
+        r = run(self.home, "--report")
+        self.assertEqual(r.returncode, 1, r.stdout + r.stderr)
+        self.assertIn("duplicated or incomplete", r.stdout)
+
+    def test_a_half_written_block_is_reported_as_corruption(self):
+        self.install()
+        text = self.md.read_text(encoding="utf-8")
+        self.md.write_text(re.sub(r"<!-- agent-safety v1 end -->", "", text), encoding="utf-8")
+        self.assertEqual(install.marker_corruption(self.md),
+                         ["the agent-safety markers in CLAUDE.md are duplicated or incomplete"])
+
+    def test_a_clean_file_reports_no_corruption(self):
+        self.install()
+        self.assertEqual(install.marker_corruption(self.md), [])
+
+
 class TestStampVersion(StampCase):
     def test_a_stamp_from_a_different_format_version_is_rejected(self):
         """The field exists so a shape change is detectable, which needs it to be read."""
