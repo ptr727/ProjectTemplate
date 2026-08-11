@@ -193,14 +193,51 @@ function Add-KnownHost {
     }
     info 'Adding the github.com host keys'
     if ($script:DRY_RUN) {
-        info "[dry run] ssh-keyscan github.com >> $known"
+        info "[dry run] check the github.com host key against the fingerprints GitHub publishes, then record it in $known"
         return
     }
-    $keys = (& ssh-keyscan github.com 2>$null | Out-String)
-    if (-not $keys.Trim()) { die 'ssh-keyscan returned nothing for github.com, so the host keys could not be read' }
+
+    # Comment lines carry the banner rather than a key, and ssh-keygen refuses a file holding one.
+    $scanned = @(& ssh-keyscan github.com 2> $null | Where-Object { $_ -and $_ -notmatch '^\s*#' })
+    if ($scanned.Count -eq 0) {
+        die 'ssh-keyscan returned no host key for github.com. The OpenSSH under %SystemRoot%\System32 is older than the key exchange github.com offers and fails with "unsupported KEX method", where the copy shipped with Git for Windows under %ProgramFiles%\Git\usr\bin succeeds. Put that one first on PATH and run this again.'
+    }
+
+    # What was offered is checked against what GitHub publishes before it is recorded, matching the Linux peer.
+    # Recording whatever answered would persist a substituted key on the one run where nothing yet pins the real one, and every later connection would then verify against it.
+    $temp = Join-Path ([IO.Path]::GetTempPath()) ([Guid]::NewGuid().ToString() + '.pub')
+    try {
+        [IO.File]::WriteAllText($temp, ($scanned -join "`n") + "`n")
+        $offered = @(& ssh-keygen -lf $temp 2> $null |
+                ForEach-Object { ($_ -split '\s+')[1] -replace '^SHA256:', '' } |
+                Where-Object { $_ } | Sort-Object -Unique)
+    } finally {
+        Remove-Item $temp -Force -ErrorAction SilentlyContinue
+    }
+    if ($offered.Count -eq 0) { die 'The host key github.com offered could not be fingerprinted, so it is not being recorded' }
+
+    $published = @()
+    try {
+        $meta = Invoke-RestMethod -Uri 'https://api.github.com/meta' -TimeoutSec 10
+        $published = @($meta.ssh_key_fingerprints.PSObject.Properties |
+                Where-Object { $_.Name -like 'SHA256*' } | ForEach-Object { $_.Value })
+    } catch {
+        $published = @()
+    }
+    if ($published.Count -eq 0) {
+        die 'Cannot read the host key fingerprints GitHub publishes, so the key it offered cannot be checked. Compare it by hand against https://docs.github.com/authentication/keeping-your-account-secure/githubs-ssh-key-fingerprints and record it with ssh-keyscan.'
+    }
+
+    foreach ($fingerprint in $offered) {
+        if ($published -notcontains $fingerprint) {
+            die "github.com offered a host key GitHub does not publish (SHA256:$fingerprint), so it is not being recorded"
+        }
+    }
+    info 'The offered host key matches what GitHub publishes'
+
     $directory = Split-Path -Parent $known
     if (-not (Test-Path $directory)) { New-Item -ItemType Directory -Path $directory -Force | Out-Null }
-    Add-Content -Path $known -Value $keys.TrimEnd()
+    Add-Content -Path $known -Value $scanned
 }
 
 # --- GitHub, read only ---

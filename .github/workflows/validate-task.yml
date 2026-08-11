@@ -57,7 +57,7 @@ jobs:
       # 1.23.0 rather than the newest: 1.24.0 needs a newer System.Management.Automation than this image carries, so it installs and then fails to import, which reads as a broken gate rather than a version mismatch.
       # The count is printed because a checker that read no files reports the same clean as one that read them all, which is how this step first passed having read nothing.
       # The list splits on whitespace rather than on a newline, because the same command is documented for a local run and a PowerShell caller joins the file list with spaces where a shell joins it with newlines.
-      # Splitting on the newline alone hands the analyzer one path holding every file, which it reports as one file it cannot find and a clean run over the rest.
+      # Splitting on the newline alone hands the analyzer one path holding every file, which it reports as one file it cannot find and then a count of one and no findings, having analyzed nothing at all.
       - name: Check PowerShell scripts step
         run: |
           set -Eeuo pipefail

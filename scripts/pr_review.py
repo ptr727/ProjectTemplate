@@ -351,10 +351,13 @@ def gh_graphql(query: str, **variables) -> dict:
     `errors` is checked rather than trusted to the exit code, since a GraphQL document can fail
     per-field while the request itself succeeds, and the caller would read the null that leaves.
     """
+    # Every read below decodes as UTF-8 rather than as whatever the platform's locale is.
+    # `gh` emits UTF-8 on every platform, where a Windows console locale is cp1252.
+    # A review body carrying one typographic quote crashed the decode and left the caller reading a null stdout.
     argv = ['gh', 'api', 'graphql', '-f', f'query={query}']
     for name, value in variables.items():
         argv += ['-F' if isinstance(value, int) else '-f', f'{name}={value}']
-    r = subprocess.run(argv, capture_output=True, text=True)
+    r = subprocess.run(argv, capture_output=True, text=True, encoding='utf-8')
     if r.returncode != 0:
         sys.stderr.write(r.stderr[:800])
         raise SystemExit(f'gh graphql failed rc={r.returncode}')
@@ -381,7 +384,7 @@ def timeline(owner: str, repo: str, num: int) -> list[tuple[str, str]]:
     r = subprocess.run(
         ['gh', 'api', '--paginate', f'repos/{owner}/{repo}/issues/{num}/timeline?per_page=100',
          '--jq', TIMELINE_JQ],
-        capture_output=True, text=True)
+        capture_output=True, text=True, encoding='utf-8')
     if r.returncode != 0:
         sys.stderr.write(r.stderr[:800])
         raise SystemExit(f'gh timeline failed rc={r.returncode}')
@@ -1265,7 +1268,7 @@ def origin_owner() -> str | None:
     try:
         url = subprocess.run(['git', '-C', str(Path(__file__).resolve().parent),
                               'remote', 'get-url', 'origin'],
-                             capture_output=True, text=True, timeout=5).stdout.strip()
+                             capture_output=True, text=True, encoding='utf-8', timeout=5).stdout.strip()
     except Exception:
         return None
     m = re.search(r'[:/]([A-Za-z0-9_.\-]+)/([A-Za-z0-9_.\-]+?)(?:\.git)?/?$', url)
@@ -1412,7 +1415,7 @@ def gh_rest(path: str, jq: str | None = None) -> subprocess.CompletedProcess:
     """
     argv = ['gh', 'api', path] + (['--jq', jq] if jq else [])
     try:
-        return subprocess.run(argv, capture_output=True, text=True, timeout=30)
+        return subprocess.run(argv, capture_output=True, text=True, encoding='utf-8', timeout=30)
     except (OSError, subprocess.SubprocessError):
         return subprocess.CompletedProcess(argv, 1, '', 'gh could not be run')
 
