@@ -17,6 +17,7 @@
     "./skills/python-codestyle",
     "./skills/resync-a-repo",
     "./skills/shell-codestyle",
+    "./skills/standup-a-repo",
     "./skills/upstream-contribution-workflow"
   ]
 }
