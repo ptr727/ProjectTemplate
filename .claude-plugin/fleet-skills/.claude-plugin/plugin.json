@@ -6,6 +6,8 @@
     "name": "ptr727"
   },
   "skills": [
-    "./skills/carried-instruction-file-guard"
+    "./skills/carried-instruction-file-guard",
+    "./skills/copilot-instructions-keeper",
+    "./skills/pr-review-conduct"
   ]
 }
