@@ -7,22 +7,30 @@ $ErrorActionPreference = "Stop"
 $here = Split-Path -Parent $MyInvocation.MyCommand.Path
 $script = Join-Path $here "skills_install.py"
 
-# Prefer launchers that are unambiguously Python 3, in the order tried below.
-# $pyArgs is splatted rather than sliced from a combined array.
-# PowerShell's `1..0` range operator returns a descending @(1, 0) rather than empty.
-# That would corrupt a single-element launcher's argument list.
+# Try each candidate in order, version-checking it before committing to it.
 # None of these launchers guarantees 3.7+ by construction.
 # `py -3` and `python3` can both resolve to an old 3.6 interpreter on some systems.
-# The version is checked once, after selection, covering every branch.
+# Picking the first *available* launcher and checking only that one would fail the whole install on a machine where an earlier candidate is stale but a later one is fine.
+$candidates = @(
+    @{ Exe = "py"; Args = @("-3") },
+    @{ Exe = "python3"; Args = @() },
+    @{ Exe = "python"; Args = @() }
+)
+
 $pyExe = $null
 $pyArgs = @()
-if (Get-Command "py" -ErrorAction SilentlyContinue) {
-    $pyExe = "py"
-    $pyArgs = @("-3")
-} elseif (Get-Command "python3" -ErrorAction SilentlyContinue) {
-    $pyExe = "python3"
-} elseif (Get-Command "python" -ErrorAction SilentlyContinue) {
-    $pyExe = "python"
+foreach ($c in $candidates) {
+    if (-not (Get-Command $c.Exe -ErrorAction SilentlyContinue)) {
+        continue
+    }
+    # The installer uses `from __future__ import annotations`, which needs 3.7+.
+    # A bare `python` may be Python 2 on some systems.
+    & $c.Exe @($c.Args) -c "import sys; sys.exit(0 if sys.version_info >= (3, 7) else 1)" 2>$null
+    if ($LASTEXITCODE -eq 0) {
+        $pyExe = $c.Exe
+        $pyArgs = $c.Args
+        break
+    }
 }
 
 if (-not $pyExe) {
@@ -30,14 +38,9 @@ if (-not $pyExe) {
     exit 1
 }
 
-# The installer uses `from __future__ import annotations`, which needs 3.7+.
-# A bare `python` may be Python 2 on some systems.
-& $pyExe @pyArgs -c "import sys; sys.exit(0 if sys.version_info >= (3, 7) else 1)" 2>$null
-if ($LASTEXITCODE -ne 0) {
-    Write-Error "Found $pyExe on PATH but it is not Python 3.7+. Install Python 3.7 or newer."
-    exit 1
-}
-
+# $pyArgs is splatted rather than sliced from a combined array.
+# PowerShell's `1..0` range operator returns a descending @(1, 0) rather than empty.
+# That would corrupt a single-element launcher's argument list.
 & $pyExe @pyArgs $script @args
 
 # Propagate the installer's exit code - a native command's non-zero exit does not stop the script.
