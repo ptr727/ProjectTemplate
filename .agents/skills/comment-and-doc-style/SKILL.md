@@ -87,8 +87,8 @@ Applies to code and workflow (`#`) comments alike.
 - Comment only when the code does not explain itself, or the logic is genuinely complex.
   Self-evident code needs no comment.
 - State only the non-obvious *why*, for the human reading *this* project's code now. No
-  cross-project references, no historic or design narrative, no rule citations (governance lives
-  in `GOVERNANCE.md`, not echoed inline).
+  cross-project references, no historic or design narrative, no rule citations. Governance lives
+  in the fleet's own instruction set, not echoed inline.
 - **Keep it short**: one line is the default. A second line is earned only by a constraint the
   code cannot otherwise carry.
 - **Structured, not prose**: one sentence per line, never wrapped across lines, never a
