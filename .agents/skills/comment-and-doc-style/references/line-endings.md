@@ -7,7 +7,7 @@ summary, preserve the existing ending and verify with a byte scan, covers that c
 
 ## The defaults
 
-- **[`.editorconfig`](../../../../.editorconfig) sets the line ending.** `[*] end_of_line = crlf`
+- **`.editorconfig` sets the line ending.** `[*] end_of_line = crlf`
   is the default, every file type is CRLF unless pinned otherwise, with LF pinned for the
   execution-sensitive exceptions: `*.sh`, Dockerfiles, and any individual `.py` executed directly
   via its shebang (pinned by path, for example `spec/validate.py`, vanilla `.py` stays CRLF, since

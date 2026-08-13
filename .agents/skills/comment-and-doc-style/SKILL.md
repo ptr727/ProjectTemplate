@@ -122,17 +122,34 @@ Sub-topics take a `-` after the comment marker, each elaborating a distinct item
 
 ## Character set
 
-Agent-authored text (docs, code, comments, commit messages, PR descriptions) is ASCII by default.
-A non-ASCII character is judged by tier, and one that fits no tier is a finding, never a silent
-pass.
+Agent-authored text is ASCII by default: documentation, code, comments, commit messages, and PR
+descriptions. A non-ASCII character is read against three tiers, because whether one is
+typography or meaning depends on where it sits. A character in no tier is a finding rather than a
+silent pass.
 
-| Tier | Rule | Examples |
-| --- | --- | --- |
-| 1, never legitimate | Restructure the sentence instead of substituting an ASCII lookalike | em/en dash to a comma or two sentences (never a spaced hyphen), arrows to `->`/`=>`, curly quotes to straight quotes, ellipsis to `...`, bullet to `-` |
-| 2, legitimate only next to a number | Keep next to a number, a tier-3 symbol, or another tier-2 operator, otherwise use the ASCII form | keep `<=35` in a threshold table, write `<=`, `>=`, `!=`, `+/-`, `x`, `/` in flowing prose |
-| 3, always legitimate | Keep, never approximate away or spell out | micro, degree, ohm, pi, superscript two and three, section symbols |
-| developer-typed | Never strip, and not a license for the agent to add its own | emoji a developer deliberately placed for emphasis |
-
+- **Tier 1, never legitimate.** Typography carrying no meaning its ASCII form loses. Remove on
+  sight:
+  - em dash (U+2014) and en dash (U+2013) to a restructured sentence, two sentences or a comma,
+    never a spaced hyphen
+  - right arrow (U+2192) to `->`, double arrow (U+21D2) to `=>`
+  - curly quotes (U+2018/U+2019/U+201C/U+201D) to straight `'` and `"`
+  - ellipsis (U+2026) to `...`, bullet (U+2022) to `-`
+  - no-break space (U+00A0) to a space, non-breaking hyphen (U+2011) to `-`
+- **Tier 2, legitimate only next to a number.** Relational and arithmetic operators: U+2264,
+  U+2265, U+2260, U+00B1, U+2212, U+00D7, U+00F7, U+00B7. Keep one when an adjacent non-space token
+  is a number, a tier-3 symbol, or another tier-2 operator, so a threshold table or a measured
+  range reads as the range it is. In flowing prose write the ASCII form: `<=`, `>=`, `!=`, `+/-`,
+  `-`, `x`, `/`. A tier-2 operator directly before a number in a table of thresholds is the range
+  it describes and stays, the same character between two words in a sentence is prose and takes
+  the ASCII form.
+- **Tier 3, always legitimate.** Scientific and unit symbols whose ASCII form would be a lie:
+  micro (U+00B5), degree (U+00B0), ohm (U+2126), pi (U+03C0), superscript two and three (U+00B2,
+  U+00B3), section (U+00A7). Keep the symbol, never approximate it away or spell it out.
+- **Unicode a developer deliberately typed** stays regardless of tier, such as emoji used for
+  emphasis or as callout markers. Never strip a developer's own characters, this is developer
+  authored text and not a license for the agent to add its own.
+- **An unrecognized non-ASCII character is reported, not allowed.** Classify it into a tier above
+  before using it.
 - **No semicolon in agent-authored prose.** Recast a mid-sentence semicolon as a comma or as two
   sentences. A semicolon separating items in a list that already contains commas, or a statement
   terminator in code, is unaffected.
