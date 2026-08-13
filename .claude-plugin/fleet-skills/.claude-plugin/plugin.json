@@ -5,5 +5,7 @@
   "author": {
     "name": "ptr727"
   },
-  "skills": []
+  "skills": [
+    "./skills/carried-instruction-file-guard"
+  ]
 }
