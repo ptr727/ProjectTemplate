@@ -69,12 +69,14 @@ def tree_digest(root, names):
         skill_dir = root / name
         reject_symlinks(skill_dir)
         h.update(name.encode("utf-8"))
-        for f in sorted(skill_dir.rglob("*")):
-            if f.is_file():
-                # .as_posix(), not str(): a bare str(Path) uses backslashes on Windows.
-                # That would make the digest disagree with a Linux machine over identical bytes.
-                h.update(f.relative_to(root).as_posix().encode("utf-8"))
-                h.update(f.read_bytes())
+        # Sorted by the same .as_posix() key that gets hashed, not by raw Path comparison.
+        # Path ordering follows the platform's native separator.
+        # Two OSes can sort an identical file set into a different order and hash it into a different digest, even though the bytes hashed per file already agree via .as_posix() below.
+        files = sorted((f for f in skill_dir.rglob("*") if f.is_file()),
+                        key=lambda f: f.relative_to(root).as_posix())
+        for f in files:
+            h.update(f.relative_to(root).as_posix().encode("utf-8"))
+            h.update(f.read_bytes())
     return h.hexdigest()[:16]
 
 
