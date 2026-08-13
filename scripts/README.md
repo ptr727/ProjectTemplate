@@ -4,7 +4,7 @@ The fleet's checks and review tooling, run by hand, with the deterministic ones 
 
 **Hosted here and reached, never carried.** These are not declared in [`spec/files.json`][files], so the audit does not expect a downstream repo to ship them, the same footing as `spec/audit.py`. That is the fleet model rather than an omission: a script holding no per-repo content is one copy for the fleet, run from a hub checkout against the repository named on the command line, per [GOVERNANCE.md "Hub-Hosted Tooling"][governance-hub-hosted-tooling]. A repository that cannot reach the hub reports the check as not run rather than reconstructing it, since a rebuilt gate encodes its author's reading of the rule and agrees with no other repository. CI reaches the same rules through the [`prose-gate`][prose-gate-action] composite action, which a caller pins to a commit SHA. It reads the copy bundled at that pin only where the run targets `main`, and takes the rules from hub `develop` on every other target, a feature-branch push included, so a released repo's gate is reproducible while every branch below it exercises a rule change before that change reaches `main`. A caller wanting one specific hub ref passes `rules-ref` and overrides both.
 
-Python only, standard library only, no third-party packages. Every script is read-only and exits non-zero on a finding.
+Python only, standard library only, no third-party packages. Every check script is read-only and exits non-zero on a finding. `build_dist.py` and `skills_install.py` below are the two exceptions, since a generator and an installer both exist to write, and each still offers a read-only mode (`--check`, `--report`) for CI and for asking without changing anything.
 
 Each script has a `test_<script>.py` beside it, driving its gates against input they must reject, because a gate nobody has watched fail is a gate nobody knows works. Where a case covers a table it reads the live table rather than restating it, and each one asserts a floor on what a healthy run reaches, since a check whose scan matches nothing reports zero findings and reads exactly like a pass.
 
@@ -12,7 +12,9 @@ Each script has a `test_<script>.py` beside it, driving its gates against input 
 python3 scripts/test_prose_lint.py
 python3 scripts/test_repo_gate.py
 python3 scripts/test_pr_review.py
-python3 -m unittest discover -s scripts          # all three, and exits 5 if the suite vanishes
+python3 scripts/test_build_dist.py
+python3 scripts/test_skills_install.py
+python3 -m unittest discover -s scripts          # all of them, and exits 5 if the suite vanishes
 uvx coverage@latest run --source=. -m unittest discover -s scripts && uvx coverage@latest report
 ```
 
@@ -192,17 +194,33 @@ Undecided is a third answer here for the reason it is one in `repo_gate.py`. A r
 
 The match is on the block's heading rather than anywhere in the body, and on the runbook's alternation rather than on one phrasing, since the wording has already appeared two ways. A case asserts the script's pattern is the one the runbook publishes rather than a copy of it that can drift. Reading the whole body was the first implementation and its own review caught it: a review whose overview prose discusses suppressed findings carries none, and reporting that as a finding trains the reader to skim the field. A heading outside any `<details>` wrapper is still read, because reporting zero when the markup moves is the same false clean one level up, and that fallback takes a count so ordinary prose does not become one.
 
+## `build_dist.py`
+
+Regenerates [`.claude-plugin/fleet-skills/`][fleet-skills-dist] from [`.agents/skills/`][agents-skills], the hub's own hand-authored fleet Skills. Codex and opencode read `.agents/skills/` directly, project-local, with no install step. Claude Code scans neither that path nor any repo-root path by default, only `.claude/skills/` or a plugin's own `skills/`, so this script materializes a Claude-plugin-compatible copy for [`.claude-plugin/marketplace.json`][marketplace] to publish, nested under `.claude-plugin/` rather than a top-level `dist/`, since this repo's `.gitignore` already gives `dist/` a different, Python-build-artifact meaning. `.agents/skills/` stays the one place a skill is hand-edited, and `.claude-plugin/fleet-skills/` is generated and never hand-edited, the same discipline this fleet already applies to other derived trees.
+
+`--check` is the read-only mode: it exits `1` when the generated plugin was built from different source bytes than `.agents/skills/` currently holds, comparing a digest over every source file rather than a file-count or a timestamp, so a same-size edit still registers. CI runs `--check` rather than trusting a contributor to have run the generator, the same reason `spec/audit.py` exists rather than trusting a hand-carried file.
+
+## `skills_install.py`
+
+Installs the fleet's Skills for the current machine, cross-platform and idempotent, mirroring [`host-setup/agent-safety/install.py`][agent-safety-install]'s shape: `skills_install.sh` and `skills_install.ps1` are thin wrappers that locate a Python 3 interpreter and hand off, so every OS runs one tested code path. Two independent things happen on a run, since the three tools this fleet targets discover skills differently: `.agents/skills/` is materialized (not symlinked) to `$HOME/.agents/skills/`, so Codex and opencode's global scan covers every repo on the machine rather than only the one that happens to be open, and this repo's marketplace is registered with the `claude` CLI (`claude plugin marketplace add`, `claude plugin install`) so Claude Code loads the same content the other two read directly. The marketplace/plugin registration goes through the `claude` CLI's own commands rather than writing its internal `known_marketplaces.json` by hand, because that file's shape is the CLI's state, not a documented contract, and a hand-written copy risks drifting from what the CLI expects on its next release.
+
+`--report` reads the stamp a prior run wrote (`$HOME/.agents/skills-install-stamp.json`, naming the hub commit installed) against the current checkout and says whether the machine is current, without installing anything. A repository whose `AGENTS.md` keeps needing a rule restated is usually this: the machine was never installed, or was installed from an older commit.
+
 <!-- Internal -->
 
+[agent-safety-install]: ../host-setup/agent-safety/install.py
+[agents-skills]: ../.agents/skills/README.md
 [audit]: ../spec/audit.py
 [copilot-instructions]: ../.github/copilot-instructions.md
 [editorconfig]: ../.editorconfig
 [files]: ../spec/files.json
+[fleet-skills-dist]: ../.claude-plugin/fleet-skills/
 [gitattributes]: ../.gitattributes
 [governance]: ../GOVERNANCE.md
 [governance-hub-hosted-tooling]: ../GOVERNANCE.md#hub-hosted-tooling
 [host-setup]: ../docs/host-setup.md
 [host-tools]: ../spec/host-tools.json
+[marketplace]: ../.claude-plugin/marketplace.json
 [operations]: ../OPERATIONS.md
 [prose-gate-action]: ../.github/actions/prose-gate/action.yml
 [repos]: ../registry/repos.json

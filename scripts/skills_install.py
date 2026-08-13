@@ -1,0 +1,165 @@
+#!/usr/bin/env python3
+"""Install the fleet's Skills for the current user account. Cross-platform, idempotent.
+
+Two independent things happen, since Claude Code, opencode, and Codex CLI discover skills
+differently (see AGENTS.md "Fleet Bootstrap" for why):
+
+  - Codex and opencode read .agents/skills/<name>/SKILL.md directly, project-local, walking up
+    from the working directory. They also check a global $HOME/.agents/skills/, which this
+    installer materializes so every repo on this machine benefits, not only this checkout.
+  - Claude Code never scans .agents/skills/, only .claude/skills/ or a plugin's own skills/. This
+    installer registers this repo's marketplace (built at dist/claude/, see build_dist.py) and
+    installs its plugin via the `claude` CLI, so Claude Code loads the same content the other two
+    tools read directly.
+
+Both wrappers (install.sh, install.ps1) call this, so every OS runs one tested code path.
+
+Every run records a stamp at ~/.agents/skills-install-stamp.json naming the machine, what was
+installed, and the hub commit it came from, so staleness is checkable later without re-running the
+install. `--report` reads that stamp against this checkout and answers whether the machine is
+current, without changing anything.
+
+Usage: python3 skills_install.py            (installs)
+       python3 skills_install.py --report   (read-only: is this machine current?)
+       AGENTS_HOME=/x python3 skills_install.py   (override the global skills target, for testing)
+"""
+from __future__ import annotations
+
+import argparse
+import json
+import os
+import shutil
+import socket
+import subprocess
+import sys
+from pathlib import Path
+
+HERE = Path(__file__).resolve().parent
+ROOT = HERE.parent
+SKILLS_SRC = ROOT / ".agents" / "skills"
+MARKETPLACE_NAME = "projecttemplate-fleet"
+PLUGIN_NAME = "fleet-skills"
+STAMP_VERSION = 1
+
+
+def agents_home():
+    """Where Codex/opencode look for globally-installed skills, overridable for testing."""
+    override = os.environ.get("AGENTS_HOME")
+    return Path(override) if override else Path.home() / ".agents"
+
+
+def source_ref():
+    """The hub commit this installer is running from, and whether the tree is dirty."""
+    def git(*args):
+        try:
+            r = subprocess.run(["git", "-C", str(ROOT), *args], capture_output=True, text=True)
+        except OSError:
+            return None
+        return r.stdout.strip() if r.returncode == 0 else None
+
+    sha = git("rev-parse", "HEAD")
+    if not sha:
+        return {"vcs": "none"}
+    ref = {"vcs": "git", "commit": sha}
+    status = git("status", "--porcelain", "--", str(SKILLS_SRC))
+    ref["dirty"] = bool(status)
+    return ref
+
+
+def materialize_global_skills(target):
+    """Mirror .agents/skills/ into `target`, replacing what's there.
+
+    A plain copy rather than a symlink: a symlink to a checkout that later moves or is deleted
+    leaves every repo on the machine silently unable to resolve skills, where a copy just goes
+    stale (caught by --report) instead of missing outright.
+    """
+    if target.exists():
+        shutil.rmtree(target)
+    if SKILLS_SRC.is_dir():
+        shutil.copytree(SKILLS_SRC, target)
+    else:
+        target.mkdir(parents=True, exist_ok=True)
+
+
+def claude_available():
+    return shutil.which("claude") is not None
+
+
+def register_claude_marketplace():
+    """Add this repo's marketplace and install its plugin via the `claude` CLI.
+
+    Shells out to `claude plugin marketplace add`/`install` rather than writing
+    ~/.claude/plugins/known_marketplaces.json directly: that file's shape is the CLI's own
+    internal state, not a documented contract, so writing it by hand risks silently drifting from
+    whatever the CLI actually expects on the next release.
+    """
+    marketplace_add = subprocess.run(
+        ["claude", "plugin", "marketplace", "add", str(ROOT)],
+        capture_output=True, text=True,
+    )
+    # Re-adding an already-registered marketplace is expected on a re-run.
+    # Only a genuine failure (not "already exists") is fatal, since idempotence is the point.
+    if marketplace_add.returncode != 0 and "already" not in marketplace_add.stdout.lower() \
+            and "already" not in marketplace_add.stderr.lower():
+        print(marketplace_add.stdout, marketplace_add.stderr, file=sys.stderr)
+        return False
+
+    install = subprocess.run(
+        ["claude", "plugin", "install", f"{PLUGIN_NAME}@{MARKETPLACE_NAME}", "--scope", "user"],
+        capture_output=True, text=True,
+    )
+    if install.returncode != 0 and "already" not in install.stdout.lower() \
+            and "already" not in install.stderr.lower():
+        print(install.stdout, install.stderr, file=sys.stderr)
+        return False
+    return True
+
+
+def build_stamp(claude_registered):
+    return {
+        "stampVersion": STAMP_VERSION,
+        "hostname": socket.gethostname(),
+        "source": source_ref(),
+        "claudeRegistered": claude_registered,
+    }
+
+
+def report(stamp_path):
+    if not stamp_path.is_file():
+        print("Not installed on this machine (no stamp found).")
+        return 1
+    stamp = json.loads(stamp_path.read_text(encoding="utf-8"))
+    current = source_ref()
+    stale = stamp.get("source", {}).get("commit") != current.get("commit")
+    print(json.dumps({"stamp": stamp, "currentCommit": current.get("commit"), "stale": stale}, indent=2))
+    return 1 if stale else 0
+
+
+def main():
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("--report", action="store_true", help="read-only: is this machine current?")
+    args = parser.parse_args()
+
+    home = agents_home()
+    stamp_path = home / "skills-install-stamp.json"
+
+    if args.report:
+        return report(stamp_path)
+
+    materialize_global_skills(home / "skills")
+
+    claude_registered = False
+    if claude_available():
+        claude_registered = register_claude_marketplace()
+    else:
+        print("`claude` not found on PATH, skipping Claude Code marketplace registration "
+              "(Codex/opencode global skills were still installed).", file=sys.stderr)
+
+    home.mkdir(parents=True, exist_ok=True)
+    stamp_path.write_text(json.dumps(build_stamp(claude_registered), indent=2) + "\n", encoding="utf-8")
+    print(f"Installed to {home / 'skills'}. Claude Code marketplace registered: {claude_registered}.")
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())
