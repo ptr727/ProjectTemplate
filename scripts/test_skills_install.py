@@ -128,6 +128,23 @@ class MaterializeCase(unittest.TestCase):
         self.assertFalse((target / "bar").exists())
         self.assertTrue((target / "foo").is_dir())
 
+    def test_a_symlinked_directory_in_the_cleanup_scan_is_skipped_not_crashed_on(self) -> None:
+        """is_dir() alone follows a symlink, and shutil.rmtree() refuses a top-level symlink
+        with an uncaught OSError. A stray symlink under the shared target, even one whose real
+        target happens to carry the marker, must be skipped rather than blow up the install."""
+        real = self.tmp / "elsewhere"
+        real.mkdir()
+        (real / skills_install.INSTALLED_MARKER).write_text("", encoding="utf-8")
+        target = self.tmp / "target"
+        target.mkdir(parents=True)
+        (target / "retired-name").symlink_to(real)
+        self.src.mkdir(parents=True)
+
+        skills_install.materialize_global_skills(target)  # must not raise
+
+        self.assertTrue((target / "retired-name").is_symlink())
+        self.assertTrue((real / skills_install.INSTALLED_MARKER).is_file())
+
     def test_a_same_named_third_party_skill_is_never_removed_as_if_retired(self) -> None:
         """The marker, not the name, decides what this installer may remove. A third-party
         skill happening to share a name with something the fleet once published must survive,

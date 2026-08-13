@@ -120,7 +120,12 @@ def materialize_global_skills(target):
     current_names = {p.name for p in skill_dirs}
 
     for existing in target.iterdir():
-        if existing.is_dir() and existing.name not in current_names and (existing / INSTALLED_MARKER).is_file():
+        # A plain is_dir() check follows a symlink.
+        # Calling shutil.rmtree() on one refuses with an uncaught OSError instead of deleting through it.
+        # Confirmed locally rather than assumed.
+        # Skipping a symlink here avoids that crash on a stray one under the shared target.
+        if (not existing.is_symlink() and existing.is_dir()
+                and existing.name not in current_names and (existing / INSTALLED_MARKER).is_file()):
             shutil.rmtree(existing)
 
     for skill_dir in skill_dirs:
