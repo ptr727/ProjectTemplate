@@ -17,7 +17,7 @@ description: >-
   .NET side, a repo with no .NET projects has no use for this Skill.
 ---
 
-# Dotnet Codestyle
+# .NET Codestyle
 
 ## Why this exists
 
