@@ -48,8 +48,12 @@ def reject_symlinks(skill_dir):
             raise ValueError(f"{p} is a symlink; .agents/skills/ must contain only real files")
 
 
-def source_digest(names):
-    """One digest over every source file for the given skills, order-independent per skill.
+def tree_digest(root, names):
+    """One digest over every file under `root/<name>` for each name, order-independent per skill.
+
+    Rooted at an arbitrary directory rather than hardcoding SKILLS_SRC, so the same function
+    hashes both the source tree and the generated tree, and is_stale() can compare the two
+    directly instead of trusting a stored digest to still describe what was actually generated.
 
     Names are hashed in the fixed sorted order the caller already produced. Each skill's own files
     are hashed in a second stable sort so an unrelated filesystem listing order never changes the
@@ -57,15 +61,20 @@ def source_digest(names):
     """
     h = hashlib.sha256()
     for name in names:
-        reject_symlinks(SKILLS_SRC / name)
+        skill_dir = root / name
+        reject_symlinks(skill_dir)
         h.update(name.encode("utf-8"))
-        for f in sorted((SKILLS_SRC / name).rglob("*")):
+        for f in sorted(skill_dir.rglob("*")):
             if f.is_file():
                 # .as_posix(), not str(): a bare str(Path) uses backslashes on Windows.
                 # That would make the digest disagree with a Linux machine over identical bytes.
-                h.update(f.relative_to(SKILLS_SRC).as_posix().encode("utf-8"))
+                h.update(f.relative_to(root).as_posix().encode("utf-8"))
                 h.update(f.read_bytes())
     return h.hexdigest()[:16]
+
+
+def source_digest(names):
+    return tree_digest(SKILLS_SRC, names)
 
 
 def write_plugin_manifest(names):
@@ -104,9 +113,13 @@ def regenerate():
 
 def is_stale():
     """Whether the generated plugin needs regenerating: missing, corrupted, or built from
-    different source bytes. Checks the manifest's own content and each skill's directory too,
-    not only the digest stamp, since a stamp surviving a partial deletion or a hand-edited
-    manifest would otherwise report current over a plugin that no longer actually resolves."""
+    different source bytes. Checks the manifest's own content and the generated tree's actual
+    bytes, not only the digest stamp, since a stamp surviving a partial deletion, a hand-edited
+    manifest, or an edited-in-place generated file would otherwise report current over a plugin
+    that no longer actually matches its source. Comparing the source and generated digests
+    directly, rather than trusting the stamp to still describe what is on disk, is what catches
+    the in-place edit: nothing else here re-reads the generated files at all.
+    """
     if not DIGEST_STAMP.is_file() or not PLUGIN_MANIFEST.is_file():
         return True
     names = skill_names()
@@ -116,9 +129,10 @@ def is_stale():
         return True
     if manifest.get("skills") != [f"./skills/{name}" for name in names]:
         return True
-    if any(not (DIST_PLUGIN / "skills" / name / "SKILL.md").is_file() for name in names):
+    current_source_digest = source_digest(names)
+    if DIGEST_STAMP.read_text(encoding="utf-8").strip() != current_source_digest:
         return True
-    return DIGEST_STAMP.read_text(encoding="utf-8").strip() != source_digest(names)
+    return current_source_digest != tree_digest(DIST_PLUGIN / "skills", names)
 
 
 def main():
