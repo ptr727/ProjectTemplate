@@ -60,6 +60,23 @@ class MaterializeCase(unittest.TestCase):
         skills_install.materialize_global_skills(target)
         self.assertEqual((target / "foo" / "SKILL.md").read_text(encoding="utf-8"), "v2")
 
+    def test_a_skill_from_another_source_already_in_target_is_left_alone(self) -> None:
+        """~/.agents/skills/ is a shared convention, not this fleet's own directory. Installing
+        this fleet's skills must never delete a skill some other tool or fleet put there."""
+        (self.src / "foo").mkdir(parents=True)
+        (self.src / "foo" / "SKILL.md").write_text("fleet content", encoding="utf-8")
+        target = self.tmp / "target"
+        target.mkdir(parents=True)
+        (target / "someone-elses-skill").mkdir()
+        (target / "someone-elses-skill" / "SKILL.md").write_text("not ours", encoding="utf-8")
+
+        skills_install.materialize_global_skills(target)
+
+        self.assertEqual((target / "foo" / "SKILL.md").read_text(encoding="utf-8"), "fleet content")
+        self.assertEqual(
+            (target / "someone-elses-skill" / "SKILL.md").read_text(encoding="utf-8"), "not ours"
+        )
+
 
 class ReportCase(unittest.TestCase):
     def setUp(self) -> None:

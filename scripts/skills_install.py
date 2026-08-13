@@ -70,21 +70,30 @@ def source_ref():
 
 
 def materialize_global_skills(target):
-    """Mirror .agents/skills/ into `target`, replacing what's there.
+    """Overlay .agents/skills/ into `target`, one skill directory at a time.
 
-    A plain copy rather than a symlink: a symlink to a checkout that later moves or is deleted
-    leaves every repo on the machine silently unable to resolve skills, where a copy just goes
-    stale (caught by --report) instead of missing outright.
+    Only this fleet's own skill names are touched under `target`. `~/.agents/skills/` is a shared
+    convention, not this fleet's own directory, so a machine can have skills installed there from
+    other sources, and replacing the whole directory would delete those as a side effect of
+    installing this fleet's skills. A plain copy rather than a symlink per skill: a symlink to a
+    checkout that later moves or is deleted leaves every repo on the machine silently unable to
+    resolve that skill, where a copy just goes stale (caught by --report) instead of missing
+    outright.
     """
     if target.is_symlink() or target.is_file():
         target.unlink()
-    elif target.is_dir():
-        shutil.rmtree(target)
-    target.parent.mkdir(parents=True, exist_ok=True)
-    if SKILLS_SRC.is_dir():
-        shutil.copytree(SKILLS_SRC, target)
-    else:
-        target.mkdir(parents=True, exist_ok=True)
+    target.mkdir(parents=True, exist_ok=True)
+    if not SKILLS_SRC.is_dir():
+        return
+    for skill_dir in SKILLS_SRC.iterdir():
+        if not skill_dir.is_dir():
+            continue
+        dest = target / skill_dir.name
+        if dest.is_symlink() or dest.is_file():
+            dest.unlink()
+        elif dest.is_dir():
+            shutil.rmtree(dest)
+        shutil.copytree(skill_dir, dest)
 
 
 def claude_available():

@@ -71,7 +71,9 @@ def write_plugin_manifest(names):
 
 def regenerate():
     names = skill_names()
-    if DIST_PLUGIN.exists():
+    if DIST_PLUGIN.is_symlink() or DIST_PLUGIN.is_file():
+        DIST_PLUGIN.unlink()
+    elif DIST_PLUGIN.is_dir():
         shutil.rmtree(DIST_PLUGIN)
     dist_skills = DIST_PLUGIN / "skills"
     dist_skills.mkdir(parents=True, exist_ok=True)
@@ -84,12 +86,18 @@ def regenerate():
 
 def is_stale():
     """Whether the generated plugin needs regenerating: missing, corrupted, or built from
-    different source bytes. Checks the manifest and each skill's directory too, not only the
-    digest stamp, since a stamp surviving a partial deletion would otherwise report current over
-    a plugin that no longer actually resolves."""
+    different source bytes. Checks the manifest's own content and each skill's directory too,
+    not only the digest stamp, since a stamp surviving a partial deletion or a hand-edited
+    manifest would otherwise report current over a plugin that no longer actually resolves."""
     if not DIGEST_STAMP.is_file() or not PLUGIN_MANIFEST.is_file():
         return True
     names = skill_names()
+    try:
+        manifest = json.loads(PLUGIN_MANIFEST.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return True
+    if manifest.get("skills") != [f"./skills/{name}" for name in names]:
+        return True
     if any(not (DIST_PLUGIN / "skills" / name / "SKILL.md").is_file() for name in names):
         return True
     return DIGEST_STAMP.read_text(encoding="utf-8").strip() != source_digest(names)
