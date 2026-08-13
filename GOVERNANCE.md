@@ -259,7 +259,7 @@ The checks that separate work actually done from work that merely reports succes
 
 ## PR Review Etiquette
 
-The provider-agnostic review-loop contract every fleet repo follows: request a review on every push, confirm it covers the current head SHA and the full diff rather than only part of it, triage every finding including the low-confidence ones a review body collapses rather than threads, and reply and resolve. Never merge on a green or CLEAN merge state alone, since that field reflects required status checks only and never an open review finding.
+The provider-agnostic review-loop contract every fleet repo follows: request a review on every push, confirm it covers the current head SHA and the full diff rather than only part of it, triage every finding including the low-confidence ones a review body collapses rather than threads, and reply and resolve. Never merge on a green or CLEAN merge state alone, since that field can go clean once checks pass and every known thread is resolved while still saying nothing about whether the review covered the current head SHA, read the full diff, or left a suppressed finding, which opens no thread at all, unanswered.
 
 This is packaged as the `pr-review-conduct` Skill at `.agents/skills/pr-review-conduct/SKILL.md` in the hub, not a repo-relative link since that path is hub-local and not carried into every fleet repo. Read the skill for the merge gate, the expected loop, and how a finding is closed, since this section only points to it now rather than carrying the contract text itself.
 

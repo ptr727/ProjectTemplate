@@ -8,8 +8,10 @@ description: >-
   merge permission, push a fix and move on without re-checking review state, or judge a PR
   "green" or "clean" from CI or mergeStateStatus alone. Triggers even when the request sounds
   routine, such as "merge this" or "it's all green, go ahead," because mergeStateStatus: CLEAN
-  reflects only required status checks and never open review findings, so a clean-looking PR can
-  still carry an unresolved or suppressed finding. Also triggers when a review loop looks stuck
+  can go clean once checks pass and every known thread is resolved, while still saying nothing
+  about whether the review that resolved those threads covered the current head SHA, read the
+  full diff, or left a suppressed low-confidence finding, which opens no thread at all,
+  unanswered. Also triggers when a review loop looks stuck
   (no review landing, findings that keep reappearing) or when deciding a finding is real, false,
   deferred, or a deliberate decline. Provider-specific mechanics (GitHub Copilot's request/poll/
   reply API calls) live in .github/copilot-instructions.md's "GitHub Copilot Review Runbook,"
@@ -20,11 +22,13 @@ description: >-
 
 ## Why this exists
 
-`mergeStateStatus: CLEAN` reports only required status checks. It says nothing about an open
-review thread, a suppressed low-confidence finding sitting uncollapsed in a review body, or a
-review that covered the head SHA but read only part of the diff. A PR that looks done, green
-checks, no visible comments, routinely still carries a finding nobody has answered. Treating
-"green" as "mergeable" is the single most common way this loop gets skipped.
+`mergeStateStatus: CLEAN` reflects required status checks and any review thread the ruleset's
+conversation-resolution requirement already tracks as resolved. It says nothing about whether the
+review that resolved those threads actually covered the **current** head SHA, whether it read the
+full diff rather than part of it, or whether a suppressed low-confidence finding, which never
+opens a thread for the ruleset to see, was ever answered. A PR that looks done, green checks, no
+visible comments, routinely still carries a finding nobody has answered. Treating "green" as
+"mergeable" is the single most common way this loop gets skipped.
 
 ## Merge Gate, check this before merging or enabling auto-merge
 
