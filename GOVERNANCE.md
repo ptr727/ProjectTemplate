@@ -235,7 +235,7 @@ The Docker invocations below are the same ones the VS Code tasks use, for ad-hoc
   docker run --rm --pull=always -v "$PWD":/workdir --workdir /workdir ghcr.io/streetsidesoftware/cspell:latest --no-progress README.md HISTORY.md
   ```
 
-- **PSScriptAnalyzer** (PowerShell, the peer of the shellcheck step, **only applies to a repo that carries `.ps1` files**, with the excluded rules and their reasons in `PSScriptAnalyzerSettings.psd1` alongside a repo that carries one):
+- **PSScriptAnalyzer** (PowerShell, the peer of the shellcheck step, **only applies to a repo that carries `.ps1` files**, which carries `PSScriptAnalyzerSettings.psd1` alongside them with the excluded rules and their reasons):
 
   ```sh
   docker run --rm --pull=always -e PS_SCRIPTS="$(git ls-files '*.ps1')" -v "$PWD":/mnt --workdir /mnt mcr.microsoft.com/powershell:latest \
