@@ -72,7 +72,7 @@ $KEEP = [bool]$Keep
 $REF = if ($Ref) { $Ref } else { $DEFAULT_REF }
 
 $MODE = ''
-$DIR = ''
+# No placeholder for $DIR here, unlike the four lines around it: PowerShell variable names are case-insensitive, so $DIR and the -Dir parameter $Dir are the same variable, and resetting it here would silently discard whatever -Dir the caller passed before Resolve-Directory ever reads it.
 $RESOLVED = ''
 $TREE = ''
 $PWSH_PATH = ''
