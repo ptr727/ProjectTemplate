@@ -261,8 +261,9 @@ query($o:String!,$r:String!,$n:Int!){
   }}}
 """
 
-# The Copilot reviewer bot's node id, read from the most recent PRs' own reviews rather than hand-typed or cached across runs.
-# The id belongs to the reviewer account, not to any one PR, so it is identical everywhere in this repo.
+# The Copilot reviewer bot's node id, read live from this repository's own review history rather than hand-typed or cached across runs.
+# The id belongs to the reviewer account, not to any one PR or any one review, so it is identical wherever it is found and recency does not matter once one is found.
+# `pullRequests` orders newest first so an old, possibly-archived PR is not preferred over a live one, and `reviews(first:20)` inside it just needs any one Copilot review among a PR's own, not its most recent.
 # It resolves even on a PR whose own round 1 carries no review yet, per the fleet's standing rule against fabricating or reusing a GitHub node id.
 Q_BOT_ID = """
 query($o:String!,$r:String!){
@@ -468,9 +469,12 @@ def request_copilot_review(owner: str, repo: str, pr_node_id: str) -> str:
     never fired or whose prior request was superseded by a later push sat waiting the full
     timeout for a review nothing had asked for, twice in one session before this was written.
     `union:true` adds the bot to the request set rather than replacing it, so a human reviewer
-    requested alongside it stays requested. Never raises on its own: a failed auto-request still
-    lets the wait fall back to plain polling, in case a request lands some other way meanwhile,
-    but the one-line return value says plainly that nothing was asked for and why.
+    requested alongside it stays requested. Raises where `gh_graphql` does, on the bot id read
+    or on the mutation itself, the same as every other write in this script: a failed write is
+    reported, never quietly swallowed into a fallback that would recreate the exact blind-poll
+    failure this function exists to prevent, from a different cause. The one quiet path is
+    finding no bot id to request with at all, which is not a failure, since a repository with no
+    Copilot review anywhere carries nothing to read the id from.
     """
     bot_id = copilot_bot_id(owner, repo)
     if not bot_id:
