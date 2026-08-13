@@ -82,9 +82,13 @@ def source_digest(names):
     return tree_digest(SKILLS_SRC, names)
 
 
-def write_plugin_manifest(names):
-    PLUGIN_MANIFEST.parent.mkdir(parents=True, exist_ok=True)
-    manifest = {
+def expected_manifest(names):
+    """The plugin.json content `names` should produce, entirely deterministic.
+
+    The one source is_stale() compares the actual manifest against, so a hand-edited field of
+    any kind (not only "skills") is caught the same way a hand-edited "skills" list already was.
+    """
+    return {
         "name": PLUGIN_NAME,
         "version": "0.0.0",
         "description": "Fleet-wide agent rules (comment style, PR-review conduct, resync safety) "
@@ -92,6 +96,11 @@ def write_plugin_manifest(names):
         "author": {"name": "ptr727"},
         "skills": [f"./skills/{name}" for name in names],
     }
+
+
+def write_plugin_manifest(names):
+    PLUGIN_MANIFEST.parent.mkdir(parents=True, exist_ok=True)
+    manifest = expected_manifest(names)
     # CRLF, matching this repo's JSON default (.editorconfig `[*] end_of_line = crlf`).
     # No LF pin applies here, since this is not a shebang-executed or shell-consumed path.
     PLUGIN_MANIFEST.write_text(json.dumps(manifest, indent=2) + "\n", encoding="utf-8", newline="\r\n")
@@ -132,7 +141,10 @@ def is_stale():
         manifest = json.loads(PLUGIN_MANIFEST.read_text(encoding="utf-8"))
     except (OSError, json.JSONDecodeError):
         return True
-    if manifest.get("skills") != [f"./skills/{name}" for name in names]:
+    # The full manifest, not only "skills".
+    # A hand-edited description/author/version is exactly as much a corrupted-plugin case as a hand-edited skills list.
+    # The manifest is entirely deterministic from `names`, so comparing all of it costs nothing extra to get right.
+    if manifest != expected_manifest(names):
         return True
     current_source_digest = source_digest(names)
     if DIGEST_STAMP.read_text(encoding="utf-8").strip() != current_source_digest:

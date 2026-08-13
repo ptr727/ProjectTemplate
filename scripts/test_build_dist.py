@@ -99,6 +99,17 @@ class RegenerateCase(unittest.TestCase):
         build_dist.PLUGIN_MANIFEST.unlink()
         self.assertTrue(build_dist.is_stale())
 
+    def test_a_hand_edited_non_skills_manifest_field_reports_stale(self) -> None:
+        """Only the "skills" field was compared before; a hand-edited description, author, or
+        version slipped through undetected. The manifest is entirely deterministic from `names`,
+        so comparing all of it is both correct and free."""
+        self.make_skill("foo")
+        build_dist.regenerate()
+        manifest = json.loads(build_dist.PLUGIN_MANIFEST.read_text(encoding="utf-8"))
+        manifest["description"] = "hand-edited, not what build_dist.py would generate"
+        build_dist.PLUGIN_MANIFEST.write_text(json.dumps(manifest), encoding="utf-8")
+        self.assertTrue(build_dist.is_stale())
+
     def test_a_deleted_generated_skill_reports_stale_even_with_a_current_digest_stamp(self) -> None:
         self.make_skill("foo")
         build_dist.regenerate()
