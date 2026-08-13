@@ -7,6 +7,7 @@ Run as `python3 scripts/test_skills_install.py`, or under `python3 -m unittest d
 from __future__ import annotations
 
 import json
+import shutil
 import tempfile
 import unittest
 from pathlib import Path
@@ -111,6 +112,42 @@ class MaterializeCase(unittest.TestCase):
         self.assertEqual(
             (target / "someone-elses-skill" / "SKILL.md").read_text(encoding="utf-8"), "not ours"
         )
+
+    def test_a_retired_fleet_skill_is_removed_on_the_next_install(self) -> None:
+        (self.src / "foo").mkdir(parents=True)
+        (self.src / "foo" / "SKILL.md").write_text("x", encoding="utf-8")
+        (self.src / "bar").mkdir(parents=True)
+        (self.src / "bar" / "SKILL.md").write_text("x", encoding="utf-8")
+        target = self.tmp / "target"
+        skills_install.materialize_global_skills(target)
+        self.assertTrue((target / "bar").is_dir())
+
+        shutil.rmtree(self.src / "bar")
+        skills_install.materialize_global_skills(target)
+
+        self.assertFalse((target / "bar").exists())
+        self.assertTrue((target / "foo").is_dir())
+
+    def test_a_same_named_third_party_skill_is_never_removed_as_if_retired(self) -> None:
+        """The marker, not the name, decides what this installer may remove. A third-party
+        skill happening to share a name with something the fleet once published must survive,
+        even though a name-only check would read it as "our old content, now gone"."""
+        target = self.tmp / "target"
+        target.mkdir(parents=True)
+        (target / "bar").mkdir()
+        (target / "bar" / "SKILL.md").write_text("not ours, no marker", encoding="utf-8")
+        self.src.mkdir(parents=True)
+
+        skills_install.materialize_global_skills(target)
+
+        self.assertEqual((target / "bar" / "SKILL.md").read_text(encoding="utf-8"), "not ours, no marker")
+
+    def test_an_installed_skill_carries_the_marker(self) -> None:
+        (self.src / "foo").mkdir(parents=True)
+        (self.src / "foo" / "SKILL.md").write_text("x", encoding="utf-8")
+        target = self.tmp / "target"
+        skills_install.materialize_global_skills(target)
+        self.assertTrue((target / "foo" / skills_install.INSTALLED_MARKER).is_file())
 
 
 class ReportCase(unittest.TestCase):

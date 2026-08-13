@@ -77,6 +77,9 @@ def source_ref():
     return ref
 
 
+INSTALLED_MARKER = ".installed-by-projecttemplate-fleet"
+
+
 def materialize_global_skills(target):
     """Overlay .agents/skills/ into `target`, one skill directory at a time.
 
@@ -87,10 +90,21 @@ def materialize_global_skills(target):
     checkout that later moves or is deleted leaves every repo on the machine silently unable to
     resolve that skill, where a copy just goes stale (caught by --report) instead of missing
     outright.
+
+    Each installed skill carries an INSTALLED_MARKER file, so a later run can tell "a fleet skill
+    that got retired" apart from "someone else's skill that happens to share this directory."
+    Only a directory carrying the marker is ever removed for no longer being in the current
+    source set; a directory without one is never touched, retired-looking name or not.
     """
     if target.is_symlink() or target.is_file():
         target.unlink()
     target.mkdir(parents=True, exist_ok=True)
+    current_names = {p.name for p in SKILLS_SRC.iterdir() if p.is_dir()} if SKILLS_SRC.is_dir() else set()
+
+    for existing in target.iterdir():
+        if existing.is_dir() and existing.name not in current_names and (existing / INSTALLED_MARKER).is_file():
+            shutil.rmtree(existing)
+
     if not SKILLS_SRC.is_dir():
         return
     for skill_dir in SKILLS_SRC.iterdir():
@@ -102,6 +116,7 @@ def materialize_global_skills(target):
         elif dest.is_dir():
             shutil.rmtree(dest)
         shutil.copytree(skill_dir, dest)
+        (dest / INSTALLED_MARKER).write_text("", encoding="utf-8")
 
 
 def claude_available():
