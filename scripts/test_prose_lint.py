@@ -129,7 +129,7 @@ class TestTierTables(BaitCase):
                 self.assertGreaterEqual(len(table), floor)
 
 
-class TestGovernanceCoupling(unittest.TestCase):
+class TestCommentAndDocStyleSkillCoupling(unittest.TestCase):
     """The rule text drives the tables, rather than a copy of the rule driving them.
 
     The Character Set rule text lives in the comment-and-doc-style Skill.

@@ -139,13 +139,13 @@ The fleet's tooling lives in the hub once and a repository runs it from there ra
 
 A PR title and a commit message share one contract: an imperative subject, 72 characters or fewer, no trailing period, no vague titles like `update stuff` or `wip` (Dependabot's `Bump X from Y to Z` is fine as-is), no unsolicited `Co-Authored-By:` lines, and no release-bump magnitude in the title, since Nerdbank.GitVersioning computes the next version from `version.json` and git history.
 
-This is packaged as the `comment-and-doc-style` Skill at `.agents/skills/comment-and-doc-style/SKILL.md` in the hub, not a repo-relative link since that path is hub-local and not carried into every fleet repo. Read the skill for the full format, rules, and examples, since this section only points to it now rather than carrying the contract text itself.
+This is packaged as the `comment-and-doc-style` Skill at `.agents/skills/comment-and-doc-style/SKILL.md` in the hub, not a repo-relative link since that path is hub-local and not carried into every fleet repo. The summary above sketches the contract. Read the skill for the full format, rules, and examples.
 
 ## Documentation Style Conventions
 
 The fleet's prose and formatting contract: what a carried file may reference, how Markdown links, headings, and tense are structured, the comment philosophy, the ASCII character-set tiers, the line-ending policy, and how a quantitative claim in a doc stays honest. Applies to docs and code/workflow comments alike.
 
-This is packaged as the `comment-and-doc-style` Skill at `.agents/skills/comment-and-doc-style/SKILL.md` in the hub, not a repo-relative link since that path is hub-local and not carried into every fleet repo. Read the skill for the full rules, since this section only points to it now rather than carrying the contract text itself.
+This is packaged as the `comment-and-doc-style` Skill at `.agents/skills/comment-and-doc-style/SKILL.md` in the hub, not a repo-relative link since that path is hub-local and not carried into every fleet repo. The summary above sketches the contract. Read the skill for the full rules.
 
 ### Comments
 
@@ -183,7 +183,7 @@ The checks that separate work actually done from work that merely reports succes
 
 The provider-agnostic review-loop contract every fleet repo follows: request a review on every push, confirm it covers the current head SHA and the full diff rather than only part of it, triage every finding including the low-confidence ones a review body collapses rather than threads, and reply and resolve. Never merge on a green or CLEAN merge state alone, since that field can go clean once checks pass and every known thread is resolved while still saying nothing about whether the review covered the current head SHA, read the full diff, or left a suppressed finding, which opens no thread at all, unanswered.
 
-This is packaged as the `pr-review-conduct` Skill at `.agents/skills/pr-review-conduct/SKILL.md` in the hub, not a repo-relative link since that path is hub-local and not carried into every fleet repo. Read the skill for the merge gate, the expected loop, and how a finding is closed, since this section only points to it now rather than carrying the contract text itself.
+This is packaged as the `pr-review-conduct` Skill at `.agents/skills/pr-review-conduct/SKILL.md` in the hub, not a repo-relative link since that path is hub-local and not carried into every fleet repo. The summary above sketches the contract. Read the skill for the merge gate, the expected loop, and how a finding is closed.
 
 The provider-specific mechanics this contract needs to actually drive GitHub Copilot, how to request a review, poll for it, match the suppressed-findings heading, verify coverage, and reply or resolve a thread without a hand-typed id, live in [`.github/copilot-instructions.md`](./.github/copilot-instructions.md) "GitHub Copilot Review Runbook", unaffected by this pointer. That content is read directly by the Copilot reviewer bot, which cannot read a Skill, so it stays fully written out rather than being packaged the same way.
 
