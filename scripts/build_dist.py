@@ -36,13 +36,18 @@ def skill_names():
 
 
 def reject_symlinks(skill_dir):
-    """Raise if `skill_dir` contains a symlink anywhere in its tree.
+    """Raise if `skill_dir` itself, or anything in its tree, is a symlink.
 
     .agents/skills/ is the one hand-authored source, with no legitimate reason to hold a symlink.
     Path.is_file() and read_bytes() both dereference one, and so does shutil.copytree() by
     default, so an unnoticed symlink there would let the digest and the generated plugin silently
-    include content from outside this tree, tracked or not.
+    include content from outside this tree, tracked or not. `skill_dir` itself needs its own
+    check: rglob("*") only yields paths *inside* the directory it walks, so a skill directory that
+    is itself a symlink to another tree would walk straight into that tree without the walk ever
+    seeing (or flagging) the root symlink node.
     """
+    if skill_dir.is_symlink():
+        raise ValueError(f"{skill_dir} is a symlink; .agents/skills/ must contain only real files")
     for p in skill_dir.rglob("*"):
         if p.is_symlink():
             raise ValueError(f"{p} is a symlink; .agents/skills/ must contain only real files")

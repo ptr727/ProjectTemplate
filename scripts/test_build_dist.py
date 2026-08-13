@@ -51,6 +51,18 @@ class RegenerateCase(unittest.TestCase):
         with self.assertRaises(ValueError):
             build_dist.source_digest(["foo"])
 
+    def test_a_skill_directory_that_is_itself_a_symlink_is_rejected(self) -> None:
+        """rglob("*") only yields paths inside the directory it walks, so a skill directory that
+        is itself a symlink to another tree would otherwise walk straight into that tree without
+        the walk ever seeing the root symlink node."""
+        outside = self.tmp / "outside-the-repo"
+        outside.mkdir()
+        (outside / "SKILL.md").write_text("not tracked here", encoding="utf-8")
+        self.skills_src.mkdir(parents=True, exist_ok=True)
+        (self.skills_src / "foo").symlink_to(outside)
+        with self.assertRaises(ValueError):
+            build_dist.source_digest(["foo"])
+
     def test_no_skills_still_produces_a_valid_manifest(self) -> None:
         names = build_dist.regenerate()
         self.assertEqual(names, [])
