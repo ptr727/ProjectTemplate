@@ -75,6 +75,23 @@ class RegenerateCase(unittest.TestCase):
         self.make_skill("foo")
         self.assertTrue(build_dist.is_stale())
 
+    def test_digest_uses_forward_slashes_regardless_of_platform(self) -> None:
+        """A digest built from str(Path) would use backslashes on Windows and disagree with a
+        Linux machine over identical bytes. Reproduce the expected posix-joined hash by hand and
+        confirm it matches, which would fail if source_digest regressed to str(Path)."""
+        self.make_skill("foo")
+        (self.skills_src / "foo" / "scripts").mkdir()
+        (self.skills_src / "foo" / "scripts" / "run.py").write_text("x", encoding="utf-8")
+
+        import hashlib
+        expected = hashlib.sha256()
+        expected.update(b"foo")
+        expected.update(b"foo/SKILL.md")
+        expected.update(b"content")
+        expected.update(b"foo/scripts/run.py")
+        expected.update(b"x")
+        self.assertEqual(build_dist.source_digest(["foo"]), expected.hexdigest()[:16])
+
     def test_removing_a_skill_after_regenerate_no_longer_carries_it(self) -> None:
         self.make_skill("foo")
         self.make_skill("bar")

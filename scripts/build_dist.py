@@ -47,7 +47,9 @@ def source_digest(names):
         h.update(name.encode("utf-8"))
         for f in sorted((SKILLS_SRC / name).rglob("*")):
             if f.is_file():
-                h.update(str(f.relative_to(SKILLS_SRC)).encode("utf-8"))
+                # .as_posix(), not str(): a bare str(Path) uses backslashes on Windows.
+                # That would make the digest disagree with a Linux machine over identical bytes.
+                h.update(f.relative_to(SKILLS_SRC).as_posix().encode("utf-8"))
                 h.update(f.read_bytes())
     return h.hexdigest()[:16]
 

@@ -8,9 +8,9 @@ differently (see AGENTS.md "Fleet Bootstrap" for why):
     from the working directory. They also check a global $HOME/.agents/skills/, which this
     installer materializes so every repo on this machine benefits, not only this checkout.
   - Claude Code never scans .agents/skills/, only .claude/skills/ or a plugin's own skills/. This
-    installer registers this repo's marketplace (built at dist/claude/, see build_dist.py) and
-    installs its plugin via the `claude` CLI, so Claude Code loads the same content the other two
-    tools read directly.
+    installer registers this repo's marketplace (built at .claude-plugin/fleet-skills/, see
+    build_dist.py) and installs its plugin via the `claude` CLI, so Claude Code loads the same
+    content the other two tools read directly.
 
 Both wrappers (install.sh, install.ps1) call this, so every OS runs one tested code path.
 
@@ -61,7 +61,10 @@ def source_ref():
     if not sha:
         return {"vcs": "none"}
     ref = {"vcs": "git", "commit": sha}
-    status = git("status", "--porcelain", "--", str(SKILLS_SRC))
+    # A repo-relative pathspec, not str(SKILLS_SRC).
+    # With `git -C <repo>`, an absolute path can fail to match anything.
+    # That silently and permanently reports dirty=False.
+    status = git("status", "--porcelain", "--", SKILLS_SRC.relative_to(ROOT).as_posix())
     ref["dirty"] = bool(status)
     return ref
 
@@ -73,8 +76,11 @@ def materialize_global_skills(target):
     leaves every repo on the machine silently unable to resolve skills, where a copy just goes
     stale (caught by --report) instead of missing outright.
     """
-    if target.exists():
+    if target.is_symlink() or target.is_file():
+        target.unlink()
+    elif target.is_dir():
         shutil.rmtree(target)
+    target.parent.mkdir(parents=True, exist_ok=True)
     if SKILLS_SRC.is_dir():
         shutil.copytree(SKILLS_SRC, target)
     else:

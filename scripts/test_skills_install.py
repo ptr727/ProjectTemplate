@@ -31,6 +31,19 @@ class MaterializeCase(unittest.TestCase):
         self.assertTrue(target.is_dir())
         self.assertEqual(list(target.iterdir()), [])
 
+    def test_materializing_when_the_target_parent_does_not_exist_yet(self) -> None:
+        (self.src / "foo").mkdir(parents=True)
+        (self.src / "foo" / "SKILL.md").write_text("x", encoding="utf-8")
+        target = self.tmp / "not-yet-created" / "skills"
+        skills_install.materialize_global_skills(target)
+        self.assertEqual((target / "foo" / "SKILL.md").read_text(encoding="utf-8"), "x")
+
+    def test_materializing_over_a_stray_file_at_the_target_path(self) -> None:
+        target = self.tmp / "target"
+        target.write_text("not a directory", encoding="utf-8")
+        skills_install.materialize_global_skills(target)
+        self.assertTrue(target.is_dir())
+
     def test_materializing_copies_the_source_tree(self) -> None:
         (self.src / "foo").mkdir(parents=True)
         (self.src / "foo" / "SKILL.md").write_text("x", encoding="utf-8")
