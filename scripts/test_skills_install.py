@@ -197,7 +197,7 @@ class ReportCase(unittest.TestCase):
 
     def test_matching_commit_reports_current(self) -> None:
         stamp = self.tmp / "stamp.json"
-        with mock.patch("skills_install.source_ref", return_value={"vcs": "git", "commit": "abc"}):
+        with mock.patch("skills_install.source_ref", return_value={"vcs": "git", "commit": "abc", "dirty": False}):
             stamp.write_text(json.dumps({"stampVersion": skills_install.STAMP_VERSION, "source": {"commit": "abc"}}), encoding="utf-8")
             exit_code = skills_install.report(stamp)
         self.assertEqual(exit_code, 0)
@@ -205,7 +205,7 @@ class ReportCase(unittest.TestCase):
     def test_mismatched_commit_reports_stale(self) -> None:
         stamp = self.tmp / "stamp.json"
         stamp.write_text(json.dumps({"stampVersion": skills_install.STAMP_VERSION, "source": {"commit": "old"}}), encoding="utf-8")
-        with mock.patch("skills_install.source_ref", return_value={"vcs": "git", "commit": "new"}):
+        with mock.patch("skills_install.source_ref", return_value={"vcs": "git", "commit": "new", "dirty": False}):
             exit_code = skills_install.report(stamp)
         self.assertEqual(exit_code, 1)
 
@@ -237,7 +237,7 @@ class ReportCase(unittest.TestCase):
             json.dumps({"stampVersion": skills_install.STAMP_VERSION, "source": "oops"}),
             encoding="utf-8",
         )
-        with mock.patch("skills_install.source_ref", return_value={"vcs": "git", "commit": "abc"}):
+        with mock.patch("skills_install.source_ref", return_value={"vcs": "git", "commit": "abc", "dirty": False}):
             with mock.patch("builtins.print"):
                 exit_code = skills_install.report(stamp)
         self.assertEqual(exit_code, 1)
@@ -249,7 +249,7 @@ class ReportCase(unittest.TestCase):
             json.dumps({"stampVersion": skills_install.STAMP_VERSION + 1, "source": {"commit": "abc"}}),
             encoding="utf-8",
         )
-        with mock.patch("skills_install.source_ref", return_value={"vcs": "git", "commit": "abc"}):
+        with mock.patch("skills_install.source_ref", return_value={"vcs": "git", "commit": "abc", "dirty": False}):
             with mock.patch("builtins.print"):
                 exit_code = skills_install.report(stamp)
         self.assertEqual(exit_code, 1)

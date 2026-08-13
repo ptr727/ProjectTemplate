@@ -209,8 +209,11 @@ def report(stamp_path):
     # The commit it names is not what is actually on disk.
     # A caller trusting "current" here would trust bytes that were never installed.
     # Wrapped in bool() rather than left as a bare "or" chain.
-    # A missing current_commit (a non-git checkout) or a missing "dirty" key must read as stale.
-    # A plain "or" chain can leave stale as None, and `if stale else` treats that as falsy too.
+    # A missing current_commit (a non-git checkout) reads as stale this way.
+    # A plain "or" chain would leave `stale` as the None that produces there instead, and `if stale else` treats that as falsy the same as an actual False.
+    # A missing "dirty" key by itself reads as not-dirty, since get() returns None there, which is falsy.
+    # That is not the same as reading as stale.
+    # A call to source_ref() always sets "dirty" whenever it sets "commit", so the two are missing together only in the vcs=="none" case, which current_commit is None already catches.
     stale = bool(
         current_commit is None
         or stamp_commit != current_commit
