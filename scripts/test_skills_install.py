@@ -149,6 +149,15 @@ class MaterializeCase(unittest.TestCase):
         skills_install.materialize_global_skills(target)
         self.assertTrue((target / "foo" / skills_install.INSTALLED_MARKER).is_file())
 
+    def test_a_directory_without_skill_md_is_not_copied_as_a_skill(self) -> None:
+        """Matches build_dist.skill_names()'s own definition of a skill, so a stray cache or
+        scratch directory under .agents/skills/ is never treated as one here either."""
+        (self.src / "not-a-skill").mkdir(parents=True)
+        (self.src / "not-a-skill" / "notes.txt").write_text("wip", encoding="utf-8")
+        target = self.tmp / "target"
+        skills_install.materialize_global_skills(target)
+        self.assertFalse((target / "not-a-skill").exists())
+
 
 class ReportCase(unittest.TestCase):
     def setUp(self) -> None:

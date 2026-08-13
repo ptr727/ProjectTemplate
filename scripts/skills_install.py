@@ -80,6 +80,17 @@ def source_ref():
 INSTALLED_MARKER = ".installed-by-projecttemplate-fleet"
 
 
+def skill_source_dirs():
+    """Every .agents/skills/<name>/ directory that actually carries a SKILL.md.
+
+    Matches build_dist.skill_names()'s own definition of a skill, so a stray non-skill directory
+    under .agents/skills/ (a cache folder, a scratch dir) is never treated as one here either.
+    """
+    if not SKILLS_SRC.is_dir():
+        return []
+    return [p for p in SKILLS_SRC.iterdir() if (p / "SKILL.md").is_file()]
+
+
 def materialize_global_skills(target):
     """Overlay .agents/skills/ into `target`, one skill directory at a time.
 
@@ -99,17 +110,14 @@ def materialize_global_skills(target):
     if target.is_symlink() or target.is_file():
         target.unlink()
     target.mkdir(parents=True, exist_ok=True)
-    current_names = {p.name for p in SKILLS_SRC.iterdir() if p.is_dir()} if SKILLS_SRC.is_dir() else set()
+    skill_dirs = skill_source_dirs()
+    current_names = {p.name for p in skill_dirs}
 
     for existing in target.iterdir():
         if existing.is_dir() and existing.name not in current_names and (existing / INSTALLED_MARKER).is_file():
             shutil.rmtree(existing)
 
-    if not SKILLS_SRC.is_dir():
-        return
-    for skill_dir in SKILLS_SRC.iterdir():
-        if not skill_dir.is_dir():
-            continue
+    for skill_dir in skill_dirs:
         dest = target / skill_dir.name
         if dest.is_symlink() or dest.is_file():
             dest.unlink()
