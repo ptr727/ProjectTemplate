@@ -1,0 +1,11 @@
+{
+  "name": "fleet-skills",
+  "version": "0.0.0",
+  "description": "Fleet-wide agent rules (comment style, PR-review conduct, resync safety) packaged as Claude Code Skills, generated from .agents/skills/.",
+  "author": {
+    "name": "ptr727"
+  },
+  "skills": [
+    "./skills/carried-instruction-file-guard"
+  ]
+}

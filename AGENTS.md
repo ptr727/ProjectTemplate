@@ -87,3 +87,5 @@ Every rule below is a level-two section of [`GOVERNANCE.md`](./GOVERNANCE.md). R
 | Editor settings and tasks | `Editor and Tasks` |
 | The About panel, description, or repo toggles | `Repository Details` |
 | Where a file belongs in the tree | `Repository Layout` |
+
+Some of the rules above are also packaged as Claude Code / opencode / Codex Skills, hand-authored at [`.agents/skills/`](./.agents/skills/) in the hub, so they surface automatically instead of needing to be re-read every session. `scripts/` is hub-hosted and reached rather than carried, per "Hub-Hosted Tooling", so run the installer from a hub checkout: `python3 scripts/skills_install.py` (or the `.sh`/`.ps1` wrapper) once per machine, from `github.com/ptr727/ProjectTemplate`, installs them for every repo touched from that machine. `python3 scripts/skills_install.py --report`, also from a hub checkout, says whether this machine is current. A rule that keeps needing to be restated is a sign the install is missing or stale, not that the rule does not exist.

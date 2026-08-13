@@ -1,0 +1,14 @@
+{
+  "name": "projecttemplate-fleet",
+  "description": "Fleet-wide agent rules for the ptr727 repos, packaged as Claude Code Skills.",
+  "owner": {
+    "name": "ptr727"
+  },
+  "plugins": [
+    {
+      "name": "fleet-skills",
+      "description": "Fleet-wide agent rules (comment style, PR-review conduct, resync safety) packaged as Claude Code Skills.",
+      "source": "./.claude-plugin/fleet-skills"
+    }
+  ]
+}
