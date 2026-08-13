@@ -76,8 +76,8 @@ Every rule below is a level-two section of [`GOVERNANCE.md`](./GOVERNANCE.md). R
 | A live config repo rather than a code repo | `Operational Repositories` |
 | Onboarding a repo or running a conformance sweep | `Repository Onboarding and Conformance` (hub only, not carried) |
 | Running a fleet gate, the review digest, or the config script | `Hub-Hosted Tooling` |
-| Writing a commit message or pull request title | `Pull Request Title and Commit Message Conventions` |
-| Any prose, comment, doc, or line-ending change | `Documentation Style Conventions` |
+| Writing a commit message or pull request title | `Pull Request Title and Commit Message Conventions`, packaged as the `comment-and-doc-style` Skill |
+| Any prose, comment, doc, or line-ending change | `Documentation Style Conventions`, packaged as the `comment-and-doc-style` Skill |
 | Proving work actually happened | `Verification Discipline` |
 | Requesting, answering, or closing a review | `PR Review Etiquette`, packaged as the `pr-review-conduct` Skill |
 | Reporting progress or asking the user something | `Communicating with the User` |
