@@ -158,6 +158,16 @@ class MaterializeCase(unittest.TestCase):
         skills_install.materialize_global_skills(target)
         self.assertFalse((target / "not-a-skill").exists())
 
+    def test_a_symlink_in_a_skill_directory_is_rejected(self) -> None:
+        """shutil.copytree() follows a symlink by default, which would silently pull content
+        from outside .agents/skills/ into the shared, machine-wide skills directory."""
+        (self.src / "foo").mkdir(parents=True)
+        (self.src / "foo" / "SKILL.md").write_text("x", encoding="utf-8")
+        (self.src / "foo" / "escape").symlink_to(self.tmp)
+        target = self.tmp / "target"
+        with self.assertRaises(ValueError):
+            skills_install.materialize_global_skills(target)
+
 
 class ReportCase(unittest.TestCase):
     def setUp(self) -> None:
@@ -212,6 +222,20 @@ class ReportCase(unittest.TestCase):
             encoding="utf-8",
         )
         with mock.patch("skills_install.source_ref", return_value={"vcs": "git", "commit": "abc"}):
+            with mock.patch("builtins.print"):
+                exit_code = skills_install.report(stamp)
+        self.assertEqual(exit_code, 1)
+
+    def test_a_non_git_checkout_reports_stale_rather_than_current(self) -> None:
+        """source_ref() returns {"vcs": "none"} with no "commit" key at all outside a git
+        checkout. A bare equality/or chain could leave `stale` as None (falsy, same as False)
+        instead of asserting staleness when there is no commit to compare against at all."""
+        stamp = self.tmp / "stamp.json"
+        stamp.write_text(
+            json.dumps({"stampVersion": skills_install.STAMP_VERSION, "source": {"commit": None}}),
+            encoding="utf-8",
+        )
+        with mock.patch("skills_install.source_ref", return_value={"vcs": "none"}):
             with mock.patch("builtins.print"):
                 exit_code = skills_install.report(stamp)
         self.assertEqual(exit_code, 1)

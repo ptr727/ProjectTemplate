@@ -34,6 +34,8 @@ import subprocess
 import sys
 from pathlib import Path
 
+import build_dist
+
 HERE = Path(__file__).resolve().parent
 ROOT = HERE.parent
 SKILLS_SRC = ROOT / ".agents" / "skills"
@@ -102,6 +104,10 @@ def materialize_global_skills(target):
     resolve that skill, where a copy just goes stale (caught by --report) instead of missing
     outright.
 
+    Raises ValueError (via build_dist.reject_symlinks) if a skill directory contains a symlink,
+    since shutil.copytree() follows one by default and would silently pull in content from
+    outside the tracked source tree.
+
     Each installed skill carries an INSTALLED_MARKER file, so a later run can tell "a fleet skill
     that got retired" apart from "someone else's skill that happens to share this directory."
     Only a directory carrying the marker is ever removed for no longer being in the current
@@ -118,6 +124,7 @@ def materialize_global_skills(target):
             shutil.rmtree(existing)
 
     for skill_dir in skill_dirs:
+        build_dist.reject_symlinks(skill_dir)
         dest = target / skill_dir.name
         if dest.is_symlink() or dest.is_file():
             dest.unlink()
@@ -145,8 +152,9 @@ def register_claude_marketplace():
     )
     # Re-adding an already-registered marketplace is expected on a re-run.
     # Only a genuine failure (not "already exists") is fatal, since idempotence is the point.
-    if marketplace_add.returncode != 0 and "already" not in marketplace_add.stdout.lower() \
-            and "already" not in marketplace_add.stderr.lower():
+    if (marketplace_add.returncode != 0
+            and "already" not in marketplace_add.stdout.lower()
+            and "already" not in marketplace_add.stderr.lower()):
         print(marketplace_add.stdout, marketplace_add.stderr, file=sys.stderr)
         return False
 
@@ -154,8 +162,9 @@ def register_claude_marketplace():
         ["claude", "plugin", "install", f"{PLUGIN_NAME}@{MARKETPLACE_NAME}", "--scope", "user"],
         capture_output=True, text=True,
     )
-    if install.returncode != 0 and "already" not in install.stdout.lower() \
-            and "already" not in install.stderr.lower():
+    if (install.returncode != 0
+            and "already" not in install.stdout.lower()
+            and "already" not in install.stderr.lower()):
         print(install.stdout, install.stderr, file=sys.stderr)
         return False
     return True
@@ -186,11 +195,19 @@ def report(stamp_path):
               "Re-run the installer.")
         return 1
     current = source_ref()
+    current_commit = current.get("commit")
     # A dirty checkout cannot be asserted current.
     # The commit it names is not what is actually on disk.
     # A caller trusting "current" here would trust bytes that were never installed.
-    stale = stamp.get("source", {}).get("commit") != current.get("commit") or current.get("dirty")
-    print(json.dumps({"stamp": stamp, "currentCommit": current.get("commit"), "stale": stale}, indent=2))
+    # Wrapped in bool() rather than left as a bare "or" chain.
+    # A missing current_commit (a non-git checkout) or a missing "dirty" key must read as stale.
+    # A plain "or" chain can leave stale as None, and `if stale else` treats that as falsy too.
+    stale = bool(
+        current_commit is None
+        or stamp.get("source", {}).get("commit") != current_commit
+        or current.get("dirty")
+    )
+    print(json.dumps({"stamp": stamp, "currentCommit": current_commit, "stale": stale}, indent=2))
     return 1 if stale else 0
 
 
@@ -205,7 +222,11 @@ def main():
     if args.report:
         return report(stamp_path)
 
-    materialize_global_skills(home / "skills")
+    try:
+        materialize_global_skills(home / "skills")
+    except ValueError as exc:
+        print(exc, file=sys.stderr)
+        return 1
 
     claude_present = claude_available()
     claude_registered = register_claude_marketplace() if claude_present else False

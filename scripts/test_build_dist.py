@@ -37,6 +37,20 @@ class RegenerateCase(unittest.TestCase):
         d.mkdir(parents=True, exist_ok=True)
         (d / "SKILL.md").write_text(body, encoding="utf-8")
 
+    def test_a_symlink_in_a_skill_directory_is_rejected_by_regenerate(self) -> None:
+        """shutil.copytree() follows a symlink by default, which would silently pull content
+        from outside .agents/skills/ into the generated, published plugin."""
+        self.make_skill("foo")
+        (self.skills_src / "foo" / "escape").symlink_to(self.tmp)
+        with self.assertRaises(ValueError):
+            build_dist.regenerate()
+
+    def test_a_symlink_in_a_skill_directory_is_rejected_by_source_digest(self) -> None:
+        self.make_skill("foo")
+        (self.skills_src / "foo" / "escape").symlink_to(self.tmp)
+        with self.assertRaises(ValueError):
+            build_dist.source_digest(["foo"])
+
     def test_no_skills_still_produces_a_valid_manifest(self) -> None:
         names = build_dist.regenerate()
         self.assertEqual(names, [])
@@ -122,6 +136,14 @@ class RegenerateCase(unittest.TestCase):
         names = build_dist.regenerate()
         self.assertEqual(names, ["foo"])
         self.assertFalse((self.dist_plugin / "skills" / "bar").exists())
+
+    def test_main_reports_a_symlink_cleanly_instead_of_a_raw_traceback(self) -> None:
+        self.make_skill("foo")
+        (self.skills_src / "foo" / "escape").symlink_to(self.tmp)
+        from unittest import mock
+        with mock.patch("sys.argv", ["build_dist.py"]), mock.patch("builtins.print"):
+            exit_code = build_dist.main()
+        self.assertEqual(exit_code, 1)
 
 
 if __name__ == "__main__":

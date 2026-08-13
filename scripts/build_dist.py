@@ -35,6 +35,19 @@ def skill_names():
     return sorted(p.name for p in SKILLS_SRC.iterdir() if (p / "SKILL.md").is_file())
 
 
+def reject_symlinks(skill_dir):
+    """Raise if `skill_dir` contains a symlink anywhere in its tree.
+
+    .agents/skills/ is the one hand-authored source, with no legitimate reason to hold a symlink.
+    Path.is_file() and read_bytes() both dereference one, and so does shutil.copytree() by
+    default, so an unnoticed symlink there would let the digest and the generated plugin silently
+    include content from outside this tree, tracked or not.
+    """
+    for p in skill_dir.rglob("*"):
+        if p.is_symlink():
+            raise ValueError(f"{p} is a symlink; .agents/skills/ must contain only real files")
+
+
 def source_digest(names):
     """One digest over every source file for the given skills, order-independent per skill.
 
@@ -44,6 +57,7 @@ def source_digest(names):
     """
     h = hashlib.sha256()
     for name in names:
+        reject_symlinks(SKILLS_SRC / name)
         h.update(name.encode("utf-8"))
         for f in sorted((SKILLS_SRC / name).rglob("*")):
             if f.is_file():
@@ -78,6 +92,7 @@ def regenerate():
     dist_skills = DIST_PLUGIN / "skills"
     dist_skills.mkdir(parents=True, exist_ok=True)
     for name in names:
+        reject_symlinks(SKILLS_SRC / name)
         shutil.copytree(SKILLS_SRC / name, dist_skills / name)
     write_plugin_manifest(names)
     # CRLF, same as write_plugin_manifest.
@@ -112,13 +127,22 @@ def main():
     args = parser.parse_args()
 
     if args.check:
-        if is_stale():
+        try:
+            stale = is_stale()
+        except ValueError as exc:
+            print(exc, file=sys.stderr)
+            return 1
+        if stale:
             print(f"{DIST_PLUGIN} is stale: run `python3 scripts/build_dist.py`.", file=sys.stderr)
             return 1
         print(f"{DIST_PLUGIN} is current.")
         return 0
 
-    names = regenerate()
+    try:
+        names = regenerate()
+    except ValueError as exc:
+        print(exc, file=sys.stderr)
+        return 1
     print(f"{DIST_PLUGIN} regenerated from {len(names)} skill(s): {', '.join(names) or '(none)'}.")
     return 0
 
