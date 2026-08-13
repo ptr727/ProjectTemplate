@@ -18,7 +18,7 @@ class RegenerateCase(unittest.TestCase):
     def setUp(self) -> None:
         self.tmp = Path(self.enterContext(__import__("tempfile").TemporaryDirectory()))
         self.skills_src = self.tmp / ".agents" / "skills"
-        self.dist_plugin = self.tmp / "dist" / "claude" / "fleet-skills"
+        self.dist_plugin = self.tmp / ".claude-plugin" / "fleet-skills"
         self.addCleanup(self._restore, build_dist.SKILLS_SRC, build_dist.DIST_PLUGIN,
                          build_dist.PLUGIN_MANIFEST, build_dist.DIGEST_STAMP)
         build_dist.SKILLS_SRC = self.skills_src
@@ -58,6 +58,19 @@ class RegenerateCase(unittest.TestCase):
         self.assertEqual(manifest["skills"], ["./skills/bar", "./skills/foo"])
         self.assertEqual((self.dist_plugin / "skills" / "foo" / "SKILL.md").read_text(encoding="utf-8"), "content")
         self.assertFalse(build_dist.is_stale())
+
+    def test_a_deleted_manifest_reports_stale_even_with_a_current_digest_stamp(self) -> None:
+        self.make_skill("foo")
+        build_dist.regenerate()
+        build_dist.PLUGIN_MANIFEST.unlink()
+        self.assertTrue(build_dist.is_stale())
+
+    def test_a_deleted_generated_skill_reports_stale_even_with_a_current_digest_stamp(self) -> None:
+        self.make_skill("foo")
+        build_dist.regenerate()
+        import shutil
+        shutil.rmtree(self.dist_plugin / "skills" / "foo")
+        self.assertTrue(build_dist.is_stale())
 
     def test_editing_a_skill_after_regenerate_reports_stale(self) -> None:
         self.make_skill("foo")

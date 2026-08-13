@@ -134,9 +134,16 @@ def report(stamp_path):
     if not stamp_path.is_file():
         print("Not installed on this machine (no stamp found).")
         return 1
-    stamp = json.loads(stamp_path.read_text(encoding="utf-8"))
+    try:
+        stamp = json.loads(stamp_path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError) as exc:
+        print(f"Stamp at {stamp_path} is unreadable ({exc}). Re-run the installer.")
+        return 1
     current = source_ref()
-    stale = stamp.get("source", {}).get("commit") != current.get("commit")
+    # A dirty checkout cannot be asserted current.
+    # The commit it names is not what is actually on disk.
+    # A caller trusting "current" here would trust bytes that were never installed.
+    stale = stamp.get("source", {}).get("commit") != current.get("commit") or current.get("dirty")
     print(json.dumps({"stamp": stamp, "currentCommit": current.get("commit"), "stale": stale}, indent=2))
     return 1 if stale else 0
 

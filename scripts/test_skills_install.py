@@ -66,7 +66,7 @@ class ReportCase(unittest.TestCase):
         self.tmp = Path(self.enterContext(tempfile.TemporaryDirectory()))
 
     def test_no_stamp_reports_not_installed(self) -> None:
-        with mock.patch.object(__import__("sys").modules["skills_install"], "print"):
+        with mock.patch("builtins.print"):
             exit_code = skills_install.report(self.tmp / "missing-stamp.json")
         self.assertEqual(exit_code, 1)
 
@@ -81,6 +81,21 @@ class ReportCase(unittest.TestCase):
         stamp = self.tmp / "stamp.json"
         stamp.write_text(json.dumps({"source": {"commit": "old"}}), encoding="utf-8")
         with mock.patch("skills_install.source_ref", return_value={"vcs": "git", "commit": "new"}):
+            exit_code = skills_install.report(stamp)
+        self.assertEqual(exit_code, 1)
+
+    def test_unreadable_stamp_reports_stale_instead_of_crashing(self) -> None:
+        stamp = self.tmp / "stamp.json"
+        stamp.write_text("not valid json {{{", encoding="utf-8")
+        with mock.patch("builtins.print"):
+            exit_code = skills_install.report(stamp)
+        self.assertEqual(exit_code, 1)
+
+    def test_matching_commit_but_dirty_checkout_reports_stale(self) -> None:
+        stamp = self.tmp / "stamp.json"
+        stamp.write_text(json.dumps({"source": {"commit": "abc"}}), encoding="utf-8")
+        with mock.patch("skills_install.source_ref",
+                         return_value={"vcs": "git", "commit": "abc", "dirty": True}):
             exit_code = skills_install.report(stamp)
         self.assertEqual(exit_code, 1)
 

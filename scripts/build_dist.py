@@ -83,10 +83,16 @@ def regenerate():
 
 
 def is_stale():
-    """Whether the generated plugin needs regenerating: missing, or built from different source bytes."""
-    if not DIGEST_STAMP.is_file():
+    """Whether the generated plugin needs regenerating: missing, corrupted, or built from
+    different source bytes. Checks the manifest and each skill's directory too, not only the
+    digest stamp, since a stamp surviving a partial deletion would otherwise report current over
+    a plugin that no longer actually resolves."""
+    if not DIGEST_STAMP.is_file() or not PLUGIN_MANIFEST.is_file():
         return True
-    return DIGEST_STAMP.read_text(encoding="utf-8").strip() != source_digest(skill_names())
+    names = skill_names()
+    if any(not (DIST_PLUGIN / "skills" / name / "SKILL.md").is_file() for name in names):
+        return True
+    return DIGEST_STAMP.read_text(encoding="utf-8").strip() != source_digest(names)
 
 
 def main():
