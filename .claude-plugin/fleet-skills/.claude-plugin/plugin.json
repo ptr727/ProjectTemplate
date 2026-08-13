@@ -9,6 +9,8 @@
     "./skills/carried-instruction-file-guard",
     "./skills/comment-and-doc-style",
     "./skills/copilot-instructions-keeper",
-    "./skills/pr-review-conduct"
+    "./skills/fleet-conformance-check",
+    "./skills/pr-review-conduct",
+    "./skills/resync-a-repo"
   ]
 }
