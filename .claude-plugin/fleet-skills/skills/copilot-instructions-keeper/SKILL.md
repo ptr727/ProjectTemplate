@@ -39,7 +39,7 @@ raised against this specific repository and disproved against this repository's 
 revision. A repository carrying a copy of this file carries the shape and rules, deletes any
 entry whose subject it does not hold, and records what it has proved for itself.
 
-This means a blind re-vendor of the hub's canonical `copilot-instructions.md` over a downstream
+This means a blind re-vendor of the hub's canonical `.github/copilot-instructions.md` over a downstream
 repo's copy is wrong in both directions:
 
 - Copying the hub's own "Disproved Claims" entries (about `ProjectTemplate` itself) into a
