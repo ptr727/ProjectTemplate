@@ -49,10 +49,13 @@ class RegenerateCase(unittest.TestCase):
         (self.skills_src / "half-written" / "notes.txt").write_text("wip", encoding="utf-8")
         self.assertEqual(build_dist.skill_names(), [])
 
-    def test_digest_stamp_ends_with_a_final_newline(self) -> None:
+    def test_digest_stamp_ends_with_a_final_crlf(self) -> None:
+        """Read as bytes, not text: a text-mode read applies universal-newline translation and
+        would report a plain LF ending as "\\n" too, hiding exactly the platform-default-newline
+        bug this asserts against."""
         self.make_skill("foo")
         build_dist.regenerate()
-        self.assertTrue(build_dist.DIGEST_STAMP.read_text(encoding="utf-8").endswith("\n"))
+        self.assertTrue(build_dist.DIGEST_STAMP.read_bytes().endswith(b"\r\n"))
 
     def test_regenerate_copies_skill_content_and_lists_it_in_the_manifest(self) -> None:
         self.make_skill("foo")
