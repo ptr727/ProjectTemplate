@@ -24,15 +24,14 @@ Subcommands
            be believed. The remedy is an issue on the repository hosting this script, and the
            review loop does not close until the reader is fixed. Merging regardless is the
            maintainer's decision rather than the agent's.
-  reply    Answer one thread selected by its text, and resolve it on request. The only
-           writing path here, and it exists because the hand-run form keeps failing the
-           same way: a node id typed into a mutation, which resolves globally and so
-           writes to a real thread somewhere rather than failing. This takes a pull
-           request number and words from the finding, queries the id itself, and offers
-           no argument an id fits in. Exit 0 = done, 60 = no thread matched, 61 = more
-           than one did, 62 = the reply returned no comment url so nothing was resolved,
-           63 = the resolve did not report the thread resolved, 64 = the target is under
-           another owner.
+  reply    Answer one thread selected by its text, and resolve it on request. Exists
+           because the hand-run form keeps failing the same way: a node id typed into a
+           mutation, which resolves globally and so writes to a real thread somewhere
+           rather than failing. This takes a pull request number and words from the
+           finding, queries the id itself, and offers no argument an id fits in. Exit 0 =
+           done, 60 = no thread matched, 61 = more than one did, 62 = the reply returned
+           no comment url so nothing was resolved, 63 = the resolve did not report the
+           thread resolved, 64 = the target is under another owner.
   wait     Request a review where none is outstanding, then poll until Copilot's review lands
            on the current head, then print the digest. The auto-request is skipped once a
            review already covers the head, once Copilot has already answered outside a formal
