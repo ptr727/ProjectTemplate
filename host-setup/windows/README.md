@@ -61,9 +61,16 @@ Neither this tooling nor its Linux sibling installs `markdownlint`, `cspell`, `a
 
 Each of those runs as a pinned container image or through `uvx`, which is what keeps a local run and CI the same check: the image tag fixes the version. Installing native copies through `winget` would put a second, unpinned version of each on the host, and a local run would then differ from CI, which is the exact property the pinned images exist to guarantee. The only host requirements any of it creates are `docker` and `uv`, and both are already in the registry.
 
-## Why There Is No bootstrap.ps1
+## bootstrap.ps1
 
-[`bootstrap.sh`][bootstrap] exists to stand up a host that has no git and no checkout. The Windows form of that problem has no one-liner anybody here has run, and an unverified loader is worse than none, which is the same rule [`docs/host-setup.md`][host-setup] applies to its own verification block. A Windows host therefore obtains this repository first and runs these scripts from the checkout.
+[`bootstrap.ps1`][bootstrap-ps1] is a fifth script, and the odd one out: it sits beside [`bootstrap.sh`][bootstrap] at the top of [`host-setup/`][host-setup-readme] rather than here, since it is the same concern as that file rather than a fifth member of this registry. It exists to stand up a host that has no git and no checkout, the same problem `bootstrap.sh` solves on Linux.
+
+An unverified loader is worse than none, and that is why this one does more than fetch a tarball. It runs under Windows PowerShell 5.1, the one shell a fresh Windows host guarantees, and hands off to `pwsh` only once it has found or installed it through `winget`, since every script in this directory refuses to run under anything older. It pins TLS 1.2 itself rather than assume a fresh console's default reaches GitHub. And it checks a fetched tree for the marker it wrote before removing anything under `-Dir`, the same rule `bootstrap.sh` follows on Linux. None of that verifies the tooling it goes on to run, which stays exactly as unverified against a genuinely fresh host as it always was. It verifies the one step earlier this loader adds, standing up the interpreter everything past it depends on.
+
+```powershell
+pwsh -NoProfile -File ..\bootstrap.ps1 -Help
+..\bootstrap.ps1 -Report -DryRun
+```
 
 ## Docker Desktop and WSL
 
@@ -101,6 +108,7 @@ host-setup\windows\install-tools.ps1 -Report
 host-setup\windows\upgrade-host.ps1 -Status
 host-setup\windows\setup-github.ps1 -Status
 host-setup\windows\setup-wsl.ps1 -Status
+host-setup\bootstrap.ps1 -Report -DryRun
 ```
 
 Then the dry runs, which print what each action would do:
@@ -120,6 +128,7 @@ The scripts are checked by `PSScriptAnalyzer`, which runs in CI as the peer of t
 
 [agent-safety]: ../agent-safety/install.ps1
 [bootstrap]: ../bootstrap.sh
+[bootstrap-ps1]: ../bootstrap.ps1
 [governance]: ../../GOVERNANCE.md
 [host-setup]: ../../docs/host-setup.md
 [host-setup-readme]: ../README.md
