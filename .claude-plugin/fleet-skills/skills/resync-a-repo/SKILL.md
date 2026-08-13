@@ -61,9 +61,9 @@ earlier in the session.
    improvement the hub should adopt instead of a mistake to erase.
 4. **Interface workflows.** Honor the named contract, required jobs, the ruleset-bound check name,
    the artifact-name handoff, rather than copying bytes.
-5. **Settings, rulesets, and secrets.** Run `repo-config/configure.sh check <owner>/<repo>
-   release|operational` against the repo by name, then `apply` for what it reports, never from a
-   carried copy.
+5. **Settings, rulesets, and secrets.** Run
+   `repo-config/configure.sh check <owner>/<repo> release|operational` against the repo by name,
+   then `apply` for what it reports, never from a carried copy.
 6. **Intent files last, and by hand,** since nothing mechanical judges these.
 
 Reconcile the registry entry (`status`, `types`, `releaseTrigger`, `workflowModel`,
