@@ -127,10 +127,10 @@ Examples:
 function Resolve-Pwsh {
     $command = Get-Command pwsh -ErrorAction SilentlyContinue
     if ($command) { return $command.Source }
-    foreach ($candidate in @(
-            (Join-Path $env:ProgramFiles 'PowerShell\7\pwsh.exe')
-            (Join-Path ${env:ProgramFiles(x86)} 'PowerShell\7\pwsh.exe')
-        )) {
+    # ProgramFiles(x86) carries no value on a host with no WOW64 layer, and Join-Path on a null path is a terminating error under Set-StrictMode, not an empty match to fall through.
+    $candidates = @((Join-Path $env:ProgramFiles 'PowerShell\7\pwsh.exe'))
+    if (${env:ProgramFiles(x86)}) { $candidates += (Join-Path ${env:ProgramFiles(x86)} 'PowerShell\7\pwsh.exe') }
+    foreach ($candidate in $candidates) {
         if (Test-Path $candidate) { return $candidate }
     }
     return $null
@@ -144,9 +144,11 @@ function Install-Pwsh {
     }
     step 'Installing PowerShell 7'
     & winget install --id Microsoft.PowerShell --exact --source winget --accept-source-agreements --accept-package-agreements --silent --disable-interactivity | Out-Host
+    $wingetExit = $LASTEXITCODE
     $found = Resolve-Pwsh
     if (-not $found) {
-        die 'winget reported installing PowerShell 7, but pwsh could still not be found. Close this console and paste the setup lines again, or install it from https://aka.ms/PSWindows.'
+        # This names winget's own exit code even though pwsh's absence, not the code, is what decides this die: a non-zero code explains why, where "reported installing" alone does not, and winget answering 0 while pwsh is still missing is worth saying too.
+        die "winget exited $wingetExit installing PowerShell 7, and pwsh could still not be found. Close this console and paste the setup lines again, or install it from https://aka.ms/PSWindows."
     }
     return $found
 }
