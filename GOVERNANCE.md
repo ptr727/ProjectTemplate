@@ -259,84 +259,11 @@ The checks that separate work actually done from work that merely reports succes
 
 ## PR Review Etiquette
 
-> This "PR Review Etiquette" section is the provider-agnostic review-loop *contract* every fleet repo follows, alongside the [`.github/copilot-instructions.md`](./.github/copilot-instructions.md) "GitHub Copilot Review Runbook" that implements it. Without both in-repo, an agent has no pointer to the reliable Copilot mechanics and falls back to ad-hoc (and known-broken) behavior.
+The provider-agnostic review-loop contract every fleet repo follows: request a review on every push, confirm it covers the current head SHA and the full diff rather than only part of it, triage every finding including the low-confidence ones a review body collapses rather than threads, and reply and resolve. Never merge on a green or CLEAN merge state alone, since that field can go clean once checks pass and every known thread is resolved while still saying nothing about whether the review covered the current head SHA, read the full diff, or left a suppressed finding, which opens no thread at all, unanswered.
 
-The repo runs a review loop on every PR: local agent iteration plus remote automated review (GitHub Copilot is the configured reviewer). Treat this as a contract regardless of which local agent authored the changes.
+This is packaged as the `pr-review-conduct` Skill at `.agents/skills/pr-review-conduct/SKILL.md` in the hub, not a repo-relative link since that path is hub-local and not carried into every fleet repo. Read the skill for the merge gate, the expected loop, and how a finding is closed, since this section only points to it now rather than carrying the contract text itself.
 
-### Merge Gate (read this first)
-
-**Do not merge, and do not enable auto-merge, unless ALL of these hold:**
-
-1. Required status checks are green (`mergeStateStatus: CLEAN`), and where they are not, the reason is **read** rather than inferred, because `BLOCKED` is one word for a failed check, a required check nothing is running, an unresolved thread, and a missing approval alike, so the response to it is decided from the check states and never from the word, **and**
-2. A Copilot review is confirmed on the **current head SHA** by matching the review's commit SHA to the head, not an earlier push, because a push makes required checks go green **before** the re-review lands, so a green merge-state can precede the current-head review and never signals readiness on its own, and the matched review is **read** rather than only counted, because Copilot declines a pull request it will not take on with a formal review carrying that same head SHA and no findings, which matches the SHA and covers nothing, and because a review can carry the head SHA and still say it read only part of the diff, which is the same clean pass in everything a SHA match can see, so the body's own count of the files it read is checked against the files the pull request changed, **and**
-3. **Every** Copilot finding on that head SHA is closed out, with all review threads resolved, **and** any issue-level Copilot comments (which have no resolve action) triaged and replied to, **and** the low-confidence findings collapsed in the review body investigated and answered, since those appear in no thread and a loop that polls threads alone reports a clean pass while they stand, so zero outstanding findings remain, **and**
-4. Nothing in the reviewer's output was a shape the review tooling could not read, since every reader keys on a marker and a marker that changes spelling is a section the reader stops finding and reports as absent, which is how three separate misreadings each reported a clean pass over a review they had not understood. An unrecognized shape blocks this gate on its own, and the remedy is an issue filed against the repository hosting the reader, naming the shape and quoting the body it came from, rather than a judgment about what the new wording probably meant, **and**
-5. The maintainer has given **explicit** permission to merge.
-
-`mergeStateStatus: CLEAN` reflects **only** required statuses, and never open bot review comments, so `CLEAN` alone is **never** sufficient to merge. A green/`CLEAN` PR with an unresolved Copilot finding fails this gate, so treat it as "not mergeable" no matter what the merge-state field says. The agent never merges on its own (consistent with "default to staging", and merging is maintainer-authorized).
-
-**`BLOCKED` is not self-explaining either, and the remedy differs by cause.** A failed check is a defect to fix, an unresolved thread is a finding to close, and a required check sitting queued with no runner assigned is neither: it is hosted-runner capacity, which no re-request, rebase, or empty commit clears, and which a reader waiting on it cannot tell from patience. Report a blocked merge by naming the blocking check and its state rather than reporting the word, and where the cause is capacity, say so and stop rather than pushing at it, since the bypass is the maintainer's to run and a starved runner is not a reason to weaken a gate.
-
-**Merging is not releasing.** A merge to a release branch does **not** by itself publish. Publishing is a separate, explicitly configured step in the repo's release pipeline (e.g. a scheduled run, a manual dispatch, or an opted-in publish-on-merge trigger), not an automatic consequence of merging. Never describe a merge as cutting a release, and never trigger a publish without explicit maintainer instruction.
-
-### Expected Review Loop
-
-1. Push changes to the PR branch.
-2. Re-request a review for the **current head SHA**. Auto-trigger is unreliable, so request it explicitly via the `requestReviews` GraphQL mutation (reliable end-to-end, per the runbook). The UI is only a fallback.
-3. Wait for review activity on that head. A completed review that raises **no findings** is a valid terminal outcome for that head, so proceed. Do not re-trigger it or treat the absence of comments as a missing review. A review whose body says it did not review is the one exception, and it is terminal in the other direction: nothing follows it, re-requesting the same head repeats it, and the body names what has to change first.
-4. Triage findings.
-5. Apply fixes or write a rationale for declines.
-6. Reply to each thread and resolve what was addressed.
-7. Re-run the loop after every fix push until no actionable findings remain.
-
-Drive the loop to green, meaning a review confirmed on the latest head SHA and every actionable finding closed, then stop and apply the **Merge Gate** above: all five preconditions must hold, and `mergeStateStatus: CLEAN` alone never satisfies it.
-
-For provider-specific mechanics (how to request review, query review state, post replies, resolve threads), see the **GitHub Copilot Review Runbook** in [.github/copilot-instructions.md](./.github/copilot-instructions.md). This file owns the contract, and that file owns the mechanics.
-
-### Every Finding Ends in an Action
-
-**A finding is closed by one of five outcomes, and a round count is never one of them.** The loop runs until no finding stands, however many rounds that takes, because the number of rounds measures how much was found rather than whether the work is done. A finding parked, waited out, or superseded by a push is still open.
-
-1. **It is real, so fix it.** Reply with the fixing commit SHA.
-2. **It is not real, so disprove it in the thread**, with the command and its output, the code path that makes it impossible, or the rule that governs it. The proof is addressed to the reviewer as much as to the maintainer, since a decline it can read is what stops it raising the same thing next round. An assertion is not a proof and does not close a finding.
-3. **It is real and deliberately not being fixed, which is the maintainer's call and not the agent's.** Say what the finding is, why the fix is unwanted, and get an explicit answer. Never suppress one by silence, by resolving the thread, or by an answer that reads as a decline while conceding the point.
-4. **It is real and worth doing later, so file the issue first and reply with its link.** A deferral recorded only in a thread is lost the moment the pull request merges, so the issue is what carries it and the link is what proves it exists rather than being intended. This is for work the change did not create: an adjacent defect the reviewer noticed in passing, or a fix too large to ride along. It does not cover a defect in the change under review, because filing an issue about a bug you are about to merge is outcome 3 in other clothes, and that one is the maintainer's to decide.
-5. **It keeps coming back, so fix the class rather than the instance.** A finding raised repeatedly against correct code is a defect in what the code communicates, not in the reviewer. Give it what it lacks: the non-obvious *why* as a comment where the code cannot state it, a clearer name, a narrower interface, or the rule change where the rule is what is wrong. A comment written for this earns its place under the comment rules like any other, so it states the why, stays short, and never cites a rule or addresses the reviewer. Making the noise stop is worth doing well, because a reviewer that repeats itself trains the reader to skim it, and skimming is how a real finding gets missed.
-
-### Triaging Review Comments
-
-**A low-confidence finding is not a low-value one.** Copilot collapses the findings it is least sure of into the review body instead of raising a thread, and in this fleet's experience those are right the large majority of the time. Judge each one against the code, never against its confidence label. They are also the easiest to lose, because they appear in no thread, so a loop that polls threads alone reports a clean pass while they stand (see the Merge Gate, condition 3).
-
-For each comment, classify before responding:
-
-- **Bug** - wrong behavior, missing test coverage, or a real divergence between code and docs. Fix it. Reply with the fixing commit SHA when done.
-- **Style/convention** - the comment cites a rule from this file or a language-specific style guide. Two cases:
-  - The cited rule matches what the existing codebase already does -> fix the offending code.
-  - The cited rule contradicts what's in the tree, or industry norm -> **update the rule instead of the code**. The rule is wrong, not the code. Bouncing the same code across rounds is the symptom of a wrong rule, so treat the recurrence itself as the finding and take it to the user for the rule change (outcome 5 above), rather than counting rounds until some threshold licenses it.
-- **Architectural opinion** - the comment proposes a different design ("constrain this to disabled-by-default", "move it elsewhere", "add a runtime guardrail"). This is judgment, not a bug. Surface it to the user with a recommendation, and don't apply it unilaterally.
-
-### Responding and Resolution Expectations
-
-Reply inline with either the fixing commit SHA (for accepted issues) or the evidence that disproves it (for declines). **A decline carries proof rather than an assertion**, meaning the command and its output, the code path that makes the concern impossible, or the rule that governs it. "This is fine" is not a reply, and disagreeing without evidence is not addressing a finding, so a thread is not resolved on one. Resolve review threads when addressed, or when declined with that evidence recorded in the thread. Issue-level comments (those at `repos/.../issues/<N>/comments` rather than tied to a specific line) have no resolution action, so acknowledge with a reply if needed and move on.
-
-After the final push on a PR, sweep older threads from earlier rounds whose code paths no longer exist, or stale unresolved markers remain in the review UI.
-
-**Answering a suppressed finding is a different act from replying in a thread, and it carries its own pairing.** A threaded reply sits under the comment it answers and the UI shows whether it is resolved. A suppressed finding has neither, so an answer that does not carry its own context is unverifiable: the maintainer cannot tell that it was seen, which finding it addresses, or whether any were skipped, and has to ask. An answer therefore **quotes the finding** in a blockquote, with its `file:line` anchor and enough of Copilot's own words to identify it, **carries one bold verdict per finding** (`Fixed in <SHA>`, `Disproven`, or `No change needed`) so the outcomes are scannable without reading prose, **states the `(N)` count** the block heading gives so N answers can be checked against N findings, and **links the review** that raised them, since a PR accumulates rounds and an unlinked answer is ambiguous about which one it closes. One comment per review round keeps the answers together.
-
-**Read every round, not only the head.** A suppressed finding has no resolved state, so a push does not retire it: the finding simply stops appearing in a head-scoped query while remaining unanswered. Treating "superseded by a push" as "answered" is how rounds of findings go unanswered. The hub's `scripts/pr_review.py status <n> --repo <owner>/<name>` reports every round and marks which are from earlier ones, and it names the repository because a pull request number resolves in every repository and a digest of the wrong one is well-formed. That script is hub-hosted rather than carried, so no repository holds a copy to run and it is invoked from a hub checkout per "Hub-Hosted Tooling" above.
-
-**The review's own overview cannot be trusted to say whether findings exist.** A body that reads "Copilot reviewed N out of N changed files and generated no new comments" routinely carries a collapsed block of suppressed findings directly beneath that sentence. Read the body for the block rather than the summary line, because the summary line and `reviewDecision` and an empty unresolved-thread list all agree that a review with four outstanding findings is clean.
-
-### Escalating to the User
-
-Bring the user in when:
-
-- **Genuine design trade-off** surfaces (fail-open vs fail-closed, narrow vs broad refactor scope, "should we add a guardrail or trust the docstring"). Triage, recommend, ask.
-- **A recurring finding** the code keeps attracting, which is the fix-the-class signal. Summarize the pattern and bring the remedy, whether that is the rule change or what the code has to say differently to stop earning it.
-- **A finding you judge real but do not want fixed**, which is outcome 3 above and is never the agent's call to make quietly.
-- **Architectural redesign** is requested rather than a bug fix. Surface with a recommendation, and never apply it unilaterally.
-
-Anti-pattern: don't keep flipping the code on the same style point. Flip the rule once and stick to the rule.
+The provider-specific mechanics this contract needs to actually drive GitHub Copilot, how to request a review, poll for it, match the suppressed-findings heading, verify coverage, and reply or resolve a thread without a hand-typed id, live in [`.github/copilot-instructions.md`](./.github/copilot-instructions.md) "GitHub Copilot Review Runbook", unaffected by this pointer. That content is read directly by the Copilot reviewer bot, which cannot read a Skill, so it stays fully written out rather than being packaged the same way.
 
 ## Communicating with the User
 
