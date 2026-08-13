@@ -45,15 +45,15 @@ fleet's internal model so the two are never conflated.
    actually reaches upstream. Updating the same upstream PR rather than opening a new one each
    round rewrites the clean branch's history, and pushing a rewritten branch that is already
    published requires `git push --force-with-lease` (prefer it over a bare `--force`, it refuses
-   the push if the remote moved since the last fetch). **This is the one narrow exception to
-   `git-commit-conventions`'s never-force-push rule, and it is scoped tightly**: force-with-lease
-   only the clean presentation branch, only on the maintainer's own fork, only while it carries
-   nobody's work but this squash. `git-commit-conventions`'s rule governs this fleet's own
-   repos, where a branch is shared with bots, other branches, and required-check history a
-   rewrite would orphan, none of which applies to a disposable single-purpose fork branch. Never
-   force-push the dirty work branch, it is the append-only iteration log this whole workflow
-   exists to preserve. If force-with-lease is ever refused or unavailable, open a fresh PR from a
-   newly named clean branch rather than fighting the push.
+   the push if the remote moved since the last fetch). **`git-commit-conventions`'s never-force-push
+   rule governs this fleet's own repos, where a branch is shared with bots, other branches, and
+   required-check history a rewrite would orphan, and it stays absolute there, with no exception.
+   It has no jurisdiction here**: this clean presentation branch lives on the maintainer's own
+   fork, outside the fleet entirely, and carries nobody's work but this squash. Force-with-lease
+   is scoped just as tightly regardless: only this one branch, only on the maintainer's own fork,
+   never the dirty work branch, which is the append-only iteration log this whole workflow exists
+   to preserve. If force-with-lease is ever refused or unavailable, open a fresh PR from a newly
+   named clean branch rather than fighting the push.
 
 **The dirty branch is always the working copy. The clean branch is always the presentation copy.**
 Never reverse this: never iterate directly on the branch that's open against upstream, and never
