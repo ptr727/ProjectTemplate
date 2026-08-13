@@ -15,6 +15,31 @@ from unittest import mock
 import skills_install
 
 
+class SourceRefCase(unittest.TestCase):
+    """source_ref()'s dirty check must watch every path this installer actually reads from,
+    not only .agents/skills/, or a modified marketplace.json/generated plugin would report
+    dirty=False over bytes that were never installed."""
+
+    def test_git_status_is_scoped_to_both_watched_paths(self) -> None:
+        calls = []
+
+        def fake_run(args, **kwargs):
+            calls.append(args)
+            result = mock.Mock()
+            result.returncode = 0
+            result.stdout = "deadbeef\n" if "rev-parse" in args else ""
+            return result
+
+        with mock.patch("subprocess.run", side_effect=fake_run):
+            skills_install.source_ref()
+
+        status_call = next(c for c in calls if "status" in c)
+        self.assertIn(str(skills_install.SKILLS_SRC.relative_to(skills_install.ROOT).as_posix()), status_call)
+        self.assertIn(
+            str(skills_install.CLAUDE_PLUGIN_DIR.relative_to(skills_install.ROOT).as_posix()), status_call
+        )
+
+
 class MaterializeCase(unittest.TestCase):
     def setUp(self) -> None:
         self.tmp = Path(self.enterContext(tempfile.TemporaryDirectory()))

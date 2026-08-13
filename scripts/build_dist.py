@@ -80,7 +80,7 @@ def regenerate():
     for name in names:
         shutil.copytree(SKILLS_SRC / name, dist_skills / name)
     write_plugin_manifest(names)
-    DIGEST_STAMP.write_text(source_digest(names), encoding="utf-8")
+    DIGEST_STAMP.write_text(source_digest(names) + "\n", encoding="utf-8")
     return names
 
 

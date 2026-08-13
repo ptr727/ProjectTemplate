@@ -37,6 +37,7 @@ from pathlib import Path
 HERE = Path(__file__).resolve().parent
 ROOT = HERE.parent
 SKILLS_SRC = ROOT / ".agents" / "skills"
+CLAUDE_PLUGIN_DIR = ROOT / ".claude-plugin"
 MARKETPLACE_NAME = "projecttemplate-fleet"
 PLUGIN_NAME = "fleet-skills"
 STAMP_VERSION = 1
@@ -61,10 +62,15 @@ def source_ref():
     if not sha:
         return {"vcs": "none"}
     ref = {"vcs": "git", "commit": sha}
-    # A repo-relative pathspec, not str(SKILLS_SRC).
+    # Watches both paths this installer actually reads.
+    # .agents/skills/ is copied for Codex/opencode.
+    # .claude-plugin/ is the marketplace.json and generated plugin Claude Code reads.
+    # Scoping dirty to only the first missed a modified marketplace.json or generated content.
+    # Repo-relative pathspecs, not str(Path).
     # With `git -C <repo>`, an absolute path can fail to match anything.
     # That silently and permanently reports dirty=False.
-    status = git("status", "--porcelain", "--", SKILLS_SRC.relative_to(ROOT).as_posix())
+    watched = [SKILLS_SRC, CLAUDE_PLUGIN_DIR]
+    status = git("status", "--porcelain", "--", *(p.relative_to(ROOT).as_posix() for p in watched))
     ref["dirty"] = bool(status)
     return ref
 
