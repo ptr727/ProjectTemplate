@@ -75,18 +75,31 @@ condition, and neither is patience running out.
 ## Every finding ends in one of five outcomes
 
 1. **Real, so fix it.** Reply with the fixing commit SHA.
-2. **Not real, so disprove it in the thread**, with the command and its output, the code path
-   that makes it impossible, or the rule that governs it. An assertion ("this is fine") does not
-   close a finding, a decline needs evidence the reviewer itself could check.
-3. **Real, but deliberately not fixed, the maintainer's call, not the agent's.** State the
-   finding and why the fix is unwanted, and get an explicit answer. Never resolve this one by
-   silence.
+2. **Not real, or real but structurally out of scope, so decline in the thread with evidence.**
+   Disprove a wrong finding with the command and its output, the code path that makes it
+   impossible, or the rule that governs it. A finding that is factually correct but not this
+   repo's to fix (a verbatim-fidelity manifest entry byte-locking the section, ownership that
+   sits elsewhere) declines the same way: name the boundary and cite what proves it. Either shape
+   closes the thread on its own evidence. An assertion ("this is fine") does not close a finding,
+   a decline needs evidence the reviewer itself could check.
+3. **Real, fixable here, but deliberately left as is, a value call rather than a scope
+   boundary, so it is the maintainer's, not the agent's.** Reach for this only once outcome 2 is
+   ruled out, since a scope boundary declines on its own evidence and never needs this outcome at
+   all. State the finding and why the fix is unwanted, and get an explicit answer in the same
+   turn, before moving to other work. A plan to ask later is resolution by silence the moment
+   attention moves elsewhere. If the maintainer is not reachable right now, leave the thread open
+   and say so, rather than treating the intention to ask as the asking.
 4. **Real and worth doing later, so file the issue first, then reply with its link.** A deferral
    noted only in a thread is lost the moment the PR merges.
 5. **Keeps recurring, so fix the class, not the instance.** A finding raised repeatedly against
    correct code means the code is not communicating something: add the comment, sharpen the name,
    narrow the interface, or fix the rule if the rule is wrong. Bouncing the same point across
    rounds is the signal to escalate the rule itself, not to keep re-arguing it.
+
+**A disposition decided on one PR does not carry to the next.** The same finding shape recurring
+on a sibling repo or PR, even within one batch or one session, gets its own outcome: its own
+evidence-backed decline (outcome 2) or its own explicit maintainer answer (outcome 3). A prior
+instance's outcome is context for the new one, never a standing answer to reuse in its place.
 
 ## Triaging findings
 
