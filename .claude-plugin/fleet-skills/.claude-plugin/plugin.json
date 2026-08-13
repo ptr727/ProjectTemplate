@@ -9,8 +9,11 @@
     "./skills/carried-instruction-file-guard",
     "./skills/comment-and-doc-style",
     "./skills/copilot-instructions-keeper",
+    "./skills/dotnet-codestyle",
     "./skills/fleet-conformance-check",
     "./skills/pr-review-conduct",
-    "./skills/resync-a-repo"
+    "./skills/python-codestyle",
+    "./skills/resync-a-repo",
+    "./skills/shell-codestyle"
   ]
 }
