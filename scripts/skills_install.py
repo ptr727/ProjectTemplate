@@ -201,6 +201,10 @@ def report(stamp_path):
         return 1
     current = source_ref()
     current_commit = current.get("commit")
+    # A dict-shaped stamp can still carry a non-dict "source" (a stray string, a number).
+    # Calling .get("commit") on that would crash instead of reading as stale like every other unrecognized-shape case here does.
+    stamp_source = stamp.get("source")
+    stamp_commit = stamp_source.get("commit") if isinstance(stamp_source, dict) else None
     # A dirty checkout cannot be asserted current.
     # The commit it names is not what is actually on disk.
     # A caller trusting "current" here would trust bytes that were never installed.
@@ -209,7 +213,7 @@ def report(stamp_path):
     # A plain "or" chain can leave stale as None, and `if stale else` treats that as falsy too.
     stale = bool(
         current_commit is None
-        or stamp.get("source", {}).get("commit") != current_commit
+        or stamp_commit != current_commit
         or current.get("dirty")
     )
     print(json.dumps({"stamp": stamp, "currentCommit": current_commit, "stale": stale}, indent=2))

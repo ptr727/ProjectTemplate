@@ -231,6 +231,17 @@ class ReportCase(unittest.TestCase):
             exit_code = skills_install.report(stamp)
         self.assertEqual(exit_code, 1)
 
+    def test_a_dict_stamp_with_a_non_dict_source_reports_stale_instead_of_crashing(self) -> None:
+        stamp = self.tmp / "stamp.json"
+        stamp.write_text(
+            json.dumps({"stampVersion": skills_install.STAMP_VERSION, "source": "oops"}),
+            encoding="utf-8",
+        )
+        with mock.patch("skills_install.source_ref", return_value={"vcs": "git", "commit": "abc"}):
+            with mock.patch("builtins.print"):
+                exit_code = skills_install.report(stamp)
+        self.assertEqual(exit_code, 1)
+
     def test_an_unrecognized_stamp_version_reports_stale(self) -> None:
         """A future format bump must not have an old-shaped stamp read as current."""
         stamp = self.tmp / "stamp.json"
