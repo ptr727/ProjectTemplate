@@ -46,7 +46,9 @@ STAMP_VERSION = 1
 def agents_home():
     """Where Codex/opencode look for globally-installed skills, overridable for testing."""
     override = os.environ.get("AGENTS_HOME")
-    return Path(override) if override else Path.home() / ".agents"
+    # .expanduser(): AGENTS_HOME=~/tmp is a real thing a caller would type.
+    # A bare Path() treats "~" as a literal directory name, not the shell-expanded home it looks like.
+    return Path(override).expanduser() if override else Path.home() / ".agents"
 
 
 def source_ref():
@@ -153,6 +155,12 @@ def report(stamp_path):
         stamp = json.loads(stamp_path.read_text(encoding="utf-8"))
     except (OSError, json.JSONDecodeError) as exc:
         print(f"Stamp at {stamp_path} is unreadable ({exc}). Re-run the installer.")
+        return 1
+    # A non-dict JSON value (an array, a bare string) is a shape this reader does not know.
+    # So is an unrecognized stampVersion, not merely a plain missing/dirty install.
+    if not isinstance(stamp, dict) or stamp.get("stampVersion") != STAMP_VERSION:
+        print(f"Stamp at {stamp_path} is not a recognized shape (stampVersion {STAMP_VERSION} expected). "
+              "Re-run the installer.")
         return 1
     current = source_ref()
     # A dirty checkout cannot be asserted current.

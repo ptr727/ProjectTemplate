@@ -15,6 +15,16 @@ from unittest import mock
 import skills_install
 
 
+class AgentsHomeCase(unittest.TestCase):
+    def test_a_tilde_override_expands_to_the_real_home_directory(self) -> None:
+        """AGENTS_HOME=~/tmp is a real thing a caller would type. A bare Path() treats "~" as a
+        literal directory name rather than the shell-expanded home it looks like."""
+        with mock.patch.dict("os.environ", {"AGENTS_HOME": "~/agents-test"}):
+            home = skills_install.agents_home()
+        self.assertNotIn("~", str(home))
+        self.assertEqual(home, Path.home() / "agents-test")
+
+
 class SourceRefCase(unittest.TestCase):
     """source_ref()'s dirty check must watch every path this installer actually reads from,
     not only .agents/skills/, or a modified marketplace.json/generated plugin would report
@@ -115,13 +125,13 @@ class ReportCase(unittest.TestCase):
     def test_matching_commit_reports_current(self) -> None:
         stamp = self.tmp / "stamp.json"
         with mock.patch("skills_install.source_ref", return_value={"vcs": "git", "commit": "abc"}):
-            stamp.write_text(json.dumps({"source": {"commit": "abc"}}), encoding="utf-8")
+            stamp.write_text(json.dumps({"stampVersion": skills_install.STAMP_VERSION, "source": {"commit": "abc"}}), encoding="utf-8")
             exit_code = skills_install.report(stamp)
         self.assertEqual(exit_code, 0)
 
     def test_mismatched_commit_reports_stale(self) -> None:
         stamp = self.tmp / "stamp.json"
-        stamp.write_text(json.dumps({"source": {"commit": "old"}}), encoding="utf-8")
+        stamp.write_text(json.dumps({"stampVersion": skills_install.STAMP_VERSION, "source": {"commit": "old"}}), encoding="utf-8")
         with mock.patch("skills_install.source_ref", return_value={"vcs": "git", "commit": "new"}):
             exit_code = skills_install.report(stamp)
         self.assertEqual(exit_code, 1)
@@ -135,10 +145,29 @@ class ReportCase(unittest.TestCase):
 
     def test_matching_commit_but_dirty_checkout_reports_stale(self) -> None:
         stamp = self.tmp / "stamp.json"
-        stamp.write_text(json.dumps({"source": {"commit": "abc"}}), encoding="utf-8")
+        stamp.write_text(json.dumps({"stampVersion": skills_install.STAMP_VERSION, "source": {"commit": "abc"}}), encoding="utf-8")
         with mock.patch("skills_install.source_ref",
                          return_value={"vcs": "git", "commit": "abc", "dirty": True}):
             exit_code = skills_install.report(stamp)
+        self.assertEqual(exit_code, 1)
+
+    def test_a_valid_json_non_dict_stamp_reports_stale_instead_of_crashing(self) -> None:
+        stamp = self.tmp / "stamp.json"
+        stamp.write_text(json.dumps(["not", "a", "dict"]), encoding="utf-8")
+        with mock.patch("builtins.print"):
+            exit_code = skills_install.report(stamp)
+        self.assertEqual(exit_code, 1)
+
+    def test_an_unrecognized_stamp_version_reports_stale(self) -> None:
+        """A future format bump must not have an old-shaped stamp read as current."""
+        stamp = self.tmp / "stamp.json"
+        stamp.write_text(
+            json.dumps({"stampVersion": skills_install.STAMP_VERSION + 1, "source": {"commit": "abc"}}),
+            encoding="utf-8",
+        )
+        with mock.patch("skills_install.source_ref", return_value={"vcs": "git", "commit": "abc"}):
+            with mock.patch("builtins.print"):
+                exit_code = skills_install.report(stamp)
         self.assertEqual(exit_code, 1)
 
 
