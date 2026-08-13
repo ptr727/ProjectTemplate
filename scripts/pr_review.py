@@ -33,8 +33,15 @@ Subcommands
            than one did, 62 = the reply returned no comment url so nothing was resolved,
            63 = the resolve did not report the thread resolved, 64 = the target is under
            another owner.
-  wait     Poll until Copilot's review lands on the current head, then print the digest.
-           The loop runs in-process, so a 45-minute wait costs one agent turn, not 90.
+  wait     Request a review where none is outstanding, then poll until Copilot's review lands
+           on the current head, then print the digest. The auto-request is skipped once a
+           review already covers the head, once Copilot has already answered outside a formal
+           review, or once one is already in the pending request set, so calling `wait` again on
+           the same PR never double-requests. It reads the Copilot reviewer's bot id from the
+           repository's own last 20 PRs rather than a fixed id, and requests nothing (falling
+           back to polling only) where that comes up empty, since a repository with no Copilot
+           review in that window has nothing to read the id from and a fabricated one is never
+           an option. The loop runs in-process, so a 45-minute wait costs one agent turn, not 90.
            Exit 0 = review present, 30 = still pending at timeout (pending is not failure),
            40 = Copilot answered outside a formal review, so read the printed body.
            40 reports the shape of that answer and reads nothing of its cause: an answer
@@ -247,11 +254,26 @@ TIMELINE_JQ = (
 Q_LIVE = """
 query($o:String!,$r:String!,$n:Int!){
   repository(owner:$o,name:$r){ pullRequest(number:$n){
-    headRefOid
+    id headRefOid
     reviews(last:100){ nodes{ author{login} state commit{oid} submittedAt } pageInfo{ hasPreviousPage } }
     comments(last:100){ nodes{ author{login} createdAt } pageInfo{ hasPreviousPage } }
     reviewRequests(first:10){ nodes{ requestedReviewer{ __typename ... on Bot{login} ... on User{login} } } }
   }}}
+"""
+
+# The Copilot reviewer bot's node id, read from the most recent PRs' own reviews rather than hand-typed or cached across runs.
+# The id belongs to the reviewer account, not to any one PR, so it is identical everywhere in this repo.
+# It resolves even on a PR whose own round 1 carries no review yet, per the fleet's standing rule against fabricating or reusing a GitHub node id.
+Q_BOT_ID = """
+query($o:String!,$r:String!){
+  repository(owner:$o,name:$r){
+    pullRequests(first:20, orderBy:{field:CREATED_AT, direction:DESC}){
+      nodes{ reviews(first:20){ nodes{ author{ __typename login ... on Bot{ id } } } } } } } }
+"""
+
+M_REQUEST_REVIEWS = """
+mutation($pr:ID!,$bot:ID!){
+  requestReviews(input:{pullRequestId:$pr, botIds:[$bot], union:true}){ pullRequest{ id } }}
 """
 
 # Full query: run once on transition, not per poll.
@@ -417,6 +439,46 @@ def reviewer_requested(pr: dict) -> bool:
     """
     return any((n.get('requestedReviewer') or {}).get('login') == REVIEWER
                for n in ((pr.get('reviewRequests') or {}).get('nodes') or []))
+
+
+def copilot_bot_id(owner: str, repo: str) -> str | None:
+    """The Copilot reviewer bot's node id, or None where no recent review names one to read.
+
+    None is a real answer, not a failure to retry: a repository's very first PR, or one Copilot
+    has never reviewed, carries no review to read the id from. The caller falls back to polling
+    only rather than guessing, since a fabricated or reused id resolves globally and a wrong one
+    would silently target another repository's PR.
+    """
+    data = gh_graphql(Q_BOT_ID, o=owner, r=repo)
+    prs = ((data.get('repository') or {}).get('pullRequests') or {}).get('nodes') or []
+    for node in prs:
+        for review in (node.get('reviews') or {}).get('nodes') or []:
+            author = review.get('author') or {}
+            if author.get('__typename') == 'Bot' and author.get('login') == REVIEWER:
+                bot_id = author.get('id')
+                if bot_id:
+                    return bot_id
+    return None
+
+
+def request_copilot_review(owner: str, repo: str, pr_node_id: str) -> str:
+    """Ask Copilot to review the current head, and say in one line what happened.
+
+    This exists because `wait` used to only ever poll, never request, so a PR whose auto-seed
+    never fired or whose prior request was superseded by a later push sat waiting the full
+    timeout for a review nothing had asked for, twice in one session before this was written.
+    `union:true` adds the bot to the request set rather than replacing it, so a human reviewer
+    requested alongside it stays requested. Never raises on its own: a failed auto-request still
+    lets the wait fall back to plain polling, in case a request lands some other way meanwhile,
+    but the one-line return value says plainly that nothing was asked for and why.
+    """
+    bot_id = copilot_bot_id(owner, repo)
+    if not bot_id:
+        return ('no Copilot review found across the last 20 PRs to read the reviewer bot id '
+                'from, so nothing was requested here; polling only. Seed one via the UI, or '
+                'widen the search if this repository has more unreviewed history than that.')
+    gh_graphql(M_REQUEST_REVIEWS, pr=pr_node_id, bot=bot_id)
+    return f'requested a Copilot review on the current head (bot {bot_id})'
 
 
 def reviewer_nodes(pr: dict, field: str) -> list[dict]:
@@ -1643,6 +1705,13 @@ def main(argv: list[str] | None = None) -> int:
     # Waiting it out reports a review that landed as one that never did, at the timeout.
     # The liveness query carries the authors, so this costs the loop no extra call.
     drift = reviewer_login_drift(pr)
+    # Request before the first poll, not just at the call site: a caller expects `wait` to make a review happen, not merely to watch for one.
+    # Two prior gaps this closed, a push superseding an already-answered request and an auto-seed that never fired, both left nothing outstanding for the loop below to ever see land.
+    # Skipped once a review already covers the head, once Copilot has already answered outside a formal review, or once something is already in the request set, so a second `wait` on the same PR never double-requests.
+    if not done and not answer and not drift and not reviewer_requested(pr):
+        print(f'auto-request: {request_copilot_review(owner, repo, pr["id"])}')
+        # No re-read here: Copilot never resolves within the round trip that just issued the request.
+        # The loop below picks up fresh state on its own first iteration instead of this spending a second call to learn nothing new.
     stalled = ''
     i = 0
     next_pickup = a.pickup_grace

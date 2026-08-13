@@ -158,7 +158,7 @@ def payload(reviews: list[dict], threads: list[dict] | None = None,
             files: list[str] | None = None, more_files: bool = False) -> dict:
     requested = ([{'requestedReviewer': {'__typename': 'Bot', 'login': pr_review.REVIEWER}}]
                  if pending else [])
-    return {'headRefOid': HEAD, 'mergeable': 'MERGEABLE', 'mergeStateStatus': merge,
+    return {'id': 'PR_test', 'headRefOid': HEAD, 'mergeable': 'MERGEABLE', 'mergeStateStatus': merge,
             # The diff's own file list, which the round's file table is compared against.
             # A case naming none gets the empty connection a pull request of no files carries.
             'files': {'nodes': [{'path': p} for p in files or []],
@@ -182,13 +182,25 @@ class GqlCase(unittest.TestCase):
     """Base that answers every `gql` call from a queue, so no case reaches the network."""
 
     def answer(self, *responses: dict) -> mock._patch:
-        """Patch `gql` to return each response in turn, repeating the last one."""
+        """Patch `gql` to return each response in turn, repeating the last one.
+
+        Also patches `gh_graphql` directly with a default reporting no Copilot review anywhere
+        to read a bot id from, so `wait`'s auto-request finds nothing to request and falls
+        straight through to polling, same as a repository with no Copilot history. `gql` itself
+        never reaches the real `gh_graphql` since the mock above replaces it wholesale, so the
+        two patches govern disjoint call sites and neither can shadow the other. A case
+        exercising the auto-request itself re-patches `gh_graphql` after calling this.
+        """
         queue = list(responses)
 
         def fake(_query, _owner, _repo, _num):
             return queue.pop(0) if len(queue) > 1 else queue[0]
 
-        return self.enterContext(mock.patch.object(pr_review, 'gql', side_effect=fake))
+        patched = self.enterContext(mock.patch.object(pr_review, 'gql', side_effect=fake))
+        self.enterContext(mock.patch.object(
+            pr_review, 'gh_graphql',
+            return_value={'repository': {'pullRequests': {'nodes': []}}}))
+        return patched
 
 
 class TestLiveState(GqlCase):
@@ -1863,6 +1875,61 @@ class TestCli(GqlCase):
         self.assertEqual(0, self.cli(['status', '7']))
         self.assertIn('repo=o/r pr=7', self.out.getvalue())
 
+    def wire_bot(self, bot_id: str | None) -> list[tuple[str, dict]]:
+        """Route `gh_graphql` calls after `self.answer(...)`, recording each one made.
+
+        `self.answer(...)` already installs a default returning no bot id, which is what every
+        other wait test relies on to skip the auto-request path untouched. This overrides that
+        default for the handful of tests below that exercise the auto-request itself.
+        """
+        calls: list[tuple[str, dict]] = []
+
+        def fake(query: str, **variables: object) -> dict:
+            calls.append((query, variables))
+            if 'pullRequests(first:20' in query:
+                if bot_id is None:
+                    return {'repository': {'pullRequests': {'nodes': []}}}
+                return {'repository': {'pullRequests': {'nodes': [
+                    {'reviews': {'nodes': [{'author': {
+                        '__typename': 'Bot', 'login': pr_review.REVIEWER, 'id': bot_id}}]}}]}}}
+            if 'requestReviews' in query:
+                return {'requestReviews': {'pullRequest': {'id': variables.get('pr')}}}
+            raise AssertionError(f'unexpected document: {query[:60]}')
+
+        self.enterContext(mock.patch.object(pr_review, 'gh_graphql', side_effect=fake))
+        return calls
+
+    def test_a_resolved_bot_id_issues_the_request_before_the_first_poll(self) -> None:
+        """The gap this closed: nothing outstanding and nothing ever asked for, twice measured."""
+        self.answer(payload([review(oid=OLD)]), payload([review()]))
+        calls = self.wire_bot('BOT_123')
+        with mock.patch.object(pr_review.time, 'sleep') as slept:
+            self.assertEqual(0, self.cli(['wait', '7']))
+        self.assertEqual(1, slept.call_count)
+        mutations = [(q, v) for q, v in calls if 'requestReviews' in q]
+        self.assertEqual(1, len(mutations))
+        self.assertEqual('BOT_123', mutations[0][1].get('bot'))
+        self.assertEqual('PR_test', mutations[0][1].get('pr'))
+        self.assertIn('auto-request: requested a Copilot review', self.out.getvalue())
+
+    def test_no_bot_id_anywhere_skips_the_request_and_still_polls(self) -> None:
+        """A repository with no Copilot history falls back to plain polling, not a crash."""
+        self.answer(payload([review(oid=OLD)]), payload([review()]))
+        calls = self.wire_bot(None)
+        with mock.patch.object(pr_review.time, 'sleep') as slept:
+            self.assertEqual(0, self.cli(['wait', '7']))
+        self.assertEqual(1, slept.call_count)
+        self.assertFalse([c for c in calls if 'requestReviews' in c[0]])
+        self.assertIn('no Copilot review found', self.out.getvalue())
+
+    def test_an_already_requested_review_is_not_re_requested(self) -> None:
+        """Calling `wait` twice on the same pending request never double-requests it."""
+        self.answer(payload([review()], pending=True))
+        calls = self.wire_bot('BOT_123')
+        self.assertEqual(0, self.cli(['wait', '7']))
+        self.assertFalse(calls)
+        self.assertNotIn('auto-request:', self.out.getvalue())
+
 
 def rthread(tid: str, body: str = 'The retry count is off by one.', path: str = 'a.py',
             line: int = 12, resolved: bool = False,
@@ -2334,29 +2401,39 @@ class TestContract(unittest.TestCase):
         text = RUNBOOK.read_text(encoding='utf-8')
         self.assertIn('Coverage of the head is not coverage of the diff', text)
 
-    def test_the_only_writes_are_the_two_the_reply_path_owns(self) -> None:
-        """One writing path, and everything else that changes state stays out of this script.
+    def test_the_only_writes_are_the_three_named_here(self) -> None:
+        """Every write this script makes is one of three, and each arrived as a reviewed change.
 
         The read subcommands are the bulk of it and a mutation reaching them is a digest that
-        writes, so the whole-source guard stays and is narrowed to the two documents `reply`
-        needs rather than dropped when the first of them arrived.
+        writes, so the whole-source guard stays and is narrowed to the documents the script
+        actually needs rather than dropped when the first of them arrived. `requestReviews`
+        joined `addPullRequestReviewThreadReply`/`resolveReviewThread` deliberately, closing a
+        gap where `wait` only ever polled and never asked, which twice left it waiting the full
+        timeout for a review nothing had requested. `union:true` only adds to the request set
+        (see `request_copilot_review`), so it cannot drop a human reviewer requested alongside
+        Copilot, unlike the `union:false` clear-and-recover form the runbook documents by hand.
         """
         source = (REPO / 'scripts' / 'pr_review.py').read_text(encoding='utf-8')
         for verb in ('-X POST', '-X PATCH', '-X PUT', '-X DELETE', '--method',
-                     'gh pr merge', 'gh pr review', 'gh pr edit', 'requestReviews'):
+                     'gh pr merge', 'gh pr review', 'gh pr edit'):
             with self.subTest(verb=verb):
                 self.assertNotIn(verb, source, f'{verb!r} is a state-changing call this script '
                                                'has no reason to make')
+        self.assertNotIn('union:false', source.replace(' ', ''),
+                         'the additive form is the only one this script issues, since dropping '
+                         'a pending human reviewer is the runbook\'s manual recovery path, never '
+                         'an automatic one')
         # `mutation(` opens a document, so the count is the number of documents.
-        # A third arriving is a write nobody reviewed as one rather than a style drift.
-        self.assertEqual(2, source.count('mutation('))
+        # A fourth arriving is a write nobody reviewed as one rather than a style drift.
+        self.assertEqual(3, source.count('mutation('))
         self.assertIn('addPullRequestReviewThreadReply', source)
         self.assertIn('resolveReviewThread', source)
+        self.assertIn('requestReviews', source)
 
     def test_the_mutations_are_the_ones_the_runbook_publishes(self) -> None:
         """A helper performing a different write than the documented one is undocumented."""
         text = RUNBOOK.read_text(encoding='utf-8')
-        for name in ('addPullRequestReviewThreadReply', 'resolveReviewThread'):
+        for name in ('addPullRequestReviewThreadReply', 'resolveReviewThread', 'requestReviews'):
             with self.subTest(mutation=name):
                 self.assertIn(name, text)
 
