@@ -93,8 +93,8 @@ def expected_manifest(names):
     return {
         "name": PLUGIN_NAME,
         "version": "0.0.0",
-        "description": "Fleet-wide agent rules (comment style, PR-review conduct, resync safety) "
-        "packaged as Claude Code Skills, generated from .agents/skills/.",
+        "description": "Fleet-wide agent rules and per-language conventions packaged as Claude "
+        "Code Skills, generated from .agents/skills/.",
         "author": {"name": "ptr727"},
         "skills": [f"./skills/{name}" for name in names],
     }

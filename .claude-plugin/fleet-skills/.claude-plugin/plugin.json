@@ -1,7 +1,7 @@
 {
   "name": "fleet-skills",
   "version": "0.0.0",
-  "description": "Fleet-wide agent rules (comment style, PR-review conduct, resync safety) packaged as Claude Code Skills, generated from .agents/skills/.",
+  "description": "Fleet-wide agent rules and per-language conventions packaged as Claude Code Skills, generated from .agents/skills/.",
   "author": {
     "name": "ptr727"
   },
@@ -9,8 +9,11 @@
     "./skills/carried-instruction-file-guard",
     "./skills/comment-and-doc-style",
     "./skills/copilot-instructions-keeper",
+    "./skills/dotnet-codestyle",
     "./skills/fleet-conformance-check",
     "./skills/pr-review-conduct",
-    "./skills/resync-a-repo"
+    "./skills/python-codestyle",
+    "./skills/resync-a-repo",
+    "./skills/shell-codestyle"
   ]
 }
