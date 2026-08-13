@@ -442,6 +442,24 @@ Three findings raised while writing [`host-setup/windows/`][host-setup-windows],
   - **Settled** - The Windows tooling already refuses this way. That began as a constraint, since a PowerShell `param()` block records which switches were given and not their order, and the constraint produced the better behavior.
   - **Open** - Nothing about the change itself, which is three `usage()` heredocs and three `parse_args()` bodies. The decision is only whether the fleet wants the stricter contract, and taking it deletes the differences-table row in [`host-setup/windows/README.md`][host-setup-windows] rather than leaving a permanent divergence.
 
+### Neither Host Bootstrap Has Run Against a Truly Fresh Host
+
+Two loaders exist so a copy-paste snippet takes a stock OS install to a configured dev host, and neither has ever been run that way. Everything either has behind it is a dry run or a read against an already-configured checkout, on a machine carrying most of the target tools already. That confirms the logic is internally consistent. It confirms nothing about a `winget` package id still resolving, a stock Debian netinst actually lacking `curl` the way the docs assume, `tar.exe` genuinely shipping on a given Windows image, or the interactive menu reading correctly on a real console. This needs a human watching a real run on a real fresh image and reporting back what broke, including anything that merely looked fine, since neither of those closes from a description of the logic.
+
+**State** `ready`. **Touches** [`host-setup/bootstrap.sh`][bootstrap] and [`host-setup/bootstrap.ps1`][bootstrap-ps1] and, if either run turns something up, whichever script under [`host-setup/linux/`][install-tools] or [`host-setup/windows/`][host-setup-windows] it drives. **Cost** VM time on the images each entry names, and an iteration round trip per finding, since a fix this file cannot verify is a fix that needs the same fresh image again.
+
+- **Run `bootstrap.sh` unattended against a fresh Debian and a fresh Ubuntu image, and again to confirm the second run is idempotent.** `--host --yes` finishing clean, with nothing to fix, is the signal. A re-run reporting no further changes confirms idempotency rather than assuming it.
+  - **Blocked by** - VM access to a current image of each, and one still-supported older release per distribution, since the contract's floors are meant to hold there too.
+  - **Issue** - None filed.
+  - **Checked** - `develop` at `82a87d3` on 2026-08-13, where this loader has existed since #674 and carries no record of a run against an image with nothing preinstalled.
+  - **Open** - Which images, who runs the pass, and whether a failure blocks the loader or is filed and worked separately, since a fresh-host pass can turn up findings well past what one pull request should carry.
+
+- **Run `bootstrap.ps1` unattended against a fresh Windows 10 image with no App Installer, and a fresh Windows 11 image, then again on each to confirm idempotency.** The Windows 10 case is the one that exercises the winget-missing remedy this loader prints but has never had checked against a real console. Windows 11 is the expected common case, App Installer and `winget` both present. `-Host -Yes` finishing clean on each, then a clean re-run, is the same signal as the Linux entry above.
+  - **Blocked by** - VM access to both images.
+  - **Issue** - None filed.
+  - **Checked** - Branch `feature/windows-bootstrap-loader` on 2026-08-13, adding this loader for the first time. It has run under `-DryRun` and against `PSScriptAnalyzer` on a dev machine that already carries `pwsh`, `winget`, and most managed tools, which is signal on the script's internal consistency and none at all on whether it survives a host it has not touched.
+  - **Open** - Same as the Linux entry: which images, who runs the pass, and how a finding routes back.
+
 ## Standalone Chores
 
 Small work with no research to preserve, selectable one bullet at a time.
@@ -590,6 +608,8 @@ Nothing is awaiting close today. [#578][issue-578] was the last entry here and c
 [agents]: ./AGENTS.md
 [audit]: ./spec/audit.py
 [audit-doc]: ./AUDIT.md
+[bootstrap]: ./host-setup/bootstrap.sh
+[bootstrap-ps1]: ./host-setup/bootstrap.ps1
 [codestyle]: ./CODESTYLE.md
 [copilot-instructions]: ./.github/copilot-instructions.md
 [divergences]: ./spec/divergences.json

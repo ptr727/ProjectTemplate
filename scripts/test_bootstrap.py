@@ -1,12 +1,12 @@
-"""Tests for the host bootstrap: the loader invariant, and that the tooling covers what the spec requires.
+"""Tests for the host bootstraps: the loader invariant, and that the tooling covers what the spec requires.
 
 Two properties, both of which fail silently rather than loudly if nobody checks them.
 
-The loader invariant is what keeps `host-setup/bootstrap.sh` outside the reach of the
-`Hub-Hosted Tooling` rule rather than exempt from it. A loader obtains a tree and hands control to
-one entry point inside it. The moment it reads a second path in that tree it has become a tool that
-reads hub content, and the rule applies to it in full. That boundary is a property of the file, so
-it is asserted here rather than promised in prose.
+The loader invariant is what keeps `host-setup/bootstrap.sh` and `host-setup/bootstrap.ps1` outside
+the reach of the `Hub-Hosted Tooling` rule rather than exempt from it. A loader obtains a tree and
+hands control to one entry point inside it. The moment it reads a second path in that tree it has
+become a tool that reads hub content, and the rule applies to it in full. That boundary is a property
+of each file, so it is asserted here rather than promised in prose.
 
 The coverage assertion is the only connection between the floors in `spec/host-tools.json` and the
 tooling that installs them. Nothing joins the two at runtime, deliberately: the gate measures a host
@@ -31,6 +31,7 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
 BOOTSTRAP = ROOT / 'host-setup' / 'bootstrap.sh'
+BOOTSTRAP_PS = ROOT / 'host-setup' / 'bootstrap.ps1'
 LINUX = ROOT / 'host-setup' / 'linux'
 WINDOWS = ROOT / 'host-setup' / 'windows'
 HOST_TOOLS = ROOT / 'spec' / 'host-tools.json'
@@ -110,40 +111,65 @@ def spec_tools() -> list[dict]:
         return []
 
 
-def test_loader_reads_one_path_into_the_tree() -> None:
-    """The loader references exactly one directory inside the tree it fetches.
+def assert_loader_reads_one_path(path: Path, expected: str) -> None:
+    """A loader references exactly one directory inside the tree it fetches.
 
-    The expected set names the Linux path alone, and stays that way while `host-setup/windows`
-    carries no loader of its own. Widening it to admit a Windows path before one exists would
-    retire the invariant ahead of the thing it protects.
+    Both loaders write that one reference as a single interpolated, forward-slashed string
+    (`$TREE/host-setup/<platform>/$tool` in each), rather than building it from parts, which is what
+    lets this one pattern read either file unmodified.
     """
-    text = BOOTSTRAP.read_text(encoding='utf-8')
+    text = path.read_text(encoding='utf-8')
 
     # Every reference to the fetched tree goes through the variable holding its location, so the paths it names are countable rather than scattered.
     references = re.findall(r'\$TREE(?:/[^"\'\s]*)?', text)
     paths = {reference for reference in references if '/' in reference}
 
     check(
-        paths == {'$TREE/host-setup/linux/$tool'},
-        f'the loader reads more than its one entry point into the fetched tree: {sorted(paths)}',
+        paths == {expected},
+        f'{path.name} reads more than its one entry point into the fetched tree: {sorted(paths)}',
     )
 
     # A payload or a table read from the tree is what makes a file a tool rather than a loader.
     for forbidden in ('spec/', 'registry/', 'repo-config/', 'catalog/'):
         check(
             f'$TREE/{forbidden}' not in text,
-            f'the loader reads {forbidden} from the fetched tree, which makes it a tool',
+            f'{path.name} reads {forbidden} from the fetched tree, which makes it a tool',
         )
 
 
-def test_loader_needs_no_python() -> None:
+def assert_loader_needs_no_python(path: Path) -> None:
     """A host being bootstrapped must not be made to install an interpreter first."""
-    text = BOOTSTRAP.read_text(encoding='utf-8')
+    text = path.read_text(encoding='utf-8')
     for interpreter in ('python3 ', 'python ', 'uv run', 'py -3'):
         check(
             interpreter not in text,
-            f'the loader invokes {interpreter.strip()}, which a host being bootstrapped may not have',
+            f'{path.name} invokes {interpreter.strip()}, which a host being bootstrapped may not have',
         )
+
+
+def test_linux_loader_reads_one_path_into_the_tree() -> None:
+    """`bootstrap.sh` references exactly one directory inside the tree it fetches."""
+    assert_loader_reads_one_path(BOOTSTRAP, '$TREE/host-setup/linux/$tool')
+
+
+def test_windows_loader_reads_one_path_into_the_tree() -> None:
+    """`bootstrap.ps1` references exactly one directory inside the tree it fetches.
+
+    `$Tool`, PascalCase, because that is the parameter name PowerShell convention wants, where bash's
+    equivalent is the lowercase local `$tool`. The pattern this shares with the Linux check is the shape
+    of the path, one interpolated `$TREE/host-setup/<platform>/<name>` string, not the exact casing.
+    """
+    assert_loader_reads_one_path(BOOTSTRAP_PS, '$TREE/host-setup/windows/$Tool')
+
+
+def test_linux_loader_needs_no_python() -> None:
+    """A host `bootstrap.sh` stands up must not be made to install an interpreter first."""
+    assert_loader_needs_no_python(BOOTSTRAP)
+
+
+def test_windows_loader_needs_no_python() -> None:
+    """A host `bootstrap.ps1` stands up must not be made to install an interpreter first."""
+    assert_loader_needs_no_python(BOOTSTRAP_PS)
 
 
 def assert_coverage(platform: str, managed: set[str], installer: str) -> None:
@@ -248,14 +274,35 @@ def test_every_windows_script_is_present() -> None:
             )
 
 
+def test_bootstrap_ps1_is_present_and_unmarked() -> None:
+    """`bootstrap.ps1` is present, and does not open with a shebang.
+
+    Kept apart from `test_every_windows_script_is_present` rather than folded into it, because
+    `bootstrap.ps1` deliberately sits beside `bootstrap.sh` at `host-setup/`, not inside
+    `host-setup/windows/` with the four scripts that test checks. Same reasoning as that test: the
+    `eol-coverage` gate pins a tracked file opening `#!` to `eol=lf`, against the CRLF this file is
+    written with.
+    """
+    check(BOOTSTRAP_PS.is_file(), 'bootstrap.ps1 is missing from host-setup')
+    if BOOTSTRAP_PS.is_file():
+        check(
+            not BOOTSTRAP_PS.read_bytes().startswith(b'#!'),
+            'bootstrap.ps1 opens with a shebang, which the eol-coverage gate then pins to LF, '
+            'against the CRLF this file is written with',
+        )
+
+
 def main() -> int:
     for test in (
-        test_loader_reads_one_path_into_the_tree,
-        test_loader_needs_no_python,
+        test_linux_loader_reads_one_path_into_the_tree,
+        test_windows_loader_reads_one_path_into_the_tree,
+        test_linux_loader_needs_no_python,
+        test_windows_loader_needs_no_python,
         test_every_required_linux_tool_is_installable,
         test_every_required_windows_tool_is_installable,
         test_every_managed_tool_is_executable,
         test_every_windows_script_is_present,
+        test_bootstrap_ps1_is_present_and_unmarked,
     ):
         test()
 

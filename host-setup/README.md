@@ -4,14 +4,15 @@ What a machine needs before it can be worked in, and the tooling that puts it th
 
 ## What Is Here
 
-- [`bootstrap.sh`][bootstrap] stands a host up from nothing. It is the one file fetched on its own, because a host with no git and no checkout is what it exists to fix. It fetches this repository and runs the tooling from that tree.
+- [`bootstrap.sh`][bootstrap] stands a Debian or Ubuntu host up from nothing. It is the one file fetched on its own, because a host with no git and no checkout is what it exists to fix. It fetches this repository and runs the tooling from that tree.
+- [`bootstrap.ps1`][bootstrap-ps1] does the same for native Windows. It runs under Windows PowerShell 5.1, the version every fresh Windows host guarantees, and hands off to PowerShell 7 once it has found or installed it, since every script it drives requires that version.
 - [`linux/`][linux] holds the tooling itself, for Debian and Ubuntu based hosts, Proxmox and WSL included. `install-tools.sh` installs and upgrades the host tools, `upgrade-host.sh` upgrades the packages of the current release or moves to the next one, and `setup-github.sh` configures the SSH key, git, and commit signing.
 - [`windows/`][windows] holds the tooling for native Windows, through `winget` and PowerShell 7. `install-tools.ps1` installs and upgrades the host tools, `upgrade-host.ps1` upgrades the winget packages and updates the WSL platform, `setup-github.ps1` configures the SSH key, git, and commit signing, and `setup-wsl.ps1` installs a WSL distribution and reports the Docker Desktop integration.
 - [`agent-safety/`][agent-safety] holds the write-safety guards, deployed per machine and per account.
 
 ## Standing a Host Up
 
-Three lines, on a host that has nothing:
+Three lines, on a Debian or Ubuntu host that has nothing:
 
 ```shell
 sudo apt-get update && sudo apt-get install -y curl ca-certificates tar
@@ -28,6 +29,23 @@ Piping it is still detected: with no action and no terminal it reports rather th
 ./bootstrap.sh --host --yes             # packages, tools, git and GitHub, unattended
 ./bootstrap.sh --ref develop --report   # run the tooling as it is on develop
 ./bootstrap.sh --help                   # every action and option
+```
+
+Three lines as well, on a native Windows host that has nothing, pasted into a stock `powershell.exe` console:
+
+```powershell
+[Net.ServicePointManager]::SecurityProtocol = [Net.ServicePointManager]::SecurityProtocol -bor [Net.SecurityProtocolType]::Tls12
+Invoke-WebRequest -UseBasicParsing -Uri https://raw.githubusercontent.com/ptr727/ProjectTemplate/main/host-setup/bootstrap.ps1 -OutFile bootstrap.ps1
+powershell -ExecutionPolicy Bypass -File bootstrap.ps1
+```
+
+The first line is the Windows counterpart of installing `curl`: a fresh console's default TLS floor can predate 1.2, which every host this fetches from requires. The third runs under the `powershell.exe` a fresh host guarantees rather than `pwsh`, since `bootstrap.ps1` finds or installs PowerShell 7 itself and hands the rest of the run to it. `-ExecutionPolicy Bypass` clears both the default `Restricted` policy and the mark of the web `Invoke-WebRequest` leaves on the file, in one flag.
+
+```powershell
+.\bootstrap.ps1 -Report                # what each tool would do, changing nothing
+.\bootstrap.ps1 -Host -Yes              # packages, tools, git and GitHub, unattended
+.\bootstrap.ps1 -Ref develop -Report    # run the tooling as it is on develop
+.\bootstrap.ps1 -Help                   # every action and option
 ```
 
 Each tool also runs on its own, on a host that already has a checkout:
@@ -49,8 +67,6 @@ host-setup\windows\setup-github.ps1 -Status
 host-setup\windows\setup-wsl.ps1 -Status
 ```
 
-There is no `bootstrap.ps1`, so a Windows host obtains this repository first. The problem `bootstrap.sh` solves is a host with no git and no checkout, and the Windows form of that problem has no one-liner anybody here has run, so none is offered.
-
 ## Which Revision a Run Used
 
 `bootstrap.sh` resolves the ref it was given to the commit it names, prints that commit, and downloads that exact revision. A run therefore says which revision of the tooling it used, and a second run of the same ref cannot silently be a different tree. Where the resolve fails, which an unauthenticated rate limit can cause, the run says it cannot attribute itself and continues, since the download itself is unaffected.
@@ -59,17 +75,18 @@ There is no `bootstrap.ps1`, so a Windows host obtains this repository first. Th
 
 ## Three Rules This Directory Follows
 
-**Group by whichever axis has one member.** `agent-safety/` is one concern across three platforms, so it is a concern directory holding `install.sh`, `install.ps1` and `install.py`. `linux/` is three concerns on one platform, so it is a platform directory. Windows host tooling therefore sits at `windows/` rather than beside the Linux scripts, because the `winget` equivalent of `install-tools.sh` is a different program rather than a translation of one. It carries one registry record per tool where the Linux script carries four functions, since every Windows source is `winget` and the per-tool variation those functions exist for does not arise. `windows/` also carries a fourth script with no Linux peer, because WSL is a Windows-side concern.
+**Group by whichever axis has one member.** `agent-safety/` is one concern across three platforms, so it is a concern directory holding `install.sh`, `install.ps1` and `install.py`. `linux/` is three concerns on one platform, so it is a platform directory. Windows host tooling therefore sits at `windows/` rather than beside the Linux scripts, because the `winget` equivalent of `install-tools.sh` is a different program rather than a translation of one. It carries one registry record per tool where the Linux script carries four functions, since every Windows source is `winget` and the per-tool variation those functions exist for does not arise. `windows/` also carries a fourth script with no Linux peer, because WSL is a Windows-side concern. The loader is the same shape as `agent-safety/`, not as `linux/`/`windows/`: one concern, two platforms, so `bootstrap.ps1` sits beside `bootstrap.sh` at the top level rather than inside `windows/`.
 
-**Nothing here needs Python, and `bootstrap.sh` needs only `curl`.** [`docs/host-setup.md`][host-setup] carries that as part of the contract, with the reasoning. It is why `bootstrap.sh` runs no gate as a closing step: [`scripts/host_gate.py`][host-gate] measures a host against the floors and is not called from here, and nothing here is called from it. A host set up by hand years ago is an ordinary host, so the gate reports what it is missing and running this tooling is a remedy a person chooses. The two are joined at code time instead, by [`scripts/test_bootstrap.py`][test-bootstrap] asserting that every tool the spec requires is one this tooling can provide.
+**Nothing here needs Python, and neither loader needs an interpreter to fetch what it drives.** [`docs/host-setup.md`][host-setup] carries that as part of the contract, with the reasoning. `bootstrap.sh` needs only `curl` and `tar`. `bootstrap.ps1` needs only `tar.exe`, which has shipped with Windows since 1803, and installs its one further dependency, `pwsh`, itself through `winget`. Neither runs a gate as a closing step: [`scripts/host_gate.py`][host-gate] measures a host against the floors and is not called from here, and nothing here is called from it. A host set up by hand years ago is an ordinary host, so the gate reports what it is missing and running this tooling is a remedy a person chooses. The two are joined at code time instead, by [`scripts/test_bootstrap.py`][test-bootstrap] asserting that every tool the spec requires is one this tooling can provide.
 
-**The scripts under `linux/` and `windows/` share no file, and the duplication is deliberate.** Each is independently fetchable and runnable on its own, which is the property that lets a host with no checkout use one without the others. A shared helper file would take that away: the moment one script sources a sibling, fetching it alone yields a script that dies on a missing file. What is duplicated is about thirty lines each of logging, the dry-run wrapper, the confirmation prompt, and a temporary directory, and those copies are identical rather than merely similar. Do not factor them out. On the Windows side the fetchability argument is one no loader exercises yet, and the duplication is kept anyway so a loader added later inherits the property rather than having to introduce it.
+**The scripts under `linux/` and `windows/` share no file, and the duplication is deliberate.** Each is independently fetchable and runnable on its own, which is the property that lets a host with no checkout use one without the others. A shared helper file would take that away: the moment one script sources a sibling, fetching it alone yields a script that dies on a missing file. What is duplicated is about thirty lines each of logging, the dry-run wrapper, the confirmation prompt, and a temporary directory, and those copies are identical rather than merely similar. Do not factor them out. `bootstrap.ps1` now exercises the same fetchability argument `bootstrap.sh` always has, rather than merely being written to allow for it.
 
 <!-- Repo -->
 
 [agent-safety]: ./agent-safety/
 [audit]: ../AUDIT.md
 [bootstrap]: ./bootstrap.sh
+[bootstrap-ps1]: ./bootstrap.ps1
 [host-gate]: ../scripts/host_gate.py
 [host-setup]: ../docs/host-setup.md
 [linux]: ./linux/
