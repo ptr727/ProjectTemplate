@@ -146,10 +146,17 @@ def is_stale():
     # The manifest is entirely deterministic from `names`, so comparing all of it costs nothing extra to get right.
     if manifest != expected_manifest(names):
         return True
+    # The digest walk below only hashes the expected names.
+    # An extra directory under DIST_PLUGIN/skills/ (a retired skill left behind, one added by hand) would never be read and could not affect that comparison.
+    # Checked by name first, deliberately not folded into the digest walk itself.
+    dist_skills = DIST_PLUGIN / "skills"
+    actual_names = {p.name for p in dist_skills.iterdir() if p.is_dir()} if dist_skills.is_dir() else set()
+    if actual_names != set(names):
+        return True
     current_source_digest = source_digest(names)
     if DIGEST_STAMP.read_text(encoding="utf-8").strip() != current_source_digest:
         return True
-    return current_source_digest != tree_digest(DIST_PLUGIN / "skills", names)
+    return current_source_digest != tree_digest(dist_skills, names)
 
 
 def main():

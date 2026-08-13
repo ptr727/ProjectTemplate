@@ -139,6 +139,16 @@ class RegenerateCase(unittest.TestCase):
         (self.dist_plugin / "skills" / "foo" / "references" / "notes.md").unlink()
         self.assertTrue(build_dist.is_stale())
 
+    def test_an_orphaned_generated_skill_directory_reports_stale(self) -> None:
+        """tree_digest() only hashes the expected `names`, so an extra directory under
+        DIST_PLUGIN/skills/ (a retired skill left behind, one added by hand) would never be
+        read and could not affect a pure digest comparison. Checked by name explicitly."""
+        self.make_skill("foo")
+        build_dist.regenerate()
+        (self.dist_plugin / "skills" / "orphan").mkdir()
+        (self.dist_plugin / "skills" / "orphan" / "SKILL.md").write_text("stray", encoding="utf-8")
+        self.assertTrue(build_dist.is_stale())
+
     def test_editing_a_skill_after_regenerate_reports_stale(self) -> None:
         self.make_skill("foo")
         build_dist.regenerate()
