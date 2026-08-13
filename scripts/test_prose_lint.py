@@ -24,7 +24,7 @@ from unittest import mock
 import prose_lint
 
 REPO = Path(__file__).resolve().parent.parent
-GOVERNANCE = REPO / 'GOVERNANCE.md'
+COMMENT_AND_DOC_STYLE_SKILL = REPO / '.agents' / 'skills' / 'comment-and-doc-style' / 'SKILL.md'
 
 # Bait assembled from two literals, so this module never holds the pattern it feeds the gate.
 # A file full of rejected input would otherwise report itself.
@@ -129,18 +129,21 @@ class TestTierTables(BaitCase):
                 self.assertGreaterEqual(len(table), floor)
 
 
-class TestGovernanceCoupling(unittest.TestCase):
+class TestCommentAndDocStyleSkillCoupling(unittest.TestCase):
     """The rule text drives the tables, rather than a copy of the rule driving them.
 
-    These are the cases that catch an incomplete or mis-tiered table, which no bait built from the
-    tables themselves can do: bait proves the matching works, not that the data is right.
+    The Character Set rule text lives in the comment-and-doc-style Skill.
+    GOVERNANCE.md's own section is a pointer at it, per the "skill becomes sole canonical
+    content" decision. These are the cases that catch an incomplete or mis-tiered table, which
+    no bait built from the tables themselves can do: bait proves the matching works, not that
+    the data is right.
     """
 
     def setUp(self) -> None:
-        self.doc = GOVERNANCE.read_text(encoding='utf-8')
-        section = re.search(r'^### Character Set$(.*?)^### ', self.doc, re.MULTILINE | re.DOTALL)
+        self.doc = COMMENT_AND_DOC_STYLE_SKILL.read_text(encoding='utf-8')
+        section = re.search(r'^## Character set$(.*?)^## ', self.doc, re.MULTILINE | re.DOTALL)
         if section is None:
-            self.fail('the Character Set heading moved, so the parse is blind')
+            self.fail('the Character set heading moved, so the parse is blind')
         self.section = section.group(1)
 
     def tier_codepoints(self, label: str) -> set[int]:
@@ -1342,11 +1345,13 @@ class TestSpelling(BaitCase):
 class TestCarriedContent(unittest.TestCase):
     """Content the fleet copies byte-matched, which only the hub can ever correct.
 
-    GOVERNANCE "Character Set" states the obligation: correct-as-you-next-edit assumes someone
-    able to edit the file, and a downstream repo cannot edit a verbatim one, since its copy is
-    byte-matched against the hub's. So the hub sweeps the class and re-vendors. That makes a
-    finding in a verbatim file different in kind from the tree-wide backlog: it is not a
-    correction owed by whoever next edits the file, it is one no downstream repo can make at all.
+    The comment-and-doc-style Skill's "Character set" section states the obligation:
+    correct-as-you-next-edit assumes someone able to edit the file, and a downstream repo cannot
+    edit a verbatim one, since its copy is byte-matched against the hub's.
+    So the hub sweeps the class and re-vendors.
+    That makes a finding in a verbatim file different in kind from the tree-wide backlog: it is
+    not a correction owed by whoever next edits the file, it is one no downstream repo can make
+    at all.
     """
 
     def verbatim_paths(self) -> list[Path]:
