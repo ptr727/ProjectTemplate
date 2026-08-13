@@ -97,12 +97,18 @@ jobs:
           python3 scripts/test_prose_lint.py
           python3 scripts/test_repo_gate.py
           python3 scripts/test_pr_review.py
+          python3 scripts/test_build_dist.py
+          python3 scripts/test_skills_install.py
           python3 spec/audit.py --selftest
           python3 host-setup/agent-safety/gh-write-guard.py --selftest
           python3 host-setup/agent-safety/test_install.py
 
       - name: Check repo gates step
         run: python3 scripts/repo_gate.py
+
+      # Read-only: fails if .claude-plugin/fleet-skills/ was not regenerated from .agents/skills/.
+      - name: Check fleet skills are current step
+        run: python3 scripts/build_dist.py --check
 
       # Every default prose rule is clean tree-wide, so all but one block a change that adds a finding.
       # `charset-unknown` is the exception and reports in the step below, for the reason given there.
