@@ -12,16 +12,16 @@ differently (see AGENTS.md "Fleet Bootstrap" for why):
     build_dist.py) and installs its plugin via the `claude` CLI, so Claude Code loads the same
     content the other two tools read directly.
 
-Both wrappers (install.sh, install.ps1) call this, so every OS runs one tested code path.
+Both wrappers (skills_install.sh, skills_install.ps1) call this, so every OS runs one tested code path.
 
 Every run records a stamp at ~/.agents/skills-install-stamp.json naming the machine, what was
 installed, and the hub commit it came from, so staleness is checkable later without re-running the
 install. `--report` reads that stamp against this checkout and answers whether the machine is
 current, without changing anything.
 
-Usage: python3 skills_install.py            (installs)
-       python3 skills_install.py --report   (read-only: is this machine current?)
-       AGENTS_HOME=/x python3 skills_install.py   (override the global skills target, for testing)
+Usage: python3 scripts/skills_install.py            (installs)
+       python3 scripts/skills_install.py --report   (read-only: is this machine current?)
+       AGENTS_HOME=/x python3 scripts/skills_install.py   (override the global skills target, for testing)
 """
 from __future__ import annotations
 

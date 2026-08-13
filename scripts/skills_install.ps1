@@ -1,8 +1,8 @@
 # Thin wrapper: run the cross-platform installer with a Python 3 (Windows).
 # All logic lives in skills_install.py so every OS runs one tested code path.
 # It is idempotent and safe to re-run.
-#   .\skills_install.ps1
-#   $env:AGENTS_HOME = "C:\path"; .\skills_install.ps1   # override the target (testing)
+#   Run: scripts\skills_install.ps1
+#   Or: $env:AGENTS_HOME = "C:\path"; scripts\skills_install.ps1   # override the target (testing)
 $ErrorActionPreference = "Stop"
 $here = Split-Path -Parent $MyInvocation.MyCommand.Path
 $script = Join-Path $here "skills_install.py"

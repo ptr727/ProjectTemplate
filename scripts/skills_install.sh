@@ -2,8 +2,8 @@
 # Thin wrapper: run the cross-platform installer with a Python 3 (Linux / WSL / macOS).
 # All logic lives in skills_install.py so every OS runs one tested code path.
 # It is idempotent and safe to re-run.
-#   ./skills_install.sh              installs the fleet skills for this user
-#   AGENTS_HOME=/x ./skills_install.sh   overrides the target (testing)
+#   Run: scripts/skills_install.sh              installs the fleet skills for this user
+#   Or: AGENTS_HOME=/x scripts/skills_install.sh   overrides the target (testing)
 set -Eeuo pipefail
 here="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
