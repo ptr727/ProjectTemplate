@@ -11,9 +11,12 @@
     "./skills/copilot-instructions-keeper",
     "./skills/dotnet-codestyle",
     "./skills/fleet-conformance-check",
+    "./skills/git-commit-conventions",
+    "./skills/operational-vs-release-workflow",
     "./skills/pr-review-conduct",
     "./skills/python-codestyle",
     "./skills/resync-a-repo",
-    "./skills/shell-codestyle"
+    "./skills/shell-codestyle",
+    "./skills/upstream-contribution-workflow"
   ]
 }
