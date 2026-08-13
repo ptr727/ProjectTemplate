@@ -29,9 +29,10 @@ change from one resync to the next.
 
 Read RESYNC.md section 0. A repo with no instruction set at all, or a partial one, is not this
 skill's job, it is STANDUP.md sections 1A and 2 instead, since an absent carried file is a
-baseline that never arrived rather than drift to converge. Run `spec/audit.py <repo>` and read
-whether the findings are letters (absent) or drift (present but stale) before doing anything else.
-The finding kind names the procedure the repo is owed.
+baseline that never arrived rather than drift to converge. Run `spec/audit.py <RepoName>`, the
+target's `registry/repos.json` `name` field rather than an `owner/repo` slug or a checkout path,
+and read whether the findings are letters (absent) or drift (present but stale) before doing
+anything else. The finding kind names the procedure the repo is owed.
 
 ## Reach the hub and measure before changing anything
 
