@@ -224,6 +224,24 @@ class ReportCase(unittest.TestCase):
             exit_code = skills_install.report(stamp)
         self.assertEqual(exit_code, 1)
 
+    def test_installed_from_dirty_but_now_clean_at_the_same_commit_still_reports_stale(self) -> None:
+        """The stamp records dirty=True from install time, when the actual materialized bytes
+        did not match any clean commit. A checkout going clean at the same commit afterward
+        cannot make that install "current": the bytes it produced are still unverifiable
+        against anything, since nothing about the current clean state proves what was on disk
+        at install time."""
+        stamp = self.tmp / "stamp.json"
+        stamp.write_text(
+            json.dumps({"stampVersion": skills_install.STAMP_VERSION,
+                        "source": {"commit": "abc", "dirty": True}}),
+            encoding="utf-8",
+        )
+        with mock.patch("skills_install.source_ref",
+                         return_value={"vcs": "git", "commit": "abc", "dirty": False}):
+            with mock.patch("builtins.print"):
+                exit_code = skills_install.report(stamp)
+        self.assertEqual(exit_code, 1)
+
     def test_a_valid_json_non_dict_stamp_reports_stale_instead_of_crashing(self) -> None:
         stamp = self.tmp / "stamp.json"
         stamp.write_text(json.dumps(["not", "a", "dict"]), encoding="utf-8")

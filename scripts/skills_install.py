@@ -205,9 +205,13 @@ def report(stamp_path):
     # Calling .get("commit") on that would crash instead of reading as stale like every other unrecognized-shape case here does.
     stamp_source = stamp.get("source")
     stamp_commit = stamp_source.get("commit") if isinstance(stamp_source, dict) else None
+    stamp_dirty = stamp_source.get("dirty") if isinstance(stamp_source, dict) else None
     # A dirty checkout cannot be asserted current.
     # The commit it names is not what is actually on disk.
     # A caller trusting "current" here would trust bytes that were never installed.
+    # Checked on both sides.
+    # The current checkout's own dirty flag catches a machine that has since gone dirty at the recorded commit.
+    # The stamp's recorded dirty flag catches the install itself having happened from a dirty checkout, whose bytes a later-clean tree at the same commit can never actually reproduce or verify.
     # Wrapped in bool() rather than left as a bare "or" chain.
     # A missing current_commit (a non-git checkout) reads as stale this way.
     # A plain "or" chain would leave `stale` as the None that produces there instead, and `if stale else` treats that as falsy the same as an actual False.
@@ -218,6 +222,7 @@ def report(stamp_path):
         current_commit is None
         or stamp_commit != current_commit
         or current.get("dirty")
+        or stamp_dirty
     )
     print(json.dumps({"stamp": stamp, "currentCommit": current_commit, "stale": stale}, indent=2))
     return 1 if stale else 0
