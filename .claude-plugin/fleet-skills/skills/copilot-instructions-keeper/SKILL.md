@@ -24,11 +24,11 @@ This skill is about maintaining that file's carried copy, not a substitute for i
 
 `spec/files.json` declares it `intent` fidelity, `whole: true`, covering three named sections
 (`Commit Messages and Pull Request Titles`, `Reviewing Carried Fleet Content`, `GitHub Copilot
-Review Runbook`), with `<owner>`, `<repo>`, and `<N>` placeholders filled per repo. **`intent`
-fidelity is checked by the fleet audit for presence only, never content** (`RESYNC.md`), so a hub
-revision to this file produces no finding anywhere in the mechanical audit. If this file is
-stale, nothing else in the fleet's tooling will say so, noticing has to happen in a live session
-like this one.
+Review Runbook`), with `<owner>`, `<repo>`, and `<N>` placeholders filled per repo. **The fleet
+audit checks an `intent` file for file presence and each named section's heading, never for
+content drift inside a section.** A section that is present but has fallen out of date against
+the hub, the exact gap this skill exists to catch, produces no finding anywhere in the mechanical
+audit. Noticing that has to happen in a live session like this one.
 
 ## The one thing this file has that others don't: repo-local ledger entries
 
