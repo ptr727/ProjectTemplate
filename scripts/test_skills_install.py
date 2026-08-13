@@ -85,5 +85,32 @@ class ReportCase(unittest.TestCase):
         self.assertEqual(exit_code, 1)
 
 
+class MainExitCodeCase(unittest.TestCase):
+    """A caller scripting this installer needs the exit code to distinguish a real failure
+    (claude present but registration failed) from an expected partial install (no claude on
+    this machine at all)."""
+
+    def setUp(self) -> None:
+        self.tmp = Path(self.enterContext(tempfile.TemporaryDirectory()))
+        self.addCleanup(mock.patch.stopall)
+        mock.patch("skills_install.agents_home", return_value=self.tmp).start()
+        mock.patch("skills_install.materialize_global_skills").start()
+        mock.patch("sys.argv", ["skills_install.py"]).start()
+
+    def test_claude_present_but_registration_fails_exits_nonzero(self) -> None:
+        mock.patch("skills_install.claude_available", return_value=True).start()
+        mock.patch("skills_install.register_claude_marketplace", return_value=False).start()
+        self.assertEqual(skills_install.main(), 1)
+
+    def test_claude_present_and_registration_succeeds_exits_zero(self) -> None:
+        mock.patch("skills_install.claude_available", return_value=True).start()
+        mock.patch("skills_install.register_claude_marketplace", return_value=True).start()
+        self.assertEqual(skills_install.main(), 0)
+
+    def test_claude_absent_is_a_partial_install_not_a_failure(self) -> None:
+        mock.patch("skills_install.claude_available", return_value=False).start()
+        self.assertEqual(skills_install.main(), 0)
+
+
 if __name__ == "__main__":
     unittest.main()

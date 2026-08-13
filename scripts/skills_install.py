@@ -154,16 +154,21 @@ def main():
 
     materialize_global_skills(home / "skills")
 
-    claude_registered = False
-    if claude_available():
-        claude_registered = register_claude_marketplace()
-    else:
+    claude_present = claude_available()
+    claude_registered = register_claude_marketplace() if claude_present else False
+    if not claude_present:
         print("`claude` not found on PATH, skipping Claude Code marketplace registration "
               "(Codex/opencode global skills were still installed).", file=sys.stderr)
 
     home.mkdir(parents=True, exist_ok=True)
     stamp_path.write_text(json.dumps(build_stamp(claude_registered), indent=2) + "\n", encoding="utf-8")
     print(f"Installed to {home / 'skills'}. Claude Code marketplace registered: {claude_registered}.")
+
+    # `claude` missing is a partial-but-expected install (a Codex/opencode-only machine).
+    # `claude` present but registration failing is a real failure.
+    # The stamp still records it either way, but only the exit code lets automation notice.
+    if claude_present and not claude_registered:
+        return 1
     return 0
 
 
