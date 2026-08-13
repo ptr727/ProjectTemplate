@@ -9,8 +9,9 @@ description: >-
   Copilot's review mechanics in this file look stale, wrong, or missing something the fleet
   runbook should cover, or whenever standing up a new repo and carrying this file for the first
   time. Also triggers on "why isn't the audit catching that this file is out of date," since the
-  fleet's mechanical audit checks this file for presence only, at intent fidelity, never for
-  content drift, so nothing else notices staleness here except a live check like this one.
+  fleet's mechanical audit checks this file, at intent fidelity, for file presence and each named
+  section's heading, never for content drift inside a section, so nothing else notices a stale
+  section here except a live check like this one.
 ---
 
 # Copilot Instructions Keeper
