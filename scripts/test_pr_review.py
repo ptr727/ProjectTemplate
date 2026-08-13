@@ -2419,7 +2419,7 @@ class TestContract(unittest.TestCase):
             with self.subTest(verb=verb):
                 self.assertNotIn(verb, source, f'{verb!r} is a state-changing call this script '
                                                'has no reason to make')
-        self.assertNotIn('union:false', source.replace(' ', ''),
+        self.assertNotIn('union:false', ''.join(source.split()),
                          'the additive form is the only one this script issues, since dropping '
                          'a pending human reviewer is the runbook\'s manual recovery path, never '
                          'an automatic one')
