@@ -78,7 +78,10 @@ git -C ~/repos/<Repo> fetch origin <task-branch>
 git -C ~/repos/<Repo> worktree add ~/repos/worktrees/<Repo>-<task-slug> <task-branch>
 ```
 
-Git refuses to attach a branch that is already checked out somewhere else, and that refusal is
+When the base clone holds only the remote-tracking ref, the same command creates the local
+branch tracking `origin/<task-branch>` through git's ordinary checkout guessing, so a fresh
+clone needs no separate branch setup. Git refuses to attach a branch that is already checked
+out somewhere else, and that refusal is
 the mandate working, since the branch sitting checked out in a shared tree is the hazard the
 continuation rule exists for. Return that checkout to its own working branch first when its tree
 is clean, and stop when it is not, because a dirty tree there may be another task's uncommitted
