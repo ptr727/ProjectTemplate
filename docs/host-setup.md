@@ -247,14 +247,15 @@ d=$(mktemp -d "${TMPDIR:-/tmp}/sign-check.XXXXXX") && (
     && echo "$out" \
     && ae=$(git -C "$d" log -1 --format='%ae') \
     && ce=$(git -C "$d" log -1 --format='%ce') \
-    && case "$out" in sig=G\ *) true ;; *) false ;; esac \
+    && case "$out" in sig=G\ *|sig=U\ *) true ;; *) false ;; esac \
+    && case "$email" in *@users.noreply.github.com) true ;; *) false ;; esac \
     && [ "$ae" = "$email" ] \
     && [ "$ce" = "$email" ]
 )
 gh auth status
 ```
 
-`sig` must read `G` and both the `author` and `committer` email must match the noreply address from the config line above, both enforced by the snippet itself. `ssh-add -L` (or a `gpg --list-secret-keys` equivalent) is not a substitute: it only proves an agent holds a key, and a host that signs straight from a key file with no agent running passes this scratch commit while failing that probe, per [GOVERNANCE.md "Git and Commit Rules"][governance-git-and-commit-rules]. If signing fails locally, the devcontainer will fail too, so fix here first.
+`sig` must read `G` (good signature) or `U` (good signature, undefined trust: GPG-only, common on a freshly generated key before its trust is set to ultimate; SSH's `allowed_signers` carries no trust concept, so this never applies there), both the `author` and `committer` email must be an actual noreply address, and both must match `user.email` from the config line above, all enforced by the snippet itself. `ssh-add -L` (or a `gpg --list-secret-keys` equivalent) is not a substitute: it only proves an agent holds a key, and a host that signs straight from a key file with no agent running passes this scratch commit while failing that probe, per [GOVERNANCE.md "Git and Commit Rules"][governance-git-and-commit-rules]. If signing fails locally, the devcontainer will fail too, so fix here first.
 
 The gate replaced a line that ran `--version` on each tool and read only whether it answered. That form reported a host carrying the broken `gh` as fully set up, which is the failure it exists to stop. It exits non-zero on a missing required tool or one below its floor, and a below-floor finding prints the defect behind the floor rather than the number alone, names where to install from, and prints the command that installs or upgrades the tool on the current platform, so that failure carries its own fix. A missing tool prints the one-line fact, and [`host-setup/`][host-setup-dir] is its remedy.
 
@@ -272,7 +273,8 @@ try {
     && git -C "$d" log -1 --format='sig=%G? author=%an <%ae> committer=%cn <%ce>' | Tee-Object -Variable out
   $ae = git -C "$d" log -1 --format='%ae'
   $ce = git -C "$d" log -1 --format='%ce'
-  if ($out -notmatch '^sig=G ' -or $ae -ne $email -or $ce -ne $email) {
+  if ($out -notmatch '^sig=[GU] ' -or $email -notmatch '@users\.noreply\.github\.com$' `
+      -or $ae -ne $email -or $ce -ne $email) {
     throw "signing/identity check failed: $out"
   }
 } finally {

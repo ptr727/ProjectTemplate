@@ -73,7 +73,8 @@ scope-widened commit, a rewritten shared history, a destructive reset).
       && echo "$out" \
       && ae=$(git -C "$d" log -1 --format='%ae') \
       && ce=$(git -C "$d" log -1 --format='%ce') \
-      && case "$out" in sig=G\ *) true ;; *) false ;; esac \
+      && case "$out" in sig=G\ *|sig=U\ *) true ;; *) false ;; esac \
+      && case "$email" in *@users.noreply.github.com) true ;; *) false ;; esac \
       && [ "$ae" = "$email" ] \
       && [ "$ce" = "$email" ]
   )
@@ -90,7 +91,8 @@ scope-widened commit, a rewritten shared history, a destructive reset).
       && git -C "$d" log -1 --format='sig=%G? author=%an <%ae> committer=%cn <%ce>' | Tee-Object -Variable out
     $ae = git -C "$d" log -1 --format='%ae'
     $ce = git -C "$d" log -1 --format='%ce'
-    if ($out -notmatch '^sig=G ' -or $ae -ne $email -or $ce -ne $email) {
+    if ($out -notmatch '^sig=[GU] ' -or $email -notmatch '@users\.noreply\.github\.com$' `
+        -or $ae -ne $email -or $ce -ne $email) {
       throw "signing/identity check failed: $out"
     }
   } finally {
@@ -98,7 +100,9 @@ scope-widened commit, a rewritten shared history, a destructive reset).
   }
   ```
 
-  `sig` must read `G`, git's own good-signature verdict char. Don't grep localized
+  `sig` must read `G` (good signature) or `U` (good signature, undefined trust: GPG-only, common
+  on a freshly generated key before its trust is set to ultimate). SSH's `allowed_signers` carries
+  no trust concept, so `U` never applies there. `sig` is git's own verdict char. Don't grep localized
   "Good" text, since that varies by git version and locale. Anything else, or the commit failing
   outright, means **do not commit**: surface the actual error to the developer and stop at
   `git add`. Nothing else is contrary evidence: not an unreachable agent, not a config value, not a
