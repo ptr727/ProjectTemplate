@@ -20,6 +20,7 @@ settings.json bug). Each gap names its carriers, so a `retire` disposition reads
 
 Usage: python3 spec/fidelity_honesty.py [--report]
 """
+
 import base64
 import sys
 
@@ -50,25 +51,44 @@ def check_units(spec):
     for e in spec["files"]["baseline"]:
         fid = e.get("fidelity")
         if fid in ("intent", "verbatim"):
-            yield (e["path"], fid, e.get("appliesTo", "*"), "*", e["path"], e.get("reference") or e["path"], None)
+            yield (
+                e["path"],
+                fid,
+                e.get("appliesTo", "*"),
+                "*",
+                e["path"],
+                e.get("reference") or e["path"],
+                None,
+            )
         sections = e.get("sections")
         if not isinstance(sections, list):
             continue
         for elt in sections:
-            if isinstance(elt, dict) and elt.get("fidelity") == "verbatim" and isinstance(elt.get("name"), str) and elt["name"]:
+            if (
+                isinstance(elt, dict)
+                and elt.get("fidelity") == "verbatim"
+                and isinstance(elt.get("name"), str)
+                and elt["name"]
+            ):
                 name = elt["name"]
-                yield (f"{e['path']}{SECTION_SEP}{name}", "verbatim", e.get("appliesTo", "*"),
-                       elt.get("appliesTo", "*"), e["path"], e.get("reference") or e["path"],
-                       (lambda t, n=name: audit.extract_section(t, n)))
+                yield (
+                    f"{e['path']}{SECTION_SEP}{name}",
+                    "verbatim",
+                    e.get("appliesTo", "*"),
+                    elt.get("appliesTo", "*"),
+                    e["path"],
+                    e.get("reference") or e["path"],
+                    (lambda t, n=name: audit.extract_section(t, n)),
+                )
 
 
 def fidelity_pass(spec):
     defaults = spec["registry"].get("defaults", {})
     repos = [r for r in spec["registry"]["repos"] if r.get("status") == "cataloged"]
 
-    spreads = []          # (unit dict, spread dict) for the full table
-    promote = []          # intent units that are uniform fleet-wide
-    mislabel = []         # verbatim units that diverge non-stale
+    spreads = []  # (unit dict, spread dict) for the full table
+    promote = []  # intent units that are uniform fleet-wide
+    mislabel = []  # verbatim units that diverge non-stale
 
     for label, fid, ent_ap, sec_ap, down_path, canon_path, extract in check_units(spec):
         unit = {"path": label, "fidelity": fid}
@@ -76,7 +96,9 @@ def fidelity_pass(spec):
             canon_raw = (audit.ROOT / canon_path).read_text(encoding="utf-8", errors="replace")
         except OSError:
             canon_raw = None
-        canon = None if canon_raw is None else (canon_raw if extract is None else extract(canon_raw))
+        canon = (
+            None if canon_raw is None else (canon_raw if extract is None else extract(canon_raw))
+        )
         if canon is None:
             spreads.append((unit, None))
             continue
@@ -93,7 +115,9 @@ def fidelity_pass(spec):
             if not (audit.applies(ent_ap, sel) and audit.applies(sec_ap, sel)):
                 continue
             text = fetch(audit.repo_slug(r), down_path, r.get("groundTruthBranch", "main"))
-            if text is None:  # missing (404) or present-but-non-inline (too large / encoding "none")
+            if (
+                text is None
+            ):  # missing (404) or present-but-non-inline (too large / encoding "none")
                 spread["unavailable"].append(r["name"])
                 continue
             region = text if extract is None else extract(text)
@@ -193,17 +217,31 @@ def render_report(spreads, promote, gaps, unreadable, ledger):
         sp = spread_by_path.get(path)
         if not sp:
             return set(), set(), set()
-        return set(sp["differs"]) | set(sp["stale"]) | set(sp["absent"]), set(sp["match"]), set(sp["unavailable"])
+        return (
+            set(sp["differs"]) | set(sp["stale"]) | set(sp["absent"]),
+            set(sp["match"]),
+            set(sp["unavailable"]),
+        )
 
     # Keep only well-formed entries so --report degrades cleanly on a hand-malformed ledger rather than raising KeyError or TypeError downstream.
     # The validate.py gate reports the malformation loudly in CI.
-    dispositions = [d for d in ledger.get("dispositions", [])
-                    if isinstance(d, dict) and isinstance(d.get("path"), str)
-                    and isinstance(d.get("repos"), list) and isinstance(d.get("disposition"), str)
-                    and isinstance(d.get("reason"), str)]
-    gap_entries = [g for g in ledger.get("gaps", [])
-                   if isinstance(g, dict) and isinstance(g.get("path"), str)
-                   and isinstance(g.get("disposition"), str) and isinstance(g.get("reason"), str)]
+    dispositions = [
+        d
+        for d in ledger.get("dispositions", [])
+        if isinstance(d, dict)
+        and isinstance(d.get("path"), str)
+        and isinstance(d.get("repos"), list)
+        and isinstance(d.get("disposition"), str)
+        and isinstance(d.get("reason"), str)
+    ]
+    gap_entries = [
+        g
+        for g in ledger.get("gaps", [])
+        if isinstance(g, dict)
+        and isinstance(g.get("path"), str)
+        and isinstance(g.get("disposition"), str)
+        and isinstance(g.get("reason"), str)
+    ]
     gap_disp = {g["path"]: g for g in gap_entries}
     covered = {}  # path -> repos that carry a disposition (to find the untriaged remainder)
     for d in dispositions:
@@ -246,7 +284,9 @@ def render_report(spreads, promote, gaps, unreadable, ledger):
     w = out.append
     w("# Fleet divergence report")
     w("")
-    w("Generated by `python3 spec/fidelity_honesty.py --report` - do not hand-edit. Curate dispositions in [`spec/divergences.json`][ledger] and regenerate. Each row reflects a repo's ground-truth branch at generation time. Git dates this file.")
+    w(
+        "Generated by `python3 spec/fidelity_honesty.py --report` - do not hand-edit. Curate dispositions in [`spec/divergences.json`][ledger] and regenerate. Each row reflects a repo's ground-truth branch at generation time. Git dates this file."
+    )
     w("")
 
     w("## Burn-down")
@@ -262,12 +302,18 @@ def render_report(spreads, promote, gaps, unreadable, ledger):
         w("")
         for entry, live, gone, unk in rows:
             trk = f" (tracking: {entry['tracking']})" if entry.get("tracking") else ""
-            if live is None:  # a manifest-gap disposition, whose carriers come from the gap pass rather than from the ledger row
-                w(f"- **{entry['path']}** (manifest gap, carried by {_fmt(gaps.get(entry['path'], []))}){trk} - {entry['reason']}")
+            if (
+                live is None
+            ):  # a manifest-gap disposition, whose carriers come from the gap pass rather than from the ledger row
+                w(
+                    f"- **{entry['path']}** (manifest gap, carried by {_fmt(gaps.get(entry['path'], []))}){trk} - {entry['reason']}"
+                )
             else:
                 extra = f" _(recorded {_fmt(gone)} now resolved)_" if gone else ""
                 extra += f" _(unavailable, unverified: {_fmt(unk)})_" if unk else ""
-                w(f"- **{entry['path']}** - {_fmt(live) if live else '(none live)'}{trk}{extra} - {entry['reason']}")
+                w(
+                    f"- **{entry['path']}** - {_fmt(live) if live else '(none live)'}{trk}{extra} - {entry['reason']}"
+                )
         w("")
 
     w("## Untriaged - add a disposition to `spec/divergences.json`")
@@ -279,21 +325,32 @@ def render_report(spreads, promote, gaps, unreadable, ledger):
         for path, repos in untriaged_files:
             w(f"- **{path}** - hand-modified in {_fmt(repos)} (verbatim canonical)")
         for path, repos in untriaged_absent:
-            w(f"- **{path}** - **not carried** by {_fmt(repos)}, so the section never arrived rather than being edited (verbatim canonical)")
+            w(
+                f"- **{path}** - **not carried** by {_fmt(repos)}, so the section never arrived rather than being edited (verbatim canonical)"
+            )
         for g in untriaged_gaps:
-            w(f"- **{g}** - hub-hosted and undeclared in the manifest, carried by {_fmt(gaps.get(g, []))}")
+            w(
+                f"- **{g}** - hub-hosted and undeclared in the manifest, carried by {_fmt(gaps.get(g, []))}"
+            )
         w("")
 
     if unreadable:
-        w(f"**Tree unreadable, so no manifest gap was measured for {_fmt(unreadable)}.** An unread tree contributes no gaps and reads exactly like a repo carrying none, so it is named rather than counted as clean.")
+        w(
+            f"**Tree unreadable, so no manifest gap was measured for {_fmt(unreadable)}.** An unread tree contributes no gaps and reads exactly like a repo carrying none, so it is named rather than counted as clean."
+        )
         w("")
 
     w("## Mechanical re-vendor (verbatim stale copies)")
     w("")
-    w("A past hub revision, not the current canonical - the audit already flags these as DRIFT. Copy the current file down. No judgment needed.")
+    w(
+        "A past hub revision, not the current canonical - the audit already flags these as DRIFT. Copy the current file down. No judgment needed."
+    )
     w("")
-    stale_rows = [(e["path"], sp["stale"]) for e, sp in spreads
-                  if sp is not None and e["fidelity"] == "verbatim" and sp["stale"]]
+    stale_rows = [
+        (e["path"], sp["stale"])
+        for e, sp in spreads
+        if sp is not None and e["fidelity"] == "verbatim" and sp["stale"]
+    ]
     if not stale_rows:
         w("_None._")
     for path, repos in stale_rows:
@@ -345,18 +402,26 @@ def main():
         if spread is None:
             print(f"   {e.get('fidelity'):8} {e['path']} :: canonical unreadable at hub - skipped")
             continue
-        print(f"   {e['fidelity']:8} {e['path']} :: "
-              f"{len(spread['match'])} / {len(spread['stale'])} / {len(spread['differs'])} / "
-              f"{len(spread['absent'])} / {len(spread['unavailable'])}")
+        print(
+            f"   {e['fidelity']:8} {e['path']} :: "
+            f"{len(spread['match'])} / {len(spread['stale'])} / {len(spread['differs'])} / "
+            f"{len(spread['absent'])} / {len(spread['unavailable'])}"
+        )
 
-    print("\n== INTENT units with no divergent copy (verbatim-appropriate) -> candidates to promote to VERBATIM ==")
-    print("   (>=1 confirmed match, 0 hand-modified. Any stale/unavailable copy is shown per unit and would")
+    print(
+        "\n== INTENT units with no divergent copy (verbatim-appropriate) -> candidates to promote to VERBATIM =="
+    )
+    print(
+        "   (>=1 confirmed match, 0 hand-modified. Any stale/unavailable copy is shown per unit and would"
+    )
     print("    re-vendor under verbatim - the drift intent cannot catch)")
     if not promote:
         print("   none")
     for e, spread in promote:
-        print(f"   {e['path']}: {len(spread['match'])} match, {len(spread['stale'])} stale, "
-              f"{len(spread['unavailable'])} unavailable, 0 differ")
+        print(
+            f"   {e['path']}: {len(spread['match'])} match, {len(spread['stale'])} stale, "
+            f"{len(spread['unavailable'])} unavailable, 0 differ"
+        )
 
     print("\n== VERBATIM units with NON-stale downstream divergence (mis-label or real drift) ==")
     if not mislabel:

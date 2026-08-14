@@ -3,6 +3,7 @@
 
 Run as `python3 scripts/tests/test_build_dist.py`, or under `python3 -m unittest discover -s scripts/tests`.
 """
+
 from __future__ import annotations
 
 import json
@@ -21,8 +22,13 @@ class RegenerateCase(unittest.TestCase):
         self.tmp = Path(self.enterContext(__import__("tempfile").TemporaryDirectory()))
         self.skills_src = self.tmp / ".agents" / "skills"
         self.dist_plugin = self.tmp / ".claude-plugin" / "fleet-skills"
-        self.addCleanup(self._restore, build_dist.SKILLS_SRC, build_dist.DIST_PLUGIN,
-                         build_dist.PLUGIN_MANIFEST, build_dist.DIGEST_STAMP)
+        self.addCleanup(
+            self._restore,
+            build_dist.SKILLS_SRC,
+            build_dist.DIST_PLUGIN,
+            build_dist.PLUGIN_MANIFEST,
+            build_dist.DIGEST_STAMP,
+        )
         build_dist.SKILLS_SRC = self.skills_src
         build_dist.DIST_PLUGIN = self.dist_plugin
         build_dist.PLUGIN_MANIFEST = self.dist_plugin / ".claude-plugin" / "plugin.json"
@@ -92,7 +98,10 @@ class RegenerateCase(unittest.TestCase):
         self.assertEqual(names, ["bar", "foo"])
         manifest = json.loads(build_dist.PLUGIN_MANIFEST.read_text(encoding="utf-8"))
         self.assertEqual(manifest["skills"], ["./skills/bar", "./skills/foo"])
-        self.assertEqual((self.dist_plugin / "skills" / "foo" / "SKILL.md").read_text(encoding="utf-8"), "content")
+        self.assertEqual(
+            (self.dist_plugin / "skills" / "foo" / "SKILL.md").read_text(encoding="utf-8"),
+            "content",
+        )
         self.assertFalse(build_dist.is_stale())
 
     def test_a_deleted_manifest_reports_stale_even_with_a_current_digest_stamp(self) -> None:
@@ -116,6 +125,7 @@ class RegenerateCase(unittest.TestCase):
         self.make_skill("foo")
         build_dist.regenerate()
         import shutil
+
         shutil.rmtree(self.dist_plugin / "skills" / "foo")
         self.assertTrue(build_dist.is_stale())
 
@@ -176,6 +186,7 @@ class RegenerateCase(unittest.TestCase):
         (self.skills_src / "foo" / "scripts" / "run.py").write_text("x", encoding="utf-8")
 
         import hashlib
+
         expected = hashlib.sha256()
         expected.update(b"foo")
         expected.update(b"foo/SKILL.md")
@@ -189,6 +200,7 @@ class RegenerateCase(unittest.TestCase):
         self.make_skill("bar")
         build_dist.regenerate()
         import shutil
+
         shutil.rmtree(self.skills_src / "bar")
         names = build_dist.regenerate()
         self.assertEqual(names, ["foo"])
@@ -198,6 +210,7 @@ class RegenerateCase(unittest.TestCase):
         self.make_skill("foo")
         (self.skills_src / "foo" / "escape").symlink_to(self.tmp)
         from unittest import mock
+
         with mock.patch("sys.argv", ["build_dist.py"]), mock.patch("builtins.print"):
             exit_code = build_dist.main()
         self.assertEqual(exit_code, 1)

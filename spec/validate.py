@@ -6,6 +6,7 @@ its publish mechanisms are recognized, and its secrets are consistent with
 spec/secrets.json. Exits non-zero on any failure. This is the classification
 dry-run the CI lint job runs; it needs no third-party packages.
 """
+
 import json
 import pathlib
 import re
@@ -21,7 +22,14 @@ CONSUMER_MODELS = ("push", "pull")
 # How faithfully a carried unit is checked, per spec/fidelity-model.md, defaulting to presence.
 FIDELITIES = ("presence", "intent", "verbatim", "interface")
 # The keys an interface unit's `contract` may carry (kept in sync with files.schema.json).
-CONTRACT_KEYS = {"requiredJobKeys", "requiredCheckName", "artifactNameToken", "requireTokensInJob", "forbidTokensInJob", "verbatimJobs"}
+CONTRACT_KEYS = {
+    "requiredJobKeys",
+    "requiredCheckName",
+    "artifactNameToken",
+    "requireTokensInJob",
+    "forbidTokensInJob",
+    "verbatimJobs",
+}
 
 
 def load(rel):
@@ -81,26 +89,48 @@ def main():
     if not isinstance(readme_model, dict):
         errors.append("readme-sections.json: top level is not an object")
     else:
-        for key, want in (("sections", list), ("shieldClasses", list), ("linkGroups", list),
-                          ("linkNaming", list), ("canonicalLinks", list), ("distribution", dict)):
+        for key, want in (
+            ("sections", list),
+            ("shieldClasses", list),
+            ("linkGroups", list),
+            ("linkNaming", list),
+            ("canonicalLinks", list),
+            ("distribution", dict),
+        ):
             value = readme_model.get(key)
             if not isinstance(value, want) or not value:
-                errors.append(f"readme-sections.json: '{key}' must be a non-empty {'array' if want is list else 'object'}, and spec/audit.py indexes it directly")
+                errors.append(
+                    f"readme-sections.json: '{key}' must be a non-empty {'array' if want is list else 'object'}, and spec/audit.py indexes it directly"
+                )
         # The distribution prefixes are what tell a repo's own URLs from a third party's.
         # Their absence fails open rather than loud: link_kind would classify every own URL as external, canonical naming would quietly stop being enforced, and the audit would still report green.
-        prefixes = readme_model.get("distribution", {}).get("urlPrefixes") if isinstance(readme_model.get("distribution"), dict) else None
+        prefixes = (
+            readme_model.get("distribution", {}).get("urlPrefixes")
+            if isinstance(readme_model.get("distribution"), dict)
+            else None
+        )
         if not is_str_list(prefixes) or not prefixes:
-            errors.append("readme-sections.json: 'distribution.urlPrefixes' must be a non-empty array of strings, or the link audit stops distinguishing this repo's URLs from a third party's and silently passes")
+            errors.append(
+                "readme-sections.json: 'distribution.urlPrefixes' must be a non-empty array of strings, or the link audit stops distinguishing this repo's URLs from a third party's and silently passes"
+            )
         else:
             # Every prefix, not merely one of them.
             # A broad entry added beside a valid one would pass an any() guard while making link_kind read a third party's URL as this repo's own, which is the failure the guard exists to stop.
             loose = [p for p in prefixes if "{slug}" not in p and "{owner}" not in p]
             if loose:
-                errors.append(f"readme-sections.json: 'distribution.urlPrefixes' entry {loose[0]!r} carries neither {{slug}} nor {{owner}}, so it is not repo-scoped and would match another owner's URLs")
+                errors.append(
+                    f"readme-sections.json: 'distribution.urlPrefixes' entry {loose[0]!r} carries neither {{slug}} nor {{owner}}, so it is not repo-scoped and would match another owner's URLs"
+                )
         # A canonicalLinks entry naming a destination it cannot match is a name nothing enforces, and audit.py raises on it mid-run rather than reporting.
-        for c in readme_model.get("canonicalLinks", []) if isinstance(readme_model.get("canonicalLinks"), list) else []:
+        for c in (
+            readme_model.get("canonicalLinks", [])
+            if isinstance(readme_model.get("canonicalLinks"), list)
+            else []
+        ):
             if isinstance(c, dict) and "repoPath" not in c and "match" not in c:
-                errors.append(f"readme-sections.json: canonicalLinks entry '{c.get('name')}' carries neither 'repoPath' nor 'match', so it can match no URL")
+                errors.append(
+                    f"readme-sections.json: canonicalLinks entry '{c.get('name')}' carries neither 'repoPath' nor 'match', so it can match no URL"
+                )
 
     # CI runs no JSON-schema validation, so shape-check the shared tool catalog here.
     # A duplicate name is the failure worth catching: the audit keys on it, so the second entry silently shadows the first and half the fleet is measured against a description nobody can see.
@@ -118,18 +148,28 @@ def main():
         seen = set()
         for t in tools:
             name = t.get("name") if isinstance(t, dict) else None
-            if not isinstance(t, dict) or not all(isinstance(t.get(f), str) and t.get(f) for f in ("name", "link", "description")):
-                errors.append(f"third-party-tools.json: entry {name or t!r} needs a non-empty name, link and description")
+            if not isinstance(t, dict) or not all(
+                isinstance(t.get(f), str) and t.get(f) for f in ("name", "link", "description")
+            ):
+                errors.append(
+                    f"third-party-tools.json: entry {name or t!r} needs a non-empty name, link and description"
+                )
                 continue
             if name.lower() in seen:
-                errors.append(f"third-party-tools.json: duplicate tool name '{name}' - the audit keys on it, so the second entry would shadow the first")
+                errors.append(
+                    f"third-party-tools.json: duplicate tool name '{name}' - the audit keys on it, so the second entry would shadow the first"
+                )
             seen.add(name.lower())
             desc = t["description"]
             if not (desc[0].isupper() and desc.endswith(".")):
-                errors.append(f"third-party-tools.json: '{name}' description {desc!r} is not a sentence - open with a capital and close with a full stop")
+                errors.append(
+                    f"third-party-tools.json: '{name}' description {desc!r} is not a sentence - open with a capital and close with a full stop"
+                )
         names = [t["name"] for t in tools if isinstance(t, dict) and isinstance(t.get("name"), str)]
         if names != sorted(names, key=str.lower):
-            errors.append("third-party-tools.json: 'tools' is not sorted by name, which is how a reader finds an entry to copy")
+            errors.append(
+                "third-party-tools.json: 'tools' is not sorted by name, which is how a reader finds an entry to copy"
+            )
     # Shape-checked here rather than left to the gate, because a malformed entry is a silently skipped tool.
     # A floor nobody can compare against reports nothing, which reads exactly like a host that passed.
     host_tools = load("spec/host-tools.json")
@@ -146,18 +186,26 @@ def main():
                 continue
             # Case-insensitive, matching the gate, which folds case so a repository writing 'GH' overrides 'gh' rather than adding a second entry.
             if name.lower() in ht_seen:
-                errors.append(f"host-tools.json: duplicate tool name '{name}' - the gate keys on it without regard to case, so the second entry would shadow the first")
+                errors.append(
+                    f"host-tools.json: duplicate tool name '{name}' - the gate keys on it without regard to case, so the second entry would shadow the first"
+                )
             ht_seen.add(name.lower())
             if not isinstance(t.get("why"), str) or not t.get("why"):
-                errors.append(f"host-tools.json: '{name}' needs a non-empty why, which is what keeps a floor from becoming folklore")
+                errors.append(
+                    f"host-tools.json: '{name}' needs a non-empty why, which is what keeps a floor from becoming folklore"
+                )
             # Type-checked rather than read for truthiness, since the string "false" is true and would fail every host on a tool nobody requires.
             # CI runs no JSON-schema validation, so this file is the only thing that reads the declaration before the gate trusts it.
             if "required" in t and not isinstance(t["required"], bool):
-                errors.append(f"host-tools.json: '{name}' required must be true or false, not {t['required']!r}")
+                errors.append(
+                    f"host-tools.json: '{name}' required must be true or false, not {t['required']!r}"
+                )
             # Compiled rather than only type-checked, since scripts/host_gate.py names this file as what covers the hub declaration.
             # An uncompilable pattern would otherwise ship and surface at gate runtime, which is the reader that cannot fix it.
             if not isinstance(t.get("pattern"), str) or not t.get("pattern"):
-                errors.append(f"host-tools.json: '{name}' needs a non-empty pattern to read a version with")
+                errors.append(
+                    f"host-tools.json: '{name}' needs a non-empty pattern to read a version with"
+                )
             else:
                 try:
                     re.compile(t["pattern"])
@@ -166,44 +214,75 @@ def main():
             probes = t.get("probes")
             # The emptiness of each argument is read as well as its type, so this says what it claims and agrees with the gate's own check.
             # An empty argument passes a type test and produces a probe that cannot execute.
-            if not isinstance(probes, list) or not probes or not all(isinstance(p, list) and p and all(isinstance(a, str) and a for a in p) for p in probes):
-                errors.append(f"host-tools.json: '{name}' needs 'probes' as a non-empty array of non-empty string arrays")
+            if (
+                not isinstance(probes, list)
+                or not probes
+                or not all(
+                    isinstance(p, list) and p and all(isinstance(a, str) and a for a in p)
+                    for p in probes
+                )
+            ):
+                errors.append(
+                    f"host-tools.json: '{name}' needs 'probes' as a non-empty array of non-empty string arrays"
+                )
             # Presence is read as presence, since a sentinel default cannot tell a missing key from one holding that same value.
             # A declared "minimum": false would otherwise be reported as undeclared, sending the reader to add a field that is already there.
             if "minimum" not in t:
-                errors.append(f"host-tools.json: '{name}' must declare 'minimum', using null where no floor has been measured")
+                errors.append(
+                    f"host-tools.json: '{name}' must declare 'minimum', using null where no floor has been measured"
+                )
                 floor = None
             else:
                 floor = t["minimum"]
             if floor is not None:
                 if not isinstance(floor, str) or not re.fullmatch(r"\d+(\.\d+)*", floor):
-                    errors.append(f"host-tools.json: '{name}' minimum {floor!r} must be dot-separated integers or null")
+                    errors.append(
+                        f"host-tools.json: '{name}' minimum {floor!r} must be dot-separated integers or null"
+                    )
                 elif not isinstance(t.get("source"), dict) or not t["source"]:
-                    errors.append(f"host-tools.json: '{name}' declares a floor and no 'source', so a host below it is told to upgrade and not where from")
+                    errors.append(
+                        f"host-tools.json: '{name}' declares a floor and no 'source', so a host below it is told to upgrade and not where from"
+                    )
                 else:
                     # The keys are read by platform, so a misspelled one drops the remedy on that platform while the object stays non-empty.
                     # Requiring the object and not its contents is the shape of guard this repo keeps finding: present, and asserting nothing.
                     platforms = {"linux", "macos", "windows"}
                     stray = sorted(set(t["source"]) - platforms)
                     if stray:
-                        errors.append(f"host-tools.json: '{name}' source names {', '.join(stray)}, which no platform reads - use {', '.join(sorted(platforms))}")
+                        errors.append(
+                            f"host-tools.json: '{name}' source names {', '.join(stray)}, which no platform reads - use {', '.join(sorted(platforms))}"
+                        )
                     for plat, where in t["source"].items():
                         if not isinstance(where, str) or not where:
-                            errors.append(f"host-tools.json: '{name}' source.{plat} must be a non-empty string")
+                            errors.append(
+                                f"host-tools.json: '{name}' source.{plat} must be a non-empty string"
+                            )
                     # The remedy is held to the same shape as the source it sits beside, and required on the same trigger.
                     # A floor whose failure prints no runnable command leaves the operator to rediscover the installer, which is the gap the field closes.
                     if not isinstance(t.get("remedy"), dict) or not t["remedy"]:
-                        errors.append(f"host-tools.json: '{name}' declares a floor and no 'remedy', so a below-floor failure names no command that fixes it")
+                        errors.append(
+                            f"host-tools.json: '{name}' declares a floor and no 'remedy', so a below-floor failure names no command that fixes it"
+                        )
                     else:
                         stray = sorted(set(t["remedy"]) - platforms)
                         if stray:
-                            errors.append(f"host-tools.json: '{name}' remedy names {', '.join(stray)}, which no platform reads - use {', '.join(sorted(platforms))}")
+                            errors.append(
+                                f"host-tools.json: '{name}' remedy names {', '.join(stray)}, which no platform reads - use {', '.join(sorted(platforms))}"
+                            )
                         for plat, command in t["remedy"].items():
                             if not isinstance(command, str) or not command:
-                                errors.append(f"host-tools.json: '{name}' remedy.{plat} must be a non-empty string")
-        ht_names = [t["name"] for t in host_tools["tools"] if isinstance(t, dict) and isinstance(t.get("name"), str)]
+                                errors.append(
+                                    f"host-tools.json: '{name}' remedy.{plat} must be a non-empty string"
+                                )
+        ht_names = [
+            t["name"]
+            for t in host_tools["tools"]
+            if isinstance(t, dict) and isinstance(t.get("name"), str)
+        ]
         if ht_names != sorted(ht_names, key=str.lower):
-            errors.append("host-tools.json: 'tools' is not sorted by name, which is how a reader finds an entry")
+            errors.append(
+                "host-tools.json: 'tools' is not sorted by name, which is how a reader finds an entry"
+            )
     if not isinstance(mechanisms, dict):
         errors.append("secrets.json: 'mechanisms' is not an object")
     else:
@@ -214,21 +293,27 @@ def main():
     else:
         for t, v in target_mech.items():
             if not (v is None or isinstance(v, str)):
-                errors.append(f"secrets.json: targetMechanisms['{t}'] must be a mechanism name or null")
+                errors.append(
+                    f"secrets.json: targetMechanisms['{t}'] must be a mechanism name or null"
+                )
     feature_mech = secrets.get("featureMechanisms", {})
     if not isinstance(feature_mech, dict):
         errors.append("secrets.json: 'featureMechanisms' is not an object")
     else:
         for f, v in feature_mech.items():
             if not (v is None or isinstance(v, str)):
-                errors.append(f"secrets.json: featureMechanisms['{f}'] must be a mechanism name or null")
+                errors.append(
+                    f"secrets.json: featureMechanisms['{f}'] must be a mechanism name or null"
+                )
     type_mech = secrets.get("typeMechanisms", {})
     if not isinstance(type_mech, dict):
         errors.append("secrets.json: 'typeMechanisms' is not an object")
     else:
         for t, v in type_mech.items():
             if not (v is None or isinstance(v, str)):
-                errors.append(f"secrets.json: typeMechanisms['{t}'] must be a mechanism name or null")
+                errors.append(
+                    f"secrets.json: typeMechanisms['{t}'] must be a mechanism name or null"
+                )
     if errors:
         print("Spec validation FAILED:")
         for err in errors:
@@ -240,10 +325,14 @@ def main():
     reg_defaults = repos.get("defaults", {})
     default_model = reg_defaults.get("workflowModel")
     if default_model is not None and default_model not in WORKFLOW_MODELS:
-        errors.append(f"defaults.workflowModel '{default_model}' invalid (expected {' or '.join(WORKFLOW_MODELS)})")
+        errors.append(
+            f"defaults.workflowModel '{default_model}' invalid (expected {' or '.join(WORKFLOW_MODELS)})"
+        )
     default_trigger = reg_defaults.get("releaseTrigger")
     if default_trigger is not None and default_trigger not in RELEASE_TRIGGERS:
-        errors.append(f"defaults.releaseTrigger '{default_trigger}' invalid (expected one of {', '.join(RELEASE_TRIGGERS)})")
+        errors.append(
+            f"defaults.releaseTrigger '{default_trigger}' invalid (expected one of {', '.join(RELEASE_TRIGGERS)})"
+        )
 
     for i, repo in enumerate(repos["repos"]):
         if not isinstance(repo, dict):
@@ -277,24 +366,34 @@ def main():
         for tname, prof in profiles_decl.items():
             allowed = types["types"].get(tname, {}).get("profiles", [])
             if tname not in repo_types:
-                errors.append(f"{name}: profile declared for '{tname}', not one of the repo's types")
+                errors.append(
+                    f"{name}: profile declared for '{tname}', not one of the repo's types"
+                )
             elif tname in known_types and prof not in allowed:
-                errors.append(f"{name}: type '{tname}' profile '{prof}' not in its allowed profiles {allowed or '[]'}")
+                errors.append(
+                    f"{name}: type '{tname}' profile '{prof}' not in its allowed profiles {allowed or '[]'}"
+                )
 
         model = repo.get("workflowModel")
         if model is not None and model not in WORKFLOW_MODELS:
-            errors.append(f"{name}: workflowModel '{model}' invalid (expected {' or '.join(WORKFLOW_MODELS)})")
+            errors.append(
+                f"{name}: workflowModel '{model}' invalid (expected {' or '.join(WORKFLOW_MODELS)})"
+            )
 
         # The releaseTrigger field is a scope selector, per spec/scope-model.md, so an invalid value would silently fail to match any releaseTrigger-scoped section rather than error.
         trigger = repo.get("releaseTrigger")
         if trigger is not None and trigger not in RELEASE_TRIGGERS:
-            errors.append(f"{name}: releaseTrigger '{trigger}' invalid (expected one of {', '.join(RELEASE_TRIGGERS)})")
+            errors.append(
+                f"{name}: releaseTrigger '{trigger}' invalid (expected one of {', '.join(RELEASE_TRIGGERS)})"
+            )
 
         # The consumerModel field is a scope selector, per spec/scope-model.md, so a cataloged repo must declare it.
         # Otherwise a push-scoped or pull-scoped section would fail open on that repo, never matching.
         cm = repo.get("consumerModel")
         if cm not in CONSUMER_MODELS:
-            errors.append(f"{name}: consumerModel '{cm}' invalid or missing (expected {' or '.join(CONSUMER_MODELS)})")
+            errors.append(
+                f"{name}: consumerModel '{cm}' invalid or missing (expected {' or '.join(CONSUMER_MODELS)})"
+            )
 
         eol = repo.get("lineEndings")
         if eol is not None and eol not in ("lf", "crlf"):
@@ -342,14 +441,22 @@ def main():
     reserved = set(WORKFLOW_MODELS) | set(RELEASE_TRIGGERS) | set(CONSUMER_MODELS)
     clash = known_types & reserved
     if clash:
-        errors.append(f"files.json: project type(s) collide with a reserved scope selector: {', '.join(sorted(clash))}")
+        errors.append(
+            f"files.json: project type(s) collide with a reserved scope selector: {', '.join(sorted(clash))}"
+        )
     universe = known_types | reserved
 
     def check_selector(where, applies_to):
         if isinstance(applies_to, list) and not applies_to:
-            errors.append(f"files.json: {where} appliesTo is an empty list (use \"*\" for all repos, or list selectors) - it would apply nowhere")
+            errors.append(
+                f'files.json: {where} appliesTo is an empty list (use "*" for all repos, or list selectors) - it would apply nowhere'
+            )
             return
-        tokens = [] if applies_to == "*" else (applies_to if isinstance(applies_to, list) else [applies_to])
+        tokens = (
+            []
+            if applies_to == "*"
+            else (applies_to if isinstance(applies_to, list) else [applies_to])
+        )
         for tok in tokens:
             # CI runs no JSON-schema validation, so guard the type here rather than crash on an unhashable token, a nested object being one, reaching the set-membership test below.
             if not isinstance(tok, str):
@@ -378,10 +485,14 @@ def main():
         # CI runs no schema validation, so shape-check the fidelity fields here rather than let a malformed contract or an outside-root reference slip through and crash a later check.
         fid = item.get("fidelity", "presence")
         if fid not in FIDELITIES:
-            errors.append(f"files.json: {path} fidelity '{fid}' invalid (expected one of {', '.join(FIDELITIES)})")
+            errors.append(
+                f"files.json: {path} fidelity '{fid}' invalid (expected one of {', '.join(FIDELITIES)})"
+            )
         has_contract = "contract" in item
         if has_contract and fid != "interface":
-            errors.append(f"files.json: {path} has a contract but fidelity is '{fid}' (contract is only for fidelity 'interface')")
+            errors.append(
+                f"files.json: {path} has a contract but fidelity is '{fid}' (contract is only for fidelity 'interface')"
+            )
         if fid == "interface" and not has_contract:
             errors.append(f"files.json: {path} fidelity 'interface' requires a contract")
         if has_contract:
@@ -391,28 +502,43 @@ def main():
             else:
                 unknown = set(contract) - CONTRACT_KEYS
                 if unknown:
-                    errors.append(f"files.json: {path} contract has unknown key(s): {', '.join(sorted(unknown))}")
+                    errors.append(
+                        f"files.json: {path} contract has unknown key(s): {', '.join(sorted(unknown))}"
+                    )
                 # The engine trusts these value types (CI runs no schema validation), so verify them here.
                 for k in ("requiredJobKeys", "verbatimJobs"):
                     if k in contract and not is_str_list(contract[k]):
-                        errors.append(f"files.json: {path} contract.{k} must be an array of strings")
+                        errors.append(
+                            f"files.json: {path} contract.{k} must be an array of strings"
+                        )
                 for k in ("requiredCheckName", "artifactNameToken"):
                     if k in contract and not isinstance(contract[k], str):
                         errors.append(f"files.json: {path} contract.{k} must be a string")
                 for k in ("requireTokensInJob", "forbidTokensInJob"):
                     v = contract.get(k)
-                    if k in contract and not (isinstance(v, dict) and all(isinstance(j, str) and is_str_list(t) for j, t in v.items())):
-                        errors.append(f"files.json: {path} contract.{k} must be an object of job name to array of strings")
+                    if k in contract and not (
+                        isinstance(v, dict)
+                        and all(isinstance(j, str) and is_str_list(t) for j, t in v.items())
+                    ):
+                        errors.append(
+                            f"files.json: {path} contract.{k} must be an object of job name to array of strings"
+                        )
         ref = item.get("reference")
         if ref is not None and not isinstance(ref, str):
             errors.append(f"files.json: {path} reference must be a string")
             ref = None
-        elif isinstance(ref, str) and (ref.startswith("/") or ".." in pathlib.PurePosixPath(ref).parts):
-            errors.append(f"files.json: {path} reference '{ref}' must be a repo-relative path (no leading / or ..)")
+        elif isinstance(ref, str) and (
+            ref.startswith("/") or ".." in pathlib.PurePosixPath(ref).parts
+        ):
+            errors.append(
+                f"files.json: {path} reference '{ref}' must be a repo-relative path (no leading / or ..)"
+            )
         if fid == "verbatim":
             src = ref if isinstance(ref, str) else path
             if isinstance(src, str) and not (ROOT / src).exists():
-                errors.append(f"files.json: {path} fidelity 'verbatim' but its canonical source {src} is missing")
+                errors.append(
+                    f"files.json: {path} fidelity 'verbatim' but its canonical source {src} is missing"
+                )
 
         sections = item.get("sections", [])
         if not isinstance(sections, list):
@@ -421,18 +547,28 @@ def main():
         for elt in sections:
             if isinstance(elt, dict):
                 if not isinstance(elt.get("name"), str) or not elt.get("name"):
-                    errors.append(f"files.json: {path} section object missing a non-empty string 'name': {elt!r}")
-                check_selector(f"{path} section '{elt.get('name', '?')}'", elt.get("appliesTo", "*"))
+                    errors.append(
+                        f"files.json: {path} section object missing a non-empty string 'name': {elt!r}"
+                    )
+                check_selector(
+                    f"{path} section '{elt.get('name', '?')}'", elt.get("appliesTo", "*")
+                )
                 # A section may carry its own fidelity, defaulting to intent, or verbatim for a universal rule block checked byte-for-byte.
                 # Verbatim is meaningful only on a Markdown file, where the heading delimits the region.
                 # The hub's own file is the canonical, so no reference is needed.
                 sfid = elt.get("fidelity", "intent")
                 if sfid not in ("intent", "verbatim"):
-                    errors.append(f"files.json: {path} section '{elt.get('name', '?')}' fidelity '{sfid}' invalid (expected intent or verbatim)")
+                    errors.append(
+                        f"files.json: {path} section '{elt.get('name', '?')}' fidelity '{sfid}' invalid (expected intent or verbatim)"
+                    )
                 elif sfid == "verbatim" and not path.endswith(".md"):
-                    errors.append(f"files.json: {path} section '{elt.get('name', '?')}' is verbatim but {path} is not Markdown (heading regions apply to .md only)")
+                    errors.append(
+                        f"files.json: {path} section '{elt.get('name', '?')}' is verbatim but {path} is not Markdown (heading regions apply to .md only)"
+                    )
             elif not isinstance(elt, str):
-                errors.append(f"files.json: {path} section entry {elt!r} must be a string or object")
+                errors.append(
+                    f"files.json: {path} section entry {elt!r} must be a string or object"
+                )
 
         # Every declared section must resolve to a real `## <heading>` in the hub's own copy of the file, per spec/section-model.md "Enforcement".
         # Without this, a renamed or mistyped section name declares a region that does not exist.
@@ -440,11 +576,15 @@ def main():
         # This is Markdown only, and only where the hub ships the file.
         if path.endswith(".md") and (ROOT / path).exists():
             hub_text = (ROOT / path).read_text(encoding="utf-8", errors="replace")
-            headings = {m.group(1).strip() for m in re.finditer(r"^## (.+?)\s*$", hub_text, re.MULTILINE)}
+            headings = {
+                m.group(1).strip() for m in re.finditer(r"^## (.+?)\s*$", hub_text, re.MULTILINE)
+            }
             for elt in sections:
                 name = elt.get("name") if isinstance(elt, dict) else elt
                 if isinstance(name, str) and name and name not in headings:
-                    errors.append(f"files.json: {path} declares section '{name}' but no '## {name}' heading exists in {path}")
+                    errors.append(
+                        f"files.json: {path} declares section '{name}' but no '## {name}' heading exists in {path}"
+                    )
 
     # Validate the divergence ledger in spec/divergences.json when present, so a mistyped repo name or disposition fails CI rather than silently dropping a burn-down row.
     dispositions = ("re-vendor", "track", "accepted", "upstream-candidate", "investigate", "retire")
@@ -455,10 +595,19 @@ def main():
         # A verbatim section is an addressable unit too, labeled "path > section" to match fidelity_honesty's SECTION_SEP, so a section-scoped divergence can carry its own disposition.
         # Only well-formed section entries produce a label, since a malformed one is already reported by the files.json checks above.
         for i in baseline:
-            if not isinstance(i, dict) or not isinstance(i.get("path"), str) or not isinstance(i.get("sections"), list):
+            if (
+                not isinstance(i, dict)
+                or not isinstance(i.get("path"), str)
+                or not isinstance(i.get("sections"), list)
+            ):
                 continue
             for elt in i["sections"]:
-                if isinstance(elt, dict) and elt.get("fidelity") == "verbatim" and isinstance(elt.get("name"), str) and elt["name"]:
+                if (
+                    isinstance(elt, dict)
+                    and elt.get("fidelity") == "verbatim"
+                    and isinstance(elt.get("name"), str)
+                    and elt["name"]
+                ):
                     manifest_paths.add(f"{i['path']} > {elt['name']}")
         # Guard the root type: a non-object root (a list from a bad edit) would crash the .get() calls below.
         if not isinstance(div, dict):
@@ -483,7 +632,9 @@ def main():
             elif p not in manifest_paths:
                 errors.append(f"divergences.json: disposition path '{p}' is not a manifest unit")
             if d.get("disposition") not in dispositions:
-                errors.append(f"divergences.json: '{p}' disposition '{d.get('disposition')}' invalid (expected one of {', '.join(dispositions)})")
+                errors.append(
+                    f"divergences.json: '{p}' disposition '{d.get('disposition')}' invalid (expected one of {', '.join(dispositions)})"
+                )
             if not is_str_list(d.get("repos")) or not d.get("repos"):
                 errors.append(f"divergences.json: '{p}' repos must be a non-empty array of strings")
             else:
@@ -503,9 +654,13 @@ def main():
             if not isinstance(gp, str):
                 errors.append(f"divergences.json: gap path {gp!r} must be a string")
             elif gp in manifest_paths:
-                errors.append(f"divergences.json: gap '{gp}' is already a manifest unit (not a gap)")
+                errors.append(
+                    f"divergences.json: gap '{gp}' is already a manifest unit (not a gap)"
+                )
             if g.get("disposition") not in dispositions:
-                errors.append(f"divergences.json: gap '{gp}' disposition '{g.get('disposition')}' invalid (expected one of {', '.join(dispositions)})")
+                errors.append(
+                    f"divergences.json: gap '{gp}' disposition '{g.get('disposition')}' invalid (expected one of {', '.join(dispositions)})"
+                )
             if not isinstance(g.get("reason"), str) or not g.get("reason"):
                 errors.append(f"divergences.json: gap '{gp}' reason must be a non-empty string")
             if not (g.get("tracking") is None or isinstance(g.get("tracking"), str)):
@@ -516,7 +671,9 @@ def main():
         for err in errors:
             print(f"  - {err}")
         return 1
-    cataloged = sum(1 for r in repos["repos"] if isinstance(r, dict) and r.get("status") == "cataloged")
+    cataloged = sum(
+        1 for r in repos["repos"] if isinstance(r, dict) and r.get("status") == "cataloged"
+    )
     backlog = sum(1 for r in repos["repos"] if isinstance(r, dict) and r.get("status") == "backlog")
     print(f"Spec validation OK: {cataloged} cataloged, {backlog} backlog repos classify cleanly.")
     return 0
