@@ -137,7 +137,7 @@ def untracked_paths(root: Path) -> list[str]:
     """
     try:
         r = subprocess.run(['git', '-C', str(root), 'ls-files', '-z', '--others',
-                            '--exclude-standard'], capture_output=True, text=True)
+                            '--exclude-standard'], capture_output=True, text=True, check=False)
     except (OSError, ValueError):
         return []
     if r.returncode != 0:
@@ -251,8 +251,8 @@ def home_path_findings(lineno: int, line: str) -> list[tuple[int, str, str]]:
         if m.group('user').lower() in SERVICE_ACCOUNTS:
             continue
         out.append((lineno, 'home-path',
-                    f'absolute home path {m.group(0)!r} -> use a constructed path, not an '
-                    'observed one'))
+                    (f'absolute home path {m.group(0)!r} -> use a constructed path, not an '
+                    'observed one')))
     return out
 
 
@@ -312,7 +312,7 @@ def once_tracked(root: str, rel_path: str) -> bool:
     """Whether git at `root` ever recorded `rel_path`, the deletion signature this rule keys on."""
     try:
         r = subprocess.run(['git', '-C', root, 'log', '-1', '--format=%H', '--', rel_path],
-                           capture_output=True, text=True)
+                           capture_output=True, text=True, check=False)
     except (OSError, ValueError):
         return False
     return r.returncode == 0 and bool(r.stdout.strip())
@@ -350,8 +350,8 @@ def dead_path_findings(root: Path, base: Path, lineno: int,
                 continue
             if once_tracked(str(root), str(tracked_rel)):
                 out.append((lineno, 'dead-path',
-                            f'path {token!r} is deleted from this tree -> re-point, rewrite, '
-                            'or remove the stale mention'))
+                            (f'path {token!r} is deleted from this tree -> re-point, rewrite, '
+                            'or remove the stale mention')))
                 break
     return out
 
@@ -360,7 +360,7 @@ def shallow_checkout(root: Path) -> bool:
     """Whether the checkout at `root` is shallow, which holds no deletion history to key on."""
     try:
         r = subprocess.run(['git', '-C', str(root), 'rev-parse', '--is-shallow-repository'],
-                           capture_output=True, text=True)
+                           capture_output=True, text=True, check=False)
     except (OSError, ValueError):
         return False
     return r.returncode == 0 and r.stdout.strip() == 'true'
@@ -392,7 +392,7 @@ def repo_root(path: Path) -> str:
     start = path if path.is_dir() else path.parent
     try:
         r = subprocess.run(['git', '-C', str(start), 'rev-parse', '--show-toplevel'],
-                           capture_output=True, text=True)
+                           capture_output=True, text=True, check=False)
     except (OSError, ValueError):
         return ''
     return r.stdout.strip() if r.returncode == 0 else ''
@@ -406,7 +406,7 @@ def tracked_paths(root: Path) -> list[Path] | None:
     """
     try:
         r = subprocess.run(['git', '-C', str(root), 'ls-files', '-z'],
-                           capture_output=True, text=True)
+                           capture_output=True, text=True, check=False)
     except (OSError, ValueError):
         return None
     if r.returncode != 0 or not r.stdout.strip('\0'):
@@ -1196,8 +1196,8 @@ def comment_wrap_findings(path: Path, raw: str, lines: list[str]) -> list[tuple[
         # A label opening a definition is exempt, since the lowercase word is the name being defined.
         elif leading and body[:1].islower() and not COMMENT_LABEL.match(body):
             out.append((n, 'comment-case',
-                        'comment sentence opens in lowercase -> capitalize, or restructure so it '
-                        'does not open on a lowercase name'))
+                        ('comment sentence opens in lowercase -> capitalize, or restructure so it '
+                        'does not open on a lowercase name')))
         # A trailing comment can start a sentence the next full-line comment continues.
         # The continuation has to be a full-line comment, since a trailing one annotates its own.
         prev_body = body

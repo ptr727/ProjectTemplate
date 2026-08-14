@@ -26,6 +26,7 @@ import argparse
 import base64
 import functools
 import hashlib
+import itertools
 import json
 import pathlib
 import re
@@ -74,7 +75,7 @@ def hub_tracked():
     A non-zero exit raises rather than returning an empty set, which would read as "the hub tracks nothing"
     and silently clear every hub-only finding.
     """
-    r = subprocess.run(["git", "ls-files"], cwd=ROOT, capture_output=True, text=True)
+    r = subprocess.run(["git", "ls-files"], cwd=ROOT, capture_output=True, text=True, check=False)
     if r.returncode != 0:
         raise RuntimeError(f"git ls-files failed in {ROOT}: {r.stderr.strip() or 'non-zero exit'}")
     return frozenset(r.stdout.splitlines())
@@ -135,7 +136,7 @@ def hub_name():
     worktree without an origin would silently break. The caller announces the directory-name fallback:
     a silently degraded match is the fail-open case this check exists to prevent.
     """
-    r = subprocess.run(["git", "config", "--get", "remote.origin.url"], capture_output=True, text=True, cwd=ROOT)
+    r = subprocess.run(["git", "config", "--get", "remote.origin.url"], capture_output=True, text=True, cwd=ROOT, check=False)
     if r.returncode == 0 and r.stdout.strip():
         return r.stdout.strip().rstrip("/").removesuffix(".git").split("/")[-1], True
     return ROOT.name, False
@@ -150,7 +151,7 @@ def gh(path, ok404=False) -> Any:
     No --paginate: on object endpoints it concatenates page documents into unparseable JSON. Every
     list read here fits one page; callers pass per_page=100 where a default page could truncate.
     """
-    r = subprocess.run(["gh", "api", path], capture_output=True, text=True)
+    r = subprocess.run(["gh", "api", path], capture_output=True, text=True, check=False)
     if r.returncode != 0:
         if ok404 and ("HTTP 404" in r.stderr or "Not Found" in r.stderr):
             return None
@@ -317,7 +318,7 @@ def extract_section(text, heading):
     out, capturing, fenced = [], False, False
     for ln in normalize(text).split("\n"):
         stripped = ln.strip()
-        if stripped.startswith("```") or stripped.startswith("~~~"):
+        if stripped.startswith(("```", "~~~")):
             fenced = not fenced
         elif not fenced and stripped.startswith("## "):
             if capturing:
@@ -348,7 +349,7 @@ def strip_sections(text, names):
     out, dropping, fenced = [], False, False
     for ln in normalize(text).split("\n"):
         stripped = ln.strip()
-        if stripped.startswith("```") or stripped.startswith("~~~"):
+        if stripped.startswith(("```", "~~~")):
             fenced = not fenced
         elif not fenced and stripped.startswith("## "):
             dropping = stripped[2:].strip().lower() in want  # a sibling H2 always ends the previous region
@@ -446,7 +447,7 @@ def unfenced_text(text):
     out, fenced = [], False
     for ln in normalize(text).split("\n"):
         s = ln.strip()
-        if s.startswith("```") or s.startswith("~~~"):
+        if s.startswith(("```", "~~~")):
             fenced = not fenced
             continue
         if not fenced:
@@ -563,7 +564,7 @@ def readme_section_findings(text, model, sel, public):
         findings.append(("LETTER", f"readme: no `## {s['name']}` section{why} - it is a required section (spec/readme-structure.md)"))
 
     seq = [(by_name.get(hl) or retired.get(hl), h) for h, hl in zip(heads, lower) if hl in by_name or hl in retired]
-    for (prev, prev_h), (cur, cur_h) in zip(seq, seq[1:]):
+    for (prev, prev_h), (cur, cur_h) in itertools.pairwise(seq):
         if cur["ordinal"] < prev["ordinal"]:
             findings.append(("LETTER", f"readme: section '{cur_h}' follows '{prev_h}' but is ordered before it - the declared sections keep their relative order (spec/readme-structure.md)"))
 
@@ -831,7 +832,7 @@ def third_party_tool_findings(text, catalog):
             findings.append(("LETTER", f"readme: 3rd Party Tools describes {name} as {shown} where the fleet describes it as '{want['description']}' - a shared tool carries one description (spec/third-party-tools.json)"))
     # Ordering covers every tool listed, not only the cataloged ones, since a reader scans the whole list.
     if listed != sorted(listed, key=str.lower):
-        first = next(f"{a} before {b}" for a, b in zip(listed, listed[1:]) if a.lower() > b.lower())
+        first = next(f"{a} before {b}" for a, b in itertools.pairwise(listed) if a.lower() > b.lower())
         findings.append(("LETTER", f"readme: 3rd Party Tools is not alphabetized ({first}) - the list is scanned rather than read (spec/readme-structure.md)"))
     return findings
 
@@ -1082,11 +1083,11 @@ def git_file_history(rel_path):
     # Decode as UTF-8 with replacement to match the downstream and canonical reads.
     # A divergent decode would fabricate a mismatch.
     r = subprocess.run(["git", "log", "--format=%H", "--", rel_path], cwd=ROOT, capture_output=True,
-                       encoding="utf-8", errors="replace")
+                       encoding="utf-8", errors="replace", check=False)
     if r.returncode == 0:
         for sha in r.stdout.split():
             s = subprocess.run(["git", "show", f"{sha}:{rel_path}"], cwd=ROOT, capture_output=True,
-                               encoding="utf-8", errors="replace")
+                               encoding="utf-8", errors="replace", check=False)
             if s.returncode == 0:
                 out.append(s.stdout)
     _HISTORY_CACHE[rel_path] = out
@@ -1100,7 +1101,7 @@ def hub_last_change(rel_path):
     Cached because one canonical's date is compared against every audited repo's copy.
     """
     r = subprocess.run(["git", "log", "-1", "--format=%cI %h", "--", rel_path], cwd=ROOT,
-                       capture_output=True, text=True)
+                       capture_output=True, text=True, check=False)
     if r.returncode != 0 or not r.stdout.strip():
         return None
     date, sha = r.stdout.strip().split(" ", 1)
@@ -1138,9 +1139,9 @@ def check_intent_staleness(slug, ground, path, canonical_rel, down_text):
     hub_date, hub_sha = hub_change
     if datetime.fromisoformat(hub_date) <= datetime.fromisoformat(repo_date):
         return []
-    return [("DRIFT", f"intent: {path} last changed {repo_date} on {ground}, and the hub canonical "
+    return [("DRIFT", (f"intent: {path} last changed {repo_date} on {ground}, and the hub canonical "
              f"changed later at {hub_date} ({hub_sha}) - the copy possibly trails the hub, "
-             f"verify intent per AUDIT.md section 7")]
+             f"verify intent per AUDIT.md section 7"))]
 
 
 def check_verbatim(label, down_text, canonical_rel, extract=None):
@@ -1216,36 +1217,36 @@ def audit_repo(entry, spec, branch=None):
         ground_head = gh(f"repos/{slug}/branches/{ground}", ok404=True)
     if ground_head is None:
         return findings + [("ERROR", f"branch: ground-truth branch {ground} does not exist, so nothing could be read")], ""
-    if main_exists and dev_exists:
-        # Commit counts mislead here, since merge-commit promotions leave main permanently ahead while the head trees are identical, so tree equality is the no-drift fast path.
-        # Where the head trees differ, an empty compare files[] means develop is merely ahead, carrying no main-side changes since the merge-base, which is normal and yields no finding and no further API calls.
-        if branch_main["commit"]["commit"]["tree"]["sha"] != branch_dev["commit"]["commit"]["tree"]["sha"]:
-            cmp = gh(f"repos/{slug}/compare/develop...main", ok404=True)
-            if cmp and cmp.get("files"):
-                # A non-empty files[] signals main-side changes but is not usable directly.
-                # It is blind to cherry-picked promotions, where develop may already hold identical content under different commit SHAs such as a promote branch, and it is capped at 300 entries, per #336.
-                # Derive the main-side change set from the merge-base tree instead, taking paths whose object SHA, a blob or a submodule pointer, differs from base to main, additions and deletions included and with no cap.
-                # Then drop paths whose objects already match at develop, since content develop already has is not content develop lacks.
-                # That is three recursive tree calls, so where any tree is truncated, or unexpectedly not a dict, the filter is skipped and the compare's unfiltered count is kept, which is conservative and marked.
-                trees = {
-                    "base": gh(f"repos/{slug}/git/trees/{cmp['merge_base_commit']['commit']['tree']['sha']}?recursive=1"),
-                    "develop": gh(f"repos/{slug}/git/trees/{branch_dev['commit']['commit']['tree']['sha']}?recursive=1"),
-                    "main": gh(f"repos/{slug}/git/trees/{branch_main['commit']['commit']['tree']['sha']}?recursive=1"),
-                }
-                if not all(isinstance(t, dict) for t in trees.values()) or any(t.get("truncated") for t in trees.values()):
-                    findings.append(("DRIFT", f"branch: {len(cmp['files'])}+ path(s) differ between main and develop (forward-sync or reconciliation may be needed; tree unavailable or too large to classify direction)"))
-                else:
-                    objs = {name: {e["path"]: e["sha"] for e in t["tree"] if e["type"] in ("blob", "commit")} for name, t in trees.items()}
-                    # Split main-side drift by direction, never flagging every difference as a develop deficit.
-                    # A path develop still holds at the merge-base is a genuine forward-sync gap.
-                    # A path both branches moved is diverged, and develop may already supersede main.
-                    behind, diverged = classify_branch_drift(objs["base"], objs["main"], objs["develop"])
-                    if behind:
-                        shown = ", ".join(behind[:8]) + (" ..." if len(behind) > 8 else "")
-                        findings.append(("DRIFT", f"branch: {len(behind)} main-side path change(s) develop is behind on (forward-sync needed): {shown}"))
-                    if diverged:
-                        shown = ", ".join(diverged[:8]) + (" ..." if len(diverged) > 8 else "")
-                        findings.append(("DRIFT", f"branch: {len(diverged)} path(s) changed on both main and develop since the merge-base - reconcile before promoting (develop may already supersede main): {shown}"))
+    # Commit counts mislead here, since merge-commit promotions leave main permanently ahead while the head trees are identical, so tree equality is the no-drift fast path.
+    # Where the head trees differ, an empty compare files[] means develop is merely ahead, carrying no main-side changes since the merge-base, which is normal and yields no finding and no further API calls.
+    if (main_exists and dev_exists
+            and branch_main["commit"]["commit"]["tree"]["sha"] != branch_dev["commit"]["commit"]["tree"]["sha"]):
+        cmp = gh(f"repos/{slug}/compare/develop...main", ok404=True)
+        if cmp and cmp.get("files"):
+            # A non-empty files[] signals main-side changes but is not usable directly.
+            # It is blind to cherry-picked promotions, where develop may already hold identical content under different commit SHAs such as a promote branch, and it is capped at 300 entries, per #336.
+            # Derive the main-side change set from the merge-base tree instead, taking paths whose object SHA, a blob or a submodule pointer, differs from base to main, additions and deletions included and with no cap.
+            # Then drop paths whose objects already match at develop, since content develop already has is not content develop lacks.
+            # That is three recursive tree calls, so where any tree is truncated, or unexpectedly not a dict, the filter is skipped and the compare's unfiltered count is kept, which is conservative and marked.
+            trees = {
+                "base": gh(f"repos/{slug}/git/trees/{cmp['merge_base_commit']['commit']['tree']['sha']}?recursive=1"),
+                "develop": gh(f"repos/{slug}/git/trees/{branch_dev['commit']['commit']['tree']['sha']}?recursive=1"),
+                "main": gh(f"repos/{slug}/git/trees/{branch_main['commit']['commit']['tree']['sha']}?recursive=1"),
+            }
+            if not all(isinstance(t, dict) for t in trees.values()) or any(t.get("truncated") for t in trees.values()):
+                findings.append(("DRIFT", f"branch: {len(cmp['files'])}+ path(s) differ between main and develop (forward-sync or reconciliation may be needed; tree unavailable or too large to classify direction)"))
+            else:
+                objs = {name: {e["path"]: e["sha"] for e in t["tree"] if e["type"] in ("blob", "commit")} for name, t in trees.items()}
+                # Split main-side drift by direction, never flagging every difference as a develop deficit.
+                # A path develop still holds at the merge-base is a genuine forward-sync gap.
+                # A path both branches moved is diverged, and develop may already supersede main.
+                behind, diverged = classify_branch_drift(objs["base"], objs["main"], objs["develop"])
+                if behind:
+                    shown = ", ".join(behind[:8]) + (" ..." if len(behind) > 8 else "")
+                    findings.append(("DRIFT", f"branch: {len(behind)} main-side path change(s) develop is behind on (forward-sync needed): {shown}"))
+                if diverged:
+                    shown = ", ".join(diverged[:8]) + (" ..." if len(diverged) > 8 else "")
+                    findings.append(("DRIFT", f"branch: {len(diverged)} path(s) changed on both main and develop since the merge-base - reconcile before promoting (develop may already supersede main): {shown}"))
 
     # --- General settings ---
     expected = dict(spec["settings"])
@@ -1508,7 +1509,7 @@ def audit_repo(entry, spec, branch=None):
             if any((pt.get("target") if isinstance(pt, dict) else pt) == "docker" for pt in entry.get("publish", [])):
                 try:
                     dh = docker_hub_description(slug)
-                except Exception as e:
+                except Exception as e:  # noqa: BLE001
                     dh = None
                     findings.append(("DRIFT", f"description: could not read the Docker Hub short description to verify it mirrors the README ({e}) - verify by hand"))
                 if dh is not None and dh.strip() != want:
@@ -2231,7 +2232,7 @@ def main(argv=None):
     # Findings are a point-in-time snapshot.
     # Stamp the run so anything derived from it, an onboarding issue or a report, carries its own freshness signal and a reader can tell whether it still applies.
     run_utc = datetime.now(UTC).strftime("%Y-%m-%dT%H:%M:%SZ")
-    hub = subprocess.run(["git", "rev-parse", "--short", "HEAD"], capture_output=True, text=True, cwd=ROOT)
+    hub = subprocess.run(["git", "rev-parse", "--short", "HEAD"], capture_output=True, text=True, cwd=ROOT, check=False)
     hub_sha = hub.stdout.strip() if hub.returncode == 0 else "unknown"
 
     # --issue <repo>: emit only the convergence issue on stdout (title first line, then body) so it captures cleanly.
@@ -2242,7 +2243,8 @@ def main(argv=None):
         entry = repos[0]
         try:
             findings, audited_sha = audit_repo(entry, spec, a.branch)
-        except Exception as e:  # an unverifiable audit still produces an honest issue
+        # An unverifiable audit still produces an honest issue.
+        except Exception as e:  # noqa: BLE001
             findings, audited_sha = [("ERROR", str(e))], ""
         title, body = render_issue(entry, findings, ground_branch_of(entry, a.branch),
                                    audited_sha, run_utc, hub_sha)
@@ -2262,7 +2264,8 @@ def main(argv=None):
         ground = ground_branch_of(entry, a.branch)
         try:
             findings, audited_sha = audit_repo(entry, spec, a.branch)
-        except Exception as e:  # a gh/JSON failure mid-audit must not abort the sweep
+        # A gh/JSON failure mid-audit must not abort the sweep.
+        except Exception as e:  # noqa: BLE001
             findings, audited_sha = [("ERROR", str(e))], ""
         stamp = f" @ {ground}@{audited_sha[:7]}" if audited_sha else ""
         print(f"== {entry['name']} ({', '.join(entry.get('types', []))}; {model}){stamp} ==")

@@ -306,7 +306,7 @@ Every repo's GitHub repository details (the About panel) follow a fixed conventi
 - [`registry/repos.json`](./registry/repos.json): the fleet registry, holding every project, its type(s), and its status.
 - [`repo-config/`](./repo-config/): branch rulesets, the fleet settings, and the apply script every repo is configured by, kept out of `.github/` (which is Actions-owned). The payloads carry to the fleet and the script is reached here.
 - [`catalog/`](./catalog/): reusable reference snippets (workflows, configs, devcontainers) the audit compares implementations against.
-- [`scripts/`](./scripts/): the fleet's lint and review tooling, with the deterministic checks also gating CI, for the documented rules no CI linter checks. Hosted here and reached rather than carried, per "Hub-Hosted Tooling".
+- [`scripts/`](./scripts/): the fleet's lint and review tooling, with the deterministic checks also gating CI, for the documented rules no CI linter checks. Its unit tests sit apart under [`scripts/tests/`](./scripts/tests/). Hosted here and reached rather than carried, per "Hub-Hosted Tooling".
 - [`docs/`](./docs/): hub-only procedure and measurement docs (host setup, config carry, signing, agent token cost), none of them carried downstream.
 - [`reports/`](./reports/): per-repo audit output.
 - [`.github/workflows/`](./.github/workflows/): this repo's own lint-only CI and source-only release, the workflow contract it dogfoods.

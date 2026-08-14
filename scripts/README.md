@@ -6,16 +6,16 @@ The fleet's checks and review tooling, run by hand, with the deterministic ones 
 
 Python only, standard library only, no third-party packages. Every check script is read-only and exits non-zero on a finding. `build_dist.py` and `skills_install.py` below are the two exceptions, since a generator and an installer both exist to write, and each still offers a read-only mode (`--check`, `--report`) for CI and for asking without changing anything.
 
-Each script has a `test_<script>.py` beside it, driving its gates against input they must reject, because a gate nobody has watched fail is a gate nobody knows works. Where a case covers a table it reads the live table rather than restating it, and each one asserts a floor on what a healthy run reaches, since a check whose scan matches nothing reports zero findings and reads exactly like a pass.
+The directory separates its kinds by name and by tree. A gate checks and exits non-zero on a finding, and its name carries a `_lint` or `_gate` suffix saying what it gates. `prose_lint.py` and `repo_gate.py` gate this tree in CI, and `host_gate.py` gates the machine it runs on. A utility does work rather than gating and carries no suffix: `build_dist.py`, `pr_review.py`, `skills_install.py`. The unit tests live apart under [`scripts/tests/`][tests], one `test_<script>.py` per script, driving its gates against input they must reject. A gate nobody has watched fail is a gate nobody knows works. Where a case covers a table it reads the live table rather than restating it, and each one asserts a floor on what a healthy run reaches, since a check whose scan matches nothing reports zero findings and reads exactly like a pass.
 
 ```sh
-python3 scripts/test_prose_lint.py
-python3 scripts/test_repo_gate.py
-python3 scripts/test_pr_review.py
-python3 scripts/test_build_dist.py
-python3 scripts/test_skills_install.py
-python3 -m unittest discover -s scripts          # all of them, and exits 5 if the suite vanishes
-uvx coverage@latest run --source=. -m unittest discover -s scripts && uvx coverage@latest report
+python3 scripts/tests/test_prose_lint.py
+python3 scripts/tests/test_repo_gate.py
+python3 scripts/tests/test_pr_review.py
+python3 scripts/tests/test_build_dist.py
+python3 scripts/tests/test_skills_install.py
+python3 -m unittest discover -s scripts/tests    # all of them, and exits 5 if the suite vanishes
+uvx coverage@latest run --source=scripts,spec,host-setup -m unittest discover -s scripts/tests && uvx coverage@latest report
 ```
 
 ## `prose_lint.py`
@@ -225,3 +225,4 @@ Installs the fleet's Skills for the current machine, cross-platform and idempote
 [prose-gate-action]: ../.github/actions/prose-gate/action.yml
 [repos]: ../registry/repos.json
 [section-model]: ../spec/section-model.md
+[tests]: ./tests/

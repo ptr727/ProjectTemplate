@@ -73,12 +73,17 @@ whether the Python has third-party runtime dependencies, which shows up structur
   auto-updates (SHA-pinned actions, package deps) and otherwise run latest, so the VS Code tasks,
   README, and CI all run the unpinned latest here. `.py` files follow the repo's line-ending
   default (CRLF in a CRLF-default repo, and a shebang-executed script is LF-pinned by path, per
-  GOVERNANCE.md's "Line Endings" section). There is no pytest suite and no coverage gate. A script
-  that carries a gate still earns tests, written with the standard library's `unittest` so they
-  run under bare `python3` with nothing installed, as `test_<script>.py` beside the script it
-  exercises. Measure them with `uvx coverage@latest run -m unittest discover -s <dir>` when a
-  number is wanted, without adopting a threshold. A co-present `csharp` type still carries
-  `codecov.yml` for its own tests.
+  GOVERNANCE.md's "Line Endings" section). There is no pytest suite, and `unittest` is the runner
+  instead. A script that carries a gate still earns tests, written with the standard library's
+  `unittest` so they run under bare `python3` with nothing installed, as `test_<script>.py` under
+  a `tests/` directory beside the scripts it exercises (`<scripts-dir>/tests/`), kept apart so a
+  test never reads as a tool. Within the scripts directory the name carries the kind: a gate that
+  checks and exits non-zero on a finding takes a `_lint` or `_gate` suffix, and a utility that
+  does work takes none. Any repo carrying Python carries the Python tooling in CI, coverage
+  included, this profile too: `uvx ruff@latest check`, `uvx mypy@latest`, and the unittest suite
+  under `uvx coverage@latest run -m unittest discover -s <scripts-dir>/tests` with
+  `coverage report`, informational with no threshold adopted. A co-present `csharp` type still
+  carries `codecov.yml` for its own tests.
 
 ## Toolchain
 

@@ -6,7 +6,7 @@ answer rather than a crash: a review attributed to the wrong login, a review cou
 stale head, or a wait that returns success while nothing landed. Each case below feeds a crafted
 GraphQL payload and asserts the reading, with `gql` replaced so no case reaches the network.
 
-Run as `python3 scripts/test_pr_review.py`, or under `python3 -m unittest discover -s scripts`.
+Run as `python3 scripts/tests/test_pr_review.py`, or under `python3 -m unittest discover -s scripts/tests`.
 """
 from __future__ import annotations
 
@@ -22,9 +22,10 @@ from itertools import count
 from pathlib import Path
 from unittest import mock
 
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 import pr_review
 
-REPO = Path(__file__).resolve().parent.parent
+REPO = Path(__file__).resolve().parent.parent.parent
 RUNBOOK = REPO / '.github' / 'copilot-instructions.md'
 
 HEAD = 'a' * 40
@@ -653,14 +654,14 @@ class TestCoverage(GqlCase):
     def test_each_vetted_spelling_of_a_full_round_reads_as_full(self) -> None:
         """The census: four tails on the first spelling, and the `Review details` bullet."""
         for covers in (
-            'Copilot reviewed 7 out of 7 changed files in this pull request and generated '
-            'no new comments.',
-            'Copilot reviewed 7 out of 7 changed files in this pull request and generated '
-            'no comments.',
-            'Copilot reviewed 7 out of 7 changed files in this pull request and generated '
-            '1 comment.',
-            'Copilot reviewed 7 out of 7 changed files in this pull request and generated '
-            '4 comments.',
+            ('Copilot reviewed 7 out of 7 changed files in this pull request and generated '
+            'no new comments.'),
+            ('Copilot reviewed 7 out of 7 changed files in this pull request and generated '
+            'no comments.'),
+            ('Copilot reviewed 7 out of 7 changed files in this pull request and generated '
+            '1 comment.'),
+            ('Copilot reviewed 7 out of 7 changed files in this pull request and generated '
+            '4 comments.'),
             '- **Files reviewed:** 7/7 changed files',
         ):
             with self.subTest(covers=covers[:44]):
@@ -1364,9 +1365,8 @@ class TestCheckShapes(unittest.TestCase):
         self.assertIn('queued 0m', out)
         self.assertNotIn('-2m', out)
         # The CLI cannot reach it, since the parser refuses the threshold that would.
-        with contextlib.redirect_stderr(io.StringIO()):
-            with self.assertRaises(SystemExit):
-                pr_review.main(['status', '7', '--repo', 'o/r', '--check-grace', '-200'])
+        with contextlib.redirect_stderr(io.StringIO()), self.assertRaises(SystemExit):
+            pr_review.main(['status', '7', '--repo', 'o/r', '--check-grace', '-200'])
 
     def test_a_caller_handing_the_digest_an_odd_node_costs_a_field_not_the_digest(self) -> None:
         """The rendering path reads with `.get` for the reason `age` catches two exceptions.
@@ -1584,9 +1584,8 @@ class TestGqlTransport(unittest.TestCase):
         """Returning nothing on failure would read as a PR with no reviews and no threads."""
         failed = subprocess.CompletedProcess(args=[], returncode=1, stdout='', stderr='boom')
         with mock.patch.object(pr_review.subprocess, 'run', return_value=failed), \
-                contextlib.redirect_stderr(io.StringIO()) as err:
-            with self.assertRaises(SystemExit):
-                pr_review.gql('query', 'o', 'r', 1)
+                contextlib.redirect_stderr(io.StringIO()) as err, self.assertRaises(SystemExit):
+            pr_review.gql('query', 'o', 'r', 1)
         self.assertIn('boom', err.getvalue())
 
     def test_a_successful_call_unwraps_to_the_pull_request(self) -> None:
@@ -1855,18 +1854,17 @@ class TestCli(GqlCase):
         the run was reading a pull request in a repository nobody had named.
         """
         self.answer(payload([review()]))
-        with contextlib.redirect_stderr(io.StringIO()) as err:
-            with self.assertRaises(SystemExit):
-                pr_review.main(['status', '7'])
+        with contextlib.redirect_stderr(io.StringIO()) as err, self.assertRaises(SystemExit):
+            pr_review.main(['status', '7'])
         self.assertIn('--repo', err.getvalue())
 
     def test_a_repo_that_is_not_owner_slash_name_is_rejected_by_name(self) -> None:
         """The near-miss a required argument still admits, and unpacking it is a bare traceback."""
         for bad in ('ProjectTemplate', 'ptr727/', '/ProjectTemplate', 'a/b/c', ''):
             with self.subTest(repo=bad):
-                with contextlib.redirect_stderr(io.StringIO()) as err:
-                    with self.assertRaises(SystemExit):
-                        pr_review.main(['status', '7', '--repo', bad])
+                with (contextlib.redirect_stderr(io.StringIO()) as err,
+                      self.assertRaises(SystemExit)):
+                    pr_review.main(['status', '7', '--repo', bad])
                 self.assertIn('OWNER/NAME', err.getvalue())
 
     def test_the_digest_names_the_repository_it_read(self) -> None:
@@ -2103,9 +2101,8 @@ class TestReplyStaysInScope(ReplyCase):
 
 class TestReplyArguments(unittest.TestCase):
     def err(self, argv: list[str]) -> str:
-        with contextlib.redirect_stderr(io.StringIO()) as err:
-            with self.assertRaises(SystemExit):
-                pr_review.main(argv)
+        with contextlib.redirect_stderr(io.StringIO()) as err, self.assertRaises(SystemExit):
+            pr_review.main(argv)
         return err.getvalue()
 
     def test_an_empty_body_is_rejected_rather_than_posted(self) -> None:
@@ -2503,7 +2500,8 @@ class TestContract(unittest.TestCase):
             {'event': 'commented', 'created_at': '05'},
         ]
         run = subprocess.run(['jq', '-r', pr_review.TIMELINE_JQ],
-                             input=json.dumps(events), capture_output=True, text=True)
+                             input=json.dumps(events), capture_output=True, text=True,
+                             check=False)
         self.assertEqual(0, run.returncode, run.stderr)
         self.assertEqual(['review_requested 01', 'copilot_work_started 02'],
                          run.stdout.split('\n')[:-1])
@@ -2513,9 +2511,8 @@ class TestContract(unittest.TestCase):
 
     def test_a_negative_pickup_grace_is_rejected_rather_than_read_as_every_poll(self) -> None:
         """It leaves the next reading behind the clock, which is the per-poll pattern returning."""
-        with contextlib.redirect_stderr(io.StringIO()) as err:
-            with self.assertRaises(SystemExit):
-                pr_review.main(['wait', '7', '--repo', 'o/r', '--pickup-grace', '-1'])
+        with contextlib.redirect_stderr(io.StringIO()) as err, self.assertRaises(SystemExit):
+            pr_review.main(['wait', '7', '--repo', 'o/r', '--pickup-grace', '-1'])
         # The repository is named, or this exits on the missing argument and proves nothing.
         self.assertIn('pickup-grace', err.getvalue())
 
@@ -2527,9 +2524,9 @@ class TestContract(unittest.TestCase):
         """
         for flag in ('--check-grace', '--check-stall'):
             with self.subTest(flag=flag):
-                with contextlib.redirect_stderr(io.StringIO()) as err:
-                    with self.assertRaises(SystemExit):
-                        pr_review.main(['wait', '7', '--repo', 'o/r', flag, '-1'])
+                with (contextlib.redirect_stderr(io.StringIO()) as err,
+                      self.assertRaises(SystemExit)):
+                    pr_review.main(['wait', '7', '--repo', 'o/r', flag, '-1'])
                 self.assertIn(flag.lstrip('-'), err.getvalue())
 
     def test_the_documented_exit_codes_are_the_ones_the_code_returns(self) -> None:
@@ -2563,19 +2560,18 @@ class TestContract(unittest.TestCase):
         """
         for grace, stall in (('1800', '300'), ('600', '600')):
             with self.subTest(grace=grace, stall=stall):
-                with contextlib.redirect_stderr(io.StringIO()) as err:
-                    with self.assertRaises(SystemExit):
-                        pr_review.main(['wait', '7', '--repo', 'o/r',
-                                        '--check-grace', grace, '--check-stall', stall])
+                with (contextlib.redirect_stderr(io.StringIO()) as err,
+                      self.assertRaises(SystemExit)):
+                    pr_review.main(['wait', '7', '--repo', 'o/r',
+                                    '--check-grace', grace, '--check-stall', stall])
                 self.assertIn('check-grace', err.getvalue())
 
     def test_a_failed_timeline_read_raises_rather_than_reading_as_no_events(self) -> None:
         """An empty list reads as no request pending, which is the false clean one level up."""
         failed = subprocess.CompletedProcess(args=[], returncode=1, stdout='', stderr='boom')
         with mock.patch.object(pr_review.subprocess, 'run', return_value=failed), \
-                contextlib.redirect_stderr(io.StringIO()) as err:
-            with self.assertRaises(SystemExit):
-                pr_review.timeline('o', 'r', 7)
+                contextlib.redirect_stderr(io.StringIO()) as err, self.assertRaises(SystemExit):
+            pr_review.timeline('o', 'r', 7)
         self.assertIn('boom', err.getvalue())
 
     def test_the_backoff_is_bounded_and_non_decreasing(self) -> None:

@@ -5,7 +5,7 @@ Each check runs on a crafted temp root rather than on this repo, so a case prove
 objects to the fault instead of proving the repo is currently clean. The coverage floors are the
 other half: a check whose scan matches nothing reports zero issues and reads exactly like a pass.
 
-Run as `python3 scripts/test_repo_gate.py`, or under `python3 -m unittest discover -s scripts`.
+Run as `python3 scripts/tests/test_repo_gate.py`, or under `python3 -m unittest discover -s scripts/tests`.
 """
 from __future__ import annotations
 
@@ -20,9 +20,10 @@ import unittest
 from pathlib import Path
 from unittest import mock
 
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 import repo_gate
 
-REPO = Path(__file__).resolve().parent.parent
+REPO = Path(__file__).resolve().parent.parent.parent
 GOVERNANCE = REPO / 'GOVERNANCE.md'
 GITATTRIBUTES = REPO / '.gitattributes'
 

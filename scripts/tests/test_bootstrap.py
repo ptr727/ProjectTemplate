@@ -18,7 +18,7 @@ That assertion runs once per platform, because the two installers do not manage 
 difference is a decision rather than an accident. `git-restore-mtime` serves a Linux deploy path and
 the spec declares it not applicable on Windows.
 
-Run: python3 scripts/test_bootstrap.py
+Run: python3 scripts/tests/test_bootstrap.py
 """
 from __future__ import annotations
 
@@ -27,7 +27,7 @@ import re
 import subprocess
 from pathlib import Path
 
-ROOT = Path(__file__).resolve().parent.parent
+ROOT = Path(__file__).resolve().parent.parent.parent
 BOOTSTRAP = ROOT / 'host-setup' / 'bootstrap.sh'
 BOOTSTRAP_PS = ROOT / 'host-setup' / 'bootstrap.ps1'
 LINUX = ROOT / 'host-setup' / 'linux'
@@ -60,7 +60,7 @@ WINDOWS_INSTALLER_REMEDY = re.compile(r'^host-setup/windows/install-tools\.ps1 -
 
 # A spec tool an installer deliberately does not manage, and the reason, recorded so an omission is a decision somebody made rather than one nobody noticed.
 # Both sets are empty, which is itself the assertion: docker installs the same way on a hypervisor and a workstation on both platforms now, and the one case that differs, a WSL distribution, is handled inside install-tools.sh itself (it skips the native install and points at Docker Desktop's own WSL integration) rather than by leaving docker unmanaged on Linux entirely.
-NOT_MANAGED = {
+NOT_MANAGED: dict[str, dict[str, str]] = {
     'linux': {},
     'windows': {},
 }

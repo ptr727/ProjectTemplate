@@ -72,7 +72,7 @@ NOTES: list[str] = []
 
 
 def sh(*args: str) -> str:
-    return subprocess.run(args, capture_output=True, text=True).stdout
+    return subprocess.run(args, capture_output=True, text=True, check=False).stdout
 
 
 def origin_owner(root: Path) -> str | None:
@@ -95,7 +95,7 @@ def gh_exists(path: str) -> bool | None:
     """
     try:
         r = subprocess.run(['gh', 'api', path, '--jq', '.sha'],
-                           capture_output=True, text=True, timeout=GH_TIMEOUT)
+                           capture_output=True, text=True, timeout=GH_TIMEOUT, check=False)
     except (OSError, subprocess.SubprocessError):
         return None
     if r.returncode == 0:
@@ -235,7 +235,7 @@ def resolved_eol(root: Path, paths: list[str]) -> dict[str, str] | None:
         return {}
     try:
         r = subprocess.run(['git', '-C', str(root), 'check-attr', '-z', '--stdin', 'eol'],
-                           input='\0'.join(paths) + '\0', capture_output=True, text=True)
+                           input='\0'.join(paths) + '\0', capture_output=True, text=True, check=False)
     except (OSError, subprocess.SubprocessError):
         return None
     if r.returncode != 0:

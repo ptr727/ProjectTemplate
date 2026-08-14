@@ -174,7 +174,7 @@ Each gap's handoff below states who detects it, what closes it, and the test tha
 ### G2: Host-Tools Repo Overlay Is Silently Skippable (Closed)
 
 - **Gap** - [`scripts/host_gate.py`][host-gate] run without `--repo` read only the declaration at its own working directory, so a run started in a subdirectory of a repo carrying a `host-tools.json` overlay skipped that overlay without a word.
-- **Resolution** - A bare run whose working directory sits inside such a repo prints a warning naming the overlay's directory and the `--repo` re-run that counts it, asserted by the `TestBareRunOverlayWarning` cases in `scripts/test_host_gate.py`. An explicit `--repo` and `--no-local` each stay silent, since both are a choice the caller made. [`STANDUP.md`][standup] section 0 states the residual case the warning cannot cover, a target repo that does not exist yet, instead of the workaround sentence.
+- **Resolution** - A bare run whose working directory sits inside such a repo prints a warning naming the overlay's directory and the `--repo` re-run that counts it, asserted by the `TestBareRunOverlayWarning` cases in `scripts/tests/test_host_gate.py`. An explicit `--repo` and `--no-local` each stay silent, since both are a choice the caller made. [`STANDUP.md`][standup] section 0 states the residual case the warning cannot cover, a target repo that does not exist yet, instead of the workaround sentence.
 
 ### G3: A Failed Tool Floor Names No Install Remedy (Closed)
 
@@ -189,13 +189,13 @@ flowchart LR
   run --> recheck["re-run host_gate"] --> ok["proceed"]
 ```
 
-- **Closing test** - [`scripts/test_bootstrap.py`][test-bootstrap] asserts the mapping stays total per platform, with the one recorded not-applicable exception, and that a remedy handing back into an installer names a tool that installer manages. [`spec/validate.py`][validate] and the schema require a remedy on every hub floor. A repository overlay may still add a floor without one, in which case the failure degrades to the `INSTALL FROM:` source line.
+- **Closing test** - [`scripts/tests/test_bootstrap.py`][test-bootstrap] asserts the mapping stays total per platform, with the one recorded not-applicable exception, and that a remedy handing back into an installer names a tool that installer manages. [`spec/validate.py`][validate] and the schema require a remedy on every hub floor. A repository overlay may still add a floor without one, in which case the failure degrades to the `INSTALL FROM:` source line.
 
 ### G4: Deletion Sweeps Miss Prose (Closed)
 
 - **Gap** - A resync that deletes a carried file greps for the path and finds code uses, not prose describing the file without naming its path. A measured incident left a layout section describing a deleted script.
 - **Resolution** - Split by what a pattern can reach. The named-path half is mechanized: the `dead-path` rule in [`scripts/prose_lint.py`][prose-lint] reports a Markdown mention (a backtick span, an inline link target, or a reference definition) of a path git once tracked and the tree no longer holds. Keying on deletion history is what scopes it: a proposed file a backlog names, another repository's layout, and a ref like `origin/develop` each have no history here and stay silent, and a manifest-declared carried path is exempt since the hub's own instance retires to a catalog snippet while docs keep naming the carried file. The rule runs in the default set and in CI, where the checkout fetches full history because the rule stands down loudly in a shallow clone rather than pass blind. The name-shaped half, the description that names no path, is `accepted` as manual: no pattern reaches it, the same judgment the home-path rule records, so the [`RESYNC.md`][resync] section 4 read of the layout and operations sections stands and now names the lint beside it.
-- **Closing test** - `TestDeadPath` in `scripts/test_prose_lint.py`, including the shallow stand-down and the tree-clean assertion. The rule's first tree-wide run caught a real instance, [`docs/host-setup.md`][host-setup-doc] describing bind-mounts in the deleted `.devcontainer/` definitions, fixed by re-pointing at the catalog snippets.
+- **Closing test** - `TestDeadPath` in `scripts/tests/test_prose_lint.py`, including the shallow stand-down and the tree-clean assertion. The rule's first tree-wide run caught a real instance, [`docs/host-setup.md`][host-setup-doc] describing bind-mounts in the deleted `.devcontainer/` definitions, fixed by re-pointing at the catalog snippets.
 
 ### G5: Intent-Fidelity Drift Is Invisible (Closed)
 
@@ -369,7 +369,7 @@ Design-doc first: this doc merges, then each unchecked item becomes an issue lin
 [skills-install]: ../scripts/skills_install.py
 [skills-readme]: ../.agents/skills/README.md
 [standup]: ../STANDUP.md
-[test-bootstrap]: ../scripts/test_bootstrap.py
+[test-bootstrap]: ../scripts/tests/test_bootstrap.py
 [todo]: ../TODO.md
 [validate]: ../spec/validate.py
 [validate-task]: ../.github/workflows/validate-task.yml

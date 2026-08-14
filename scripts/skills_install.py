@@ -57,7 +57,7 @@ def source_ref():
     """The hub commit this installer is running from, and whether the tree is dirty."""
     def git(*args):
         try:
-            r = subprocess.run(["git", "-C", str(ROOT), *args], capture_output=True, text=True)
+            r = subprocess.run(["git", "-C", str(ROOT), *args], capture_output=True, text=True, check=False)
         except OSError:
             return None
         return r.stdout.strip() if r.returncode == 0 else None
@@ -159,7 +159,7 @@ def register_claude_marketplace():
     """
     marketplace_add = subprocess.run(
         ["claude", "plugin", "marketplace", "add", str(ROOT)],
-        capture_output=True, text=True,
+        capture_output=True, text=True, check=False,
     )
     # Re-adding an already-registered marketplace is expected on a re-run.
     # Only a genuine failure (not "already exists") is fatal, since idempotence is the point.
@@ -171,7 +171,7 @@ def register_claude_marketplace():
 
     install = subprocess.run(
         ["claude", "plugin", "install", f"{PLUGIN_NAME}@{MARKETPLACE_NAME}", "--scope", "user"],
-        capture_output=True, text=True,
+        capture_output=True, text=True, check=False,
     )
     if (install.returncode != 0
             and "already" not in install.stdout.lower()

@@ -68,7 +68,7 @@ def probe(argv: list[str]) -> str | None:
     the exit code decides and a failing probe falls through to the next one.
     """
     try:
-        p = subprocess.run(argv, capture_output=True, text=True, timeout=20)
+        p = subprocess.run(argv, capture_output=True, text=True, timeout=20, check=False)
     except (OSError, subprocess.SubprocessError):
         return None
     if p.returncode != 0:
@@ -128,9 +128,9 @@ def field_problems(entry: dict) -> list[str]:
         problems.append('why must be a non-empty string')
     if 'required' in entry and not isinstance(entry['required'], bool):
         problems.append(f'required must be true or false, not {entry["required"]!r}')
-    if 'minimum' in entry and entry['minimum'] is not None:
-        if not isinstance(entry['minimum'], str) or parse_version(entry['minimum']) is None:
-            problems.append(f'minimum must be dot-separated integers or null, not {entry["minimum"]!r}')
+    if ('minimum' in entry and entry['minimum'] is not None
+            and (not isinstance(entry['minimum'], str) or parse_version(entry['minimum']) is None)):
+        problems.append(f'minimum must be dot-separated integers or null, not {entry["minimum"]!r}')
     if 'source' in entry and not isinstance(entry['source'], dict):
         problems.append('source must be an object')
     if 'remedy' in entry and not isinstance(entry['remedy'], dict):
@@ -201,7 +201,7 @@ def contract_problems(tools: list[dict]) -> list[str]:
             if not isinstance(src[plat], str) or not src[plat]:
                 problems.append(f'{name} source.{plat} is empty, so a host on that platform is told to upgrade and not where from')
         # The remedy is shape-checked and not required, so a repository floor without one degrades to the source line rather than failing the merge.
-        # Requiring it fleet-wide is the hub declaration's contract, held by spec/validate.py and scripts/test_bootstrap.py rather than here.
+        # Requiring it fleet-wide is the hub declaration's contract, held by spec/validate.py and scripts/tests/test_bootstrap.py rather than here.
         rem = t.get('remedy')
         if rem is not None and not isinstance(rem, dict):
             problems.append(f'{name} remedy must be an object keyed by platform, so its command was not read')
