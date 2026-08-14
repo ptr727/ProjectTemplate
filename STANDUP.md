@@ -31,8 +31,14 @@ git config --global --get commit.gpgsign    # true
 git config --global --get user.signingkey   # set
 git config --global --get gpg.format        # ssh for an SSH key; unset or openpgp for GPG
 
-# the agent holding the key, selected by the format above
-if [ "$(git config --global --get gpg.format)" = ssh ]; then ssh-add -L; else gpg --list-secret-keys; fi
+# prove signing works with a live scratch commit in a disposable scratch repo, not this
+# repo (its own git init is still section 0B, below), and not an agent-liveness probe
+# (ssh-add -L, gpg --list-secret-keys): a host that signs straight from a key file with no
+# agent running passes cleanly and fails that probe. See
+# .agents/skills/git-commit-conventions/SKILL.md "Signing, verified not configured" for why.
+# One physical line, not backslash-joined: this file is CRLF (the repo's Markdown default),
+# and a `\` continuation stops working the moment a stray `\r` lands after it.
+d=$(mktemp -d "${TMPDIR:-/tmp}/sign-check.XXXXXX") && ( trap 'rm -rf "$d"' 0; email=$(git config --global --get user.email) && git init -q "$d" && git -C "$d" commit --allow-empty -q -m check && out=$(git -C "$d" log -1 --format='sig=%G? author=%an <%ae> committer=%cn <%ce>') && echo "$out" && ae=$(git -C "$d" log -1 --format='%ae') && ce=$(git -C "$d" log -1 --format='%ce') && case "$out" in sig=G\ *|sig=U\ *) true ;; *) false ;; esac && case "$email" in *@users.noreply.github.com) true ;; *) false ;; esac && [ "$ae" = "$email" ] && [ "$ce" = "$email" ] )
 ```
 
 `--global` rather than the effective config, because the effective value depends on where the command runs: inside any existing repository a repo-local override wins, so a bare `git config --get user.email` there reports that repository's identity and hides the host setting this step exists to check. The two scopes together are what make the result sound, since this block proves the host is right and the block below proves nothing shadows it.
@@ -53,7 +59,7 @@ python3 scripts/host_gate.py --repo <path-to-target-checkout>   # after section 
 
 A finding at either point is a **host** misconfiguration to fix on the machine or surface to the maintainer, never something to patch per repo, and [`docs/host-setup.md`][host-setup] is the contract it checks.
 
-The agent check branches rather than listing both forms, because they are alternatives and running the wrong one fails on a correctly configured host: an SSH host need not have `gpg` installed at all. Signing is **SSH or GPG**, so judge the format and its agent together rather than requiring `ssh`: what matters is that the configured format has a matching agent holding the key, which is the check [GOVERNANCE.md "Git and Commit Rules"][governance-git-and-commit-rules] prescribes. Any of these wrong or absent is a **host** misconfiguration to surface to the maintainer ([`docs/host-setup.md`][host-setup] is the setup procedure), not something to patch per repo. Patching it locally hides a broken host that then produces wrong identities in every other repo on that machine.
+The scratch commit exercises the whole signing pipeline rather than one delivery path, since `ssh-add -L` or `gpg --list-secret-keys` only prove an agent holds a key and say nothing about a host that signs straight from a key file with no agent running at all, a live and correctly configured case [git-commit-conventions][git-commit-conventions] documents in "Signing, verified not configured", the same rules [GOVERNANCE.md "Git and Commit Rules"][governance-git-and-commit-rules] points to. Signing is **SSH or GPG**, so this judges the configured format by its actual result (`sig=G`, or `sig=U` for a cryptographically good signature from an unrecognized signer, either a GPG key whose trust is merely undefined or an SSH key missing from the local `allowed_signers` file), never by which delivery path produced it. A missing `--global` value, `sig` not reading `G` or `U`, or either printed email not matching the noreply address is a **host** misconfiguration to surface to the maintainer ([`docs/host-setup.md`][host-setup] is the setup procedure), not something to patch per repo. Patching it locally hides a broken host that then produces wrong identities in every other repo on that machine.
 
 After `git init` and before the first commit, confirm the repo added no override of its own. This one needs a repository, since `--local` fails outside one. Read it here and run it in section 0B, which places it between the init and the first commit, so nothing here is a prompt to init early:
 
@@ -222,6 +228,7 @@ The same [`AUDIT.md`][audit] run is the on-demand audit for any known repo, and 
 [content-import]: ./docs/content-import.md
 [files]: ./spec/files.json
 [fleet-map]: ./docs/fleet-map.md
+[git-commit-conventions]: ./.agents/skills/git-commit-conventions/SKILL.md
 [governance]: ./GOVERNANCE.md
 [governance-git-and-commit-rules]: ./GOVERNANCE.md#git-and-commit-rules
 [governance-repository-boundaries-and-write-safety]: ./GOVERNANCE.md#repository-boundaries-and-write-safety
