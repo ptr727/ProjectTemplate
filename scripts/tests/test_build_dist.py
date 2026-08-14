@@ -1,14 +1,16 @@
 #!/usr/bin/env python3
 """Exercise build_dist.py's regeneration and staleness detection against a crafted skills tree.
 
-Run as `python3 scripts/test_build_dist.py`, or under `python3 -m unittest discover -s scripts`.
+Run as `python3 scripts/tests/test_build_dist.py`, or under `python3 -m unittest discover -s scripts/tests`.
 """
 from __future__ import annotations
 
 import json
+import sys
 import unittest
 from pathlib import Path
 
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 import build_dist
 
 

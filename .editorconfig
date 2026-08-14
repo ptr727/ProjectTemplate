@@ -80,9 +80,10 @@ end_of_line = lf
 [host-setup/agent-safety/*.py]
 end_of_line = lf
 
-# The repo lint and review scripts are shebang-executable tooling run by path, so a CRLF shebang would break direct execution on a Unix host.
+# The repo lint and review scripts, and their tests under scripts/tests/, are shebang-executable tooling run by path, so a CRLF shebang would break direct execution on a Unix host.
 # They are pinned in .gitattributes to match.
-[scripts/*.py]
+# `**` rather than `*`, because an EditorConfig `*` stops at a path separator and would leave scripts/tests/ on the CRLF default.
+[scripts/**.py]
 end_of_line = lf
 
 # The uv tool regenerates uv.lock with LF on every platform, so pin it here.

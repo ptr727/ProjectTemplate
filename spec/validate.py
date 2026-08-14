@@ -49,8 +49,8 @@ def main():
             errors.append(f"{fname}: missing required key '{key}'")
     if errors:
         print("Spec validation FAILED:")
-        for e in errors:
-            print(f"  - {e}")
+        for err in errors:
+            print(f"  - {err}")
         return 1
 
     known_types = set(types["types"])
@@ -231,8 +231,8 @@ def main():
                 errors.append(f"secrets.json: typeMechanisms['{t}'] must be a mechanism name or null")
     if errors:
         print("Spec validation FAILED:")
-        for e in errors:
-            print(f"  - {e}")
+        for err in errors:
+            print(f"  - {err}")
         return 1
 
     # The defaults for workflowModel and releaseTrigger feed configure.sh's fallback and selector resolution.
@@ -513,8 +513,8 @@ def main():
 
     if errors:
         print("Spec validation FAILED:")
-        for e in errors:
-            print(f"  - {e}")
+        for err in errors:
+            print(f"  - {err}")
         return 1
     cataloged = sum(1 for r in repos["repos"] if isinstance(r, dict) and r.get("status") == "cataloged")
     backlog = sum(1 for r in repos["repos"] if isinstance(r, dict) and r.get("status") == "backlog")

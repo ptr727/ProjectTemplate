@@ -5,7 +5,7 @@ Each case reintroduces a fault and asserts the gate objects to it, because a gat
 watched fail is a gate nobody knows works. Where a case covers a table, it reads the live table
 rather than restating it: a proof that restates the gated data proves only that the function runs.
 
-Run as `python3 scripts/test_prose_lint.py`, or under `python3 -m unittest discover -s scripts`.
+Run as `python3 scripts/tests/test_prose_lint.py`, or under `python3 -m unittest discover -s scripts/tests`.
 """
 from __future__ import annotations
 
@@ -21,9 +21,10 @@ import unittest
 from pathlib import Path
 from unittest import mock
 
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 import prose_lint
 
-REPO = Path(__file__).resolve().parent.parent
+REPO = Path(__file__).resolve().parent.parent.parent
 COMMENT_AND_DOC_STYLE_SKILL = REPO / '.agents' / 'skills' / 'comment-and-doc-style' / 'SKILL.md'
 
 # Bait assembled from two literals, so this module never holds the pattern it feeds the gate.
@@ -1117,7 +1118,7 @@ class TestDiscovery(unittest.TestCase):
         found = prose_lint.discover([str(REPO)])
         r = subprocess.run(['git', '-C', str(REPO), 'check-ignore', '--stdin'],
                            input='\n'.join(str(p) for p in found),
-                           capture_output=True, text=True)
+                           capture_output=True, text=True, check=False)
         self.assertEqual('', r.stdout.strip())
 
     def test_the_fallback_skips_generated_roots(self) -> None:
@@ -1780,9 +1781,9 @@ class TestHomePath(BaitCase):
         its own cases, and the only repair would be an exemption naming these files, which is the
         stale-exemption shape that hands out a work list damaging correct documents.
         """
-        for name in ('prose_lint.py', 'test_prose_lint.py'):
-            with self.subTest(source=name):
-                found = prose_lint.check_file(Path(__file__).with_name(name), {'home-path'})
+        for path in (REPO / 'scripts' / 'prose_lint.py', Path(__file__)):
+            with self.subTest(source=path.name):
+                found = prose_lint.check_file(path, {'home-path'})
                 self.assertEqual([], found)
 
 

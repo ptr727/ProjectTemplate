@@ -379,7 +379,7 @@ def gh_graphql(query: str, **variables) -> dict:
     argv = ['gh', 'api', 'graphql', '-f', f'query={query}']
     for name, value in variables.items():
         argv += ['-F' if isinstance(value, int) else '-f', f'{name}={value}']
-    r = subprocess.run(argv, capture_output=True, text=True, encoding='utf-8')
+    r = subprocess.run(argv, capture_output=True, text=True, encoding='utf-8', check=False)
     if r.returncode != 0:
         sys.stderr.write(r.stderr[:800])
         raise SystemExit(f'gh graphql failed rc={r.returncode}')
@@ -406,7 +406,7 @@ def timeline(owner: str, repo: str, num: int) -> list[tuple[str, str]]:
     r = subprocess.run(
         ['gh', 'api', '--paginate', f'repos/{owner}/{repo}/issues/{num}/timeline?per_page=100',
          '--jq', TIMELINE_JQ],
-        capture_output=True, text=True, encoding='utf-8')
+        capture_output=True, text=True, encoding='utf-8', check=False)
     if r.returncode != 0:
         sys.stderr.write(r.stderr[:800])
         raise SystemExit(f'gh timeline failed rc={r.returncode}')
@@ -684,10 +684,10 @@ def file_table(body: str) -> list[str]:
     for line in FENCE.sub('', body or '').splitlines():
         if TABLE_HEADER.match(line):
             reading = True
-        elif not TABLE_ROW.match(line):
+        elif (row := TABLE_ROW.match(line)) is None:
             reading = False
         elif reading and not TABLE_RULE.match(line):
-            cell = TABLE_ROW.match(line).group(1)
+            cell = row.group(1)
             paths.append(cell.strip().strip('`').strip())
     return [p for p in paths if p]
 
@@ -891,8 +891,7 @@ def age(stamp: str, now: datetime) -> float | None:
     if not stamp:
         return None
     try:
-        # `fromisoformat` reads the trailing Z only from 3.11, and a fleet machine may carry less.
-        return (now - datetime.fromisoformat(stamp.replace('Z', '+00:00'))).total_seconds()
+        return (now - datetime.fromisoformat(stamp)).total_seconds()
     # ValueError is the unparseable stamp, and TypeError is the parseable one carrying no zone.
     # A stamp with no offset parses to a naive datetime, which will not subtract from an aware now.
     # Catching only the first lets that raise out of a reporting call and take the digest with it.
@@ -1333,8 +1332,10 @@ def origin_owner() -> str | None:
     try:
         url = subprocess.run(['git', '-C', str(Path(__file__).resolve().parent),
                               'remote', 'get-url', 'origin'],
-                             capture_output=True, text=True, encoding='utf-8', timeout=5).stdout.strip()
-    except Exception:
+                             capture_output=True, text=True, encoding='utf-8', timeout=5,
+                             check=False).stdout.strip()
+    # A missing git, a timeout, or any other failure all mean the owner cannot be read.
+    except Exception:  # noqa: BLE001
         return None
     m = re.search(r'[:/]([A-Za-z0-9_.\-]+)/([A-Za-z0-9_.\-]+?)(?:\.git)?/?$', url)
     return m.group(1).lower() if m else None
@@ -1480,7 +1481,8 @@ def gh_rest(path: str, jq: str | None = None) -> subprocess.CompletedProcess:
     """
     argv = ['gh', 'api', path] + (['--jq', jq] if jq else [])
     try:
-        return subprocess.run(argv, capture_output=True, text=True, encoding='utf-8', timeout=30)
+        return subprocess.run(argv, capture_output=True, text=True, encoding='utf-8', timeout=30,
+                              check=False)
     except (OSError, subprocess.SubprocessError):
         return subprocess.CompletedProcess(argv, 1, '', 'gh could not be run')
 
@@ -1488,7 +1490,7 @@ def gh_rest(path: str, jq: str | None = None) -> subprocess.CompletedProcess:
 def answered_absent(proc: subprocess.CompletedProcess) -> bool:
     """Whether GitHub said the object is not there, as opposed to nothing having been read."""
     m = HTTP_STATUS.search(proc.stderr)
-    return bool(m) and m.group(1) in ABSENT
+    return m is not None and m.group(1) in ABSENT
 
 
 def body_references(body: str) -> tuple[list[str], list[str]]:
@@ -1546,7 +1548,7 @@ def head_carries(owner: str, repo: str, head: str, refs: list[str]) -> set[str] 
     # Raising instead would abort a run the caller is in the middle of.
     try:
         proc = subprocess.run(['gh', 'api', f'repos/{owner}/{repo}/tarball/{head}'],
-                              capture_output=True, timeout=TARBALL_TIMEOUT)
+                              capture_output=True, timeout=TARBALL_TIMEOUT, check=False)
     except (OSError, subprocess.SubprocessError):
         return None
     if proc.returncode != 0:

@@ -130,7 +130,7 @@ def source_ref():
         # A host with no git is the normal case for a tarball install, and it is not an error here.
         # Letting FileNotFoundError escape would crash both the install and the read-only report.
         try:
-            r = subprocess.run(["git", "-C", str(HERE), *args], capture_output=True, text=True)
+            r = subprocess.run(["git", "-C", str(HERE), *args], capture_output=True, text=True, check=False)
         except OSError:
             return None
         return r.stdout.strip() if r.returncode == 0 else None
@@ -417,9 +417,12 @@ def main():
                         help="read-only: compare this machine's stamp against this checkout and exit")
     args = parser.parse_args()
 
-    if sys.version_info < (3, 7):
-        sys.stderr.write("This installer and the hook require Python 3.7+. Run it with python3.\n")
+    # The stamp step calls datetime.UTC, a 3.11 API, so an older interpreter is refused up front rather than crashing mid-install.
+    # A capability probe rather than a version tuple, which the linter reads as dead code under the py313 target.
+    if not hasattr(datetime, "UTC"):
+        sys.stderr.write("This installer and the hook require Python 3.11+. Run it with a newer python3.\n")
         return 1
+
     # Expanduser resolves a CLAUDE_HOME set in `~/...` form to the home dir rather than a literal `~` dir.
     claude_home_env = os.environ.get("CLAUDE_HOME")
     claude_home = pathlib.Path(claude_home_env).expanduser() if claude_home_env else pathlib.Path.home() / ".claude"
@@ -442,7 +445,7 @@ def main():
     except OSError:
         pass
     print(f"  hook -> {hook_dst}")
-    r = subprocess.run([sys.executable, str(hook_dst), "--selftest"], capture_output=True, text=True)
+    r = subprocess.run([sys.executable, str(hook_dst), "--selftest"], capture_output=True, text=True, check=False)
     if r.returncode != 0:
         sys.stderr.write("Hook self-test FAILED; aborting before registration.\n" + r.stdout + r.stderr)
         return 1
@@ -590,7 +593,7 @@ def main():
     # 5. Stamp the machine, written last so it records a completed install rather than an attempted one.
     # The blocks are read back off disk here, so the stamp reports what CLAUDE.md holds rather than what was intended.
     stamp_path = claude_home / "agent-safety-stamp.json"
-    stamp = build_stamp(claude_home, datetime.datetime.now(datetime.timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"))
+    stamp = build_stamp(claude_home, datetime.datetime.now(datetime.UTC).strftime("%Y-%m-%dT%H:%M:%SZ"))
     stamp_path.write_text(json.dumps(stamp, indent=2) + "\n", encoding="utf-8")
     print(f"  stamp -> {stamp_path}")
 

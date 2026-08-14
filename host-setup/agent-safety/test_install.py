@@ -20,14 +20,14 @@ HERE = pathlib.Path(__file__).resolve().parent
 INSTALL = HERE / "install.py"
 
 sys.path.insert(0, str(HERE))
-import install  # noqa: E402
+import install
 
 
 def run(home, *args):
     """Invoke the installer as a subprocess, the way a host actually runs it."""
     env = dict(os.environ, CLAUDE_HOME=str(home))
     return subprocess.run([sys.executable, str(INSTALL), *args],
-                          capture_output=True, text=True, env=env)
+                          capture_output=True, text=True, env=env, check=False)
 
 
 class StampCase(unittest.TestCase):
@@ -198,7 +198,7 @@ class TestDegradedEnvironments(StampCase):
     def test_a_host_without_git_stamps_rather_than_crashing(self):
         """A tarball install on a minimal host has no git, which is normal rather than an error."""
         env = dict(os.environ, CLAUDE_HOME=str(self.home), PATH="")
-        r = subprocess.run([sys.executable, str(INSTALL)], capture_output=True, text=True, env=env)
+        r = subprocess.run([sys.executable, str(INSTALL)], capture_output=True, text=True, env=env, check=False)
         self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
         stamp = json.loads(self.stamp.read_text(encoding="utf-8"))
         self.assertEqual(stamp["source"]["vcs"], "none")

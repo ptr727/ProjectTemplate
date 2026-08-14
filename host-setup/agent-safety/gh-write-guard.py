@@ -113,9 +113,10 @@ def _origin_owner_repo(cwd):
     try:
         url = subprocess.run(
             ["git", "-C", cwd or ".", "remote", "get-url", "origin"],
-            capture_output=True, text=True, timeout=5,
+            capture_output=True, text=True, timeout=5, check=False,
         ).stdout.strip()
-    except Exception:
+    # A checkout with no usable origin is answered as unknown rather than crashing the hook.
+    except Exception:  # noqa: BLE001
         return None
     m = re.search(r"[:/]([A-Za-z0-9_.\-]+)/([A-Za-z0-9_.\-]+?)(?:\.git)?/?$", url)
     return (m.group(1).lower(), m.group(2).lower()) if m else None
@@ -163,15 +164,17 @@ def _live_branch_rules(owner, repo, branch):
         r = subprocess.run(
             # Quote the branch, since a name carrying `/`, such as feature/x, would otherwise split the API path.
             ["gh", "api", f"repos/{owner}/{repo}/rules/branches/{quote(branch, safe='')}", "--jq", "[.[].type]"],
-            capture_output=True, text=True, timeout=10,
+            capture_output=True, text=True, timeout=10, check=False,
         )
-    except Exception:
+    # Any failure to query means unknown, so the caller can fail closed instead of the hook crashing.
+    except Exception:  # noqa: BLE001
         return None
     if r.returncode != 0:
         return None
     try:
         return set(json.loads(r.stdout or "[]"))
-    except Exception:
+    # Unparseable output also means unknown rather than a crash.
+    except Exception:  # noqa: BLE001
         return None
 
 
@@ -182,8 +185,9 @@ def _current_push_branch(cwd):
         ["rev-parse", "--abbrev-ref", "HEAD"],
     ):
         try:
-            r = subprocess.run(["git", "-C", cwd or ".", *args], capture_output=True, text=True, timeout=5)
-        except Exception:
+            r = subprocess.run(["git", "-C", cwd or ".", *args], capture_output=True, text=True, timeout=5, check=False)
+        # The hook must answer on any failure rather than crash.
+        except Exception:  # noqa: BLE001
             return None
         ref = r.stdout.strip()
         if r.returncode == 0 and ref and ref != "HEAD":
@@ -479,7 +483,7 @@ def classify(cmd, cwd=None, origin=None, current_branch=None, rules_lookup=None,
     if _GRAPHQL.search(cmd) and _MUTATION.search(cmd):
         for m in _FIELD_ASSIGN.finditer(cmd):
             val = m.group("v").strip("'\"")
-            if val.startswith("$") or val.startswith("${"):
+            if val.startswith(("$", "${")):
                 continue
             if _NODE_ID_LITERAL.match(val):
                 return "deny", (
@@ -680,7 +684,8 @@ def _selftest():
 def _main():
     try:
         data = json.load(sys.stdin)
-    except Exception:
+    # The hook must never crash on input it does not recognize.
+    except Exception:  # noqa: BLE001
         sys.exit(0)  # not our event shape - do not interfere
     if data.get("tool_name") != "Bash":
         sys.exit(0)
