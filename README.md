@@ -131,6 +131,23 @@ Keeping a fleet of repositories consistent has always been a tax paid in review 
 
 ProjectTemplate follows the same model it documents, and audits its own rules against itself (it classifies as the source-only project type in [WORKFLOW.md][workflow]).
 
+The doors a session enters through, and where each leads, matching the "Getting Started" table above:
+
+```mermaid
+flowchart TD
+  start["new session: human via this README, or agent via AGENTS.md Fleet Bootstrap"]
+  start -->|"set up a machine"| hostsetup["host-setup/: guardrails, then fleet skills"]
+  start -->|"repo does not exist yet"| standup["STANDUP.md"]
+  start -->|"repo exists, in or out of conformance"| resync["RESYNC.md"]
+  hostsetup --> standup
+  standup --> audit["AUDIT.md: verify"]
+  resync --> audit
+  audit -->|"blocked by a rule"| diverging["Diverging From a Rule"]
+  audit -->|"gap in the rules or docs"| issues["Questions or Issues"]
+```
+
+Within this repo, day-to-day development follows the same branching, CI, review, and release model it documents for the fleet:
+
 - **Branching.** Persistent `main` and `develop`, each with its own ruleset. This repo uses the default `release` workflow model: commit on feature branches only, feature branch to `develop` is squash-merged, `develop` to `main` is a merge commit, and `develop` is forward-only (no `main -> develop` back-merges). Live-service config repos instead use the `operational` model (registry `workflowModel`), with direct signed commits to `develop`, promoted to `main` by an occasional PR. See [GOVERNANCE.md "Branching Model"][governance-branching-model].
 - **CI is lint-only.** There is no build or unit test. The PR gate runs markdownlint, cspell, JSON validation (`jq` parses `registry/`, `spec/`, and `repo-config/`, plus the `spec/validate.py` cross-reference and shape checks), and actionlint, and exposes the ruleset-bound `Check pull request workflow status job` aggregator. The same lint configs (`.markdownlint-cli2.jsonc`, `cspell.json`) drive the editor extensions, the CLI, and CI.
 - **Review loop.** Every PR is reviewed by GitHub Copilot, and the agent drives the review loop to green and merges only with explicit maintainer permission. See [GOVERNANCE.md "PR Review Etiquette"][governance-pr-review-etiquette].

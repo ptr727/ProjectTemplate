@@ -12,6 +12,15 @@ This repository is governed by a shared template, and the canonical rules, machi
 
 Route by what this repository currently holds rather than by what it is expected to hold, since the two differ exactly when this section matters most.
 
+```mermaid
+flowchart TD
+  state["what does this repository currently hold?"]
+  state -->|"no repo, or a local tree with no remote"| standup["hub STANDUP.md, from section 0"]
+  state -->|"no carried instruction set, or a partial one"| standup2["hub STANDUP.md sections 1A, 2"]
+  state -->|"instruction set present, current or stale"| resync["hub RESYNC.md"]
+  state -->|"believes it is conformant"| resync2["hub RESYNC.md, run the audit anyway"]
+```
+
 - **No repository yet, or a local tree with no remote.** Follow the hub's `STANDUP.md` from section 0. That file is hub-only and deliberately not carried, because a repository needing it cannot be relied on to hold a current copy. Note that nothing in it creates the GitHub repository, which is an outward-facing write requiring explicit permission, so section 0A is the list handed to the maintainer before anything else starts.
 - **A repository with no carried instruction set, or a partial one.** Carry the baseline per the hub's `STANDUP.md` sections 1A and 2, which resolve what this repository is owed from its declared types and workflow model. Absent files are not drift to re-vendor, they are a baseline that never arrived, and the two are fixed differently.
 - **A repository with the instruction set, current or stale.** Follow the hub's `RESYNC.md`, which runs `AUDIT.md` end to end for the findings and then applies each one in an order that matters, since the rules govern what comes after them, a deletion must precede the re-vendor that would otherwise refresh the file, and only some findings are mechanically detectable at all. An audit that reports drift and stops is half the procedure.

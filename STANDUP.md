@@ -4,6 +4,21 @@ How an agent takes a repository from nothing (or a partial state) to **operation
 
 Standing up a repo is **applying the manifests until the audit passes**, nothing more invented. If a repo needs a construct no manifest covers, that is a spec gap: raise it ([`AUDIT.md`][audit] section 9), never improvise a per-repo answer. This is the downward-audit model (standard-style repos the hub audits against their declared type), which the fleet uses because managing downstream divergence is too costly.
 
+```mermaid
+flowchart TD
+  s0["0: verify identity, signing, host_gate"] --> s0a["0A: maintainer hands over repo, App, secrets"]
+  s0a --> s0b["0B: create main + develop empty, feature branch off develop"]
+  s0b --> s1["1: classify, write registry/repos.json entry"]
+  s1 --> s1a["1A: carry the instruction set, before authoring anything"]
+  s1a --> s1b["1B: capture external source, if this repo replaces one"]
+  s1b --> s2["2: carry the baseline files"]
+  s2 --> s3["3: stand up the workflows"]
+  s3 --> s4["4: apply settings, rulesets, secrets"]
+  s4 --> s5["5: run AUDIT.md"]
+  s5 -->|"operational, or deltas tracked with an issue"| done["stood up"]
+  s5 -->|"a construct no manifest covers"| gap["spec gap: raise it, AUDIT.md section 9"]
+```
+
 ## 0. Verify Commit Identity and Signing, Before the First Commit
 
 Do this before `git init` or any commit, because the window closes at the first one. A repo whose initial history is unsigned or committed under the wrong identity cannot be cleanly repaired: `Require signed commits` blocks the first `develop -> main` release, re-signing that history is a non-fast-forward the `Block force pushes` rule rejects, and completing it needs the ruleset temporarily disabled plus a maintainer force-push that [`docs/repo-config-carry.md`][repo-config-carry] forbids an agent to perform. Greenfield repos where signing is live before the first commit never hit this.

@@ -4,6 +4,21 @@ How an agent brings a repository that is **already stood up** back into line wit
 
 Resyncing invents nothing. It is [`AUDIT.md`][audit] run for the findings, then each finding applied by the remedy its class already carries. What this file adds is the **order**, the **remedies that remove content rather than update it**, and an honest account of **what a resync cannot detect**, none of which a findings list states on its own.
 
+```mermaid
+flowchart TD
+  route["0: which state? none / partial / full instruction set"]
+  route -->|"no repo, no remote"| toStandup["STANDUP.md section 0"]
+  route -->|"partial instruction set"| toStandup2["STANDUP.md sections 1A, 2"]
+  route -->|"full instruction set, current or stale"| reach["1: fetch hub main, verify host"]
+  reach --> measure["2: audit.py, --issue, fidelity_honesty.py --report"]
+  measure --> apply
+  subgraph apply["3: apply, in this order"]
+    instr["instruction set"] --> del["deletions"] --> revendor["verbatim re-vendors"] --> iface["interface workflows"] --> settings["settings, rulesets, secrets"] --> intent["intent files, by hand"]
+  end
+  apply --> reaudit["re-audit — 5: intent files judged only for presence, never proven current"]
+  reaudit --> ship["6: PR per drift class, review loop, maintainer merges"]
+```
+
 ## 0. Route Here Only If the Repository Is Stood Up
 
 Three states look similar from inside a repository and take different procedures, so establish which one before doing anything. The `AGENTS.md` "Fleet Bootstrap" section carries this same routing in the repository itself, byte-locked, so an agent finds it without knowing this file exists.
@@ -69,6 +84,16 @@ The order is load-bearing. Each step below either changes the rules the later st
 Every other finding in this procedure is satisfied by adding or replacing content. This one is satisfied by removing it, which makes it the only class where acting on a wrong finding loses something.
 
 The detector is derived rather than listed: the hub's git-tracked paths minus the [`spec/files.json`][files] baseline is what the hub hosts and no repository carries. That means a file dropped from the manifest starts being reported on the next run with no retirement list to maintain, and it also means **the match is on path alone**, so a hit is a candidate and not a verdict.
+
+```mermaid
+flowchart LR
+  candidate["hub git-tracked path, not in spec/files.json"] --> disp["check spec/divergences.json disposition"]
+  disp -->|"retire"| delete["delete the file"]
+  disp -->|"accepted"| keep["keep, closed permanently"]
+  disp -->|"untriaged"| read["read before touching"]
+  delete --> sweep["sweep every inbound reference, tree-wide"]
+  sweep --> fix["re-point, rewrite, or remove, per case"]
+```
 
 - **Only a `retire` disposition in [`spec/divergences.json`][divergences] authorizes a deletion.** It records that the file is the hub's content with nothing per-repository in it, and what to reach instead.
 - **An untriaged hit is read before it is touched.** A repository's own content at a path the hub also uses matches this check while carrying nothing of the hub's. The first fleet-wide run found two: a KiCad tooling document at `scripts/README.md`, and per-repository formatting hooks at `.husky/pre-commit`, each of which shares the path and none of the content. Deleting either would have destroyed work the hub never owned.

@@ -80,7 +80,7 @@ A target contributes a file to the GitHub release by uploading a workflow artifa
 flowchart LR
   leafa[leaf: target A] -->|release-asset-branch-A| store[(run artifacts)]
   leafb[leaf: target B] -->|release-asset-branch-B| store
-  store -->|pattern + merge-multiple| rel[github-release job]
+  store -->|pattern + merge-multiple| rel["github-release job (D6)"]
   reg[registry leaf: nuget / pypi / docker] -->|push, no asset| registries[(registries)]
 ```
 
@@ -109,7 +109,7 @@ flowchart TD
   pr[pull request] --> ch[changes paths-filter]
   ch -->|target changed| sb[smoke-build changed targets]
   ch -->|workflow-only or docs| skip[smoke-build skipped]
-  val[validation job] --> agg[Check pull request workflow status job]
+  val[validation job] --> agg["Check pull request workflow status job (D1)"]
   sb --> agg
   skip --> agg
   agg -->|success| ok[merge allowed]
@@ -122,10 +122,10 @@ Each publish builds a **single branch**, the trigger ref (`main` a release, `dev
 ```mermaid
 flowchart TD
   trig[main-only schedule / dispatch / paths-filtered push] --> one[build the one trigger branch]
-  one -->|main| vmain[version X.Y.Z stable]
-  one -->|develop| vdev[version X.Y.Z-g-sha prerelease]
-  vmain --> relm[github-release + registries: latest]
-  vdev --> reld[github-release + registries: prerelease]
+  one -->|main| vmain["version X.Y.Z stable (D3)"]
+  one -->|develop| vdev["version X.Y.Z-g-sha prerelease (D3)"]
+  vmain --> relm["github-release + registries: latest (D4)"]
+  vdev --> reld["github-release + registries: prerelease (D4)"]
 ```
 
 ### Output Seam by Destination
