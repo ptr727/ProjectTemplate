@@ -258,10 +258,13 @@ py -3 scripts/host_gate.py                   # presence and version floors, from
 py -3 scripts/skills_install.py --report     # the skills install stamp is current
 git config --global --list | Select-String "user\.|signing|gpg\."
 $d = Join-Path $env:TEMP ([guid]::NewGuid())
-git init -q $d
-git -C $d commit -S --allow-empty -q -m check
-git -C $d log -1 --format='sig=%G? author=%an <%ae> committer=%cn <%ce>'
-Remove-Item -Recurse -Force $d
+try {
+  git init -q "$d"
+  git -C "$d" commit -S --allow-empty -q -m check
+  git -C "$d" log -1 --format='sig=%G? author=%an <%ae> committer=%cn <%ce>'
+} finally {
+  Remove-Item -Recurse -Force "$d"
+}
 gh auth status
 ```
 

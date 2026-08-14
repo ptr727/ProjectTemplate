@@ -70,10 +70,13 @@ scope-widened commit, a rewritten shared history, a destructive reset).
   PowerShell equivalent:
   ```powershell
   $d = Join-Path $env:TEMP ([guid]::NewGuid())
-  git init -q $d
-  git -C $d commit -S --allow-empty -q -m check
-  git -C $d log -1 --format='sig=%G? author=%an <%ae> committer=%cn <%ce>'
-  Remove-Item -Recurse -Force $d
+  try {
+    git init -q "$d"
+    git -C "$d" commit -S --allow-empty -q -m check
+    git -C "$d" log -1 --format='sig=%G? author=%an <%ae> committer=%cn <%ce>'
+  } finally {
+    Remove-Item -Recurse -Force "$d"
+  }
   ```
   `sig` must read `G`, git's own good-signature verdict char. Don't grep localized
   "Good" text, since that varies by git version and locale. Anything else, or the commit failing
