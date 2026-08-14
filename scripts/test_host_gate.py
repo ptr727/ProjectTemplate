@@ -656,7 +656,7 @@ class TestShippedDeclaration(unittest.TestCase):
         one in the data, which is what caught the python3 floor being added without this line.
         """
         floors = {t['name'] for t in self.data['tools'] if t['minimum'] is not None}
-        self.assertEqual(floors, {'gh', 'git-restore-mtime', 'jq', 'python3', 'uv'})
+        self.assertEqual(floors, {'docker', 'gh', 'git-restore-mtime', 'jq', 'python3', 'uv'})
 
     def test_the_contract_table_carries_every_declared_floor(self):
         """docs/host-setup.md restates the floors, so the doc goes stale the moment the data moves.
@@ -714,11 +714,11 @@ class TestShippedDeclaration(unittest.TestCase):
 
         A reader who takes a target floor for a measured one goes looking for a defect report that
         does not exist, which is the failure the two-kinds wording was written to prevent.
-        The set is asserted rather than one entry, so a third target floor added without the wording
-        fails here instead of reading as measured. Both members are named, since a check that only
-        counted them would pass on the wrong pair.
+        The set is asserted rather than one entry, so a target floor added without the wording
+        fails here instead of reading as measured. Each one is named individually, since a check
+        that only counted them would pass on a wrong substitution.
         """
-        targets = {'jq': '1.7', 'python3': '3.13'}
+        targets = {'docker': '29.6.2', 'jq': '1.7', 'python3': '3.13'}
         by_name = {t['name']: t for t in self.data['tools']}
         for name, floor in targets.items():
             entry = by_name[name]

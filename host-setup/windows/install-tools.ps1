@@ -482,7 +482,7 @@ function Test-WslReadyForDocker {
     }
     $version = Get-WslPlatformVersion
     if (-not $version) {
-        return "the WSL version could not be read, and Docker Desktop needs WSL $($script:DOCKER_WSL_FLOOR) or later"
+        return "the WSL version could not be read, and Docker Desktop needs WSL $($script:DOCKER_WSL_FLOOR) or later. Update it with: host-setup\windows\upgrade-host.ps1 -Wsl"
     }
     if ((Compare-HostVersion $version $script:DOCKER_WSL_FLOOR) -lt 0) {
         return "WSL is at $version, and Docker Desktop needs $($script:DOCKER_WSL_FLOOR) or later. Update it with: host-setup\windows\upgrade-host.ps1 -Wsl"

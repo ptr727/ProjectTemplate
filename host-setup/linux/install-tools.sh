@@ -564,6 +564,8 @@ docker_install() {
         warn "This is a WSL distribution, and docker here comes only from Docker Desktop's own WSL integration, never from installing docker-ce directly. Enable it in Docker Desktop under Settings, Resources, WSL integration, or check it from Windows with setup-wsl.ps1 -Status. Skipping the native install."
         return 0
     fi
+    [[ -n $CODENAME ]] ||
+        die "/etc/os-release names no VERSION_CODENAME, so the Docker apt repository's suite cannot be worked out"
 
     local -a conflicts=(docker.io docker-doc docker-compose docker-compose-v2 docker-buildx podman-docker containerd runc)
     local -a present=()
@@ -580,13 +582,13 @@ docker_install() {
     remove_stale "$SOURCES_DIR/docker.list"
 
     if install_keyring "https://download.docker.com/linux/$DISTRO_ID/gpg" \
-        "$KEYRING_DIR/docker.asc" \
+        "$KEYRING_DIR/docker.gpg" \
         "https://download.docker.com/linux/$DISTRO_ID/dists/$CODENAME/InRelease" true; then
         APT_DIRTY=true
     fi
 
     if write_sources "docker" "https://download.docker.com/linux/$DISTRO_ID" "$CODENAME" "stable" \
-        "$KEYRING_DIR/docker.asc"; then
+        "$KEYRING_DIR/docker.gpg"; then
         APT_DIRTY=true
     fi
 
