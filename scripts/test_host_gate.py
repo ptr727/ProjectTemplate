@@ -302,6 +302,81 @@ class TestUncompilablePatternAtReadTime(unittest.TestCase):
         self.assertEqual((status, version), ('unreadable', None))
 
 
+class TestBareRunOverlayWarning(unittest.TestCase):
+    """A bare run inside a repo whose root carries an overlay names what it skipped.
+
+    The default --repo reads the working directory alone, so a run started in a subdirectory reads
+    nothing and used to say nothing, which is the silent skip the warning closes. An explicit
+    --repo and --no-local each stay silent, since both are a choice the caller made.
+    """
+
+    def spec_with_one_passing_tool(self, d):
+        spec = Path(d) / 'spec.json'
+        spec.write_text(json.dumps({'tools': [tool('ok')]}), encoding='utf-8')
+        return str(spec)
+
+    def run_from(self, cwd, argv):
+        import contextlib
+        import io
+        import os
+        old = os.getcwd()
+        os.chdir(cwd)
+        try:
+            out = io.StringIO()
+            with contextlib.redirect_stdout(out):
+                host_gate.main(argv)
+            return out.getvalue()
+        finally:
+            os.chdir(old)
+
+    def repo_with_overlay(self, d):
+        root = Path(d)
+        (root / 'host-tools.json').write_text('{"tools": []}', encoding='utf-8')
+        sub = root / 'scripts'
+        sub.mkdir()
+        return root, sub
+
+    def test_a_bare_run_in_a_subdirectory_warns_and_names_the_re_run(self):
+        import tempfile
+        with tempfile.TemporaryDirectory() as d:
+            root, sub = self.repo_with_overlay(d)
+            out = self.run_from(sub, ['--spec', self.spec_with_one_passing_tool(d), '--quiet'])
+            self.assertIn('warning:', out)
+            self.assertIn(str(root.resolve()), out)
+            self.assertIn('--repo', out)
+
+    def test_a_bare_run_at_the_root_layers_the_overlay_and_does_not_warn(self):
+        import tempfile
+        with tempfile.TemporaryDirectory() as d:
+            root, _ = self.repo_with_overlay(d)
+            out = self.run_from(root, ['--spec', self.spec_with_one_passing_tool(d)])
+            self.assertIn('layered', out)
+            self.assertNotIn('warning:', out)
+
+    def test_an_explicit_repo_does_not_warn(self):
+        import tempfile
+        with tempfile.TemporaryDirectory() as d:
+            _, sub = self.repo_with_overlay(d)
+            out = self.run_from(sub, ['--spec', self.spec_with_one_passing_tool(d), '--repo', str(sub), '--quiet'])
+            self.assertNotIn('warning:', out)
+
+    def test_no_local_does_not_warn(self):
+        import tempfile
+        with tempfile.TemporaryDirectory() as d:
+            _, sub = self.repo_with_overlay(d)
+            out = self.run_from(sub, ['--spec', self.spec_with_one_passing_tool(d), '--no-local', '--quiet'])
+            self.assertNotIn('warning:', out)
+
+    def test_overlay_above_returns_the_nearest_carrier(self):
+        import tempfile
+        with tempfile.TemporaryDirectory() as d:
+            root = Path(d)
+            (root / 'host-tools.json').write_text('{"tools": []}', encoding='utf-8')
+            deep = root / 'a' / 'b'
+            deep.mkdir(parents=True)
+            self.assertEqual(host_gate.overlay_above(deep), root.resolve())
+
+
 class TestMalformedLocalFile(unittest.TestCase):
     """A repository file is validated by nothing upstream, so the gate reports rather than crashes."""
 

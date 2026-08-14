@@ -259,6 +259,19 @@ def merge(base: list[dict], local: list[dict]) -> tuple[list[dict], list[str]]:
     return [by_key[k] for k in sorted(by_key)], rejected
 
 
+def overlay_above(start: Path) -> Path | None:
+    """The nearest ancestor of `start` carrying a host-tools.json, or None where none does.
+
+    A bare run reads only the declaration at the working directory itself, so an overlay at the
+    root of the repo the run is inside goes unread without a word when the run starts in a
+    subdirectory. Naming that directory lets the run say what it skipped and which re-run counts it.
+    """
+    for parent in start.resolve().parents:
+        if (parent / 'host-tools.json').is_file():
+            return parent
+    return None
+
+
 def check(tools: list[dict]) -> list[str]:
     """Every declared tool against its floor, returning one line per failure."""
     issues = []
@@ -306,7 +319,7 @@ def check(tools: list[dict]) -> list[str]:
 def main(argv: list[str] | None = None) -> int:
     ap = argparse.ArgumentParser(description='Check host tool versions against the hub declaration plus a repository\'s own.')
     ap.add_argument('--spec', default=str(SPEC), help='path to the hub declaration, for testing')
-    ap.add_argument('--repo', default='.', help='repository whose host-tools.json layers over the hub one')
+    ap.add_argument('--repo', default=None, help='repository whose host-tools.json layers over the hub one, default the working directory')
     ap.add_argument('--no-local', action='store_true', help='read the hub declaration alone, ignoring the repository')
     ap.add_argument('--quiet', action='store_true', help='print failures only, dropping the per-tool notes')
     a = ap.parse_args(argv)
@@ -321,7 +334,7 @@ def main(argv: list[str] | None = None) -> int:
 
     NOTES.clear()
     rejected: list[str] = []
-    local_path = Path(a.repo) / 'host-tools.json'
+    local_path = Path(a.repo or '.') / 'host-tools.json'
     # A repository layering onto the hub is the normal case, and carrying no local file is the common one, so its absence is silent.
     if not a.no_local and local_path.is_file():
         local = read_declaration(local_path, 'repository host tool declaration')
@@ -330,6 +343,12 @@ def main(argv: list[str] | None = None) -> int:
             return 2
         tools, rejected = merge(tools, local)
         NOTES.append(f'{local_path} layered {len(local)} local entry(s) over the hub declaration')
+
+    # Only a bare run warns, since an explicit --repo and --no-local are each a choice the caller made.
+    # The default sits at None rather than '.' so the two are tellable apart.
+    skipped = None
+    if a.repo is None and not a.no_local and not local_path.is_file():
+        skipped = overlay_above(Path.cwd())
 
     # The contract is read after layering, since neither file can see what the other adds to it.
     issues = rejected + contract_problems(tools) + check(tools)
@@ -346,6 +365,9 @@ def main(argv: list[str] | None = None) -> int:
         # After the findings and outside the count, since a note is not one.
         for note in NOTES:
             print(f'         note: {note}')
+    if skipped is not None:
+        # Outside --quiet, because a silently skipped overlay is the omission this line exists to name.
+        print(f'         warning: {skipped} carries a host-tools.json overlay this bare run did not read - re-run with --repo {skipped} so its floors count')
     return 1 if issues else 0
 
 

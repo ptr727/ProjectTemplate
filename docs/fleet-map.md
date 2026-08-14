@@ -91,14 +91,13 @@ An agent is told to create or stand up a repo. The router of last resort is the 
 flowchart TD
   ask["stand up a new repo"] --> route["AGENTS.md Fleet Bootstrap routes by repo state"]
   route --> s0["STANDUP section 0: identity and signing, host gate"]
-  s0 -.->|"G2: bare run skips repo floors silently"| s0
   s0 --> s1["section 1: classify, registry entry, carry instruction set first"]
   s1 --> s2["sections 2-4: baseline, workflows, settings and rulesets"]
   s2 --> s5["section 5: run the audit"]
   s5 --> report["committed report under reports/"]
 ```
 
-Owned by [`STANDUP.md`][standup], packaged as the `standup-a-repo` skill. Gaps on this path: G2 (a bare `host_gate.py` run before the target's overlay exists reports nothing about the floors it skipped).
+Owned by [`STANDUP.md`][standup], packaged as the `standup-a-repo` skill. No open gaps sit on this path: G2, the silent bare-run overlay skip, is closed and its row records the resolution.
 
 ### A Stale Repository
 
@@ -172,7 +171,7 @@ Four wiring points close the model, each a register gap with its own deliverable
 | ID | Gap | Owner | Phase |
 | --- | --- | --- | --- |
 | G1 | Skills install is absent from the cold-start flow | script + doc | P1 |
-| G2 | Host-tools repo overlay is silently skippable | script + doc | P1 |
+| G2 | Host-tools repo overlay is silently skippable | script + doc | closed |
 | G3 | A failed tool floor names no install remedy | spec + script | P1 |
 | G4 | Deletion sweeps miss prose describing the deleted path | doc | P3 |
 | G5 | Intent-fidelity carried files have no drift detection | spec + decision | P3 |
@@ -194,13 +193,10 @@ Each gap's handoff below states who detects it, what closes it, and the test tha
 - **Closed when** - A fresh-host run per [`host-setup/README.md`][host-setup-readme] ends with the stamp present and `--report` exiting zero, and the README names four deployed things.
 - **Target** - [`bootstrap.sh`][bootstrap] + [`bootstrap.ps1`][bootstrap-ps1] step, [`docs/host-setup.md`][host-setup-doc] section, [`README.md`][readme] edit. The closing PR decides how the step degrades when the `claude` CLI is absent, and whether that CLI joins [`spec/host-tools.json`][host-tools] as a cataloged tool.
 
-### G2: Host-Tools Repo Overlay Is Silently Skippable
+### G2: Host-Tools Repo Overlay Is Silently Skippable (Closed)
 
-- **Gap** - [`scripts/host_gate.py`][host-gate] run without `--repo` checks only the fleet floors, and reports nothing about the target-repo overlay floors it skipped. [`STANDUP.md`][standup] section 0 works around this in prose.
-- **Checked** - STANDUP section 0 states a bare run "reports nothing about the omission".
-- **Handoff** - When `host_gate.py` runs bare while the working directory is inside a repo carrying a `host-tools.json` overlay, it says so in its output, naming the `--repo` re-run that would count the overlay.
-- **Closed when** - A bare run inside such a repo prints the warning, and the STANDUP prose can drop the workaround sentence.
-- **Target** - `host_gate.py` warning, [`STANDUP.md`][standup] section 0 wording.
+- **Gap** - [`scripts/host_gate.py`][host-gate] run without `--repo` read only the declaration at its own working directory, so a run started in a subdirectory of a repo carrying a `host-tools.json` overlay skipped that overlay without a word.
+- **Resolution** - A bare run whose working directory sits inside such a repo prints a warning naming the overlay's directory and the `--repo` re-run that counts it, asserted by the `TestBareRunOverlayWarning` cases in `scripts/test_host_gate.py`. An explicit `--repo` and `--no-local` each stay silent, since both are a choice the caller made. [`STANDUP.md`][standup] section 0 states the residual case the warning cannot cover, a target repo that does not exist yet, instead of the workaround sentence.
 
 ### G3: A Failed Tool Floor Names No Install Remedy
 
@@ -351,7 +347,7 @@ Design-doc first: this doc merges, then each unchecked item becomes an issue lin
 ### P1: Close the Install Model
 
 - [ ] G1 bootstrap skills step, host-setup section, README fourth deployed thing (cross-links the open host-tooling issues [#671][issue-671] and [#673][issue-673], which touch the same scripts)
-- [ ] G2 `host_gate.py` bare-run warning
+- [x] G2 `host_gate.py` bare-run warning
 - [ ] G3 failed-floor remedy output
 - [ ] G6 staleness cadence wording
 - [x] G8 `build_dist.py --check` in CI, found already in place via [#676][pr-676] and recorded closed
