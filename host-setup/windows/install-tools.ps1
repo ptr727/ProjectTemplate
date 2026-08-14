@@ -614,7 +614,9 @@ function Enter-DockerMaintenance {
         # Installing through wsl --update's own MSI raises a UAC prompt when this pwsh is not itself elevated, the state the rest of this script deliberately stays in (running elevated trades this one prompt for winget installers elsewhere that fail pre-elevated instead).
         # Nothing can answer that prompt without a person at the console, so a run with neither would hang rather than fail, which -Yes is supposed to rule out, not walk into unattended.
         if (-not $script:ELEVATED -and (-not [Environment]::UserInteractive -or [Console]::IsInputRedirected)) {
-            warn "wsl --update needs administrator and raises its own prompt, which nothing can answer unattended; it would hang rather than fail, so this refuses to start it. Run interactively once so the prompt has someone to answer, or quit Docker Desktop yourself and run host-setup\windows\upgrade-host.ps1 -Wsl, which refuses on its own while Docker Desktop is running: this refusal also restarts Docker Desktop, to leave the host as it found it, so it may already be running again by the time this is read"
+            # Built rather than a fixed string, because whether this refusal itself restarts Docker Desktop depends on whether $result.Stopped is set, and a run that found it already stopped restarts nothing for the remedy below to run into.
+            $restartNote = if ($result.Stopped) { ' This refusal also restarts Docker Desktop, to leave the host as it found it, so it may already be running again by the time this is read.' } else { '' }
+            warn "wsl --update needs administrator and raises its own prompt, which nothing can answer unattended; it would hang rather than fail, so this refuses to start it. Run interactively once so the prompt has someone to answer, or quit Docker Desktop yourself and run host-setup\windows\upgrade-host.ps1 -Wsl, which refuses on its own while Docker Desktop is running.$restartNote"
             if ($result.Stopped) { Start-DockerDesktop | Out-Null; $result.Stopped = $false }
             $result.Proceed = $false
             return $result
