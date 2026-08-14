@@ -584,10 +584,12 @@ function Enter-DockerMaintenance {
     $result = @{ Proceed = $true; Stopped = $false }
     if (-not $WasRunning -and -not $WslProblem) { return $result }
 
+    # Test-WslReadyForDocker's own string carries a remedy clause for a caller that will not fix WSL itself, "Update it with: host-setup\windows\upgrade-host.ps1 -Wsl", which reads as misleading and duplicative embedded in a prompt for a run about to do exactly that.
+    $wslReason = if ($WslProblem) { $WslProblem -replace '\s*Update it with:.*$', '' } else { $WslProblem }
     $question = if ($WslProblem -and $WasRunning) {
-        "docker needs WSL updated first ($WslProblem). Stop Docker Desktop, update WSL, and restart Docker Desktop to continue?"
+        "docker needs WSL updated first ($wslReason). Stop Docker Desktop, update WSL, and restart Docker Desktop to continue?"
     } elseif ($WslProblem) {
-        "docker needs WSL updated first ($WslProblem). Update WSL to continue?"
+        "docker needs WSL updated first ($wslReason). Update WSL to continue?"
     } else {
         "docker is about to change version, and Docker Desktop's own WSL integration commonly goes stale across an engine bump. Stop Docker Desktop first, and restart it after, to avoid that?"
     }
@@ -610,7 +612,7 @@ function Enter-DockerMaintenance {
         # Installing through wsl --update's own MSI raises a UAC prompt when this pwsh is not itself elevated, the state the rest of this script deliberately stays in (running elevated trades this one prompt for winget installers elsewhere that fail pre-elevated instead).
         # Nothing can answer that prompt without a person at the console, so a run with neither would hang rather than fail, which -Yes is supposed to rule out, not walk into unattended.
         if (-not $script:ELEVATED -and (-not [Environment]::UserInteractive -or [Console]::IsInputRedirected)) {
-            warn "wsl --update needs administrator and raises its own prompt, which nothing can answer unattended; it would hang rather than fail, so this refuses to start it. Run interactively once so the prompt has someone to answer, or quit Docker Desktop yourself and run host-setup\windows\upgrade-host.ps1 -Wsl, which refuses on its own while Docker Desktop is running, including one this line just restarted to leave the host as it found it"
+            warn "wsl --update needs administrator and raises its own prompt, which nothing can answer unattended; it would hang rather than fail, so this refuses to start it. Run interactively once so the prompt has someone to answer, or quit Docker Desktop yourself and run host-setup\windows\upgrade-host.ps1 -Wsl, which refuses on its own while Docker Desktop is running: this refusal also restarts Docker Desktop, to leave the host as it found it, so it may already be running again by the time this is read"
             if ($result.Stopped) { Start-DockerDesktop | Out-Null; $result.Stopped = $false }
             $result.Proceed = $false
             return $result
