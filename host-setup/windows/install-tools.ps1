@@ -109,11 +109,11 @@ it finds and an installer that needs administrator asks for it itself. Naming a 
 disagrees with the installed copy would add a second copy beside the first rather than replacing
 it, so an upgrade refuses that case and names -Reinstall, which removes the old copy first.
 
-An install or upgrade of docker also brings the WSL platform itself up to Docker Desktop's own
-floor where it is behind, and stops Docker Desktop first either way, since Docker Desktop holds
-the WSL service open and both a platform update and its own WSL integration otherwise need a
-restart to recover from an engine bump. wsl --update raises its own administrator prompt, which
-this refuses to start unattended where nothing could answer it, rather than hang.
+An install, upgrade or reinstall of docker also brings the WSL platform itself up to Docker
+Desktop's own floor where it is behind, and stops Docker Desktop first either way, since Docker
+Desktop holds the WSL service open and both a platform update and its own WSL integration
+otherwise need a restart to recover from an engine bump. wsl --update raises its own administrator
+prompt, which this refuses to start unattended where nothing could answer it, rather than hang.
 
 Examples:
   install-tools.ps1                       Report on every tool
@@ -602,7 +602,7 @@ function Enter-DockerMaintenance {
     } elseif ($WslProblem) {
         "docker needs WSL updated first ($wslReason). Update WSL to continue?"
     } else {
-        "docker is about to change version, and Docker Desktop's own WSL integration commonly goes stale across an engine bump. Stop Docker Desktop first, and restart it after, to avoid that?"
+        "docker is about to be upgraded or reinstalled, and Docker Desktop's own WSL integration commonly goes stale across a change like that. Stop Docker Desktop first, and restart it after, to avoid that?"
     }
     if (-not (confirm $question)) {
         if ($WslProblem) { $result.Proceed = $false; return $result }
