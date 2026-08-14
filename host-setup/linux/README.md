@@ -19,7 +19,7 @@ host-setup/linux/setup-github.sh --status
 host-setup/linux/install-skills.sh --report
 ```
 
-Each script is LF with a shebang, and its executable bit is tracked in git. A fresh checkout therefore runs each without a `bash` prefix. That is the Linux form of "this will run", and [`scripts/test_bootstrap.py`][test-bootstrap] asserts both.
+Each script is LF with a shebang, and its executable bit is tracked in git. A fresh checkout therefore runs each without a `bash` prefix. That is the Linux form of "this will run", and [`scripts/tests/test_bootstrap.py`][test-bootstrap] asserts both.
 
 ## Requirements
 
@@ -140,7 +140,7 @@ host-setup/linux/setup-github.sh --configure --dry-run
 
 Two of those are guards rather than previews. `--release --dry-run` on a Proxmox host prints the refusal, not the commands. A docker `--upgrade --dry-run` inside a WSL distribution prints the skip. A `[dry run]` line from either means the guard sits in the wrong place.
 
-The scripts are checked by `shellcheck`, which runs in CI over every `.sh` file `git ls-files` returns. A local run uses the same `koalaman/shellcheck:stable` container. [`scripts/test_bootstrap.py`][test-bootstrap] asserts that every tool the spec requires on Linux is one `install-tools.sh` can provide, or a recorded exception. It also asserts each script here is tracked executable, so a fresh checkout can run it.
+The scripts are checked by `shellcheck`, which runs in CI over every `.sh` file `git ls-files` returns. A local run uses the same `koalaman/shellcheck:stable` container. [`scripts/tests/test_bootstrap.py`][test-bootstrap] asserts that every tool the spec requires on Linux is one `install-tools.sh` can provide, or a recorded exception. It also asserts each script here is tracked executable, so a fresh checkout can run it.
 
 <!-- Repo -->
 
@@ -152,7 +152,7 @@ The scripts are checked by `shellcheck`, which runs in CI over every `.sh` file 
 [install-tools]: ./install-tools.sh
 [setup-github]: ./setup-github.sh
 [skills-install]: ../../scripts/skills_install.py
-[test-bootstrap]: ../../scripts/test_bootstrap.py
+[test-bootstrap]: ../../scripts/tests/test_bootstrap.py
 [upgrade-host]: ./upgrade-host.sh
 [windows-readme]: ../windows/README.md
 

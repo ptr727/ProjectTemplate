@@ -26,6 +26,7 @@ maintainer's admin bypass. The denied shapes:
 
 Run `gh-write-guard.py --selftest` to verify the decision matrix without Claude Code.
 """
+
 import json
 import os
 import re
@@ -82,9 +83,11 @@ _SUPPRESS = re.compile(r">\s*/dev/null|&>\s*/dev/null|2>\s*/dev/null|\|\|\s*(?:t
 _QUOTED_SPAN = re.compile(r'"(?:\\.|[^"\\])*"' r"|'[^']*'")
 # A GitHub global node id literal, being an uppercase prefix such as PR_, PRRT_, IC_ or BOT_ followed by a long base64url body, or a legacy MD-prefixed base64 id.
 # The uppercase prefix plus a body of at least 12 characters keeps it from matching an ordinary underscored word in a reply body, such as body="fixed_the_thing_now" with its lowercase prefix.
-_NODE_ID_LITERAL = re.compile(r'^(?:[A-Z]{1,5}_[A-Za-z0-9_\-]{12,}|MD[A-Za-z0-9]{12,})$')
+_NODE_ID_LITERAL = re.compile(r"^(?:[A-Z]{1,5}_[A-Za-z0-9_\-]{12,}|MD[A-Za-z0-9]{12,})$")
 # -F/-f name=VALUE, capturing the value - handles "quoted" and bare
-_FIELD_ASSIGN = re.compile(r"""(?:-F|-f|--field|--raw-field)\s+[A-Za-z_][\w]*=(?P<v>'[^']*'|"[^"]*"|\S+)""")
+_FIELD_ASSIGN = re.compile(
+    r"""(?:-F|-f|--field|--raw-field)\s+[A-Za-z_][\w]*=(?P<v>'[^']*'|"[^"]*"|\S+)"""
+)
 # Every spelling gh accepts for the target flag, being `--repo x`, `--repo=x`, `-R x`, `-R=x`, and the attached short form `-Rx`.
 # A form left out is not a near-miss, it is a silent bypass of the whole repository scope, so the separator is matched rather than assumed to be a space.
 # The look-behind requires the flag to start a shell token, meaning whitespace before it or the string start, which is where a real flag always sits.
@@ -92,8 +95,12 @@ _FIELD_ASSIGN = re.compile(r"""(?:-F|-f|--field|--raw-field)\s+[A-Za-z_][\w]*=(?
 # A mention inside prose, as in `--title "use -Rowner/repo"`, is still read as a target and still denies.
 # A space precedes it exactly as one precedes a real flag, so no look-behind can separate the two.
 # Telling a flag from text needs argv-position parsing, the way _push_targets does it for git push.
-_EXPLICIT_REPO = re.compile(r"(?<![^\s])(?:--repo[=\s]+|-R[=\s]*)(?P<q>['\"]?)(?P<r>[^\s'\"]+)(?P=q)")
-_API_REPO_PATH = re.compile(r"\bgh\s+api\b[^\n|]*?\brepos/(?P<owner>[A-Za-z0-9_.\-]+)/(?P<repo>[A-Za-z0-9_.\-]+)")
+_EXPLICIT_REPO = re.compile(
+    r"(?<![^\s])(?:--repo[=\s]+|-R[=\s]*)(?P<q>['\"]?)(?P<r>[^\s'\"]+)(?P=q)"
+)
+_API_REPO_PATH = re.compile(
+    r"\bgh\s+api\b[^\n|]*?\brepos/(?P<owner>[A-Za-z0-9_.\-]+)/(?P<repo>[A-Za-z0-9_.\-]+)"
+)
 
 
 def _is_gh_write(cmd):
@@ -113,9 +120,13 @@ def _origin_owner_repo(cwd):
     try:
         url = subprocess.run(
             ["git", "-C", cwd or ".", "remote", "get-url", "origin"],
-            capture_output=True, text=True, timeout=5,
+            capture_output=True,
+            text=True,
+            timeout=5,
+            check=False,
         ).stdout.strip()
-    except Exception:
+    # A checkout with no usable origin is answered as unknown rather than crashing the hook.
+    except Exception:  # noqa: BLE001
         return None
     m = re.search(r"[:/]([A-Za-z0-9_.\-]+)/([A-Za-z0-9_.\-]+?)(?:\.git)?/?$", url)
     return (m.group(1).lower(), m.group(2).lower()) if m else None
@@ -162,16 +173,27 @@ def _live_branch_rules(owner, repo, branch):
     try:
         r = subprocess.run(
             # Quote the branch, since a name carrying `/`, such as feature/x, would otherwise split the API path.
-            ["gh", "api", f"repos/{owner}/{repo}/rules/branches/{quote(branch, safe='')}", "--jq", "[.[].type]"],
-            capture_output=True, text=True, timeout=10,
+            [
+                "gh",
+                "api",
+                f"repos/{owner}/{repo}/rules/branches/{quote(branch, safe='')}",
+                "--jq",
+                "[.[].type]",
+            ],
+            capture_output=True,
+            text=True,
+            timeout=10,
+            check=False,
         )
-    except Exception:
+    # Any failure to query means unknown, so the caller can fail closed instead of the hook crashing.
+    except Exception:  # noqa: BLE001
         return None
     if r.returncode != 0:
         return None
     try:
         return set(json.loads(r.stdout or "[]"))
-    except Exception:
+    # Unparseable output also means unknown rather than a crash.
+    except Exception:  # noqa: BLE001
         return None
 
 
@@ -182,8 +204,15 @@ def _current_push_branch(cwd):
         ["rev-parse", "--abbrev-ref", "HEAD"],
     ):
         try:
-            r = subprocess.run(["git", "-C", cwd or ".", *args], capture_output=True, text=True, timeout=5)
-        except Exception:
+            r = subprocess.run(
+                ["git", "-C", cwd or ".", *args],
+                capture_output=True,
+                text=True,
+                timeout=5,
+                check=False,
+            )
+        # The hook must answer on any failure rather than crash.
+        except Exception:  # noqa: BLE001
             return None
         ref = r.stdout.strip()
         if r.returncode == 0 and ref and ref != "HEAD":
@@ -194,7 +223,15 @@ def _current_push_branch(cwd):
 # Flags that consume the following token as a value, so the value is not a positional (remote/refspec).
 _PUSH_VALUE_FLAGS = {"-o", "--push-option", "--repo", "--receive-pack", "--exec"}
 # The git global options, which sit before the subcommand, that consume the following token as their value.
-_GIT_GLOBAL_VALUE_OPTS = {"-C", "-c", "--git-dir", "--work-tree", "--namespace", "--exec-path", "--config-env"}
+_GIT_GLOBAL_VALUE_OPTS = {
+    "-C",
+    "-c",
+    "--git-dir",
+    "--work-tree",
+    "--namespace",
+    "--exec-path",
+    "--config-env",
+}
 
 
 # A newline ends a command exactly as `;` does, so it is an operator character here rather than whitespace.
@@ -214,7 +251,9 @@ def _shell_tokens(cmd):
     try:
         lex = shlex.shlex(cmd, posix=True, punctuation_chars=_PUNCTUATION_CHARS)
         lex.whitespace_split = True
-        lex.whitespace = lex.whitespace.replace("\n", "")  # A newline is an operator above rather than a gap between words.
+        lex.whitespace = lex.whitespace.replace(
+            "\n", ""
+        )  # A newline is an operator above rather than a gap between words.
         return list(lex)
     except (ValueError, TypeError):  # bad quoting, or punctuation_chars unsupported on old Python
         # Neither fallback isolates an operator, so the lines are split here to keep the one thing this path must not lose, that a newline ends the command before it.
@@ -317,7 +356,9 @@ def _push_targets(cmd, cwd=None, current_branch=None):
             elif t == "--mirror":
                 mirror = True
             elif t == "--tags":
-                tags_only = True  # --follow-tags is NOT tags-only: it also pushes the current branch
+                tags_only = (
+                    True  # --follow-tags is NOT tags-only: it also pushes the current branch
+                )
             elif t in _PUSH_VALUE_FLAGS:
                 i += 1  # skip this flag's value
             elif t.startswith("-"):
@@ -336,7 +377,7 @@ def _push_targets(cmd, cwd=None, current_branch=None):
                 delete = True  # `:dst` empty-source refspec deletes dst
             dst = rs.split(":", 1)[1] if ":" in rs else rs
             if dst.startswith("refs/heads/"):
-                dst = dst[len("refs/heads/"):]
+                dst = dst[len("refs/heads/") :]
             elif dst.startswith("refs/"):
                 continue  # a tag or other non-branch ref
             if dst:
@@ -348,7 +389,9 @@ def _push_targets(cmd, cwd=None, current_branch=None):
                 force = True
                 branches = list(_PROTECTED_DEFAULT_ORDER)
             elif push_all:
-                branches = list(_PROTECTED_DEFAULT_ORDER)  # updates every local branch, protected included
+                branches = list(
+                    _PROTECTED_DEFAULT_ORDER
+                )  # updates every local branch, protected included
             elif tags_only:
                 branches = []  # tags only, no branch is updated
             else:
@@ -370,10 +413,13 @@ def _handoff(cmd):
 
 def _check_bypass_flags(cmd):
     """Deny the explicit-bypass flags: they are a bypass by definition, no branch query needed."""
-    if _GH_ADMIN_MERGE.search(_QUOTED_SPAN.sub("", cmd)):  # a flag inside a quoted body is not a real flag
+    if _GH_ADMIN_MERGE.search(
+        _QUOTED_SPAN.sub("", cmd)
+    ):  # a flag inside a quoted body is not a real flag
         return "deny", (
             "This uses `gh pr merge --admin`, which merges past required reviews and status checks using "
-            "admin power - a bypass of the merge gate. Merge only when the gate is satisfied." + _handoff(cmd)
+            "admin power - a bypass of the merge gate. Merge only when the gate is satisfied."
+            + _handoff(cmd)
         )
     # The --no-verify flag and `commit -n` skip the git hooks, so they only matter as an actual argument to a git commit or push.
     # Other tools use --no-verify for unrelated things, and shlex keeps a quoted mention out of the argv.
@@ -394,7 +440,10 @@ def _check_push_bypass(cmd, cwd, origin, current_branch=None, rules_lookup=None)
     """Deny a git push that would only succeed by bypassing an active branch rule."""
     targets = _push_targets(cmd, cwd, current_branch)
     if not targets:
-        return "allow", ""  # only a quoted mention or a non-push git command: no git/API work needed
+        return (
+            "allow",
+            "",
+        )  # only a quoted mention or a non-push git command: no git/API work needed
     if rules_lookup is None and origin is None:
         origin = _origin_owner_repo(cwd)
     for op, br in targets:
@@ -413,7 +462,8 @@ def _check_push_bypass(cmd, cwd, origin, current_branch=None, rules_lookup=None)
                 )
                 return "deny", (
                     f"Could not verify '{br}', a protected-by-default branch (main/master/develop), "
-                    f"because {reason}. Failing closed rather than risk a silent bypass." + _handoff(cmd)
+                    f"because {reason}. Failing closed rather than risk a silent bypass."
+                    + _handoff(cmd)
                 )
             continue  # an unknown-rules feature/other branch: nothing to bypass, let it through
         if op == "update" and "pull_request" in rules:
@@ -431,7 +481,8 @@ def _check_push_bypass(cmd, cwd, origin, current_branch=None, rules_lookup=None)
             )
         if op == "delete" and "deletion" in rules:
             return "deny", (
-                f"This deletes '{br}', whose rules forbid deletion (rule: deletion)." + _handoff(cmd)
+                f"This deletes '{br}', whose rules forbid deletion (rule: deletion)."
+                + _handoff(cmd)
             )
     return "allow", ""
 
@@ -479,14 +530,14 @@ def classify(cmd, cwd=None, origin=None, current_branch=None, rules_lookup=None,
     if _GRAPHQL.search(cmd) and _MUTATION.search(cmd):
         for m in _FIELD_ASSIGN.finditer(cmd):
             val = m.group("v").strip("'\"")
-            if val.startswith("$") or val.startswith("${"):
+            if val.startswith(("$", "${")):
                 continue
             if _NODE_ID_LITERAL.match(val):
                 return "deny", (
                     f"This mutation passes a literal GitHub node id ({val[:16]}...) instead of a "
                     "variable captured from a live query. Node ids resolve globally, so a fabricated "
                     "or stale id writes to a real object in another repository. Capture the id from a "
-                    "query in this session into a variable and pass -F ...=\"$VAR\". See GOVERNANCE.md "
+                    'query in this session into a variable and pass -F ...="$VAR". See GOVERNANCE.md '
                     "'Repository Boundaries and Write Safety'."
                 )
 
@@ -515,7 +566,7 @@ def classify(cmd, cwd=None, origin=None, current_branch=None, rules_lookup=None,
                     f"origin ({origin[0]}/{origin[1]}). Writes reach the origin and its sibling "
                     f"repositories under {origin[0]}, and a different owner is the shape that caused a "
                     f"stray comment on a stranger's repository. Ask the maintainer to grant it in "
-                    f"{_ALLOW_ENV} (\"{t[0]}/{t[1]}\", or \"{t[0]}/*\" for that whole owner) before the "
+                    f'{_ALLOW_ENV} ("{t[0]}/{t[1]}", or "{t[0]}/*" for that whole owner) before the '
                     "session starts, and do not set it yourself, since a permission the agent grants "
                     "itself is not a permission. See GOVERNANCE.md 'Repository Boundaries and Write "
                     "Safety', or the same section of the user-level CLAUDE.md where the repo has no "
@@ -528,28 +579,88 @@ def classify(cmd, cwd=None, origin=None, current_branch=None, rules_lookup=None,
 # --- Self-test ---------------------------------------------------------------------------------------
 _CASES = [
     # (command, expected_decision, label)
-    ("gh api graphql -f query='mutation($t:ID!){addPullRequestReviewThreadReply(input:{pullRequestReviewThreadId:$t,body:\"x\"}){comment{id}}}' -F t=\"PRRT_kwDODvuuzM6SFvx0\" >/dev/null 2>&1 || true", "deny", "the incident: suppressed + literal id"),
-    ("gh api graphql -f query='mutation($t:ID!){resolveReviewThread(input:{threadId:$t}){thread{isResolved}}}' -F t=\"PRRT_kwDOabc123def\"", "deny", "literal node id in a mutation"),
-    ("gh api graphql -f query='mutation($t:ID!){resolveReviewThread(input:{threadId:$t}){thread{isResolved}}}' -F t=\"$TID\"", "allow", "mutation with captured $TID"),
-    ("gh issue comment 5 -R mankatcheung/job-finder --body \"hi\"", "deny", "cross-origin explicit -R"),
-    ("gh issue comment 5 -R \"mankatcheung/job-finder\" --body \"hi\"", "deny", "cross-origin quoted -R"),
+    (
+        'gh api graphql -f query=\'mutation($t:ID!){addPullRequestReviewThreadReply(input:{pullRequestReviewThreadId:$t,body:"x"}){comment{id}}}\' -F t="PRRT_kwDODvuuzM6SFvx0" >/dev/null 2>&1 || true',
+        "deny",
+        "the incident: suppressed + literal id",
+    ),
+    (
+        "gh api graphql -f query='mutation($t:ID!){resolveReviewThread(input:{threadId:$t}){thread{isResolved}}}' -F t=\"PRRT_kwDOabc123def\"",
+        "deny",
+        "literal node id in a mutation",
+    ),
+    (
+        "gh api graphql -f query='mutation($t:ID!){resolveReviewThread(input:{threadId:$t}){thread{isResolved}}}' -F t=\"$TID\"",
+        "allow",
+        "mutation with captured $TID",
+    ),
+    (
+        'gh issue comment 5 -R mankatcheung/job-finder --body "hi"',
+        "deny",
+        "cross-origin explicit -R",
+    ),
+    (
+        'gh issue comment 5 -R "mankatcheung/job-finder" --body "hi"',
+        "deny",
+        "cross-origin quoted -R",
+    ),
     ("gh pr create --title x --body y >/dev/null 2>&1", "deny", "suppressed gh pr create"),
-    ("gh api repos/ptr727/PlexCleaner/issues/1/comments -f body=\"ok\"", "allow", "gh api POST to origin"),
-    ("gh api graphql -f query='{repository(owner:\"o\",name:\"r\"){pullRequest(number:1){reviewThreads(first:100){nodes{id}}}}}'", "allow", "graphql READ query"),
+    (
+        'gh api repos/ptr727/PlexCleaner/issues/1/comments -f body="ok"',
+        "allow",
+        "gh api POST to origin",
+    ),
+    (
+        'gh api graphql -f query=\'{repository(owner:"o",name:"r"){pullRequest(number:1){reviewThreads(first:100){nodes{id}}}}}\'',
+        "allow",
+        "graphql READ query",
+    ),
     ("gh pr view 5 --json reviews", "allow", "gh pr view (read)"),
     ("return 1 2>/dev/null || exit 1", "allow", "shell guard, not a gh write"),
     ("git commit -m 'x' && git push >/dev/null 2>&1", "deny", "push with discarded output"),
-    ("gh issue comment 5 --body x 2>&1 | tee out.log", "allow", "bare 2>&1 piped to tee is not suppression"),
+    (
+        "gh issue comment 5 --body x 2>&1 | tee out.log",
+        "allow",
+        "bare 2>&1 piped to tee is not suppression",
+    ),
     ("gh pr comment 5 --body ok 2>&1", "allow", "bare 2>&1 leaves output visible"),
-    ("gh api repos/ptr727/PlexCleaner/issues/1/comments -f body=x 2>/dev/null", "deny", "stderr discarded on a write"),
-    ("gh issue comment 5 --body \"run make || true to skip errors\"", "allow", "|| true inside a quoted body is not a tail"),
-    ("gh pr comment 5 --body \"pipe noisy output to >/dev/null\"", "allow", ">/dev/null inside a quoted body is not a redirect"),
-    ("gh issue comment 5 --body \"see notes\" >/dev/null", "deny", "real redirect after a quoted body still denies"),
-    ("gh issue comment 5 --body \"he said \\\"pipe to >/dev/null\\\" today\"", "allow", "escaped quotes in a body do not end the span early"),
+    (
+        "gh api repos/ptr727/PlexCleaner/issues/1/comments -f body=x 2>/dev/null",
+        "deny",
+        "stderr discarded on a write",
+    ),
+    (
+        'gh issue comment 5 --body "run make || true to skip errors"',
+        "allow",
+        "|| true inside a quoted body is not a tail",
+    ),
+    (
+        'gh pr comment 5 --body "pipe noisy output to >/dev/null"',
+        "allow",
+        ">/dev/null inside a quoted body is not a redirect",
+    ),
+    (
+        'gh issue comment 5 --body "see notes" >/dev/null',
+        "deny",
+        "real redirect after a quoted body still denies",
+    ),
+    (
+        'gh issue comment 5 --body "he said \\"pipe to >/dev/null\\" today"',
+        "allow",
+        "escaped quotes in a body do not end the span early",
+    ),
     ("gh pr close 5 || :", "deny", "force-success no-op tail on a write"),
     ("gh pr comment 5 --body x || echo done", "deny", "force-success echo tail on a write"),
-    ("gh api graphql -f query='mutation{addPullRequestReviewThreadReply(input:{pullRequestReviewThreadId:$t,body:$b}){comment{id}}}' -F t=\"$TID\" -F b=\"fixed_the_underscore_bug_here\"", "allow", "underscored reply body is not a node id"),
-    ("gh api graphql -f query='mutation{resolveReviewThread(input:{threadId:$t}){thread{isResolved}}}' -F t=\"TODO_fixit\"", "allow", "short all-caps token is not a node id"),
+    (
+        'gh api graphql -f query=\'mutation{addPullRequestReviewThreadReply(input:{pullRequestReviewThreadId:$t,body:$b}){comment{id}}}\' -F t="$TID" -F b="fixed_the_underscore_bug_here"',
+        "allow",
+        "underscored reply body is not a node id",
+    ),
+    (
+        "gh api graphql -f query='mutation{resolveReviewThread(input:{threadId:$t}){thread{isResolved}}}' -F t=\"TODO_fixit\"",
+        "allow",
+        "short all-caps token is not a node id",
+    ),
 ]
 
 # Rule-3 cases, covering repository scope.
@@ -557,92 +668,463 @@ _CASES = [
 # Origin is ptr727/plexcleaner throughout.
 _SCOPE_CASES = [
     # (command, environ, expected_decision, label)
-    ("gh issue create --repo ptr727/PhotoCleaner --title x --body y", {}, "allow", "sibling repo under the same owner"),
-    ("gh api repos/ptr727/PhotoCleaner/issues -f title=x", {}, "allow", "sibling repo via an explicit API path"),
-    ("gh issue create --repo esphome/esphome --title x --body y", {}, "deny", "different owner with no grant"),
-    ("gh issue create --repo esphome/esphome --title x --body y", {_ALLOW_ENV: "esphome/esphome"}, "allow", "different owner named in the grant"),
-    ("gh issue create --repo esphome/esphome --title x --body y", {_ALLOW_ENV: "esphome/*"}, "allow", "different owner granted by owner wildcard"),
-    ("gh issue create --repo esphome/aioesphomeapi --title x", {_ALLOW_ENV: "esphome/esphome"}, "deny", "a repo grant does not extend to that owner's other repos"),
-    ("gh issue comment 5 -R mankatcheung/job-finder --body hi", {_ALLOW_ENV: "esphome/*"}, "deny", "the incident: a grant for one owner does not reach another"),
-    ("gh issue create --repo esphome/esphome --title x", {_ALLOW_ENV: "not-an-owner-repo"}, "deny", "a malformed grant grants nothing"),
-    ("GH_WRITE_GUARD_ALLOW=esphome/esphome gh issue create --repo esphome/esphome --title x", {}, "deny", "an inline env prefix is part of the command, not the hook's environment"),
+    (
+        "gh issue create --repo ptr727/PhotoCleaner --title x --body y",
+        {},
+        "allow",
+        "sibling repo under the same owner",
+    ),
+    (
+        "gh api repos/ptr727/PhotoCleaner/issues -f title=x",
+        {},
+        "allow",
+        "sibling repo via an explicit API path",
+    ),
+    (
+        "gh issue create --repo esphome/esphome --title x --body y",
+        {},
+        "deny",
+        "different owner with no grant",
+    ),
+    (
+        "gh issue create --repo esphome/esphome --title x --body y",
+        {_ALLOW_ENV: "esphome/esphome"},
+        "allow",
+        "different owner named in the grant",
+    ),
+    (
+        "gh issue create --repo esphome/esphome --title x --body y",
+        {_ALLOW_ENV: "esphome/*"},
+        "allow",
+        "different owner granted by owner wildcard",
+    ),
+    (
+        "gh issue create --repo esphome/aioesphomeapi --title x",
+        {_ALLOW_ENV: "esphome/esphome"},
+        "deny",
+        "a repo grant does not extend to that owner's other repos",
+    ),
+    (
+        "gh issue comment 5 -R mankatcheung/job-finder --body hi",
+        {_ALLOW_ENV: "esphome/*"},
+        "deny",
+        "the incident: a grant for one owner does not reach another",
+    ),
+    (
+        "gh issue create --repo esphome/esphome --title x",
+        {_ALLOW_ENV: "not-an-owner-repo"},
+        "deny",
+        "a malformed grant grants nothing",
+    ),
+    (
+        "GH_WRITE_GUARD_ALLOW=esphome/esphome gh issue create --repo esphome/esphome --title x",
+        {},
+        "deny",
+        "an inline env prefix is part of the command, not the hook's environment",
+    ),
     # Every spelling of the target flag.
     # A form the extraction misses is a silent bypass of rule 3 rather than a near-miss, so each is asserted against a foreign owner that must deny.
     ("gh issue create --repo=esphome/esphome --title x", {}, "deny", "--repo=value equals form"),
     ("gh issue create -R=esphome/esphome --title x", {}, "deny", "-R=value equals form"),
     ("gh issue create -Resphome/esphome --title x", {}, "deny", "-Rvalue attached short form"),
-    ("gh issue create --repo ptr727/PhotoCleaner --title x && gh issue create --repo esphome/esphome --title y", {}, "deny", "a foreign target in the second invocation of a compound is read"),
-    ("gh issue create --repo=ptr727/PhotoCleaner --title x", {}, "allow", "equals form to a sibling owner still allows"),
-    ("gh issue create --repo ptr727/PhotoCleaner --title \"-Resphome/esphome\"", {}, "allow", "a value opening a quoted span is not a flag"),
+    (
+        "gh issue create --repo ptr727/PhotoCleaner --title x && gh issue create --repo esphome/esphome --title y",
+        {},
+        "deny",
+        "a foreign target in the second invocation of a compound is read",
+    ),
+    (
+        "gh issue create --repo=ptr727/PhotoCleaner --title x",
+        {},
+        "allow",
+        "equals form to a sibling owner still allows",
+    ),
+    (
+        'gh issue create --repo ptr727/PhotoCleaner --title "-Resphome/esphome"',
+        {},
+        "allow",
+        "a value opening a quoted span is not a flag",
+    ),
 ]
 
 # Rule-4 cases, covering branch-rule bypass.
 # Each carries its own branch-to-rules map so the run is deterministic and offline, where the real hook queries the live rules and here rules_lookup is injected.
 # The current_branch value stands in for the git resolution of a bare push.
 # A `None` rules value means the query could not be read.
-_CODE_RULES = {"deletion", "non_fast_forward", "required_linear_history", "required_signatures",
-               "pull_request", "required_status_checks", "copilot_code_review"}  # code-style develop / any main
-_CONFIG_RULES = {"deletion", "non_fast_forward", "required_signatures"}  # config-style develop: no pull_request
+_CODE_RULES = {
+    "deletion",
+    "non_fast_forward",
+    "required_linear_history",
+    "required_signatures",
+    "pull_request",
+    "required_status_checks",
+    "copilot_code_review",
+}  # code-style develop / any main
+_CONFIG_RULES = {
+    "deletion",
+    "non_fast_forward",
+    "required_signatures",
+}  # config-style develop: no pull_request
 _GIT_CASES = [
     # (command, current_branch, {branch: rules_set_or_None}, expected_decision, label)
-    ("git push origin develop", None, {"develop": _CODE_RULES}, "deny", "code-style develop: direct push bypasses pull_request"),
-    ("git push origin develop", None, {"develop": _CONFIG_RULES}, "allow", "config-style develop: no pull_request rule, direct push allowed"),
-    ("git push origin main", None, {"main": _CODE_RULES}, "deny", "main: direct push bypasses pull_request"),
-    ("git push origin feature/x", None, {"feature/x": set()}, "allow", "feature branch: no rules, allowed"),
-    ("git push -u origin feature/x", None, {"feature/x": set()}, "allow", "feature branch with -u: allowed"),
-    ("git push origin HEAD:develop", None, {"develop": _CODE_RULES}, "deny", "HEAD:develop refspec resolves to develop"),
-    ("git push origin abc1234:refs/heads/main", None, {"main": _CODE_RULES}, "deny", "sha:refs/heads/main resolves to main"),
+    (
+        "git push origin develop",
+        None,
+        {"develop": _CODE_RULES},
+        "deny",
+        "code-style develop: direct push bypasses pull_request",
+    ),
+    (
+        "git push origin develop",
+        None,
+        {"develop": _CONFIG_RULES},
+        "allow",
+        "config-style develop: no pull_request rule, direct push allowed",
+    ),
+    (
+        "git push origin main",
+        None,
+        {"main": _CODE_RULES},
+        "deny",
+        "main: direct push bypasses pull_request",
+    ),
+    (
+        "git push origin feature/x",
+        None,
+        {"feature/x": set()},
+        "allow",
+        "feature branch: no rules, allowed",
+    ),
+    (
+        "git push -u origin feature/x",
+        None,
+        {"feature/x": set()},
+        "allow",
+        "feature branch with -u: allowed",
+    ),
+    (
+        "git push origin HEAD:develop",
+        None,
+        {"develop": _CODE_RULES},
+        "deny",
+        "HEAD:develop refspec resolves to develop",
+    ),
+    (
+        "git push origin abc1234:refs/heads/main",
+        None,
+        {"main": _CODE_RULES},
+        "deny",
+        "sha:refs/heads/main resolves to main",
+    ),
     ("git push", "develop", {"develop": _CODE_RULES}, "deny", "bare push resolving to develop"),
-    ("git push", "feature/x", {"feature/x": set()}, "allow", "bare push resolving to a feature branch"),
-    ("git push --force origin develop", None, {"develop": _CONFIG_RULES}, "deny", "force-push denied by non_fast_forward even on config develop"),
-    ("git push --force-with-lease origin feature/x", None, {"feature/x": set()}, "allow", "force-with-lease to a ruleless feature branch"),
-    ("git push origin +HEAD:develop", None, {"develop": _CODE_RULES}, "deny", "+refspec is a force-push to develop"),
-    ("git push --delete origin develop", None, {"develop": _CODE_RULES}, "deny", "delete develop denied by deletion rule"),
-    ("git push origin :develop", None, {"develop": _CODE_RULES}, "deny", "empty-source :develop is a delete"),
-    ("git push origin develop", None, {"develop": None}, "deny", "develop with unreadable rules: fail closed"),
-    ("git push origin feature/x", None, {"feature/x": None}, "allow", "feature branch with unreadable rules: fail open"),
+    (
+        "git push",
+        "feature/x",
+        {"feature/x": set()},
+        "allow",
+        "bare push resolving to a feature branch",
+    ),
+    (
+        "git push --force origin develop",
+        None,
+        {"develop": _CONFIG_RULES},
+        "deny",
+        "force-push denied by non_fast_forward even on config develop",
+    ),
+    (
+        "git push --force-with-lease origin feature/x",
+        None,
+        {"feature/x": set()},
+        "allow",
+        "force-with-lease to a ruleless feature branch",
+    ),
+    (
+        "git push origin +HEAD:develop",
+        None,
+        {"develop": _CODE_RULES},
+        "deny",
+        "+refspec is a force-push to develop",
+    ),
+    (
+        "git push --delete origin develop",
+        None,
+        {"develop": _CODE_RULES},
+        "deny",
+        "delete develop denied by deletion rule",
+    ),
+    (
+        "git push origin :develop",
+        None,
+        {"develop": _CODE_RULES},
+        "deny",
+        "empty-source :develop is a delete",
+    ),
+    (
+        "git push origin develop",
+        None,
+        {"develop": None},
+        "deny",
+        "develop with unreadable rules: fail closed",
+    ),
+    (
+        "git push origin feature/x",
+        None,
+        {"feature/x": None},
+        "allow",
+        "feature branch with unreadable rules: fail open",
+    ),
     ("git commit --no-verify -m x", None, {}, "deny", "commit --no-verify skips the hooks"),
     ("git commit -n -m x", None, {}, "deny", "commit -n is --no-verify"),
-    ("git -C /repo commit -n -m x", None, {}, "deny", "global option before commit -n does not dodge the check"),
-    ("git -c user.name=x commit --no-verify -m y", None, {}, "deny", "global option before commit --no-verify does not dodge the check"),
-    ("git push --no-verify origin feature/x", None, {"feature/x": set()}, "deny", "push --no-verify is a bypass even on a feature branch"),
-    ("git push -n origin develop", None, {"develop": _CODE_RULES}, "deny", "push -n is dry-run not no-verify, but the direct push to develop still denies"),
-    ("gh pr merge 5 --admin --squash", None, {}, "deny", "gh pr merge --admin overrides the merge gate"),
-    ("gh pr merge 5 \\\n  --admin --squash", None, {}, "deny", "line-continued gh pr merge --admin still caught"),
-    ("git commit -m 'mention --no-verify in the message'", None, {}, "allow", "--no-verify inside a quoted message is not a flag"),
-    ("npm publish --no-verify", None, {}, "allow", "--no-verify on a non-git command is not a git-hook bypass"),
-    ("gh issue comment 5 --body \"run: git push origin develop\"", None, {"develop": _CODE_RULES}, "allow", "a git push mentioned inside a quoted body is not an executed push"),
-    ("git push origin 'HEAD:develop'", None, {"develop": _CODE_RULES}, "deny", "a quoted refspec is unquoted by shlex and still resolves to develop"),
-    ("git -C /repo push origin develop", None, {"develop": _CODE_RULES}, "deny", "global option -C <dir> before push does not dodge Rule 4"),
-    ("git -c user.name=x push origin main", None, {"main": _CODE_RULES}, "deny", "global option -c k=v before push does not dodge Rule 4"),
-    ("git --git-dir=/r/.git push origin develop", None, {"develop": _CODE_RULES}, "deny", "global option --git-dir=... before push does not dodge Rule 4"),
-    ("git -C /repo push origin feature/x", None, {"feature/x": set()}, "allow", "global options before push to a feature branch: allowed"),
-    ("git push --all origin", None, {"main": _CODE_RULES, "master": set(), "develop": _CODE_RULES}, "deny", "--all updates every branch: a protected default denies"),
-    ("git push --all origin", None, {"main": set(), "master": set(), "develop": set()}, "allow", "--all where no default branch is protected: allowed"),
-    ("git push --mirror origin", None, {"main": _CODE_RULES, "master": set(), "develop": _CODE_RULES}, "deny", "--mirror force-prunes every ref: a protected default denies"),
+    (
+        "git -C /repo commit -n -m x",
+        None,
+        {},
+        "deny",
+        "global option before commit -n does not dodge the check",
+    ),
+    (
+        "git -c user.name=x commit --no-verify -m y",
+        None,
+        {},
+        "deny",
+        "global option before commit --no-verify does not dodge the check",
+    ),
+    (
+        "git push --no-verify origin feature/x",
+        None,
+        {"feature/x": set()},
+        "deny",
+        "push --no-verify is a bypass even on a feature branch",
+    ),
+    (
+        "git push -n origin develop",
+        None,
+        {"develop": _CODE_RULES},
+        "deny",
+        "push -n is dry-run not no-verify, but the direct push to develop still denies",
+    ),
+    (
+        "gh pr merge 5 --admin --squash",
+        None,
+        {},
+        "deny",
+        "gh pr merge --admin overrides the merge gate",
+    ),
+    (
+        "gh pr merge 5 \\\n  --admin --squash",
+        None,
+        {},
+        "deny",
+        "line-continued gh pr merge --admin still caught",
+    ),
+    (
+        "git commit -m 'mention --no-verify in the message'",
+        None,
+        {},
+        "allow",
+        "--no-verify inside a quoted message is not a flag",
+    ),
+    (
+        "npm publish --no-verify",
+        None,
+        {},
+        "allow",
+        "--no-verify on a non-git command is not a git-hook bypass",
+    ),
+    (
+        'gh issue comment 5 --body "run: git push origin develop"',
+        None,
+        {"develop": _CODE_RULES},
+        "allow",
+        "a git push mentioned inside a quoted body is not an executed push",
+    ),
+    (
+        "git push origin 'HEAD:develop'",
+        None,
+        {"develop": _CODE_RULES},
+        "deny",
+        "a quoted refspec is unquoted by shlex and still resolves to develop",
+    ),
+    (
+        "git -C /repo push origin develop",
+        None,
+        {"develop": _CODE_RULES},
+        "deny",
+        "global option -C <dir> before push does not dodge Rule 4",
+    ),
+    (
+        "git -c user.name=x push origin main",
+        None,
+        {"main": _CODE_RULES},
+        "deny",
+        "global option -c k=v before push does not dodge Rule 4",
+    ),
+    (
+        "git --git-dir=/r/.git push origin develop",
+        None,
+        {"develop": _CODE_RULES},
+        "deny",
+        "global option --git-dir=... before push does not dodge Rule 4",
+    ),
+    (
+        "git -C /repo push origin feature/x",
+        None,
+        {"feature/x": set()},
+        "allow",
+        "global options before push to a feature branch: allowed",
+    ),
+    (
+        "git push --all origin",
+        None,
+        {"main": _CODE_RULES, "master": set(), "develop": _CODE_RULES},
+        "deny",
+        "--all updates every branch: a protected default denies",
+    ),
+    (
+        "git push --all origin",
+        None,
+        {"main": set(), "master": set(), "develop": set()},
+        "allow",
+        "--all where no default branch is protected: allowed",
+    ),
+    (
+        "git push --mirror origin",
+        None,
+        {"main": _CODE_RULES, "master": set(), "develop": _CODE_RULES},
+        "deny",
+        "--mirror force-prunes every ref: a protected default denies",
+    ),
     ("git push --tags origin", None, {}, "allow", "--tags pushes tags only, no branch target"),
-    ("git push --follow-tags origin", "develop", {"develop": _CODE_RULES}, "deny", "--follow-tags also pushes the current branch: resolves develop"),
-    ("git push --push-option='a>b' origin develop", None, {"develop": _CODE_RULES}, "deny", "a > inside a quoted option value is not a redirection: develop still parsed"),
-    ("git push origin feature/x && git push origin develop", None, {"feature/x": set(), "develop": _CODE_RULES}, "deny", "second push in a compound is checked: develop denies"),
-    ("git push origin develop && git push origin feature/x", None, {"develop": _CODE_RULES, "feature/x": set()}, "deny", "first push in a compound is checked: develop denies"),
-    ("git push origin develop | cat", None, {"develop": _CODE_RULES}, "deny", "a pipe ends the push argv: develop still parsed"),
-    ("git push 2>push.log origin develop", None, {"develop": _CODE_RULES}, "deny", "a leading fd redirection is skipped, not a positional: develop still parsed"),
-    ("git push >log origin develop", None, {"develop": _CODE_RULES}, "deny", "a leading stdout redirection before args does not hide develop"),
-    ("/usr/bin/git push origin develop", None, {"develop": _CODE_RULES}, "deny", "an absolute-path git is still git: direct push denies"),
+    (
+        "git push --follow-tags origin",
+        "develop",
+        {"develop": _CODE_RULES},
+        "deny",
+        "--follow-tags also pushes the current branch: resolves develop",
+    ),
+    (
+        "git push --push-option='a>b' origin develop",
+        None,
+        {"develop": _CODE_RULES},
+        "deny",
+        "a > inside a quoted option value is not a redirection: develop still parsed",
+    ),
+    (
+        "git push origin feature/x && git push origin develop",
+        None,
+        {"feature/x": set(), "develop": _CODE_RULES},
+        "deny",
+        "second push in a compound is checked: develop denies",
+    ),
+    (
+        "git push origin develop && git push origin feature/x",
+        None,
+        {"develop": _CODE_RULES, "feature/x": set()},
+        "deny",
+        "first push in a compound is checked: develop denies",
+    ),
+    (
+        "git push origin develop | cat",
+        None,
+        {"develop": _CODE_RULES},
+        "deny",
+        "a pipe ends the push argv: develop still parsed",
+    ),
+    (
+        "git push 2>push.log origin develop",
+        None,
+        {"develop": _CODE_RULES},
+        "deny",
+        "a leading fd redirection is skipped, not a positional: develop still parsed",
+    ),
+    (
+        "git push >log origin develop",
+        None,
+        {"develop": _CODE_RULES},
+        "deny",
+        "a leading stdout redirection before args does not hide develop",
+    ),
+    (
+        "/usr/bin/git push origin develop",
+        None,
+        {"develop": _CODE_RULES},
+        "deny",
+        "an absolute-path git is still git: direct push denies",
+    ),
     ("/usr/bin/git commit -n -m x", None, {}, "deny", "absolute-path git commit -n is --no-verify"),
-    ("git.exe push origin develop", None, {"develop": _CODE_RULES}, "deny", "git.exe is still git: direct push denies"),
-    ("gh issue comment 5 --body \"first git push\" && git push origin develop", None, {"develop": _CODE_RULES}, "deny", "a quoted mention before a real push does not hide the real target"),
-    ("git push >push.log 2>&1", "develop", {"develop": _CODE_RULES}, "deny", "redirection tokens are not a branch: bare push to develop still denies"),
-    ("git push origin develop >push.log 2>&1", None, {"develop": _CODE_RULES}, "deny", "redirect after a real refspec does not hide the develop target"),
+    (
+        "git.exe push origin develop",
+        None,
+        {"develop": _CODE_RULES},
+        "deny",
+        "git.exe is still git: direct push denies",
+    ),
+    (
+        'gh issue comment 5 --body "first git push" && git push origin develop',
+        None,
+        {"develop": _CODE_RULES},
+        "deny",
+        "a quoted mention before a real push does not hide the real target",
+    ),
+    (
+        "git push >push.log 2>&1",
+        "develop",
+        {"develop": _CODE_RULES},
+        "deny",
+        "redirection tokens are not a branch: bare push to develop still denies",
+    ),
+    (
+        "git push origin develop >push.log 2>&1",
+        None,
+        {"develop": _CODE_RULES},
+        "deny",
+        "redirect after a real refspec does not hide the develop target",
+    ),
     # A newline ends a command as `&&` does, and reading it as whitespace made every token on a later line an argument of the push.
     # A feature-branch push followed by a `gh pr create` then denied as a direct push to the base branch that command named.
-    ("git push -u origin feature/x\ngh pr create --base develop --title x --body y", None, {"feature/x": set(), "develop": _CODE_RULES}, "allow", "a newline ends the push argv: the pr-create base is not a push target"),
-    ("cd /repo\ngit push origin develop", None, {"develop": _CODE_RULES}, "deny", "a push on a later line is still parsed as a push"),
-    ("git push origin feature/x\ngit push origin develop", None, {"feature/x": set(), "develop": _CODE_RULES}, "deny", "a second push on the next line is checked: develop denies"),
-    ("git push \\\n  origin develop", None, {"develop": _CODE_RULES}, "deny", "a backslash-newline is a continuation, not a separator: develop still parsed"),
-    ("gh issue comment 5 --body \"one line\ngit push origin develop\"", None, {"develop": _CODE_RULES}, "allow", "a newline inside a quoted body does not start a new command"),
+    (
+        "git push -u origin feature/x\ngh pr create --base develop --title x --body y",
+        None,
+        {"feature/x": set(), "develop": _CODE_RULES},
+        "allow",
+        "a newline ends the push argv: the pr-create base is not a push target",
+    ),
+    (
+        "cd /repo\ngit push origin develop",
+        None,
+        {"develop": _CODE_RULES},
+        "deny",
+        "a push on a later line is still parsed as a push",
+    ),
+    (
+        "git push origin feature/x\ngit push origin develop",
+        None,
+        {"feature/x": set(), "develop": _CODE_RULES},
+        "deny",
+        "a second push on the next line is checked: develop denies",
+    ),
+    (
+        "git push \\\n  origin develop",
+        None,
+        {"develop": _CODE_RULES},
+        "deny",
+        "a backslash-newline is a continuation, not a separator: develop still parsed",
+    ),
+    (
+        'gh issue comment 5 --body "one line\ngit push origin develop"',
+        None,
+        {"develop": _CODE_RULES},
+        "allow",
+        "a newline inside a quoted body does not start a new command",
+    ),
     # Unbalanced quoting is what actually reaches the degraded path, and the separator has to survive there too.
-    ("git push origin feature/x\ngit push origin develop 'unclosed", None, {"feature/x": set(), "develop": _CODE_RULES}, "deny", "the degraded path keeps the newline: a push on the next line is still read"),
+    (
+        "git push origin feature/x\ngit push origin develop 'unclosed",
+        None,
+        {"feature/x": set(), "develop": _CODE_RULES},
+        "deny",
+        "the degraded path keeps the newline: a push on the next line is still read",
+    ),
 ]
 
 
@@ -652,22 +1134,37 @@ def _selftest():
     origin = ("ptr727", "plexcleaner")
     ok = True
     for cmd, want, label in _CASES:
-        got, _ = classify(cmd, origin=origin, current_branch="feature/x", rules_lookup=lambda br: set(),
-                          environ={})
+        got, _ = classify(
+            cmd,
+            origin=origin,
+            current_branch="feature/x",
+            rules_lookup=lambda br: set(),
+            environ={},
+        )
         mark = "ok  " if got == want else "FAIL"
         if got != want:
             ok = False
         print(f"  {mark} [{got:5}] want={want:5} {label}")
     for cmd, env, want, label in _SCOPE_CASES:
-        got, _ = classify(cmd, origin=origin, current_branch="feature/x", rules_lookup=lambda br: set(),
-                          environ=env)
+        got, _ = classify(
+            cmd,
+            origin=origin,
+            current_branch="feature/x",
+            rules_lookup=lambda br: set(),
+            environ=env,
+        )
         mark = "ok  " if got == want else "FAIL"
         if got != want:
             ok = False
         print(f"  {mark} [{got:5}] want={want:5} {label}")
     for cmd, cur, rmap, want, label in _GIT_CASES:
-        got, _ = classify(cmd, origin=origin, current_branch=cur, rules_lookup=lambda br, _m=rmap: _m.get(br),
-                          environ={})
+        got, _ = classify(
+            cmd,
+            origin=origin,
+            current_branch=cur,
+            rules_lookup=lambda br, _m=rmap: _m.get(br),
+            environ={},
+        )
         mark = "ok  " if got == want else "FAIL"
         if got != want:
             ok = False
@@ -680,7 +1177,8 @@ def _selftest():
 def _main():
     try:
         data = json.load(sys.stdin)
-    except Exception:
+    # The hook must never crash on input it does not recognize.
+    except Exception:  # noqa: BLE001
         sys.exit(0)  # not our event shape - do not interfere
     if data.get("tool_name") != "Bash":
         sys.exit(0)
@@ -689,13 +1187,17 @@ def _main():
     decision, reason = classify(cmd, cwd)
     if decision == "deny":
         # Documented PreToolUse deny contract (confirm field names against current docs before shipping).
-        print(json.dumps({
-            "hookSpecificOutput": {
-                "hookEventName": "PreToolUse",
-                "permissionDecision": "deny",
-                "permissionDecisionReason": reason,
-            }
-        }))
+        print(
+            json.dumps(
+                {
+                    "hookSpecificOutput": {
+                        "hookEventName": "PreToolUse",
+                        "permissionDecision": "deny",
+                        "permissionDecisionReason": reason,
+                    }
+                }
+            )
+        )
         sys.exit(0)
     sys.exit(0)
 

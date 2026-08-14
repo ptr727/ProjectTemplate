@@ -22,6 +22,7 @@ GOVERNANCE.md "Hub-Hosted Tooling" for how a repository reaches it.
 Exit 0 = every required tool is present and at or above its floor. 1 = at least one is missing or
 below. 2 = the declaration itself could not be read, which is a defect here rather than on the host.
 """
+
 from __future__ import annotations
 
 import argparse
@@ -32,15 +33,15 @@ import subprocess
 import sys
 from pathlib import Path
 
-SPEC = Path(__file__).resolve().parent.parent / 'spec' / 'host-tools.json'
+SPEC = Path(__file__).resolve().parent.parent / "spec" / "host-tools.json"
 NOTES: list[str] = []
 
 
 def parse_version(text: str) -> tuple[int, ...] | None:
     """Dot-separated integers as a tuple, or None where the text is not one."""
-    if not re.fullmatch(r'\d+(\.\d+)*', text or ''):
+    if not re.fullmatch(r"\d+(\.\d+)*", text or ""):
         return None
-    return tuple(int(p) for p in text.split('.'))
+    return tuple(int(p) for p in text.split("."))
 
 
 def compare(found: tuple[int, ...], floor: tuple[int, ...]) -> int:
@@ -68,12 +69,12 @@ def probe(argv: list[str]) -> str | None:
     the exit code decides and a failing probe falls through to the next one.
     """
     try:
-        p = subprocess.run(argv, capture_output=True, text=True, timeout=20)
+        p = subprocess.run(argv, capture_output=True, text=True, timeout=20, check=False)
     except (OSError, subprocess.SubprocessError):
         return None
     if p.returncode != 0:
         return None
-    return f'{p.stdout}\n{p.stderr}'
+    return f"{p.stdout}\n{p.stderr}"
 
 
 def read_tool(tool: dict) -> tuple[str, str | None, str | None]:
@@ -87,26 +88,26 @@ def read_tool(tool: dict) -> tuple[str, str | None, str | None]:
     # Naming a probe that never ran sends the reader to fix a pattern against output they cannot reproduce, and naming one of several that did is the same error at smaller scale.
     # The pattern has to match one of these, so all of them are what the reader needs, and picking the first or the last is a guess either way.
     answered: list[str] = []
-    for argv in tool['probes']:
+    for argv in tool["probes"]:
         out = probe(argv)
         if out is None:
             continue
-        answered.append(' '.join(argv))
+        answered.append(" ".join(argv))
         try:
-            m = re.search(tool['pattern'], out)
+            m = re.search(tool["pattern"], out)
         except re.error:
             # A pattern that does not compile is a broken declaration, and the gate reports rather than raising.
             # A local entry is caught by field_problems and the hub one by spec/validate.py, so this is the backstop for neither having run.
-            return 'unreadable', None, ' '.join(argv)
+            return "unreadable", None, " ".join(argv)
         if m:
-            return 'read', m.group(1), ' '.join(argv)
+            return "read", m.group(1), " ".join(argv)
     if not answered:
-        return 'absent', None, None
+        return "absent", None, None
     # A plain separator, since the caller is what decides how a command is marked up and doing it here nests the caller's own backticks inside these.
-    return 'unreadable', None, ', '.join(answered)
+    return "unreadable", None, ", ".join(answered)
 
 
-REQUIRED_FIELDS = ('name', 'probes', 'pattern', 'minimum', 'why')
+REQUIRED_FIELDS = ("name", "probes", "pattern", "minimum", "why")
 
 
 def field_problems(entry: dict) -> list[str]:
@@ -122,33 +123,42 @@ def field_problems(entry: dict) -> list[str]:
     and a required tool becomes optional, which is the relaxation the merge rule exists to refuse.
     """
     problems = []
-    if 'name' in entry and (not isinstance(entry['name'], str) or not entry['name']):
-        problems.append('name must be a non-empty string')
-    if 'why' in entry and (not isinstance(entry['why'], str) or not entry['why']):
-        problems.append('why must be a non-empty string')
-    if 'required' in entry and not isinstance(entry['required'], bool):
-        problems.append(f'required must be true or false, not {entry["required"]!r}')
-    if 'minimum' in entry and entry['minimum'] is not None:
-        if not isinstance(entry['minimum'], str) or parse_version(entry['minimum']) is None:
-            problems.append(f'minimum must be dot-separated integers or null, not {entry["minimum"]!r}')
-    if 'source' in entry and not isinstance(entry['source'], dict):
-        problems.append('source must be an object')
-    if 'remedy' in entry and not isinstance(entry['remedy'], dict):
-        problems.append('remedy must be an object')
-    if 'probes' in entry:
-        probes = entry['probes']
-        if (not isinstance(probes, list) or not probes
-                or not all(isinstance(p, list) and p and all(isinstance(a, str) and a for a in p) for p in probes)):
-            problems.append('probes must be a non-empty array of non-empty string arrays')
-    if 'pattern' in entry:
-        pattern = entry['pattern']
+    if "name" in entry and (not isinstance(entry["name"], str) or not entry["name"]):
+        problems.append("name must be a non-empty string")
+    if "why" in entry and (not isinstance(entry["why"], str) or not entry["why"]):
+        problems.append("why must be a non-empty string")
+    if "required" in entry and not isinstance(entry["required"], bool):
+        problems.append(f"required must be true or false, not {entry['required']!r}")
+    if (
+        "minimum" in entry
+        and entry["minimum"] is not None
+        and (not isinstance(entry["minimum"], str) or parse_version(entry["minimum"]) is None)
+    ):
+        problems.append(f"minimum must be dot-separated integers or null, not {entry['minimum']!r}")
+    if "source" in entry and not isinstance(entry["source"], dict):
+        problems.append("source must be an object")
+    if "remedy" in entry and not isinstance(entry["remedy"], dict):
+        problems.append("remedy must be an object")
+    if "probes" in entry:
+        probes = entry["probes"]
+        if (
+            not isinstance(probes, list)
+            or not probes
+            or not all(
+                isinstance(p, list) and p and all(isinstance(a, str) and a for a in p)
+                for p in probes
+            )
+        ):
+            problems.append("probes must be a non-empty array of non-empty string arrays")
+    if "pattern" in entry:
+        pattern = entry["pattern"]
         if not isinstance(pattern, str) or not pattern:
-            problems.append('pattern must be a non-empty string')
+            problems.append("pattern must be a non-empty string")
         else:
             try:
                 re.compile(pattern)
             except re.error as e:
-                problems.append(f'pattern does not compile ({e})')
+                problems.append(f"pattern does not compile ({e})")
     return problems
 
 
@@ -164,15 +174,15 @@ def read_declaration(path: Path, what: str) -> list[dict] | str:
     `str` is unambiguous against a `list` of entries.
     """
     try:
-        tools = json.loads(path.read_text(encoding='utf-8'))['tools']
+        tools = json.loads(path.read_text(encoding="utf-8"))["tools"]
     except (OSError, ValueError, KeyError, TypeError) as e:
-        return f'{path}: cannot read the {what} ({e})'
+        return f"{path}: cannot read the {what} ({e})"
     if not isinstance(tools, list) or not all(isinstance(t, dict) for t in tools):
         return f"{path}: 'tools' must be an array of objects"
     return tools
 
 
-PLATFORM_KEYS = ('linux', 'macos', 'windows')
+PLATFORM_KEYS = ("linux", "macos", "windows")
 
 
 def contract_problems(tools: list[dict]) -> list[str]:
@@ -188,30 +198,42 @@ def contract_problems(tools: list[dict]) -> list[str]:
     """
     problems = []
     for t in tools:
-        if t.get('minimum') is None:
+        if t.get("minimum") is None:
             continue
-        name, src = t['name'], t.get('source')
+        name, src = t["name"], t.get("source")
         if not isinstance(src, dict) or not src:
-            problems.append(f'{name} declares the {t["minimum"]} floor with no source, so a host below it is told to upgrade and not where from')
+            problems.append(
+                f"{name} declares the {t['minimum']} floor with no source, so a host below it is told to upgrade and not where from"
+            )
             continue
         stray = sorted(set(src) - set(PLATFORM_KEYS))
         if stray:
-            problems.append(f'{name} source names {", ".join(stray)}, which no platform reads - use {", ".join(PLATFORM_KEYS)}')
+            problems.append(
+                f"{name} source names {', '.join(stray)}, which no platform reads - use {', '.join(PLATFORM_KEYS)}"
+            )
         for plat in sorted(set(src) & set(PLATFORM_KEYS)):
             if not isinstance(src[plat], str) or not src[plat]:
-                problems.append(f'{name} source.{plat} is empty, so a host on that platform is told to upgrade and not where from')
+                problems.append(
+                    f"{name} source.{plat} is empty, so a host on that platform is told to upgrade and not where from"
+                )
         # The remedy is shape-checked and not required, so a repository floor without one degrades to the source line rather than failing the merge.
-        # Requiring it fleet-wide is the hub declaration's contract, held by spec/validate.py and scripts/test_bootstrap.py rather than here.
-        rem = t.get('remedy')
+        # Requiring it fleet-wide is the hub declaration's contract, held by spec/validate.py and scripts/tests/test_bootstrap.py rather than here.
+        rem = t.get("remedy")
         if rem is not None and not isinstance(rem, dict):
-            problems.append(f'{name} remedy must be an object keyed by platform, so its command was not read')
+            problems.append(
+                f"{name} remedy must be an object keyed by platform, so its command was not read"
+            )
         elif isinstance(rem, dict):
             stray = sorted(set(rem) - set(PLATFORM_KEYS))
             if stray:
-                problems.append(f'{name} remedy names {", ".join(stray)}, which no platform reads - use {", ".join(PLATFORM_KEYS)}')
+                problems.append(
+                    f"{name} remedy names {', '.join(stray)}, which no platform reads - use {', '.join(PLATFORM_KEYS)}"
+                )
             for plat in sorted(set(rem) & set(PLATFORM_KEYS)):
                 if not isinstance(rem[plat], str) or not rem[plat]:
-                    problems.append(f'{name} remedy.{plat} is empty, so a host on that platform is shown a command that is not one')
+                    problems.append(
+                        f"{name} remedy.{plat} is empty, so a host on that platform is shown a command that is not one"
+                    )
     return problems
 
 
@@ -234,24 +256,26 @@ def merge(base: list[dict], local: list[dict]) -> tuple[list[dict], list[str]]:
     misspelled override into an addition, which is the one outcome the author could not have
     intended and the gate would report as success.
     """
-    by_key = {t['name'].lower(): dict(t) for t in base}
+    by_key = {t["name"].lower(): dict(t) for t in base}
     rejected = []
     for entry in local:
-        name = entry.get('name')
+        name = entry.get("name")
         if not isinstance(name, str) or not name:
-            rejected.append('a local entry carries no name, so it was ignored')
+            rejected.append("a local entry carries no name, so it was ignored")
             continue
         # Types are checked before anything is applied, so a wrong one is refused rather than bypassing a guard written against a literal or crashing a later read.
         problems = field_problems(entry)
         if problems:
-            rejected.append(f'local tool {name} was ignored: {"; ".join(problems)}')
+            rejected.append(f"local tool {name} was ignored: {'; '.join(problems)}")
             continue
 
         key = name.lower()
         if key not in by_key:
             missing = [f for f in REQUIRED_FIELDS if f not in entry]
             if missing:
-                rejected.append(f'local tool {name} adds a new entry without {", ".join(missing)}, so it was ignored')
+                rejected.append(
+                    f"local tool {name} adds a new entry without {', '.join(missing)}, so it was ignored"
+                )
             else:
                 by_key[key] = dict(entry)
             continue
@@ -259,16 +283,22 @@ def merge(base: list[dict], local: list[dict]) -> tuple[list[dict], list[str]]:
         merged = by_key[key]
         for field, value in entry.items():
             # The hub's spelling of the name stands, since the gate reports under it and a local case variant is an override rather than a rename.
-            if field == 'name':
+            if field == "name":
                 continue
-            if field == 'required' and merged.get('required', True) and value is False:
-                rejected.append(f'local tool {name} tried to turn a required tool optional, which is a relaxation, so the hub value stands')
+            if field == "required" and merged.get("required", True) and value is False:
+                rejected.append(
+                    f"local tool {name} tried to turn a required tool optional, which is a relaxation, so the hub value stands"
+                )
                 continue
-            if field == 'minimum':
-                hub_floor = parse_version(merged['minimum']) if merged['minimum'] else None
+            if field == "minimum":
+                hub_floor = parse_version(merged["minimum"]) if merged["minimum"] else None
                 new_floor = parse_version(value) if value else None
-                if hub_floor is not None and (new_floor is None or compare(new_floor, hub_floor) < 0):
-                    rejected.append(f'local tool {name} tried to lower the floor from {merged["minimum"]} to {value!r}, which is a relaxation, so the hub floor stands')
+                if hub_floor is not None and (
+                    new_floor is None or compare(new_floor, hub_floor) < 0
+                ):
+                    rejected.append(
+                        f"local tool {name} tried to lower the floor from {merged['minimum']} to {value!r}, which is a relaxation, so the hub floor stands"
+                    )
                     continue
             merged[field] = value
     return [by_key[k] for k in sorted(by_key)], rejected
@@ -276,9 +306,9 @@ def merge(base: list[dict], local: list[dict]) -> tuple[list[dict], list[str]]:
 
 def platform_key() -> str:
     """The PLATFORM_KEYS member the running host reads its source and remedy under."""
-    if sys.platform.startswith('linux'):
-        return 'linux'
-    return 'macos' if sys.platform == 'darwin' else 'windows'
+    if sys.platform.startswith("linux"):
+        return "linux"
+    return "macos" if sys.platform == "darwin" else "windows"
 
 
 def platform_field(tool: dict, field: str) -> str | None:
@@ -295,8 +325,8 @@ def platform_field(tool: dict, field: str) -> str | None:
 
 def quote_argument(value: str) -> str:
     """`value` as one shell word, for a printed command a reader pastes back into their shell."""
-    if platform_key() == 'windows':
-        return f'"{value}"' if ' ' in value else value
+    if platform_key() == "windows":
+        return f'"{value}"' if " " in value else value
     return shlex.quote(value)
 
 
@@ -307,17 +337,17 @@ def resolve_remedy(command: str, root: Path | None = None) -> str:
     runs from any working directory, so the path is resolved against the tree this script lives in
     and quoted where the shell needs it, to keep the printed command runnable as printed.
     """
-    if not command.startswith('host-setup/'):
+    if not command.startswith("host-setup/"):
         return command
-    script, _, rest = command.partition(' ')
+    script, _, rest = command.partition(" ")
     resolved = str((root or Path(__file__).resolve().parent.parent) / script)
-    if platform_key() == 'windows':
+    if platform_key() == "windows":
         # PowerShell runs a quoted path only through the call operator, and a single-quoted literal doubles its own quote character.
         escaped = resolved.replace("'", "''")
-        quoted = f"& '{escaped}'" if resolved != escaped or ' ' in resolved else resolved
+        quoted = f"& '{escaped}'" if resolved != escaped or " " in resolved else resolved
     else:
         quoted = shlex.quote(resolved)
-    return f'{quoted} {rest}' if rest else quoted
+    return f"{quoted} {rest}" if rest else quoted
 
 
 def overlay_above(start: Path) -> Path | None:
@@ -328,7 +358,7 @@ def overlay_above(start: Path) -> Path | None:
     subdirectory. Naming that directory lets the run say what it skipped and which re-run counts it.
     """
     for parent in start.resolve().parents:
-        if (parent / 'host-tools.json').is_file():
+        if (parent / "host-tools.json").is_file():
             return parent
     return None
 
@@ -337,59 +367,79 @@ def check(tools: list[dict]) -> list[str]:
     """Every declared tool against its floor, returning one line per failure."""
     issues = []
     for tool in tools:
-        name = tool['name']
-        required = tool.get('required', True)
+        name = tool["name"]
+        required = tool.get("required", True)
         status, version, how = read_tool(tool)
 
-        if status == 'absent':
+        if status == "absent":
             if required:
-                issues.append(f'{name} is not installed, and it is required')
+                issues.append(f"{name} is not installed, and it is required")
             else:
-                NOTES.append(f'{name} is absent and optional, so nothing was read for it')
+                NOTES.append(f"{name} is absent and optional, so nothing was read for it")
             continue
 
-        if status == 'unreadable' or version is None:
+        if status == "unreadable" or version is None:
             # Not a host failure, since the tool answered and the declaration failed to read it, so the remedy is in the declaration.
-            issues.append(f'{name} ran via `{how}` but its declared pattern read no version from the output, so its floor was not applied')
+            issues.append(
+                f"{name} ran via `{how}` but its declared pattern read no version from the output, so its floor was not applied"
+            )
             continue
 
-        floor_text = tool['minimum']
+        floor_text = tool["minimum"]
         if floor_text is None:
-            NOTES.append(f'{name} {version} present, and no floor is declared for it')
+            NOTES.append(f"{name} {version} present, and no floor is declared for it")
             continue
 
         found, floor = parse_version(version), parse_version(floor_text)
         if floor is None:
             # A malformed floor is a defect in the declaration, and silently skipping it would retire the check.
-            issues.append(f'{name} declares the floor {floor_text!r}, which is not dot-separated integers, so nothing could be compared against it')
+            issues.append(
+                f"{name} declares the floor {floor_text!r}, which is not dot-separated integers, so nothing could be compared against it"
+            )
         elif found is None:
-            issues.append(f'{name} reported {version!r}, which is not dot-separated integers, so its floor was not applied')
+            issues.append(
+                f"{name} reported {version!r}, which is not dot-separated integers, so its floor was not applied"
+            )
         elif compare(found, floor) < 0:
             # The remedy rides on the finding rather than beside it, since a separate line would count as a second issue.
-            src = platform_field(tool, 'source')
-            rem = platform_field(tool, 'remedy')
+            src = platform_field(tool, "source")
+            rem = platform_field(tool, "remedy")
             # The head line stays the scannable fact and the rationale follows it, rather than being inlined into it.
             # An entry's why runs to a paragraph, so inlining made the one line a reader scans in CI output unreadable, and the longest entry is not the one that needs it least.
-            issues.append(f'{name} {version} is below the {floor_text} floor'
-                          + f'\nWHY: {tool["why"]}'
-                          + (f'\nINSTALL FROM: {src}' if src else '')
-                          + (f'\nREMEDY: {resolve_remedy(rem)}' if rem else ''))
+            issues.append(
+                f"{name} {version} is below the {floor_text} floor"
+                + f"\nWHY: {tool['why']}"
+                + (f"\nINSTALL FROM: {src}" if src else "")
+                + (f"\nREMEDY: {resolve_remedy(rem)}" if rem else "")
+            )
         else:
-            NOTES.append(f'{name} {version} meets the {floor_text} floor')
+            NOTES.append(f"{name} {version} meets the {floor_text} floor")
     return issues
 
 
 def main(argv: list[str] | None = None) -> int:
-    ap = argparse.ArgumentParser(description='Check host tool versions against the hub declaration plus a repository\'s own.')
-    ap.add_argument('--spec', default=str(SPEC), help='path to the hub declaration, for testing')
-    ap.add_argument('--repo', default=None, help='repository whose host-tools.json layers over the hub one, default the working directory')
-    ap.add_argument('--no-local', action='store_true', help='read the hub declaration alone, ignoring the repository')
-    ap.add_argument('--quiet', action='store_true', help='print failures only, dropping the per-tool notes')
+    ap = argparse.ArgumentParser(
+        description="Check host tool versions against the hub declaration plus a repository's own."
+    )
+    ap.add_argument("--spec", default=str(SPEC), help="path to the hub declaration, for testing")
+    ap.add_argument(
+        "--repo",
+        default=None,
+        help="repository whose host-tools.json layers over the hub one, default the working directory",
+    )
+    ap.add_argument(
+        "--no-local",
+        action="store_true",
+        help="read the hub declaration alone, ignoring the repository",
+    )
+    ap.add_argument(
+        "--quiet", action="store_true", help="print failures only, dropping the per-tool notes"
+    )
     a = ap.parse_args(argv)
 
     # One reader for both declarations, so a shape guard added to one cannot go missing from the other.
     # Checking only the local file was exactly that asymmetry, and the hub file is no better validated at the point it is read.
-    hub = read_declaration(Path(a.spec), 'host tool declaration')
+    hub = read_declaration(Path(a.spec), "host tool declaration")
     if isinstance(hub, str):
         print(hub, file=sys.stderr)
         return 2
@@ -397,15 +447,15 @@ def main(argv: list[str] | None = None) -> int:
 
     NOTES.clear()
     rejected: list[str] = []
-    local_path = Path(a.repo or '.') / 'host-tools.json'
+    local_path = Path(a.repo or ".") / "host-tools.json"
     # A repository layering onto the hub is the normal case, and carrying no local file is the common one, so its absence is silent.
     if not a.no_local and local_path.is_file():
-        local = read_declaration(local_path, 'repository host tool declaration')
+        local = read_declaration(local_path, "repository host tool declaration")
         if isinstance(local, str):
             print(local, file=sys.stderr)
             return 2
         tools, rejected = merge(tools, local)
-        NOTES.append(f'{local_path} layered {len(local)} local entry(s) over the hub declaration')
+        NOTES.append(f"{local_path} layered {len(local)} local entry(s) over the hub declaration")
 
     # Only a bare run warns, since an explicit --repo and --no-local are each a choice the caller made.
     # The default sits at None rather than '.' so the two are tellable apart.
@@ -415,24 +465,26 @@ def main(argv: list[str] | None = None) -> int:
 
     # The contract is read after layering, since neither file can see what the other adds to it.
     issues = rejected + contract_problems(tools) + check(tools)
-    status = 'FAIL' if issues else 'ok'
-    print(f'[{status:4}] host-tools  {len(issues)} issue(s) over {len(tools)} declared tool(s)')
+    status = "FAIL" if issues else "ok"
+    print(f"[{status:4}] host-tools  {len(issues)} issue(s) over {len(tools)} declared tool(s)")
     for i in issues:
         # A finding may carry continuation lines, indented under it rather than counted beside it.
         # Every line is split rather than only the first, since partitioning once leaves later newlines inside one printed line and loses the indent on all but the first.
-        head, *rest = i.split('\n')
-        print(f'         {head}')
+        head, *rest = i.split("\n")
+        print(f"         {head}")
         for tail in rest:
-            print(f'           {tail}')
+            print(f"           {tail}")
     if not a.quiet:
         # After the findings and outside the count, since a note is not one.
         for note in NOTES:
-            print(f'         note: {note}')
+            print(f"         note: {note}")
     if skipped is not None:
         # Outside --quiet, because a silently skipped overlay is the omission this line exists to name.
-        print(f'         warning: {skipped} carries a host-tools.json overlay this bare run did not read - re-run with --repo {quote_argument(str(skipped))} so its floors count')
+        print(
+            f"         warning: {skipped} carries a host-tools.json overlay this bare run did not read - re-run with --repo {quote_argument(str(skipped))} so its floors count"
+        )
     return 1 if issues else 0
 
 
-if __name__ == '__main__':
+if __name__ == "__main__":
     sys.exit(main())

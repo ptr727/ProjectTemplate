@@ -18,8 +18,9 @@ That assertion runs once per platform, because the two installers do not manage 
 difference is a decision rather than an accident. `git-restore-mtime` serves a Linux deploy path and
 the spec declares it not applicable on Windows.
 
-Run: python3 scripts/test_bootstrap.py
+Run: python3 scripts/tests/test_bootstrap.py
 """
+
 from __future__ import annotations
 
 import json
@@ -27,42 +28,44 @@ import re
 import subprocess
 from pathlib import Path
 
-ROOT = Path(__file__).resolve().parent.parent
-BOOTSTRAP = ROOT / 'host-setup' / 'bootstrap.sh'
-BOOTSTRAP_PS = ROOT / 'host-setup' / 'bootstrap.ps1'
-LINUX = ROOT / 'host-setup' / 'linux'
-WINDOWS = ROOT / 'host-setup' / 'windows'
-HOST_TOOLS = ROOT / 'spec' / 'host-tools.json'
+ROOT = Path(__file__).resolve().parent.parent.parent
+BOOTSTRAP = ROOT / "host-setup" / "bootstrap.sh"
+BOOTSTRAP_PS = ROOT / "host-setup" / "bootstrap.ps1"
+LINUX = ROOT / "host-setup" / "linux"
+WINDOWS = ROOT / "host-setup" / "windows"
+HOST_TOOLS = ROOT / "spec" / "host-tools.json"
 
 # The tools the linux tooling manages, read from the script rather than restated here, so the two cannot drift while both look correct.
-TOOLS_DECLARATION = re.compile(r'^readonly TOOLS=\(([^)]*)\)', re.MULTILINE)
+TOOLS_DECLARATION = re.compile(r"^readonly TOOLS=\(([^)]*)\)", re.MULTILINE)
 
 # The same, for the windows tooling, whose registry is a list of records rather than a flat array.
 # The names are read out of the records themselves rather than from a second list beside them, so there is one declaration to keep true rather than two that can agree wrongly.
-PS_TOOLS_OPEN = re.compile(r'^\$TOOLS\s*=\s*@\(', re.MULTILINE)
-PS_TOOLS_CLOSE = re.compile(r'^\)', re.MULTILINE)
+PS_TOOLS_OPEN = re.compile(r"^\$TOOLS\s*=\s*@\(", re.MULTILINE)
+PS_TOOLS_CLOSE = re.compile(r"^\)", re.MULTILINE)
 PS_TOOL_NAME = re.compile(r"^\s*@\{\s*Name\s*=\s*'([^']+)'", re.MULTILINE)
 
 # A spec tool whose name differs from the name the installer knows it by, and why.
 ALIASES = {
-    'linux': {'python3': 'python'},
-    'windows': {'python3': 'python'},
+    "linux": {"python3": "python"},
+    "windows": {"python3": "python"},
 }
 
 # A platform a floored tool's remedy deliberately omits, and the reason, so an omission is a decision rather than a hole in the mapping.
 REMEDY_NOT_APPLICABLE = {
-    'git-restore-mtime': {'windows': 'The tool serves a Linux deploy path, which its source states.'},
+    "git-restore-mtime": {
+        "windows": "The tool serves a Linux deploy path, which its source states."
+    },
 }
 
 # The remedy commands that hand back into the host-setup installers, read so the tool each names can be checked against what that installer manages.
-LINUX_INSTALLER_REMEDY = re.compile(r'^host-setup/linux/install-tools\.sh --upgrade (\S+)$')
-WINDOWS_INSTALLER_REMEDY = re.compile(r'^host-setup/windows/install-tools\.ps1 -Upgrade (\S+)$')
+LINUX_INSTALLER_REMEDY = re.compile(r"^host-setup/linux/install-tools\.sh --upgrade (\S+)$")
+WINDOWS_INSTALLER_REMEDY = re.compile(r"^host-setup/windows/install-tools\.ps1 -Upgrade (\S+)$")
 
 # A spec tool an installer deliberately does not manage, and the reason, recorded so an omission is a decision somebody made rather than one nobody noticed.
 # Both sets are empty, which is itself the assertion: docker installs the same way on a hypervisor and a workstation on both platforms now, and the one case that differs, a WSL distribution, is handled inside install-tools.sh itself (it skips the native install and points at Docker Desktop's own WSL integration) rather than by leaving docker unmanaged on Linux entirely.
-NOT_MANAGED = {
-    'linux': {},
-    'windows': {},
+NOT_MANAGED: dict[str, dict[str, str]] = {
+    "linux": {},
+    "windows": {},
 }
 
 failures: list[str] = []
@@ -75,33 +78,39 @@ def check(condition: bool, message: str) -> None:
 
 def declared_tools() -> set[str]:
     """The tool names `install-tools.sh` manages."""
-    text = (LINUX / 'install-tools.sh').read_text(encoding='utf-8')
+    text = (LINUX / "install-tools.sh").read_text(encoding="utf-8")
     match = TOOLS_DECLARATION.search(text)
     if not match:
-        failures.append('install-tools.sh declares no TOOLS array, so coverage cannot be checked')
+        failures.append("install-tools.sh declares no TOOLS array, so coverage cannot be checked")
         return set()
     return {name.strip() for name in match.group(1).split() if name.strip()}
 
 
 def declared_windows_tools() -> set[str]:
     """The tool names `install-tools.ps1` manages."""
-    text = (WINDOWS / 'install-tools.ps1').read_text(encoding='utf-8')
+    text = (WINDOWS / "install-tools.ps1").read_text(encoding="utf-8")
     opened = PS_TOOLS_OPEN.search(text)
     if not opened:
-        failures.append('install-tools.ps1 declares no $TOOLS registry, so coverage cannot be checked')
+        failures.append(
+            "install-tools.ps1 declares no $TOOLS registry, so coverage cannot be checked"
+        )
         return set()
 
     # A missing close marker is a failure rather than a scan to end of file.
     # Reading on past the registry collects every later `Name = '...'` in the script, so a broken registry answers with a larger tool set than it declares and the coverage check below passes on it.
     closed = PS_TOOLS_CLOSE.search(text, opened.end())
     if not closed:
-        failures.append('install-tools.ps1 opens a $TOOLS registry this cannot find the end of, so coverage cannot be checked')
+        failures.append(
+            "install-tools.ps1 opens a $TOOLS registry this cannot find the end of, so coverage cannot be checked"
+        )
         return set()
 
-    body = text[opened.end():closed.start()]
+    body = text[opened.end() : closed.start()]
     names = set(PS_TOOL_NAME.findall(body))
     if not names:
-        failures.append('install-tools.ps1 declares a $TOOLS registry with no Name fields this can read')
+        failures.append(
+            "install-tools.ps1 declares a $TOOLS registry with no Name fields this can read"
+        )
     return names
 
 
@@ -109,9 +118,9 @@ def spec_tools() -> list[dict]:
     """The tools the spec declares, or an empty list and a recorded failure."""
     # A malformed or unreadable spec is a finding this file reports beside the others, rather than a traceback that ends the run and takes the checks after it with it.
     try:
-        return json.loads(HOST_TOOLS.read_text(encoding='utf-8'))['tools']
+        return json.loads(HOST_TOOLS.read_text(encoding="utf-8"))["tools"]
     except (OSError, ValueError, KeyError) as error:
-        failures.append(f'{HOST_TOOLS.name} could not be read as a tool declaration: {error}')
+        failures.append(f"{HOST_TOOLS.name} could not be read as a tool declaration: {error}")
         return []
 
 
@@ -122,38 +131,38 @@ def assert_loader_reads_one_path(path: Path, expected: str) -> None:
     (`$TREE/host-setup/<platform>/$tool` in each), rather than building it from parts, which is what
     lets this one pattern read either file unmodified.
     """
-    text = path.read_text(encoding='utf-8')
+    text = path.read_text(encoding="utf-8")
 
     # Every reference to the fetched tree goes through the variable holding its location, so the paths it names are countable rather than scattered.
     references = re.findall(r'\$TREE(?:/[^"\'\s]*)?', text)
-    paths = {reference for reference in references if '/' in reference}
+    paths = {reference for reference in references if "/" in reference}
 
     check(
         paths == {expected},
-        f'{path.name} reads more than its one entry point into the fetched tree: {sorted(paths)}',
+        f"{path.name} reads more than its one entry point into the fetched tree: {sorted(paths)}",
     )
 
     # A payload or a table read from the tree is what makes a file a tool rather than a loader.
-    for forbidden in ('spec/', 'registry/', 'repo-config/', 'catalog/'):
+    for forbidden in ("spec/", "registry/", "repo-config/", "catalog/"):
         check(
-            f'$TREE/{forbidden}' not in text,
-            f'{path.name} reads {forbidden} from the fetched tree, which makes it a tool',
+            f"$TREE/{forbidden}" not in text,
+            f"{path.name} reads {forbidden} from the fetched tree, which makes it a tool",
         )
 
 
 def assert_loader_needs_no_python(path: Path) -> None:
     """A host being bootstrapped must not be made to install an interpreter first."""
-    text = path.read_text(encoding='utf-8')
-    for interpreter in ('python3 ', 'python ', 'uv run', 'py -3'):
+    text = path.read_text(encoding="utf-8")
+    for interpreter in ("python3 ", "python ", "uv run", "py -3"):
         check(
             interpreter not in text,
-            f'{path.name} invokes {interpreter.strip()}, which a host being bootstrapped may not have',
+            f"{path.name} invokes {interpreter.strip()}, which a host being bootstrapped may not have",
         )
 
 
 def test_linux_loader_reads_one_path_into_the_tree() -> None:
     """`bootstrap.sh` references exactly one directory inside the tree it fetches."""
-    assert_loader_reads_one_path(BOOTSTRAP, '$TREE/host-setup/linux/$tool')
+    assert_loader_reads_one_path(BOOTSTRAP, "$TREE/host-setup/linux/$tool")
 
 
 def test_windows_loader_reads_one_path_into_the_tree() -> None:
@@ -163,7 +172,7 @@ def test_windows_loader_reads_one_path_into_the_tree() -> None:
     equivalent is the lowercase local `$tool`. The pattern this shares with the Linux check is the shape
     of the path, one interpolated `$TREE/host-setup/<platform>/<name>` string, not the exact casing.
     """
-    assert_loader_reads_one_path(BOOTSTRAP_PS, '$TREE/host-setup/windows/$Tool')
+    assert_loader_reads_one_path(BOOTSTRAP_PS, "$TREE/host-setup/windows/$Tool")
 
 
 def test_linux_loader_needs_no_python() -> None:
@@ -182,8 +191,8 @@ def assert_coverage(platform: str, managed: set[str], installer: str) -> None:
         return
 
     for tool in spec_tools():
-        name = tool['name']
-        if not tool.get('required', False):
+        name = tool["name"]
+        if not tool.get("required", False):
             continue
 
         # Every required tool is checked, including one whose declaration names no source for this platform.
@@ -193,14 +202,14 @@ def assert_coverage(platform: str, managed: set[str], installer: str) -> None:
         if name in NOT_MANAGED[platform]:
             check(
                 expected not in managed,
-                f'{name} is recorded as not managed on {platform}, but {installer} manages it, so the record is stale',
+                f"{name} is recorded as not managed on {platform}, but {installer} manages it, so the record is stale",
             )
             continue
 
         check(
             expected in managed,
-            f'the spec requires {name} on {platform} and {installer} does not manage it, '
-            f'so a host cannot satisfy the gate by running the tooling',
+            f"the spec requires {name} on {platform} and {installer} does not manage it, "
+            f"so a host cannot satisfy the gate by running the tooling",
         )
 
 
@@ -214,28 +223,30 @@ def test_every_declared_floor_carries_a_total_remedy_mapping() -> None:
     linux_managed = declared_tools()
     windows_managed = declared_windows_tools()
     for tool in spec_tools():
-        name = tool['name']
-        if tool.get('minimum') is None:
+        name = tool["name"]
+        if tool.get("minimum") is None:
             continue
-        remedy = tool.get('remedy')
+        remedy = tool.get("remedy")
         if not isinstance(remedy, dict) or not remedy:
-            failures.append(f'{name} declares a floor and no remedy, so its failure names no command')
+            failures.append(
+                f"{name} declares a floor and no remedy, so its failure names no command"
+            )
             continue
-        for platform in ('linux', 'macos', 'windows'):
+        for platform in ("linux", "macos", "windows"):
             if platform in REMEDY_NOT_APPLICABLE.get(name, {}):
                 check(
                     platform not in remedy,
-                    f'{name} is recorded as not applicable on {platform} and carries a remedy there, so the record is stale',
+                    f"{name} is recorded as not applicable on {platform} and carries a remedy there, so the record is stale",
                 )
                 continue
             command = remedy.get(platform)
             check(
                 isinstance(command, str) and bool(command),
-                f'{name} declares a floor and no {platform} remedy, so a below-floor host there is told to upgrade and not how',
+                f"{name} declares a floor and no {platform} remedy, so a below-floor host there is told to upgrade and not how",
             )
         installer_cases = (
-            ('linux', LINUX_INSTALLER_REMEDY, linux_managed, 'install-tools.sh'),
-            ('windows', WINDOWS_INSTALLER_REMEDY, windows_managed, 'install-tools.ps1'),
+            ("linux", LINUX_INSTALLER_REMEDY, linux_managed, "install-tools.sh"),
+            ("windows", WINDOWS_INSTALLER_REMEDY, windows_managed, "install-tools.ps1"),
         )
         for platform, pattern, managed, installer in installer_cases:
             command = remedy.get(platform)
@@ -245,18 +256,18 @@ def test_every_declared_floor_carries_a_total_remedy_mapping() -> None:
             if match and managed:
                 check(
                     match.group(1) in managed,
-                    f'{name} remedy.{platform} names {match.group(1)}, which {installer} does not manage, so the printed command fails',
+                    f"{name} remedy.{platform} names {match.group(1)}, which {installer} does not manage, so the printed command fails",
                 )
 
 
 def test_every_required_linux_tool_is_installable() -> None:
     """A tool the spec requires on Linux is one the tooling can provide, or a recorded exception."""
-    assert_coverage('linux', declared_tools(), 'install-tools.sh')
+    assert_coverage("linux", declared_tools(), "install-tools.sh")
 
 
 def test_every_required_windows_tool_is_installable() -> None:
     """A tool the spec requires on Windows is one the tooling can provide, or a recorded exception."""
-    assert_coverage('windows', declared_windows_tools(), 'install-tools.ps1')
+    assert_coverage("windows", declared_windows_tools(), "install-tools.ps1")
 
 
 def indexed_modes() -> dict[str, str]:
@@ -269,17 +280,22 @@ def indexed_modes() -> dict[str, str]:
     """
     try:
         listing = subprocess.run(
-            ['git', 'ls-files', '-s', '--', 'host-setup'],
-            capture_output=True, text=True, check=True, cwd=ROOT,
+            ["git", "ls-files", "-s", "--", "host-setup"],
+            capture_output=True,
+            text=True,
+            check=True,
+            cwd=ROOT,
         ).stdout
     except (OSError, subprocess.CalledProcessError) as error:
-        failures.append(f'git could not report the recorded file modes, so executability is unchecked: {error}')
+        failures.append(
+            f"git could not report the recorded file modes, so executability is unchecked: {error}"
+        )
         return {}
 
     modes: dict[str, str] = {}
     for line in listing.splitlines():
         # Each row is "<mode> <object> <stage>\t<path>", so the tab is what separates the fields from the path.
-        fields, _, path = line.partition('\t')
+        fields, _, path = line.partition("\t")
         if path:
             modes[path] = fields.split()[0]
     return modes
@@ -288,15 +304,15 @@ def indexed_modes() -> dict[str, str]:
 def test_every_managed_tool_is_executable() -> None:
     """Each script the loader hands control to is present and executable."""
     modes = indexed_modes()
-    for name in ('install-skills.sh', 'install-tools.sh', 'upgrade-host.sh', 'setup-github.sh'):
+    for name in ("install-skills.sh", "install-tools.sh", "upgrade-host.sh", "setup-github.sh"):
         path = LINUX / name
-        check(path.is_file(), f'{name} is missing from host-setup/linux')
+        check(path.is_file(), f"{name} is missing from host-setup/linux")
         if path.is_file() and modes:
-            mode = modes.get(f'host-setup/linux/{name}', '')
+            mode = modes.get(f"host-setup/linux/{name}", "")
             check(
-                mode == '100755',
-                f'{name} is recorded as {mode or "untracked"} rather than 100755, '
-                f'so a fresh checkout cannot run it',
+                mode == "100755",
+                f"{name} is recorded as {mode or 'untracked'} rather than 100755, "
+                f"so a fresh checkout cannot run it",
             )
 
 
@@ -309,17 +325,23 @@ def test_every_windows_script_is_present() -> None:
     default with no pin of their own. A shebang added later would fail that gate from a file nobody
     would think to look at.
     """
-    scripts = ('install-skills.ps1', 'install-tools.ps1', 'upgrade-host.ps1', 'setup-github.ps1', 'setup-wsl.ps1')
-    for name in scripts + ('README.md',):
-        check((WINDOWS / name).is_file(), f'{name} is missing from host-setup/windows')
+    scripts = (
+        "install-skills.ps1",
+        "install-tools.ps1",
+        "upgrade-host.ps1",
+        "setup-github.ps1",
+        "setup-wsl.ps1",
+    )
+    for name in scripts + ("README.md",):
+        check((WINDOWS / name).is_file(), f"{name} is missing from host-setup/windows")
 
     for name in scripts:
         path = WINDOWS / name
         if path.is_file():
             check(
-                not path.read_bytes().startswith(b'#!'),
-                f'{name} opens with a shebang, which the eol-coverage gate then pins to LF, '
-                f'against the CRLF these files are written with',
+                not path.read_bytes().startswith(b"#!"),
+                f"{name} opens with a shebang, which the eol-coverage gate then pins to LF, "
+                f"against the CRLF these files are written with",
             )
 
 
@@ -332,12 +354,12 @@ def test_bootstrap_ps1_is_present_and_unmarked() -> None:
     `eol-coverage` gate pins a tracked file opening `#!` to `eol=lf`, against the CRLF this file is
     written with.
     """
-    check(BOOTSTRAP_PS.is_file(), 'bootstrap.ps1 is missing from host-setup')
+    check(BOOTSTRAP_PS.is_file(), "bootstrap.ps1 is missing from host-setup")
     if BOOTSTRAP_PS.is_file():
         check(
-            not BOOTSTRAP_PS.read_bytes().startswith(b'#!'),
-            'bootstrap.ps1 opens with a shebang, which the eol-coverage gate then pins to LF, '
-            'against the CRLF this file is written with',
+            not BOOTSTRAP_PS.read_bytes().startswith(b"#!"),
+            "bootstrap.ps1 opens with a shebang, which the eol-coverage gate then pins to LF, "
+            "against the CRLF this file is written with",
         )
 
 
@@ -357,14 +379,14 @@ def main() -> int:
         test()
 
     if failures:
-        print(f'[FAIL] bootstrap  {len(failures)} issue(s)')
+        print(f"[FAIL] bootstrap  {len(failures)} issue(s)")
         for failure in failures:
-            print(f'         {failure}')
+            print(f"         {failure}")
         return 1
 
-    print('[ OK ] bootstrap  loader invariant and spec coverage')
+    print("[ OK ] bootstrap  loader invariant and spec coverage")
     return 0
 
 
-if __name__ == '__main__':
+if __name__ == "__main__":
     raise SystemExit(main())
