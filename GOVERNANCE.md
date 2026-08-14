@@ -130,7 +130,7 @@ This is packaged as the `comment-and-doc-style` Skill at `.agents/skills/comment
 
 ## Documentation Style Conventions
 
-The fleet's prose and formatting contract: what a carried file may reference, how Markdown links, headings, and tense are structured, the comment philosophy, the ASCII character-set tiers, the line-ending policy, and how a quantitative claim in a doc stays honest. Applies to docs and code/workflow comments alike.
+The fleet's prose and formatting contract, applied to docs and code/workflow comments alike. It governs what a carried file may reference, Markdown link, heading, and tense structure, and the comment philosophy. It also holds the ASCII character-set tiers, the line-ending policy, the sentence-structure house style, and the rule keeping a quantitative claim honest.
 
 This is packaged as the `comment-and-doc-style` Skill at `.agents/skills/comment-and-doc-style/SKILL.md` in the hub, not a repo-relative link since that path is hub-local and not carried into every fleet repo. The summary above sketches the contract. Read the skill for the full rules.
 
@@ -145,6 +145,10 @@ The full ASCII tier system (never legitimate, legitimate next to a number, alway
 ### Line Endings
 
 The full CRLF/LF policy (`.editorconfig` and `.gitattributes` defaults and pins, choosing an ending for a new file type, operational-repo overrides, editing discipline, and auditing) is in the `comment-and-doc-style` Skill referenced above.
+
+### Sentence Structure
+
+ASD-STE100's structural half is the adopted house style: short sentences, one instruction per sentence, active voice, and imperative mood for procedure steps. Its controlled dictionary is deliberately not adopted. The full rules, the sentence word cap, and the opt-in `sentence-length` check that enforces the cap are in the `comment-and-doc-style` Skill referenced above.
 
 ## Verification Discipline
 

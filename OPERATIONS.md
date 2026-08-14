@@ -8,7 +8,7 @@ What verifying a change here requires, including the part CI cannot perform. The
 
 ### Run the gates the way CI runs them
 
-CI passes explicit `--check` lists, and a bare `python3 scripts/prose_lint.py [file]` runs `DEFAULT_RULES`, which is those two lists together. What differs is the exit code rather than the coverage: CI gates on eight of the nine and reports `charset-unknown` warn-only, where a bare run exits non-zero on any of the nine. `sentence-split` is in neither, so nothing below runs it and a local run reaches it only by naming it. Run the CI invocations:
+CI passes explicit `--check` lists, and a bare `python3 scripts/prose_lint.py [file]` runs `DEFAULT_RULES`, which is those two lists together. What differs is the exit code rather than the coverage. CI gates on nine of the ten and reports `charset-unknown` warn-only, where a bare run exits non-zero on any of the ten. `sentence-split` and `sentence-length` are in neither, so nothing below runs them and a local run reaches them only by naming them. Run the CI invocations:
 
 ```sh
 python3 scripts/test_prose_lint.py
@@ -17,7 +17,7 @@ python3 scripts/test_pr_review.py
 python3 spec/audit.py --selftest
 python3 host-setup/agent-safety/gh-write-guard.py --selftest
 python3 scripts/repo_gate.py
-python3 scripts/prose_lint.py . --check charset --check semicolon --check dash --check dupword --check spelling --check comment-wrap --check comment-case --check home-path
+python3 scripts/prose_lint.py . --check charset --check semicolon --check dash --check dupword --check spelling --check comment-wrap --check comment-case --check home-path --check dead-path
 python3 scripts/prose_lint.py . --check charset-unknown --summary
 for f in registry/*.json spec/*.json repo-config/*.json; do jq empty "$f"; done
 python3 spec/validate.py
@@ -28,7 +28,7 @@ docker run --rm --pull=always -e PS_SCRIPTS="$(git ls-files '*.ps1')" -v "$PWD":
 
 The two container lines that take a file list differ from the workflow in **form** and not in what they check, and both differences exist because this runbook runs on a developer's machine where the workflow runs on `ubuntu-latest`. The shell list is collected with a `while read` loop rather than the workflow's `mapfile`, since `mapfile` arrives in bash 4 and macOS ships 3.2, and it stays an array so a path carrying whitespace is still passed as one argument. The PowerShell list splits on whitespace rather than on a newline, since a shell joins `git ls-files` output with newlines and PowerShell joins it with spaces, and splitting on the newline alone hands the analyzer one argument holding every path, which it reports as one file it cannot find and a clean run over nothing.
 
-Two gaps in that list are CI's rather than this runbook's, reproduced here so a local run matches CI rather than quietly exceeding it. The `jq` glob covers `repo-config/*.json` and does not reach `repo-config/operational/develop.json`, so a malformed operational payload passes. The second is that `sentence-split` is implemented and tested but named by no invocation, so nothing runs it.
+Two gaps in that list are CI's rather than this runbook's, reproduced here so a local run matches CI rather than quietly exceeding it. The `jq` glob covers `repo-config/*.json` and does not reach `repo-config/operational/develop.json`, so a malformed operational payload passes. The second is that `sentence-split` and `sentence-length` are implemented and tested but named by no invocation, so nothing runs them.
 
 Run the `editorconfig-checker` line before pushing a new file, and before pushing an existing file that a script rewrote rather than an editor. This repository defaults to CRLF and most tooling writes LF, so a new file fails that check on its first CI run rather than locally. A scripted rewrite is the same hazard on a file that was already correct, since reading and rewriting a whole file in text mode converts every line ending in it, which no prose or Markdown gate reports.
 

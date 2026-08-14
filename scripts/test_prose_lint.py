@@ -1274,6 +1274,59 @@ class TestSentenceSplit(BaitCase):
                                         {'sentence-split'}, name='bait.py'))
 
 
+class TestSentenceLength(BaitCase):
+    """The word cap on one Markdown sentence, the first structural house-style check."""
+
+    def sentence_of(self, words: int) -> str:
+        return ' '.join(['word'] * words) + '.'
+
+    def test_a_sentence_over_the_cap_is_flagged(self) -> None:
+        over = self.sentence_of(prose_lint.SENTENCE_WORD_CAP + 1)
+        self.assertEqual(['sentence-length'], self.kinds(over + '\n', {'sentence-length'}))
+
+    def test_a_sentence_at_the_cap_passes(self) -> None:
+        at_cap = self.sentence_of(prose_lint.SENTENCE_WORD_CAP)
+        self.assertEqual([], self.kinds(at_cap + '\n', {'sentence-length'}))
+
+    def test_each_sentence_on_a_line_is_judged_alone(self) -> None:
+        """Two sentences sharing a line are two counts, never one joined span."""
+        at_cap = self.sentence_of(prose_lint.SENTENCE_WORD_CAP)
+        self.assertEqual([], self.kinds(f'{at_cap} {at_cap}\n', {'sentence-length'}))
+
+    def test_an_inline_code_span_is_one_word(self) -> None:
+        """Naming a symbol costs the sentence one word however long the symbol's name is."""
+        span = '`' + ' '.join(['token'] * prose_lint.SENTENCE_WORD_CAP) + '`'
+        self.assertEqual([], self.kinds(f'The value {span} is read.\n', {'sentence-length'}))
+
+    def test_a_quotation_is_one_word(self) -> None:
+        """Quoted text is someone else's prose, so its length is not the author's finding."""
+        quoted = '"' + ' '.join(['word'] * prose_lint.SENTENCE_WORD_CAP) + '"'
+        self.assertEqual([], self.kinds(f'The doc says {quoted} here.\n', {'sentence-length'}))
+
+    def test_a_quotation_keeps_its_sentence_boundary(self) -> None:
+        """A terminator closing a quotation still ends the sentence, so neighbors do not merge."""
+        lead = ' '.join(['word'] * (prose_lint.SENTENCE_WORD_CAP - 5))
+        text = f'{lead} said "stop right now." {lead} said nothing.\n'
+        self.assertEqual([], self.kinds(text, {'sentence-length'}))
+
+    def test_structure_is_not_a_sentence(self) -> None:
+        """A table row, a heading, a link definition, and a blockquote hold no prose sentence."""
+        run = ' '.join(['word'] * (prose_lint.SENTENCE_WORD_CAP + 1))
+        for text in (f'| {run} |\n', f'# {run}\n', f'[ref]: ./{run}.md\n', f'> {run}\n'):
+            with self.subTest(text=text[:20]):
+                self.assertEqual([], self.kinds(text, {'sentence-length'}))
+
+    def test_the_rule_is_markdown_only(self) -> None:
+        """A source file's long lines are code, which no sentence rule judges."""
+        over = self.sentence_of(prose_lint.SENTENCE_WORD_CAP + 1)
+        self.assertEqual([], self.kinds(f'# {over}\n', {'sentence-length'}, name='bait.py'))
+
+    def test_the_rule_is_opt_in(self) -> None:
+        """Adoption is incremental, so the default set stays unchanged until a promotion."""
+        self.assertNotIn('sentence-length', prose_lint.DEFAULT_RULES)
+        self.assertIn('sentence-length', prose_lint.RULES)
+
+
 class TestSpelling(BaitCase):
     """US English, read from Markdown prose and from the comments of every other syntax.
 
