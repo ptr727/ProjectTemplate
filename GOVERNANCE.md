@@ -55,7 +55,7 @@ Two workflow models, set per repo by the registry `workflowModel` field. Most re
 `release`: squash-only feature branches into `develop`, merge-commit-only `develop -> main`
 promotions, forward-only with no back-merges, and two promotion traps worth knowing before the
 first one (never delete `develop`, resolve an EOL-only conflict by taking `develop`'s side).
-**GitHub's own "default branch" repository setting reads `main`, but `develop` is where work starts and where in-flight content lives**, so a worktree or clone that defaults to "the default branch" lands on `main` and can silently miss content already merged to `develop` but not yet promoted. Branch from `develop` for a `release`-model repo unless the task is explicitly about `main`-only content.
+**GitHub's own "default branch" repository setting reads `main`, but `develop` is where work starts and where in-flight content lives**, so a worktree or clone that defaults to "the default branch" lands on `main` and can silently miss content already merged to `develop` but not yet promoted. Branch from `develop`, on either workflow model, unless the task is explicitly about `main`-only content.
 **Operational** repos differ substantially (direct-to-`develop`, advisory CI, dispatch-only
 release), covered as a delta rather than a separate model.
 
