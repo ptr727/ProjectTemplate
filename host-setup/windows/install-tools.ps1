@@ -306,13 +306,14 @@ function Get-ExplicitUpgrade {
 # The package id winget's own catalog says produced the version this tool reports as installed.
 # `winget list --id X --exact` answers yes for a package sharing this tool's family even where X itself is not what is installed (#693: a host running OpenJS.NodeJS, the Current channel, reads as OpenJS.NodeJS.LTS because the two share a publisher and a name), but the version it reports comes straight from the installed entry regardless of which id was asked about, so matching that version against every id in the family, read from a plain source search rather than an id scoped one, is what tells the ids apart without trusting the id column winget answered with at all.
 # A tool naming no family resolves to its own package unchanged and costs nothing extra, and a version matching none of the family's ids does the same, since a family search that cannot confirm anything is no worse than not asking.
+# A version matching more than one id falls back the same way rather than picking the first: two ids sharing a version happens right at a channel handoff, when a major that just left Current has not yet lost its old id from the search results, and picking between them by list order would be a guess wearing the shape of an answer.
 function Resolve-ToolPackage {
     param([Parameter(Mandatory)][hashtable]$Tool, [string]$Installed)
     if (-not $Tool.Family -or -not $Installed) { return $Tool.Package }
     $text = (& winget search --query $Tool.Family --source winget --disable-interactivity 2>&1 | Out-String -Width 500)
     if ($LASTEXITCODE -ne 0) { return $Tool.Package }
-    $match = (Read-WingetSearchTable -Text $text -Prefix $Tool.Family) | Where-Object { $_.Version -eq $Installed } | Select-Object -First 1
-    if ($match) { return $match.Id }
+    $found = @((Read-WingetSearchTable -Text $text -Prefix $Tool.Family) | Where-Object { $_.Version -eq $Installed })
+    if ($found.Count -eq 1) { return $found[0].Id }
     return $Tool.Package
 }
 
