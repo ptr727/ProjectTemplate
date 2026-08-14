@@ -644,9 +644,10 @@ tool_status() {
 
 # The path of a copy of $1 that resolves ahead of $BIN_DIR/$1 on PATH, or empty when there is none.
 # Shared by the report, which only names the shadow, and --install/--upgrade, which removes it.
+# "type -P" skips aliases and shell functions, which "command -v" answers for with no file behind them.
 tool_shadow_path() {
     local name="$1" resolved
-    resolved=$(command -v "$name" 2> /dev/null || true)
+    resolved=$(type -P "$name" 2> /dev/null || true)
     [[ -n $resolved && $resolved != "$BIN_DIR/$name" ]] && printf '%s' "$resolved"
     return 0
 }
@@ -752,6 +753,14 @@ tool_unshadow() {
     for name in "${names[@]}"; do
         resolved=$(tool_shadow_path "$name")
         [[ -n $resolved ]] || continue
+
+        # A distro package's own file, found only when PATH puts it ahead of $BIN_DIR, which this script does not set up.
+        # Removing it directly would desync dpkg's database from the filesystem, so it stays, and the fix is the PATH order.
+        if dpkg-query -S "$resolved" > /dev/null 2>&1; then
+            warn "$tool: $resolved belongs to a distro package and stays, put $BIN_DIR ahead of it on PATH instead"
+            continue
+        fi
+
         log "$tool: $resolved shadows $BIN_DIR/$name, removing it"
         if confirm "  Remove $resolved?"; then
             run_root rm -f "$resolved"
