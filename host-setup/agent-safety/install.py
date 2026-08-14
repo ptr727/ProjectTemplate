@@ -417,6 +417,12 @@ def main():
                         help="read-only: compare this machine's stamp against this checkout and exit")
     args = parser.parse_args()
 
+    # The stamp step calls datetime.UTC, a 3.11 API, so an older interpreter is refused up front rather than crashing mid-install.
+    # A capability probe rather than a version tuple, which the linter reads as dead code under the py313 target.
+    if not hasattr(datetime, "UTC"):
+        sys.stderr.write("This installer and the hook require Python 3.11+. Run it with a newer python3.\n")
+        return 1
+
     # Expanduser resolves a CLAUDE_HOME set in `~/...` form to the home dir rather than a literal `~` dir.
     claude_home_env = os.environ.get("CLAUDE_HOME")
     claude_home = pathlib.Path(claude_home_env).expanduser() if claude_home_env else pathlib.Path.home() / ".claude"

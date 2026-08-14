@@ -84,6 +84,9 @@ jobs:
       # @latest rather than a version pin, since a `uvx <tool>@<ver>` pin is nothing Dependabot tracks and would silently go stale, where the action SHA below is tracked.
       - name: Setup uv step
         uses: astral-sh/setup-uv@08807647e7069bb48b6ef5acd8ec9567f424441b # v8.1.0
+        with:
+          # The interpreter for the uv-run steps matches the pyproject py313 target, bumped in lockstep with it.
+          python-version: "3.13"
 
       - name: Lint Python step
         run: uvx ruff@latest check .
