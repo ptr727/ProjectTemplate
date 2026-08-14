@@ -92,9 +92,11 @@ scope-widened commit, a rewritten shared history, a destructive reset).
   }
   ```
 
-  `sig` must read `G` (good signature) or `U` (good signature, undefined trust: GPG-only, common
-  on a freshly generated key before its trust is set to ultimate). SSH's `allowed_signers` carries
-  no trust concept, so `U` never applies there. `sig` is git's own verdict char. Don't grep localized
+  `sig` must read `G` (good signature) or `U` (good signature, unrecognized signer). For GPG, `U`
+  is a valid signature from a key whose trust level is merely undefined, common right after
+  generating a new key. For SSH, it's a valid signature from a key not found in the local
+  `allowed_signers` file, which doesn't affect whether GitHub itself verifies the commit, only
+  local `git verify-commit` output. `sig` is git's own verdict char. Don't grep localized
   "Good" text, since that varies by git version and locale. Anything else, or the commit failing
   outright, means **do not commit**: surface the actual error to the developer and stop at
   `git add`. Nothing else is contrary evidence: not an unreachable agent, not a config value, not a
