@@ -53,17 +53,20 @@ scope-widened commit, a rewritten shared history, a destructive reset).
   `ssh-agent` running at all (the common case on Git for Windows), just as GPG can sign
   agent-backed or straight from a keyring. **Probing agent liveness (`ssh-add -L`, a `gpg-agent`
   check) is not a valid test and must not be used.** It tests one specific delivery path, not
-  whether `git commit -S` succeeds, and a host that signs straight from a key file fails that
-  probe while signing correctly.
+  whether a commit actually ends up signed, and a host that signs straight from a key file fails
+  that probe while signing correctly.
 - **Verify with a real scratch commit, read back with git's own verdict, not a text grep.** This
   single probe is tech-agnostic (SSH agent-backed, SSH key-file, GPG agent-backed, and GPG keyring
   all exercise the same code path) and doubles as the identity check below. Run it once before the
-  first agent-authored commit of a session. Don't assume a prior session left config correct:
+  first agent-authored commit of a session. Don't assume a prior session left config correct. The
+  commit below is plain, deliberately no `-S`: forcing it would still succeed on a host where
+  `commit.gpgsign` is unset or false, which is the exact default-config gap this probe exists to
+  catch, since every real commit an agent makes is plain too:
   ```sh
   d=$(mktemp -d "${TMPDIR:-/tmp}/sign-check.XXXXXX") && (
     trap 'rm -rf "$d"' EXIT
     git init -q "$d" \
-      && git -C "$d" commit -S --allow-empty -q -m check \
+      && git -C "$d" commit --allow-empty -q -m check \
       && git -C "$d" log -1 --format='sig=%G? author=%an <%ae> committer=%cn <%ce>'
   )
   ```
@@ -72,10 +75,10 @@ scope-widened commit, a rewritten shared history, a destructive reset).
   $d = Join-Path $env:TEMP ([guid]::NewGuid())
   try {
     git init -q "$d"
-    git -C "$d" commit -S --allow-empty -q -m check
+    git -C "$d" commit --allow-empty -q -m check
     git -C "$d" log -1 --format='sig=%G? author=%an <%ae> committer=%cn <%ce>'
   } finally {
-    Remove-Item -Recurse -Force "$d"
+    if (Test-Path "$d") { Remove-Item -Recurse -Force "$d" }
   }
   ```
   `sig` must read `G`, git's own good-signature verdict char. Don't grep localized

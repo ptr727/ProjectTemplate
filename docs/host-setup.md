@@ -241,7 +241,7 @@ git config --global --list | grep -E "user\.|signing|gpg\."
 d=$(mktemp -d "${TMPDIR:-/tmp}/sign-check.XXXXXX") && (
   trap 'rm -rf "$d"' EXIT
   git init -q "$d" \
-    && git -C "$d" commit -S --allow-empty -q -m check \
+    && git -C "$d" commit --allow-empty -q -m check \
     && git -C "$d" log -1 --format='sig=%G? author=%an <%ae> committer=%cn <%ce>'
 )
 gh auth status
@@ -260,10 +260,10 @@ git config --global --list | Select-String "user\.|signing|gpg\."
 $d = Join-Path $env:TEMP ([guid]::NewGuid())
 try {
   git init -q "$d"
-  git -C "$d" commit -S --allow-empty -q -m check
+  git -C "$d" commit --allow-empty -q -m check
   git -C "$d" log -1 --format='sig=%G? author=%an <%ae> committer=%cn <%ce>'
 } finally {
-  Remove-Item -Recurse -Force "$d"
+  if (Test-Path "$d") { Remove-Item -Recurse -Force "$d" }
 }
 gh auth status
 ```

@@ -38,7 +38,7 @@ git config --global --get gpg.format        # ssh for an SSH key; unset or openp
 d=$(mktemp -d "${TMPDIR:-/tmp}/sign-check.XXXXXX") && (
   trap 'rm -rf "$d"' EXIT
   git init -q "$d" \
-    && git -C "$d" commit -S --allow-empty -q -m check \
+    && git -C "$d" commit --allow-empty -q -m check \
     && git -C "$d" log -1 --format='sig=%G? author=%an <%ae> committer=%cn <%ce>'
 )
 ```
