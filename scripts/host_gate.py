@@ -27,6 +27,7 @@ from __future__ import annotations
 import argparse
 import json
 import re
+import shlex
 import subprocess
 import sys
 from pathlib import Path
@@ -132,6 +133,8 @@ def field_problems(entry: dict) -> list[str]:
             problems.append(f'minimum must be dot-separated integers or null, not {entry["minimum"]!r}')
     if 'source' in entry and not isinstance(entry['source'], dict):
         problems.append('source must be an object')
+    if 'remedy' in entry and not isinstance(entry['remedy'], dict):
+        problems.append('remedy must be an object')
     if 'probes' in entry:
         probes = entry['probes']
         if (not isinstance(probes, list) or not probes
@@ -197,6 +200,18 @@ def contract_problems(tools: list[dict]) -> list[str]:
         for plat in sorted(set(src) & set(PLATFORM_KEYS)):
             if not isinstance(src[plat], str) or not src[plat]:
                 problems.append(f'{name} source.{plat} is empty, so a host on that platform is told to upgrade and not where from')
+        # The remedy is shape-checked and not required, so a repository floor without one degrades to the source line rather than failing the merge.
+        # Requiring it fleet-wide is the hub declaration's contract, held by spec/validate.py and scripts/test_bootstrap.py rather than here.
+        rem = t.get('remedy')
+        if rem is not None and not isinstance(rem, dict):
+            problems.append(f'{name} remedy must be an object keyed by platform, so its command was not read')
+        elif isinstance(rem, dict):
+            stray = sorted(set(rem) - set(PLATFORM_KEYS))
+            if stray:
+                problems.append(f'{name} remedy names {", ".join(stray)}, which no platform reads - use {", ".join(PLATFORM_KEYS)}')
+            for plat in sorted(set(rem) & set(PLATFORM_KEYS)):
+                if not isinstance(rem[plat], str) or not rem[plat]:
+                    problems.append(f'{name} remedy.{plat} is empty, so a host on that platform is shown a command that is not one')
     return problems
 
 
@@ -259,6 +274,65 @@ def merge(base: list[dict], local: list[dict]) -> tuple[list[dict], list[str]]:
     return [by_key[k] for k in sorted(by_key)], rejected
 
 
+def platform_key() -> str:
+    """The PLATFORM_KEYS member the running host reads its source and remedy under."""
+    if sys.platform.startswith('linux'):
+        return 'linux'
+    return 'macos' if sys.platform == 'darwin' else 'windows'
+
+
+def platform_field(tool: dict, field: str) -> str | None:
+    """The current platform's value under `field`, or None where the entry does not usably carry one.
+
+    The shape checks report a malformed declaration, and this read stays crash-free beside them,
+    so one bad field costs its own output line rather than the whole run and the findings already
+    collected.
+    """
+    values = tool.get(field)
+    value = values.get(platform_key()) if isinstance(values, dict) else None
+    return value if isinstance(value, str) and value else None
+
+
+def quote_argument(value: str) -> str:
+    """`value` as one shell word, for a printed command a reader pastes back into their shell."""
+    if platform_key() == 'windows':
+        return f'"{value}"' if ' ' in value else value
+    return shlex.quote(value)
+
+
+def resolve_remedy(command: str, root: Path | None = None) -> str:
+    """A remedy command with a repo-relative installer path made absolute against this checkout.
+
+    The catalog stores host-setup/ paths repo-relative so the data stays portable, and the gate
+    runs from any working directory, so the path is resolved against the tree this script lives in
+    and quoted where the shell needs it, to keep the printed command runnable as printed.
+    """
+    if not command.startswith('host-setup/'):
+        return command
+    script, _, rest = command.partition(' ')
+    resolved = str((root or Path(__file__).resolve().parent.parent) / script)
+    if platform_key() == 'windows':
+        # PowerShell runs a quoted path only through the call operator, and a single-quoted literal doubles its own quote character.
+        escaped = resolved.replace("'", "''")
+        quoted = f"& '{escaped}'" if resolved != escaped or ' ' in resolved else resolved
+    else:
+        quoted = shlex.quote(resolved)
+    return f'{quoted} {rest}' if rest else quoted
+
+
+def overlay_above(start: Path) -> Path | None:
+    """The nearest ancestor of `start` carrying a host-tools.json, or None where none does.
+
+    A bare run reads only the declaration at the working directory itself, so an overlay at the
+    root of the repo the run is inside goes unread without a word when the run starts in a
+    subdirectory. Naming that directory lets the run say what it skipped and which re-run counts it.
+    """
+    for parent in start.resolve().parents:
+        if (parent / 'host-tools.json').is_file():
+            return parent
+    return None
+
+
 def check(tools: list[dict]) -> list[str]:
     """Every declared tool against its floor, returning one line per failure."""
     issues = []
@@ -292,12 +366,14 @@ def check(tools: list[dict]) -> list[str]:
             issues.append(f'{name} reported {version!r}, which is not dot-separated integers, so its floor was not applied')
         elif compare(found, floor) < 0:
             # The remedy rides on the finding rather than beside it, since a separate line would count as a second issue.
-            src = (tool.get('source') or {}).get('linux' if sys.platform.startswith('linux') else 'macos' if sys.platform == 'darwin' else 'windows')
+            src = platform_field(tool, 'source')
+            rem = platform_field(tool, 'remedy')
             # The head line stays the scannable fact and the rationale follows it, rather than being inlined into it.
             # An entry's why runs to a paragraph, so inlining made the one line a reader scans in CI output unreadable, and the longest entry is not the one that needs it least.
             issues.append(f'{name} {version} is below the {floor_text} floor'
                           + f'\nWHY: {tool["why"]}'
-                          + (f'\nINSTALL FROM: {src}' if src else ''))
+                          + (f'\nINSTALL FROM: {src}' if src else '')
+                          + (f'\nREMEDY: {resolve_remedy(rem)}' if rem else ''))
         else:
             NOTES.append(f'{name} {version} meets the {floor_text} floor')
     return issues
@@ -306,7 +382,7 @@ def check(tools: list[dict]) -> list[str]:
 def main(argv: list[str] | None = None) -> int:
     ap = argparse.ArgumentParser(description='Check host tool versions against the hub declaration plus a repository\'s own.')
     ap.add_argument('--spec', default=str(SPEC), help='path to the hub declaration, for testing')
-    ap.add_argument('--repo', default='.', help='repository whose host-tools.json layers over the hub one')
+    ap.add_argument('--repo', default=None, help='repository whose host-tools.json layers over the hub one, default the working directory')
     ap.add_argument('--no-local', action='store_true', help='read the hub declaration alone, ignoring the repository')
     ap.add_argument('--quiet', action='store_true', help='print failures only, dropping the per-tool notes')
     a = ap.parse_args(argv)
@@ -321,7 +397,7 @@ def main(argv: list[str] | None = None) -> int:
 
     NOTES.clear()
     rejected: list[str] = []
-    local_path = Path(a.repo) / 'host-tools.json'
+    local_path = Path(a.repo or '.') / 'host-tools.json'
     # A repository layering onto the hub is the normal case, and carrying no local file is the common one, so its absence is silent.
     if not a.no_local and local_path.is_file():
         local = read_declaration(local_path, 'repository host tool declaration')
@@ -330,6 +406,12 @@ def main(argv: list[str] | None = None) -> int:
             return 2
         tools, rejected = merge(tools, local)
         NOTES.append(f'{local_path} layered {len(local)} local entry(s) over the hub declaration')
+
+    # Only a bare run warns, since an explicit --repo and --no-local are each a choice the caller made.
+    # The default sits at None rather than '.' so the two are tellable apart.
+    skipped = None
+    if a.repo is None and not a.no_local and not local_path.is_file():
+        skipped = overlay_above(Path.cwd())
 
     # The contract is read after layering, since neither file can see what the other adds to it.
     issues = rejected + contract_problems(tools) + check(tools)
@@ -346,6 +428,9 @@ def main(argv: list[str] | None = None) -> int:
         # After the findings and outside the count, since a note is not one.
         for note in NOTES:
             print(f'         note: {note}')
+    if skipped is not None:
+        # Outside --quiet, because a silently skipped overlay is the omission this line exists to name.
+        print(f'         warning: {skipped} carries a host-tools.json overlay this bare run did not read - re-run with --repo {quote_argument(str(skipped))} so its floors count')
     return 1 if issues else 0
 
 

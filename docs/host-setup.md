@@ -43,7 +43,7 @@ Presence is the weaker half of this contract. Both host defects this fleet has a
 
 Neither `node` nor `dotnet` is in the table above, deliberately: they serve the repositories that need them rather than the fleet contract, and a repository needing one declares it in a `host-tools.json` of its own, which [`scripts/host_gate.py`][host-gate] merges over this one. The merge tightens only, so a repository may raise a floor or add one and may not lower or remove one.
 
-**A host being stood up needs no Python.** The tooling under [`host-setup/`][host-setup-dir] is shell and PowerShell, deliberately, because requiring an interpreter to upgrade a package or install a tool would make the first step of standing a host up depend on the thing that step exists to provide. The Python floor above is a development requirement, meaning [`scripts/`][scripts-dir] and [`spec/`][spec-dir], and a host that only runs services never has to meet it. `bootstrap.sh` needs `curl` and `tar`, both of which a base install carries or can install without a network tool of its own. `bootstrap.ps1` needs only `tar.exe`, which has shipped with Windows since 1803, and installs its one further dependency, PowerShell 7, itself through `winget`.
+**A host being stood up needs no Python.** The tooling under [`host-setup/`][host-setup-dir] is shell and PowerShell, deliberately, because requiring an interpreter to upgrade a package or install a tool would make the first step of standing a host up depend on the thing that step exists to provide. The Python floor above is a development requirement, meaning [`scripts/`][scripts-dir] and [`spec/`][spec-dir], and a host that only runs services never has to meet it. `bootstrap.sh` needs `curl` and `tar`, both of which a base install carries or can install without a network tool of its own. `bootstrap.ps1` needs only `tar.exe`, which has shipped with Windows since 1803, and installs its one further dependency, PowerShell 7, itself through `winget`. The one exception is the skills step at the end of a stand-up, which drives the Python installer in [`scripts/`][scripts-dir], and it runs last for exactly that reason: `install-tools` has provided the interpreter by then, and run alone on a host without one it stops and names the tools step as its prerequisite.
 
 **Standing a host up.** [`host-setup/`][host-setup-dir] carries the tooling that makes a host satisfy this contract, and its README is the usage. A host with nothing runs [`host-setup/bootstrap.sh`][bootstrap], which fetches this repository and runs that tooling from the fetched tree. A native Windows host with nothing runs [`host-setup/bootstrap.ps1`][bootstrap-ps1] the same way, which finds or installs PowerShell 7 before it fetches anything, since every script under [`host-setup/windows/`][host-setup-windows] requires it. Neither is called by [`scripts/host_gate.py`][host-gate] and neither calls it: the gate measures a host against the floors above, and the tooling is a remedy a person chooses when the gate reports a gap.
 
@@ -213,10 +213,28 @@ Run it bare, with no `VAR=value` prefix of its own, which would report a value t
 
 Withdraw a grant by deleting the `env` entry and restarting. Nothing expires it, so a grant left in place stays live for every later session in that checkout, which is the reason to remove it once the work that needed it is done.
 
+## Fleet Skills Install
+
+The fleet's agent skills are hand-authored in the hub at `.agents/skills/` and installed per user by [`scripts/skills_install.py`][skills-install]: an overlay copy into `~/.agents/skills/` for Codex and opencode, and a user-scope Claude Code plugin install where the `claude` CLI is present. Every run stamps the hub commit it installed from into `~/.agents/skills-install-stamp.json`, and `--report` reads that stamp against the checkout and exits non-zero where the machine is behind it.
+
+Install from a hub checkout, once per machine:
+
+```shell
+python3 scripts/skills_install.py            # or the scripts/skills_install.sh / .ps1 wrapper
+python3 scripts/skills_install.py --report   # read-only: is this machine current?
+```
+
+A bootstrapped host does not run this by hand: the `--host` mode of [`host-setup/bootstrap.sh`][bootstrap] and [`bootstrap.ps1`][bootstrap-ps1] ends with the same installer, driven from the fetched tree by `install-skills.sh` or `install-skills.ps1`, and the `--skills` action runs that step on its own.
+
+The `claude` CLI is deliberately absent from the tool catalog in [`spec/host-tools.json`][host-tools]. A Codex-only machine is a complete machine, so the installer degrades where the CLI is missing, still landing the overlay half, saying so, and recording the partial install in the stamp, where cataloging the CLI would instead fail every host that never wanted it.
+
+**The refresh cadence**: re-run the installer when `--report` exits non-zero, and after any hub merge that touches `.agents/skills/`. Session entry runs no automatic check, by design: the trigger is suspicion, and a rule that keeps needing to be restated in a session is the loudest form of it, which is the symptom the `fleet-conformance-check` skill routes to this report. The maintainer runs the refresh by hand, and an automated one stays out of scope until the fleet has evidence the manual cadence fails.
+
 ## Verify Host Setup
 
 ```shell
 python3 scripts/host_gate.py           # presence and version floors, from spec/host-tools.json
+python3 scripts/skills_install.py --report   # the skills install stamp is current
 git config --global --list | grep -E "user\.|signing|gpg\."
 ssh-add -L                                   # should list your public key
 git -c gpg.format=ssh commit -S --allow-empty -m "verify-signing"
@@ -226,12 +244,13 @@ gh auth status
 
 If signing fails locally, the devcontainer will fail too, so fix here first.
 
-The gate replaced a line that ran `--version` on each tool and read only whether it answered. That form reported a host carrying the broken `gh` as fully set up, which is the failure it exists to stop. It exits non-zero on a missing required tool or one below its floor, prints the defect behind the floor rather than the number alone, and names where to install from.
+The gate replaced a line that ran `--version` on each tool and read only whether it answered. That form reported a host carrying the broken `gh` as fully set up, which is the failure it exists to stop. It exits non-zero on a missing required tool or one below its floor, and a below-floor finding prints the defect behind the floor rather than the number alone, names where to install from, and prints the command that installs or upgrades the tool on the current platform, so that failure carries its own fix. A missing tool prints the one-line fact, and [`host-setup/`][host-setup-dir] is its remedy.
 
 **This block is POSIX, and on native Windows two lines need translating.** Run the POSIX form from WSL2 or Git Bash per the shell note, or use the PowerShell form below. Git Bash inherits the Windows `PATH`, so `python3` reaches the same Store alias stub it does in PowerShell and reports a working interpreter as missing.
 
 ```powershell
 py -3 scripts/host_gate.py                   # presence and version floors, from spec/host-tools.json
+py -3 scripts/skills_install.py --report     # the skills install stamp is current
 git config --global --list | Select-String "user\.|signing|gpg\."
 ssh-add -L                                   # should list your public key
 git -c gpg.format=ssh commit -S --allow-empty -m "verify-signing"
@@ -252,6 +271,7 @@ Verified on Windows 11 Pro 10.0.26200 with PowerShell 7.6.4, where `py -3 script
 | Run the repo's own gates and tests | Python 3 covers `scripts/` and `spec/` with no packages to install |
 | Drive the PR and Copilot review loop | `gh` and an authenticated session |
 | Let an agent work with the `gh` credentials live | the write-safety kit is installed |
+| Have the fleet skills surface in every agent session | the skills install stamp is current per `skills_install.py --report` |
 
 A host that fails any row is not ready for the procedure that row names, and the fix belongs on the host rather than in a repo.
 
@@ -275,6 +295,7 @@ A host that fails any row is not ready for the procedure that row names, and the
 [issue-483]: https://github.com/ptr727/ProjectTemplate/issues/483
 [operations]: ../OPERATIONS.md
 [scripts-dir]: ../scripts/
+[skills-install]: ../scripts/skills_install.py
 [spec-dir]: ../spec/
 [ssh-signing]: ./ssh-signing.md
 [standup]: ../STANDUP.md

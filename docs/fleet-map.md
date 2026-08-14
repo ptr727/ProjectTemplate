@@ -50,7 +50,6 @@ flowchart TD
   scripts["scripts/ hub-hosted tooling"] --> audit
   skills[".agents/skills/ source"] --> build[build_dist.py]
   build --> plugin[".claude-plugin/ generated"]
-  build -.->|"G8: no CI staleness gate"| plugin
   plugin --> install[skills_install.py]
   skills --> install
   install --> host["host: ~/.agents/skills + plugin + stamp"]
@@ -76,13 +75,13 @@ flowchart TD
   fetch --> upgrade["upgrade host packages"]
   upgrade --> tools["install-tools: git gh jq node python uv dotnet"]
   tools --> github["setup-github: identity, SSH signing, gh auth"]
-  github --> safety["agent-safety install: write guard + CLAUDE.md blocks"]
-  safety -.->|"G1: step missing today"| skillsinstall["skills install"]
-  skillsinstall -.-> verify["verify: host_gate + skills_install --report"]
-  safety --> session["first agent session"]
+  github --> skillsinstall["install-skills: fleet skills for the user"]
+  skillsinstall --> safety["agent-safety install: write guard + CLAUDE.md blocks"]
+  safety --> verify["verify: host_gate + skills_install --report"]
+  verify --> session["first agent session"]
 ```
 
-Owned by [`host-setup/`][host-setup-readme] and [`docs/host-setup.md`][host-setup-doc]. Gaps on this path: G1 (the skills install has no home in the provisioning flow, so a fully bootstrapped host has every tool and no fleet skills).
+Owned by [`host-setup/`][host-setup-readme] and [`docs/host-setup.md`][host-setup-doc]. No open gaps sit on this path: G1, the skills install with no home in the provisioning flow, is closed and its row records the resolution.
 
 ### A New Repository
 
@@ -92,14 +91,13 @@ An agent is told to create or stand up a repo. The router of last resort is the 
 flowchart TD
   ask["stand up a new repo"] --> route["AGENTS.md Fleet Bootstrap routes by repo state"]
   route --> s0["STANDUP section 0: identity and signing, host gate"]
-  s0 -.->|"G2: bare run skips repo floors silently"| s0
   s0 --> s1["section 1: classify, registry entry, carry instruction set first"]
   s1 --> s2["sections 2-4: baseline, workflows, settings and rulesets"]
   s2 --> s5["section 5: run the audit"]
   s5 --> report["committed report under reports/"]
 ```
 
-Owned by [`STANDUP.md`][standup], packaged as the `standup-a-repo` skill. Gaps on this path: G2 (a bare `host_gate.py` run before the target's overlay exists reports nothing about the floors it skipped).
+Owned by [`STANDUP.md`][standup], packaged as the `standup-a-repo` skill. No open gaps sit on this path: G2, the silent bare-run overlay skip, is closed and its row records the resolution.
 
 ### A Stale Repository
 
@@ -113,11 +111,11 @@ flowchart TD
   apply -.->|"G4: deleted paths live on in prose"| apply
   apply -.->|"G5: intent-fidelity drift is invisible"| apply
   audit --> hostcheck["host gate on the way in"]
-  hostcheck -.->|"G3: a failed floor names no install command"| dead["operator improvises the install"]
+  hostcheck --> remedy["a failed floor prints its install command"]
   apply --> reaudit["re-audit"] --> report["committed report"]
 ```
 
-Owned by [`RESYNC.md`][resync] and [`AUDIT.md`][audit], packaged as the `resync-a-repo` skill with the `carried-instruction-file-guard` and `copilot-instructions-keeper` skills firing inside it. Gaps on this path: G3 (the audit-to-install bridge), G4 (deletion sweeps miss prose), G5 (intent-fidelity drift detection).
+Owned by [`RESYNC.md`][resync] and [`AUDIT.md`][audit], packaged as the `resync-a-repo` skill with the `carried-instruction-file-guard` and `copilot-instructions-keeper` skills firing inside it. Gaps on this path: G4 (deletion sweeps miss prose), G5 (intent-fidelity drift detection). G3, the audit-to-install bridge, is closed and its row records the resolution.
 
 ### Daily Development in a Conformant Repository
 
@@ -125,7 +123,7 @@ The steady state. An agent writes Python, C#, shell, or config in a repo that al
 
 ```mermaid
 flowchart TD
-  start["session start"] -.->|"G6: staleness check not wired in"| stale["skills_install --report"]
+  start["session start"] -->|"restated-rule symptom"| stale["skills_install --report, per the documented cadence"]
   start --> work["work: codestyle, commit, and doc skills fire by trigger"]
   work --> gates["pre-commit gates: prose lint, eol"]
   gates --> pr["pull request"]
@@ -134,7 +132,7 @@ flowchart TD
   merge -.->|"G7: operational PR-only is prose-enforced"| merge
 ```
 
-Owned by the per-language sections of [`CODESTYLE.md`][codestyle] and the conduct skills. Gaps on this path: G6 (nothing at session entry checks whether this machine's skills are stale), G7 (the operational develop ruleset blocks no direct commit).
+Owned by the per-language sections of [`CODESTYLE.md`][codestyle] and the conduct skills. Gaps on this path: G7 (the operational develop ruleset blocks no direct commit). G6, the unwired staleness check, is closed and its row records the resolution.
 
 ### Hub-Side Operations
 
@@ -146,15 +144,14 @@ flowchart LR
     reg["registry iterate"] --> peraudit["per-repo audit"] --> issues["convergence issues"]
   end
   subgraph lifecycle["skill lifecycle"]
-    author["edit .agents/skills/"] --> gen["build_dist.py"] --> check["--check"] --> prq["PR"] --> merged["merge"] --> refresh["hosts re-run installer"]
-    author -.->|"G8: a missed regen ships silently"| prq
+    author["edit .agents/skills/"] --> gen["build_dist.py"] --> check["CI runs --check"] --> prq["PR"] --> merged["merge"] --> refresh["hosts re-run installer"]
   end
   subgraph rollout["carried-change rollout"]
     specedit["spec or law edit"] --> revendor["fleet re-vendor per RESYNC"]
   end
 ```
 
-Owned by [`AUDIT.md`][audit] section 10, [`GOVERNANCE.md` "Hub-Hosted Tooling"][governance-hub-hosted-tooling], and [`.agents/skills/README.md`][skills-readme]. Gaps on this path: G8 (no CI gate runs `build_dist.py --check`), G9 and G10 (topics and the skill lifecycle itself lack skills), G12 (conduct rules are scattered).
+Owned by [`AUDIT.md`][audit] section 10, [`GOVERNANCE.md` "Hub-Hosted Tooling"][governance-hub-hosted-tooling], and [`.agents/skills/README.md`][skills-readme]. Gaps on this path: G9 and G10 (topics and the skill lifecycle itself lack skills), G12 (conduct rules are scattered).
 
 ## Skills Install Model
 
@@ -162,25 +159,25 @@ Owned by [`AUDIT.md`][audit] section 10, [`GOVERNANCE.md` "Hub-Hosted Tooling"][
 
 The lifecycle chain as built: a skill is hand-authored under [`.agents/skills/`][skills-readme], [`scripts/build_dist.py`][build-dist] generates the Claude Code plugin under [`.claude-plugin/`][marketplace], and [`scripts/skills_install.py`][skills-install] installs both forms per machine (an overlay copy into `~/.agents/skills/` for Codex and opencode, a user-scope plugin install for Claude Code), stamping the hub commit into `~/.agents/skills-install-stamp.json`. `skills_install.py --report` is the read-only staleness check and exits non-zero when the machine is behind the checkout.
 
-Four wiring points close the model, each a register gap with its own deliverable:
+Four wiring points close the model, and each is in place:
 
-1. **Bootstrap** (G1): [`host-setup/bootstrap.sh`][bootstrap] and [`bootstrap.ps1`][bootstrap-ps1] gain a skills step after the agent-safety install, degrading gracefully when the `claude` CLI is absent (the overlay half still lands, and the stamp records the partial install).
-2. **Host contract** (G1): [`docs/host-setup.md`][host-setup-doc] gains a section stating the install and the verify command, and the [`README.md`][readme] "Using This Repo" section names the skills install as the fourth deployed thing.
-3. **Session entry** (G6): the tail of [`AGENTS.md`][agents] already says a rule that keeps needing restating signals a stale install, and the `fleet-conformance-check` skill already runs the report, so the gap closes by stating the cadence in both places rather than by new tooling.
-4. **Refresh cadence** (G6): re-run the installer when `--report` exits non-zero, and after any hub merge that touches `.agents/skills/`. The maintainer runs it by hand today, and an automated refresh is deliberately out of scope until the fleet has evidence the manual cadence fails.
+1. **Bootstrap** (G1, closed): [`host-setup/bootstrap.sh`][bootstrap] and [`bootstrap.ps1`][bootstrap-ps1] end their host mode with a skills step, driven by the `install-skills` pair in the platform directories, degrading gracefully when the `claude` CLI is absent (the overlay half still lands, and the stamp records the partial install). Each loader hands the commit it resolved to the installer, so a stamp written from the tarball tree stays checkable.
+2. **Host contract** (G1, closed): [`docs/host-setup.md`][host-setup-doc] states the install and the verify command in its "Fleet Skills Install" section, and the [`README.md`][readme] "Using This Repo" section names the skills install among its four deployed things.
+3. **Session entry** (G6, closed): the tail of [`AGENTS.md`][agents] says a rule that keeps needing restating signals a stale install, and the `fleet-conformance-check` skill runs the report and states the cadence, so the symptom routes to the check without new tooling.
+4. **Refresh cadence** (G6, closed): [`docs/host-setup.md`][host-setup-doc] "Fleet Skills Install" states it: re-run the installer when `--report` exits non-zero, and after any hub merge that touches `.agents/skills/`. The maintainer runs it by hand, and an automated refresh is deliberately out of scope until the fleet has evidence the manual cadence fails.
 
 ## Gap Register
 
 | ID | Gap | Owner | Phase |
 | --- | --- | --- | --- |
-| G1 | Skills install is absent from the cold-start flow | script + doc | P1 |
-| G2 | Host-tools repo overlay is silently skippable | script + doc | P1 |
-| G3 | A failed tool floor names no install remedy | spec + script | P1 |
+| G1 | Skills install is absent from the cold-start flow | script + doc | closed |
+| G2 | Host-tools repo overlay is silently skippable | script + doc | closed |
+| G3 | A failed tool floor names no install remedy | spec + script | closed |
 | G4 | Deletion sweeps miss prose describing the deleted path | doc | P3 |
 | G5 | Intent-fidelity carried files have no drift detection | spec + decision | P3 |
-| G6 | Session entry never checks skill staleness | doc + skill | P1 |
+| G6 | Session entry never checks skill staleness | doc + skill | closed |
 | G7 | Operational develop PR-only rule is prose-enforced | decision | P3 |
-| G8 | Generated plugin can ship stale with no CI gate | CI | P1 |
+| G8 | Generated plugin can ship stale with no CI gate | CI | closed |
 | G9 | WORKFLOW.md and AUDIT.md have no skill coverage | skill | P2 |
 | G10 | The skill lifecycle itself has no skill | skill | P2 |
 | G11 | Peer messaging is live but undeclared | doc | P0 |
@@ -188,38 +185,32 @@ Four wiring points close the model, each a register gap with its own deliverable
 
 Each gap's handoff below states who detects it, what closes it, and the test that proves it closed. The handoff sentence is the contract the closing pull request implements.
 
-### G1: Skills Install Is Absent From the Cold Start
+### G1: Skills Install Is Absent From the Cold Start (Closed)
 
-- **Gap** - A host bootstrapped end to end via `host-setup/` has every tool and no fleet skills, because no provisioning step runs [`scripts/skills_install.py`][skills-install].
-- **Checked** - Zero matches for `skills_install` under `host-setup/`, and [`README.md`][readme] "Using This Repo" opens with "Three things are deployed from here".
-- **Handoff** - When the bootstrap reaches the end of its host mode, it runs the skills installer from the fetched hub tree, and the verify step runs `skills_install.py --report` beside `host_gate.py`.
-- **Closed when** - A fresh-host run per [`host-setup/README.md`][host-setup-readme] ends with the stamp present and `--report` exiting zero, and the README names four deployed things.
-- **Target** - [`bootstrap.sh`][bootstrap] + [`bootstrap.ps1`][bootstrap-ps1] step, [`docs/host-setup.md`][host-setup-doc] section, [`README.md`][readme] edit. The closing PR decides how the step degrades when the `claude` CLI is absent, and whether that CLI joins [`spec/host-tools.json`][host-tools] as a cataloged tool.
+- **Gap** - A host bootstrapped end to end via `host-setup/` had every tool and no fleet skills, because no provisioning step ran [`scripts/skills_install.py`][skills-install].
+- **Resolution** - The bootstrap host mode ends with a skills step: `install-skills.sh` and `install-skills.ps1` drive the installer from the fetched tree, a `--skills` action runs the step on its own, and the bootstrap report reads `--report` beside the other status lines. Each loader hands the commit it resolved to the installer via `SKILLS_SOURCE_COMMIT`, so the stamp written from a tarball tree stays checkable and `--report` exits zero on a fresh host, which is this row's closing test. [`docs/host-setup.md`][host-setup-doc] carries the "Fleet Skills Install" section with the verify line, and [`README.md`][readme] "Using This Repo" names four deployed things.
+- **Decisions** - The `claude` CLI stays out of [`spec/host-tools.json`][host-tools]: a Codex-only machine is a complete machine, so the installer degrades where the CLI is absent, landing the overlay half and recording the partial install in the stamp. The skills step is the recorded exception to `host-setup/`'s no-Python and independent-fetchability rules, and it runs last in a stand-up so `install-tools` provides its interpreter first.
+- **Cross-links** - [#671][issue-671] and [#673][issue-673] touch the same `host-setup/` scripts and stay open on their own tracks.
 
-### G2: Host-Tools Repo Overlay Is Silently Skippable
+### G2: Host-Tools Repo Overlay Is Silently Skippable (Closed)
 
-- **Gap** - [`scripts/host_gate.py`][host-gate] run without `--repo` checks only the fleet floors, and reports nothing about the target-repo overlay floors it skipped. [`STANDUP.md`][standup] section 0 works around this in prose.
-- **Checked** - STANDUP section 0 states a bare run "reports nothing about the omission".
-- **Handoff** - When `host_gate.py` runs bare while the working directory is inside a repo carrying a `host-tools.json` overlay, it says so in its output, naming the `--repo` re-run that would count the overlay.
-- **Closed when** - A bare run inside such a repo prints the warning, and the STANDUP prose can drop the workaround sentence.
-- **Target** - `host_gate.py` warning, [`STANDUP.md`][standup] section 0 wording.
+- **Gap** - [`scripts/host_gate.py`][host-gate] run without `--repo` read only the declaration at its own working directory, so a run started in a subdirectory of a repo carrying a `host-tools.json` overlay skipped that overlay without a word.
+- **Resolution** - A bare run whose working directory sits inside such a repo prints a warning naming the overlay's directory and the `--repo` re-run that counts it, asserted by the `TestBareRunOverlayWarning` cases in `scripts/test_host_gate.py`. An explicit `--repo` and `--no-local` each stay silent, since both are a choice the caller made. [`STANDUP.md`][standup] section 0 states the residual case the warning cannot cover, a target repo that does not exist yet, instead of the workaround sentence.
 
-### G3: A Failed Tool Floor Names No Install Remedy
+### G3: A Failed Tool Floor Names No Install Remedy (Closed)
 
-- **Gap** - The tool catalog detects a missing or stale tool, and the handoff back into `host-setup/` does not exist: a failed floor leaves the operator or agent to rediscover which installer provides the tool.
-- **Checked** - `host_gate.py` output names the tool and the floor, and no output names an install command. Each [`spec/host-tools.json`][host-tools] entry carries a per-platform `source` already.
-- **Handoff** - When `host_gate.py` reports a tool below its floor, its output names the command that installs or upgrades that tool on the current platform, derived from the catalog's `source` field, so the failure carries its own remedy.
+- **Gap** - The tool catalog detected a stale tool, and the handoff back into `host-setup/` did not exist: a failed floor left the operator or agent to rediscover which installer provides the tool.
+- **Resolution** - Each floored [`spec/host-tools.json`][host-tools] entry carries a per-platform `remedy` beside its `source`, and a below-floor failure prints it as a `REMEDY:` line, with a `host-setup/` path resolved against the checkout the gate runs from so the command is runnable as printed. The catalog's own note states the field's semantics.
 
 ```mermaid
 flowchart LR
-  fail["host_gate: tool below floor"] --> lookup["read source for the tool and platform"]
-  lookup --> remedy["output names the install command"]
+  fail["host_gate: tool below floor"] --> lookup["read remedy for the tool and platform"]
+  lookup --> remedy["output prints the install command"]
   remedy --> run["operator or agent runs it"]
   run --> recheck["re-run host_gate"] --> ok["proceed"]
 ```
 
-- **Closed when** - Every required tool's failure output names a runnable remedy, and [`scripts/test_bootstrap.py`][scripts-readme] asserts the mapping stays total.
-- **Target** - [`spec/host-tools.json`][host-tools] remedy mapping (or a derivation from `source`), `host_gate.py` output, test coverage.
+- **Closing test** - [`scripts/test_bootstrap.py`][test-bootstrap] asserts the mapping stays total per platform, with the one recorded not-applicable exception, and that a remedy handing back into an installer names a tool that installer manages. [`spec/validate.py`][validate] and the schema require a remedy on every hub floor. A repository overlay may still add a floor without one, in which case the failure degrades to the `INSTALL FROM:` source line.
 
 ### G4: Deletion Sweeps Miss Prose
 
@@ -227,7 +218,7 @@ flowchart LR
 - **Checked** - [`RESYNC.md`][resync] section 4 documents the incident and prescribes the manual remedy.
 - **Handoff** - When a resync deletes a file, the session reads the files whose job is to describe what the repo holds (the layout and operations sections) before shipping, per the RESYNC section 4 step.
 - **Closed when** - Either the manual step is judged sufficient and this row closes as `accepted`, or a lint that flags a stale description ships and the row names it.
-- **Target** - Decision first, optional [`scripts/prose_lint.py`][scripts-readme] check second.
+- **Target** - Decision first, optional [`scripts/prose_lint.py`][prose-lint] check second.
 
 ### G5: Intent-Fidelity Drift Is Invisible
 
@@ -237,13 +228,10 @@ flowchart LR
 - **Closed when** - Either the advisory surfaces in the audit report, or the row closes as `accepted` with the honest statement standing in [`AUDIT.md`][audit] and [`spec/fidelity-model.md`][fidelity-model].
 - **Target** - Decision, then candidate advisory in `spec/audit.py`.
 
-### G6: Session Entry Never Checks Skill Staleness
+### G6: Session Entry Never Checks Skill Staleness (Closed)
 
-- **Gap** - A machine with stale or missing skills behaves like a machine that never installed them, and nothing at session entry says so. The symptom is a rule that keeps needing to be restated.
-- **Checked** - [`AGENTS.md`][agents] names the symptom in its closing paragraph, and the `fleet-conformance-check` skill runs the report, but only when invoked.
-- **Handoff** - When a session starts work in a fleet repo, the documented cadence directs it to run `skills_install.py --report` from a hub checkout on suspicion, and the `fleet-conformance-check` skill is the trigger surface.
-- **Closed when** - The cadence is stated in [`docs/host-setup.md`][host-setup-doc] and the skill's own text, and the restated-rule symptom routes to the check in both.
-- **Target** - Doc wording, `fleet-conformance-check` skill text.
+- **Gap** - A machine with stale or missing skills behaves like a machine that never installed them, and nothing at session entry said so. The symptom is a rule that keeps needing to be restated.
+- **Resolution** - The cadence is stated in both places the row asked for. [`docs/host-setup.md`][host-setup-doc] "Fleet Skills Install" directs a re-run of the installer when `--report` exits non-zero and after any hub merge touching `.agents/skills/`, and the `fleet-conformance-check` skill carries the same cadence in its own "Refresh cadence" section, routing the restated-rule symptom to the report it already runs. No new tooling, by design: the trigger is suspicion, and session entry stays uninstrumented until the fleet has evidence the manual cadence fails.
 
 ### G7: Operational Develop PR-Only Is Prose-Enforced
 
@@ -253,13 +241,11 @@ flowchart LR
 - **Closed when** - The maintainer records the disposition, mirroring the [`spec/divergences.json`][divergences] vocabulary.
 - **Target** - A disposition, not necessarily code.
 
-### G8: Generated Plugin Can Ship Stale
+### G8: Generated Plugin Can Ship Stale (Closed)
 
-- **Gap** - `.claude-plugin/` is generated from `.agents/skills/`, and a merge that edits the source without re-running [`scripts/build_dist.py`][build-dist] ships a plugin that no longer matches it. `--check` exists and nothing in CI runs it.
-- **Checked** - [`.github/workflows/validate-task.yml`][validate-task] runs markdownlint, cspell, JSON validation, and actionlint, and does not run `build_dist.py --check`.
-- **Handoff** - When a pull request touches `.agents/skills/` or `.claude-plugin/`, CI runs `build_dist.py --check` and the aggregator gates on it.
-- **Closed when** - A PR desyncing the two trees fails the required check.
-- **Target** - A step in [`validate-task.yml`][validate-task].
+- **Gap** - `.claude-plugin/` is generated from `.agents/skills/`, and a merge that edits the source without re-running [`scripts/build_dist.py`][build-dist] would ship a plugin that no longer matches it.
+- **Resolution** - [`.github/workflows/validate-task.yml`][validate-task] runs `build_dist.py --check` as its own step in the lint job, on every pull request, and the required aggregator check gates on that job. A PR desyncing the two trees therefore fails the required check, which is this row's closing test.
+- **Provenance** - The step landed in [#676][pr-676], which predates this register's merge, so this row's original `Checked` claim was stale on arrival. Recording that here rather than silently deleting the row is the maintenance rule doing its job.
 
 ### G9: WORKFLOW.md and AUDIT.md Have No Skill
 
@@ -331,7 +317,7 @@ Agent-to-agent messaging on one host is a working method with measured value, an
 
 ## Simplified Technical English Evaluation
 
-Should agent-authored prose adopt ASD-STE100, a controlled language standard, or a lighter constrained house style? The criteria: does it improve agent instruction-following, does it compose with the enforcement that exists ([`scripts/prose_lint.py`][scripts-readme] and the character-set and semicolon rules), what does it cost to author, and does its vocabulary fit a technical fleet.
+Should agent-authored prose adopt ASD-STE100, a controlled language standard, or a lighter constrained house style? The criteria: does it improve agent instruction-following, does it compose with the enforcement that exists ([`scripts/prose_lint.py`][prose-lint] and the character-set and semicolon rules), what does it cost to author, and does its vocabulary fit a technical fleet.
 
 | Criterion | Full ASD-STE100 | Constrained house style |
 | --- | --- | --- |
@@ -354,11 +340,11 @@ Design-doc first: this doc merges, then each unchecked item becomes an issue lin
 
 ### P1: Close the Install Model
 
-- [ ] G1 bootstrap skills step, host-setup section, README fourth deployed thing (cross-links the open host-tooling issues [#671][issue-671] and [#673][issue-673], which touch the same scripts)
-- [ ] G2 `host_gate.py` bare-run warning
-- [ ] G3 failed-floor remedy output
-- [ ] G6 staleness cadence wording
-- [ ] G8 `build_dist.py --check` in CI
+- [x] G1 bootstrap skills step, host-setup section, README fourth deployed thing (cross-links the open host-tooling issues [#671][issue-671] and [#673][issue-673], which touch the same scripts)
+- [x] G2 `host_gate.py` bare-run warning
+- [x] G3 failed-floor remedy output
+- [x] G6 staleness cadence wording
+- [x] G8 `build_dist.py --check` in CI, found already in place via [#676][pr-676] and recorded closed
 
 ### P2: Close the Skill Coverage
 
@@ -406,6 +392,7 @@ Design-doc first: this doc merges, then each unchecked item becomes an issue lin
 [host-tools]: ../spec/host-tools.json
 [marketplace]: ../.claude-plugin/marketplace.json
 [peer-messaging]: ./peer-messaging.md
+[prose-lint]: ../scripts/prose_lint.py
 [readme]: ../README.md
 [repo-config-readme]: ../repo-config/README.md
 [repos]: ../registry/repos.json
@@ -414,12 +401,15 @@ Design-doc first: this doc merges, then each unchecked item becomes an issue lin
 [skills-install]: ../scripts/skills_install.py
 [skills-readme]: ../.agents/skills/README.md
 [standup]: ../STANDUP.md
+[test-bootstrap]: ../scripts/test_bootstrap.py
 [todo]: ../TODO.md
+[validate]: ../spec/validate.py
 [validate-task]: ../.github/workflows/validate-task.yml
 [workflow]: ../WORKFLOW.md
 
-<!-- Issues -->
+<!-- Issues and Pull Requests -->
 
 [issue-671]: https://github.com/ptr727/ProjectTemplate/issues/671
 [issue-672]: https://github.com/ptr727/ProjectTemplate/issues/672
 [issue-673]: https://github.com/ptr727/ProjectTemplate/issues/673
+[pr-676]: https://github.com/ptr727/ProjectTemplate/pull/676

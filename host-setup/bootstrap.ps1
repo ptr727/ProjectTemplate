@@ -21,6 +21,7 @@ param(
     [switch]$Upgrade,
     [switch]$Tools,
     [switch]$Github,
+    [switch]$Skills,
     [Alias('w')][switch]$Wsl,
     [Alias('n')][switch]$DryRun,
     [Alias('y')][switch]$Yes,
@@ -61,6 +62,7 @@ $ACTIONS = [ordered]@{
     upgrade = [bool]$Upgrade
     tools   = [bool]$Tools
     github  = [bool]$Github
+    skills  = [bool]$Skills
     wsl     = [bool]$Wsl
     host    = [bool]$StandUpHost
     dev     = [bool]$Dev
@@ -88,11 +90,12 @@ describe them come from one revision rather than from whatever a host happens to
 
 Actions, name one, default -Report:
   -r, -Report       Report what each tool would do, change nothing
-      -Host         Upgrade packages, install the tools, configure git and GitHub
+      -Host         Upgrade packages, install the tools, configure git and GitHub, install the skills
       -Dev          As -Host, and add the tools a development machine needs
       -Upgrade      Upgrade the packages winget manages, only
       -Tools        Install the host tools, only
       -Github       Configure git, the SSH key, and commit signing, only
+      -Skills       Install the fleet skills for the current user, only
   -w, -Wsl          Report the WSL platform and the distributions installed, only
   -h, -Help         Show this help
 
@@ -262,7 +265,7 @@ function Invoke-Cleanup {
 # Written as one interpolated, forward-slashed string against the bare $TREE rather than $script:TREE or Join-Path, so this loader's one entry point into the tree reads as the literal pattern the Linux loader is checked by, and stays checkable by that same pattern.
 # A read resolves $TREE up to script scope on its own, and only a write needs the script: prefix, which is why the assignment in Get-Tree still carries it.
 function Invoke-Tool {
-    param([Parameter(Mandatory)][string]$Tool, [Parameter(ValueFromRemainingArguments)][string[]]$Arguments)
+    param([Parameter(Mandatory)][string]$Tool, [switch]$ToleratesFailure, [Parameter(ValueFromRemainingArguments)][string[]]$Arguments)
 
     $path = "$TREE/host-setup/windows/$Tool"
     if (-not (Test-Path $path)) {
@@ -274,17 +277,21 @@ function Invoke-Tool {
     if ($script:DRY_RUN) { $flags += '-DryRun' }
 
     & $script:PWSH_PATH -NoProfile -ExecutionPolicy Bypass -File $path @Arguments @flags
-    if ($LASTEXITCODE -ne 0) { die "$Tool exited $LASTEXITCODE" }
+    if ($LASTEXITCODE -ne 0 -and -not $ToleratesFailure) { die "$Tool exited $LASTEXITCODE" }
 }
 
 function Show-Report {
     Invoke-Tool -Tool 'upgrade-host.ps1' -Arguments '-Status'
     Invoke-Tool -Tool 'install-tools.ps1' -Arguments '-Report'
     Invoke-Tool -Tool 'setup-github.ps1' -Arguments '-Status'
+    # Tolerated rather than fatal, since a missing install is a finding for a report to name and not a reason to stop naming the rest.
+    Invoke-Tool -Tool 'install-skills.ps1' -ToleratesFailure -Arguments '-Report'
+    if ($LASTEXITCODE -ne 0) { info 'The fleet skills install is missing or stale, and -Host or -Skills lands it' }
 }
 
 # The order is fixed rather than chosen.
 # Packages come first so install-tools.ps1 and setup-github.ps1 act on a host winget has just brought current, and GitHub comes last because it is the only step that waits on a person in a browser.
+# The skills step runs after the tools, because install-tools.ps1 provides the interpreter it needs.
 function Invoke-StandUp {
     # Named Kind rather than Profile, which is PowerShell's own automatic variable for the current user's profile script.
     param([string]$Kind)
@@ -296,6 +303,7 @@ function Invoke-StandUp {
         Invoke-Tool -Tool 'install-tools.ps1' -Arguments '-Install'
     }
     Invoke-Tool -Tool 'setup-github.ps1' -Arguments '-Configure'
+    Invoke-Tool -Tool 'install-skills.ps1'
 }
 
 # Names the host in the menu heading.
@@ -322,9 +330,10 @@ function Show-Menu {
     log '  2  Upgrade the packages winget manages'
     log '  3  Install the host tools'
     log '  4  Configure git and GitHub'
-    log '  5  Report the WSL platform and the distributions installed'
-    log '  6  All of the above but WSL, which is a host stood up'
-    log '  7  All of the above but WSL, plus the development tools'
+    log '  5  Install the fleet skills'
+    log '  6  Report the WSL platform and the distributions installed'
+    log '  7  All of the above but WSL, which is a host stood up'
+    log '  8  All of the above but WSL, plus the development tools'
     log '  q  Quit'
     log ''
 
@@ -334,9 +343,10 @@ function Show-Menu {
         '2' { $script:MODE = 'upgrade' }
         '3' { $script:MODE = 'tools' }
         '4' { $script:MODE = 'github' }
-        '5' { $script:MODE = 'wsl' }
-        '6' { $script:MODE = 'host' }
-        '7' { $script:MODE = 'dev' }
+        '5' { $script:MODE = 'skills' }
+        '6' { $script:MODE = 'wsl' }
+        '7' { $script:MODE = 'host' }
+        '8' { $script:MODE = 'dev' }
         'q' { exit 0 }
         'Q' { exit 0 }
         default { die 'Not one of the choices' }
@@ -401,12 +411,15 @@ function main {
 
     try {
         Resolve-Ref
+        # The commit the resolve produced is handed to the skills installer, since the tarball tree it runs from has no .git to answer for it.
+        $env:SKILLS_SOURCE_COMMIT = $script:RESOLVED
         Get-Tree
         switch ($script:MODE) {
             'report' { Show-Report }
             'upgrade' { Invoke-Tool -Tool 'upgrade-host.ps1' -Arguments '-Packages' }
             'tools' { Invoke-Tool -Tool 'install-tools.ps1' -Arguments '-Install' }
             'github' { Invoke-Tool -Tool 'setup-github.ps1' -Arguments '-Configure' }
+            'skills' { Invoke-Tool -Tool 'install-skills.ps1' }
             # Only setup-wsl.ps1's -Status runs here: its -Install needs a distribution name, which no flag here collects, so choosing a default distro nobody asked for is exactly what -Wsl staying out of -Host and -Dev already exists to avoid.
             # Installing one by name is a checkout away, once this run has fetched it.
             'wsl' { Invoke-Tool -Tool 'setup-wsl.ps1' -Arguments '-Status' }

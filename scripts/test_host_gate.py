@@ -136,6 +136,51 @@ class TestCheck(unittest.TestCase):
         self.assertIn('below the 2.47.0 floor', issues[0])
         self.assertIn('INSTALL FROM', issues[0])
 
+    def test_a_below_floor_failure_names_the_remedy_command(self):
+        """The finding carries its own fix, still as one issue."""
+        remedy = dict.fromkeys(('linux', 'macos', 'windows'), 'pkg upgrade gh')
+        entry = tool('gh', minimum='2.47.0', probes=self.probe_for('v2.46.0'),
+                     source=dict.fromkeys(('linux', 'macos', 'windows'), 'somewhere'), remedy=remedy)
+        issues = host_gate.check([entry])
+        self.assertEqual(len(issues), 1)
+        self.assertIn('REMEDY: pkg upgrade gh', issues[0])
+
+    def test_a_host_setup_remedy_resolves_against_this_checkout(self):
+        """The data stays repo-relative and the printed command is runnable from any directory."""
+        resolved = host_gate.resolve_remedy('host-setup/linux/install-tools.sh --upgrade gh')
+        self.assertTrue(resolved.startswith(str(host_gate.SPEC.parent.parent)))
+        self.assertTrue(resolved.endswith('install-tools.sh --upgrade gh'))
+        self.assertEqual(host_gate.resolve_remedy('brew upgrade gh'), 'brew upgrade gh')
+
+    def test_a_checkout_path_needing_quoting_is_quoted(self):
+        """Runnable as printed holds for a checkout path carrying a space, on either shell."""
+        resolved = host_gate.resolve_remedy('host-setup/linux/install-tools.sh --upgrade gh',
+                                            root=Path('/tmp/space dir'))
+        self.assertTrue(resolved.endswith("--upgrade gh"))
+        if host_gate.platform_key() == 'windows':
+            self.assertTrue(resolved.startswith("& '"))
+        else:
+            self.assertIn("'", resolved.partition(' --upgrade')[0])
+
+    def test_a_malformed_source_or_remedy_reports_rather_than_crashing(self):
+        """One bad field costs its own output line, not the run and the findings already collected.
+
+        The hub declaration is shape-checked by spec/validate.py in CI and by nothing at gate
+        runtime, so the below-floor read has to survive a non-dict field and a non-string command.
+        """
+        entry = tool('gh', minimum='2.47.0', probes=self.probe_for('v2.46.0'),
+                     source='not a dict', remedy={'linux': 7, 'macos': 7, 'windows': 7})
+        issues = host_gate.check([entry])
+        self.assertEqual(len(issues), 1)
+        self.assertNotIn('INSTALL FROM', issues[0])
+        self.assertNotIn('REMEDY', issues[0])
+
+    def test_a_non_dict_remedy_on_a_floored_tool_is_a_contract_problem(self):
+        problems = host_gate.contract_problems(
+            [tool('gh', minimum='2.47.0', source={'linux': 'somewhere'}, remedy='not a dict')])
+        self.assertEqual(len(problems), 1)
+        self.assertIn('remedy must be an object', problems[0])
+
     def test_a_version_at_the_floor_passes(self):
         self.assertEqual(host_gate.check([tool('gh', minimum='2.47.0', probes=self.probe_for('v2.47.0'))]), [])
 
@@ -300,6 +345,90 @@ class TestUncompilablePatternAtReadTime(unittest.TestCase):
         entry = tool('odd', pattern='(unclosed', probes=[[sys.executable, '-c', 'print("v1.0")']])
         status, version, _ = host_gate.read_tool(entry)
         self.assertEqual((status, version), ('unreadable', None))
+
+
+class TestBareRunOverlayWarning(unittest.TestCase):
+    """A bare run inside a repo whose root carries an overlay names what it skipped.
+
+    The default --repo reads the working directory alone, so a run started in a subdirectory reads
+    nothing and used to say nothing, which is the silent skip the warning closes. An explicit
+    --repo and --no-local each stay silent, since both are a choice the caller made.
+    """
+
+    def spec_with_one_passing_tool(self, d):
+        spec = Path(d) / 'spec.json'
+        spec.write_text(json.dumps({'tools': [tool('ok')]}), encoding='utf-8')
+        return str(spec)
+
+    def run_from(self, cwd, argv):
+        import contextlib
+        import io
+        import os
+        old = os.getcwd()
+        os.chdir(cwd)
+        try:
+            out = io.StringIO()
+            with contextlib.redirect_stdout(out):
+                host_gate.main(argv)
+            return out.getvalue()
+        finally:
+            os.chdir(old)
+
+    def repo_with_overlay(self, d):
+        root = Path(d)
+        (root / 'host-tools.json').write_text('{"tools": []}', encoding='utf-8')
+        sub = root / 'scripts'
+        sub.mkdir()
+        return root, sub
+
+    def test_a_bare_run_in_a_subdirectory_warns_and_names_the_re_run(self):
+        import tempfile
+        with tempfile.TemporaryDirectory() as d:
+            root, sub = self.repo_with_overlay(d)
+            out = self.run_from(sub, ['--spec', self.spec_with_one_passing_tool(d), '--quiet'])
+            self.assertIn('warning:', out)
+            self.assertIn(str(root.resolve()), out)
+            self.assertIn('--repo', out)
+
+    def test_a_bare_run_at_the_root_layers_the_overlay_and_does_not_warn(self):
+        import tempfile
+        with tempfile.TemporaryDirectory() as d:
+            root, _ = self.repo_with_overlay(d)
+            out = self.run_from(root, ['--spec', self.spec_with_one_passing_tool(d)])
+            self.assertIn('layered', out)
+            self.assertNotIn('warning:', out)
+
+    def test_an_explicit_repo_does_not_warn(self):
+        import tempfile
+        with tempfile.TemporaryDirectory() as d:
+            _, sub = self.repo_with_overlay(d)
+            out = self.run_from(sub, ['--spec', self.spec_with_one_passing_tool(d), '--repo', str(sub), '--quiet'])
+            self.assertNotIn('warning:', out)
+
+    def test_no_local_does_not_warn(self):
+        import tempfile
+        with tempfile.TemporaryDirectory() as d:
+            _, sub = self.repo_with_overlay(d)
+            out = self.run_from(sub, ['--spec', self.spec_with_one_passing_tool(d), '--no-local', '--quiet'])
+            self.assertNotIn('warning:', out)
+
+    def test_a_spaced_overlay_path_is_quoted_in_the_re_run(self):
+        """The printed --repo re-run pastes back into a shell whole, path spaces included."""
+        import tempfile
+        with tempfile.TemporaryDirectory(suffix=' with space') as d:
+            root, sub = self.repo_with_overlay(d)
+            out = self.run_from(sub, ['--spec', self.spec_with_one_passing_tool(d), '--quiet'])
+            self.assertIn(f'--repo {host_gate.quote_argument(str(root.resolve()))}', out)
+            self.assertNotIn(f'--repo {root.resolve()} ', out)
+
+    def test_overlay_above_returns_the_nearest_carrier(self):
+        import tempfile
+        with tempfile.TemporaryDirectory() as d:
+            root = Path(d)
+            (root / 'host-tools.json').write_text('{"tools": []}', encoding='utf-8')
+            deep = root / 'a' / 'b'
+            deep.mkdir(parents=True)
+            self.assertEqual(host_gate.overlay_above(deep), root.resolve())
 
 
 class TestMalformedLocalFile(unittest.TestCase):

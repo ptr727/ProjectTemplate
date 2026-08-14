@@ -1,6 +1,6 @@
 {
     "$schema": "./host-tools.schema.json",
-    "note": "The host contract in docs/host-setup.md, as data a gate can read. docs/host-setup.md states which tools a host needs and which repo procedure stops working without each one; this file adds the version floors, and each floor records the defect it encodes rather than a preference. A floor is one of two kinds and says which in its own why. A measured floor sits immediately above a version known to break a documented procedure, and is the kind most floors here are. A target floor declares the version the repo's own toolchain is configured for, where a lower interpreter is unverified rather than known broken, and it is honest about that rather than implying a defect nobody found. Everything else is presence-only, which is deliberate: a floor nobody can justify becomes a host failure nobody can act on. An entry is required unless it declares otherwise, and an optional tool that is absent is skipped rather than failed, since it is needed by one repository rather than by the fleet. Probes are tried in order and the first that runs is the answer, which is how a host whose interpreter is not called python3 still reports a version. The pattern is matched against the probe's combined output and its first capture group is the version, read as dot-separated integers, so a two-part YYYY.MM version compares correctly against a three-part semantic one.",
+    "note": "The host contract in docs/host-setup.md, as data a gate can read. docs/host-setup.md states which tools a host needs and which repo procedure stops working without each one; this file adds the version floors, and each floor records the defect it encodes rather than a preference. A floor is one of two kinds and says which in its own why. A measured floor sits immediately above a version known to break a documented procedure, and is the kind most floors here are. A target floor declares the version the repo's own toolchain is configured for, where a lower interpreter is unverified rather than known broken, and it is honest about that rather than implying a defect nobody found. Everything else is presence-only, which is deliberate: a floor nobody can justify becomes a host failure nobody can act on. An entry is required unless it declares otherwise, and an optional tool that is absent is skipped rather than failed, since it is needed by one repository rather than by the fleet. Probes are tried in order and the first that runs is the answer, which is how a host whose interpreter is not called python3 still reports a version. The pattern is matched against the probe's combined output and its first capture group is the version, read as dot-separated integers, so a two-part YYYY.MM version compares correctly against a three-part semantic one. A floor also carries a remedy beside its source: the source says where the tool must come from and why, and the remedy is the one command that installs or upgrades it on each platform, printed under a below-floor failure so the finding carries its own fix. A remedy is written for the below-floor state, which is why the host-setup installers run in their upgrade mode there. A macOS remedy runs brew install rather than brew upgrade where the entry's source is the platform rather than Homebrew: brew install upgrades a formula that is installed but outdated, per the Homebrew manpage's install entry, and brew upgrade refuses a tool Homebrew never installed, so install is the one form that fixes both below-floor states. A remedy path under host-setup/ is repo-relative and the gate resolves it against the checkout it runs from, so the printed command is runnable as printed. A platform where the tool does not apply carries no remedy key, and scripts/test_bootstrap.py is what keeps this mapping total and pointing at tools the installers actually manage.",
     "tools": [
         {
             "name": "docker",
@@ -21,6 +21,11 @@
                 "linux": "The official apt repository at cli.github.com, per https://github.com/cli/cli/blob/trunk/docs/install_linux.md, and never the distribution's own package.",
                 "macos": "Homebrew, which tracks upstream releases.",
                 "windows": "winget, which tracks upstream releases, so the hazard the Linux note describes does not arise."
+            },
+            "remedy": {
+                "linux": "host-setup/linux/install-tools.sh --upgrade gh",
+                "macos": "brew upgrade gh",
+                "windows": "host-setup/windows/install-tools.ps1 -Upgrade gh"
             }
         },
         {
@@ -42,6 +47,10 @@
                 "linux": "The upstream release at https://github.com/MestreLion/git-tools, or in CI the action at https://github.com/chetan/git-restore-mtime-action which vendors it, and never the distribution's own package.",
                 "macos": "Homebrew's git-tools, checked against the floor like any other source.",
                 "windows": "Not applicable, since the tool is used by a Linux deploy path."
+            },
+            "remedy": {
+                "linux": "host-setup/linux/install-tools.sh --upgrade git-restore-mtime",
+                "macos": "brew upgrade git-tools"
             }
         },
         {
@@ -55,6 +64,11 @@
                 "linux": "The distribution package where it meets the floor, which on current Debian stable it does at 1.7.1, so the floor is chosen to be satisfiable without a manual build. An older release sits below it, and there the upstream release at https://github.com/jqlang/jq is the source. Preferring the current upstream release everywhere keeps the fleet on one version in practice, which is what the other two platforms already do.",
                 "macos": "Homebrew, which tracks upstream releases.",
                 "windows": "winget, which tracks upstream releases, so the hazard the Linux note describes does not arise."
+            },
+            "remedy": {
+                "linux": "host-setup/linux/install-tools.sh --upgrade jq",
+                "macos": "brew upgrade jq",
+                "windows": "host-setup/windows/install-tools.ps1 -Upgrade jq"
             }
         },
         {
@@ -68,6 +82,11 @@
                 "linux": "Whatever the platform provides at or above the floor, since the scripts need an interpreter and no packages, so no distribution or build is pinned here.",
                 "macos": "Whatever the platform provides at or above the floor, on the same reasoning as Linux.",
                 "windows": "The python.org installer, which registers py, python and python3.13 but not python3, so the gate reaches it through the py -3 probe rather than the python3 name that resolves to the Microsoft Store alias stub."
+            },
+            "remedy": {
+                "linux": "host-setup/linux/install-tools.sh --upgrade python",
+                "macos": "brew install python",
+                "windows": "host-setup/windows/install-tools.ps1 -Upgrade python"
             }
         },
         {

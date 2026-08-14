@@ -30,7 +30,7 @@ python3 scripts/host_gate.py            # from a hub checkout, against the fleet
 
 **No `--repo` here, and that is the one place in these procedures where it is omitted deliberately.** The flag points the gate at a repo's own `host-tools.json` so its floors are layered over the fleet ones, and at this step there is no repo to point it at: the target does not exist yet, since this section runs before the `git init` in section 0B, and the file itself arrives with the baseline in section 2. So this run checks the fleet floors, which is all that is knowable now.
 
-**Re-run it with `--repo` once section 2 has carried the file**, because a bare run does not read the target's declaration at all, so any floor that repo adds goes unapplied and the run cannot tell you it was skipped:
+**Re-run it with `--repo` once section 2 has carried the file**, because a bare run reads no declaration but the one at its own working directory, so any floor the target adds goes unapplied. The gate warns when its working directory sits inside a repo whose overlay it did not read, and no warning can name a target that does not exist yet, so this re-run is the only thing that counts the target's floors:
 
 ```shell
 python3 scripts/host_gate.py --repo <path-to-target-checkout>   # after section 2, so the repo's own floors count

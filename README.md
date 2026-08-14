@@ -50,6 +50,7 @@ Nothing here is installed as a dependency. The rules are read, the baseline is c
 - [How This Repo Operates](#how-this-repo-operates)
 - [Using This Repo](#using-this-repo)
   - [Deploy the Host Guardrails](#deploy-the-host-guardrails)
+  - [Install the Fleet Skills](#install-the-fleet-skills)
   - [Carry the Rules Into a Repository](#carry-the-rules-into-a-repository)
   - [Adopting Outside This Fleet](#adopting-outside-this-fleet)
 - [Diverging From a Rule](#diverging-from-a-rule)
@@ -137,7 +138,7 @@ ProjectTemplate follows the same model it documents, and audits its own rules ag
 
 ## Using This Repo
 
-Three things are deployed from here, and they land in different places. The host guardrails install once per machine, the baseline is carried once per repository, and the audit is run whenever a repository changes materially. Do them in that order on a new machine, because the guardrails bound every session that follows and retrofitting them means the sessions in between ran unguarded.
+Four things are deployed from here, and they land in different places. The host guardrails install once per machine, the fleet skills install once per user on that machine, the baseline is carried once per repository, and the audit is run whenever a repository changes materially. Do them in that order on a new machine, because the guardrails bound every session that follows and retrofitting them means the sessions in between ran unguarded.
 
 ### Deploy the Host Guardrails
 
@@ -152,6 +153,17 @@ host-setup/agent-safety/install.sh        # Linux, WSL, macOS
 ```
 
 Restart Claude Code sessions on the machine afterward so the hook and the `CLAUDE.md` blocks load. The installer is idempotent, so re-running it is also how a machine picks up an upstream change to the guard. What it installs, how to verify it, and what it deliberately does not catch are in [`host-setup/agent-safety/README.md`][agent-safety], and the surrounding host prerequisites (git identity, SSH signing, `gh`, `docker`, `uv`) are in [`docs/host-setup.md`][host-setup].
+
+### Install the Fleet Skills
+
+The skills are the per-topic rules packaged so they surface in an agent session by trigger, instead of being re-read from the law docs each time. They install once per user per machine, from a hub checkout, and land beside the guardrails rather than in any repository:
+
+```shell
+python3 scripts/skills_install.py            # or the scripts/skills_install.sh / .ps1 wrapper
+python3 scripts/skills_install.py --report   # read-only: is this machine current?
+```
+
+A host stood up end to end by the [`host-setup/`][host-setup-dir] bootstrap gets this step at the end of its host mode, so a fresh machine finishes with the tools, the identity, and the skills together. [`docs/host-setup.md`][host-setup] "Fleet Skills Install" carries the details, including how the install degrades where the `claude` CLI is absent.
 
 ### Carry the Rules Into a Repository
 

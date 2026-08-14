@@ -64,6 +64,12 @@ def source_ref():
 
     sha = git("rev-parse", "HEAD")
     if not sha:
+        # A bootstrap runs this from a fetched tarball tree, which has no .git to answer for it.
+        # The loader resolved its ref to a commit before downloading and hands that in, keeping the stamp checkable instead of permanently stale.
+        # A tarball of a resolved commit is clean by construction, which is what dirty=False records.
+        handed = os.environ.get("SKILLS_SOURCE_COMMIT")
+        if handed:
+            return {"vcs": "archive", "commit": handed, "dirty": False}
         return {"vcs": "none"}
     ref = {"vcs": "git", "commit": sha}
     # Watches both paths this installer actually reads.
