@@ -674,7 +674,8 @@ def main():
     print("\nDone. This machine:")
     print(f"  {stamp_line(stamp)}")
     print("\nRe-check at any time, from a fresh hub checkout, without changing anything:")
-    print(f'  {launcher} "{HERE / "install.py"}" --report')
+    install_path = HERE / "install.py"
+    print(f'  {launcher} "{install_path}" --report')
     print("Restart Claude Code sessions on this machine so the hook and CLAUDE.md load.")
     return 0
 
