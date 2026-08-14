@@ -293,6 +293,13 @@ def platform_field(tool: dict, field: str) -> str | None:
     return value if isinstance(value, str) and value else None
 
 
+def quote_argument(value: str) -> str:
+    """`value` as one shell word, for a printed command a reader pastes back into their shell."""
+    if platform_key() == 'windows':
+        return f'"{value}"' if ' ' in value else value
+    return shlex.quote(value)
+
+
 def resolve_remedy(command: str, root: Path | None = None) -> str:
     """A remedy command with a repo-relative installer path made absolute against this checkout.
 
@@ -423,7 +430,7 @@ def main(argv: list[str] | None = None) -> int:
             print(f'         note: {note}')
     if skipped is not None:
         # Outside --quiet, because a silently skipped overlay is the omission this line exists to name.
-        print(f'         warning: {skipped} carries a host-tools.json overlay this bare run did not read - re-run with --repo {skipped} so its floors count')
+        print(f'         warning: {skipped} carries a host-tools.json overlay this bare run did not read - re-run with --repo {quote_argument(str(skipped))} so its floors count')
     return 1 if issues else 0
 
 

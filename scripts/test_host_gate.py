@@ -412,6 +412,15 @@ class TestBareRunOverlayWarning(unittest.TestCase):
             out = self.run_from(sub, ['--spec', self.spec_with_one_passing_tool(d), '--no-local', '--quiet'])
             self.assertNotIn('warning:', out)
 
+    def test_a_spaced_overlay_path_is_quoted_in_the_re_run(self):
+        """The printed --repo re-run pastes back into a shell whole, path spaces included."""
+        import tempfile
+        with tempfile.TemporaryDirectory(suffix=' with space') as d:
+            root, sub = self.repo_with_overlay(d)
+            out = self.run_from(sub, ['--spec', self.spec_with_one_passing_tool(d), '--quiet'])
+            self.assertIn(f'--repo {host_gate.quote_argument(str(root.resolve()))}', out)
+            self.assertNotIn(f'--repo {root.resolve()} ', out)
+
     def test_overlay_above_returns_the_nearest_carrier(self):
         import tempfile
         with tempfile.TemporaryDirectory() as d:

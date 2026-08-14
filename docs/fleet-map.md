@@ -210,7 +210,7 @@ flowchart LR
   run --> recheck["re-run host_gate"] --> ok["proceed"]
 ```
 
-- **Closing test** - [`scripts/test_bootstrap.py`][scripts-readme] asserts the mapping stays total per platform, with the one recorded not-applicable exception, and that a remedy handing back into an installer names a tool that installer manages. [`spec/validate.py`][files] and the schema require a remedy on every hub floor. A repository overlay may still add a floor without one, in which case the failure degrades to the `INSTALL FROM:` source line.
+- **Closing test** - [`scripts/test_bootstrap.py`][test-bootstrap] asserts the mapping stays total per platform, with the one recorded not-applicable exception, and that a remedy handing back into an installer names a tool that installer manages. [`spec/validate.py`][validate] and the schema require a remedy on every hub floor. A repository overlay may still add a floor without one, in which case the failure degrades to the `INSTALL FROM:` source line.
 
 ### G4: Deletion Sweeps Miss Prose
 
@@ -218,7 +218,7 @@ flowchart LR
 - **Checked** - [`RESYNC.md`][resync] section 4 documents the incident and prescribes the manual remedy.
 - **Handoff** - When a resync deletes a file, the session reads the files whose job is to describe what the repo holds (the layout and operations sections) before shipping, per the RESYNC section 4 step.
 - **Closed when** - Either the manual step is judged sufficient and this row closes as `accepted`, or a lint that flags a stale description ships and the row names it.
-- **Target** - Decision first, optional [`scripts/prose_lint.py`][scripts-readme] check second.
+- **Target** - Decision first, optional [`scripts/prose_lint.py`][prose-lint] check second.
 
 ### G5: Intent-Fidelity Drift Is Invisible
 
@@ -317,7 +317,7 @@ Agent-to-agent messaging on one host is a working method with measured value, an
 
 ## Simplified Technical English Evaluation
 
-Should agent-authored prose adopt ASD-STE100, a controlled language standard, or a lighter constrained house style? The criteria: does it improve agent instruction-following, does it compose with the enforcement that exists ([`scripts/prose_lint.py`][scripts-readme] and the character-set and semicolon rules), what does it cost to author, and does its vocabulary fit a technical fleet.
+Should agent-authored prose adopt ASD-STE100, a controlled language standard, or a lighter constrained house style? The criteria: does it improve agent instruction-following, does it compose with the enforcement that exists ([`scripts/prose_lint.py`][prose-lint] and the character-set and semicolon rules), what does it cost to author, and does its vocabulary fit a technical fleet.
 
 | Criterion | Full ASD-STE100 | Constrained house style |
 | --- | --- | --- |
@@ -392,6 +392,7 @@ Design-doc first: this doc merges, then each unchecked item becomes an issue lin
 [host-tools]: ../spec/host-tools.json
 [marketplace]: ../.claude-plugin/marketplace.json
 [peer-messaging]: ./peer-messaging.md
+[prose-lint]: ../scripts/prose_lint.py
 [readme]: ../README.md
 [repo-config-readme]: ../repo-config/README.md
 [repos]: ../registry/repos.json
@@ -400,7 +401,9 @@ Design-doc first: this doc merges, then each unchecked item becomes an issue lin
 [skills-install]: ../scripts/skills_install.py
 [skills-readme]: ../.agents/skills/README.md
 [standup]: ../STANDUP.md
+[test-bootstrap]: ../scripts/test_bootstrap.py
 [todo]: ../TODO.md
+[validate]: ../spec/validate.py
 [validate-task]: ../.github/workflows/validate-task.yml
 [workflow]: ../WORKFLOW.md
 
