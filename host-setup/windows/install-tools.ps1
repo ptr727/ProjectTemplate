@@ -184,6 +184,26 @@ function Read-WingetTable {
     return , $rows
 }
 
+# The id and version of every row winget printed for a source search, unfiltered by id.
+# Shares the header driven offsets with Read-WingetTable, but keeps the id column instead of assuming the caller already knows it, which is what Resolve-ToolPackage needs from a family search.
+function Read-WingetSearchTable {
+    param([string]$Text, [string]$Prefix)
+    $rows = @()
+    $lines = $Text -split "`r?`n"
+    $header = $lines | Where-Object { $_ -match '^Name\s+Id\s+Version' } | Select-Object -First 1
+    if (-not $header) { return , $rows }
+    $idColumn = $header.IndexOf('Id')
+    $versionColumn = $header.IndexOf('Version')
+    foreach ($line in $lines) {
+        if ($line.Length -le $versionColumn) { continue }
+        $id = ($line.Substring($idColumn, $versionColumn - $idColumn)).Trim()
+        if (-not $id.StartsWith($Prefix)) { continue }
+        $version = ($line.Substring($versionColumn) -split '\s+')[0]
+        $rows += [PSCustomObject]@{ Id = $id; Version = $version }
+    }
+    return , $rows
+}
+
 # The installed versions of one package id, or an empty list where none is installed.
 # The exit code decides rather than the output text, since a missing id and an unreadable source both print prose and only the code tells them apart.
 # A null answer means the question could not be answered, which is not the same as none installed.
@@ -283,6 +303,19 @@ function Get-ExplicitUpgrade {
     return , $script:EXPLICIT
 }
 
+# The package id winget's own catalog says produced the version this tool reports as installed.
+# `winget list --id X --exact` answers yes for a package sharing this tool's family even where X itself is not what is installed (#693: a host running OpenJS.NodeJS, the Current channel, reads as OpenJS.NodeJS.LTS because the two share a publisher and a name), but the version it reports comes straight from the installed entry regardless of which id was asked about, so matching that version against every id in the family, read from a plain source search rather than an id scoped one, is what tells the ids apart without trusting the id column winget answered with at all.
+# A tool naming no family resolves to its own package unchanged and costs nothing extra, and a version matching none of the family's ids does the same, since a family search that cannot confirm anything is no worse than not asking.
+function Resolve-ToolPackage {
+    param([Parameter(Mandatory)][hashtable]$Tool, [string]$Installed)
+    if (-not $Tool.Family -or -not $Installed) { return $Tool.Package }
+    $text = (& winget search --query $Tool.Family --source winget --disable-interactivity 2>&1 | Out-String -Width 500)
+    if ($LASTEXITCODE -ne 0) { return $Tool.Package }
+    $match = (Read-WingetSearchTable -Text $text -Prefix $Tool.Family) | Where-Object { $_.Version -eq $Installed } | Select-Object -First 1
+    if ($match) { return $match.Id }
+    return $Tool.Package
+}
+
 # Install, upgrade and remove, named here so the flags appear once in this file.
 # No scope is passed unless the caller named one, because winget then acts on the copy it found and naming a different scope adds a copy rather than replacing one.
 function Invoke-WingetInstall {
@@ -317,15 +350,16 @@ function Invoke-WingetRemove {
 # Managed tools, in the order a report lists them.
 # Every one is a single winget package, which is what makes this a table where the Linux script needs four functions per tool.
 # Probe names the executable that proves the tool is present when winget knows no package for it, and it is py for python because that is the name a correctly set up Windows host carries.
+# Family names the id prefix winget's catalog shares across every channel and pinned major a tool ships under, and is empty everywhere but node: node alone ships as more than one id (Current, LTS, and one per pinned major back to 4), any of which is fine on a host as long as its version clears Available, and Resolve-ToolPackage is what finds which one that is.
 $TOOLS = @(
-    @{ Name = 'git'; Package = 'Git.Git'; Probe = 'git'; Optional = @() }
-    @{ Name = 'gh'; Package = 'GitHub.cli'; Probe = 'gh'; Optional = @() }
-    @{ Name = 'jq'; Package = 'jqlang.jq'; Probe = 'jq'; Optional = @() }
-    @{ Name = 'python'; Package = 'Python.Python.3.13'; Probe = 'py'; Optional = @() }
-    @{ Name = 'uv'; Package = 'astral-sh.uv'; Probe = 'uv'; Optional = @() }
-    @{ Name = 'docker'; Package = 'Docker.DockerDesktop'; Probe = 'docker'; Optional = @() }
-    @{ Name = 'node'; Package = 'OpenJS.NodeJS.LTS'; Probe = 'node'; Optional = @() }
-    @{ Name = 'dotnet'; Package = 'Microsoft.DotNet.SDK.10'; Probe = 'dotnet'; Optional = @('Microsoft.DotNet.SDK.9', 'Microsoft.DotNet.SDK.8') }
+    @{ Name = 'git'; Package = 'Git.Git'; Probe = 'git'; Optional = @(); Family = '' }
+    @{ Name = 'gh'; Package = 'GitHub.cli'; Probe = 'gh'; Optional = @(); Family = '' }
+    @{ Name = 'jq'; Package = 'jqlang.jq'; Probe = 'jq'; Optional = @(); Family = '' }
+    @{ Name = 'python'; Package = 'Python.Python.3.13'; Probe = 'py'; Optional = @(); Family = '' }
+    @{ Name = 'uv'; Package = 'astral-sh.uv'; Probe = 'uv'; Optional = @(); Family = '' }
+    @{ Name = 'docker'; Package = 'Docker.DockerDesktop'; Probe = 'docker'; Optional = @(); Family = '' }
+    @{ Name = 'node'; Package = 'OpenJS.NodeJS.LTS'; Probe = 'node'; Optional = @(); Family = 'OpenJS.NodeJS' }
+    @{ Name = 'dotnet'; Package = 'Microsoft.DotNet.SDK.10'; Probe = 'dotnet'; Optional = @('Microsoft.DotNet.SDK.9', 'Microsoft.DotNet.SDK.8'); Family = '' }
 )
 
 function Get-Tool {
@@ -366,6 +400,9 @@ function Get-ToolState {
     param([Parameter(Mandatory)][hashtable]$Tool)
     $rows = Get-WingetInstalled -Id $Tool.Package
     $state = @{
+        # The id acted on from here down.
+        # Reading rows above already answered whether something from this tool's family is installed and at what version, and this may still change below, to the id that version actually belongs to, before anything here is reported or acted on.
+        Package   = $Tool.Package
         Installed = $null
         Rows      = @()
         # Whether the installed state was read at all, kept apart from what it said.
@@ -378,7 +415,8 @@ function Get-ToolState {
     if ($state.Readable) {
         $state.Rows = $rows
         $state.Installed = Resolve-InstalledVersion -Version $rows
-        if ($rows.Count -gt 0) { $state.Scope = Get-WingetScope -Id $Tool.Package }
+        $state.Package = Resolve-ToolPackage -Tool $Tool -Installed $state.Installed
+        if ($rows.Count -gt 0) { $state.Scope = Get-WingetScope -Id $state.Package }
     }
     $state.Status = Get-ToolStatus -Tool $Tool -State $state
     return $state
@@ -397,7 +435,7 @@ function Get-ToolStatus {
     }
     if (-not $State.Installed) { return 'multiple' }
     if (-not $State.Available) { return 'unknown' }
-    if ((Get-ExplicitUpgrade) -contains $Tool.Package) { return 'self-updating' }
+    if ((Get-ExplicitUpgrade) -contains $State.Package) { return 'self-updating' }
     if ((Compare-HostVersion $State.Installed $State.Available) -ge 0) { return 'current' }
     return 'outdated'
 }
@@ -416,7 +454,7 @@ function Add-ToolNote {
     if ($State.Scope.Count -gt 1) {
         note $Tool.Name 'installed in both scopes, so one copy shadows the other on PATH, and -Reinstall removes one'
     }
-    if ($State.Rows.Count -gt 0 -and (Test-WingetOwnedEntry -Id $Tool.Package)) {
+    if ($State.Rows.Count -gt 0 -and (Test-WingetOwnedEntry -Id $State.Package)) {
         note $Tool.Name 'winget wrote this uninstall entry, so winget installed it'
     }
     if ($State.Status -eq 'multiple') {
@@ -459,7 +497,7 @@ function Show-Report {
         $installed = if ($state.Status -eq 'multiple') { $state.Rows -join ',' } elseif ($state.Installed) { $state.Installed } else { '-' }
         $available = if ($state.Available) { $state.Available } else { '-' }
         $scope = if ($state.Scope.Count -gt 0) { $state.Scope -join '+' } else { '-' }
-        log ($format -f $record.Name, $installed, $available, $record.Package, $scope, $state.Status)
+        log ($format -f $record.Name, $installed, $available, $state.Package, $scope, $state.Status)
         Add-ToolNote -Tool $record -State $state
     }
 
@@ -505,14 +543,14 @@ function Invoke-ToolApply {
             log "${ToolName}: not installed, so there is nothing to remove"
         } else {
             $where = if ($state.Scope.Count -gt 0) { " installed $($state.Scope -join ' and ') wide" } else { '' }
-            if (-not (confirm "Remove $($record.Package) at $($state.Rows -join ', ')$where and install it again?")) {
+            if (-not (confirm "Remove $($state.Package) at $($state.Rows -join ', ')$where and install it again?")) {
                 die 'Declined'
             }
             # Every copy is removed, each in the scope it was found in, since a tool present in both scopes is exactly the shadowing this action exists to clear.
             # An empty scope means winget reported none, and there the removal names none either and lets winget act on what it finds.
             $found = if ($state.Scope.Count -gt 0) { $state.Scope } else { @('') }
             foreach ($scope in $found) {
-                if ((Invoke-WingetRemove -Id $record.Package -InScope $scope) -ne 0) {
+                if ((Invoke-WingetRemove -Id $state.Package -InScope $scope) -ne 0) {
                     warn "$ToolName failed to uninstall$(if ($scope) { " the $scope wide copy" })"
                     $script:FAILED += $ToolName
                     return
@@ -537,11 +575,11 @@ function Invoke-ToolApply {
         log "${ToolName}: $($state.Status)$(if ($state.Available) { ", the source carries $($state.Available)" })"
     }
 
-    $packages = @($record.Package)
+    $packages = @($state.Package)
     if ($script:WITH_OPTIONAL) { $packages += $record.Optional }
 
     foreach ($package in $packages) {
-        $code = if ($state.Rows.Count -gt 0 -and $script:MODE -eq 'upgrade' -and $package -eq $record.Package) {
+        $code = if ($state.Rows.Count -gt 0 -and $script:MODE -eq 'upgrade' -and $package -eq $state.Package) {
             Invoke-WingetUpgrade -Id $package
         } else {
             Invoke-WingetInstall -Id $package
@@ -560,7 +598,7 @@ function Invoke-ToolApply {
         }
     }
 
-    $now = Resolve-InstalledVersion -Version (Get-WingetInstalled -Id $record.Package)
+    $now = Resolve-InstalledVersion -Version (Get-WingetInstalled -Id $state.Package)
     if ($now -ne $state.Installed) {
         $before = if ($state.Installed) { $state.Installed } else { '-' }
         $after = if ($now) { $now } else { '-' }
