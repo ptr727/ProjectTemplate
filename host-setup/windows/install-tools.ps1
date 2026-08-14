@@ -109,6 +109,12 @@ it finds and an installer that needs administrator asks for it itself. Naming a 
 disagrees with the installed copy would add a second copy beside the first rather than replacing
 it, so an upgrade refuses that case and names -Reinstall, which removes the old copy first.
 
+An install or upgrade of docker also brings the WSL platform itself up to Docker Desktop's own
+floor where it is behind, and stops Docker Desktop first either way, since Docker Desktop holds
+the WSL service open and both a platform update and its own WSL integration otherwise need a
+restart to recover from an engine bump. wsl --update raises its own administrator prompt, which
+this refuses to start unattended where nothing could answer it, rather than hang.
+
 Examples:
   install-tools.ps1                       Report on every tool
   install-tools.ps1 -Install              Install what is missing
@@ -511,9 +517,8 @@ function Get-WslPlatformVersion {
 }
 
 # What stands between this host and installing or upgrading docker, or $null where nothing does.
-# Read-only: this never runs wsl --install or wsl --update itself.
-# Those stay a person's own action through upgrade-host.ps1 -Wsl and setup-wsl.ps1, confirmed with the maintainer as the boundary.
-# A WSL platform update restarts every distribution, and neither action belongs as a silent side effect of installing a different tool.
+# A pure report either way, used as-is for -Report's note and as Enter-DockerMaintenance's own pre-check below, which is what actually drives the WSL platform update this used to only name.
+# Standing up WSL from nothing with wsl --install stays a person's own step regardless, since that is a different action on a different subject from bringing an existing platform current, the same reasoning that keeps distribution installs in setup-wsl.ps1 rather than folded in here.
 function Test-WslReadyForDocker {
     if (-not (Get-Command wsl.exe -ErrorAction SilentlyContinue)) {
         return "wsl.exe was not found, and Docker Desktop needs WSL2. Install it with: wsl --install --no-distribution"
@@ -526,6 +531,93 @@ function Test-WslReadyForDocker {
         return "WSL is at $version, and Docker Desktop needs $($script:DOCKER_WSL_FLOOR) or later. Update it with: host-setup\windows\upgrade-host.ps1 -Wsl"
     }
     return $null
+}
+
+# --- Docker ---
+
+# Whether Docker Desktop answers as running right now, through its own CLI rather than a process probe.
+# A vmmem process surviving a crash is not the same as the backend actually being up, and the CLI is what agrees with what the tray icon shows.
+function Test-DockerDesktopRunning {
+    if (-not (Get-Command docker -ErrorAction SilentlyContinue)) { return $false }
+    $text = (& docker desktop status --format json 2>&1 | Out-String)
+    if ($LASTEXITCODE -ne 0) { return $false }
+    return ($text -match '"Status"\s*:\s*"running"')
+}
+
+function Stop-DockerDesktop {
+    info 'Stopping Docker Desktop'
+    $code = run 'docker' @('desktop', 'stop', '--timeout', '90')
+    if ($code -ne 0) { warn "docker desktop stop exited $code" }
+    return $code
+}
+
+function Start-DockerDesktop {
+    info 'Starting Docker Desktop'
+    $code = run 'docker' @('desktop', 'start', '--timeout', '180')
+    if ($code -ne 0) { warn 'docker desktop start did not exit cleanly, start Docker Desktop by hand and check WSL integration per distro' }
+    return $code
+}
+
+# Everything a docker install, upgrade or reinstall needs from Docker Desktop and WSL before winget touches the package is folded into one window rather than run twice: Docker Desktop holds the WSL service open, so a platform update fails part way while it is running, the same reason upgrade-host.ps1 -Wsl refuses outright.
+# Docker Desktop's own per distro WSL integration also goes stale across an engine bump often enough that it has a name on Docker's own tracker, surfacing as "WSL integration with distro '<name>' unexpectedly stopped" the next time anything in that distro touches docker, and the in app "Restart the WSL integration" button on that dialog does not clear it, since it retries the proxy inside the distro that is already running against the same stale state.
+# Both are fixed the same way: Docker Desktop stopped, WSL brought current, every distro shut down with it so each one's integration remounts fresh rather than being patched in place, and Docker Desktop started again once the docker package itself is also settled, by Exit-DockerMaintenance below.
+# Boundary note: this script used to be read-only on WSL by design, naming upgrade-host.ps1 -Wsl as a person's own step rather than running it.
+# The maintainer moved that boundary once a docker version bump on its own already needed this same stop, then restart, window for its own integration to recover, since a platform update asks for nothing more than that same window with Docker Desktop already stopped inside it.
+# Returns whether docker is clear to proceed, and whether this stopped Docker Desktop, which is what Exit-DockerMaintenance needs to know whether it owes a restart.
+function Enter-DockerMaintenance {
+    param([Parameter(Mandatory)][bool]$WasRunning, [string]$WslProblem)
+
+    $result = @{ Proceed = $true; Stopped = $false }
+    if (-not $WasRunning -and -not $WslProblem) { return $result }
+
+    $question = if ($WslProblem) {
+        "docker needs WSL updated first ($WslProblem). Stop Docker Desktop, update WSL, and restart Docker Desktop to continue?"
+    } else {
+        "docker is about to change version, and Docker Desktop's own WSL integration commonly goes stale across an engine bump. Stop Docker Desktop first, and restart it after, to avoid that?"
+    }
+    if (-not (confirm $question)) {
+        if ($WslProblem) { $result.Proceed = $false; return $result }
+        note 'docker' 'WSL integration may report a stale per-distro error until Docker Desktop and WSL are both restarted (docker desktop stop; wsl --shutdown; docker desktop start); declined the automatic cycle'
+        return $result
+    }
+
+    if ($WasRunning) {
+        Stop-DockerDesktop | Out-Null
+        $result.Stopped = $true
+    }
+    if ($WslProblem) {
+        # Installing through wsl --update's own MSI raises a UAC prompt when this pwsh is not itself elevated, the state the rest of this script deliberately stays in (running elevated trades this one prompt for winget installers elsewhere that fail pre-elevated instead).
+        # Nothing can answer that prompt without a person at the console, so a run with neither would hang rather than fail, which -Yes is supposed to rule out, not walk into unattended.
+        if (-not $script:ELEVATED -and (-not [Environment]::UserInteractive -or [Console]::IsInputRedirected)) {
+            warn "wsl --update needs administrator and raises its own prompt, which nothing can answer unattended; it would hang rather than fail, so this refuses to start it. Run interactively once so the prompt has someone to answer, or update WSL first with: host-setup\windows\upgrade-host.ps1 -Wsl"
+            if ($result.Stopped) { Start-DockerDesktop | Out-Null; $result.Stopped = $false }
+            $result.Proceed = $false
+            return $result
+        }
+        info 'Updating the WSL platform'
+        info 'This restarts every distribution, so anything running inside one is stopped'
+        $updateCode = run 'wsl.exe' @('--update')
+        if ($updateCode -ne 0) { warn "wsl --update exited $updateCode" }
+        $stillBroken = Test-WslReadyForDocker
+        if ($stillBroken) {
+            warn "docker skipped, still $stillBroken after the update"
+            if ($result.Stopped) { Start-DockerDesktop | Out-Null; $result.Stopped = $false }
+            $result.Proceed = $false
+            return $result
+        }
+    }
+    return $result
+}
+
+# The other half of Enter-DockerMaintenance, run once the docker package itself is settled: shuts every WSL distro down so each one's integration remounts fresh, then starts Docker Desktop again.
+# A no-op where Enter-DockerMaintenance never stopped anything, so a run that changed nothing about Docker Desktop does not restart it for no reason, and a run that was declined does not either.
+function Exit-DockerMaintenance {
+    param([Parameter(Mandatory)][bool]$Stopped)
+    if (-not $Stopped) { return }
+    info 'Shutting down WSL'
+    $shutdownCode = run 'wsl.exe' @('--shutdown')
+    if ($shutdownCode -ne 0) { warn "wsl --shutdown exited $shutdownCode" }
+    Start-DockerDesktop | Out-Null
 }
 
 # --- Actions ---
@@ -588,17 +680,6 @@ function Invoke-ToolApply {
         return
     }
 
-    # Docker Desktop needs WSL2 already present and current, and does not install or update it itself.
-    # A WSL gap has nothing to do with any other tool in this run, so it is collected here on the same rule as a failed install rather than ending the whole run.
-    if ($ToolName -eq 'docker') {
-        $wslProblem = Test-WslReadyForDocker
-        if ($wslProblem) {
-            warn "docker skipped, $wslProblem"
-            $script:FAILED += $ToolName
-            return
-        }
-    }
-
     # Naming a scope the installed copy does not sit in would add a second copy beside it, so the removal is asked for rather than done on the way past.
     if ($script:WANT_SCOPE -and $state.Rows.Count -gt 0 -and $state.Scope.Count -gt 0 -and
         $state.Scope -notcontains $script:WANT_SCOPE -and $script:MODE -ne 'reinstall') {
@@ -643,6 +724,25 @@ function Invoke-ToolApply {
         return
     }
 
+    # Reached only once real work is about to happen: every "leave it alone" status above already returned.
+    # That is deliberate here, not incidental: an already current docker with a stale WSL platform has nothing this run needs to fix, and gating on WSL readiness any earlier would skip a tool that was never going to change anyway.
+    $dockerMaintenance = $null
+    if ($ToolName -eq 'docker') {
+        $wasRunning = Test-DockerDesktopRunning
+        $wslProblem = Test-WslReadyForDocker
+        if ($wslProblem -and -not (Get-Command wsl.exe -ErrorAction SilentlyContinue)) {
+            warn "docker skipped, $wslProblem"
+            $script:FAILED += $ToolName
+            return
+        }
+        $dockerMaintenance = Enter-DockerMaintenance -WasRunning $wasRunning -WslProblem $wslProblem
+        if (-not $dockerMaintenance.Proceed) {
+            warn "docker skipped, $wslProblem"
+            $script:FAILED += $ToolName
+            return
+        }
+    }
+
     if ($script:MODE -ne 'reinstall') {
         log "${ToolName}: $($state.Status)$(if ($state.Available) { ", the source carries $($state.Available)" })"
     }
@@ -666,6 +766,8 @@ function Invoke-ToolApply {
                 info 'Close whatever is running it, then run this again'
             }
             $script:FAILED += $ToolName
+            # Owed regardless of how this returns: Enter-DockerMaintenance stopped Docker Desktop for this attempt, and a failed install is not a reason to leave it down.
+            if ($dockerMaintenance) { Exit-DockerMaintenance -Stopped $dockerMaintenance.Stopped }
             return
         }
     }
@@ -676,6 +778,7 @@ function Invoke-ToolApply {
         $after = if ($now) { $now } else { '-' }
         $script:CHANGED += "$ToolName $before -> $after"
     }
+    if ($dockerMaintenance) { Exit-DockerMaintenance -Stopped $dockerMaintenance.Stopped }
 }
 
 function Invoke-Apply {

@@ -4,7 +4,7 @@ The tooling that makes a native Windows host satisfy the contract in [`docs/host
 
 ## What Is Here
 
-- [`install-tools.ps1`][install-tools] installs and upgrades the host tools, and reports what each one is installed at, where it came from, and which scope it sits in.
+- [`install-tools.ps1`][install-tools] installs and upgrades the host tools, and reports what each one is installed at, where it came from, and which scope it sits in. Installing or upgrading `docker` also brings the WSL platform up to Docker Desktop's own floor where it is behind.
 - [`upgrade-host.ps1`][upgrade-host] upgrades the packages `winget` manages and updates the WSL platform.
 - [`setup-github.ps1`][setup-github] configures the SSH key, git, and commit signing.
 - [`setup-wsl.ps1`][setup-wsl] installs a WSL distribution and reports how Docker Desktop is integrated with the ones this host runs.
@@ -80,7 +80,13 @@ pwsh -NoProfile -File ..\bootstrap.ps1 -Help
 
 Docker's own `docker-desktop` distribution is excluded from every distribution listing, since it is Docker's rather than one an operator installed.
 
-`install-tools.ps1` checks, before installing or upgrading `docker`, that `wsl.exe` is present and reports a WSL version at or above `2.1.5`, Docker Desktop's own documented floor for the platform it depends on. Where either is not the case it skips `docker` and names the exact remedy (`wsl --install --no-distribution`, or `upgrade-host.ps1 -Wsl`) rather than installing against a platform Docker Desktop cannot use, or Windows-feature-installing on the caller's behalf. It never runs `wsl --install` or `wsl --update` itself: those stay `upgrade-host.ps1 -Wsl` and a person's own choice, since an update restarts every distribution and neither belongs as a side effect of installing a different tool. The same check surfaces as a note under `-Report`, read-only, before a caller ever runs `-Install`.
+`install-tools.ps1` checks, before installing or upgrading `docker`, that `wsl.exe` is present and reports a WSL version at or above `2.1.5`, Docker Desktop's own documented floor for the platform it depends on. Where `wsl.exe` is missing entirely it skips `docker` and names the remedy (`wsl --install --no-distribution`), the one case this still leaves to a person: standing up WSL from nothing is a different action from bringing an existing platform current, the same reasoning that keeps a distribution *install* in `setup-wsl.ps1` rather than folded in here. The same check surfaces as a note under `-Report`, read-only, before a caller ever runs `-Install`.
+
+Where WSL is present but behind the floor, or `docker` itself is about to change version, `install-tools.ps1` drives the fix itself rather than only naming it, asking first unless `-Yes` was given: it stops Docker Desktop through its own CLI (`docker desktop stop`, not the tray icon), runs `wsl --update` where the floor is not met, shuts every WSL distribution down with `wsl --shutdown`, and starts Docker Desktop again (`docker desktop start`) once the `docker` package itself is also settled.
+
+This moved a boundary the tool used to hold: WSL used to be read-only here, and `upgrade-host.ps1 -Wsl` was the only thing that ever ran `wsl --update`, on the reasoning that an update restarts every distribution and that does not belong as a side effect of installing a different tool. Two things moved it. Docker Desktop's own per-distro WSL integration goes stale across an engine bump often enough to have a name on Docker's own tracker (`WSL integration with distro '<name>' unexpectedly stopped`), and the dialog's own "Restart the WSL integration" button does not clear it, since it retries the proxy inside the distro that is already running against the same stale state. A full stop, `wsl --shutdown`, start cycle does clear it. And once a `docker` version bump already needed that exact stop-then-restart window for its own integration to recover, updating WSL inside that same window costs nothing extra, and skips the `upgrade-host.ps1 -Wsl` refusal a Docker Desktop already running would otherwise walk straight into.
+
+`wsl --update` installs through its own MSI and raises a UAC prompt when this `pwsh` is not itself elevated, the state the rest of this tooling deliberately stays in. Nothing can answer that prompt unattended, so where the process is neither elevated nor at an interactive console, `install-tools.ps1` refuses to start the update rather than hang, and restores Docker Desktop to how it found it first.
 
 ## Differences From the Linux Tooling
 
