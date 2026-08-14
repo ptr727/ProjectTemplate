@@ -238,13 +238,21 @@ The `claude` CLI is deliberately absent from the tool catalog in [`spec/host-too
 python3 scripts/host_gate.py           # presence and version floors, from spec/host-tools.json
 python3 scripts/skills_install.py --report   # the skills install stamp is current
 git config --global --list | grep -E "user\.|signing|gpg\."
-ssh-add -L                                   # should list your public key
-git -c gpg.format=ssh commit -S --allow-empty -m "verify-signing"
-git log --show-signature -1
+d=$(mktemp -d) && (
+  trap 'rm -rf "$d"' EXIT
+  git init -q "$d" \
+    && git -C "$d" commit -S --allow-empty -q -m check \
+    && git -C "$d" log -1 --format='sig=%G? email=%ae'
+)
 gh auth status
 ```
 
-If signing fails locally, the devcontainer will fail too, so fix here first.
+`sig` must read `G` and `email` must match the noreply address from the config line above.
+`ssh-add -L` (or a `gpg --list-secret-keys` equivalent) is not a substitute: it only proves an
+agent holds a key, and a host that signs straight from a key file with no agent running passes
+this scratch commit while failing that probe, per [GOVERNANCE.md "Git and Commit
+Rules"][governance-git-and-commit-rules]. If signing fails locally, the devcontainer will fail
+too, so fix here first.
 
 The gate replaced a line that ran `--version` on each tool and read only whether it answered. That form reported a host carrying the broken `gh` as fully set up, which is the failure it exists to stop. It exits non-zero on a missing required tool or one below its floor, and a below-floor finding prints the defect behind the floor rather than the number alone, names where to install from, and prints the command that installs or upgrades the tool on the current platform, so that failure carries its own fix. A missing tool prints the one-line fact, and [`host-setup/`][host-setup-dir] is its remedy.
 
@@ -254,9 +262,11 @@ The gate replaced a line that ran `--version` on each tool and read only whether
 py -3 scripts/host_gate.py                   # presence and version floors, from spec/host-tools.json
 py -3 scripts/skills_install.py --report     # the skills install stamp is current
 git config --global --list | Select-String "user\.|signing|gpg\."
-ssh-add -L                                   # should list your public key
-git -c gpg.format=ssh commit -S --allow-empty -m "verify-signing"
-git log --show-signature -1
+$d = Join-Path $env:TEMP ([guid]::NewGuid())
+git init -q $d
+git -C $d commit -S --allow-empty -q -m check
+git -C $d log -1 --format='sig=%G? email=%ae'
+Remove-Item -Recurse -Force $d
 gh auth status
 ```
 
