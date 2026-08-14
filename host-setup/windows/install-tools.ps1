@@ -555,7 +555,12 @@ function Test-DockerDesktopRunning {
     if (-not (Get-Command docker -ErrorAction SilentlyContinue)) { return $false }
     $text = (& docker desktop status --format json 2>&1 | Out-String)
     if ($LASTEXITCODE -ne 0) { return $false }
-    return ($text -match '"Status"\s*:\s*"running"')
+    # Parsed rather than matched, the same way setup-wsl.ps1 reads Docker's own settings file, with the regex kept as a fallback for a CLI version that ever answers non-JSON rather than reading that as "not running".
+    try {
+        return ((ConvertFrom-Json $text -ErrorAction Stop).Status -eq 'running')
+    } catch {
+        return ($text -match '"Status"\s*:\s*"running"')
+    }
 }
 
 function Stop-DockerDesktop {
