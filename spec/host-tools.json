@@ -94,8 +94,18 @@
             "required": true,
             "probes": [["uv", "--version"]],
             "pattern": "uv (\\d+(?:\\.\\d+)*)",
-            "minimum": null,
-            "why": "Used for coverage runs and the Python toolchain in a Python repository, where the pinned tool versions live in that repository rather than in uv itself. No floor has been measured here."
+            "minimum": "0.12.2",
+            "why": "Used for coverage runs and the Python toolchain in a Python repository, where the pinned tool versions live in that repository rather than in uv itself, so no uv feature is what a floor here would guard. The floor is a target rather than a measured breakage, and it says so rather than implying a defect nobody found. It is anchored to what two independently set-up hosts already carry rather than to a version anyone has verified good, the same reasoning jq's floor uses. A winget install on Windows carried 0.12.2 while winget already offered 0.12.4, so the winget package can lag upstream by a release, and host-setup/linux/install-tools.sh, which fetches upstream's latest release directly rather than a distribution package, carried 0.12.4 on a separate Linux host. The floor sits at the lower of the two, so a host on either managed install path already clears it, and a host below it is unverified rather than known broken.",
+            "source": {
+                "linux": "The upstream release archive at https://github.com/astral-sh/uv, which host-setup/linux/install-tools.sh fetches directly, and no distribution packages it.",
+                "macos": "Homebrew, which tracks upstream releases.",
+                "windows": "winget (astral-sh.uv), which can lag upstream by a release rather than tracking it release for release."
+            },
+            "remedy": {
+                "linux": "host-setup/linux/install-tools.sh --upgrade uv",
+                "macos": "brew upgrade uv",
+                "windows": "host-setup/windows/install-tools.ps1 -Upgrade uv"
+            }
         }
     ]
 }

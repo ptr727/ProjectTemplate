@@ -656,7 +656,7 @@ class TestShippedDeclaration(unittest.TestCase):
         one in the data, which is what caught the python3 floor being added without this line.
         """
         floors = {t['name'] for t in self.data['tools'] if t['minimum'] is not None}
-        self.assertEqual(floors, {'gh', 'git-restore-mtime', 'jq', 'python3'})
+        self.assertEqual(floors, {'gh', 'git-restore-mtime', 'jq', 'python3', 'uv'})
 
     def test_the_contract_table_carries_every_declared_floor(self):
         """docs/host-setup.md restates the floors, so the doc goes stale the moment the data moves.
@@ -691,7 +691,9 @@ class TestShippedDeclaration(unittest.TestCase):
                     floor_col = [c.lower() for c in cells].index('floor')
                 continue
             if cells:
-                rows[norm(cells[0])] = cells
+                # A compound cell like `uv` / `uvx` names two tools, so each names the row.
+                for token in cells[0].split('/'):
+                    rows[norm(token)] = cells
         self.assertIsNotNone(floor_col, 'docs/host-setup.md has no contract table with a Floor column')
         for t in self.data['tools']:
             # An optional tool is deliberately outside the table, which lists what a host must provide.

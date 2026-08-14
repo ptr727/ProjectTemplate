@@ -21,7 +21,7 @@ This section is the **contract**: which tools a host needs and which repo proced
 | Python 3 | `scripts/` and `spec/` (standard library only, no packages to install) | `python3 --version`, or `py -3 --version` on native Windows | **3.13**, target |
 | `jq` | the ruleset normalizer in `repo-config/configure.sh`, the ruleset diff in [`AUDIT.md`][audit] section 6, and payload regeneration | `jq --version` | **1.7**, target |
 | `docker` | the four linters, which run as pinned images rather than local installs | `docker --version` | none |
-| `uv` / `uvx` | coverage runs, and the Python toolchain (`ruff`, `pyright` or `mypy`) in a Python repo | `uv --version` | none |
+| `uv` / `uvx` | coverage runs, and the Python toolchain (`ruff`, `pyright` or `mypy`) in a Python repo | `uv --version` | **0.12.2**, target |
 
 The **Floor** column exists because presence and sufficiency are different questions and the answer to the first was being read as the answer to the second. A tool below its floor still answers `--version`, so every other column reports it as fine while `scripts/host_gate.py` fails it. The kind is named beside the number, since a **measured** floor sits above a version known to break a documented procedure and gives a failing host a defect to point at, where a **target** floor names the version the repo's toolchain is configured for and does not. The next section carries the reasoning behind each one.
 
