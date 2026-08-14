@@ -519,6 +519,8 @@ function Invoke-ToolApply {
     param([Parameter(Mandatory)][string]$ToolName)
     $record = Get-Tool $ToolName
     $state = Get-ToolState -Tool $record
+    # The id fresh work goes to, which is the installed id itself except in exactly one case: an outdated tool resolved to an id outside the tool's own default, which for node means a pinned major that is frozen and can never itself clear Available, so the default is the only id capable of fixing it.
+    $target = if ($state.Status -eq 'outdated' -and $state.Package -ne $record.Package) { $record.Package } else { $state.Package }
 
     if ($state.Status -eq 'unmanaged') {
         log "${ToolName}: answers on PATH and winget knows no package for it, leaving it alone"
@@ -544,7 +546,8 @@ function Invoke-ToolApply {
             log "${ToolName}: not installed, so there is nothing to remove"
         } else {
             $where = if ($state.Scope.Count -gt 0) { " installed $($state.Scope -join ' and ') wide" } else { '' }
-            if (-not (confirm "Remove $($state.Package) at $($state.Rows -join ', ')$where and install it again?")) {
+            $again = if ($target -eq $state.Package) { 'install it again' } else { "install $target instead" }
+            if (-not (confirm "Remove $($state.Package) at $($state.Rows -join ', ')$where and $($again)?")) {
                 die 'Declined'
             }
             # Every copy is removed, each in the scope it was found in, since a tool present in both scopes is exactly the shadowing this action exists to clear.
@@ -567,6 +570,9 @@ function Invoke-ToolApply {
     } elseif ($state.Status -eq 'multiple') {
         log "${ToolName}: winget lists $($state.Rows -join ', ') under one id, so -Reinstall is the action that resolves it"
         return
+    } elseif ($script:MODE -eq 'upgrade' -and $state.Status -eq 'outdated' -and $target -ne $state.Package) {
+        log "${ToolName}: $($state.Package) at $($state.Installed) is a fixed release and cannot advance under that id, -Reinstall $ToolName replaces it with $target"
+        return
     } elseif ($script:MODE -eq 'install' -and $state.Status -eq 'outdated') {
         log "${ToolName}: at $($state.Installed), the source carries $($state.Available), -Upgrade moves it"
         return
@@ -576,11 +582,11 @@ function Invoke-ToolApply {
         log "${ToolName}: $($state.Status)$(if ($state.Available) { ", the source carries $($state.Available)" })"
     }
 
-    $packages = @($state.Package)
+    $packages = @($target)
     if ($script:WITH_OPTIONAL) { $packages += $record.Optional }
 
     foreach ($package in $packages) {
-        $code = if ($state.Rows.Count -gt 0 -and $script:MODE -eq 'upgrade' -and $package -eq $state.Package) {
+        $code = if ($state.Rows.Count -gt 0 -and $script:MODE -eq 'upgrade' -and $package -eq $target) {
             Invoke-WingetUpgrade -Id $package
         } else {
             Invoke-WingetInstall -Id $package
@@ -599,7 +605,7 @@ function Invoke-ToolApply {
         }
     }
 
-    $now = Resolve-InstalledVersion -Version (Get-WingetInstalled -Id $state.Package)
+    $now = Resolve-InstalledVersion -Version (Get-WingetInstalled -Id $target)
     if ($now -ne $state.Installed) {
         $before = if ($state.Installed) { $state.Installed } else { '-' }
         $after = if ($now) { $now } else { '-' }
