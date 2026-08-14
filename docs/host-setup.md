@@ -244,7 +244,7 @@ gh auth status
 
 If signing fails locally, the devcontainer will fail too, so fix here first.
 
-The gate replaced a line that ran `--version` on each tool and read only whether it answered. That form reported a host carrying the broken `gh` as fully set up, which is the failure it exists to stop. It exits non-zero on a missing required tool or one below its floor, prints the defect behind the floor rather than the number alone, names where to install from, and prints the command that installs or upgrades the tool on the current platform, so the failure carries its own fix.
+The gate replaced a line that ran `--version` on each tool and read only whether it answered. That form reported a host carrying the broken `gh` as fully set up, which is the failure it exists to stop. It exits non-zero on a missing required tool or one below its floor, and a below-floor finding prints the defect behind the floor rather than the number alone, names where to install from, and prints the command that installs or upgrades the tool on the current platform, so that failure carries its own fix. A missing tool prints the one-line fact, and [`host-setup/`][host-setup-dir] is its remedy.
 
 **This block is POSIX, and on native Windows two lines need translating.** Run the POSIX form from WSL2 or Git Bash per the shell note, or use the PowerShell form below. Git Bash inherits the Windows `PATH`, so `python3` reaches the same Store alias stub it does in PowerShell and reports a working interpreter as missing.
 
