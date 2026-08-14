@@ -610,11 +610,11 @@ function Enter-DockerMaintenance {
         return $result
     }
 
-    # A platform update fails part way while Docker Desktop holds the WSL service open, so an unsuccessful stop is treated the same as a still-running Docker Desktop: both refuse the run rather than risk wsl --update against a host that never actually let go of the WSL service.
-    # Skipped under -DryRun, where Stop-DockerDesktop never actually stopped anything and Docker Desktop is still genuinely running, which would otherwise read every dry run on a live host as this exact failure rather than as a preview.
+    # Gated on whether Docker Desktop is still observed running after the attempt, not on Stop-DockerDesktop's own exit code: a non-zero exit that still left Docker Desktop stopped is not a reason to refuse the run and, just as importantly, not a reason to leave Stopped unset, which would tell Exit-DockerMaintenance below there is nothing to restart and strand the host stopped when it started running.
+    # Skipped under -DryRun, where nothing actually stopped and Docker Desktop is still genuinely running, which would otherwise read every dry run on a live host as this exact failure rather than as a preview.
     if ($WasRunning) {
-        $stopCode = Stop-DockerDesktop
-        if (-not $script:DRY_RUN -and ($stopCode -ne 0 -or (Test-DockerDesktopRunning))) {
+        Stop-DockerDesktop | Out-Null
+        if (-not $script:DRY_RUN -and (Test-DockerDesktopRunning)) {
             warn 'docker skipped, Docker Desktop did not stop, and a WSL platform update fails part way while it is running'
             $result.Proceed = $false
             return $result
