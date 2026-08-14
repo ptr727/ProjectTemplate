@@ -434,6 +434,60 @@ function Add-ToolNote {
     if ($Tool.Name -eq 'dotnet' -and -not $script:WITH_OPTIONAL) {
         note 'dotnet' "optional set not selected: $($Tool.Optional -join ', ')"
     }
+    if ($Tool.Name -eq 'docker') {
+        $wslProblem = Test-WslReadyForDocker
+        if ($wslProblem) { note 'docker' $wslProblem }
+    }
+}
+
+# --- WSL ---
+
+# Docker Desktop's own documented floor for the WSL platform, per docs.docker.com/desktop/features/wsl.
+$DOCKER_WSL_FLOOR = '2.1.5'
+
+# Every wsl.exe call goes through here, because wsl.exe emits UTF-16 by default and its output then reads as NUL separated characters.
+# Mirrored from upgrade-host.ps1 rather than shared with it, on the same rule as the rest of this directory: a script here has to stay independently fetchable.
+function Invoke-Wsl {
+    param([Parameter(ValueFromRemainingArguments)][string[]]$Arguments)
+    $previous = $env:WSL_UTF8
+    try {
+        $env:WSL_UTF8 = '1'
+        $text = (& wsl.exe @Arguments 2>&1 | Out-String -Width 500)
+        if ($text.Contains([char]0)) { $text = $text -replace "`0", '' }
+        return $text
+    } finally {
+        if ($null -eq $previous) { Remove-Item Env:\WSL_UTF8 -ErrorAction SilentlyContinue }
+        else { $env:WSL_UTF8 = $previous }
+    }
+}
+
+# Just the "WSL version" line, as a value Compare-HostVersion can read.
+# upgrade-host.ps1's Get-WslVersion concatenates WSL, kernel and WSLg into one display string instead, which serves a report and not a comparison.
+function Get-WslPlatformVersion {
+    if (-not (Get-Command wsl.exe -ErrorAction SilentlyContinue)) { return $null }
+    $text = Invoke-Wsl '--version'
+    if ($LASTEXITCODE -ne 0) { return $null }
+    if ($text -match '(?m)^WSL version:\s*(\S+)\s*$') { return $Matches[1] }
+    return $null
+}
+
+# What stands between this host and installing or upgrading docker, or $null where nothing does.
+# Read-only: this never runs wsl --install or wsl --update itself. Those stay a person's own action
+# through upgrade-host.ps1 -Wsl and setup-wsl.ps1, confirmed with the maintainer as the boundary,
+# since a WSL platform update restarts every distribution and neither action belongs as a silent
+# side effect of installing a different tool.
+function Test-WslReadyForDocker {
+    if (-not (Get-Command wsl.exe -ErrorAction SilentlyContinue)) {
+        return "wsl.exe was not found, and Docker Desktop needs WSL2. Install it with: wsl --install --no-distribution"
+    }
+    $version = Get-WslPlatformVersion
+    if (-not $version) {
+        return "the WSL version could not be read, and Docker Desktop needs WSL $($script:DOCKER_WSL_FLOOR) or later"
+    }
+    if ((Compare-HostVersion $version $script:DOCKER_WSL_FLOOR) -lt 0) {
+        return "WSL is at $version, and Docker Desktop needs $($script:DOCKER_WSL_FLOOR) or later. Update it with: host-setup\windows\upgrade-host.ps1 -Wsl"
+    }
+    return $null
 }
 
 # --- Actions ---
@@ -492,6 +546,17 @@ function Invoke-ToolApply {
         warn "$ToolName skipped, winget did not answer what is installed and this will not install against an unknown state"
         $script:FAILED += $ToolName
         return
+    }
+
+    # Docker Desktop needs WSL2 already present and current, and does not install or update it itself.
+    # A WSL gap has nothing to do with any other tool in this run, so it is collected here on the same rule as a failed install rather than ending the whole run.
+    if ($ToolName -eq 'docker') {
+        $wslProblem = Test-WslReadyForDocker
+        if ($wslProblem) {
+            warn "docker skipped, $wslProblem"
+            $script:FAILED += $ToolName
+            return
+        }
     }
 
     # Naming a scope the installed copy does not sit in would add a second copy beside it, so the removal is asked for rather than done on the way past.

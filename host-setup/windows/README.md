@@ -80,6 +80,8 @@ pwsh -NoProfile -File ..\bootstrap.ps1 -Help
 
 Docker's own `docker-desktop` distribution is excluded from every distribution listing, since it is Docker's rather than one an operator installed.
 
+`install-tools.ps1` checks, before installing or upgrading `docker`, that `wsl.exe` is present and reports a WSL version at or above `2.1.5`, Docker Desktop's own documented floor for the platform it depends on. Where either is not the case it skips `docker` and names the exact remedy (`wsl --install --no-distribution`, or `upgrade-host.ps1 -Wsl`) rather than installing against a platform Docker Desktop cannot use, or Windows-feature-installing on the caller's behalf. It never runs `wsl --install` or `wsl --update` itself: those stay `upgrade-host.ps1 -Wsl` and a person's own choice, since an update restarts every distribution and neither belongs as a side effect of installing a different tool. The same check surfaces as a note under `-Report`, read-only, before a caller ever runs `-Install`.
+
 ## Differences From the Linux Tooling
 
 | Linux | Windows | Why |
@@ -88,7 +90,7 @@ Docker's own `docker-desktop` distribution is excluded from every distribution l
 | `install-tools.sh` carries four functions per tool | `install-tools.ps1` carries one registry record per tool | Every source is `winget`, so the per-tool variation those functions exist for does not arise |
 | Actions, the last one given wins | Actions, name one | A `param()` block records which switches were given and not their order, and refusing beats silently discarding an intent |
 | `git-restore-mtime` is managed | not managed | The spec declares it not applicable on Windows, since it serves a Linux deploy path |
-| `docker` is not managed | `docker` is managed | `Docker.DockerDesktop` is one winget package, where the Linux answer differs by host role |
+| `install-tools.ps1` checks the WSL *platform* version before installing docker | `install-tools.sh` refuses docker entirely inside a WSL *distribution* | Windows needs WSL2 present for Docker Desktop's own backend; a WSL distribution instead takes docker only from Docker Desktop's own WSL integration |
 | `sudo` re-runs a command as root | nothing elevates | `winget` raises UAC per installer, which is the path with the fewest failures |
 | `unmanaged` means the upstream repository is unconfigured | `unmanaged` means the tool is on `PATH` and winget knows no package for it | The same question, by a different mechanism |
 | `credential.helper cache --timeout=3600` | `credential.helper manager`, and only where unset | Git Credential Manager ships with Git for Windows |

@@ -15,7 +15,7 @@ readonly SOURCES_DIR="/etc/apt/sources.list.d"
 readonly BIN_DIR="/usr/local/bin"
 
 # Managed tools, in dependency order: node asks jq to read the upstream release index.
-readonly TOOLS=(git gh jq git-restore-mtime node python uv dotnet)
+readonly TOOLS=(git gh jq git-restore-mtime node python uv docker dotnet)
 
 # Package sets.
 # The default set is what a tool needs to be useful, and the optional set is what is useful often enough to name but not always wanted, installed only with --optional.
@@ -30,6 +30,8 @@ APT_REFRESHED=false
 APT_DIRTY=false
 DISTRO_ID=""
 DISTRO_VERSION=""
+CODENAME=""
+IS_WSL=false
 ARCH=""
 SUDO=()
 SELECTED=()
@@ -98,6 +100,7 @@ detect_host() {
 
     DISTRO_ID="${ID:-}"
     DISTRO_VERSION="${VERSION_ID:-}"
+    CODENAME="${VERSION_CODENAME:-}"
     if [[ $DISTRO_ID != "debian" && $DISTRO_ID != "ubuntu" ]]; then
         [[ " ${ID_LIKE:-} " == *" debian "* ]] ||
             die "Unsupported distribution \"${DISTRO_ID:-unknown}\", this script installs on Debian and Ubuntu based hosts"
@@ -107,6 +110,11 @@ detect_host() {
 
     command -v apt-get > /dev/null || die "apt-get not found, this script installs apt packages"
     ARCH=$(dpkg --print-architecture)
+
+    # WSL has no kernel of its own, and docker there comes only from Docker Desktop's own WSL integration, never a native install.
+    if grep -qi microsoft /proc/version 2> /dev/null || [[ -n ${WSL_DISTRO_NAME:-} ]]; then
+        IS_WSL=true
+    fi
 
     if [[ $EUID -ne 0 ]]; then
         command -v sudo > /dev/null || die "Not running as root and sudo is not installed"
@@ -526,6 +534,67 @@ uv_install() {
     run_root install -m 0755 "$TMP_DIR/uv-$triple/uvx" "$BIN_DIR/uvx"
 }
 
+# --- docker ---
+
+docker_source() { printf 'download.docker.com'; }
+
+# Read directly from the CLI rather than from apt_installed_version docker-ce, unlike gh and node.
+# On a WSL distribution using Docker Desktop's own WSL integration, docker is a working command with no docker-ce apt package behind it at all, and reading the apt package version would misreport that working install as absent.
+# This also matches exactly what scripts/host_gate.py's own probe and pattern read.
+docker_version() {
+    command -v docker > /dev/null || return 0
+    docker --version 2> /dev/null | sed -n 's/^Docker version \([0-9][0-9.]*\).*/\1/p'
+}
+
+# Stripped of the epoch and the Debian package revision apt_candidate_version otherwise carries (e.g. "5:29.7.2-1~debian.13~trixie"), so this compares like for like against docker_version's plain CLI reading rather than against dpkg's own packaging metadata.
+docker_target() {
+    local raw
+    raw=$(apt_candidate_version docker-ce)
+    [[ -z $raw ]] && return 0
+    raw="${raw#*:}"
+    printf '%s' "${raw%%-*}"
+}
+
+# Old and conflicting packages named here, per Docker's own uninstall list.
+# Debian and Ubuntu never ship a package named docker-ce, so unlike gh and node there is no distro package the upstream one could be confused with, and tool_configured needs no entry for it.
+docker_install() {
+    # The only sanctioned source inside a WSL distribution is Docker Desktop's own WSL integration, confirmed with the maintainer as a hard rule with no override.
+    # A native install here would run a second engine beside Desktop's, so this is a skip rather than a failure, on the same pattern dotnet_feed uses for an architecture Microsoft's feed does not carry.
+    if [[ $IS_WSL == true ]]; then
+        warn "This is a WSL distribution, and docker here comes only from Docker Desktop's own WSL integration, never from installing docker-ce directly. Enable it in Docker Desktop under Settings, Resources, WSL integration, or check it from Windows with setup-wsl.ps1 -Status. Skipping the native install."
+        return 0
+    fi
+
+    local -a conflicts=(docker.io docker-doc docker-compose docker-compose-v2 docker-buildx podman-docker containerd runc)
+    local -a present=()
+    local pkg
+    for pkg in "${conflicts[@]}"; do
+        package_installed "$pkg" && present+=("$pkg")
+    done
+    if [[ ${#present[@]} -gt 0 ]]; then
+        log "  Removing ${#present[@]} conflicting package(s): ${present[*]}"
+        run_root apt-get remove -y "${present[@]}"
+    fi
+
+    ensure_prerequisites
+    remove_stale "$SOURCES_DIR/docker.list"
+
+    if install_keyring "https://download.docker.com/linux/$DISTRO_ID/gpg" \
+        "$KEYRING_DIR/docker.asc" \
+        "https://download.docker.com/linux/$DISTRO_ID/dists/$CODENAME/InRelease" true; then
+        APT_DIRTY=true
+    fi
+
+    if write_sources "docker" "https://download.docker.com/linux/$DISTRO_ID" "$CODENAME" "stable" \
+        "$KEYRING_DIR/docker.asc"; then
+        APT_DIRTY=true
+    fi
+
+    apt_install docker-ce docker-ce-cli containerd.io docker-buildx-plugin docker-compose-plugin
+
+    # Non-root use (usermod -aG docker $USER) is left to the operator, the same way this file leaves orphaned dependencies to a later apt autoremove: it is a user/group choice rather than a question of whether the tool is present and current.
+}
+
 # --- dotnet ---
 
 dotnet_source() {
@@ -703,6 +772,11 @@ tool_note() {
             fi
             if [[ ! -f "$SOURCES_DIR/$name.sources" ]]; then
                 note "$tool" "upstream repository not configured, the available version is the distro's"
+            fi
+            ;;
+        docker)
+            if [[ $IS_WSL == true ]]; then
+                note "docker" "this is a WSL distribution, docker here comes only from Docker Desktop's own WSL integration, never from installing docker-ce directly, so --install/--upgrade skip it"
             fi
             ;;
         *) ;;

@@ -16,9 +16,7 @@ cannot satisfy.
 
 That assertion runs once per platform, because the two installers do not manage the same set and the
 difference is a decision rather than an accident. `git-restore-mtime` serves a Linux deploy path and
-the spec declares it not applicable on Windows. `docker` is the reverse: one winget package there,
-and on Linux an answer that differs by whether the host is a hypervisor, a WSL distribution, or a
-workstation.
+the spec declares it not applicable on Windows.
 
 Run: python3 scripts/test_bootstrap.py
 """
@@ -61,12 +59,9 @@ LINUX_INSTALLER_REMEDY = re.compile(r'^host-setup/linux/install-tools\.sh --upgr
 WINDOWS_INSTALLER_REMEDY = re.compile(r'^host-setup/windows/install-tools\.ps1 -Upgrade (\S+)$')
 
 # A spec tool an installer deliberately does not manage, and the reason, recorded so an omission is a decision somebody made rather than one nobody noticed.
-# The windows set is empty rather than absent, which is itself the assertion: Docker Desktop is one winget package there, where on Linux a hypervisor and a workstation want different answers, so an entry appearing here later is a decision to justify rather than a gap to fill.
+# Both sets are empty, which is itself the assertion: docker installs the same way on a hypervisor and a workstation on both platforms now, and the one case that differs, a WSL distribution, is handled inside install-tools.sh itself (it skips the native install and points at Docker Desktop's own WSL integration) rather than by leaving docker unmanaged on Linux entirely.
 NOT_MANAGED = {
-    'linux': {
-        'docker': 'Installed from the vendor script per the distribution, and a hypervisor or a WSL '
-                  'distribution wants a different answer than a workstation does.',
-    },
+    'linux': {},
     'windows': {},
 }
 
