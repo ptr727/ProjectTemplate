@@ -642,7 +642,7 @@ tool_status() {
     fi
 }
 
-# The path of a copy of $1 that resolves ahead of $BIN_DIR/$1 on PATH, or empty when there is none.
+# Where PATH currently resolves $1 to, when that is not $BIN_DIR/$1, or empty when it already is.
 # Shared by the report, which only names the shadow, and --install/--upgrade, which removes it.
 # "type -P" skips aliases and shell functions, which "command -v" answers for with no file behind them.
 tool_shadow_path() {
@@ -777,9 +777,12 @@ tool_unshadow() {
 apply_tool() {
     local tool="$1" installed target status
 
-    # Ahead of the version read below, since a shadowed tool's "command -v" answers for the shadow, not $BIN_DIR.
-    # That let a shadowed tool report "current" and skip its own install function entirely.
-    tool_unshadow "$tool"
+    # Unshadowing first is safe only when nothing at $BIN_DIR could be made worse by it.
+    # --upgrade brings $BIN_DIR current regardless, and --install with nothing there yet has nothing to protect.
+    # --install with a managed copy already in place leaves it at its version by design, so removing a newer shadow first would downgrade what PATH resolves to.
+    if [[ $MODE == "upgrade" || ! -x "$BIN_DIR/$tool" ]]; then
+        tool_unshadow "$tool"
+    fi
 
     installed=$("$(tool_function "$tool" version)" 2> /dev/null || true)
     target=$("$(tool_function "$tool" target)" 2> /dev/null || true)
