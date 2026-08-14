@@ -60,7 +60,7 @@ scope-widened commit, a rewritten shared history, a destructive reset).
   all exercise the same code path) and doubles as the identity check below. Run it once before the
   first agent-authored commit of a session. Don't assume a prior session left config correct:
   ```sh
-  d=$(mktemp -d) && (
+  d=$(mktemp -d "${TMPDIR:-/tmp}/sign-check.XXXXXX") && (
     trap 'rm -rf "$d"' EXIT
     git init -q "$d" \
       && git -C "$d" commit -S --allow-empty -q -m check \

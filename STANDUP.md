@@ -35,7 +35,7 @@ git config --global --get gpg.format        # ssh for an SSH key; unset or openp
 # gpg --list-secret-keys): a host that signs straight from a key file with no agent running
 # passes cleanly and fails that probe. See .agents/skills/git-commit-conventions/SKILL.md
 # "Signing, verified not configured" for why.
-d=$(mktemp -d) && (
+d=$(mktemp -d "${TMPDIR:-/tmp}/sign-check.XXXXXX") && (
   trap 'rm -rf "$d"' EXIT
   git init -q "$d" \
     && git -C "$d" commit -S --allow-empty -q -m check \

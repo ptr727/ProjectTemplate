@@ -238,7 +238,7 @@ The `claude` CLI is deliberately absent from the tool catalog in [`spec/host-too
 python3 scripts/host_gate.py           # presence and version floors, from spec/host-tools.json
 python3 scripts/skills_install.py --report   # the skills install stamp is current
 git config --global --list | grep -E "user\.|signing|gpg\."
-d=$(mktemp -d) && (
+d=$(mktemp -d "${TMPDIR:-/tmp}/sign-check.XXXXXX") && (
   trap 'rm -rf "$d"' EXIT
   git init -q "$d" \
     && git -C "$d" commit -S --allow-empty -q -m check \
