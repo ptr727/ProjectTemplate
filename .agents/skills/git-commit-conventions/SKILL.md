@@ -48,11 +48,68 @@ scope-widened commit, a rewritten shared history, a destructive reset).
 
 - **Every commit must be cryptographically signed (SSH or GPG).** Branch protection enforces this
   on every fleet branch, and an unsigned commit is rejected on push. Signing depends on
-  environment configuration: `git config commit.gpgsign true`, a configured `user.signingkey`, and
-  a working signing agent (`ssh-agent` for SSH, `gpg-agent` for GPG). **If signing is not
-  configured, do not commit.** Surface the missing config to the developer and stop at `git add`.
-  Verify before the first agent-authored commit, don't assume a prior session left it set:
-  `git config --get commit.gpgsign && ssh-add -L`, or the GPG equivalent.
+  environment configuration (`commit.gpgsign`, `user.signingkey`, `gpg.format`), but none of those
+  values prove signing actually works: `gpg.format=ssh` can sign straight from a key file with no
+  `ssh-agent` running at all (the common case on Git for Windows), just as GPG can sign
+  agent-backed or straight from a keyring. **Probing agent liveness (`ssh-add -L`, a `gpg-agent`
+  check) is not a valid test and must not be used.** It tests one specific delivery path, not
+  whether a commit actually ends up signed, and a host that signs straight from a key file fails
+  that probe while signing correctly.
+- **Verify with a real scratch commit, read back with git's own verdict, not a text grep.** This
+  single probe is tech-agnostic (SSH agent-backed, SSH key-file, GPG agent-backed, and GPG keyring
+  all exercise the same code path) and doubles as the identity check below. Run it once before the
+  first agent-authored commit of a session. Don't assume a prior session left config correct. The
+  commit below is plain, deliberately no `-S`: forcing it would still succeed on a host where
+  `commit.gpgsign` is unset or false, which is the exact default-config gap this probe exists to
+  catch, since every real commit an agent makes is plain too:
+
+  This file is CRLF (the repo's Markdown default), and a `\` line continuation stops working
+  the moment a stray `\r` lands after it, so the probe is one physical line, not backslash-joined
+  ones:
+
+  ```sh
+  d=$(mktemp -d "${TMPDIR:-/tmp}/sign-check.XXXXXX") && ( trap 'rm -rf "$d"' 0; email=$(git config --global --get user.email) && git init -q "$d" && git -C "$d" commit --allow-empty -q -m check && out=$(git -C "$d" log -1 --format='sig=%G? author=%an <%ae> committer=%cn <%ce>') && echo "$out" && ae=$(git -C "$d" log -1 --format='%ae') && ce=$(git -C "$d" log -1 --format='%ce') && case "$out" in sig=G\ *|sig=U\ *) true ;; *) false ;; esac && case "$email" in *@users.noreply.github.com) true ;; *) false ;; esac && [ "$ae" = "$email" ] && [ "$ce" = "$email" ] )
+  ```
+
+  PowerShell equivalent:
+
+  ```powershell
+  $d = Join-Path $env:TEMP ([guid]::NewGuid())
+  try {
+    $email = git config --global --get user.email
+    git init -q "$d" `
+      && git -C "$d" commit --allow-empty -q -m check
+    $out = git -C "$d" log -1 --format='sig=%G? author=%an <%ae> committer=%cn <%ce>'
+    $out
+    $ae = git -C "$d" log -1 --format='%ae'
+    $ce = git -C "$d" log -1 --format='%ce'
+    if ($out -notmatch '^sig=[GU] ' -or $email -notmatch '@users\.noreply\.github\.com$' `
+        -or $ae -ne $email -or $ce -ne $email) {
+      throw "signing/identity check failed: $out"
+    }
+  } finally {
+    if (Test-Path "$d") { Remove-Item -Recurse -Force "$d" }
+  }
+  ```
+
+  `sig` must read `G` (good signature) or `U` (good signature, unrecognized signer). For GPG, `U`
+  is a valid signature from a key whose trust level is merely undefined, common right after
+  generating a new key. For SSH, it's a valid signature from a key not found in the local
+  `allowed_signers` file, which doesn't affect whether GitHub itself verifies the commit, only
+  local `git verify-commit` output. `sig` is git's own verdict char. Don't grep localized
+  "Good" text, since that varies by git version and locale. Anything else, or the commit failing
+  outright, means **do not commit**: surface the actual error to the developer and stop at
+  `git add`. Nothing else is contrary evidence: not an unreachable agent, not a config value, not a
+  signature type you can't otherwise explain in past history (see below).
+- **A mix of SSH- and GPG-signed commits in history is structural, not a host to track down.**
+  `git log --pretty='%G? %GK'` shows two distinct shapes, not two health states: a commit committed
+  by the PR's own author carries that host's own signature type, while a commit committed by
+  `GitHub <noreply@github.com>` is a squash-merge: GitHub creates and signs that commit itself,
+  server-side, with GitHub's own GPG key, regardless of what the PR author signed with locally.
+  Every commit on `develop`/`main` past its first squash-merge shows `GitHub` as committer and a
+  GPG signature. That's expected on every fleet repo, on every host, and is not evidence anything
+  is misconfigured. Check `commit.committer.name` before treating a differing signature type as a
+  clue worth chasing.
 - **Signing must be live before the *first* commit, not retrofitted.** Turning on a
   require-signed-commits rule against a branch that already carries unsigned commits forces a
   rewrite of that entire history to re-sign it, changing every commit SHA and making whoever does
@@ -65,9 +122,13 @@ scope-widened commit, a rewritten shared history, a destructive reset).
 **Commit under the committing account's own GitHub `noreply` identity, never a private, personal,
 or invented address.** `author` and `committer` on every agent-authored commit are the GitHub
 `noreply` address of the account whose key signs the commit, in `username@users.noreply.github.com`
-or `ID+username@users.noreply.github.com` form. **Verify it, do not set it**: check
-`git config --get user.email` matches that address before committing, rather than writing a
-repo-local override. The identity is host configuration set globally once, so a repo-local
+or `ID+username@users.noreply.github.com` form. **Verify it, do not set it**: the scratch commit
+from the signing check above already proves this end-to-end. Read its `author=`/`committer=`
+output rather than trusting `git config --get user.email` alone, since a global config value
+doesn't prove what actually lands on a commit object, and read both rather than the author alone
+since a rebase, amend, or cherry-pick can rewrite the committer while leaving the author
+untouched. Match both against that address before committing, rather than
+writing a repo-local override. The identity is host configuration set globally once, so a repo-local
 `user.email` is redundant where the global is right and a silently-shadowing wrong identity where
 it is not. A mismatch is a host fault to surface to the maintainer, not to patch per repo, because
 a local override hides a broken host that then commits wrong in every other repo on that machine.
