@@ -74,7 +74,10 @@ condition, and neither is patience running out.
 
 ## Every finding ends in one of five outcomes
 
-1. **Real, so fix it.** Reply with the fixing commit SHA.
+1. **Real, so fix it.** Reply with the fixing commit SHA. For a finding on platform-specific code
+   (PowerShell, a macOS- or WSL-only path), "fixed" means executed on that platform, per
+   `agent-conduct` "Before Claiming Done": a fix reasoned out by analogy to a tested equivalent
+   elsewhere is not yet fixed, and the reply says so rather than claiming the SHA closes it.
 2. **Not real, or real but structurally out of scope, so decline in the thread with evidence.**
    Disprove a wrong finding with the command and its output, the code path that makes it
    impossible, or the rule that governs it. A finding that is factually correct but not this

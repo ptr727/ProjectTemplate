@@ -20,6 +20,7 @@ Read `GOVERNANCE.md` "Verification Discipline" before reporting success on anyth
 - **A launched process is not a result.** Report the output the wait produced, and where it produced none, that absence is the report. Never name an external cause the record does not carry.
 - **A local clone is not the branch it names.** Fetch immediately before reading, or read the live ref, and name the ref and commit in any finding a local read produced.
 - **A test asserts the mechanism it names, and a gate has to be watched failing.** A case that passes for an incidental reason is worse than no case, because it is later cited as evidence.
+- **Platform-specific code is verified only on the platform it runs on.** Reasoning about PowerShell, macOS, or WSL-specific behavior from a different host is not verification, however closely it matches an already-tested equivalent elsewhere. State an untested structural match as exactly that, never in the words used for a tested fact, and when no agent in the loop has access to the target platform, say so and defer or ship it labeled unverified.
 
 Claims about a pull request being reviewed, clean, or mergeable are owned by the `pr-review-conduct` skill, and claims that a commit landed by `git-commit-conventions`.
 
