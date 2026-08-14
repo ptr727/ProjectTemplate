@@ -570,8 +570,10 @@ function Enter-DockerMaintenance {
     $result = @{ Proceed = $true; Stopped = $false }
     if (-not $WasRunning -and -not $WslProblem) { return $result }
 
-    $question = if ($WslProblem) {
+    $question = if ($WslProblem -and $WasRunning) {
         "docker needs WSL updated first ($WslProblem). Stop Docker Desktop, update WSL, and restart Docker Desktop to continue?"
+    } elseif ($WslProblem) {
+        "docker needs WSL updated first ($WslProblem). Update WSL to continue?"
     } else {
         "docker is about to change version, and Docker Desktop's own WSL integration commonly goes stale across an engine bump. Stop Docker Desktop first, and restart it after, to avoid that?"
     }
@@ -581,8 +583,13 @@ function Enter-DockerMaintenance {
         return $result
     }
 
+    # A platform update fails part way while Docker Desktop holds the WSL service open, so an unsuccessful stop is treated the same as a still-running Docker Desktop: both refuse the run rather than risk wsl --update against a host that never actually let go of the WSL service.
     if ($WasRunning) {
-        Stop-DockerDesktop | Out-Null
+        if ((Stop-DockerDesktop) -ne 0 -or (Test-DockerDesktopRunning)) {
+            warn 'docker skipped, Docker Desktop did not stop, and a WSL platform update fails part way while it is running'
+            $result.Proceed = $false
+            return $result
+        }
         $result.Stopped = $true
     }
     if ($WslProblem) {
