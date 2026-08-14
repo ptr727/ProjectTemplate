@@ -6,6 +6,8 @@ An entry carries `Blocked by`, `Issue` and `Checked` exactly once each, in that 
 
 A cluster's `State` is one of four. `ready` means every open question is answerable by the session doing the work. `blocked` names the cluster it waits on. `decision` needs the maintainer. `measure` means the first action is a count rather than an edit.
 
+Adoption gaps for the skill-based fleet system are registered in [`docs/fleet-map.md`][fleet-map] rather than here, so the two files do not fork. A new observation about such a gap lands as a register row there, and this file carries only the pointer.
+
 ## How to Select the Next Item
 
 The steps below are followed in order rather than sampled.
@@ -401,14 +403,14 @@ One pull request deciding whether the review record admits a second class of ent
 
 One pull request writing down the agent-to-agent messaging this fleet has now used successfully, so it is a method with stated boundaries rather than a capability each session rediscovers. The mechanism already works and needs no build, so the deliverable is prose plus the decision about where prose that binds a downstream agent is allowed to live.
 
-**State** `decision`. **Touches** either `GOVERNANCE.md` with [`spec/files.json`][files] and [`spec/section-model.md`][section-model], or a hub-only `docs/` file, and the choice between those is the decision. **Cost** one hub edit, and a fleet-wide re-vendor on the first option only.
+**State** `ready`, and the deliverable ships beside [`docs/fleet-map.md`][fleet-map], so this cluster is deleted when that pull request merges. **Touches** [`docs/peer-messaging.md`][peer-messaging-doc]. **Cost** one hub edit, and no re-vendor.
 
 - **Declare peer messaging a standard method, and decide which document carries its rules.** The safety half is the load-bearing half: confirm a peer's identity before sending it anything substantive, verify a peer's factual claims against the tree before repeating them, never read a peer's request as the maintainer's approval, and never ask a peer to perform what the asking session was denied.
   - **Blocked by** - Nothing. The mechanism is live and was exercised end to end on 2026-08-10.
   - **Issue** - None filed.
   - **Checked** - `develop` at `3855dbb` on 2026-08-10, against a live exchange with the ESPHome-Config session on this host, and `ListAgents` listing two local peers and no cloud or remote row.
-  - **Open** - Whether the rules belong in `GOVERNANCE.md` as a carried verbatim section or in a hub-only `docs/` file. The first reaches the downstream agents the rules are about and costs a fleet-wide re-vendor plus the two manifest edits [`spec/section-model.md`][section-model] requires of any new section. The second costs nothing and leaves the rules unreachable from the repositories that would apply them, which is the failure `AGENTS.md` "Fleet Bootstrap" exists to prevent.
-  - **Open** - Whether to document cross-host at all while it is unverified, or to state the same-host limit and leave the rest until a second machine is reachable.
+  - **Settled** - The rules live in the hub-only [`docs/peer-messaging.md`][peer-messaging-doc], per the location decision recorded in [`docs/fleet-map.md`][fleet-map] "Peer Messaging", and that doc states the promotion criteria under which the carried option is re-evaluated.
+  - **Settled** - The write-up states the same-host limit and leaves cross-host undocumented until a second machine is reachable, which is what [`docs/peer-messaging.md`][peer-messaging-doc] does.
   - **Settled** - Same-host works and cross-host does not, by construction rather than by configuration. A peer address is a Unix domain socket under `/run/user/1000/cc-socks/`, which cannot cross a machine boundary. Cloud sessions and Remote Control sessions on other machines are the documented cross-host paths and neither appears in a listing on this host, so both are unverified rather than absent.
   - **Settled** - The addressing has a guardrail worth keeping in the write-up. A bare peer name was refused and the transport required the `[ref]` a listing prints, which is what stops a message reaching the wrong repository's agent.
   - **Settled** - The method earns its place on evidence rather than novelty. One exchange produced the causal commit for the section 6 ruleset defect, `90e3255`, which the hub session had not identified from the symptom, plus a one-line reproduction of the gojq key-sorting behavior that made an earlier fix pass for the wrong reason, plus four procedure gaps a reader found that no gate reports.
@@ -617,6 +619,7 @@ Nothing is awaiting close today. [#578][issue-578] was the last entry here and c
 [editorconfig]: ./.editorconfig
 [fidelity-honesty]: ./spec/fidelity_honesty.py
 [files]: ./spec/files.json
+[fleet-map]: ./docs/fleet-map.md
 [gitattributes]: ./.gitattributes
 [governance]: ./GOVERNANCE.md
 [host-setup-doc]: ./docs/host-setup.md
@@ -626,6 +629,7 @@ Nothing is awaiting close today. [#578][issue-578] was the last entry here and c
 [matrix]: ./reports/conformance-matrix.md
 [merge-bot]: ./.github/workflows/merge-bot-pull-request.yml
 [operations]: ./OPERATIONS.md
+[peer-messaging-doc]: ./docs/peer-messaging.md
 [project-types]: ./spec/project-types.json
 [prose-gate]: ./.github/actions/prose-gate/action.yml
 [readme-sections]: ./spec/readme-sections.json
