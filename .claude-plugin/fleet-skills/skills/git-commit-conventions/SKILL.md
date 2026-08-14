@@ -62,25 +62,29 @@ scope-widened commit, a rewritten shared history, a destructive reset).
   commit below is plain, deliberately no `-S`: forcing it would still succeed on a host where
   `commit.gpgsign` is unset or false, which is the exact default-config gap this probe exists to
   catch, since every real commit an agent makes is plain too:
+
   ```sh
   d=$(mktemp -d "${TMPDIR:-/tmp}/sign-check.XXXXXX") && (
-    trap 'rm -rf "$d"' EXIT
+    trap 'rm -rf "$d"' 0
     git init -q "$d" \
       && git -C "$d" commit --allow-empty -q -m check \
       && git -C "$d" log -1 --format='sig=%G? author=%an <%ae> committer=%cn <%ce>'
   )
   ```
+
   PowerShell equivalent:
+
   ```powershell
   $d = Join-Path $env:TEMP ([guid]::NewGuid())
   try {
-    git init -q "$d"
-    git -C "$d" commit --allow-empty -q -m check
-    git -C "$d" log -1 --format='sig=%G? author=%an <%ae> committer=%cn <%ce>'
+    git init -q "$d" `
+      && git -C "$d" commit --allow-empty -q -m check `
+      && git -C "$d" log -1 --format='sig=%G? author=%an <%ae> committer=%cn <%ce>'
   } finally {
     if (Test-Path "$d") { Remove-Item -Recurse -Force "$d" }
   }
   ```
+
   `sig` must read `G`, git's own good-signature verdict char. Don't grep localized
   "Good" text, since that varies by git version and locale. Anything else, or the commit failing
   outright, means **do not commit**: surface the actual error to the developer and stop at

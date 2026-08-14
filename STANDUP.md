@@ -31,12 +31,13 @@ git config --global --get commit.gpgsign    # true
 git config --global --get user.signingkey   # set
 git config --global --get gpg.format        # ssh for an SSH key; unset or openpgp for GPG
 
-# prove signing works with a live scratch commit, not an agent-liveness probe (ssh-add -L,
-# gpg --list-secret-keys): a host that signs straight from a key file with no agent running
-# passes cleanly and fails that probe. See .agents/skills/git-commit-conventions/SKILL.md
-# "Signing, verified not configured" for why.
+# prove signing works with a live scratch commit in a disposable scratch repo, not this
+# repo (its own git init is still section 0B, below), and not an agent-liveness probe
+# (ssh-add -L, gpg --list-secret-keys): a host that signs straight from a key file with no
+# agent running passes cleanly and fails that probe. See
+# .agents/skills/git-commit-conventions/SKILL.md "Signing, verified not configured" for why.
 d=$(mktemp -d "${TMPDIR:-/tmp}/sign-check.XXXXXX") && (
-  trap 'rm -rf "$d"' EXIT
+  trap 'rm -rf "$d"' 0
   git init -q "$d" \
     && git -C "$d" commit --allow-empty -q -m check \
     && git -C "$d" log -1 --format='sig=%G? author=%an <%ae> committer=%cn <%ce>'

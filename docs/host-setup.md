@@ -239,7 +239,7 @@ python3 scripts/host_gate.py           # presence and version floors, from spec/
 python3 scripts/skills_install.py --report   # the skills install stamp is current
 git config --global --list | grep -E "user\.|signing|gpg\."
 d=$(mktemp -d "${TMPDIR:-/tmp}/sign-check.XXXXXX") && (
-  trap 'rm -rf "$d"' EXIT
+  trap 'rm -rf "$d"' 0
   git init -q "$d" \
     && git -C "$d" commit --allow-empty -q -m check \
     && git -C "$d" log -1 --format='sig=%G? author=%an <%ae> committer=%cn <%ce>'
@@ -259,9 +259,9 @@ py -3 scripts/skills_install.py --report     # the skills install stamp is curre
 git config --global --list | Select-String "user\.|signing|gpg\."
 $d = Join-Path $env:TEMP ([guid]::NewGuid())
 try {
-  git init -q "$d"
-  git -C "$d" commit --allow-empty -q -m check
-  git -C "$d" log -1 --format='sig=%G? author=%an <%ae> committer=%cn <%ce>'
+  git init -q "$d" `
+    && git -C "$d" commit --allow-empty -q -m check `
+    && git -C "$d" log -1 --format='sig=%G? author=%an <%ae> committer=%cn <%ce>'
 } finally {
   if (Test-Path "$d") { Remove-Item -Recurse -Force "$d" }
 }
