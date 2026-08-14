@@ -643,7 +643,7 @@ tool_status() {
 }
 
 # Where PATH currently resolves $1 to, when that is not $BIN_DIR/$1, or empty when it already is.
-# Shared by the report, which only names the shadow, and --install/--upgrade, which removes it.
+# Shared by the report, which only names the shadow, and --install/--upgrade, which act on it (apply_tool decides when it is safe to remove).
 # "type -P" skips aliases and shell functions, which "command -v" answers for with no file behind them.
 tool_shadow_path() {
     local name="$1" resolved
@@ -683,7 +683,7 @@ tool_note() {
             ;;
         jq | uv | git-restore-mtime)
             # A copy earlier on the PATH keeps answering after this script installs a newer one, which reads as an upgrade that did not take.
-            # --install/--upgrade removes it, so a report naming one here is stale the moment either runs.
+            # --upgrade removes it. --install removes it only when nothing managed exists yet, and warns instead when it leaves one in place.
             local resolved
             resolved=$(tool_shadow_path "$tool")
             if [[ -n $resolved ]]; then
