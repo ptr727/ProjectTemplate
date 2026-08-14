@@ -570,6 +570,11 @@ function Test-DockerDesktopRunning {
 }
 
 function Stop-DockerDesktop {
+    # Test-DockerDesktopRunning can answer true through the process probe alone, with the docker CLI missing or off PATH, and & docker there is a command-not-found PowerShell throws rather than a native exit code this can warn on, so this checks first rather than let that surface as a crash.
+    if (-not (Get-Command docker -ErrorAction SilentlyContinue)) {
+        warn 'docker desktop stop needs the docker CLI, which is not on PATH; stop Docker Desktop by hand from its tray icon'
+        return 1
+    }
     info 'Stopping Docker Desktop'
     $code = run 'docker' @('desktop', 'stop', '--timeout', '90')
     if ($code -ne 0) { warn "docker desktop stop exited $code" }
@@ -577,6 +582,10 @@ function Stop-DockerDesktop {
 }
 
 function Start-DockerDesktop {
+    if (-not (Get-Command docker -ErrorAction SilentlyContinue)) {
+        warn 'docker desktop start needs the docker CLI, which is not on PATH; start Docker Desktop by hand and check WSL integration per distro'
+        return 1
+    }
     info 'Starting Docker Desktop'
     $code = run 'docker' @('desktop', 'start', '--timeout', '180')
     if ($code -ne 0) { warn 'docker desktop start did not exit cleanly, start Docker Desktop by hand and check WSL integration per distro' }

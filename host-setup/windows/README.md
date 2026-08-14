@@ -4,7 +4,7 @@ The tooling that makes a native Windows host satisfy the contract in [`docs/host
 
 ## What Is Here
 
-- [`install-tools.ps1`][install-tools] installs and upgrades the host tools, and reports what each one is installed at, where it came from, and which scope it sits in. Installing or upgrading `docker` also brings the WSL platform up to Docker Desktop's own floor where it is behind.
+- [`install-tools.ps1`][install-tools] installs and upgrades the host tools, and reports what each one is installed at, where it came from, and which scope it sits in. Installing, upgrading or reinstalling `docker` also brings the WSL platform up to Docker Desktop's own floor where it is behind.
 - [`upgrade-host.ps1`][upgrade-host] upgrades the packages `winget` manages and updates the WSL platform.
 - [`setup-github.ps1`][setup-github] configures the SSH key, git, and commit signing.
 - [`setup-wsl.ps1`][setup-wsl] installs a WSL distribution and reports how Docker Desktop is integrated with the ones this host runs.
