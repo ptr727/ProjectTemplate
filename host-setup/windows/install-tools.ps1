@@ -600,8 +600,10 @@ function Enter-DockerMaintenance {
     }
 
     # A platform update fails part way while Docker Desktop holds the WSL service open, so an unsuccessful stop is treated the same as a still-running Docker Desktop: both refuse the run rather than risk wsl --update against a host that never actually let go of the WSL service.
+    # Skipped under -DryRun, where Stop-DockerDesktop never actually stopped anything and Docker Desktop is still genuinely running, which would otherwise read every dry run on a live host as this exact failure rather than as a preview.
     if ($WasRunning) {
-        if ((Stop-DockerDesktop) -ne 0 -or (Test-DockerDesktopRunning)) {
+        $stopCode = Stop-DockerDesktop
+        if (-not $script:DRY_RUN -and ($stopCode -ne 0 -or (Test-DockerDesktopRunning))) {
             warn 'docker skipped, Docker Desktop did not stop, and a WSL platform update fails part way while it is running'
             $result.Proceed = $false
             return $result
@@ -621,7 +623,8 @@ function Enter-DockerMaintenance {
         info 'This restarts every distribution, so anything running inside one is stopped'
         $updateCode = Invoke-WslRun '--update'
         if ($updateCode -ne 0) { warn "wsl --update exited $updateCode" }
-        $stillBroken = Test-WslReadyForDocker
+        # Skipped under -DryRun on the same rule as the stop check above: wsl --update never ran, so WSL is still genuinely behind, and re-checking it here would read every dry run as this same failure rather than as a preview.
+        $stillBroken = if ($script:DRY_RUN) { $null } else { Test-WslReadyForDocker }
         if ($stillBroken) {
             warn "docker skipped, still $stillBroken after the update"
             if ($result.Stopped) { Start-DockerDesktop | Out-Null; $result.Stopped = $false }
