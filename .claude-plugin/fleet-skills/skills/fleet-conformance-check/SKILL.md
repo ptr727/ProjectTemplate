@@ -48,6 +48,14 @@ Nothing else. This skill never re-vendors a carried file, never deletes one, and
 setting or ruleset. Those are `resync-a-repo`'s job, driven from the hub with a named target,
 never a downstream repo acting on itself.
 
+## Refresh cadence
+
+Re-run the installer when `--report` exits non-zero, and after any hub merge that touches
+`.agents/skills/`. Session entry runs no automatic check, by design: the trigger is suspicion,
+and the restated-rule symptom below is the loudest form of it. `docs/host-setup.md`
+"Fleet Skills Install" in the hub states the same cadence for the host side, and an automated
+refresh stays out of scope until the fleet has evidence the manual cadence fails.
+
 ## What it escalates instead of touching
 
 - **A carried section that differs from the hub in a way that reads as a genuine local addition**

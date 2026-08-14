@@ -228,6 +228,8 @@ A bootstrapped host does not run this by hand: the `--host` mode of [`host-setup
 
 The `claude` CLI is deliberately absent from the tool catalog in [`spec/host-tools.json`][host-tools]. A Codex-only machine is a complete machine, so the installer degrades where the CLI is missing, still landing the overlay half, saying so, and recording the partial install in the stamp, where cataloging the CLI would instead fail every host that never wanted it.
 
+**The refresh cadence**: re-run the installer when `--report` exits non-zero, and after any hub merge that touches `.agents/skills/`. Session entry runs no automatic check, by design: the trigger is suspicion, and a rule that keeps needing to be restated in a session is the loudest form of it, which is the symptom the `fleet-conformance-check` skill routes to this report. The maintainer runs the refresh by hand, and an automated one stays out of scope until the fleet has evidence the manual cadence fails.
+
 ## Verify Host Setup
 
 ```shell

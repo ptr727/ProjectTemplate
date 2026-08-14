@@ -123,7 +123,7 @@ The steady state. An agent writes Python, C#, shell, or config in a repo that al
 
 ```mermaid
 flowchart TD
-  start["session start"] -.->|"G6: staleness check not wired in"| stale["skills_install --report"]
+  start["session start"] -->|"restated-rule symptom"| stale["skills_install --report, per the documented cadence"]
   start --> work["work: codestyle, commit, and doc skills fire by trigger"]
   work --> gates["pre-commit gates: prose lint, eol"]
   gates --> pr["pull request"]
@@ -132,7 +132,7 @@ flowchart TD
   merge -.->|"G7: operational PR-only is prose-enforced"| merge
 ```
 
-Owned by the per-language sections of [`CODESTYLE.md`][codestyle] and the conduct skills. Gaps on this path: G6 (nothing at session entry checks whether this machine's skills are stale), G7 (the operational develop ruleset blocks no direct commit).
+Owned by the per-language sections of [`CODESTYLE.md`][codestyle] and the conduct skills. Gaps on this path: G7 (the operational develop ruleset blocks no direct commit). G6, the unwired staleness check, is closed and its row records the resolution.
 
 ### Hub-Side Operations
 
@@ -159,12 +159,12 @@ Owned by [`AUDIT.md`][audit] section 10, [`GOVERNANCE.md` "Hub-Hosted Tooling"][
 
 The lifecycle chain as built: a skill is hand-authored under [`.agents/skills/`][skills-readme], [`scripts/build_dist.py`][build-dist] generates the Claude Code plugin under [`.claude-plugin/`][marketplace], and [`scripts/skills_install.py`][skills-install] installs both forms per machine (an overlay copy into `~/.agents/skills/` for Codex and opencode, a user-scope plugin install for Claude Code), stamping the hub commit into `~/.agents/skills-install-stamp.json`. `skills_install.py --report` is the read-only staleness check and exits non-zero when the machine is behind the checkout.
 
-Four wiring points close the model, each a register gap with its own deliverable:
+Four wiring points close the model, and each is in place:
 
 1. **Bootstrap** (G1, closed): [`host-setup/bootstrap.sh`][bootstrap] and [`bootstrap.ps1`][bootstrap-ps1] end their host mode with a skills step, driven by the `install-skills` pair in the platform directories, degrading gracefully when the `claude` CLI is absent (the overlay half still lands, and the stamp records the partial install). Each loader hands the commit it resolved to the installer, so a stamp written from the tarball tree stays checkable.
 2. **Host contract** (G1, closed): [`docs/host-setup.md`][host-setup-doc] states the install and the verify command in its "Fleet Skills Install" section, and the [`README.md`][readme] "Using This Repo" section names the skills install among its four deployed things.
-3. **Session entry** (G6): the tail of [`AGENTS.md`][agents] already says a rule that keeps needing restating signals a stale install, and the `fleet-conformance-check` skill already runs the report, so the gap closes by stating the cadence in both places rather than by new tooling.
-4. **Refresh cadence** (G6): re-run the installer when `--report` exits non-zero, and after any hub merge that touches `.agents/skills/`. The maintainer runs it by hand today, and an automated refresh is deliberately out of scope until the fleet has evidence the manual cadence fails.
+3. **Session entry** (G6, closed): the tail of [`AGENTS.md`][agents] says a rule that keeps needing restating signals a stale install, and the `fleet-conformance-check` skill runs the report and states the cadence, so the symptom routes to the check without new tooling.
+4. **Refresh cadence** (G6, closed): [`docs/host-setup.md`][host-setup-doc] "Fleet Skills Install" states it: re-run the installer when `--report` exits non-zero, and after any hub merge that touches `.agents/skills/`. The maintainer runs it by hand, and an automated refresh is deliberately out of scope until the fleet has evidence the manual cadence fails.
 
 ## Gap Register
 
@@ -175,7 +175,7 @@ Four wiring points close the model, each a register gap with its own deliverable
 | G3 | A failed tool floor names no install remedy | spec + script | closed |
 | G4 | Deletion sweeps miss prose describing the deleted path | doc | P3 |
 | G5 | Intent-fidelity carried files have no drift detection | spec + decision | P3 |
-| G6 | Session entry never checks skill staleness | doc + skill | P1 |
+| G6 | Session entry never checks skill staleness | doc + skill | closed |
 | G7 | Operational develop PR-only rule is prose-enforced | decision | P3 |
 | G8 | Generated plugin can ship stale with no CI gate | CI | closed |
 | G9 | WORKFLOW.md and AUDIT.md have no skill coverage | skill | P2 |
@@ -228,13 +228,10 @@ flowchart LR
 - **Closed when** - Either the advisory surfaces in the audit report, or the row closes as `accepted` with the honest statement standing in [`AUDIT.md`][audit] and [`spec/fidelity-model.md`][fidelity-model].
 - **Target** - Decision, then candidate advisory in `spec/audit.py`.
 
-### G6: Session Entry Never Checks Skill Staleness
+### G6: Session Entry Never Checks Skill Staleness (Closed)
 
-- **Gap** - A machine with stale or missing skills behaves like a machine that never installed them, and nothing at session entry says so. The symptom is a rule that keeps needing to be restated.
-- **Checked** - [`AGENTS.md`][agents] names the symptom in its closing paragraph, and the `fleet-conformance-check` skill runs the report, but only when invoked.
-- **Handoff** - When a session starts work in a fleet repo, the documented cadence directs it to run `skills_install.py --report` from a hub checkout on suspicion, and the `fleet-conformance-check` skill is the trigger surface.
-- **Closed when** - The cadence is stated in [`docs/host-setup.md`][host-setup-doc] and the skill's own text, and the restated-rule symptom routes to the check in both.
-- **Target** - Doc wording, `fleet-conformance-check` skill text.
+- **Gap** - A machine with stale or missing skills behaves like a machine that never installed them, and nothing at session entry said so. The symptom is a rule that keeps needing to be restated.
+- **Resolution** - The cadence is stated in both places the row asked for. [`docs/host-setup.md`][host-setup-doc] "Fleet Skills Install" directs a re-run of the installer when `--report` exits non-zero and after any hub merge touching `.agents/skills/`, and the `fleet-conformance-check` skill carries the same cadence in its own "Refresh cadence" section, routing the restated-rule symptom to the report it already runs. No new tooling, by design: the trigger is suspicion, and session entry stays uninstrumented until the fleet has evidence the manual cadence fails.
 
 ### G7: Operational Develop PR-Only Is Prose-Enforced
 
@@ -346,7 +343,7 @@ Design-doc first: this doc merges, then each unchecked item becomes an issue lin
 - [x] G1 bootstrap skills step, host-setup section, README fourth deployed thing (cross-links the open host-tooling issues [#671][issue-671] and [#673][issue-673], which touch the same scripts)
 - [x] G2 `host_gate.py` bare-run warning
 - [x] G3 failed-floor remedy output
-- [ ] G6 staleness cadence wording
+- [x] G6 staleness cadence wording
 - [x] G8 `build_dist.py --check` in CI, found already in place via [#676][pr-676] and recorded closed
 
 ### P2: Close the Skill Coverage
