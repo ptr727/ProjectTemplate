@@ -108,14 +108,12 @@ flowchart TD
   ask["bring this repo back into conformance"] --> resync["RESYNC from a hub checkout"]
   resync --> audit["AUDIT end to end, read-only"]
   audit --> apply["apply in order: rules, deletions, re-vendors, workflows, config"]
-  apply -.->|"G4: deleted paths live on in prose"| apply
-  apply -.->|"G5: intent-fidelity drift is invisible"| apply
   audit --> hostcheck["host gate on the way in"]
   hostcheck --> remedy["a failed floor prints its install command"]
   apply --> reaudit["re-audit"] --> report["committed report"]
 ```
 
-Owned by [`RESYNC.md`][resync] and [`AUDIT.md`][audit], packaged as the `resync-a-repo` skill with the `carried-instruction-file-guard` and `copilot-instructions-keeper` skills firing inside it. Gaps on this path: G4 (deletion sweeps miss prose), G5 (intent-fidelity drift detection). G3, the audit-to-install bridge, is closed and its row records the resolution.
+Owned by [`RESYNC.md`][resync] and [`AUDIT.md`][audit], packaged as the `resync-a-repo` skill with the `carried-instruction-file-guard` and `copilot-instructions-keeper` skills firing inside it. No open gaps sit on this path: G3, the audit-to-install bridge, G4, the prose-deletion sweep, and G5, the intent-staleness advisory, are closed and their rows record the resolutions.
 
 ### Daily Development in a Conformant Repository
 
@@ -129,10 +127,9 @@ flowchart TD
   gates --> pr["pull request"]
   pr --> review["Copilot loop via pr_review.py"]
   review --> merge["merge per registry workflowModel"]
-  merge -.->|"G7: operational PR-only is prose-enforced"| merge
 ```
 
-Owned by the per-language sections of [`CODESTYLE.md`][codestyle] and the conduct skills. Gaps on this path: G7 (the operational develop ruleset blocks no direct commit). G6, the unwired staleness check, is closed and its row records the resolution.
+Owned by the per-language sections of [`CODESTYLE.md`][codestyle] and the conduct skills. No open gaps sit on this path: G6, the unwired staleness check, and G7, the operational direct-commit allowance, are closed and their rows record the resolutions.
 
 ### Hub-Side Operations
 
@@ -173,14 +170,14 @@ Four wiring points close the model, and each is in place:
 | G1 | Skills install is absent from the cold-start flow | script + doc | closed |
 | G2 | Host-tools repo overlay is silently skippable | script + doc | closed |
 | G3 | A failed tool floor names no install remedy | spec + script | closed |
-| G4 | Deletion sweeps miss prose describing the deleted path | doc | P3 |
-| G5 | Intent-fidelity carried files have no drift detection | spec + decision | P3 |
+| G4 | Deletion sweeps miss prose describing the deleted path | doc | closed |
+| G5 | Intent-fidelity carried files have no drift detection | spec + decision | closed |
 | G6 | Session entry never checks skill staleness | doc + skill | closed |
-| G7 | Operational develop PR-only rule is prose-enforced | decision | P3 |
+| G7 | Operational develop PR-only rule is prose-enforced | decision | closed |
 | G8 | Generated plugin can ship stale with no CI gate | CI | closed |
 | G9 | WORKFLOW.md and AUDIT.md have no skill coverage | skill | closed |
 | G10 | The skill lifecycle itself has no skill | skill | closed |
-| G11 | Peer messaging is live but undeclared | doc | P0 |
+| G11 | Peer messaging is live but undeclared | doc | closed |
 | G12 | General conduct rules have no skill | skill | closed |
 
 Each gap's handoff below states who detects it, what closes it, and the test that proves it closed. The handoff sentence is the contract the closing pull request implements.
@@ -212,34 +209,28 @@ flowchart LR
 
 - **Closing test** - [`scripts/test_bootstrap.py`][test-bootstrap] asserts the mapping stays total per platform, with the one recorded not-applicable exception, and that a remedy handing back into an installer names a tool that installer manages. [`spec/validate.py`][validate] and the schema require a remedy on every hub floor. A repository overlay may still add a floor without one, in which case the failure degrades to the `INSTALL FROM:` source line.
 
-### G4: Deletion Sweeps Miss Prose
+### G4: Deletion Sweeps Miss Prose (Closed)
 
 - **Gap** - A resync that deletes a carried file greps for the path and finds code uses, not prose describing the file without naming its path. A measured incident left a layout section describing a deleted script.
-- **Checked** - [`RESYNC.md`][resync] section 4 documents the incident and prescribes the manual remedy.
-- **Handoff** - When a resync deletes a file, the session reads the files whose job is to describe what the repo holds (the layout and operations sections) before shipping, per the RESYNC section 4 step.
-- **Closed when** - Either the manual step is judged sufficient and this row closes as `accepted`, or a lint that flags a stale description ships and the row names it.
-- **Target** - Decision first, optional [`scripts/prose_lint.py`][prose-lint] check second.
+- **Resolution** - Split by what a pattern can reach. The named-path half is mechanized: the `dead-path` rule in [`scripts/prose_lint.py`][prose-lint] reports a Markdown mention (a backtick span, an inline link target, or a reference definition) of a path git once tracked and the tree no longer holds. Keying on deletion history is what scopes it: a proposed file a backlog names, another repository's layout, and a ref like `origin/develop` each have no history here and stay silent, and a manifest-declared carried path is exempt since the hub's own instance retires to a catalog snippet while docs keep naming the carried file. The rule runs in the default set and in CI, where the checkout fetches full history because the rule stands down loudly in a shallow clone rather than pass blind. The name-shaped half, the description that names no path, is `accepted` as manual: no pattern reaches it, the same judgment the home-path rule records, so the [`RESYNC.md`][resync] section 4 read of the layout and operations sections stands and now names the lint beside it.
+- **Closing test** - `TestDeadPath` in `scripts/test_prose_lint.py`, including the shallow stand-down and the tree-clean assertion. The rule's first tree-wide run caught a real instance, [`docs/host-setup.md`][host-setup-doc] describing bind-mounts in the deleted `.devcontainer/` definitions, fixed by re-pointing at the catalog snippets.
 
-### G5: Intent-Fidelity Drift Is Invisible
+### G5: Intent-Fidelity Drift Is Invisible (Closed)
 
-- **Gap** - A carried file at `intent` fidelity is presence-checked only, so it can trail the hub by many revisions while the audit reads clean. This class hid real drift before.
-- **Checked** - [`RESYNC.md`][resync] section 5 names the class, and [`spec/fidelity_honesty.py`][fidelity-model] finds promotion candidates but runs only when the owner runs it.
-- **Handoff** - When the audit reports on a repo, it also reports the hub revision each intent-fidelity unit was last reconciled against, advisory rather than failing, so staleness is at least visible.
-- **Closed when** - Either the advisory surfaces in the audit report, or the row closes as `accepted` with the honest statement standing in [`AUDIT.md`][audit] and [`spec/fidelity-model.md`][fidelity-model].
-- **Target** - Decision, then candidate advisory in `spec/audit.py`.
+- **Gap** - A carried file at `intent` fidelity was presence-checked only, so it could trail the hub by many revisions while the audit read clean. This class hid real drift before.
+- **Resolution** - The advisory ships in `spec/audit.py`: for each applicable intent unit the audit compares when the hub canonical and the repo copy each last changed, and a canonical changing later reports the copy as possibly trailing, at DRIFT and never failing. A copy content-identical to the canonical is skipped, being both current and the promotion candidate `spec/fidelity_honesty.py` exists to find. Measured on its first run: a fleet repo's carried `WORKFLOW.md`, `CODESTYLE.md`, and `.editorconfig` each reported as trailing hub changes made weeks earlier, findings no prior check produced.
+- **Decisions** - The handoff imagined reporting the hub revision each unit was last reconciled against, and no reconciliation record exists anywhere, so the last-modified comparison is the implementable proxy and ships instead of inventing a per-repo stamp. The advisory therefore says possibly: a copy touched after the hub change without actually reconciling reads current, a blind spot stated in [`RESYNC.md`][resync] section 5, [`AUDIT.md`][audit], and [`spec/fidelity-model.md`][fidelity-model] rather than papered over.
 
 ### G6: Session Entry Never Checks Skill Staleness (Closed)
 
 - **Gap** - A machine with stale or missing skills behaves like a machine that never installed them, and nothing at session entry said so. The symptom is a rule that keeps needing to be restated.
 - **Resolution** - The cadence is stated in both places the row asked for. [`docs/host-setup.md`][host-setup-doc] "Fleet Skills Install" directs a re-run of the installer when `--report` exits non-zero and after any hub merge touching `.agents/skills/`, and the `fleet-conformance-check` skill carries the same cadence in its own "Refresh cadence" section, routing the restated-rule symptom to the report it already runs. No new tooling, by design: the trigger is suspicion, and session entry stays uninstrumented until the fleet has evidence the manual cadence fails.
 
-### G7: Operational Develop PR-Only Is Prose-Enforced
+### G7: Operational Develop PR-Only Is Prose-Enforced (Closed)
 
 - **Gap** - [`repo-config/operational/develop.json`][repo-config-readme] carries deletion, non-fast-forward, and signature rules only, so nothing blocks a direct commit that skips the feature-branch instruction during a standup.
-- **Checked** - The ruleset payload, and [`WORKFLOW.md`][workflow] "Branch Model", which documents the direct-commit allowance as deliberate for the operational model.
-- **Handoff** - This is a decision row: the allowance is the model's foundation, so the candidate outcomes are `accepted` (the standup instruction stays prose-enforced) or a standup-time-only tightening. Nothing detects the violation mechanically today.
-- **Closed when** - The maintainer records the disposition, mirroring the [`spec/divergences.json`][divergences] vocabulary.
-- **Target** - A disposition, not necessarily code.
+- **Resolution** - Closed `accepted`, mirroring the [`spec/divergences.json`][divergences] vocabulary, with the disposition recorded where the exposure is described: [`STANDUP.md`][standup] section 0B states it beside its uneven-protection warning. The allowance is the operational model's foundation per [`WORKFLOW.md`][workflow] "Branch Model", and a standup runs on a feature branch either way, so the exposed interval is the tail of a procedure the instruction already governs.
+- **Decisions** - The considered alternative, applying the release `develop` payload during standup and swapping to the operational payload after the closing audit, was declined: it adds a swap step that can be forgotten and a window where the live ruleset contradicts the registry's declared model, buying mechanical enforcement only for an interval the instruction already covers. A forgotten swap would surface as a ruleset defect on the next audit, which is real, and so would the contradiction it spends the interim in.
 
 ### G8: Generated Plugin Can Ship Stale (Closed)
 
@@ -258,13 +249,10 @@ flowchart LR
 - **Gap** - Authoring, changing, and retiring a skill was governed by scripts and scattered prose, so the agent most likely to get it wrong (one editing a skill) had no skill watching it.
 - **Resolution** - The `skill-lifecycle` skill packages the pipeline (source-versus-generated split, `build_dist.py` regenerate and `--check`, installer and stamp semantics, the doc-packaging pattern, trigger-description conventions), and [`.agents/skills/README.md`][skills-readme] defers to it for procedure, which is this row's closing test. It was authored first in phase 2 so the other three skills follow its procedure.
 
-### G11: Peer Messaging Is Live but Undeclared
+### G11: Peer Messaging Is Live but Undeclared (Closed)
 
-- **Gap** - Agent-to-agent messaging works and has produced real findings, and no committed doc states its rules, so each session rediscovers the capability without its boundaries.
-- **Checked** - [`TODO.md`][todo] "Peer Messaging Between Agents as a Declared Method", with the live exchange anchored there at `develop` `3855dbb` on 2026-08-10.
-- **Handoff** - [`docs/peer-messaging.md`][peer-messaging] declares the method and its safety rules, hub-only, and the TODO item's open location question resolves to it.
-- **Closed when** - This pull request merges. This row closes in P0.
-- **Target** - [`docs/peer-messaging.md`][peer-messaging], shipped beside this doc.
+- **Gap** - Agent-to-agent messaging works and has produced real findings, and no committed doc stated its rules, so each session rediscovered the capability without its boundaries.
+- **Resolution** - [`docs/peer-messaging.md`][peer-messaging] declares the method and its safety rules, hub-only, shipped beside this doc in the P0 pull request, and the [`TODO.md`][todo] "Peer Messaging Between Agents as a Declared Method" item resolves to it. The row's phase cell trailed its own closure until the P3 register pass, which is the maintenance rule doing its job.
 
 ### G12: General Conduct Rules Have No Skill (Closed)
 
@@ -348,9 +336,9 @@ Design-doc first: this doc merges, then each unchecked item becomes an issue lin
 
 ### P3: Audit-Depth Decisions
 
-- [ ] G4 disposition: manual step sufficient, or a lint ships
-- [ ] G5 disposition: advisory staleness in the audit report, or accepted
-- [ ] G7 disposition: operational standup enforcement, or accepted
+- [x] G4 disposition: the `dead-path` lint ships for the named-path half, the manual read stands for the name-shaped half
+- [x] G5 disposition: the last-modified advisory ships in `spec/audit.py`
+- [x] G7 disposition: `accepted`, recorded in [`STANDUP.md`][standup] section 0B
 
 ### P4: Steady State
 

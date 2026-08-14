@@ -89,7 +89,7 @@ The rename runs unconditionally rather than behind a test of `init.defaultBranch
 
 **Committing onto `develop` and squashing afterwards does not work**, because `non_fast_forward` is set on both `develop` payloads and rewriting that history is exactly what the rule rejects. This is not hypothetical, since a repo stood up that way was correctly blocked at the point the history needed rewriting, with the standup already written into the branch it had to be lifted off.
 
-**The protection is uneven, so on an operational repo this instruction is the only thing holding the line.** A release repo's `repo-config/develop.json` carries a `pull_request` rule that blocks a direct commit outright, while `repo-config/operational/develop.json` carries three rules, `deletion`, `non_fast_forward` and `required_signatures`, and none of them stops one. A conformant operational repo therefore accepts the commit that this step exists to prevent, and reports nothing wrong afterwards.
+**The protection is uneven, so on an operational repo this instruction is the only thing holding the line.** A release repo's `repo-config/develop.json` carries a `pull_request` rule that blocks a direct commit outright, while `repo-config/operational/develop.json` carries three rules, `deletion`, `non_fast_forward` and `required_signatures`, and none of them stops one. A conformant operational repo therefore accepts the commit that this step exists to prevent, and reports nothing wrong afterwards. That is a recorded disposition rather than an oversight, `accepted` in the [`docs/fleet-map.md`][fleet-map] register (G7): the allowance is the operational model's foundation, a standup runs on a feature branch either way, and a ruleset tightened for standup alone would leave a window where the live ruleset contradicts the registry's model, so this instruction stays the enforcement.
 
 **On a public repo the squash is the one chance to leave the exploratory history out.** Standup is where a wrong secret value, a throwaway credential, and a run of noise commits accumulate, and a squashed feature branch publishes the result rather than the route to it.
 
@@ -206,6 +206,7 @@ The same [`AUDIT.md`][audit] run is the on-demand audit for any known repo, and 
 [codestyle]: ./CODESTYLE.md
 [content-import]: ./docs/content-import.md
 [files]: ./spec/files.json
+[fleet-map]: ./docs/fleet-map.md
 [governance]: ./GOVERNANCE.md
 [governance-git-and-commit-rules]: ./GOVERNANCE.md#git-and-commit-rules
 [governance-repository-boundaries-and-write-safety]: ./GOVERNANCE.md#repository-boundaries-and-write-safety

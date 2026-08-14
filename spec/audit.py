@@ -6,8 +6,9 @@ Compares each cataloged registry repo against the ground truth in this repo - ge
 names (spec/secrets.json; values are never read), baseline/per-type file presence and per-scope
 Markdown section presence on the ground-truth branch (spec/files.json, spec/scope-model.md),
 hub-hosted files a repo carries and should delete (git-tracked here and undeclared in the manifest,
-triaged by spec/divergences.json), and branch-model facts (main/develop existence, develop behind
-main). Owner-initiated: run it when
+triaged by spec/divergences.json), intent-staleness advisories (a carried intent file whose hub
+canonical changed after the copy last did), and branch-model facts (main/develop existence, develop
+behind main). Owner-initiated: run it when
 onboarding a repo, when drift is suspected, or before fleet-wide changes. Read-only - it never
 modifies a target.
 
@@ -1092,6 +1093,56 @@ def git_file_history(rel_path):
     return out
 
 
+@functools.cache
+def hub_last_change(rel_path):
+    """The hub checkout's last commit touching rel_path, as (iso_date, short_sha), or None if untracked.
+
+    Cached because one canonical's date is compared against every audited repo's copy.
+    """
+    r = subprocess.run(["git", "log", "-1", "--format=%cI %h", "--", rel_path], cwd=ROOT,
+                       capture_output=True, text=True)
+    if r.returncode != 0 or not r.stdout.strip():
+        return None
+    date, sha = r.stdout.strip().split(" ", 1)
+    return date, sha
+
+
+def check_intent_staleness(slug, ground, path, canonical_rel, down_text):
+    """The intent-staleness advisory: a last-modified comparison, since intent has no content check.
+
+    An intent unit is judged by meaning, so the audit asserts presence and nothing about content
+    (spec/fidelity-model.md), which is how a copy trailed the hub by many revisions while every
+    check read clean. No reconciliation record exists anywhere, so the implementable proxy is
+    when each side last changed: the hub canonical changing after the repo's copy marks the copy
+    as possibly trailing. Advisory only, DRIFT and never a failure, and honest about its blind
+    spot: a copy touched after the hub change without actually reconciling reads current.
+
+    A copy content-identical to the canonical cannot trail it, so that case is skipped however
+    old the copy's last commit is. It is also the promotion candidate spec/fidelity_honesty.py
+    exists to find, where the structural fix is verbatim fidelity rather than a better advisory.
+    """
+    hub_change = hub_last_change(canonical_rel)
+    if hub_change is None:
+        return []
+    if down_text is not None:
+        try:
+            canon_text = (ROOT / canonical_rel).read_text(encoding="utf-8", errors="replace")
+        except OSError:
+            canon_text = None
+        if canon_text is not None and content_hash(down_text) == content_hash(canon_text):
+            return []
+    commits = gh(f"repos/{slug}/commits?path={path}&sha={ground}&per_page=1")
+    if not commits:
+        return []
+    repo_date = commits[0]["commit"]["committer"]["date"]
+    hub_date, hub_sha = hub_change
+    if datetime.fromisoformat(hub_date) <= datetime.fromisoformat(repo_date):
+        return []
+    return [("DRIFT", f"intent: {path} last changed {repo_date} on {ground}, and the hub canonical "
+             f"changed later at {hub_date} ({hub_sha}) - the copy possibly trails the hub, "
+             f"verify intent per AUDIT.md section 7")]
+
+
 def check_verbatim(label, down_text, canonical_rel, extract=None):
     """Compare a downstream copy against the hub's canonical (a region if `extract` is given), EOL-normalized,
     and classify a mismatch as stale or modified via the canonical's git history. All findings are DRIFT: a
@@ -1307,7 +1358,7 @@ def audit_repo(entry, spec, branch=None):
             path_order.append(path)
         wanted_sections[path].update(required_sections(item, sel))
         verbatim_secs[path].update(verbatim_sections(item, sel))
-        if item.get("fidelity") in ("interface", "verbatim"):
+        if item.get("fidelity") in ("interface", "verbatim", "intent"):
             check_item[path] = item
     for path in path_order:
         content = gh(f"repos/{slug}/contents/{path}?ref={ground}", ok404=True)
@@ -1343,6 +1394,10 @@ def audit_repo(entry, spec, branch=None):
                 findings.append(("DRIFT", f"verbatim: could not read {path} content on {ground} to compare (no inline content returned); verify by hand"))
             else:
                 findings.extend(check_verbatim(path, text, item.get("reference") or path))
+        # Intent staleness: the one advisory an intent unit gets, a last-modified comparison.
+        # The hub's own copies are the canonicals, so the hub itself has nothing to trail.
+        elif item is not None and fid == "intent" and entry.get("name") != HUB_NAME:
+            findings.extend(check_intent_staleness(slug, ground, path, item.get("reference") or path, text))
         # Heading-based presence is only meaningful for Markdown.
         # A "section" named on a non-md file, a tasks.json task group being one, is an intent marker judged per AUDIT.md rather than a heading grep.
         needed = wanted_sections[path]

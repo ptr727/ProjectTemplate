@@ -13,13 +13,16 @@ these rules, so nothing enforced them before this script. Rules implemented:
   sentence-split A sentence must not wrap across lines (one sentence per line).
   spelling       No British spelling, the repo-wide convention being US English.
   home-path      No absolute home path naming a real account, per the representative-data rule.
+  dead-path      No mention of a path git once tracked and the tree no longer holds.
 
 Exit 1 if any violation is found. Read-only, never edits.
 """
 from __future__ import annotations
 
 import argparse
+import functools
 import io
+import json
 import re
 import subprocess
 import sys
@@ -40,9 +43,11 @@ RULES = {
     'sentence-split': 'a sentence wrapping across lines',
     'spelling': 'a British spelling where the repo convention is US English',
     'home-path': 'an absolute home path naming a real account',
+    'dead-path': 'a mention of a path git once tracked and the tree no longer holds',
 }
 DEFAULT_RULES = frozenset({'charset', 'charset-unknown', 'semicolon', 'dash', 'dupword',
-                           'spelling', 'comment-wrap', 'comment-case', 'home-path'})
+                           'spelling', 'comment-wrap', 'comment-case', 'home-path',
+                           'dead-path'})
 
 # Trees this repo generates rather than authors, skipped when a wider scan expands into them.
 # The gate then measures hand-written prose.
@@ -247,6 +252,116 @@ def home_path_findings(lineno: int, line: str) -> list[tuple[int, str, str]]:
                     f'absolute home path {m.group(0)!r} -> use a constructed path, not an '
                     'observed one'))
     return out
+
+
+# The named-path half of the stale-description class, and only that half (RESYNC.md section 4).
+# The measured incident named no path at all, and no pattern reaches a description without one.
+# A backtick span, an inline link target, and a reference definition each assert a path.
+INLINE_SPAN = re.compile(r'`([^`\n]+)`')
+LINK_TARGET = re.compile(r'\]\(([^)\s]+)\)')
+REF_DEF = re.compile(r'^\s*\[[^\]]+\]:\s+(\S+)')
+# A character that marks a token as a placeholder, a glob, an expansion, or a scheme.
+# The colon covers every URL scheme, a drive letter, and an image tag in one stroke.
+PATH_FOREIGN = frozenset('<>{}$*?"\'\\:!|,;')
+
+
+def path_candidate(token: str, in_span: bool = True) -> str | None:
+    """The relative path a token asserts, or None when it asserts none.
+
+    A backtick span holds prose as often as a path, so it qualifies only when it is shaped
+    like a file: a single word carrying a separator and a suffix, which is what tells
+    `spec/audit.py` from a ref like `origin/develop` and from a bare directory pattern like
+    `references/`, a shape docs use for any repository's layout rather than this one's. A
+    link target or a reference definition is a path by construction, so only a foreign
+    character disqualifies it there.
+    """
+    token = token.split('#', 1)[0]
+    if not token or any(c.isspace() for c in token) or PATH_FOREIGN & set(token):
+        return None
+    if token.startswith(('/', '~', '-', '#')):
+        return None
+    if in_span:
+        if '/' not in token:
+            return None
+        last = token.rsplit('/', 1)[-1]
+        if '.' not in last or not last.strip('.'):
+            return None
+    return token.removeprefix('./')
+
+
+@functools.cache
+def carried_paths(root: str) -> frozenset[str]:
+    """Paths the manifest declares as carried, exempt because docs name them as fleet layout.
+
+    The hub's own instance of a carried file retires to a catalog snippet, so its history
+    reads as a deletion while every mention legitimately describes the file a repository
+    carries. Whether a repository actually carries one is the audit's finding, not prose's.
+    """
+    try:
+        data = json.loads((Path(root) / 'spec' / 'files.json').read_text(encoding='utf-8'))
+    except (OSError, ValueError):
+        return frozenset()
+    return frozenset(e['path'] for e in data.get('baseline', [])
+                     if isinstance(e, dict) and isinstance(e.get('path'), str))
+
+
+@functools.cache
+def once_tracked(root: str, rel_path: str) -> bool:
+    """Whether git at `root` ever recorded `rel_path`, the deletion signature this rule keys on."""
+    try:
+        r = subprocess.run(['git', '-C', root, 'log', '-1', '--format=%H', '--', rel_path],
+                           capture_output=True, text=True)
+    except (OSError, ValueError):
+        return False
+    return r.returncode == 0 and bool(r.stdout.strip())
+
+
+def dead_path_findings(root: Path, base: Path, lineno: int,
+                       line: str) -> list[tuple[int, str, str]]:
+    """Named paths on this line that git once tracked and the tree no longer holds.
+
+    Requiring a history is what scopes this to the deletion-sweep shape, a file removed with
+    its describing prose left standing. A path another repository holds, a proposed file a
+    backlog names, and a layout pattern each have no history here, so none is reported.
+    """
+    m = REF_DEF.match(line)
+    if m:
+        # A definition line holds one target and no prose, so nothing else on it is read.
+        tokens = [(m.group(1), False)]
+    else:
+        tokens = [(s.group(1), True) for s in INLINE_SPAN.finditer(line)]
+        tokens += [(t.group(1), False) for t in LINK_TARGET.finditer(strip_inline_code(line))]
+    out = []
+    for token, in_span in tokens:
+        rel_path = path_candidate(token, in_span)
+        if rel_path is None:
+            continue
+        # A mention is anchored where it resolves, the file's own directory or the root.
+        if (root / rel_path).exists() or (base / rel_path).exists():
+            continue
+        for anchor in {root, base}:
+            try:
+                tracked_rel = (anchor / rel_path).resolve().relative_to(root.resolve())
+            except ValueError:
+                continue
+            if str(tracked_rel) in carried_paths(str(root)):
+                continue
+            if once_tracked(str(root), str(tracked_rel)):
+                out.append((lineno, 'dead-path',
+                            f'path {token!r} is deleted from this tree -> re-point, rewrite, '
+                            'or remove the stale mention'))
+                break
+    return out
+
+
+def shallow_checkout(root: Path) -> bool:
+    """Whether the checkout at `root` is shallow, which holds no deletion history to key on."""
+    try:
+        r = subprocess.run(['git', '-C', str(root), 'rev-parse', '--is-shallow-repository'],
+                           capture_output=True, text=True)
+    except (OSError, ValueError):
+        return False
+    return r.returncode == 0 and r.stdout.strip() == 'true'
 
 
 def operational_checkout(root: Path) -> bool:
@@ -1077,13 +1192,22 @@ def comment_wrap_findings(path: Path, raw: str, lines: list[str]) -> list[tuple[
     return out
 
 
-def check_file(path: Path, rules: set[str]) -> list[tuple[int, str, str]]:
+def check_file(path: Path, rules: set[str],
+               root: Path | None = None) -> list[tuple[int, str, str]]:
     out: list[tuple[int, str, str]] = []
     try:
         raw = path.read_bytes().decode('utf-8')
     except (UnicodeDecodeError, OSError):
         return out
     lines = raw.split('\n')
+    # Only Markdown describes what the repo holds, so only Markdown is judged for dead paths.
+    # The file's own directory anchors a relative link, the repository root anchors the rest.
+    # No git means no deletion history to key on, so the rule stands down rather than guess.
+    dead_root: Path | None = None
+    if 'dead-path' in rules and path.suffix == '.md':
+        found = str(root) if root else repo_root(path)
+        if found:
+            dead_root = Path(found)
     if {'comment-wrap', 'comment-case'} & rules:
         out.extend(f for f in comment_wrap_findings(path, raw, lines) if f[1] in rules)
     # Outside Markdown the prose lives in the comments, and both rules judge prose, not code.
@@ -1111,6 +1235,9 @@ def check_file(path: Path, rules: set[str]) -> list[tuple[int, str, str]]:
 
         if 'charset' in rules or 'charset-unknown' in rules:
             out.extend(f for f in charset_findings(i, line) if f[1] in rules)
+
+        if dead_root is not None:
+            out.extend(dead_path_findings(dead_root, path.resolve().parent, i, line))
 
         txt = strip_inline_code(line)
         prose = strip_quoted(txt) if path.suffix == '.md' else txt
@@ -1226,6 +1353,12 @@ def main(argv: list[str] | None = None) -> int:
         print('note: home-path is not checked in an operational repository, where an absolute '
               'path is the operator instruction rather than observed data.', file=sys.stderr)
 
+    # Announced for the same reason the skip above is, a silent stand-down reads as a pass.
+    if 'dead-path' in rules and git_roots and shallow_checkout(scan_root):
+        rules.discard('dead-path')
+        print('note: dead-path is not checked in a shallow clone, which holds no deletion '
+              'history to key on. Fetch the full history to run it.', file=sys.stderr)
+
     # Every input to a verdict is read from the repository scanned rather than from the process.
     # That covers the rule set above, the file set, the diff, and the keys joining the last two.
     # An earlier guard refused a scan of one repository while the process stood in another.
@@ -1283,7 +1416,7 @@ def main(argv: list[str] | None = None) -> int:
     byfile: dict[str, int] = {}
     for f in files:
         allowed = scope.get(keys[f]) if scope is not None else None
-        for ln, kind, msg in check_file(f, rules):
+        for ln, kind, msg in check_file(f, rules, scan_root):
             if allowed is not None and ln not in allowed:
                 continue
             total += 1
