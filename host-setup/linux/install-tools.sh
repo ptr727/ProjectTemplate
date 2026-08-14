@@ -536,7 +536,14 @@ uv_install() {
 
 # --- docker ---
 
-docker_source() { printf 'download.docker.com'; }
+# Matches docker_install: a WSL distribution never reaches download.docker.com, so the report says where docker actually comes from there instead.
+docker_source() {
+    if [[ $IS_WSL == true ]]; then
+        printf "Docker Desktop's WSL integration"
+    else
+        printf 'download.docker.com'
+    fi
+}
 
 # Read directly from the CLI rather than from apt_installed_version docker-ce, unlike gh and node.
 # On a WSL distribution using Docker Desktop's own WSL integration, docker is a working command with no docker-ce apt package behind it at all, and reading the apt package version would misreport that working install as absent.
