@@ -36,20 +36,9 @@ git config --global --get gpg.format        # ssh for an SSH key; unset or openp
 # (ssh-add -L, gpg --list-secret-keys): a host that signs straight from a key file with no
 # agent running passes cleanly and fails that probe. See
 # .agents/skills/git-commit-conventions/SKILL.md "Signing, verified not configured" for why.
-d=$(mktemp -d "${TMPDIR:-/tmp}/sign-check.XXXXXX") && (
-  trap 'rm -rf "$d"' 0
-  email=$(git config --global --get user.email) \
-    && git init -q "$d" \
-    && git -C "$d" commit --allow-empty -q -m check \
-    && out=$(git -C "$d" log -1 --format='sig=%G? author=%an <%ae> committer=%cn <%ce>') \
-    && echo "$out" \
-    && ae=$(git -C "$d" log -1 --format='%ae') \
-    && ce=$(git -C "$d" log -1 --format='%ce') \
-    && case "$out" in sig=G\ *|sig=U\ *) true ;; *) false ;; esac \
-    && case "$email" in *@users.noreply.github.com) true ;; *) false ;; esac \
-    && [ "$ae" = "$email" ] \
-    && [ "$ce" = "$email" ]
-)
+# One physical line, not backslash-joined: this file is CRLF (the repo's Markdown default),
+# and a `\` continuation stops working the moment a stray `\r` lands after it.
+d=$(mktemp -d "${TMPDIR:-/tmp}/sign-check.XXXXXX") && ( trap 'rm -rf "$d"' 0; email=$(git config --global --get user.email) && git init -q "$d" && git -C "$d" commit --allow-empty -q -m check && out=$(git -C "$d" log -1 --format='sig=%G? author=%an <%ae> committer=%cn <%ce>') && echo "$out" && ae=$(git -C "$d" log -1 --format='%ae') && ce=$(git -C "$d" log -1 --format='%ce') && case "$out" in sig=G\ *|sig=U\ *) true ;; *) false ;; esac && case "$email" in *@users.noreply.github.com) true ;; *) false ;; esac && [ "$ae" = "$email" ] && [ "$ce" = "$email" ] )
 ```
 
 `--global` rather than the effective config, because the effective value depends on where the command runs: inside any existing repository a repo-local override wins, so a bare `git config --get user.email` there reports that repository's identity and hides the host setting this step exists to check. The two scopes together are what make the result sound, since this block proves the host is right and the block below proves nothing shadows it.

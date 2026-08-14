@@ -238,20 +238,9 @@ The `claude` CLI is deliberately absent from the tool catalog in [`spec/host-too
 python3 scripts/host_gate.py           # presence and version floors, from spec/host-tools.json
 python3 scripts/skills_install.py --report   # the skills install stamp is current
 git config --global --list | grep -E "user\.|signing|gpg\."
-d=$(mktemp -d "${TMPDIR:-/tmp}/sign-check.XXXXXX") && (
-  trap 'rm -rf "$d"' 0
-  email=$(git config --global --get user.email) \
-    && git init -q "$d" \
-    && git -C "$d" commit --allow-empty -q -m check \
-    && out=$(git -C "$d" log -1 --format='sig=%G? author=%an <%ae> committer=%cn <%ce>') \
-    && echo "$out" \
-    && ae=$(git -C "$d" log -1 --format='%ae') \
-    && ce=$(git -C "$d" log -1 --format='%ce') \
-    && case "$out" in sig=G\ *|sig=U\ *) true ;; *) false ;; esac \
-    && case "$email" in *@users.noreply.github.com) true ;; *) false ;; esac \
-    && [ "$ae" = "$email" ] \
-    && [ "$ce" = "$email" ]
-)
+# One physical line, not backslash-joined: this file is CRLF (the repo's Markdown default),
+# and a `\` continuation stops working the moment a stray `\r` lands after it.
+d=$(mktemp -d "${TMPDIR:-/tmp}/sign-check.XXXXXX") && ( trap 'rm -rf "$d"' 0; email=$(git config --global --get user.email) && git init -q "$d" && git -C "$d" commit --allow-empty -q -m check && out=$(git -C "$d" log -1 --format='sig=%G? author=%an <%ae> committer=%cn <%ce>') && echo "$out" && ae=$(git -C "$d" log -1 --format='%ae') && ce=$(git -C "$d" log -1 --format='%ce') && case "$out" in sig=G\ *|sig=U\ *) true ;; *) false ;; esac && case "$email" in *@users.noreply.github.com) true ;; *) false ;; esac && [ "$ae" = "$email" ] && [ "$ce" = "$email" ] )
 gh auth status
 ```
 
