@@ -71,6 +71,19 @@ git -C ~/repos/<Repo> fetch origin develop
 git -C ~/repos/<Repo> worktree add ~/repos/worktrees/<Repo>-<task-slug> -b <task-branch> origin/develop
 ```
 
+A continuation attaches the task's existing branch rather than forking a fresh one:
+
+```sh
+git -C ~/repos/<Repo> fetch origin <task-branch>
+git -C ~/repos/<Repo> worktree add ~/repos/worktrees/<Repo>-<task-slug> <task-branch>
+```
+
+Git refuses to attach a branch that is already checked out somewhere else, and that refusal is
+the mandate working, since the branch sitting checked out in a shared tree is the hazard the
+continuation rule exists for. Return that checkout to its own working branch first when its tree
+is clean, and stop when it is not, because a dirty tree there may be another task's uncommitted
+work.
+
 A machine not yet migrated to this layout still isolates exactly the same way, since the mandate
 is the isolation rather than the path: create the worktree beside whatever layout the machine
 has, and note that the base clone may live elsewhere than `~/repos/<Repo>`.
