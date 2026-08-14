@@ -1303,6 +1303,12 @@ class TestSentenceLength(BaitCase):
         quoted = '"' + ' '.join(['word'] * prose_lint.SENTENCE_WORD_CAP) + '"'
         self.assertEqual([], self.kinds(f'The doc says {quoted} here.\n', {'sentence-length'}))
 
+    def test_a_quotation_keeps_its_sentence_boundary(self) -> None:
+        """A terminator closing a quotation still ends the sentence, so neighbors do not merge."""
+        lead = ' '.join(['word'] * (prose_lint.SENTENCE_WORD_CAP - 5))
+        text = f'{lead} said "stop right now." {lead} said nothing.\n'
+        self.assertEqual([], self.kinds(text, {'sentence-length'}))
+
     def test_structure_is_not_a_sentence(self) -> None:
         """A table row, a heading, a link definition, and a blockquote hold no prose sentence."""
         run = ' '.join(['word'] * (prose_lint.SENTENCE_WORD_CAP + 1))

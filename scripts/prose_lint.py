@@ -922,8 +922,14 @@ def strip_quoted(s: str) -> str:
     A rule that states its own counter-example quotes the construction it bans, so scanning the
     quotation reports the doc that documents the rule. Markdown only: in data and code files a
     double quote is structural, and blanking those spans would hide the prose inside them.
+    A terminator ending the quotation survives outside the blank, since US English closes a
+    sentence inside the quotes and blanking it merged that sentence into its neighbor.
     """
-    return re.sub(r'"[^"\n]*"', '""', s)
+    def blank(m: re.Match[str]) -> str:
+        inner = m.group(1)
+        return '""' + (inner[-1] if inner and inner[-1] in '.!?' else '')
+
+    return re.sub(r'"([^"\n]*)"', blank, s)
 
 
 # A bullet's `**Label**:` opens the text the same way `- **Label** -` does.
