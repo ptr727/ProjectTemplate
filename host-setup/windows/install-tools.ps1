@@ -574,7 +574,7 @@ function Start-DockerDesktop {
 
 # Everything a docker install, upgrade or reinstall needs from Docker Desktop and WSL before winget touches the package is folded into one window rather than run twice: Docker Desktop holds the WSL service open, so a platform update fails part way while it is running, the same reason upgrade-host.ps1 -Wsl refuses outright.
 # Docker Desktop's own per distro WSL integration also goes stale across an engine bump often enough that it has a name on Docker's own tracker, surfacing as "WSL integration with distro '<name>' unexpectedly stopped" the next time anything in that distro touches docker, and the in app "Restart the WSL integration" button on that dialog does not clear it, since it retries the proxy inside the distro that is already running against the same stale state.
-# Both are fixed the same way: Docker Desktop stopped, WSL brought current, every distro shut down with it so each one's integration remounts fresh rather than being patched in place, and Docker Desktop started again once the docker package itself is also settled, by Exit-DockerMaintenance below.
+# Both are fixed the same way where Docker Desktop is running to begin with: stopped, WSL brought current, every distro shut down with it so each one's integration remounts fresh rather than being patched in place, and Docker Desktop started again once the docker package itself is also settled, by Exit-DockerMaintenance below; a run that finds Docker Desktop already stopped has nothing to restore and none of that runs.
 # Boundary note: this script used to be read-only on WSL by design, naming upgrade-host.ps1 -Wsl as a person's own step rather than running it.
 # The maintainer moved that boundary once a docker version bump on its own already needed this same stop, then restart, window for its own integration to recover, since a platform update asks for nothing more than that same window with Docker Desktop already stopped inside it.
 # Returns whether docker is clear to proceed, and whether this stopped Docker Desktop, which is what Exit-DockerMaintenance needs to know whether it owes a restart.
@@ -610,7 +610,7 @@ function Enter-DockerMaintenance {
         # Installing through wsl --update's own MSI raises a UAC prompt when this pwsh is not itself elevated, the state the rest of this script deliberately stays in (running elevated trades this one prompt for winget installers elsewhere that fail pre-elevated instead).
         # Nothing can answer that prompt without a person at the console, so a run with neither would hang rather than fail, which -Yes is supposed to rule out, not walk into unattended.
         if (-not $script:ELEVATED -and (-not [Environment]::UserInteractive -or [Console]::IsInputRedirected)) {
-            warn "wsl --update needs administrator and raises its own prompt, which nothing can answer unattended; it would hang rather than fail, so this refuses to start it. Run interactively once so the prompt has someone to answer, or update WSL first with: host-setup\windows\upgrade-host.ps1 -Wsl"
+            warn "wsl --update needs administrator and raises its own prompt, which nothing can answer unattended; it would hang rather than fail, so this refuses to start it. Run interactively once so the prompt has someone to answer, or quit Docker Desktop yourself and run host-setup\windows\upgrade-host.ps1 -Wsl, which refuses on its own while Docker Desktop is running, including one this line just restarted to leave the host as it found it"
             if ($result.Stopped) { Start-DockerDesktop | Out-Null; $result.Stopped = $false }
             $result.Proceed = $false
             return $result
@@ -758,7 +758,8 @@ function Invoke-ToolApply {
         }
         $dockerMaintenance = Enter-DockerMaintenance -WasRunning $wasRunning -WslProblem $wslProblem
         if (-not $dockerMaintenance.Proceed) {
-            warn "docker skipped, $wslProblem"
+            # $wslProblem is empty on the path where Enter-DockerMaintenance refused over a failed Docker Desktop stop rather than a WSL gap, and that reason was already warned there, but a bare "docker skipped, " with nothing after the comma still reads as a broken log line rather than a completed one.
+            warn "docker skipped$(if ($wslProblem) { ", $wslProblem" } else { ', Docker Desktop maintenance failed, see the warning above' })"
             $script:FAILED += $ToolName
             return
         }
