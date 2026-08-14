@@ -64,7 +64,7 @@ scope-widened commit, a rewritten shared history, a destructive reset).
     trap 'rm -rf "$d"' EXIT
     git init -q "$d" \
       && git -C "$d" commit -S --allow-empty -q -m check \
-      && git -C "$d" log -1 --format='sig=%G? email=%ae'
+      && git -C "$d" log -1 --format='sig=%G? author=%an <%ae> committer=%cn <%ce>'
   )
   ```
   PowerShell equivalent:
@@ -72,7 +72,7 @@ scope-widened commit, a rewritten shared history, a destructive reset).
   $d = Join-Path $env:TEMP ([guid]::NewGuid())
   git init -q $d
   git -C $d commit -S --allow-empty -q -m check
-  git -C $d log -1 --format='sig=%G? email=%ae'
+  git -C $d log -1 --format='sig=%G? author=%an <%ae> committer=%cn <%ce>'
   Remove-Item -Recurse -Force $d
   ```
   `sig` must read `G`, git's own good-signature verdict char. Don't grep localized
@@ -102,9 +102,11 @@ scope-widened commit, a rewritten shared history, a destructive reset).
 or invented address.** `author` and `committer` on every agent-authored commit are the GitHub
 `noreply` address of the account whose key signs the commit, in `username@users.noreply.github.com`
 or `ID+username@users.noreply.github.com` form. **Verify it, do not set it**: the scratch commit
-from the signing check above already proves this end-to-end. Read its `email=` output rather
-than trusting `git config --get user.email` alone, since a global config value doesn't prove what
-actually lands on a commit object. Match it against that address before committing, rather than
+from the signing check above already proves this end-to-end. Read its `author=`/`committer=`
+output rather than trusting `git config --get user.email` alone, since a global config value
+doesn't prove what actually lands on a commit object, and read both rather than the author alone
+since a rebase, amend, or cherry-pick can rewrite the committer while leaving the author
+untouched. Match both against that address before committing, rather than
 writing a repo-local override. The identity is host configuration set globally once, so a repo-local
 `user.email` is redundant where the global is right and a silently-shadowing wrong identity where
 it is not. A mismatch is a host fault to surface to the maintainer, not to patch per repo, because
