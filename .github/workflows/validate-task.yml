@@ -16,8 +16,12 @@ jobs:
 
     steps:
 
+      # Full history, since the dead-path prose rule keys on deletion history.
+      # A shallow clone holds none, and the rule stands down there rather than pass blind.
       - name: Checkout code step
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
 
       # Doc linters run as pinned action wrappers.
       # The editorconfig-checker action is install-only, so it runs via Docker instead.
@@ -113,7 +117,7 @@ jobs:
       # Every default prose rule is clean tree-wide, so all but one block a change that adds a finding.
       # `charset-unknown` is the exception and reports in the step below, for the reason given there.
       - name: Check prose step
-        run: python3 scripts/prose_lint.py . --check charset --check semicolon --check dash --check dupword --check spelling --check comment-wrap --check comment-case --check home-path
+        run: python3 scripts/prose_lint.py . --check charset --check semicolon --check dash --check dupword --check spelling --check comment-wrap --check comment-case --check home-path --check dead-path
 
       # Warn-only, and visible rather than absent: an unrun check is one nobody acts on.
       # A finding here names a character no tier covers, and classifying it is a fleet-law edit rather than a prose fix.

@@ -2325,6 +2325,135 @@ class TestTheScanScopeIsTheScopeReported(unittest.TestCase):
         self.assertIn('1 of 2 file(s) read, 2 changed line(s)', self.err.getvalue())
 
 
+class TestDeadPath(unittest.TestCase):
+    """The named-path half of the stale-description class (RESYNC.md section 4).
+
+    Every fixture builds a real repository, because the rule keys on git history: a path is
+    reported only when git once tracked it and the tree no longer holds it, which is the
+    deletion-sweep shape. The measured incident named no path at all, and that half stays a
+    manual read, so nothing here asserts coverage the rule does not have.
+    """
+
+    def setUp(self) -> None:
+        self.tmp = Path(self.enterContext(tempfile.TemporaryDirectory()))
+
+    def git(self, root: Path, *args: str) -> None:
+        # Signing is disabled explicitly, since a host that signs by default cannot commit here.
+        subprocess.run(['git', '-C', str(root), '-c', 'user.email=gate@example.invalid',
+                        '-c', 'user.name=gate test', '-c', 'commit.gpgsign=false', *args],
+                       check=True, capture_output=True)
+
+    def repo(self) -> Path:
+        """A repository that tracked `scripts/gone.py` once and then deleted it."""
+        root = self.tmp / 'repo'
+        (root / 'scripts').mkdir(parents=True)
+        (root / 'scripts' / 'gone.py').write_text('print()\n', encoding='utf-8')
+        (root / 'scripts' / 'kept.py').write_text('print()\n', encoding='utf-8')
+        self.git(root, 'init', '-q')
+        self.git(root, 'add', '-A')
+        self.git(root, 'commit', '-qm', 'base')
+        self.git(root, 'rm', '-q', 'scripts/gone.py')
+        self.git(root, 'commit', '-qm', 'delete')
+        return root
+
+    def kinds(self, root: Path, text: str, rel: str = 'DOC.md') -> list[str]:
+        path = root / rel
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(text, encoding='utf-8')
+        return [kind for _, kind, _ in prose_lint.check_file(path, {'dead-path'}, root)]
+
+    def test_a_deleted_path_in_a_span_is_flagged(self) -> None:
+        root = self.repo()
+        self.assertIn('dead-path', self.kinds(root, 'Run `scripts/gone.py` to apply.\n'))
+
+    def test_a_living_path_is_not_a_finding(self) -> None:
+        root = self.repo()
+        self.assertEqual([], self.kinds(root, 'Run `scripts/kept.py` to apply.\n'))
+
+    def test_a_path_with_no_history_here_is_not_a_finding(self) -> None:
+        """A proposal in a backlog and another repository's layout both name unborn paths."""
+        root = self.repo()
+        self.assertEqual([], self.kinds(root, 'Ship `scripts/future.py` next.\n'))
+
+    def test_a_reference_definition_to_a_deleted_target_is_flagged(self) -> None:
+        root = self.repo()
+        self.assertIn('dead-path', self.kinds(root, '[gone]: ./scripts/gone.py\n'))
+        self.assertEqual([], self.kinds(root, '[kept]: ./scripts/kept.py\n'))
+
+    def test_an_inline_link_to_a_deleted_target_is_flagged(self) -> None:
+        root = self.repo()
+        self.assertIn('dead-path', self.kinds(root, 'See [the script](scripts/gone.py).\n'))
+
+    def test_a_relative_mention_anchors_on_the_files_own_directory(self) -> None:
+        root = self.repo()
+        self.assertIn('dead-path',
+                      self.kinds(root, 'See [it](../scripts/gone.py).\n', rel='docs/D.md'))
+        self.assertEqual([],
+                         self.kinds(root, 'See [it](../scripts/kept.py).\n', rel='docs/D.md'))
+
+    def test_a_ref_or_directory_shaped_span_is_not_a_candidate(self) -> None:
+        """`origin/develop` styles a ref and `scripts/` a layout, and neither asserts a file."""
+        root = self.repo()
+        for text in ('Fetched from `origin/develop` here.\n',
+                     'The `scripts/` tree holds the tools.\n',
+                     'A run like `./scripts/...` is elided.\n'):
+            with self.subTest(text=text.strip()):
+                self.assertEqual([], self.kinds(root, text))
+
+    def test_a_fenced_block_is_skipped(self) -> None:
+        """A fence quotes a transcript or an example, which may legitimately show any path."""
+        root = self.repo()
+        self.assertEqual([], self.kinds(root, '```sh\npython3 scripts/gone.py\n```\n'))
+
+    def test_a_manifest_declared_carried_path_is_exempt(self) -> None:
+        """The hub's instance of a carried file retires to a snippet, and docs still name it."""
+        root = self.repo()
+        (root / 'spec').mkdir()
+        (root / 'spec' / 'files.json').write_text(
+            json.dumps({'baseline': [{'path': 'scripts/gone.py'}]}), encoding='utf-8')
+        prose_lint.carried_paths.cache_clear()
+        self.addCleanup(prose_lint.carried_paths.cache_clear)
+        self.assertEqual([], self.kinds(root, 'Run `scripts/gone.py` to apply.\n'))
+
+    def test_without_git_the_rule_stands_down(self) -> None:
+        """No history means no deletion signature, so nothing is reported rather than guessed."""
+        bare = self.tmp / 'bare'
+        bare.mkdir()
+        path = bare / 'DOC.md'
+        path.write_text('Run `scripts/gone.py` to apply.\n', encoding='utf-8')
+        self.assertEqual([], [k for _, k, _ in prose_lint.check_file(path, {'dead-path'})])
+
+    def test_a_shallow_clone_stands_down_loudly(self) -> None:
+        """A shallow clone holds no deletion history, so a run there says so and reports nothing.
+
+        Without the announcement a shallow CI checkout would pass every mention forever, which
+        is the silent-stop failure the sweep floor exists to prevent.
+        """
+        root = self.repo()
+        (root / 'DOC.md').write_text('Run `scripts/gone.py` to apply.\n', encoding='utf-8')
+        self.git(root, 'add', '-A')
+        self.git(root, 'commit', '-qm', 'doc')
+        shallow = self.tmp / 'shallow'
+        subprocess.run(['git', 'clone', '-q', '--depth', '1', f'file://{root}', str(shallow)],
+                       check=True, capture_output=True)
+        err = io.StringIO()
+        with contextlib.redirect_stdout(io.StringIO()), contextlib.redirect_stderr(err), \
+                contextlib.chdir(shallow):
+            rc = prose_lint.main(['.', '--check', 'dead-path'])
+        self.assertEqual(0, rc)
+        self.assertIn('shallow', err.getvalue())
+
+    def test_this_repository_is_clean_of_dead_paths(self) -> None:
+        """The gate ships clean on its own tree, so every finding after this is a regression."""
+        md = [p for p in REPO.rglob('*.md')
+              if not prose_lint.GENERATED_ROOTS.intersection(p.relative_to(REPO).parts)
+              and 'reports' not in p.relative_to(REPO).parts]
+        hits = [(prose_lint.rel(p), ln, msg) for p in md
+                for ln, kind, msg in prose_lint.check_file(p, {'dead-path'}, REPO)
+                if kind == 'dead-path']
+        self.assertEqual([], hits)
+
+
 class TestHarness(unittest.TestCase):
     def test_this_module_collects_a_plausible_number_of_cases(self) -> None:
         """A module whose cases fail to load still reports OK, which is a pass proving nothing."""
