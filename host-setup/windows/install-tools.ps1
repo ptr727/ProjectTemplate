@@ -462,7 +462,7 @@ function Invoke-Wsl {
 }
 
 # Just the "WSL version" line, as a value Compare-HostVersion can read.
-# upgrade-host.ps1's Get-WslVersion concatenates WSL, kernel and WSLg into one display string instead, which serves a report and not a comparison.
+# Get-WslVersion in upgrade-host.ps1 concatenates WSL, kernel and WSLg into one display string instead, which serves a report rather than a comparison.
 function Get-WslPlatformVersion {
     if (-not (Get-Command wsl.exe -ErrorAction SilentlyContinue)) { return $null }
     $text = Invoke-Wsl '--version'
@@ -472,10 +472,9 @@ function Get-WslPlatformVersion {
 }
 
 # What stands between this host and installing or upgrading docker, or $null where nothing does.
-# Read-only: this never runs wsl --install or wsl --update itself. Those stay a person's own action
-# through upgrade-host.ps1 -Wsl and setup-wsl.ps1, confirmed with the maintainer as the boundary,
-# since a WSL platform update restarts every distribution and neither action belongs as a silent
-# side effect of installing a different tool.
+# Read-only: this never runs wsl --install or wsl --update itself.
+# Those stay a person's own action through upgrade-host.ps1 -Wsl and setup-wsl.ps1, confirmed with the maintainer as the boundary.
+# A WSL platform update restarts every distribution, and neither action belongs as a silent side effect of installing a different tool.
 function Test-WslReadyForDocker {
     if (-not (Get-Command wsl.exe -ErrorAction SilentlyContinue)) {
         return "wsl.exe was not found, and Docker Desktop needs WSL2. Install it with: wsl --install --no-distribution"

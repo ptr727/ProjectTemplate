@@ -559,10 +559,13 @@ docker_target() {
 # Debian and Ubuntu never ship a package named docker-ce, so unlike gh and node there is no distro package the upstream one could be confused with, and tool_configured needs no entry for it.
 docker_install() {
     # The only sanctioned source inside a WSL distribution is Docker Desktop's own WSL integration, confirmed with the maintainer as a hard rule with no override.
-    # A native install here would run a second engine beside Desktop's, so this is a skip rather than a failure, on the same pattern dotnet_feed uses for an architecture Microsoft's feed does not carry.
+    # A native install here would run a second engine beside Desktop's, so this is always a skip rather than an install, on the same pattern dotnet_feed uses for an architecture Microsoft's feed does not carry.
     if [[ $IS_WSL == true ]]; then
         warn "This is a WSL distribution, and docker here comes only from Docker Desktop's own WSL integration, never from installing docker-ce directly. Enable it in Docker Desktop under Settings, Resources, WSL integration, or check it from Windows with setup-wsl.ps1 -Status. Skipping the native install."
-        return 0
+        # A skip is success only where the integration already answers, since --install/--upgrade otherwise exits 0 having neither installed docker nor found it working.
+        command -v docker > /dev/null && return 0
+        warn "docker is not on PATH here either, so Docker Desktop's WSL integration is not enabled for this distribution yet."
+        return 1
     fi
     [[ -n $CODENAME ]] ||
         die "/etc/os-release names no VERSION_CODENAME, so the Docker apt repository's suite cannot be worked out"

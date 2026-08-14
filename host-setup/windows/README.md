@@ -90,7 +90,7 @@ Docker's own `docker-desktop` distribution is excluded from every distribution l
 | `install-tools.sh` carries four functions per tool | `install-tools.ps1` carries one registry record per tool | Every source is `winget`, so the per-tool variation those functions exist for does not arise |
 | Actions, the last one given wins | Actions, name one | A `param()` block records which switches were given and not their order, and refusing beats silently discarding an intent |
 | `git-restore-mtime` is managed | not managed | The spec declares it not applicable on Windows, since it serves a Linux deploy path |
-| `install-tools.ps1` checks the WSL *platform* version before installing docker | `install-tools.sh` refuses docker entirely inside a WSL *distribution* | Windows needs WSL2 present for Docker Desktop's own backend; a WSL distribution instead takes docker only from Docker Desktop's own WSL integration |
+| `install-tools.sh` refuses docker entirely inside a WSL *distribution* | `install-tools.ps1` checks the WSL *platform* version before installing docker | A WSL distribution takes docker only from Docker Desktop's own WSL integration, and Windows needs WSL2 present for Docker Desktop's own backend |
 | `sudo` re-runs a command as root | nothing elevates | `winget` raises UAC per installer, which is the path with the fewest failures |
 | `unmanaged` means the upstream repository is unconfigured | `unmanaged` means the tool is on `PATH` and winget knows no package for it | The same question, by a different mechanism |
 | `credential.helper cache --timeout=3600` | `credential.helper manager`, and only where unset | Git Credential Manager ships with Git for Windows |
