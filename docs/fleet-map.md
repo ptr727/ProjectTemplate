@@ -111,11 +111,11 @@ flowchart TD
   apply -.->|"G4: deleted paths live on in prose"| apply
   apply -.->|"G5: intent-fidelity drift is invisible"| apply
   audit --> hostcheck["host gate on the way in"]
-  hostcheck -.->|"G3: a failed floor names no install command"| dead["operator improvises the install"]
+  hostcheck --> remedy["a failed floor prints its install command"]
   apply --> reaudit["re-audit"] --> report["committed report"]
 ```
 
-Owned by [`RESYNC.md`][resync] and [`AUDIT.md`][audit], packaged as the `resync-a-repo` skill with the `carried-instruction-file-guard` and `copilot-instructions-keeper` skills firing inside it. Gaps on this path: G3 (the audit-to-install bridge), G4 (deletion sweeps miss prose), G5 (intent-fidelity drift detection).
+Owned by [`RESYNC.md`][resync] and [`AUDIT.md`][audit], packaged as the `resync-a-repo` skill with the `carried-instruction-file-guard` and `copilot-instructions-keeper` skills firing inside it. Gaps on this path: G4 (deletion sweeps miss prose), G5 (intent-fidelity drift detection). G3, the audit-to-install bridge, is closed and its row records the resolution.
 
 ### Daily Development in a Conformant Repository
 
@@ -172,7 +172,7 @@ Four wiring points close the model, each a register gap with its own deliverable
 | --- | --- | --- | --- |
 | G1 | Skills install is absent from the cold-start flow | script + doc | P1 |
 | G2 | Host-tools repo overlay is silently skippable | script + doc | closed |
-| G3 | A failed tool floor names no install remedy | spec + script | P1 |
+| G3 | A failed tool floor names no install remedy | spec + script | closed |
 | G4 | Deletion sweeps miss prose describing the deleted path | doc | P3 |
 | G5 | Intent-fidelity carried files have no drift detection | spec + decision | P3 |
 | G6 | Session entry never checks skill staleness | doc + skill | P1 |
@@ -198,22 +198,20 @@ Each gap's handoff below states who detects it, what closes it, and the test tha
 - **Gap** - [`scripts/host_gate.py`][host-gate] run without `--repo` read only the declaration at its own working directory, so a run started in a subdirectory of a repo carrying a `host-tools.json` overlay skipped that overlay without a word.
 - **Resolution** - A bare run whose working directory sits inside such a repo prints a warning naming the overlay's directory and the `--repo` re-run that counts it, asserted by the `TestBareRunOverlayWarning` cases in `scripts/test_host_gate.py`. An explicit `--repo` and `--no-local` each stay silent, since both are a choice the caller made. [`STANDUP.md`][standup] section 0 states the residual case the warning cannot cover, a target repo that does not exist yet, instead of the workaround sentence.
 
-### G3: A Failed Tool Floor Names No Install Remedy
+### G3: A Failed Tool Floor Names No Install Remedy (Closed)
 
-- **Gap** - The tool catalog detects a missing or stale tool, and the handoff back into `host-setup/` does not exist: a failed floor leaves the operator or agent to rediscover which installer provides the tool.
-- **Checked** - `host_gate.py` output names the tool and the floor, and no output names an install command. Each [`spec/host-tools.json`][host-tools] entry carries a per-platform `source` already.
-- **Handoff** - When `host_gate.py` reports a tool below its floor, its output names the command that installs or upgrades that tool on the current platform, derived from the catalog's `source` field, so the failure carries its own remedy.
+- **Gap** - The tool catalog detected a stale tool, and the handoff back into `host-setup/` did not exist: a failed floor left the operator or agent to rediscover which installer provides the tool.
+- **Resolution** - Each floored [`spec/host-tools.json`][host-tools] entry carries a per-platform `remedy` beside its `source`, and a below-floor failure prints it as a `REMEDY:` line, with a `host-setup/` path resolved against the checkout the gate runs from so the command is runnable as printed. The catalog's own note states the field's semantics.
 
 ```mermaid
 flowchart LR
-  fail["host_gate: tool below floor"] --> lookup["read source for the tool and platform"]
-  lookup --> remedy["output names the install command"]
+  fail["host_gate: tool below floor"] --> lookup["read remedy for the tool and platform"]
+  lookup --> remedy["output prints the install command"]
   remedy --> run["operator or agent runs it"]
   run --> recheck["re-run host_gate"] --> ok["proceed"]
 ```
 
-- **Closed when** - Every required tool's failure output names a runnable remedy, and [`scripts/test_bootstrap.py`][scripts-readme] asserts the mapping stays total.
-- **Target** - [`spec/host-tools.json`][host-tools] remedy mapping (or a derivation from `source`), `host_gate.py` output, test coverage.
+- **Closing test** - [`scripts/test_bootstrap.py`][scripts-readme] asserts the mapping stays total per platform, with the one recorded not-applicable exception, and that a remedy handing back into an installer names a tool that installer manages. [`spec/validate.py`][files] and the schema require a remedy on every hub floor. A repository overlay may still add a floor without one, in which case the failure degrades to the `INSTALL FROM:` source line.
 
 ### G4: Deletion Sweeps Miss Prose
 
@@ -348,7 +346,7 @@ Design-doc first: this doc merges, then each unchecked item becomes an issue lin
 
 - [ ] G1 bootstrap skills step, host-setup section, README fourth deployed thing (cross-links the open host-tooling issues [#671][issue-671] and [#673][issue-673], which touch the same scripts)
 - [x] G2 `host_gate.py` bare-run warning
-- [ ] G3 failed-floor remedy output
+- [x] G3 failed-floor remedy output
 - [ ] G6 staleness cadence wording
 - [x] G8 `build_dist.py --check` in CI, found already in place via [#676][pr-676] and recorded closed
 

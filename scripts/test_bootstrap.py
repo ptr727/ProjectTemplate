@@ -51,6 +51,15 @@ ALIASES = {
     'windows': {'python3': 'python'},
 }
 
+# A platform a floored tool's remedy deliberately omits, and the reason, so an omission is a decision rather than a hole in the mapping.
+REMEDY_NOT_APPLICABLE = {
+    'git-restore-mtime': {'windows': 'The tool serves a Linux deploy path, which its source states.'},
+}
+
+# The remedy commands that hand back into the host-setup installers, read so the tool each names can be checked against what that installer manages.
+LINUX_INSTALLER_REMEDY = re.compile(r'^host-setup/linux/install-tools\.sh --upgrade (\S+)$')
+WINDOWS_INSTALLER_REMEDY = re.compile(r'^host-setup/windows/install-tools\.ps1 -Upgrade (\S+)$')
+
 # A spec tool an installer deliberately does not manage, and the reason, recorded so an omission is a decision somebody made rather than one nobody noticed.
 # The windows set is empty rather than absent, which is itself the assertion: Docker Desktop is one winget package there, where on Linux a hypervisor and a workstation want different answers, so an entry appearing here later is a decision to justify rather than a gap to fill.
 NOT_MANAGED = {
@@ -200,6 +209,51 @@ def assert_coverage(platform: str, managed: set[str], installer: str) -> None:
         )
 
 
+def test_every_declared_floor_carries_a_total_remedy_mapping() -> None:
+    """Each floored tool names a runnable remedy on every platform, or carries a recorded exception.
+
+    The gate prints the remedy under a below-floor failure, so a missing platform key is a failure
+    that tells the operator to upgrade and not how. A remedy that hands back into an installer here
+    is also checked to name a tool that installer manages, so the command it prints can actually run.
+    """
+    linux_managed = declared_tools()
+    windows_managed = declared_windows_tools()
+    for tool in spec_tools():
+        name = tool['name']
+        if tool.get('minimum') is None:
+            continue
+        remedy = tool.get('remedy')
+        if not isinstance(remedy, dict) or not remedy:
+            failures.append(f'{name} declares a floor and no remedy, so its failure names no command')
+            continue
+        for platform in ('linux', 'macos', 'windows'):
+            if platform in REMEDY_NOT_APPLICABLE.get(name, {}):
+                check(
+                    platform not in remedy,
+                    f'{name} is recorded as not applicable on {platform} and carries a remedy there, so the record is stale',
+                )
+                continue
+            command = remedy.get(platform)
+            check(
+                isinstance(command, str) and bool(command),
+                f'{name} declares a floor and no {platform} remedy, so a below-floor host there is told to upgrade and not how',
+            )
+        installer_cases = (
+            ('linux', LINUX_INSTALLER_REMEDY, linux_managed, 'install-tools.sh'),
+            ('windows', WINDOWS_INSTALLER_REMEDY, windows_managed, 'install-tools.ps1'),
+        )
+        for platform, pattern, managed, installer in installer_cases:
+            command = remedy.get(platform)
+            if not isinstance(command, str):
+                continue
+            match = pattern.match(command)
+            if match and managed:
+                check(
+                    match.group(1) in managed,
+                    f'{name} remedy.{platform} names {match.group(1)}, which {installer} does not manage, so the printed command fails',
+                )
+
+
 def test_every_required_linux_tool_is_installable() -> None:
     """A tool the spec requires on Linux is one the tooling can provide, or a recorded exception."""
     assert_coverage('linux', declared_tools(), 'install-tools.sh')
@@ -298,6 +352,7 @@ def main() -> int:
         test_windows_loader_reads_one_path_into_the_tree,
         test_linux_loader_needs_no_python,
         test_windows_loader_needs_no_python,
+        test_every_declared_floor_carries_a_total_remedy_mapping,
         test_every_required_linux_tool_is_installable,
         test_every_required_windows_tool_is_installable,
         test_every_managed_tool_is_executable,

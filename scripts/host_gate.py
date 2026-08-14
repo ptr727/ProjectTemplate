@@ -132,6 +132,8 @@ def field_problems(entry: dict) -> list[str]:
             problems.append(f'minimum must be dot-separated integers or null, not {entry["minimum"]!r}')
     if 'source' in entry and not isinstance(entry['source'], dict):
         problems.append('source must be an object')
+    if 'remedy' in entry and not isinstance(entry['remedy'], dict):
+        problems.append('remedy must be an object')
     if 'probes' in entry:
         probes = entry['probes']
         if (not isinstance(probes, list) or not probes
@@ -197,6 +199,16 @@ def contract_problems(tools: list[dict]) -> list[str]:
         for plat in sorted(set(src) & set(PLATFORM_KEYS)):
             if not isinstance(src[plat], str) or not src[plat]:
                 problems.append(f'{name} source.{plat} is empty, so a host on that platform is told to upgrade and not where from')
+        # The remedy is shape-checked and not required, so a repository floor without one degrades to the source line rather than failing the merge.
+        # Requiring it fleet-wide is the hub declaration's contract, held by spec/validate.py and scripts/test_bootstrap.py rather than here.
+        rem = t.get('remedy')
+        if isinstance(rem, dict):
+            stray = sorted(set(rem) - set(PLATFORM_KEYS))
+            if stray:
+                problems.append(f'{name} remedy names {", ".join(stray)}, which no platform reads - use {", ".join(PLATFORM_KEYS)}')
+            for plat in sorted(set(rem) & set(PLATFORM_KEYS)):
+                if not isinstance(rem[plat], str) or not rem[plat]:
+                    problems.append(f'{name} remedy.{plat} is empty, so a host on that platform is shown a command that is not one')
     return problems
 
 
@@ -259,6 +271,27 @@ def merge(base: list[dict], local: list[dict]) -> tuple[list[dict], list[str]]:
     return [by_key[k] for k in sorted(by_key)], rejected
 
 
+def platform_key() -> str:
+    """The PLATFORM_KEYS member the running host reads its source and remedy under."""
+    if sys.platform.startswith('linux'):
+        return 'linux'
+    return 'macos' if sys.platform == 'darwin' else 'windows'
+
+
+def resolve_remedy(command: str) -> str:
+    """A remedy command with a repo-relative installer path made absolute against this checkout.
+
+    The catalog stores host-setup/ paths repo-relative so the data stays portable, and the gate
+    runs from any working directory, so the path is resolved against the tree this script lives in
+    to keep the printed command runnable as printed.
+    """
+    if not command.startswith('host-setup/'):
+        return command
+    script, _, rest = command.partition(' ')
+    resolved = Path(__file__).resolve().parent.parent / script
+    return f'{resolved} {rest}' if rest else str(resolved)
+
+
 def overlay_above(start: Path) -> Path | None:
     """The nearest ancestor of `start` carrying a host-tools.json, or None where none does.
 
@@ -305,12 +338,14 @@ def check(tools: list[dict]) -> list[str]:
             issues.append(f'{name} reported {version!r}, which is not dot-separated integers, so its floor was not applied')
         elif compare(found, floor) < 0:
             # The remedy rides on the finding rather than beside it, since a separate line would count as a second issue.
-            src = (tool.get('source') or {}).get('linux' if sys.platform.startswith('linux') else 'macos' if sys.platform == 'darwin' else 'windows')
+            src = (tool.get('source') or {}).get(platform_key())
+            rem = (tool.get('remedy') or {}).get(platform_key())
             # The head line stays the scannable fact and the rationale follows it, rather than being inlined into it.
             # An entry's why runs to a paragraph, so inlining made the one line a reader scans in CI output unreadable, and the longest entry is not the one that needs it least.
             issues.append(f'{name} {version} is below the {floor_text} floor'
                           + f'\nWHY: {tool["why"]}'
-                          + (f'\nINSTALL FROM: {src}' if src else ''))
+                          + (f'\nINSTALL FROM: {src}' if src else '')
+                          + (f'\nREMEDY: {resolve_remedy(rem)}' if rem else ''))
         else:
             NOTES.append(f'{name} {version} meets the {floor_text} floor')
     return issues

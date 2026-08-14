@@ -39,6 +39,15 @@
                         "macos": { "type": "string", "minLength": 1 },
                         "windows": { "type": "string", "minLength": 1 }
                     }
+                },
+                "remedy": {
+                    "type": "object",
+                    "additionalProperties": false,
+                    "properties": {
+                        "linux": { "type": "string", "minLength": 1 },
+                        "macos": { "type": "string", "minLength": 1 },
+                        "windows": { "type": "string", "minLength": 1 }
+                    }
                 }
             }
         }

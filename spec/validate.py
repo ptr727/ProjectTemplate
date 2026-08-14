@@ -190,6 +190,17 @@ def main():
                     for plat, where in t["source"].items():
                         if not isinstance(where, str) or not where:
                             errors.append(f"host-tools.json: '{name}' source.{plat} must be a non-empty string")
+                    # The remedy is held to the same shape as the source it sits beside, and required on the same trigger.
+                    # A floor whose failure prints no runnable command leaves the operator to rediscover the installer, which is the gap the field closes.
+                    if not isinstance(t.get("remedy"), dict) or not t["remedy"]:
+                        errors.append(f"host-tools.json: '{name}' declares a floor and no 'remedy', so a below-floor failure names no command that fixes it")
+                    else:
+                        stray = sorted(set(t["remedy"]) - platforms)
+                        if stray:
+                            errors.append(f"host-tools.json: '{name}' remedy names {', '.join(stray)}, which no platform reads - use {', '.join(sorted(platforms))}")
+                        for plat, command in t["remedy"].items():
+                            if not isinstance(command, str) or not command:
+                                errors.append(f"host-tools.json: '{name}' remedy.{plat} must be a non-empty string")
         ht_names = [t["name"] for t in host_tools["tools"] if isinstance(t, dict) and isinstance(t.get("name"), str)]
         if ht_names != sorted(ht_names, key=str.lower):
             errors.append("host-tools.json: 'tools' is not sorted by name, which is how a reader finds an entry")

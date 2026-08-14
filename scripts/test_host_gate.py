@@ -136,6 +136,22 @@ class TestCheck(unittest.TestCase):
         self.assertIn('below the 2.47.0 floor', issues[0])
         self.assertIn('INSTALL FROM', issues[0])
 
+    def test_a_below_floor_failure_names_the_remedy_command(self):
+        """The finding carries its own fix, still as one issue."""
+        remedy = dict.fromkeys(('linux', 'macos', 'windows'), 'pkg upgrade gh')
+        entry = tool('gh', minimum='2.47.0', probes=self.probe_for('v2.46.0'),
+                     source=dict.fromkeys(('linux', 'macos', 'windows'), 'somewhere'), remedy=remedy)
+        issues = host_gate.check([entry])
+        self.assertEqual(len(issues), 1)
+        self.assertIn('REMEDY: pkg upgrade gh', issues[0])
+
+    def test_a_host_setup_remedy_resolves_against_this_checkout(self):
+        """The data stays repo-relative and the printed command is runnable from any directory."""
+        resolved = host_gate.resolve_remedy('host-setup/linux/install-tools.sh --upgrade gh')
+        self.assertTrue(resolved.startswith(str(host_gate.SPEC.parent.parent)))
+        self.assertTrue(resolved.endswith('install-tools.sh --upgrade gh'))
+        self.assertEqual(host_gate.resolve_remedy('brew upgrade gh'), 'brew upgrade gh')
+
     def test_a_version_at_the_floor_passes(self):
         self.assertEqual(host_gate.check([tool('gh', minimum='2.47.0', probes=self.probe_for('v2.47.0'))]), [])
 
