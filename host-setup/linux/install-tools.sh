@@ -648,7 +648,9 @@ tool_status() {
 tool_shadow_path() {
     local name="$1" resolved
     resolved=$(type -P "$name" 2> /dev/null || true)
-    [[ -n $resolved && $resolved != "$BIN_DIR/$name" ]] && printf '%s' "$resolved"
+    # A relative PATH entry (".", "./bin") makes this relative to the caller's current directory, not a real shadow.
+    # What this returns gets removed by tool_unshadow, so only an absolute path is ever trusted as one.
+    [[ $resolved == /* && $resolved != "$BIN_DIR/$name" ]] && printf '%s' "$resolved"
     return 0
 }
 
@@ -769,7 +771,12 @@ tool_unshadow() {
                 warn "$tool: left $resolved in place, it will keep shadowing $BIN_DIR/$name"
                 break
             fi
-            run_root rm -f "$resolved"
+            # A guarded call, not a bare one, so a real removal failure (a read-only filesystem) does not take set -e's whole run down with it.
+            # Leaves this one tool shadowed and moves on instead.
+            run_root rm -f "$resolved" || {
+                warn "$tool: failed to remove $resolved, it will keep shadowing $BIN_DIR/$name"
+                break
+            }
             # Under --dry-run nothing is actually removed, so the same path would resolve again forever.
             [[ $DRY_RUN == true ]] && break
         done
