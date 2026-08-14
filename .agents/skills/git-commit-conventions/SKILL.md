@@ -78,8 +78,8 @@ scope-widened commit, a rewritten shared history, a destructive reset).
   try {
     $email = git config --global --get user.email
     git init -q "$d" `
-      && git -C "$d" commit --allow-empty -q -m check `
-      && $out = git -C "$d" log -1 --format='sig=%G? author=%an <%ae> committer=%cn <%ce>'
+      && git -C "$d" commit --allow-empty -q -m check
+    $out = git -C "$d" log -1 --format='sig=%G? author=%an <%ae> committer=%cn <%ce>'
     $out
     $ae = git -C "$d" log -1 --format='%ae'
     $ce = git -C "$d" log -1 --format='%ce'
