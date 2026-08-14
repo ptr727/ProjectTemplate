@@ -15,6 +15,7 @@ Usage: python3 install.py            (installs to ~/.claude)
        python3 install.py --report   (read-only: is this machine current?)
        CLAUDE_HOME=/x python3 install.py   (override target, for testing)
 """
+
 import argparse
 import datetime
 import hashlib
@@ -63,7 +64,7 @@ def owns(entry, prefix):
     two is the character after the name: a rule that invokes this script continues with a rule-syntax
     delimiter, where a different script continues with more of its own path.
     """
-    return entry.startswith(prefix) and entry[len(prefix):len(prefix) + 1] in (":", " ", ")")
+    return entry.startswith(prefix) and entry[len(prefix) : len(prefix) + 1] in (":", " ", ")")
 
 
 def at(data, path):
@@ -74,6 +75,7 @@ def at(data, path):
             return MISSING
         node = node[part]
     return node
+
 
 # Permission rules this kit installs, each as (owned prefix, rule).
 # A re-run drops every rule the prefix owns before adding the current one, so a changed rule updates in place.
@@ -104,7 +106,11 @@ def host_facts():
     and cannot tell Debian from Ubuntu. WSL is named because it is a distinct rollout target that
     otherwise reports as the Linux it runs.
     """
-    facts = {"hostname": socket.gethostname(), "system": platform.system(), "release": platform.release()}
+    facts = {
+        "hostname": socket.gethostname(),
+        "system": platform.system(),
+        "release": platform.release(),
+    }
     osr = pathlib.Path("/etc/os-release")
     if osr.exists():
         fields = {}
@@ -126,11 +132,14 @@ def source_ref():
     installed are not that commit's, and a stamp that claims otherwise is the thing this exists
     to prevent. A checkout that is not a git tree at all (an extracted tarball) says so.
     """
+
     def git(*args):
         # A host with no git is the normal case for a tarball install, and it is not an error here.
         # Letting FileNotFoundError escape would crash both the install and the read-only report.
         try:
-            r = subprocess.run(["git", "-C", str(HERE), *args], capture_output=True, text=True, check=False)
+            r = subprocess.run(
+                ["git", "-C", str(HERE), *args], capture_output=True, text=True, check=False
+            )
         except OSError:
             return None
         return r.stdout.strip() if r.returncode == 0 else None
@@ -240,13 +249,13 @@ def installed_digest(claude_home):
     h.update(normalized(hook.read_bytes()))
     text = normalized(claude_md.read_text(encoding="utf-8", errors="replace"))
     for marker in BLOCK_MARKERS:
-        found = re.search(rf"<!-- {marker} v\d+ start -->.*?<!-- {marker} v\d+ end -->", text, re.DOTALL)
+        found = re.search(
+            rf"<!-- {marker} v\d+ start -->.*?<!-- {marker} v\d+ end -->", text, re.DOTALL
+        )
         if not found:
             return None
         h.update(found.group(0).encode("utf-8"))
     return h.hexdigest()[:16]
-
-
 
 
 def build_stamp(claude_home, installed):
@@ -288,8 +297,12 @@ def stamp_problems(stamp):
     # The version carries the format rather than the content, so a mismatch either way is unreadable.
     # A newer stamp holds fields this code does not know, and an older one lacks fields it reads.
     # Carrying the field and never checking it is the version telling nobody anything.
-    if stamp.get("stampVersion") not in (None, STAMP_VERSION) and isinstance(stamp.get("stampVersion"), int):
-        out.append(f"stampVersion is {stamp['stampVersion']} where this installer writes {STAMP_VERSION}")
+    if stamp.get("stampVersion") not in (None, STAMP_VERSION) and isinstance(
+        stamp.get("stampVersion"), int
+    ):
+        out.append(
+            f"stampVersion is {stamp['stampVersion']} where this installer writes {STAMP_VERSION}"
+        )
     return out
 
 
@@ -312,7 +325,9 @@ def registration_problems(claude_home):
     if not isinstance(data, dict):
         return ["settings.json does not hold an object at its root"]
     out = []
-    groups = data.get("hooks", {}).get("PreToolUse") if isinstance(data.get("hooks"), dict) else None
+    groups = (
+        data.get("hooks", {}).get("PreToolUse") if isinstance(data.get("hooks"), dict) else None
+    )
     registered = 0
     for group in groups or []:
         if not isinstance(group, dict):
@@ -321,10 +336,18 @@ def registration_problems(claude_home):
             if isinstance(hook, dict) and "gh-write-guard" in str(hook.get("command", "")):
                 registered += 1
     if registered == 0:
-        out.append("the PreToolUse hook is not registered in settings.json, so the guard never runs")
+        out.append(
+            "the PreToolUse hook is not registered in settings.json, so the guard never runs"
+        )
     elif registered > 1:
-        out.append(f"the PreToolUse hook is registered {registered} times, so it runs more than once")
-    allow = data.get("permissions", {}).get("allow") if isinstance(data.get("permissions"), dict) else None
+        out.append(
+            f"the PreToolUse hook is registered {registered} times, so it runs more than once"
+        )
+    allow = (
+        data.get("permissions", {}).get("allow")
+        if isinstance(data.get("permissions"), dict)
+        else None
+    )
     for _, rule in MANAGED_PERMISSIONS:
         if not isinstance(allow, list) or rule not in allow:
             out.append(f"the permission rule {rule} is absent from settings.json")
@@ -339,15 +362,23 @@ def stamp_line(stamp):
     """
     host = stamp.get("host") or {}
     src = stamp.get("source") or {}
-    where = host.get("distro") or f"{host.get('system', 'unknown')} {host.get('release', '')}".strip()
+    where = (
+        host.get("distro") or f"{host.get('system', 'unknown')} {host.get('release', '')}".strip()
+    )
     if host.get("wsl"):
         where += " (WSL)"
     commit = str(src.get("commit", "unknown"))[:7] + ("-dirty" if src.get("dirty") else "")
     held = stamp.get("blocks")
-    blocks = ", ".join(f"{k} {v}" for k, v in sorted(held.items())) if isinstance(held, dict) and held else "none"
-    return (f"{host.get('hostname', 'unknown')} | {where} | hub {commit} | "
-            f"payload {stamp.get('payloadDigest', 'unknown')} | {blocks} | "
-            f"{stamp.get('installedUtc', 'unknown')}")
+    blocks = (
+        ", ".join(f"{k} {v}" for k, v in sorted(held.items()))
+        if isinstance(held, dict) and held
+        else "none"
+    )
+    return (
+        f"{host.get('hostname', 'unknown')} | {where} | hub {commit} | "
+        f"payload {stamp.get('payloadDigest', 'unknown')} | {blocks} | "
+        f"{stamp.get('installedUtc', 'unknown')}"
+    )
 
 
 def report(claude_home):
@@ -369,13 +400,17 @@ def report(claude_home):
     # ValueError rather than JSONDecodeError, since it also covers UnicodeDecodeError.
     # A partially written or non-UTF-8 file raises that before the JSON parser is ever reached.
     except (ValueError, OSError) as e:
-        sys.stderr.write(f"Stamp at {path} is unreadable ({e}). Re-run the installer to rewrite it.\n")
+        sys.stderr.write(
+            f"Stamp at {path} is unreadable ({e}). Re-run the installer to rewrite it.\n"
+        )
         return 2
     # Valid JSON is not a usable stamp: a hand edit or an older format parses and then breaks the read.
     problems = stamp_problems(stamp)
     if problems:
-        sys.stderr.write(f"Stamp at {path} is unusable: {'; '.join(problems)}. "
-                         "Re-run the installer to rewrite it.\n")
+        sys.stderr.write(
+            f"Stamp at {path} is unusable: {'; '.join(problems)}. "
+            "Re-run the installer to rewrite it.\n"
+        )
         return 2
     print(f"This machine:  {stamp_line(stamp)}")
     # The stamp says what was installed; the machine says what is there now.
@@ -388,7 +423,9 @@ def report(claude_home):
     # This is what catches a block edited between its own markers, and a modified or deleted hook.
     live_installed = installed_digest(claude_home)
     if live_installed is None:
-        problems.append("the deployed hook or CLAUDE.md is missing, so the kit is not fully installed")
+        problems.append(
+            "the deployed hook or CLAUDE.md is missing, so the kit is not fully installed"
+        )
     elif live_installed != current:
         problems.append("the installed content differs from what this checkout would write")
     # Correct bytes on disk are not a running guard, so the wiring is checked as well.
@@ -397,9 +434,13 @@ def report(claude_home):
     # An install onto a corrupted file writes the corruption into the stamp, and the two then agree.
     problems.extend(marker_corruption(claude_home / "CLAUDE.md"))
     if live != stamp.get("blocks"):
-        problems.append(f"CLAUDE.md now holds {live or 'no blocks'}, where the stamp recorded {stamp.get('blocks') or 'none'}")
+        problems.append(
+            f"CLAUDE.md now holds {live or 'no blocks'}, where the stamp recorded {stamp.get('blocks') or 'none'}"
+        )
     if stamp.get("source", {}).get("dirty"):
-        problems.append("installed from a dirty checkout, so the recorded commit does not identify the bytes")
+        problems.append(
+            "installed from a dirty checkout, so the recorded commit does not identify the bytes"
+        )
     if problems:
         print("STALE:")
         for p in problems:
@@ -412,20 +453,30 @@ def report(claude_home):
 
 def main():
     parser = argparse.ArgumentParser(
-        description="Install the agent write-safety kit, or report whether this machine is current.")
-    parser.add_argument("--report", action="store_true",
-                        help="read-only: compare this machine's stamp against this checkout and exit")
+        description="Install the agent write-safety kit, or report whether this machine is current."
+    )
+    parser.add_argument(
+        "--report",
+        action="store_true",
+        help="read-only: compare this machine's stamp against this checkout and exit",
+    )
     args = parser.parse_args()
 
     # The stamp step calls datetime.UTC, a 3.11 API, so an older interpreter is refused up front rather than crashing mid-install.
     # A capability probe rather than a version tuple, which the linter reads as dead code under the py313 target.
     if not hasattr(datetime, "UTC"):
-        sys.stderr.write("This installer and the hook require Python 3.11+. Run it with a newer python3.\n")
+        sys.stderr.write(
+            "This installer and the hook require Python 3.11+. Run it with a newer python3.\n"
+        )
         return 1
 
     # Expanduser resolves a CLAUDE_HOME set in `~/...` form to the home dir rather than a literal `~` dir.
     claude_home_env = os.environ.get("CLAUDE_HOME")
-    claude_home = pathlib.Path(claude_home_env).expanduser() if claude_home_env else pathlib.Path.home() / ".claude"
+    claude_home = (
+        pathlib.Path(claude_home_env).expanduser()
+        if claude_home_env
+        else pathlib.Path.home() / ".claude"
+    )
     hooks_dir = claude_home / "hooks"
     hook_dst = hooks_dir / "gh-write-guard.py"
     settings = claude_home / "settings.json"
@@ -445,9 +496,13 @@ def main():
     except OSError:
         pass
     print(f"  hook -> {hook_dst}")
-    r = subprocess.run([sys.executable, str(hook_dst), "--selftest"], capture_output=True, text=True, check=False)
+    r = subprocess.run(
+        [sys.executable, str(hook_dst), "--selftest"], capture_output=True, text=True, check=False
+    )
     if r.returncode != 0:
-        sys.stderr.write("Hook self-test FAILED; aborting before registration.\n" + r.stdout + r.stderr)
+        sys.stderr.write(
+            "Hook self-test FAILED; aborting before registration.\n" + r.stdout + r.stderr
+        )
         return 1
     print("  hook self-test: PASS")
 
@@ -476,6 +531,7 @@ def main():
             "deployed but not registered.\n"
         )
         return 1
+
     # Every container this installer descends into is checked before it is used.
     # A key holding an unexpected type would otherwise raise a traceback mid-edit.
     # That reads as a crash rather than as the settings problem it is.
@@ -487,8 +543,12 @@ def main():
             "but not registered.\n"
         )
 
-    for path, want in (("hooks", dict), ("hooks/PreToolUse", list),
-                       ("permissions", dict), ("permissions/allow", list)):
+    for path, want in (
+        ("hooks", dict),
+        ("hooks/PreToolUse", list),
+        ("permissions", dict),
+        ("permissions/allow", list),
+    ):
         held = at(data, path)
         # An explicit null is present rather than absent, and `setdefault` hands back the null it found.
         # It is therefore rejected here rather than read as a gap the default fills.
@@ -519,7 +579,9 @@ def main():
     for g in pre:
         hooks_list = g.get("hooks")
         if isinstance(hooks_list, list):
-            hooks_list[:] = [h for h in hooks_list if "gh-write-guard" not in str(h.get("command", ""))]
+            hooks_list[:] = [
+                h for h in hooks_list if "gh-write-guard" not in str(h.get("command", ""))
+            ]
     group = next((g for g in pre if g.get("matcher") == "Bash"), None)
     if group is None:
         group = {"matcher": "Bash", "hooks": []}
@@ -571,7 +633,9 @@ def main():
         newline, existing = "\n", ""
     for marker, filename in CLAUDE_MD_BLOCKS:
         snippet = (HERE / filename).read_text(encoding="utf-8").strip()
-        block_re = re.compile(rf"<!-- {marker} v\d+ start -->.*?<!-- {marker} v\d+ end -->", re.DOTALL)
+        block_re = re.compile(
+            rf"<!-- {marker} v\d+ start -->.*?<!-- {marker} v\d+ end -->", re.DOTALL
+        )
         if block_re.search(existing):
             # Keep the first occurrence and drop any duplicate, rather than rewriting each in place.
             # Substituting every match preserved the duplication, so a file arriving with two blocks kept two.
@@ -583,9 +647,17 @@ def main():
                 return _snippet if len(_written) == 1 else ""
 
             existing = block_re.sub(once, existing)
-            action = "updated" if len(written) == 1 else f"updated, {len(written) - 1} duplicate(s) removed"
+            action = (
+                "updated"
+                if len(written) == 1
+                else f"updated, {len(written) - 1} duplicate(s) removed"
+            )
         else:
-            sep = "" if existing == "" or existing.endswith("\n\n") else ("\n" if existing.endswith("\n") else "\n\n")
+            sep = (
+                ""
+                if existing == "" or existing.endswith("\n\n")
+                else ("\n" if existing.endswith("\n") else "\n\n")
+            )
             existing, action = existing + sep + snippet + "\n", "appended"
         print(f"  CLAUDE.md -> {claude_md} ({marker} block {action})")
     claude_md.write_bytes(existing.replace("\n", newline).encode("utf-8"))
@@ -593,14 +665,16 @@ def main():
     # 5. Stamp the machine, written last so it records a completed install rather than an attempted one.
     # The blocks are read back off disk here, so the stamp reports what CLAUDE.md holds rather than what was intended.
     stamp_path = claude_home / "agent-safety-stamp.json"
-    stamp = build_stamp(claude_home, datetime.datetime.now(datetime.UTC).strftime("%Y-%m-%dT%H:%M:%SZ"))
+    stamp = build_stamp(
+        claude_home, datetime.datetime.now(datetime.UTC).strftime("%Y-%m-%dT%H:%M:%SZ")
+    )
     stamp_path.write_text(json.dumps(stamp, indent=2) + "\n", encoding="utf-8")
     print(f"  stamp -> {stamp_path}")
 
     print("\nDone. This machine:")
     print(f"  {stamp_line(stamp)}")
     print("\nRe-check at any time, from a fresh hub checkout, without changing anything:")
-    print(f"  {launcher} \"{HERE / 'install.py'}\" --report")
+    print(f'  {launcher} "{HERE / "install.py"}" --report')
     print("Restart Claude Code sessions on this machine so the hook and CLAUDE.md load.")
     return 0
 

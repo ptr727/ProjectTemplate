@@ -4,6 +4,7 @@ real `claude` CLI state or the real ~/.agents directory.
 
 Run as `python3 scripts/tests/test_skills_install.py`, or under `python3 -m unittest discover -s scripts/tests`.
 """
+
 from __future__ import annotations
 
 import json
@@ -47,14 +48,18 @@ class SourceRefCase(unittest.TestCase):
             skills_install.source_ref()
 
         status_call = next(c for c in calls if "status" in c)
-        self.assertIn(str(skills_install.SKILLS_SRC.relative_to(skills_install.ROOT).as_posix()), status_call)
         self.assertIn(
-            str(skills_install.CLAUDE_PLUGIN_DIR.relative_to(skills_install.ROOT).as_posix()), status_call
+            str(skills_install.SKILLS_SRC.relative_to(skills_install.ROOT).as_posix()), status_call
+        )
+        self.assertIn(
+            str(skills_install.CLAUDE_PLUGIN_DIR.relative_to(skills_install.ROOT).as_posix()),
+            status_call,
         )
 
     def test_a_handed_in_commit_stands_in_where_git_cannot_answer(self) -> None:
         """A bootstrap runs the installer from a tarball tree with no .git, and hands in the commit
         it resolved before downloading, so the stamp stays checkable rather than permanently stale."""
+
         def no_git(args, **kwargs):
             result = mock.Mock()
             result.returncode = 128
@@ -63,21 +68,26 @@ class SourceRefCase(unittest.TestCase):
 
         with mock.patch("subprocess.run", side_effect=no_git):
             with mock.patch.dict("os.environ", {"SKILLS_SOURCE_COMMIT": "cafe1234"}):
-                self.assertEqual(skills_install.source_ref(),
-                                 {"vcs": "archive", "commit": "cafe1234", "dirty": False})
+                self.assertEqual(
+                    skills_install.source_ref(),
+                    {"vcs": "archive", "commit": "cafe1234", "dirty": False},
+                )
             with mock.patch.dict("os.environ", {}, clear=True):
                 self.assertEqual(skills_install.source_ref(), {"vcs": "none"})
 
     def test_a_git_answer_outranks_a_handed_in_commit(self) -> None:
         """In a real checkout the environment variable is stray state, and the checkout is the truth."""
+
         def fake_run(args, **kwargs):
             result = mock.Mock()
             result.returncode = 0
             result.stdout = "deadbeef\n" if "rev-parse" in args else ""
             return result
 
-        with (mock.patch("subprocess.run", side_effect=fake_run),
-              mock.patch.dict("os.environ", {"SKILLS_SOURCE_COMMIT": "cafe1234"})):
+        with (
+            mock.patch("subprocess.run", side_effect=fake_run),
+            mock.patch.dict("os.environ", {"SKILLS_SOURCE_COMMIT": "cafe1234"}),
+        ):
             self.assertEqual(skills_install.source_ref()["commit"], "deadbeef")
 
 
@@ -187,7 +197,9 @@ class MaterializeCase(unittest.TestCase):
 
         skills_install.materialize_global_skills(target)
 
-        self.assertEqual((target / "bar" / "SKILL.md").read_text(encoding="utf-8"), "not ours, no marker")
+        self.assertEqual(
+            (target / "bar" / "SKILL.md").read_text(encoding="utf-8"), "not ours, no marker"
+        )
 
     def test_an_installed_skill_carries_the_marker(self) -> None:
         (self.src / "foo").mkdir(parents=True)
@@ -227,15 +239,29 @@ class ReportCase(unittest.TestCase):
 
     def test_matching_commit_reports_current(self) -> None:
         stamp = self.tmp / "stamp.json"
-        with mock.patch("skills_install.source_ref", return_value={"vcs": "git", "commit": "abc", "dirty": False}):
-            stamp.write_text(json.dumps({"stampVersion": skills_install.STAMP_VERSION, "source": {"commit": "abc"}}), encoding="utf-8")
+        with mock.patch(
+            "skills_install.source_ref",
+            return_value={"vcs": "git", "commit": "abc", "dirty": False},
+        ):
+            stamp.write_text(
+                json.dumps(
+                    {"stampVersion": skills_install.STAMP_VERSION, "source": {"commit": "abc"}}
+                ),
+                encoding="utf-8",
+            )
             exit_code = skills_install.report(stamp)
         self.assertEqual(exit_code, 0)
 
     def test_mismatched_commit_reports_stale(self) -> None:
         stamp = self.tmp / "stamp.json"
-        stamp.write_text(json.dumps({"stampVersion": skills_install.STAMP_VERSION, "source": {"commit": "old"}}), encoding="utf-8")
-        with mock.patch("skills_install.source_ref", return_value={"vcs": "git", "commit": "new", "dirty": False}):
+        stamp.write_text(
+            json.dumps({"stampVersion": skills_install.STAMP_VERSION, "source": {"commit": "old"}}),
+            encoding="utf-8",
+        )
+        with mock.patch(
+            "skills_install.source_ref",
+            return_value={"vcs": "git", "commit": "new", "dirty": False},
+        ):
             exit_code = skills_install.report(stamp)
         self.assertEqual(exit_code, 1)
 
@@ -248,13 +274,19 @@ class ReportCase(unittest.TestCase):
 
     def test_matching_commit_but_dirty_checkout_reports_stale(self) -> None:
         stamp = self.tmp / "stamp.json"
-        stamp.write_text(json.dumps({"stampVersion": skills_install.STAMP_VERSION, "source": {"commit": "abc"}}), encoding="utf-8")
-        with mock.patch("skills_install.source_ref",
-                         return_value={"vcs": "git", "commit": "abc", "dirty": True}):
+        stamp.write_text(
+            json.dumps({"stampVersion": skills_install.STAMP_VERSION, "source": {"commit": "abc"}}),
+            encoding="utf-8",
+        )
+        with mock.patch(
+            "skills_install.source_ref", return_value={"vcs": "git", "commit": "abc", "dirty": True}
+        ):
             exit_code = skills_install.report(stamp)
         self.assertEqual(exit_code, 1)
 
-    def test_installed_from_dirty_but_now_clean_at_the_same_commit_still_reports_stale(self) -> None:
+    def test_installed_from_dirty_but_now_clean_at_the_same_commit_still_reports_stale(
+        self,
+    ) -> None:
         """The stamp records dirty=True from install time, when the actual materialized bytes
         did not match any clean commit. A checkout going clean at the same commit afterward
         cannot make that install "current": the bytes it produced are still unverifiable
@@ -262,13 +294,21 @@ class ReportCase(unittest.TestCase):
         at install time."""
         stamp = self.tmp / "stamp.json"
         stamp.write_text(
-            json.dumps({"stampVersion": skills_install.STAMP_VERSION,
-                        "source": {"commit": "abc", "dirty": True}}),
+            json.dumps(
+                {
+                    "stampVersion": skills_install.STAMP_VERSION,
+                    "source": {"commit": "abc", "dirty": True},
+                }
+            ),
             encoding="utf-8",
         )
-        with (mock.patch("skills_install.source_ref",
-                         return_value={"vcs": "git", "commit": "abc", "dirty": False}),
-              mock.patch("builtins.print")):
+        with (
+            mock.patch(
+                "skills_install.source_ref",
+                return_value={"vcs": "git", "commit": "abc", "dirty": False},
+            ),
+            mock.patch("builtins.print"),
+        ):
             exit_code = skills_install.report(stamp)
         self.assertEqual(exit_code, 1)
 
@@ -285,9 +325,13 @@ class ReportCase(unittest.TestCase):
             json.dumps({"stampVersion": skills_install.STAMP_VERSION, "source": "oops"}),
             encoding="utf-8",
         )
-        with (mock.patch("skills_install.source_ref",
-                         return_value={"vcs": "git", "commit": "abc", "dirty": False}),
-              mock.patch("builtins.print")):
+        with (
+            mock.patch(
+                "skills_install.source_ref",
+                return_value={"vcs": "git", "commit": "abc", "dirty": False},
+            ),
+            mock.patch("builtins.print"),
+        ):
             exit_code = skills_install.report(stamp)
         self.assertEqual(exit_code, 1)
 
@@ -295,12 +339,18 @@ class ReportCase(unittest.TestCase):
         """A future format bump must not have an old-shaped stamp read as current."""
         stamp = self.tmp / "stamp.json"
         stamp.write_text(
-            json.dumps({"stampVersion": skills_install.STAMP_VERSION + 1, "source": {"commit": "abc"}}),
+            json.dumps(
+                {"stampVersion": skills_install.STAMP_VERSION + 1, "source": {"commit": "abc"}}
+            ),
             encoding="utf-8",
         )
-        with (mock.patch("skills_install.source_ref",
-                         return_value={"vcs": "git", "commit": "abc", "dirty": False}),
-              mock.patch("builtins.print")):
+        with (
+            mock.patch(
+                "skills_install.source_ref",
+                return_value={"vcs": "git", "commit": "abc", "dirty": False},
+            ),
+            mock.patch("builtins.print"),
+        ):
             exit_code = skills_install.report(stamp)
         self.assertEqual(exit_code, 1)
 
@@ -313,8 +363,10 @@ class ReportCase(unittest.TestCase):
             json.dumps({"stampVersion": skills_install.STAMP_VERSION, "source": {"commit": None}}),
             encoding="utf-8",
         )
-        with (mock.patch("skills_install.source_ref", return_value={"vcs": "none"}),
-              mock.patch("builtins.print")):
+        with (
+            mock.patch("skills_install.source_ref", return_value={"vcs": "none"}),
+            mock.patch("builtins.print"),
+        ):
             exit_code = skills_install.report(stamp)
         self.assertEqual(exit_code, 1)
 

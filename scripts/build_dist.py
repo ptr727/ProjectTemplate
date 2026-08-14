@@ -11,6 +11,7 @@ this repo's .gitignore already gives dist/ a different, Python-build-artifact me
 Usage: python3 scripts/build_dist.py           regenerate the plugin from .agents/skills/
        python3 scripts/build_dist.py --check   read-only: exit 1 if the plugin is stale
 """
+
 from __future__ import annotations
 
 import argparse
@@ -72,8 +73,10 @@ def tree_digest(root, names):
         # Sorted by the same .as_posix() key that gets hashed, not by raw Path comparison.
         # Path ordering follows the platform's native separator.
         # Two OSes can sort an identical file set into a different order and hash it into a different digest, even though the bytes hashed per file already agree via .as_posix() below.
-        files = sorted((f for f in skill_dir.rglob("*") if f.is_file()),
-                        key=lambda f: f.relative_to(root).as_posix())
+        files = sorted(
+            (f for f in skill_dir.rglob("*") if f.is_file()),
+            key=lambda f: f.relative_to(root).as_posix(),
+        )
         for f in files:
             h.update(f.relative_to(root).as_posix().encode("utf-8"))
             h.update(f.read_bytes())
@@ -105,7 +108,9 @@ def write_plugin_manifest(names):
     manifest = expected_manifest(names)
     # CRLF, matching this repo's JSON default (.editorconfig `[*] end_of_line = crlf`).
     # No LF pin applies here, since this is not a shebang-executed or shell-consumed path.
-    PLUGIN_MANIFEST.write_text(json.dumps(manifest, indent=2) + "\n", encoding="utf-8", newline="\r\n")
+    PLUGIN_MANIFEST.write_text(
+        json.dumps(manifest, indent=2) + "\n", encoding="utf-8", newline="\r\n"
+    )
 
 
 def regenerate():
@@ -152,7 +157,9 @@ def is_stale():
     # An extra directory under DIST_PLUGIN/skills/ (a retired skill left behind, one added by hand) would never be read and could not affect that comparison.
     # Checked by name first, deliberately not folded into the digest walk itself.
     dist_skills = DIST_PLUGIN / "skills"
-    actual_names = {p.name for p in dist_skills.iterdir() if p.is_dir()} if dist_skills.is_dir() else set()
+    actual_names = (
+        {p.name for p in dist_skills.iterdir() if p.is_dir()} if dist_skills.is_dir() else set()
+    )
     if actual_names != set(names):
         return True
     current_source_digest = source_digest(names)
@@ -163,7 +170,9 @@ def is_stale():
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--check", action="store_true", help="read-only: exit 1 if the generated plugin is stale")
+    parser.add_argument(
+        "--check", action="store_true", help="read-only: exit 1 if the generated plugin is stale"
+    )
     args = parser.parse_args()
 
     if args.check:

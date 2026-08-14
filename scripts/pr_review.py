@@ -67,6 +67,7 @@ never in the caller's hands to fabricate. Re-requesting a review stays out, havi
 such failure and no id to hide. See .github/copilot-instructions.md for the runbook, and
 GOVERNANCE.md "Repository Boundaries and Write Safety" for the rules `reply` enforces.
 """
+
 from __future__ import annotations
 
 import argparse
@@ -80,21 +81,21 @@ import time
 from datetime import UTC, datetime
 from pathlib import Path
 
-REVIEWER = 'copilot-pull-request-reviewer'
+REVIEWER = "copilot-pull-request-reviewer"
 
 # A check dispatched to a runner and not begun, in the spellings a CheckRun carries.
 # PENDING here means dispatched and not begun, which a StatusContext's means the opposite of.
 # That one is translated away in check_nodes, where the node shape is still known.
 # Reading QUEUED alone scores the rest of these as running.
-NOT_STARTED = frozenset({'QUEUED', 'WAITING', 'PENDING', 'REQUESTED'})
+NOT_STARTED = frozenset({"QUEUED", "WAITING", "PENDING", "REQUESTED"})
 # A required status nothing has posted, which is a StatusContext's state and only ever that.
 # It is not a starved job and must not borrow that remedy, since no runner is owed it at all.
 # Left out of both sets it reaches the conclusion branch, where it reports as a red check.
-NOT_POSTED = frozenset({'EXPECTED'})
+NOT_POSTED = frozenset({"EXPECTED"})
 # What counts as a check having passed, rather than as one still deciding or failed.
 # SKIPPED and NEUTRAL are passes, since the fleet aggregator pattern skips the conditional jobs.
 # Treating a skip as unfinished reports four blockers on every green pull request here.
-CHECK_OK = frozenset({'SUCCESS', 'SKIPPED', 'NEUTRAL'})
+CHECK_OK = frozenset({"SUCCESS", "SKIPPED", "NEUTRAL"})
 # How long a queued check is simply a check starting.
 # Observed pickup on a healthy run here is one to two minutes.
 # This is the pickup grace's five minutes for the same reason that one is.
@@ -109,15 +110,16 @@ CHECK_STALL = 1800
 # Those appear nowhere in `reviewThreads`, so polling threads alone reports a clean pass.
 # The alternation is the runbook's, since the heading wording has changed once already.
 # Matching one phrasing alone reports zero on a review that has them.
-SUPPRESSED = re.compile(r'Suppressed comments|low confidence', re.IGNORECASE)
+SUPPRESSED = re.compile(r"Suppressed comments|low confidence", re.IGNORECASE)
 # A refusal declines the round as a formal review carrying the head and no threads.
 # That is the clean pass byte for byte, so every coverage check passes over a round that never ran.
 # The alternation is the runbook's for the same reason the one above is.
 # One phrasing is one rewording away from reading a refusal as a review.
 # The dot covers the apostrophe in the typographic spelling and the ASCII one alike.
 # It also keeps the published filter usable inside single quotes, which neither survives.
-REFUSAL = re.compile(r'wasn.t able to review|was not able to review|unable to review',
-                     re.IGNORECASE)
+REFUSAL = re.compile(
+    r"wasn.t able to review|was not able to review|unable to review", re.IGNORECASE
+)
 # A round states how much of the diff it read on a line of its own.
 # A round that read part of it is the clean pass elsewhere, same commit and threads and digest.
 # Five such rounds landed across three merged pull requests here.
@@ -136,8 +138,8 @@ REFUSAL = re.compile(r'wasn.t able to review|was not able to review|unable to re
 # Requiring the trailing words there made a bullet that drops them read as no statement at all.
 # The sentence opener is the reviewer's name, which prose also opens a line with.
 # That one keeps the text requirement, since the name alone does not say the line states coverage.
-COVERAGE_BULLET = re.compile(r'\s*[-*]\s*\*\*Files reviewed:', re.IGNORECASE)
-COVERAGE_SENTENCE = re.compile(r'\s*Copilot\b', re.IGNORECASE)
+COVERAGE_BULLET = re.compile(r"\s*[-*]\s*\*\*Files reviewed:", re.IGNORECASE)
+COVERAGE_SENTENCE = re.compile(r"\s*Copilot\b", re.IGNORECASE)
 # The count pair itself, in the two spellings the corpus carries.
 # The comment tail one of them ends on is deliberately not part of the unit.
 # It says how many comments the round raised, which is not coverage.
@@ -148,34 +150,35 @@ COVERAGE_SENTENCE = re.compile(r'\s*Copilot\b', re.IGNORECASE)
 # Detection and parsing disagreeing there turned a readable `4/4` into a block on a readable line.
 # What is left blocking is a bullet carrying no counts, which genuinely states no coverage.
 COVERAGE_COUNTS = re.compile(
-    r'reviewed\s+(\d+)\s+out of\s+(\d+)\s+changed files?'
-    r'|\*\*Files reviewed:\*\*\s*(\d+)\s*/\s*(\d+)(?:\s+changed files?)?', re.IGNORECASE)
+    r"reviewed\s+(\d+)\s+out of\s+(\d+)\s+changed files?"
+    r"|\*\*Files reviewed:\*\*\s*(\d+)\s*/\s*(\d+)(?:\s+changed files?)?",
+    re.IGNORECASE,
+)
 # A fenced block is a quotation rather than a statement, and 131 of those bodies carry one.
 # This change puts both spellings into the source and the runbook, so a review of it quotes them.
 # A quoted count read as this round's own is a coverage figure nobody stated.
-FENCE = re.compile(r'^ {0,3}```.*?^ {0,3}```[^\n]*', re.DOTALL | re.MULTILINE)
+FENCE = re.compile(r"^ {0,3}```.*?^ {0,3}```[^\n]*", re.DOTALL | re.MULTILINE)
 # The round's own file summary table, whose first column is a path and whose second is prose.
 # The header row is the marker rather than the `<details>` around it.
 # One measured round carries the table with no `<summary>`, and two summary spellings wrap it.
 # Over the same 348 bodies, 91 carry a table and every table row in the corpus belongs to one.
 # A row outside this shape is a shape nothing has seen rather than a table read wrongly.
-TABLE_HEADER = re.compile(r'\s*\|\s*File\s*\|', re.IGNORECASE)
+TABLE_HEADER = re.compile(r"\s*\|\s*File\s*\|", re.IGNORECASE)
 # The alignment row under the header, which is punctuation rather than a file.
-TABLE_RULE = re.compile(r'\s*\|[\s:|-]+\|\s*$')
-TABLE_ROW = re.compile(r'\s*\|([^|]*)\|')
+TABLE_RULE = re.compile(r"\s*\|[\s:|-]+\|\s*$")
+TABLE_ROW = re.compile(r"\s*\|([^|]*)\|")
 # The readings a round's coverage carries, worst first.
 # A head carries more than one round only through a re-request.
 # Where two disagree, the one naming files it did not read is the one to answer.
 # `UNSTATED` sits last rather than beside the failures, being the absence of a statement.
 # A round that did state full coverage settles the question over one that stated nothing.
-UNVETTED, PARTIAL, FULL, UNSTATED = 'unvetted', 'partial', 'full', 'unstated'
+UNVETTED, PARTIAL, FULL, UNSTATED = "unvetted", "partial", "full", "unstated"
 SEVERITY = (UNVETTED, PARTIAL, FULL, UNSTATED)
 # Upper-case for the two that block a merge, for the reason `review_on_head=NO` is upper-case.
 # `unstated` rather than `unknown`, since a body carrying no count is a shape this knows.
 # What this script does not know is the separate `shapes` field, and one word for both hides it.
 # The constant carries that name too, so no reader has to map a name here onto another word.
-COVERAGE_FIELD = {UNVETTED: 'UNVETTED', PARTIAL: 'PARTIAL', FULL: 'full',
-                  UNSTATED: 'unstated'}
+COVERAGE_FIELD = {UNVETTED: "UNVETTED", PARTIAL: "PARTIAL", FULL: "full", UNSTATED: "unstated"}
 
 # Every structural marker the reviewer's own bodies carry, measured over the same 332.
 # A body is read for these rather than trusted, because every reader below keys on one of them.
@@ -186,35 +189,43 @@ COVERAGE_FIELD = {UNVETTED: 'UNVETTED', PARTIAL: 'PARTIAL', FULL: 'full',
 # The verdict headings carry a colored circle, so the emoji is what would drift most cheaply.
 # Dropping it also keeps this file inside the charset rule that governs the repository.
 VETTED_HEADINGS = {
-    '## Pull request overview', '### Reviewed changes', '### Ready to approve',
-    '### Changes recommended', '### Not ready to approve', '### Human review recommended',
-    '### Suppressed comments (N)',
+    "## Pull request overview",
+    "### Reviewed changes",
+    "### Ready to approve",
+    "### Changes recommended",
+    "### Not ready to approve",
+    "### Human review recommended",
+    "### Suppressed comments (N)",
 }
 VETTED_SUMMARIES = {
-    'Pull request overview', 'Show a summary per file', 'File summaries', 'Review details',
-    'Suppressed comments (N)', 'Comments suppressed due to low confidence (N)',
+    "Pull request overview",
+    "Show a summary per file",
+    "File summaries",
+    "Review details",
+    "Suppressed comments (N)",
+    "Comments suppressed due to low confidence (N)",
 }
-VETTED_LABELS = {'Files reviewed', 'Comments generated', 'Review effort level'}
-MARKDOWN_HEADING = re.compile(r'\s*#{1,6}\s')
+VETTED_LABELS = {"Files reviewed", "Comments generated", "Review effort level"}
+MARKDOWN_HEADING = re.compile(r"\s*#{1,6}\s")
 # The `Review details` metadata bullets, of which the coverage line is one.
-LABEL_LINE = re.compile(r'\s*[-*]\s+\*\*([^*]+):\*\*')
+LABEL_LINE = re.compile(r"\s*[-*]\s+\*\*([^*]+):\*\*")
 # A login that reads as this reviewer without being the spelling every query here filters on.
 # A rename leaves every filter matching nothing, so a review that landed reads as none at all.
 # A wait then polls out its whole timeout against a review sitting in plain sight.
 # `copilot-swe-agent` is the coding agent rather than the reviewer, and does not match this.
-READS_AS_REVIEWER = re.compile(r'copilot.*review', re.IGNORECASE)
+READS_AS_REVIEWER = re.compile(r"copilot.*review", re.IGNORECASE)
 # The repository this script is hosted in, named because an unrecognized shape is fixed here.
 # It is a literal rather than the pull request's own repository.
 # That one is where the shape was seen, not where the reader failing on it lives.
-HUB = 'ptr727/ProjectTemplate'
-DETAILS = re.compile(r'<details>(.*?)</details>', re.DOTALL | re.IGNORECASE)
-SUMMARY = re.compile(r'<summary>(.*?)</summary>', re.DOTALL | re.IGNORECASE)
-TAGS = re.compile(r'</?(?:details|summary)>', re.IGNORECASE)
-COUNT = re.compile(r'\((\d+)\)')
+HUB = "ptr727/ProjectTemplate"
+DETAILS = re.compile(r"<details>(.*?)</details>", re.DOTALL | re.IGNORECASE)
+SUMMARY = re.compile(r"<summary>(.*?)</summary>", re.DOTALL | re.IGNORECASE)
+TAGS = re.compile(r"</?(?:details|summary)>", re.IGNORECASE)
+COUNT = re.compile(r"\((\d+)\)")
 # What makes a line a heading rather than prose mentioning the phrase, in either markup.
 # A line that is neither still qualifies where it carries a count.
 # The section has appeared as a bare line too, and a count is what prose does not carry.
-HEADING = re.compile(r'\s*(?:#{1,6}\s|<summary)', re.IGNORECASE)
+HEADING = re.compile(r"\s*(?:#{1,6}\s|<summary)", re.IGNORECASE)
 
 # How many of the newest reviews and comments both queries read.
 # A narrow window drops the reviewer's answer behind ordinary discussion, reporting no answer.
@@ -297,7 +308,7 @@ query($o:String!,$r:String!,$n:Int!){
         ... on StatusContext{ context state createdAt }
       }}}}}}
   }}}
-""".replace('__CHECKS_WINDOW__', str(CHECKS_WINDOW)).replace('__FILES_WINDOW__', str(FILES_WINDOW))
+""".replace("__CHECKS_WINDOW__", str(CHECKS_WINDOW)).replace("__FILES_WINDOW__", str(FILES_WINDOW))
 # Substituted rather than interpolated, because GraphQL is braces from end to end.
 # An f-string would need every one of them doubled, which is unreadable against the schema.
 
@@ -322,17 +333,19 @@ BODY_USES = re.compile(r'uses:\s*(?P<ref>[A-Za-z0-9_.\-]+/[^\s`"\']+@[^\s`"\']+)
 # The vocabulary is an inclusion list, so a phrasing nobody thought of costs a detection.
 # Being incomplete in that direction is the safe one, since it never invents a finding.
 BODY_CLAIM = re.compile(
-    r'\b(?:fixed|landed|shipped|added|introduced|corrected|resolved|carried|amended)'
-    r'\s+(?:in|by|as)\s+`?(?P<sha>[0-9a-f]{7,40})`?', re.IGNORECASE)
+    r"\b(?:fixed|landed|shipped|added|introduced|corrected|resolved|carried|amended)"
+    r"\s+(?:in|by|as)\s+`?(?P<sha>[0-9a-f]{7,40})`?",
+    re.IGNORECASE,
+)
 # What `gh` prints when GitHub answered, as opposed to when nothing was reached at all.
-HTTP_STATUS = re.compile(r'\(HTTP (\d{3})\)')
+HTTP_STATUS = re.compile(r"\(HTTP (\d{3})\)")
 # The two GitHub returns for an object that is not there.
 # A network error carries no status, and 401 and 403 are credentials and a rate limit.
 # Reading one of those as absence reports a correct description as stale.
 # Everything outside this set is therefore "not read" rather than "not there".
-ABSENT = {'404', '422'}
+ABSENT = {"404", "422"}
 # What a reference reads as where GitHub never answered for it.
-UNREAD = 'unread'
+UNREAD = "unread"
 # Longer than the ordinary read's, since this one downloads a repository rather than a field.
 TARBALL_TIMEOUT = 120
 
@@ -376,22 +389,22 @@ def gh_graphql(query: str, **variables) -> dict:
     # Every read below decodes as UTF-8 rather than as whatever the platform's locale is.
     # `gh` emits UTF-8 on every platform, where a Windows console locale is cp1252.
     # A review body carrying one typographic quote crashed the decode and left the caller reading a null stdout.
-    argv = ['gh', 'api', 'graphql', '-f', f'query={query}']
+    argv = ["gh", "api", "graphql", "-f", f"query={query}"]
     for name, value in variables.items():
-        argv += ['-F' if isinstance(value, int) else '-f', f'{name}={value}']
-    r = subprocess.run(argv, capture_output=True, text=True, encoding='utf-8', check=False)
+        argv += ["-F" if isinstance(value, int) else "-f", f"{name}={value}"]
+    r = subprocess.run(argv, capture_output=True, text=True, encoding="utf-8", check=False)
     if r.returncode != 0:
         sys.stderr.write(r.stderr[:800])
-        raise SystemExit(f'gh graphql failed rc={r.returncode}')
+        raise SystemExit(f"gh graphql failed rc={r.returncode}")
     payload = json.loads(r.stdout)
-    if payload.get('errors'):
-        sys.stderr.write(json.dumps(payload['errors'])[:800])
-        raise SystemExit('gh graphql reported errors')
-    return payload['data']
+    if payload.get("errors"):
+        sys.stderr.write(json.dumps(payload["errors"])[:800])
+        raise SystemExit("gh graphql reported errors")
+    return payload["data"]
 
 
 def gql(query: str, owner: str, repo: str, num: int) -> dict:
-    return gh_graphql(query, o=owner, r=repo, n=num)['repository']['pullRequest']
+    return gh_graphql(query, o=owner, r=repo, n=num)["repository"]["pullRequest"]
 
 
 def timeline(owner: str, repo: str, num: int) -> list[tuple[str, str]]:
@@ -404,14 +417,23 @@ def timeline(owner: str, repo: str, num: int) -> list[tuple[str, str]]:
     long-running pull request into six requests a reading where the maximum makes it two.
     """
     r = subprocess.run(
-        ['gh', 'api', '--paginate', f'repos/{owner}/{repo}/issues/{num}/timeline?per_page=100',
-         '--jq', TIMELINE_JQ],
-        capture_output=True, text=True, encoding='utf-8', check=False)
+        [
+            "gh",
+            "api",
+            "--paginate",
+            f"repos/{owner}/{repo}/issues/{num}/timeline?per_page=100",
+            "--jq",
+            TIMELINE_JQ,
+        ],
+        capture_output=True,
+        text=True,
+        encoding="utf-8",
+        check=False,
+    )
     if r.returncode != 0:
         sys.stderr.write(r.stderr[:800])
-        raise SystemExit(f'gh timeline failed rc={r.returncode}')
-    return [(ln.split(' ', 1)[0], ln.split(' ', 1)[1])
-            for ln in r.stdout.splitlines() if ' ' in ln]
+        raise SystemExit(f"gh timeline failed rc={r.returncode}")
+    return [(ln.split(" ", 1)[0], ln.split(" ", 1)[1]) for ln in r.stdout.splitlines() if " " in ln]
 
 
 def never_picked_up(events: list[tuple[str, str]]) -> str:
@@ -423,12 +445,12 @@ def never_picked_up(events: list[tuple[str, str]]) -> str:
     reading as pending. Elapsed time cannot separate them either, since a genuinely slow round
     also produces no review, and only the pickup event says whether anything is working.
     """
-    requested = [t for e, t in events if e == 'review_requested']
-    started = [t for e, t in events if e == 'copilot_work_started']
+    requested = [t for e, t in events if e == "review_requested"]
+    started = [t for e, t in events if e == "copilot_work_started"]
     if not requested:
-        return ''
+        return ""
     newest = max(requested)
-    return '' if any(t >= newest for t in started) else newest
+    return "" if any(t >= newest for t in started) else newest
 
 
 def reviewer_requested(pr: dict) -> bool:
@@ -437,8 +459,10 @@ def reviewer_requested(pr: dict) -> bool:
     Read from GraphQL rather than `gh pr view --json reviewRequests`, which omits a Bot
     reviewer entirely and reports an empty set while the reviewer is sitting in it.
     """
-    return any((n.get('requestedReviewer') or {}).get('login') == REVIEWER
-               for n in ((pr.get('reviewRequests') or {}).get('nodes') or []))
+    return any(
+        (n.get("requestedReviewer") or {}).get("login") == REVIEWER
+        for n in ((pr.get("reviewRequests") or {}).get("nodes") or [])
+    )
 
 
 def copilot_bot_id(owner: str, repo: str) -> str | None:
@@ -450,12 +474,12 @@ def copilot_bot_id(owner: str, repo: str) -> str | None:
     would silently target another repository's PR.
     """
     data = gh_graphql(Q_BOT_ID, o=owner, r=repo)
-    prs = ((data.get('repository') or {}).get('pullRequests') or {}).get('nodes') or []
+    prs = ((data.get("repository") or {}).get("pullRequests") or {}).get("nodes") or []
     for node in prs:
-        for review in (node.get('reviews') or {}).get('nodes') or []:
-            author = review.get('author') or {}
-            if author.get('__typename') == 'Bot' and author.get('login') == REVIEWER:
-                bot_id = author.get('id')
+        for review in (node.get("reviews") or {}).get("nodes") or []:
+            author = review.get("author") or {}
+            if author.get("__typename") == "Bot" and author.get("login") == REVIEWER:
+                bot_id = author.get("id")
                 if bot_id:
                     return bot_id
     return None
@@ -477,17 +501,22 @@ def request_copilot_review(owner: str, repo: str, pr_node_id: str) -> str:
     """
     bot_id = copilot_bot_id(owner, repo)
     if not bot_id:
-        return ('no Copilot review found across the last 20 PRs to read the reviewer bot id '
-                'from, so nothing was requested here; polling only. Seed one via the UI, or '
-                'widen the search if this repository has more unreviewed history than that.')
+        return (
+            "no Copilot review found across the last 20 PRs to read the reviewer bot id "
+            "from, so nothing was requested here; polling only. Seed one via the UI, or "
+            "widen the search if this repository has more unreviewed history than that."
+        )
     gh_graphql(M_REQUEST_REVIEWS, pr=pr_node_id, bot=bot_id)
-    return f'requested a Copilot review on the current head (bot {bot_id})'
+    return f"requested a Copilot review on the current head (bot {bot_id})"
 
 
 def reviewer_nodes(pr: dict, field: str) -> list[dict]:
     """The reviewer's own nodes under `field`, oldest first as the API returns them."""
-    return [n for n in ((pr.get(field) or {}).get('nodes') or [])
-            if (n.get('author') or {}).get('login') == REVIEWER]
+    return [
+        n
+        for n in ((pr.get(field) or {}).get("nodes") or [])
+        if (n.get("author") or {}).get("login") == REVIEWER
+    ]
 
 
 def answered_outside_review(pr: dict) -> dict | None:
@@ -498,16 +527,16 @@ def answered_outside_review(pr: dict) -> dict | None:
     Treating that shape as an unmet condition is what leaves a wait with nothing at its end.
     A comment older than the newest review is spent, since the review it preceded did land.
     """
-    comments = reviewer_nodes(pr, 'comments')
+    comments = reviewer_nodes(pr, "comments")
     # A blind review window leaves no honest baseline to date a comment against.
     # An empty one dates every comment as newer, so each reads as an answer.
     # Reporting nothing keeps the wait polling, where a wrong answer ends it outright.
-    if not comments or window_blind(pr, 'reviews'):
+    if not comments or window_blind(pr, "reviews"):
         return None
-    newest = max(comments, key=lambda n: n.get('createdAt') or '')
-    reviews = reviewer_nodes(pr, 'reviews')
-    latest_review = max((n.get('submittedAt') or '' for n in reviews), default='')
-    return newest if (newest.get('createdAt') or '') > latest_review else None
+    newest = max(comments, key=lambda n: n.get("createdAt") or "")
+    reviews = reviewer_nodes(pr, "reviews")
+    latest_review = max((n.get("submittedAt") or "" for n in reviews), default="")
+    return newest if (newest.get("createdAt") or "") > latest_review else None
 
 
 def window_blind(pr: dict, field: str) -> bool:
@@ -520,7 +549,7 @@ def window_blind(pr: dict, field: str) -> bool:
     what says anything is back there at all, since a full window and a window holding the lot
     are the same length.
     """
-    older = ((pr.get(field) or {}).get('pageInfo') or {}).get('hasPreviousPage')
+    older = ((pr.get(field) or {}).get("pageInfo") or {}).get("hasPreviousPage")
     return bool(older) and not reviewer_nodes(pr, field)
 
 
@@ -532,7 +561,7 @@ def stall_of(owner: str, repo: str, num: int, pr: dict) -> str:
     picked up by nothing. A covered head or no pending request settles it without a REST call.
     """
     if reviewed_head(pr) or not reviewer_requested(pr):
-        return ''
+        return ""
     return never_picked_up(timeline(owner, repo, num))
 
 
@@ -552,9 +581,9 @@ def refusal_of(node: dict) -> str:
     heading would sit below the opening and be missed, and answering that shape means telling it
     from an overview rather than reading one line further.
     """
-    body = node.get('body') or ''
-    opening = next((ln for ln in body.splitlines() if ln.strip()), '')
-    return body if REFUSAL.search(opening) else ''
+    body = node.get("body") or ""
+    opening = next((ln for ln in body.splitlines() if ln.strip()), "")
+    return body if REFUSAL.search(opening) else ""
 
 
 def refusing_review(pr: dict) -> dict | None:
@@ -569,10 +598,13 @@ def refusing_review(pr: dict) -> dict | None:
     refusal alone. Both callers hold it: `main` returns 0 on `reviewed_head` before reaching
     here, and the digest reports the field only where nothing covers the head.
     """
-    head = pr['headRefOid']
-    refusals = [n for n in reviewer_nodes(pr, 'reviews')
-                if (n.get('commit') or {}).get('oid') == head and refusal_of(n)]
-    return max(refusals, key=lambda n: n.get('submittedAt') or '') if refusals else None
+    head = pr["headRefOid"]
+    refusals = [
+        n
+        for n in reviewer_nodes(pr, "reviews")
+        if (n.get("commit") or {}).get("oid") == head and refusal_of(n)
+    ]
+    return max(refusals, key=lambda n: n.get("submittedAt") or "") if refusals else None
 
 
 def head_reviews(pr: dict) -> list[dict]:
@@ -586,9 +618,12 @@ def head_reviews(pr: dict) -> list[dict]:
     One list rather than a predicate beside a filter, because coverage and the count of rounds on
     the head are read from the same set and a second spelling of it drifts from the first.
     """
-    head = pr['headRefOid']
-    return [n for n in reviewer_nodes(pr, 'reviews')
-            if (n.get('commit') or {}).get('oid') == head and not refusal_of(n)]
+    head = pr["headRefOid"]
+    return [
+        n
+        for n in reviewer_nodes(pr, "reviews")
+        if (n.get("commit") or {}).get("oid") == head and not refusal_of(n)
+    ]
 
 
 def reviewed_head(pr: dict) -> bool:
@@ -606,12 +641,12 @@ def is_coverage_line(line: str) -> bool:
     """Whether this line is the reviewer stating its file coverage, rather than prose about it."""
     if COVERAGE_BULLET.match(line):
         return True
-    return bool(COVERAGE_SENTENCE.match(line)) and 'changed file' in line.lower()
+    return bool(COVERAGE_SENTENCE.match(line)) and "changed file" in line.lower()
 
 
 def coverage_statements(body: str) -> list[str]:
     """The lines this round states its file coverage on, quotations excluded."""
-    return [ln.strip() for ln in FENCE.sub('', body or '').splitlines() if is_coverage_line(ln)]
+    return [ln.strip() for ln in FENCE.sub("", body or "").splitlines() if is_coverage_line(ln)]
 
 
 def read_coverage(line: str) -> tuple[int, int] | None:
@@ -644,8 +679,8 @@ def coverage_of(node: dict) -> tuple[str, str]:
     fixing this script, since a gate that allows whatever it does not recognize stops gating as
     the wording drifts, which it has done once already for each of the two patterns above.
     """
-    worst, detail = UNSTATED, ''
-    for line in coverage_statements(node.get('body') or ''):
+    worst, detail = UNSTATED, ""
+    for line in coverage_statements(node.get("body") or ""):
         counts = read_coverage(line)
         state = UNVETTED if counts is None else (FULL if counts[0] == counts[1] else PARTIAL)
         if SEVERITY.index(state) < SEVERITY.index(worst):
@@ -662,7 +697,7 @@ def head_coverage(pr: dict) -> tuple[str, str]:
     having dropped it already, and reading one would report the round that declined as a wording
     this script fails to recognize.
     """
-    worst, detail = UNSTATED, ''
+    worst, detail = UNSTATED, ""
     for node in head_reviews(pr):
         state, line = coverage_of(node)
         if SEVERITY.index(state) < SEVERITY.index(worst):
@@ -681,14 +716,14 @@ def file_table(body: str) -> list[str]:
     table later in the body is read as a second table rather than as more of the first.
     """
     paths, reading = [], False
-    for line in FENCE.sub('', body or '').splitlines():
+    for line in FENCE.sub("", body or "").splitlines():
         if TABLE_HEADER.match(line):
             reading = True
         elif (row := TABLE_ROW.match(line)) is None:
             reading = False
         elif reading and not TABLE_RULE.match(line):
             cell = row.group(1)
-            paths.append(cell.strip().strip('`').strip())
+            paths.append(cell.strip().strip("`").strip())
     return [p for p in paths if p]
 
 
@@ -698,9 +733,9 @@ def changed_paths(pr: dict) -> tuple[list[str], bool]:
     Truncation is carried rather than hidden, since a path outside a short window reads exactly
     like a path the reviewer left out of its table, and the two take opposite readings.
     """
-    files = pr.get('files') or {}
-    paths = [n.get('path') or '' for n in (files.get('nodes') or [])]
-    return [p for p in paths if p], bool((files.get('pageInfo') or {}).get('hasNextPage'))
+    files = pr.get("files") or {}
+    paths = [n.get("path") or "" for n in (files.get("nodes") or [])]
+    return [p for p in paths if p], bool((files.get("pageInfo") or {}).get("hasNextPage"))
 
 
 def head_table(pr: dict) -> list[str]:
@@ -719,7 +754,7 @@ def head_table(pr: dict) -> list[str]:
     Those report as no table rather than as a comparison, which is the honest answer.
     """
     for node in head_reviews(pr):
-        named = file_table(node.get('body') or '')
+        named = file_table(node.get("body") or "")
         if named:
             return named
     return []
@@ -747,29 +782,36 @@ def table_against_diff(pr: dict, counts: tuple[int, int] | None) -> str:
     """
     named = head_table(pr)
     if not named:
-        return 'no round covering this head carries a file table, so none of them locates the file'
+        return "no round covering this head carries a file table, so none of them locates the file"
     changed, truncated = changed_paths(pr)
     if truncated or not changed:
-        return (f'the reviewer names {len(named)} files in its own table and the diff could not '
-                f'be read back to compare them, the changed-file list being '
-                f'{"longer than the window this reads" if truncated else "absent from the query"}')
+        return (
+            f"the reviewer names {len(named)} files in its own table and the diff could not "
+            f"be read back to compare them, the changed-file list being "
+            f"{'longer than the window this reads' if truncated else 'absent from the query'}"
+        )
     omitted = [p for p in changed if p not in named]
     invented = [p for p in named if p not in changed]
     short = 0 if counts is None else counts[1] - counts[0]
     if not omitted:
-        return (f'the reviewer\'s own file table names all {len(changed)} changed files, which it '
-                f'also does on rounds stating full coverage, so it corroborates nothing and '
-                f'names no unread file')
+        return (
+            f"the reviewer's own file table names all {len(changed)} changed files, which it "
+            f"also does on rounds stating full coverage, so it corroborates nothing and "
+            f"names no unread file"
+        )
     if len(omitted) == short and not invented:
-        return (f'the reviewer\'s own file table omits exactly the {short} file'
-                f'{"" if short == 1 else "s"} the counts leave unread, naming '
-                f'{", ".join(omitted)}. The table is prose the reviewer writes rather than a '
-                f'list from the API, so that is a lead to check rather than a verdict')
-    return (f'the reviewer\'s own file table names {len(named)} of the {len(changed)} changed '
-            f'files, omitting {len(omitted)} where the counts leave {short} unread'
-            + (f' and naming {", ".join(invented)}, which the diff does not carry' if invented
-               else '')
-            + ', so it tracks the counts nowhere and names no unread file')
+        return (
+            f"the reviewer's own file table omits exactly the {short} file"
+            f"{'' if short == 1 else 's'} the counts leave unread, naming "
+            f"{', '.join(omitted)}. The table is prose the reviewer writes rather than a "
+            f"list from the API, so that is a lead to check rather than a verdict"
+        )
+    return (
+        f"the reviewer's own file table names {len(named)} of the {len(changed)} changed "
+        f"files, omitting {len(omitted)} where the counts leave {short} unread"
+        + (f" and naming {', '.join(invented)}, which the diff does not carry" if invented else "")
+        + ", so it tracks the counts nowhere and names no unread file"
+    )
 
 
 def normal(text: str) -> str:
@@ -778,8 +820,8 @@ def normal(text: str) -> str:
     The verdict headings carry a colored circle and the suppressed heading carries its finding
     count, so both drift on every review without the section having changed at all.
     """
-    ascii_only = ''.join(c for c in text if ord(c) < 128)
-    return re.sub(r'\s+', ' ', re.sub(r'\(\d+\)', '(N)', ascii_only)).strip()
+    ascii_only = "".join(c for c in text if ord(c) < 128)
+    return re.sub(r"\s+", " ", re.sub(r"\(\d+\)", "(N)", ascii_only)).strip()
 
 
 def unrecognized_in(body: str) -> list[str]:
@@ -797,19 +839,23 @@ def unrecognized_in(body: str) -> list[str]:
     # It carries no marker to check, and its own opening line is not a coverage statement.
     # Its wording drifting is still caught, since `refusal_of` then stops matching.
     # What is left of a drifted refusal is a body with no heading, which is the arm below.
-    if refusal_of({'body': body}):
+    if refusal_of({"body": body}):
         return []
-    plain = FENCE.sub('', body or '')
+    plain = FENCE.sub("", body or "")
     headings = [normal(ln) for ln in plain.splitlines() if MARKDOWN_HEADING.match(ln)]
     labels = [normal(m.group(1)) for m in map(LABEL_LINE.match, plain.splitlines()) if m]
-    found = [f'heading: {h}' for h in dict.fromkeys(headings) if h not in VETTED_HEADINGS]
-    found += [f'summary: {normal(s)}' for s in dict.fromkeys(SUMMARY.findall(plain))
-              if normal(s) not in VETTED_SUMMARIES]
-    found += [f'metadata label: {la}' for la in dict.fromkeys(labels) if la not in VETTED_LABELS]
-    found += [f'coverage line: {ln}' for ln in coverage_statements(body)
-              if read_coverage(ln) is None]
-    if not headings and not refusal_of({'body': body}):
-        found.append('body carrying no heading at all, which no measured review body does')
+    found = [f"heading: {h}" for h in dict.fromkeys(headings) if h not in VETTED_HEADINGS]
+    found += [
+        f"summary: {normal(s)}"
+        for s in dict.fromkeys(SUMMARY.findall(plain))
+        if normal(s) not in VETTED_SUMMARIES
+    ]
+    found += [f"metadata label: {la}" for la in dict.fromkeys(labels) if la not in VETTED_LABELS]
+    found += [
+        f"coverage line: {ln}" for ln in coverage_statements(body) if read_coverage(ln) is None
+    ]
+    if not headings and not refusal_of({"body": body}):
+        found.append("body carrying no heading at all, which no measured review body does")
     return found
 
 
@@ -821,10 +867,9 @@ def unrecognized_shapes(pr: dict) -> list[str]:
     round ago is one every later round will carry.
     """
     found = []
-    for node in reviewer_nodes(pr, 'reviews'):
-        where = ((node.get('commit') or {}).get('oid') or '')[:8] or 'commit unknown'
-        found += [f'{item}  (round {where})' for item in
-                  unrecognized_in(node.get('body') or '')]
+    for node in reviewer_nodes(pr, "reviews"):
+        where = ((node.get("commit") or {}).get("oid") or "")[:8] or "commit unknown"
+        found += [f"{item}  (round {where})" for item in unrecognized_in(node.get("body") or "")]
     return found + reviewer_login_drift(pr)
 
 
@@ -835,12 +880,16 @@ def reviewer_login_drift(pr: dict) -> list[str]:
     is what lets the wait stop on a drift rather than poll its whole timeout out against a review
     sitting in plain sight, which is the failure this reading exists to name.
     """
-    logins = {(n.get('author') or {}).get('login') or ''
-              for field in ('reviews', 'comments')
-              for n in ((pr.get(field) or {}).get('nodes') or [])}
-    return [f'reviewer login: {login}, where every query here filters on {REVIEWER}'
-            for login in sorted(logins)
-            if login != REVIEWER and READS_AS_REVIEWER.search(login)]
+    logins = {
+        (n.get("author") or {}).get("login") or ""
+        for field in ("reviews", "comments")
+        for n in ((pr.get(field) or {}).get("nodes") or [])
+    }
+    return [
+        f"reviewer login: {login}, where every query here filters on {REVIEWER}"
+        for login in sorted(logins)
+        if login != REVIEWER and READS_AS_REVIEWER.search(login)
+    ]
 
 
 def report_verdict(pr: dict) -> int:
@@ -852,12 +901,14 @@ def report_verdict(pr: dict) -> int:
     # A coverage line this cannot parse is one of the shapes below rather than a case of its own.
     # It exits here with the remedy that fits it, the reader being what needs the fix.
     if unrecognized_shapes(pr):
-        print(f'status=UNRECOGNIZED_REVIEWER_OUTPUT this script does not know one or more shapes '
-              f'in what the reviewer sent, listed above, so nothing it reports about this review '
-              f'is trustworthy and the review loop does not close on this digest. File an issue '
-              f'on {HUB} naming each shape and quoting the body it came from, since this script '
-              f'is hosted there and the fix lands there. Merging this pull request anyway is the '
-              f'maintainer\'s decision to take and not this script\'s, and not the agent\'s.')
+        print(
+            f"status=UNRECOGNIZED_REVIEWER_OUTPUT this script does not know one or more shapes "
+            f"in what the reviewer sent, listed above, so nothing it reports about this review "
+            f"is trustworthy and the review loop does not close on this digest. File an issue "
+            f"on {HUB} naming each shape and quoting the body it came from, since this script "
+            f"is hosted there and the fix lands there. Merging this pull request anyway is the "
+            f"maintainer's decision to take and not this script's, and not the agent's."
+        )
         return 43
     state, line = head_coverage(pr)
     if state == PARTIAL:
@@ -865,18 +916,22 @@ def report_verdict(pr: dict) -> int:
         # None is unreachable there, and narrowing keeps a later change from crashing the gate.
         counts = read_coverage(line)
         if counts is None:
-            gap = 'that the counts on that line could not be re-read, so the total is unknown'
+            gap = "that the counts on that line could not be re-read, so the total is unknown"
         else:
             unread = counts[1] - counts[0]
-            gap = (f'{unread} of the {counts[1]} changed files '
-                   f'{"has" if unread == 1 else "have"} no review')
-        print(f'status=COVERAGE_IS_PARTIAL the review covering the head read fewer files than the '
-              f'pull request changed, so part of the diff has no review at all. Every partial on '
-              f'record stayed partial at the identical ratio across every later round, so a '
-              f're-request is not the remedy it reads as. Splitting is '
-              f'the remedy where it applies, and it does not apply to a promotion. Otherwise this '
-              f'is the maintainer\'s call, taken knowing {gap}, and knowing that '
-              f'{table_against_diff(pr, counts)}')
+            gap = (
+                f"{unread} of the {counts[1]} changed files "
+                f"{'has' if unread == 1 else 'have'} no review"
+            )
+        print(
+            f"status=COVERAGE_IS_PARTIAL the review covering the head read fewer files than the "
+            f"pull request changed, so part of the diff has no review at all. Every partial on "
+            f"record stayed partial at the identical ratio across every later round, so a "
+            f"re-request is not the remedy it reads as. Splitting is "
+            f"the remedy where it applies, and it does not apply to a promotion. Otherwise this "
+            f"is the maintainer's call, taken knowing {gap}, and knowing that "
+            f"{table_against_diff(pr, counts)}"
+        )
         return 42
     return 0
 
@@ -908,9 +963,15 @@ def head_commit(pr: dict) -> dict:
     rather than by position, since a rollup off any other commit describes a push ago and renders
     every field, which is a review counted without being read one field along.
     """
-    head = pr.get('headRefOid') or ''
-    return next((c.get('commit') or {} for c in ((pr.get('commits') or {}).get('nodes') or [])
-                 if (c.get('commit') or {}).get('oid') == head), {})
+    head = pr.get("headRefOid") or ""
+    return next(
+        (
+            c.get("commit") or {}
+            for c in ((pr.get("commits") or {}).get("nodes") or [])
+            if (c.get("commit") or {}).get("oid") == head
+        ),
+        {},
+    )
 
 
 def check_nodes(pr: dict) -> list[dict]:
@@ -925,24 +986,34 @@ def check_nodes(pr: dict) -> list[dict]:
     # No match reports nothing rather than falling back to another commit's rollup.
     # A fallback is that same stale reading reached by a different route.
     # The absence is not silent either, and `checks_unreadable` is where the digest says it.
-    rollup = head_commit(pr).get('statusCheckRollup') or {}
+    rollup = head_commit(pr).get("statusCheckRollup") or {}
     out = []
-    for n in ((rollup.get('contexts') or {}).get('nodes') or []):
-        if n.get('__typename') == 'CheckRun':
-            out.append({'name': n.get('name') or '', 'state': n.get('status') or '',
-                        'conclusion': n.get('conclusion') or '',
-                        'since': n.get('startedAt') or ''})
-        elif n.get('__typename') == 'StatusContext':
+    for n in (rollup.get("contexts") or {}).get("nodes") or []:
+        if n.get("__typename") == "CheckRun":
+            out.append(
+                {
+                    "name": n.get("name") or "",
+                    "state": n.get("status") or "",
+                    "conclusion": n.get("conclusion") or "",
+                    "since": n.get("startedAt") or "",
+                }
+            )
+        elif n.get("__typename") == "StatusContext":
             # A StatusContext reports one field for both, so its state doubles as its conclusion.
             # Its PENDING means the posting system reported the run as under way.
             # A CheckRun's PENDING means the opposite, dispatched and not begun.
             # So the same string is two states, and the shape is knowable only here.
             # Left alone, a long external build reports as queued with no runner assigned.
             # That names a cause the run does not have, on a system that did pick it up.
-            state = n.get('state') or ''
-            out.append({'name': n.get('context') or '',
-                        'state': 'IN_PROGRESS' if state == 'PENDING' else state,
-                        'conclusion': state, 'since': n.get('createdAt') or ''})
+            state = n.get("state") or ""
+            out.append(
+                {
+                    "name": n.get("context") or "",
+                    "state": "IN_PROGRESS" if state == "PENDING" else state,
+                    "conclusion": state,
+                    "since": n.get("createdAt") or "",
+                }
+            )
         else:
             # A third union member is skipped rather than forced into the StatusContext shape.
             # Forcing it reads a label off a node spelling it otherwise, so it renders nameless.
@@ -950,8 +1021,15 @@ def check_nodes(pr: dict) -> list[dict]:
             # So skipping is right and skipping *quietly* is not, which review caught here.
             # An unread check missing from the tally is this script's own core failure.
             # The name carries the typename so the digest can say which member it could not read.
-            out.append({'name': '', 'state': '', 'conclusion': '', 'since': '',
-                        'unreadable': n.get('__typename') or 'an unnamed type'})
+            out.append(
+                {
+                    "name": "",
+                    "state": "",
+                    "conclusion": "",
+                    "since": "",
+                    "unreadable": n.get("__typename") or "an unnamed type",
+                }
+            )
     return out
 
 
@@ -985,38 +1063,42 @@ def check_shape(node: dict, now: datetime, grace: float, stall: float) -> str:
     FAILED is any finished check that did not pass, which is a definite answer rather than a stuck
     one, and it is reported here so that a reader is never left deducing a red check from `BLOCKED`.
     """
-    state, conclusion = node.get('state') or '', node.get('conclusion') or ''
-    elapsed = age(node.get('since') or '', now)
+    state, conclusion = node.get("state") or "", node.get("conclusion") or ""
+    elapsed = age(node.get("since") or "", now)
     if state in NOT_POSTED:
         # Its own shape, because the starved remedy is wrong for it in both directions.
         # No runner is owed a status nothing has posted, so re-running a workflow clears nothing.
         # Reported under NOT_PICKED_UP it sent a reader at the runner pool over a missing poster.
-        return 'NOT_POSTED' if elapsed is not None and elapsed > grace else ''
+        return "NOT_POSTED" if elapsed is not None and elapsed > grace else ""
     if state in NOT_STARTED:
-        return 'NOT_PICKED_UP' if elapsed is not None and elapsed > grace else ''
-    if state == 'IN_PROGRESS':
-        return 'RUNNING_LONG' if elapsed is not None and elapsed > stall else ''
+        return "NOT_PICKED_UP" if elapsed is not None and elapsed > grace else ""
+    if state == "IN_PROGRESS":
+        return "RUNNING_LONG" if elapsed is not None and elapsed > stall else ""
     # A finished check carrying no conclusion yet is still settling, so nothing is reported.
     # Reading an absent verdict as a failure invents a red check out of a race in the API.
     # An unrecognized state would reach the line below and produce that same false failure.
     if not conclusion:
-        return ''
+        return ""
     # A conclusion this does not recognize is reported rather than passed over.
     # An unknown verdict blocking a merge is exactly what a reader needs told.
     # A new enum member read as a pass is a red check rendering as a green digest.
-    return '' if conclusion in CHECK_OK else 'FAILED'
+    return "" if conclusion in CHECK_OK else "FAILED"
 
 
-def checks_stuck(nodes: list[dict], now: datetime, grace: float,
-                 stall: float) -> list[tuple[dict, str]]:
+def checks_stuck(
+    nodes: list[dict], now: datetime, grace: float, stall: float
+) -> list[tuple[dict, str]]:
     """Every check in a stuck shape, as (node, shape), in the order the rollup returns them.
 
     Takes the normalized list rather than the payload, so one `check_nodes` call serves the tally
     and this together. Two calls parsed the same rollup twice per digest, and this script's whole
     reason for existing is that the reading is the cost.
     """
-    return [(n, s) for n in nodes if not n.get('unreadable')
-            and (s := check_shape(n, now, grace, stall))]
+    return [
+        (n, s)
+        for n in nodes
+        if not n.get("unreadable") and (s := check_shape(n, now, grace, stall))
+    ]
 
 
 def checks_truncated(pr: dict) -> bool:
@@ -1028,8 +1110,8 @@ def checks_truncated(pr: dict) -> bool:
     That is the exact false clean the rest of this script exists to prevent, and a fleet repository
     with a large matrix build reaches a hundred contexts far sooner than this one does.
     """
-    contexts = ((head_commit(pr).get('statusCheckRollup') or {}).get('contexts') or {})
-    return bool((contexts.get('pageInfo') or {}).get('hasNextPage'))
+    contexts = (head_commit(pr).get("statusCheckRollup") or {}).get("contexts") or {}
+    return bool((contexts.get("pageInfo") or {}).get("hasNextPage"))
 
 
 def checks_unread(nodes: list[dict]) -> list[str]:
@@ -1041,7 +1123,7 @@ def checks_unread(nodes: list[dict]) -> list[str]:
     pass over something never seen. Raised in review on this change, against the commit that
     chose skipping over forcing, which was the right half of the answer on its own.
     """
-    return [n['unreadable'] for n in nodes if n.get('unreadable')]
+    return [n["unreadable"] for n in nodes if n.get("unreadable")]
 
 
 def checks_unreadable(pr: dict) -> bool:
@@ -1053,19 +1135,19 @@ def checks_unreadable(pr: dict) -> bool:
     than as this reading having failed. A silent narrowing is the failure mode this whole script
     is built against, and it does not get an exception for its own newest field.
     """
-    return bool((pr.get('commits') or {}).get('nodes') or []) and not head_commit(pr)
+    return bool((pr.get("commits") or {}).get("nodes") or []) and not head_commit(pr)
 
 
 def checks_tally(nodes: list[dict]) -> tuple[int, int]:
     """(checks that have passed, checks there are), so a bare count says how far the head is."""
-    read = [n for n in nodes if not n.get('unreadable')]
-    return sum(1 for n in read if (n.get('conclusion') or '') in CHECK_OK), len(read)
+    read = [n for n in nodes if not n.get("unreadable")]
+    return sum(1 for n in read if (n.get("conclusion") or "") in CHECK_OK), len(read)
 
 
 def live_state(owner: str, repo: str, num: int) -> tuple[str, bool, dict | None]:
     """Return (head_sha, copilot_reviewed_current_head, copilot_answer_outside_a_review)."""
     pr = gql(Q_LIVE, owner, repo, num)
-    return pr['headRefOid'], reviewed_head(pr), answered_outside_review(pr)
+    return pr["headRefOid"], reviewed_head(pr), answered_outside_review(pr)
 
 
 def heading_of(block: str) -> str:
@@ -1077,7 +1159,7 @@ def heading_of(block: str) -> str:
     """
     head = block.lstrip()
     m = SUMMARY.search(head)
-    return m.group(1) if m and head.lower().startswith('<summary') else head.split('\n', 1)[0]
+    return m.group(1) if m and head.lower().startswith("<summary") else head.split("\n", 1)[0]
 
 
 def suppressed_blocks(body: str) -> list[str]:
@@ -1098,13 +1180,13 @@ def suppressed_blocks(body: str) -> list[str]:
         return []
     # Each wrapper's contents, plus what is left outside them all, so a heading is found anywhere.
     # The regions do not overlap, since what the sub deletes is exactly what the findall keeps.
-    regions = DETAILS.findall(body) + [DETAILS.sub('', body)]
+    regions = DETAILS.findall(body) + [DETAILS.sub("", body)]
     blocks = []
     for region in regions:
         lines = region.splitlines()
         for i, line in enumerate(lines):
             if SUPPRESSED.search(line) and (HEADING.match(line) or COUNT.search(line)):
-                blocks.append('\n'.join(lines[i:]))
+                blocks.append("\n".join(lines[i:]))
                 break
     return blocks
 
@@ -1115,10 +1197,18 @@ def finding_count(block: str) -> int:
     return max(int(m.group(1)), 1) if m else 1
 
 
-def digest(owner: str, repo: str, num: int, seen: set[str] | None = None,
-           pr: dict | None = None, stalled: str | None = None, now: datetime | None = None,
-           grace: float = CHECK_GRACE, stall: float = CHECK_STALL,
-           checks: list[dict] | None = None) -> tuple[str, int]:
+def digest(
+    owner: str,
+    repo: str,
+    num: int,
+    seen: set[str] | None = None,
+    pr: dict | None = None,
+    stalled: str | None = None,
+    now: datetime | None = None,
+    grace: float = CHECK_GRACE,
+    stall: float = CHECK_STALL,
+    checks: list[dict] | None = None,
+) -> tuple[str, int]:
     """Render the digest, from a caller's payload and stall reading where those are given.
 
     The caller passes its own readings when the exit code has to agree with what was printed,
@@ -1132,20 +1222,25 @@ def digest(owner: str, repo: str, num: int, seen: set[str] | None = None,
     pr = gql(Q_FULL, owner, repo, num) if pr is None else pr
     stalled = stall_of(owner, repo, num, pr) if stalled is None else stalled
     now = datetime.now(UTC) if now is None else now
-    head = pr['headRefOid']
-    revs = reviewer_nodes(pr, 'reviews')
+    head = pr["headRefOid"]
+    revs = reviewer_nodes(pr, "reviews")
     # `revs` is every round and `on_head` is the ones that reviewed this commit.
     # A refusal sits in the first and not the second, being a round that covered nothing.
     on_head = head_reviews(pr)
     cover, cover_line = head_coverage(pr)
     unknown = unrecognized_shapes(pr)
-    threads = pr['reviewThreads']['nodes']
+    threads = pr["reviewThreads"]["nodes"]
     # A deleted account leaves `author` present and null, which `.get('author', {})` returns as
     # None rather than as the default, so the chained lookup crashes the whole digest.
-    unresolved = [t for t in threads
-                  if not t['isResolved']
-                  and ((((t.get('comments') or {}).get('nodes') or [{}])[0]
-                        .get('author') or {}).get('login') == REVIEWER)]
+    unresolved = [
+        t
+        for t in threads
+        if not t["isResolved"]
+        and (
+            (((t.get("comments") or {}).get("nodes") or [{}])[0].get("author") or {}).get("login")
+            == REVIEWER
+        )
+    ]
 
     # Every round, not just the head, because a suppressed finding has no resolved state to read.
     # Head-scoping treated "superseded by a push" as "answered", and the two are not the same.
@@ -1153,18 +1248,17 @@ def digest(owner: str, repo: str, num: int, seen: set[str] | None = None,
     # That is how four rounds went unanswered across three pull requests in one day.
     # The head is still marked per block, since a finding on an older round may be moot.
     # Deciding that is the reader's call rather than one the count makes for them.
-    blocks = [(n, b) for n in revs for b in suppressed_blocks(n.get('body') or '')]
-    on_head_blocks = [b for n, b in blocks if (n.get('commit') or {}).get('oid') == head]
-    stale = sum(finding_count(b) for n, b in blocks) - sum(
-        finding_count(b) for b in on_head_blocks)
+    blocks = [(n, b) for n in revs for b in suppressed_blocks(n.get("body") or "")]
+    on_head_blocks = [b for n, b in blocks if (n.get("commit") or {}).get("oid") == head]
+    stale = sum(finding_count(b) for n, b in blocks) - sum(finding_count(b) for b in on_head_blocks)
 
     answer = answered_outside_review(pr)
     # Spent where coverage of the same head landed, the precedence the exit codes already hold.
     # Reported regardless, it prints `review_on_head=yes refusal=YES` over a reviewed head.
     # That tells a reader to split a pull request the reviewer has just reviewed.
     refusal = None if on_head else refusing_review(pr)
-    blind = [f for f in ('reviews', 'comments') if window_blind(pr, f)]
-    answered = 'yes' if answer else ('unknown' if blind else 'no')
+    blind = [f for f in ("reviews", "comments") if window_blind(pr, f)]
+    answered = "yes" if answer else ("unknown" if blind else "no")
     # Normalized once and handed to both readers, since the parse is the cost here.
     # The caller's own list wins where it has one, so the wait parses the rollup once.
     # Without that it read once for what it prints and again for what it returns.
@@ -1174,152 +1268,182 @@ def digest(owner: str, repo: str, num: int, seen: set[str] | None = None,
     lines = [
         # The repository leads the line, since a number alone reads as correct anywhere.
         # A digest of the wrong pull request is well-formed, so naming it is what shows the miss.
-        f'repo={owner}/{repo} pr={num} head={head[:8]} rounds={len(revs)} '
-        f'review_on_head={"yes" if on_head else "NO"} '
+        f"repo={owner}/{repo} pr={num} head={head[:8]} rounds={len(revs)} "
+        f"review_on_head={'yes' if on_head else 'NO'} "
         # A field of its own beside that one, since a round can cover the head and read part.
         # Those two readings are what `review_on_head=yes` alone conflates.
-        f'coverage={COVERAGE_FIELD[cover]} '
+        f"coverage={COVERAGE_FIELD[cover]} "
         # Every other field on this line is a reading of the review.
         # This one says whether the readings can be believed at all, so it is not a count.
-        f'shapes={"UNRECOGNIZED" if unknown else "ok"} '
+        f"shapes={'UNRECOGNIZED' if unknown else 'ok'} "
         # A field of its own, since `rounds=1 review_on_head=NO` is also what a stale round is.
         # The two want opposite responses, one a re-request and the other a split pull request.
         # Upper-case for the reason `NO` is, as a state that blocks a merge is not one to skim.
-        f'refusal={"YES" if refusal else "no"} '
-        f'threads={len(threads)} unresolved={len(unresolved)} '
-        f'suppressed={sum(finding_count(b) for n, b in blocks)} '
-        f'(on_head={sum(finding_count(b) for b in on_head_blocks)} earlier={stale}) '
-        f'answered_outside_review={answered} '
-        f'requested={"yes" if reviewer_requested(pr) else "no"} '
-        f'merge={pr.get("mergeStateStatus")} '
+        f"refusal={'YES' if refusal else 'no'} "
+        f"threads={len(threads)} unresolved={len(unresolved)} "
+        f"suppressed={sum(finding_count(b) for n, b in blocks)} "
+        f"(on_head={sum(finding_count(b) for b in on_head_blocks)} earlier={stale}) "
+        f"answered_outside_review={answered} "
+        f"requested={'yes' if reviewer_requested(pr) else 'no'} "
+        f"merge={pr.get('mergeStateStatus')} "
         # `merge=BLOCKED` names no cause and is worn by every gate alike.
         # A red check, a check nothing runs, an open thread, and a missing approval all read it.
         # One run here polled that word for twenty-five minutes without learning which it was.
         # The tally says how far the head got, and `checks=0/0` says the rollup carried nothing.
-        f'checks={ok}/{total}'
+        f"checks={ok}/{total}"
         # Named only where there is one to name.
         # A field reading `none` on every green run is one a reader skips when it finally says more.
-        + (f' stuck={",".join(sorted({s for _, s in stuck}))}' if stuck else '')
+        + (f" stuck={','.join(sorted({s for _, s in stuck}))}" if stuck else "")
     ]
     if refusal:
         # Printed whole for the reason the comment below is, as the wording carries the remedy.
         # A file-count refusal is cleared by splitting the pull request and a quota one by waiting.
         # This reads neither cause, only that the round declined.
-        lines.append('  COPILOT REFUSED THIS ROUND: the review carrying the head says it did '
-                     'not review, so it covers nothing and re-requesting the same head repeats '
-                     'it, and the body below is what says which remedy applies')
-        lines += [f'    {ln.rstrip()}' for ln in (refusal.get('body') or '').splitlines()
-                  if ln.strip()]
+        lines.append(
+            "  COPILOT REFUSED THIS ROUND: the review carrying the head says it did "
+            "not review, so it covers nothing and re-requesting the same head repeats "
+            "it, and the body below is what says which remedy applies"
+        )
+        lines += [
+            f"    {ln.rstrip()}" for ln in (refusal.get("body") or "").splitlines() if ln.strip()
+        ]
     if unknown:
         # First of the blocks, since it says how far the rest of them can be trusted.
-        lines.append(f'  UNRECOGNIZED REVIEWER OUTPUT ({len(unknown)}): the shapes below are ones '
-                     'this script has no reader for, so every other field here is a reading of '
-                     'output it does not fully understand and a clean digest does not mean a '
-                     f'clean review. File an issue on {HUB}, which hosts this script, naming each '
-                     'shape and quoting the body it came from, before closing the review loop. '
-                     'Whether to merge anyway is the maintainer\'s call rather than the agent\'s')
-        lines += [f'    {item}' for item in unknown]
+        lines.append(
+            f"  UNRECOGNIZED REVIEWER OUTPUT ({len(unknown)}): the shapes below are ones "
+            "this script has no reader for, so every other field here is a reading of "
+            "output it does not fully understand and a clean digest does not mean a "
+            f"clean review. File an issue on {HUB}, which hosts this script, naming each "
+            "shape and quoting the body it came from, before closing the review loop. "
+            "Whether to merge anyway is the maintainer's call rather than the agent's"
+        )
+        lines += [f"    {item}" for item in unknown]
     if cover == PARTIAL:
         # The line prints under the marker for the reason a suppressed block does.
         # The counts say how much of the diff went unread, and no thread carries them.
-        lines.append('  COVERAGE IS PARTIAL: the review covering the head read fewer files than '
-                     'the pull request changed, so files in the diff have no review at all. A '
-                     're-request has never cleared this on record, so report it rather than '
-                     'retrying into it, and let the maintainer take the merge decision')
-        lines.append(f'    {cover_line}')
+        lines.append(
+            "  COVERAGE IS PARTIAL: the review covering the head read fewer files than "
+            "the pull request changed, so files in the diff have no review at all. A "
+            "re-request has never cleared this on record, so report it rather than "
+            "retrying into it, and let the maintainer take the merge decision"
+        )
+        lines.append(f"    {cover_line}")
         # The counts decide the state and this line says what the reviewer's file table adds.
         # Printed under the same marker, since a maintainer taking the decision wants both.
         # It names no verdict of its own, having been measured against the counts it sits under.
         # The table tracks them nowhere, which is why it is reported rather than read.
-        lines.append(f'    {table_against_diff(pr, read_coverage(cover_line))}')
+        lines.append(f"    {table_against_diff(pr, read_coverage(cover_line))}")
     for node, shape in stuck:
         # Each shape carries its own remedy, which is the whole point of telling them apart.
         # A reader handed one word for all three retries the wrong thing, or waits on a queue.
-        elapsed = age(node.get('since') or '', now)
+        elapsed = age(node.get("since") or "", now)
         # Clamped for display only, since a machine clock behind GitHub's renders `queued -3m`.
         # A negative age reads as nonsense and hides how long the thing has actually waited.
         # The comparison above keeps the raw value, so skew cannot make a stuck check report.
-        mins = 'age unknown' if elapsed is None else f'{int(max(elapsed, 0) // 60)}m'
+        mins = "age unknown" if elapsed is None else f"{int(max(elapsed, 0) // 60)}m"
         # Read with `.get` for the reason `age` catches two exceptions.
         # A caller handing this an odd node shape should cost a field, never the whole digest.
         # Reporting the state is the one job here, so it must not be the thing that raises.
-        name = node.get('name') or 'unnamed'
-        if shape == 'NOT_PICKED_UP':
-            lines.append(f'  CHECK NOT PICKED UP ({name!r}, queued {mins} with no '
-                         'runner assigned): nothing here starts it, because the runner pool is '
-                         'GitHub-hosted, so re-run the workflow or wait on that capacity')
-        elif shape == 'NOT_POSTED':
-            lines.append(f'  CHECK NEVER POSTED ({name!r}, expected {mins} and not '
-                         'reported): a required status whose poster has not spoken, so no runner '
-                         'is owed it and re-running a workflow here clears nothing')
-        elif shape == 'RUNNING_LONG':
-            lines.append(f'  CHECK RUNNING LONG ({name!r}, running {mins}): it has a '
-                         'runner, so it is not starved, and whether this is hung or merely slow '
-                         'is a judgment against what this job normally costs')
+        name = node.get("name") or "unnamed"
+        if shape == "NOT_PICKED_UP":
+            lines.append(
+                f"  CHECK NOT PICKED UP ({name!r}, queued {mins} with no "
+                "runner assigned): nothing here starts it, because the runner pool is "
+                "GitHub-hosted, so re-run the workflow or wait on that capacity"
+            )
+        elif shape == "NOT_POSTED":
+            lines.append(
+                f"  CHECK NEVER POSTED ({name!r}, expected {mins} and not "
+                "reported): a required status whose poster has not spoken, so no runner "
+                "is owed it and re-running a workflow here clears nothing"
+            )
+        elif shape == "RUNNING_LONG":
+            lines.append(
+                f"  CHECK RUNNING LONG ({name!r}, running {mins}): it has a "
+                "runner, so it is not starved, and whether this is hung or merely slow "
+                "is a judgment against what this job normally costs"
+            )
         else:
-            lines.append(f'  CHECK FAILED ({name!r}, {node.get("state")}/'
-                         f'{node.get("conclusion")}): a verdict rather than a stuck check, so '
-                         'read the run and fix what failed, since no wait and no re-run clears '
-                         'a real failure')
+            lines.append(
+                f"  CHECK FAILED ({name!r}, {node.get('state')}/"
+                f"{node.get('conclusion')}): a verdict rather than a stuck check, so "
+                "read the run and fix what failed, since no wait and no re-run clears "
+                "a real failure"
+            )
     unread = checks_unread(checks)
     if unread:
-        lines.append(f'  CHECKS PARTIALLY UNREAD ({", ".join(sorted(set(unread)))}): the rollup '
-                     'carries a context type this cannot normalize, so it is absent from the '
-                     'tally and the stuck reading alike and neither speaks for it')
+        lines.append(
+            f"  CHECKS PARTIALLY UNREAD ({', '.join(sorted(set(unread)))}): the rollup "
+            "carries a context type this cannot normalize, so it is absent from the "
+            "tally and the stuck reading alike and neither speaks for it"
+        )
     if checks_truncated(pr):
-        lines.append(f'  CHECKS TRUNCATED: the head carries more than the {CHECKS_WINDOW} contexts '
-                     'this query asks for, so a check past the window is missing from the tally '
-                     'and from the stuck reading alike, and neither reports what it did not see')
+        lines.append(
+            f"  CHECKS TRUNCATED: the head carries more than the {CHECKS_WINDOW} contexts "
+            "this query asks for, so a check past the window is missing from the tally "
+            "and from the stuck reading alike, and neither reports what it did not see"
+        )
     if checks_unreadable(pr):
-        lines.append('  CHECKS UNREADABLE: the payload carries commits and none of them is the '
-                     'head, so no rollup here describes this head and `checks=0/0` is this '
-                     'reading failing rather than a pull request with no checks')
+        lines.append(
+            "  CHECKS UNREADABLE: the payload carries commits and none of them is the "
+            "head, so no rollup here describes this head and `checks=0/0` is this "
+            "reading failing rather than a pull request with no checks"
+        )
     if stalled:
-        lines.append(f'  REQUEST NOT PICKED UP (requested {stalled}, no copilot_work_started '
-                     'since): clear the request and re-request, per the runbook')
+        lines.append(
+            f"  REQUEST NOT PICKED UP (requested {stalled}, no copilot_work_started "
+            "since): clear the request and re-request, per the runbook"
+        )
     if blind:
-        lines.append(f'  BEHIND THE WINDOW ({" and ".join(blind)}): the newest {WINDOW} carry '
-                     'none from the reviewer and older ones exist, so this cannot decide')
+        lines.append(
+            f"  BEHIND THE WINDOW ({' and '.join(blind)}): the newest {WINDOW} carry "
+            "none from the reviewer and older ones exist, so this cannot decide"
+        )
     if answer:
         # Printed whole for the same reason a suppressed finding is, since it reaches no thread.
         # Its wording is the only thing separating a refusal from an ordinary remark.
-        lines.append(f'  COPILOT COMMENT ({answer.get("createdAt")}, newer than any review): '
-                     'the reviewer answered without reviewing, so read the body below and '
-                     'decide, since a refusal is terminal and a remark is not')
-        lines += [f'    {ln.rstrip()}' for ln in (answer.get('body') or '').splitlines()
-                  if ln.strip()]
+        lines.append(
+            f"  COPILOT COMMENT ({answer.get('createdAt')}, newer than any review): "
+            "the reviewer answered without reviewing, so read the body below and "
+            "decide, since a refusal is terminal and a remark is not"
+        )
+        lines += [
+            f"    {ln.rstrip()}" for ln in (answer.get("body") or "").splitlines() if ln.strip()
+        ]
     new = 0
     for t in unresolved:
-        c = (t.get('comments') or {}).get('nodes', [{}])[0]
-        tid = t['id']
-        mark = ''
+        c = (t.get("comments") or {}).get("nodes", [{}])[0]
+        tid = t["id"]
+        mark = ""
         if seen is not None:
             if tid in seen:
                 continue
             seen.add(tid)
-            mark = 'NEW '
+            mark = "NEW "
             new += 1
-        body = ' '.join((c.get('body') or '').split())
-        lines.append(f'  {mark}{tid} {c.get("path")}:{c.get("line")} {body[:160]}')
+        body = " ".join((c.get("body") or "").split())
+        lines.append(f"  {mark}{tid} {c.get('path')}:{c.get('line')} {body[:160]}")
     for n, b in blocks:
         # Printed whole where a thread body is truncated, since a thread can be re-read at its id.
         # A suppressed finding has none, so this digest is the only place it appears.
         # GraphQL returns a null commit for a pending or partial review.
         # An empty sha rendered as "raised on , earlier round", losing what traces the finding.
-        sha = ((n.get('commit') or {}).get('oid') or '')[:8]
+        sha = ((n.get("commit") or {}).get("oid") or "")[:8]
         if not sha:
-            where = 'commit unknown, treat as outstanding'
+            where = "commit unknown, treat as outstanding"
         elif sha == head[:8]:
-            where = 'on head'
+            where = "on head"
         else:
-            where = f'raised on {sha}, earlier round'
-        lines.append(f'  SUPPRESSED ({where}): no thread to resolve, '
-                     'answer it in the PR conversation quoting the finding')
+            where = f"raised on {sha}, earlier round"
+        lines.append(
+            f"  SUPPRESSED ({where}): no thread to resolve, "
+            "answer it in the PR conversation quoting the finding"
+        )
         # Indentation is kept, since a block carries fenced code a flattened line would garble.
-        lines += [f'    {ln.rstrip()}' for ln in TAGS.sub('', b).splitlines() if ln.strip()]
+        lines += [f"    {ln.rstrip()}" for ln in TAGS.sub("", b).splitlines() if ln.strip()]
     if seen is not None:
-        lines[0] += f' new={new}'
-    return '\n'.join(lines), len(unresolved)
+        lines[0] += f" new={new}"
+    return "\n".join(lines), len(unresolved)
 
 
 def origin_owner() -> str | None:
@@ -1330,14 +1454,18 @@ def origin_owner() -> str | None:
     so the working directory says nothing about who owns either.
     """
     try:
-        url = subprocess.run(['git', '-C', str(Path(__file__).resolve().parent),
-                              'remote', 'get-url', 'origin'],
-                             capture_output=True, text=True, encoding='utf-8', timeout=5,
-                             check=False).stdout.strip()
+        url = subprocess.run(
+            ["git", "-C", str(Path(__file__).resolve().parent), "remote", "get-url", "origin"],
+            capture_output=True,
+            text=True,
+            encoding="utf-8",
+            timeout=5,
+            check=False,
+        ).stdout.strip()
     # A missing git, a timeout, or any other failure all mean the owner cannot be read.
     except Exception:  # noqa: BLE001
         return None
-    m = re.search(r'[:/]([A-Za-z0-9_.\-]+)/([A-Za-z0-9_.\-]+?)(?:\.git)?/?$', url)
+    m = re.search(r"[:/]([A-Za-z0-9_.\-]+)/([A-Za-z0-9_.\-]+?)(?:\.git)?/?$", url)
     return m.group(1).lower() if m else None
 
 
@@ -1354,18 +1482,22 @@ def in_scope(target_owner: str) -> tuple[bool, str]:
     """
     origin = origin_owner()
     if origin is None:
-        return False, ('this checkout has no readable `origin`, so the owner a write would stay '
-                       'within cannot be established, and an unverified scope is not a scope')
+        return False, (
+            "this checkout has no readable `origin`, so the owner a write would stay "
+            "within cannot be established, and an unverified scope is not a scope"
+        )
     if target_owner.lower() != origin:
-        return False, (f'the target is under {target_owner}, and this checkout is under {origin}. '
-                       'A different owner is the shape this refuses outright: take it through the '
-                       'runbook mutations, where the write-guard hook reads the maintainer grant')
-    return True, ''
+        return False, (
+            f"the target is under {target_owner}, and this checkout is under {origin}. "
+            "A different owner is the shape this refuses outright: take it through the "
+            "runbook mutations, where the write-guard hook reads the maintainer grant"
+        )
+    return True, ""
 
 
 def first_comment(thread: dict) -> dict:
     """The thread's opening comment, which is the finding itself."""
-    return ((thread.get('comments') or {}).get('nodes') or [{}])[0]
+    return ((thread.get("comments") or {}).get("nodes") or [{}])[0]
 
 
 def unresolved_threads(owner: str, repo: str, num: int) -> list[dict]:
@@ -1377,22 +1509,25 @@ def unresolved_threads(owner: str, repo: str, num: int) -> list[dict]:
     out: list[dict] = []
     after = None
     while True:
-        extra: dict[str, str] = {'after': after} if after else {}
-        conn = gh_graphql(Q_THREADS, o=owner, r=repo, n=num,
-                          **extra)['repository']['pullRequest']['reviewThreads']
-        out += [t for t in conn['nodes'] if not t['isResolved']]
-        page = conn.get('pageInfo') or {}
-        if not page.get('hasNextPage'):
+        extra: dict[str, str] = {"after": after} if after else {}
+        conn = gh_graphql(Q_THREADS, o=owner, r=repo, n=num, **extra)["repository"]["pullRequest"][
+            "reviewThreads"
+        ]
+        out += [t for t in conn["nodes"] if not t["isResolved"]]
+        page = conn.get("pageInfo") or {}
+        if not page.get("hasNextPage"):
             return out
-        after = page['endCursor']
+        after = page["endCursor"]
 
 
 def describe(thread: dict) -> str:
     """One line naming a thread by what a reader recognizes it as, never by its id."""
     c = first_comment(thread)
-    body = ' '.join((c.get('body') or '').split())
-    return (f'{thread.get("path")}:{thread.get("line")} '
-            f'by {(c.get("author") or {}).get("login")}: {body[:120]}')
+    body = " ".join((c.get("body") or "").split())
+    return (
+        f"{thread.get('path')}:{thread.get('line')} "
+        f"by {(c.get('author') or {}).get('login')}: {body[:120]}"
+    )
 
 
 def matching_threads(threads: list[dict], match: str, path: str | None) -> list[dict]:
@@ -1404,13 +1539,17 @@ def matching_threads(threads: list[dict], match: str, path: str | None) -> list[
     the text is quoted back out of a digest by a reader rather than compared by a machine.
     """
     needle = match.lower()
-    return [t for t in threads
-            if needle in (first_comment(t).get('body') or '').lower()
-            and (path is None or t.get('path') == path)]
+    return [
+        t
+        for t in threads
+        if needle in (first_comment(t).get("body") or "").lower()
+        and (path is None or t.get("path") == path)
+    ]
 
 
-def reply_to_thread(owner: str, repo: str, num: int, match: str, body: str,
-                    path: str | None, resolve: bool) -> int:
+def reply_to_thread(
+    owner: str, repo: str, num: int, match: str, body: str, path: str | None, resolve: bool
+) -> int:
     """Answer the one thread `match` selects, and resolve it where asked. Returns an exit code.
 
     Every refusal below is a stop rather than a fallback. There is no id to guess at, no
@@ -1420,56 +1559,69 @@ def reply_to_thread(owner: str, repo: str, num: int, match: str, body: str,
     """
     ok, why = in_scope(owner)
     if not ok:
-        print(f'status=OUT_OF_SCOPE nothing was written: {why}')
+        print(f"status=OUT_OF_SCOPE nothing was written: {why}")
         return 64
 
     threads = unresolved_threads(owner, repo, num)
     hits = matching_threads(threads, match, path)
     if not hits:
-        print(f'status=NO_MATCH nothing was written: no unresolved thread on {owner}/{repo} '
-              f'#{num} carries {match!r}'
-              + (f' at {path}' if path else '')
-              + '. Widen the words or drop --path rather than reaching for an id, since the '
-                'thread may also be resolved already, which reads the same from here.')
+        print(
+            f"status=NO_MATCH nothing was written: no unresolved thread on {owner}/{repo} "
+            f"#{num} carries {match!r}"
+            + (f" at {path}" if path else "")
+            + ". Widen the words or drop --path rather than reaching for an id, since the "
+            "thread may also be resolved already, which reads the same from here."
+        )
         for t in threads:
-            print(f'  unresolved: {describe(t)}')
+            print(f"  unresolved: {describe(t)}")
         return 60
     if len(hits) > 1:
-        print(f'status=AMBIGUOUS nothing was written: {len(hits)} unresolved threads carry '
-              f'{match!r}, and picking one of them is the failure this avoids rather than a '
-              'default it can take. Quote more of the finding, or add --path.')
+        print(
+            f"status=AMBIGUOUS nothing was written: {len(hits)} unresolved threads carry "
+            f"{match!r}, and picking one of them is the failure this avoids rather than a "
+            "default it can take. Quote more of the finding, or add --path."
+        )
         for t in hits:
-            print(f'  candidate: {describe(t)}')
+            print(f"  candidate: {describe(t)}")
         return 61
 
     target = hits[0]
-    print(f'answering: {describe(target)}')
-    reply = (gh_graphql(M_REPLY, threadId=target['id'], body=body)
-             .get('addPullRequestReviewThreadReply') or {})
-    comment = reply.get('comment') or {}
+    print(f"answering: {describe(target)}")
+    reply = (
+        gh_graphql(M_REPLY, threadId=target["id"], body=body).get("addPullRequestReviewThreadReply")
+        or {}
+    )
+    comment = reply.get("comment") or {}
     # The url is what says a reply carried a body, and an empty one still returns a comment.
     # Resolving past that closes the thread with nothing in it, which is what happened three times.
-    if not comment.get('url') or not (comment.get('body') or '').strip():
-        print('status=REPLY_NOT_CONFIRMED the reply returned no url or an empty body, so the '
-              'thread is NOT resolved and the answer is not recorded. Read the response above '
-              'before retrying, since a write that appears to fail may have taken on the server.')
-        print(f'  response: {json.dumps(reply)[:400]}')
+    if not comment.get("url") or not (comment.get("body") or "").strip():
+        print(
+            "status=REPLY_NOT_CONFIRMED the reply returned no url or an empty body, so the "
+            "thread is NOT resolved and the answer is not recorded. Read the response above "
+            "before retrying, since a write that appears to fail may have taken on the server."
+        )
+        print(f"  response: {json.dumps(reply)[:400]}")
         return 62
-    print(f'replied: {comment["url"]}')
+    print(f"replied: {comment['url']}")
 
     if not resolve:
-        print('status=REPLIED the thread is answered and left open, since --resolve was not '
-              'given. A decline is resolved only once its evidence is in the thread.')
+        print(
+            "status=REPLIED the thread is answered and left open, since --resolve was not "
+            "given. A decline is resolved only once its evidence is in the thread."
+        )
         return 0
 
-    thread = ((gh_graphql(M_RESOLVE, threadId=target['id']).get('resolveReviewThread') or {})
-              .get('thread') or {})
-    if not thread.get('isResolved'):
-        print('status=RESOLVE_NOT_CONFIRMED the reply landed and the resolve did not report the '
-              'thread resolved, so it is still open and the answer is already posted.')
-        print(f'  response: {json.dumps(thread)[:400]}')
+    thread = (gh_graphql(M_RESOLVE, threadId=target["id"]).get("resolveReviewThread") or {}).get(
+        "thread"
+    ) or {}
+    if not thread.get("isResolved"):
+        print(
+            "status=RESOLVE_NOT_CONFIRMED the reply landed and the resolve did not report the "
+            "thread resolved, so it is still open and the answer is already posted."
+        )
+        print(f"  response: {json.dumps(thread)[:400]}")
         return 63
-    print('status=REPLIED_AND_RESOLVED')
+    print("status=REPLIED_AND_RESOLVED")
     return 0
 
 
@@ -1479,12 +1631,13 @@ def gh_rest(path: str, jq: str | None = None) -> subprocess.CompletedProcess:
     Unlike `gh_graphql` this does not raise on a non-zero exit, because a 404 here is an answer
     the caller acts on rather than a failure. Reads only: every path passed in is a GET.
     """
-    argv = ['gh', 'api', path] + (['--jq', jq] if jq else [])
+    argv = ["gh", "api", path] + (["--jq", jq] if jq else [])
     try:
-        return subprocess.run(argv, capture_output=True, text=True, encoding='utf-8', timeout=30,
-                              check=False)
+        return subprocess.run(
+            argv, capture_output=True, text=True, encoding="utf-8", timeout=30, check=False
+        )
     except (OSError, subprocess.SubprocessError):
-        return subprocess.CompletedProcess(argv, 1, '', 'gh could not be run')
+        return subprocess.CompletedProcess(argv, 1, "", "gh could not be run")
 
 
 def answered_absent(proc: subprocess.CompletedProcess) -> bool:
@@ -1507,9 +1660,14 @@ def body_references(body: str) -> tuple[list[str], list[str]]:
     `defaced` inflect into all-hex English words, so a verb this list gains later cannot start
     reading one of them as a commit. It costs about one real SHA in a thousand.
     """
-    uses = sorted({m.group('ref') for m in BODY_USES.finditer(body)})
-    shas = sorted({m.group('sha') for m in BODY_CLAIM.finditer(body)
-                   if any(c.isdigit() for c in m.group('sha'))})
+    uses = sorted({m.group("ref") for m in BODY_USES.finditer(body)})
+    shas = sorted(
+        {
+            m.group("sha")
+            for m in BODY_CLAIM.finditer(body)
+            if any(c.isdigit() for c in m.group("sha"))
+        }
+    )
     return uses, shas
 
 
@@ -1520,15 +1678,16 @@ def commit_state(owner: str, repo: str, sha: str, head: str) -> str:
     commit it inherited from the base branch. GitHub reports the comparison from the base's side,
     so `identical` and `ahead` are the two readings that say the head carries it.
     """
-    proc = gh_rest(f'repos/{owner}/{repo}/compare/{sha}...{head}', '.status')
+    proc = gh_rest(f"repos/{owner}/{repo}/compare/{sha}...{head}", ".status")
     if proc.returncode == 0:
         status = proc.stdout.strip()
-        if status in ('identical', 'ahead'):
-            return ''
-        return (f'{owner}/{repo} carries the commit and this head does not descend from it '
-                f'({status})')
+        if status in ("identical", "ahead"):
+            return ""
+        return (
+            f"{owner}/{repo} carries the commit and this head does not descend from it ({status})"
+        )
     if answered_absent(proc):
-        return f'{owner}/{repo} carries no such commit'
+        return f"{owner}/{repo} carries no such commit"
     return UNREAD
 
 
@@ -1547,8 +1706,12 @@ def head_carries(owner: str, repo: str, head: str, refs: list[str]) -> set[str] 
     # An absent `gh` or a hung download reads as undecided, like every other unreadable answer.
     # Raising instead would abort a run the caller is in the middle of.
     try:
-        proc = subprocess.run(['gh', 'api', f'repos/{owner}/{repo}/tarball/{head}'],
-                              capture_output=True, timeout=TARBALL_TIMEOUT, check=False)
+        proc = subprocess.run(
+            ["gh", "api", f"repos/{owner}/{repo}/tarball/{head}"],
+            capture_output=True,
+            timeout=TARBALL_TIMEOUT,
+            check=False,
+        )
     except (OSError, subprocess.SubprocessError):
         return None
     if proc.returncode != 0:
@@ -1556,7 +1719,7 @@ def head_carries(owner: str, repo: str, head: str, refs: list[str]) -> set[str] 
     needles = {r: r.encode() for r in refs}
     found: set[str] = set()
     try:
-        with tarfile.open(fileobj=io.BytesIO(proc.stdout), mode='r:gz') as archive:
+        with tarfile.open(fileobj=io.BytesIO(proc.stdout), mode="r:gz") as archive:
             for member in archive:
                 if not member.isfile():
                     continue
@@ -1577,7 +1740,7 @@ def head_carries(owner: str, repo: str, head: str, refs: list[str]) -> set[str] 
 def check_claims(owner: str, repo: str, num: int) -> int:
     """Report every reference the description makes that its own head tree does not carry."""
     pr = gql(Q_CLAIMS, owner, repo, num)
-    head, body = pr['headRefOid'], pr.get('body') or ''
+    head, body = pr["headRefOid"], pr.get("body") or ""
     uses, shas = body_references(body)
 
     stale, unread = [], 0
@@ -1586,8 +1749,10 @@ def check_claims(owner: str, repo: str, num: int) -> int:
         if state == UNREAD:
             unread += 1
         elif state:
-            stale.append(f'STALE COMMIT `{sha}`: {state}, so the description points at something '
-                         'this branch does not have')
+            stale.append(
+                f"STALE COMMIT `{sha}`: {state}, so the description points at something "
+                "this branch does not have"
+            )
 
     # One read for every ref together, since the archive it reads is the same one either way.
     carried = head_carries(owner, repo, head, uses) if uses else set()
@@ -1595,110 +1760,151 @@ def check_claims(owner: str, repo: str, num: int) -> int:
         if carried is None:
             unread += 1
         elif ref not in carried:
-            stale.append(f'STALE USES `{ref}`: no file at this head carries that ref')
+            stale.append(f"STALE USES `{ref}`: no file at this head carries that ref")
 
-    print(f'repo={owner}/{repo} pr={num} head={head[:8]} commits={len(shas)} uses={len(uses)} '
-          f'stale={len(stale)} unread={unread}')
+    print(
+        f"repo={owner}/{repo} pr={num} head={head[:8]} commits={len(shas)} uses={len(uses)} "
+        f"stale={len(stale)} unread={unread}"
+    )
     for line in stale:
-        print(f'  {line}')
+        print(f"  {line}")
     if stale:
         # Named as the description's problem rather than the branch's.
         # The branch is the ground truth here, and the body is what drifted away from it.
-        print('status=DESCRIPTION_CONTRADICTS_ITS_BRANCH update the body to what the head tree '
-              'carries, since a reference that resolves to nothing is caught by a reviewer or '
-              'not at all')
+        print(
+            "status=DESCRIPTION_CONTRADICTS_ITS_BRANCH update the body to what the head tree "
+            "carries, since a reference that resolves to nothing is caught by a reviewer or "
+            "not at all"
+        )
         return 70
     if unread and unread == len(shas) + len(uses):
         # A check that decided nothing prints the same `stale=0` a clean one does.
-        print('status=NOTHING_WAS_READ every reference in the description was left undecided '
-              'because GitHub did not answer for any of them, so this reports no verdict')
+        print(
+            "status=NOTHING_WAS_READ every reference in the description was left undecided "
+            "because GitHub did not answer for any of them, so this reports no verdict"
+        )
         return 71
     if unread:
-        print(f'  NOTE: {unread} reference(s) were left undecided because GitHub did not answer')
+        print(f"  NOTE: {unread} reference(s) were left undecided because GitHub did not answer")
     return 0
 
 
 def main(argv: list[str] | None = None) -> int:
     ap = argparse.ArgumentParser()
-    ap.add_argument('cmd', choices=['claims', 'status', 'reply', 'wait'])
-    ap.add_argument('number', type=int)
+    ap.add_argument("cmd", choices=["claims", "status", "reply", "wait"])
+    ap.add_argument("number", type=int)
     # No default, because the wrong repository is the failure this argument has actually had.
     # A default names one repository, and every run from elsewhere silently reads that one.
     # The number resolves there, the digest renders, and nothing in the output disagrees.
     # Two runs read a pull request here while one in their own repository was the subject.
-    ap.add_argument('--repo', required=True, metavar='OWNER/NAME',
-                    help='the repository the pull request is in, since a pull '
-                         'request number identifies no repository on its own')
-    ap.add_argument('--timeout', type=int, default=2700, help='seconds (default 45m)')
-    ap.add_argument('--pickup-grace', type=int, default=300,
-                    help='seconds before the first pickup read, and between reads (default 5m)')
-    ap.add_argument('--check-grace', type=int, default=CHECK_GRACE,
-                    help='seconds a check may sit queued, or a required status go unposted, '
-                         f'before either reads as unstarted (default {CHECK_GRACE // 60}m)')
-    ap.add_argument('--check-stall', type=int, default=CHECK_STALL,
-                    help='seconds a check may run before its duration is reported '
-                         f'(default {CHECK_STALL // 60}m)')
+    ap.add_argument(
+        "--repo",
+        required=True,
+        metavar="OWNER/NAME",
+        help="the repository the pull request is in, since a pull "
+        "request number identifies no repository on its own",
+    )
+    ap.add_argument("--timeout", type=int, default=2700, help="seconds (default 45m)")
+    ap.add_argument(
+        "--pickup-grace",
+        type=int,
+        default=300,
+        help="seconds before the first pickup read, and between reads (default 5m)",
+    )
+    ap.add_argument(
+        "--check-grace",
+        type=int,
+        default=CHECK_GRACE,
+        help="seconds a check may sit queued, or a required status go unposted, "
+        f"before either reads as unstarted (default {CHECK_GRACE // 60}m)",
+    )
+    ap.add_argument(
+        "--check-stall",
+        type=int,
+        default=CHECK_STALL,
+        help="seconds a check may run before its duration is reported "
+        f"(default {CHECK_STALL // 60}m)",
+    )
     # `reply` takes the finding's words rather than its id.
     # There is deliberately no argument an id fits in, so the caller never holds one to mistype.
-    ap.add_argument('--match', metavar='TEXT',
-                    help='reply: words from the finding, matched against the thread\'s opening '
-                         'comment, and required to select exactly one unresolved thread')
-    ap.add_argument('--path', metavar='FILE',
-                    help='reply: narrow --match to one file, for a file with several findings')
-    ap.add_argument('--body', metavar='TEXT',
-                    help='reply: the answer to post, carrying the fixing commit SHA or the '
-                         'evidence that disproves the finding')
-    ap.add_argument('--resolve', action='store_true',
-                    help='reply: resolve the thread once the reply is confirmed')
+    ap.add_argument(
+        "--match",
+        metavar="TEXT",
+        help="reply: words from the finding, matched against the thread's opening "
+        "comment, and required to select exactly one unresolved thread",
+    )
+    ap.add_argument(
+        "--path",
+        metavar="FILE",
+        help="reply: narrow --match to one file, for a file with several findings",
+    )
+    ap.add_argument(
+        "--body",
+        metavar="TEXT",
+        help="reply: the answer to post, carrying the fixing commit SHA or the "
+        "evidence that disproves the finding",
+    )
+    ap.add_argument(
+        "--resolve",
+        action="store_true",
+        help="reply: resolve the thread once the reply is confirmed",
+    )
     a = ap.parse_args(argv)
     # Named for the command they belong to, since one silently ignored reads as one that took effect.
     # A `status` given --body reports a clean digest and writes nothing.
     # Nothing in that output says the reply never happened.
-    writing = {'--match': a.match, '--path': a.path, '--body': a.body,
-               '--resolve': a.resolve or None}
-    if a.cmd != 'reply':
+    writing = {
+        "--match": a.match,
+        "--path": a.path,
+        "--body": a.body,
+        "--resolve": a.resolve or None,
+    }
+    if a.cmd != "reply":
         for flag, value in writing.items():
             if value is not None:
-                ap.error(f'{flag} belongs to `reply`, not `{a.cmd}`')
+                ap.error(f"{flag} belongs to `reply`, not `{a.cmd}`")
     else:
-        for flag in ('--match', '--body'):
-            if not (writing[flag] or '').strip():
-                ap.error(f'reply requires a non-empty {flag}, since a thread resolved on an '
-                         'empty answer reads as addressed while carrying nothing')
+        for flag in ("--match", "--body"):
+            if not (writing[flag] or "").strip():
+                ap.error(
+                    f"reply requires a non-empty {flag}, since a thread resolved on an "
+                    "empty answer reads as addressed while carrying nothing"
+                )
     # A negative grace leaves the next reading permanently behind the clock.
     # That is the per-poll REST pattern the interval exists to prevent.
     if a.pickup_grace < 0:
-        ap.error('--pickup-grace cannot be negative')
+        ap.error("--pickup-grace cannot be negative")
     # A negative threshold reports every check in that state, on every run, from the first read.
     # A field that fires always is one a reader learns to skip, which costs the real case.
-    for name in ('check_grace', 'check_stall'):
+    for name in ("check_grace", "check_stall"):
         if getattr(a, name) < 0:
-            ap.error(f'--{name.replace("_", "-")} cannot be negative')
+            ap.error(f"--{name.replace('_', '-')} cannot be negative")
     # The two thresholds mean opposite things and the readings invert if the order does.
     # A stall under the grace reports a running check before it would report a starved one.
     # A case held the constants ordered while the flags could still be passed either way.
     if a.check_grace >= a.check_stall:
-        ap.error('--check-grace must be less than --check-stall, since a queued check is '
-                 f'judged sooner than a running one (got {a.check_grace} and {a.check_stall})')
+        ap.error(
+            "--check-grace must be less than --check-stall, since a queued check is "
+            f"judged sooner than a running one (got {a.check_grace} and {a.check_stall})"
+        )
     # A bare name is the near-miss a required argument still admits, and unpacking it raises a
     # ValueError traceback rather than saying which half is missing.
-    owner, _, repo = a.repo.partition('/')
-    if not owner or not repo or '/' in repo:
-        ap.error(f'--repo takes OWNER/NAME, not {a.repo!r}')
+    owner, _, repo = a.repo.partition("/")
+    if not owner or not repo or "/" in repo:
+        ap.error(f"--repo takes OWNER/NAME, not {a.repo!r}")
 
-    if a.cmd == 'claims':
+    if a.cmd == "claims":
         return check_claims(owner, repo, a.number)
 
-    if a.cmd == 'status':
+    if a.cmd == "status":
         # One payload renders the digest and decides the code, for the reason `wait` reads one.
         # Fetched twice, a round landing between them prints one pull request and grades another.
         pr = gql(Q_FULL, owner, repo, a.number)
-        out, _ = digest(owner, repo, a.number, pr=pr,
-                        grace=a.check_grace, stall=a.check_stall)
+        out, _ = digest(owner, repo, a.number, pr=pr, grace=a.check_grace, stall=a.check_stall)
         print(out)
         return report_verdict(pr)
 
-    if a.cmd == 'reply':
+    if a.cmd == "reply":
         return reply_to_thread(owner, repo, a.number, a.match, a.body, a.path, a.resolve)
 
     # In-process backoff, so the whole wait costs one agent turn.
@@ -1714,10 +1920,10 @@ def main(argv: list[str] | None = None) -> int:
     # Two prior gaps this closed, a push superseding an already-answered request and an auto-seed that never fired, both left nothing outstanding for the loop below to ever see land.
     # Skipped once a review already covers the head, once Copilot has already answered outside a formal review, or once something is already in the request set, so a second `wait` on the same PR never double-requests.
     if not done and not answer and not drift and not reviewer_requested(pr):
-        print(f'auto-request: {request_copilot_review(owner, repo, pr["id"])}')
+        print(f"auto-request: {request_copilot_review(owner, repo, pr['id'])}")
         # No re-read here: Copilot never resolves within the round trip that just issued the request.
         # The loop below picks up fresh state on its own first iteration instead of this spending a second call to learn nothing new.
-    stalled = ''
+    stalled = ""
     i = 0
     next_pickup = a.pickup_grace
     while not done and not answer and not drift:
@@ -1754,10 +1960,19 @@ def main(argv: list[str] | None = None) -> int:
     # Deriving the stuck shapes from that list costs no parse, which is what was doubled.
     checks = check_nodes(final)
     stuck = checks_stuck(checks, now, a.check_grace, a.check_stall)
-    out, _ = digest(owner, repo, a.number, pr=final, stalled=stalled, now=now,
-                    grace=a.check_grace, stall=a.check_stall, checks=checks)
+    out, _ = digest(
+        owner,
+        repo,
+        a.number,
+        pr=final,
+        stalled=stalled,
+        now=now,
+        grace=a.check_grace,
+        stall=a.check_stall,
+        checks=checks,
+    )
     print(out)
-    print(f'waited={int(time.monotonic()-start)}s')
+    print(f"waited={int(time.monotonic() - start)}s")
     # The shape reading comes first and is not gated on coverage of the head.
     # `reviewed_head` is itself one of the readings a drift breaks.
     # A renamed login matches no filter here, so it reads as no review at all.
@@ -1784,42 +1999,50 @@ def main(argv: list[str] | None = None) -> int:
         # Without it, a stuck check nothing requires returns 44 on a mergeable pull request.
         # `CLEAN` proves no required gate is outstanding, whatever else the rollup is doing.
         # The digest reports the check either way, so the narrower code costs the reader nothing.
-        if stuck and final.get('mergeStateStatus') == 'BLOCKED':
+        if stuck and final.get("mergeStateStatus") == "BLOCKED":
             # Worded as a coincidence rather than a cause.
             # Nothing here proves the stuck check is what blocks the merge.
             # `BLOCKED` is also worn by an open thread or a missing approval.
             # The rollup also carries checks no ruleset requires.
             # So naming the check as the blocker would assert a link this cannot read.
             # Both facts are true, and both are printed.
-            print('status=CHECKS_NOT_MERGEABLE the review loop is closed, the merge reads '
-                  'BLOCKED, and a check is in a shape waiting does not clear: read the block '
-                  'above, since a starved check wants a re-run, an unposted one its poster, a '
-                  'long one a judgment, and a failed one a fix. Which of them gates the merge is '
-                  'not read here, because BLOCKED is also worn by a thread or a missing approval')
+            print(
+                "status=CHECKS_NOT_MERGEABLE the review loop is closed, the merge reads "
+                "BLOCKED, and a check is in a shape waiting does not clear: read the block "
+                "above, since a starved check wants a re-run, an unposted one its poster, a "
+                "long one a judgment, and a failed one a fix. Which of them gates the merge is "
+                "not read here, because BLOCKED is also worn by a thread or a missing approval"
+            )
             return 44
         return 0
     # A refusal before an answer, since it names the round that declined where 40 names none.
     # The digest prints both bodies regardless, so the narrower code costs the reader nothing.
     if refusing_review(final):
-        print('status=REVIEW_IS_A_REFUSAL the review carrying the head says it did not review, '
-              'so it covers nothing and no further review follows it: read the body above, '
-              'since a file-count refusal is cleared by splitting the pull request and a quota '
-              'one by waiting, and re-requesting this head clears neither')
+        print(
+            "status=REVIEW_IS_A_REFUSAL the review carrying the head says it did not review, "
+            "so it covers nothing and no further review follows it: read the body above, "
+            "since a file-count refusal is cleared by splitting the pull request and a quota "
+            "one by waiting, and re-requesting this head clears neither"
+        )
         return 41
     # An answer before a stall, because the reviewer saying something outranks it saying nothing.
     if answered_outside_review(final):
-        print('status=ANSWERED_OUTSIDE_REVIEW the reviewer answered without reviewing, '
-              'so read the comment above and decide, since where it declines or names a limit '
-              'no review follows and re-requesting does not clear it')
+        print(
+            "status=ANSWERED_OUTSIDE_REVIEW the reviewer answered without reviewing, "
+            "so read the comment above and decide, since where it declines or names a limit "
+            "no review follows and re-requesting does not clear it"
+        )
         return 40
     if stalled:
-        print(f'status=REQUEST_NOT_PICKED_UP requested {stalled} and no copilot_work_started '
-              'followed it, so nothing is working on this and waiting on will not start it: '
-              'clear the request and re-request, per the runbook')
+        print(
+            f"status=REQUEST_NOT_PICKED_UP requested {stalled} and no copilot_work_started "
+            "followed it, so nothing is working on this and waiting on will not start it: "
+            "clear the request and re-request, per the runbook"
+        )
         return 50
-    print('status=PENDING')
+    print("status=PENDING")
     return 30
 
 
-if __name__ == '__main__':
+if __name__ == "__main__":
     sys.exit(main())

@@ -23,6 +23,7 @@ Usage: python3 scripts/skills_install.py            (installs)
        python3 scripts/skills_install.py --report   (read-only: is this machine current?)
        AGENTS_HOME=/x python3 scripts/skills_install.py   (override the global skills target, for testing)
 """
+
 from __future__ import annotations
 
 import argparse
@@ -55,9 +56,12 @@ def agents_home():
 
 def source_ref():
     """The hub commit this installer is running from, and whether the tree is dirty."""
+
     def git(*args):
         try:
-            r = subprocess.run(["git", "-C", str(ROOT), *args], capture_output=True, text=True, check=False)
+            r = subprocess.run(
+                ["git", "-C", str(ROOT), *args], capture_output=True, text=True, check=False
+            )
         except OSError:
             return None
         return r.stdout.strip() if r.returncode == 0 else None
@@ -130,8 +134,12 @@ def materialize_global_skills(target):
         # Calling shutil.rmtree() on one refuses with an uncaught OSError instead of deleting through it.
         # Confirmed locally rather than assumed.
         # Skipping a symlink here avoids that crash on a stray one under the shared target.
-        if (not existing.is_symlink() and existing.is_dir()
-                and existing.name not in current_names and (existing / INSTALLED_MARKER).is_file()):
+        if (
+            not existing.is_symlink()
+            and existing.is_dir()
+            and existing.name not in current_names
+            and (existing / INSTALLED_MARKER).is_file()
+        ):
             shutil.rmtree(existing)
 
     for skill_dir in skill_dirs:
@@ -159,23 +167,31 @@ def register_claude_marketplace():
     """
     marketplace_add = subprocess.run(
         ["claude", "plugin", "marketplace", "add", str(ROOT)],
-        capture_output=True, text=True, check=False,
+        capture_output=True,
+        text=True,
+        check=False,
     )
     # Re-adding an already-registered marketplace is expected on a re-run.
     # Only a genuine failure (not "already exists") is fatal, since idempotence is the point.
-    if (marketplace_add.returncode != 0
-            and "already" not in marketplace_add.stdout.lower()
-            and "already" not in marketplace_add.stderr.lower()):
+    if (
+        marketplace_add.returncode != 0
+        and "already" not in marketplace_add.stdout.lower()
+        and "already" not in marketplace_add.stderr.lower()
+    ):
         print(marketplace_add.stdout, marketplace_add.stderr, file=sys.stderr)
         return False
 
     install = subprocess.run(
         ["claude", "plugin", "install", f"{PLUGIN_NAME}@{MARKETPLACE_NAME}", "--scope", "user"],
-        capture_output=True, text=True, check=False,
+        capture_output=True,
+        text=True,
+        check=False,
     )
-    if (install.returncode != 0
-            and "already" not in install.stdout.lower()
-            and "already" not in install.stderr.lower()):
+    if (
+        install.returncode != 0
+        and "already" not in install.stdout.lower()
+        and "already" not in install.stderr.lower()
+    ):
         print(install.stdout, install.stderr, file=sys.stderr)
         return False
     return True
@@ -202,8 +218,10 @@ def report(stamp_path):
     # A non-dict JSON value (an array, a bare string) is a shape this reader does not know.
     # So is an unrecognized stampVersion, not merely a plain missing/dirty install.
     if not isinstance(stamp, dict) or stamp.get("stampVersion") != STAMP_VERSION:
-        print(f"Stamp at {stamp_path} is not a recognized shape (stampVersion {STAMP_VERSION} expected). "
-              "Re-run the installer.")
+        print(
+            f"Stamp at {stamp_path} is not a recognized shape (stampVersion {STAMP_VERSION} expected). "
+            "Re-run the installer."
+        )
         return 1
     current = source_ref()
     current_commit = current.get("commit")
@@ -254,12 +272,19 @@ def main():
     claude_present = claude_available()
     claude_registered = register_claude_marketplace() if claude_present else False
     if not claude_present:
-        print("`claude` not found on PATH, skipping Claude Code marketplace registration "
-              "(Codex/opencode global skills were still installed).", file=sys.stderr)
+        print(
+            "`claude` not found on PATH, skipping Claude Code marketplace registration "
+            "(Codex/opencode global skills were still installed).",
+            file=sys.stderr,
+        )
 
     home.mkdir(parents=True, exist_ok=True)
-    stamp_path.write_text(json.dumps(build_stamp(claude_registered), indent=2) + "\n", encoding="utf-8")
-    print(f"Installed to {home / 'skills'}. Claude Code marketplace registered: {claude_registered}.")
+    stamp_path.write_text(
+        json.dumps(build_stamp(claude_registered), indent=2) + "\n", encoding="utf-8"
+    )
+    print(
+        f"Installed to {home / 'skills'}. Claude Code marketplace registered: {claude_registered}."
+    )
 
     # `claude` missing is a partial-but-expected install (a Codex/opencode-only machine).
     # `claude` present but registration failing is a real failure.
