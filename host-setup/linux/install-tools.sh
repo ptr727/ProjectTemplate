@@ -749,24 +749,30 @@ tool_unshadow() {
         *) return 0 ;;
     esac
 
+    # A loop, not one check, since PATH can stack more than one shadow ahead of $BIN_DIR.
+    # Removing only the nearest would still leave $BIN_DIR shadowed by the next one.
     local name resolved
     for name in "${names[@]}"; do
-        resolved=$(tool_shadow_path "$name")
-        [[ -n $resolved ]] || continue
+        while true; do
+            resolved=$(tool_shadow_path "$name")
+            [[ -n $resolved ]] || break
 
-        # A distro package's own file, found only when PATH puts it ahead of $BIN_DIR, which this script does not set up.
-        # Removing it directly would desync dpkg's database from the filesystem, so it stays, and the fix is the PATH order.
-        if dpkg-query -S "$resolved" > /dev/null 2>&1; then
-            warn "$tool: $resolved belongs to a distro package and stays, put $BIN_DIR ahead of it on PATH instead"
-            continue
-        fi
+            # A distro package's own file, found only when PATH puts it ahead of $BIN_DIR, which this script does not set up.
+            # Removing it directly would desync dpkg's database from the filesystem, so it stays, and the fix is the PATH order.
+            if dpkg-query -S "$resolved" > /dev/null 2>&1; then
+                warn "$tool: $resolved belongs to a distro package and stays, put $BIN_DIR ahead of it on PATH instead"
+                break
+            fi
 
-        log "$tool: $resolved shadows $BIN_DIR/$name, removing it"
-        if confirm "  Remove $resolved?"; then
+            log "$tool: $resolved shadows $BIN_DIR/$name, removing it"
+            if ! confirm "  Remove $resolved?"; then
+                warn "$tool: left $resolved in place, it will keep shadowing $BIN_DIR/$name"
+                break
+            fi
             run_root rm -f "$resolved"
-        else
-            warn "$tool: left $resolved in place, it will keep shadowing $BIN_DIR/$name"
-        fi
+            # Under --dry-run nothing is actually removed, so the same path would resolve again forever.
+            [[ $DRY_RUN == true ]] && break
+        done
     done
 }
 
@@ -782,6 +788,8 @@ apply_tool() {
     # --install with a managed copy already in place leaves it at its version by design, so removing a newer shadow first would downgrade what PATH resolves to.
     if [[ $MODE == "upgrade" || ! -x "$BIN_DIR/$tool" ]]; then
         tool_unshadow "$tool"
+    elif [[ -n $(tool_shadow_path "$tool") ]]; then
+        log "$tool: still shadowed on PATH, --upgrade removes it, --install leaves it to avoid downgrading what's shadowing it"
     fi
 
     installed=$("$(tool_function "$tool" version)" 2> /dev/null || true)
