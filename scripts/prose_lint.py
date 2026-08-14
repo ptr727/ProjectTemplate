@@ -11,6 +11,7 @@ these rules, so nothing enforced them before this script. Rules implemented:
   comment-case   A comment sentence starts with a capital, not a lowercase word.
   dupword        No duplicated consecutive word.
   sentence-split A sentence must not wrap across lines (one sentence per line).
+  sentence-length A Markdown prose sentence must not exceed the word cap.
   spelling       No British spelling, the repo-wide convention being US English.
   home-path      No absolute home path naming a real account, per the representative-data rule.
   dead-path      No mention of a path git once tracked and the tree no longer holds.
@@ -41,6 +42,7 @@ RULES = {
     'comment-case': 'a comment sentence opening in lowercase',
     'dupword': 'a duplicated consecutive word',
     'sentence-split': 'a sentence wrapping across lines',
+    'sentence-length': 'a sentence over the word cap',
     'spelling': 'a British spelling where the repo convention is US English',
     'home-path': 'an absolute home path naming a real account',
     'dead-path': 'a mention of a path git once tracked and the tree no longer holds',
@@ -937,6 +939,11 @@ LABEL_COLON = re.compile(r'^\s*(?:[-*]|[0-9]+\.)\s+\*\*[^*]+?(?:\*\*\s*:|:\s*\*\
 SENTENCE_BREAK = re.compile(r'(?<!\b[A-Z])(?<!\be\.g)(?<!\bi\.e)(?<!\bvs)(?<!\betc)'
                             r'[.!?][*_`"\')\]]*\s+')
 
+# The word cap one Markdown prose sentence may reach, the first structural house-style check.
+# ASD-STE100's descriptive cap is the one adopted, since no pattern tells a procedure step apart.
+# Opt-in like sentence-split, because the corpus predates the cap and a default gate would fail it.
+SENTENCE_WORD_CAP = 25
+
 
 def sentences(span: str) -> list[str]:
     """The span split at its sentence boundaries, empty pieces dropped.
@@ -1285,6 +1292,21 @@ def check_file(path: Path, rules: set[str],
                 found = m.group(0)
                 out.append((i, 'spelling',
                             f"British spelling '{found}' -> '{us_form(found)}'"))
+
+        if 'sentence-length' in rules and path.suffix == '.md':
+            span = prose.strip()
+            # A table row, a heading, a link definition, and a blockquote are not prose sentences.
+            structural = (not span or span.startswith(('|', '>', '#'))
+                          or re.match(r'^\s*\[[^\]]+\]:', span))
+            if not structural:
+                # Counted per line, so a wrapped sentence is fragments the split rule owns.
+                # A code span and a quotation each collapse to one token above, deliberately.
+                for sentence in sentences(span):
+                    words = len(sentence.split())
+                    if words > SENTENCE_WORD_CAP:
+                        msg = (f'{words} words in one sentence -> '
+                               f'sentences of {SENTENCE_WORD_CAP} words or fewer')
+                        out.append((i, 'sentence-length', msg))
 
         if 'sentence-split' in rules and path.suffix == '.md':
             stripped = txt.strip()

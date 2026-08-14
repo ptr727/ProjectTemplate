@@ -80,6 +80,24 @@ Use each tool's official casing in task labels, docs, and prose: `.NET` (not `.N
   behavior, and each was accurate when written. No linter catches a claim that is merely untrue,
   so this sweep is the only mechanism that will.
 
+## Sentence structure
+
+The structural half of ASD-STE100 is the adopted house style for agent-authored prose, and the
+controlled dictionary is deliberately not adopted: vocabulary stays unrestricted, structure is
+restricted. Each structural rule a pattern can reach lands as a `prose_lint.py` check
+incrementally, and this section names each check as it ships.
+
+- **Short sentences: at most 25 words in one sentence**, ASD-STE100's descriptive cap, checked by
+  the `sentence-length` rule in `prose_lint.py`. The check is opt-in like `sentence-split`,
+  because the existing corpus predates the cap and a default gate would fail whole files nobody
+  is editing. Write new prose under the cap, and scope a run to a change with
+  `--check sentence-length --diff <base>`.
+- **One instruction per sentence.** A procedure step states one action, and a second action is a
+  second step. No pattern reaches this, so it is authoring discipline with no check.
+- **Active voice, imperative mood for procedure steps.** Write "run the gate", never "the gate
+  should be run". Also authoring discipline, since a reliable passive-voice pattern does not
+  exist.
+
 ## Comments
 
 Applies to code and workflow (`#`) comments alike.
