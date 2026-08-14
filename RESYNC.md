@@ -11,12 +11,11 @@ flowchart TD
   route -->|"partial instruction set"| toStandup2["STANDUP.md sections 1A, 2"]
   route -->|"full instruction set, current or stale"| reach["1: fetch hub main, verify host"]
   reach --> measure["2: audit.py, --issue, fidelity_honesty.py --report"]
-  measure --> apply
   subgraph apply["3: apply, in this order"]
-    instr["instruction set"] --> del["deletions"] --> revendor["verbatim re-vendors"] --> iface["interface workflows"] --> settings["settings, rulesets, secrets"] --> intent["intent files, by hand"]
+    instr["instruction set"] --> del["deletions"] --> revendor["verbatim re-vendors"] --> iface["interface workflows"] --> settings["settings, rulesets, secrets"] --> intent["intent files, by hand (see 5: what this cannot detect)"]
   end
-  apply --> reaudit["re-audit — 5: intent files judged only for presence, never proven current"]
-  reaudit --> ship["6: PR per drift class, review loop, maintainer merges"]
+  measure --> apply
+  apply --> ship["6: PR per drift class, review loop, merge, then re-audit"]
 ```
 
 ## 0. Route Here Only If the Repository Is Stood Up
