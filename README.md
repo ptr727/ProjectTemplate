@@ -146,6 +146,8 @@ flowchart TD
   audit -->|"gap in the rules or docs"| issues["Questions or Issues"]
 ```
 
+The full entry-point map behind these doors, with the gap register and the roadmap that closes it, is [docs/fleet-map.md][fleet-map].
+
 Within this repo, day-to-day development follows the same branching, CI, review, and release model it documents for the fleet:
 
 - **Branching.** Persistent `main` and `develop`, each with its own ruleset. This repo uses the default `release` workflow model: commit on feature branches only, feature branch to `develop` is squash-merged, `develop` to `main` is a merge commit, and `develop` is forward-only (no `main -> develop` back-merges). Live-service config repos instead use the `operational` model (registry `workflowModel`), with direct signed commits to `develop`, promoted to `main` by an occasional PR. See [GOVERNANCE.md "Branching Model"][governance-branching-model].
@@ -345,6 +347,7 @@ Licensed under the [MIT License][license]\
 [docs]: ./docs/
 [fidelity-model]: ./spec/fidelity-model.md
 [files]: ./spec/files.json
+[fleet-map]: ./docs/fleet-map.md
 [governance]: ./GOVERNANCE.md
 [governance-branching-model]: ./GOVERNANCE.md#branching-model
 [governance-hub-hosted-tooling]: ./GOVERNANCE.md#hub-hosted-tooling
