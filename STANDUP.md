@@ -38,11 +38,16 @@ git config --global --get gpg.format        # ssh for an SSH key; unset or openp
 # .agents/skills/git-commit-conventions/SKILL.md "Signing, verified not configured" for why.
 d=$(mktemp -d "${TMPDIR:-/tmp}/sign-check.XXXXXX") && (
   trap 'rm -rf "$d"' 0
-  git init -q "$d" \
+  email=$(git config --global --get user.email) \
+    && git init -q "$d" \
     && git -C "$d" commit --allow-empty -q -m check \
     && out=$(git -C "$d" log -1 --format='sig=%G? author=%an <%ae> committer=%cn <%ce>') \
     && echo "$out" \
-    && case "$out" in sig=G\ *) true ;; *) false ;; esac
+    && ae=$(git -C "$d" log -1 --format='%ae') \
+    && ce=$(git -C "$d" log -1 --format='%ce') \
+    && case "$out" in sig=G\ *) true ;; *) false ;; esac \
+    && [ "$ae" = "$email" ] \
+    && [ "$ce" = "$email" ]
 )
 ```
 

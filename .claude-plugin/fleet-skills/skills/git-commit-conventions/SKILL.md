@@ -66,11 +66,16 @@ scope-widened commit, a rewritten shared history, a destructive reset).
   ```sh
   d=$(mktemp -d "${TMPDIR:-/tmp}/sign-check.XXXXXX") && (
     trap 'rm -rf "$d"' 0
-    git init -q "$d" \
+    email=$(git config --global --get user.email) \
+      && git init -q "$d" \
       && git -C "$d" commit --allow-empty -q -m check \
       && out=$(git -C "$d" log -1 --format='sig=%G? author=%an <%ae> committer=%cn <%ce>') \
       && echo "$out" \
-      && case "$out" in sig=G\ *) true ;; *) false ;; esac
+      && ae=$(git -C "$d" log -1 --format='%ae') \
+      && ce=$(git -C "$d" log -1 --format='%ce') \
+      && case "$out" in sig=G\ *) true ;; *) false ;; esac \
+      && [ "$ae" = "$email" ] \
+      && [ "$ce" = "$email" ]
   )
   ```
 
@@ -79,10 +84,15 @@ scope-widened commit, a rewritten shared history, a destructive reset).
   ```powershell
   $d = Join-Path $env:TEMP ([guid]::NewGuid())
   try {
+    $email = git config --global --get user.email
     git init -q "$d" `
       && git -C "$d" commit --allow-empty -q -m check `
       && git -C "$d" log -1 --format='sig=%G? author=%an <%ae> committer=%cn <%ce>' | Tee-Object -Variable out
-    if ($out -notmatch '^sig=G ') { throw "signing check failed: $out" }
+    $ae = git -C "$d" log -1 --format='%ae'
+    $ce = git -C "$d" log -1 --format='%ce'
+    if ($out -notmatch '^sig=G ' -or $ae -ne $email -or $ce -ne $email) {
+      throw "signing/identity check failed: $out"
+    }
   } finally {
     if (Test-Path "$d") { Remove-Item -Recurse -Force "$d" }
   }
