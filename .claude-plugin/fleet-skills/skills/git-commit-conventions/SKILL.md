@@ -79,7 +79,8 @@ scope-widened commit, a rewritten shared history, a destructive reset).
     $email = git config --global --get user.email
     git init -q "$d" `
       && git -C "$d" commit --allow-empty -q -m check `
-      && git -C "$d" log -1 --format='sig=%G? author=%an <%ae> committer=%cn <%ce>' | Tee-Object -Variable out
+      && $out = git -C "$d" log -1 --format='sig=%G? author=%an <%ae> committer=%cn <%ce>'
+    $out
     $ae = git -C "$d" log -1 --format='%ae'
     $ce = git -C "$d" log -1 --format='%ce'
     if ($out -notmatch '^sig=[GU] ' -or $email -notmatch '@users\.noreply\.github\.com$' `
