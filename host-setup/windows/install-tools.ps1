@@ -549,18 +549,24 @@ function Test-WslReadyForDocker {
 
 # --- Docker ---
 
-# Whether Docker Desktop answers as running right now, through its own CLI rather than a process probe.
-# A vmmem process surviving a crash is not the same as the backend actually being up, and the CLI is what agrees with what the tray icon shows.
+# The processes that mean Docker Desktop is up when its own CLI cannot answer, mirrored from upgrade-host.ps1's Get-DockerProcess rather than shared with it, on the same rule as the rest of this directory: a script here has to stay independently fetchable.
+$DOCKER_PROCESSES = @('Docker Desktop', 'com.docker.backend', 'com.docker.build')
+
+# Whether Docker Desktop answers as running right now, preferring its own CLI over a process probe, since the CLI is what agrees with what the tray icon shows and a vmmem process surviving a crash is not the same as the backend actually being up.
+# Falls back to the process probe where the CLI itself cannot answer (missing from PATH, or the status call failing), rather than reading either as "not running" outright: that reading is what let Enter-DockerMaintenance run wsl --update against a Docker Desktop this function wrongly reported as already down.
 function Test-DockerDesktopRunning {
-    if (-not (Get-Command docker -ErrorAction SilentlyContinue)) { return $false }
-    $text = (& docker desktop status --format json 2>&1 | Out-String)
-    if ($LASTEXITCODE -ne 0) { return $false }
-    # Parsed rather than matched, the same way setup-wsl.ps1 reads Docker's own settings file, with the regex kept as a fallback for a CLI version that ever answers non-JSON rather than reading that as "not running".
-    try {
-        return ((ConvertFrom-Json $text -ErrorAction Stop).Status -eq 'running')
-    } catch {
-        return ($text -match '"Status"\s*:\s*"running"')
+    if (Get-Command docker -ErrorAction SilentlyContinue) {
+        $text = (& docker desktop status --format json 2>&1 | Out-String)
+        if ($LASTEXITCODE -eq 0) {
+            # Parsed rather than matched, the same way setup-wsl.ps1 reads Docker's own settings file, with the regex kept as a fallback for a CLI version that ever answers non-JSON rather than reading that as "not running".
+            try {
+                return ((ConvertFrom-Json $text -ErrorAction Stop).Status -eq 'running')
+            } catch {
+                return ($text -match '"Status"\s*:\s*"running"')
+            }
+        }
     }
+    return [bool](Get-Process -Name $script:DOCKER_PROCESSES -ErrorAction SilentlyContinue)
 }
 
 function Stop-DockerDesktop {
