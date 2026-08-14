@@ -35,7 +35,7 @@ Every `Checked` evidence anchor below reads `develop` at `ba392f9` on 2026-08-13
 
 ## Scope and Non-Goals
 
-This doc governs five things: the entry-point routing map, the gap register with a defined handoff per gap, the resolved skills install model, the proposals for new skills, and the phased roadmap. It does not author skills (each proposed skill ships through its own pull request via the [`.agents/skills/`][skills-readme] pipeline), does not restate any procedure, and treats multi-agent coordination as a documented pattern only, with the rules in [`docs/peer-messaging.md`][peer-messaging]. The version history that produced the current skill-based model is in [`HISTORY.md`][history], so this doc states only what is.
+This doc governs five things: the entry-point routing map, the gap register with a defined handoff per gap, the resolved skills install model, the proposals for new skills, and the phased roadmap. It does not author skills (skills ship through the [`.agents/skills/`][skills-readme] pipeline in changes of their own), does not restate any procedure, and treats multi-agent coordination as a documented pattern only, with the rules in [`docs/peer-messaging.md`][peer-messaging]. The version history that produced the current skill-based model is in [`HISTORY.md`][history], so this doc states only what is.
 
 ## System Map
 
@@ -151,7 +151,7 @@ flowchart LR
   end
 ```
 
-Owned by [`AUDIT.md`][audit] section 10, [`GOVERNANCE.md` "Hub-Hosted Tooling"][governance-hub-hosted-tooling], and [`.agents/skills/README.md`][skills-readme]. Gaps on this path: G9 and G10 (topics and the skill lifecycle itself lack skills), G12 (conduct rules are scattered).
+Owned by [`AUDIT.md`][audit] section 10, [`GOVERNANCE.md` "Hub-Hosted Tooling"][governance-hub-hosted-tooling], and [`.agents/skills/README.md`][skills-readme]. The gaps this path carried (G9, G10, G12) are closed: the four skills below cover the topics, the lifecycle, and the conduct rules, and the register rows record the resolutions.
 
 ## Skills Install Model
 
@@ -178,10 +178,10 @@ Four wiring points close the model, and each is in place:
 | G6 | Session entry never checks skill staleness | doc + skill | closed |
 | G7 | Operational develop PR-only rule is prose-enforced | decision | P3 |
 | G8 | Generated plugin can ship stale with no CI gate | CI | closed |
-| G9 | WORKFLOW.md and AUDIT.md have no skill coverage | skill | P2 |
-| G10 | The skill lifecycle itself has no skill | skill | P2 |
+| G9 | WORKFLOW.md and AUDIT.md have no skill coverage | skill | closed |
+| G10 | The skill lifecycle itself has no skill | skill | closed |
 | G11 | Peer messaging is live but undeclared | doc | P0 |
-| G12 | General conduct rules have no skill | skill | P2 |
+| G12 | General conduct rules have no skill | skill | closed |
 
 Each gap's handoff below states who detects it, what closes it, and the test that proves it closed. The handoff sentence is the contract the closing pull request implements.
 
@@ -247,21 +247,16 @@ flowchart LR
 - **Resolution** - [`.github/workflows/validate-task.yml`][validate-task] runs `build_dist.py --check` as its own step in the lint job, on every pull request, and the required aggregator check gates on that job. A PR desyncing the two trees therefore fails the required check, which is this row's closing test.
 - **Provenance** - The step landed in [#676][pr-676], which predates this register's merge, so this row's original `Checked` claim was stale on arrival. Recording that here rather than silently deleting the row is the maintenance rule doing its job.
 
-### G9: WORKFLOW.md and AUDIT.md Have No Skill
+### G9: WORKFLOW.md and AUDIT.md Have No Skill (Closed)
 
-- **Gap** - The largest law doc ([`WORKFLOW.md`][workflow], the D1-D9 contract) and the measurement procedure ([`AUDIT.md`][audit]) have no skill surface, while every other procedure and language does. Thirteen [`GOVERNANCE.md`][governance] sections are likewise doc-only.
-- **Checked** - The [`AGENTS.md`][agents] rule map annotates no skill on those rows, and no skill under `.agents/skills/` names either doc.
-- **Handoff** - The `workflow-ci-contract` and `audit-a-repo` proposals below package the two docs. Each remaining doc-only GOVERNANCE section gets an explicit disposition, skill or no-skill-needed, so absence is a decision rather than an oversight.
-- **Closed when** - Both skills ship, and the rule map carries a disposition per section.
-- **Target** - Two skills, one rule-map sweep.
+- **Gap** - The largest law doc ([`WORKFLOW.md`][workflow], the D1-D9 contract) and the measurement procedure ([`AUDIT.md`][audit]) had no skill surface, while every other procedure and language did. Thirteen [`GOVERNANCE.md`][governance] sections were likewise doc-only.
+- **Resolution** - The `workflow-ci-contract` and `audit-a-repo` skills package the two docs in the kept-authority shape (the doc keeps the full rules, the skill is the summary that routes into it). The [`AGENTS.md`][agents] rule map carries a disposition per section: `Workflow YAML Conventions` and the three conduct sections are annotated with their surfacing skill, and a paragraph after the table states why each remaining unannotated section is doc-only by decision, so absence reads as a choice rather than an oversight. Both closing tests hold: the skills ship, and the map carries the dispositions.
+- **Provenance** - All four phase-2 skills shipped in one pull request at the maintainer's direction, superseding the one-pull-request-per-skill note this doc carried, with `skill-lifecycle` authored first inside it so the others follow its procedure.
 
-### G10: The Skill Lifecycle Has No Skill
+### G10: The Skill Lifecycle Has No Skill (Closed)
 
-- **Gap** - Authoring, changing, and retiring a skill is governed by scripts and scattered prose, so the agent most likely to get it wrong (one editing a skill) has no skill watching it.
-- **Checked** - No skill under `.agents/skills/` covers editing `.agents/skills/`, and the regen and install semantics live in [`.agents/skills/README.md`][skills-readme] and `scripts/` docstrings.
-- **Handoff** - The `skill-lifecycle` proposal below packages the pipeline, and it ships first in phase 2 so the other three proposals are authored under it.
-- **Closed when** - The skill ships and the README defers to it for procedure.
-- **Target** - One skill.
+- **Gap** - Authoring, changing, and retiring a skill was governed by scripts and scattered prose, so the agent most likely to get it wrong (one editing a skill) had no skill watching it.
+- **Resolution** - The `skill-lifecycle` skill packages the pipeline (source-versus-generated split, `build_dist.py` regenerate and `--check`, installer and stamp semantics, the doc-packaging pattern, trigger-description conventions), and [`.agents/skills/README.md`][skills-readme] defers to it for procedure, which is this row's closing test. It was authored first in phase 2 so the other three skills follow its procedure.
 
 ### G11: Peer Messaging Is Live but Undeclared
 
@@ -271,17 +266,14 @@ flowchart LR
 - **Closed when** - This pull request merges. This row closes in P0.
 - **Target** - [`docs/peer-messaging.md`][peer-messaging], shipped beside this doc.
 
-### G12: General Conduct Rules Have No Skill
+### G12: General Conduct Rules Have No Skill (Closed)
 
-- **Gap** - The conduct layer (ask when unsure, never assume, verification before claiming done, delegation and token discipline) lives in carried [`AGENTS.md`][agents] sections and doc-only GOVERNANCE sections, with no skill firing at the moments those rules are violated.
-- **Checked** - The rule map rows for `Verification Discipline` and `Communicating with the User` carry no skill annotation.
-- **Handoff** - The `agent-conduct` proposal below packages the decision-moment triggers, and the carried AGENTS.md sections stay the always-on layer.
-- **Closed when** - The skill ships with narrow triggers, per the proposal.
-- **Target** - One skill.
+- **Gap** - The conduct layer (ask when unsure, never assume, verification before claiming done, delegation and token discipline) lived in carried [`AGENTS.md`][agents] sections and doc-only GOVERNANCE sections, with no skill firing at the moments those rules are violated.
+- **Resolution** - The `agent-conduct` skill ships with the narrow decision-moment triggers the proposal specifies (about to claim done, about to assume, a failure just surfaced a lesson), summarizing `Verification Discipline`, `Communicating with the User`, and `Durable Knowledge and Self-Improvement`, which keep the full rules and carry the surfacing pointer, while the carried AGENTS.md sections stay the always-on layer.
 
 ## Proposed Skills
 
-Four skills close G9, G10, and G12. Each ships as its own pull request through the [`.agents/skills/`][skills-readme] pipeline, authored under the `skill-lifecycle` skill once it exists, which is why that one goes first. Scope and overlap are settled here so the authoring PRs implement rather than re-litigate.
+Four skills close G9, G10, and G12, shipped through the [`.agents/skills/`][skills-readme] pipeline with `skill-lifecycle` authored first so the other three follow its procedure (in one pull request at the maintainer's direction, per the G9 provenance note). Scope and overlap were settled here before authoring, and each block below is the contract its skill implements.
 
 ### audit-a-repo
 
@@ -302,7 +294,7 @@ Four skills close G9, G10, and G12. Each ships as its own pull request through t
 - **Scope** - Creating, changing, splitting, and retiring a skill: the source-vs-generated split, the regen and `--check` semantics of [`scripts/build_dist.py`][build-dist], the install and stamp semantics of [`scripts/skills_install.py`][skills-install], the doc-packaging pattern (summary in the law doc, full rules in the skill), and trigger-description conventions.
 - **Trigger** - About to create or edit anything under `.agents/skills/` or `.claude-plugin/`.
 - **Packages** - [`.agents/skills/README.md`][skills-readme] procedure content, which then defers to it.
-- **Overlap** - None today, which is gap G10. Adjacent to `comment-and-doc-style` for SKILL.md prose only.
+- **Overlap** - None, and the absence was gap G10. Adjacent to `comment-and-doc-style` for SKILL.md prose only.
 
 ### agent-conduct
 
@@ -348,11 +340,11 @@ Design-doc first: this doc merges, then each unchecked item becomes an issue lin
 
 ### P2: Close the Skill Coverage
 
-- [ ] G10 `skill-lifecycle` skill, authored first
-- [ ] G9 `audit-a-repo` skill
-- [ ] G9 `workflow-ci-contract` skill
-- [ ] G12 `agent-conduct` skill
-- [ ] G9 disposition sweep over the doc-only GOVERNANCE sections in the [`AGENTS.md`][agents] rule map
+- [x] G10 `skill-lifecycle` skill, authored first
+- [x] G9 `audit-a-repo` skill
+- [x] G9 `workflow-ci-contract` skill, with `references/` splits for the guarantee catalog and the test methodology
+- [x] G12 `agent-conduct` skill, narrow decision-moment triggers per the proposal
+- [x] G9 disposition sweep over the doc-only GOVERNANCE sections in the [`AGENTS.md`][agents] rule map
 
 ### P3: Audit-Depth Decisions
 

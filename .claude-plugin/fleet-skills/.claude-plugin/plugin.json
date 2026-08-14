@@ -6,6 +6,8 @@
     "name": "ptr727"
   },
   "skills": [
+    "./skills/agent-conduct",
+    "./skills/audit-a-repo",
     "./skills/carried-instruction-file-guard",
     "./skills/comment-and-doc-style",
     "./skills/copilot-instructions-keeper",
@@ -17,7 +19,9 @@
     "./skills/python-codestyle",
     "./skills/resync-a-repo",
     "./skills/shell-codestyle",
+    "./skills/skill-lifecycle",
     "./skills/standup-a-repo",
-    "./skills/upstream-contribution-workflow"
+    "./skills/upstream-contribution-workflow",
+    "./skills/workflow-ci-contract"
   ]
 }
