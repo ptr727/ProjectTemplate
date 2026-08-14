@@ -40,7 +40,9 @@ d=$(mktemp -d "${TMPDIR:-/tmp}/sign-check.XXXXXX") && (
   trap 'rm -rf "$d"' 0
   git init -q "$d" \
     && git -C "$d" commit --allow-empty -q -m check \
-    && git -C "$d" log -1 --format='sig=%G? author=%an <%ae> committer=%cn <%ce>'
+    && out=$(git -C "$d" log -1 --format='sig=%G? author=%an <%ae> committer=%cn <%ce>') \
+    && echo "$out" \
+    && case "$out" in sig=G\ *) true ;; *) false ;; esac
 )
 ```
 

@@ -68,7 +68,9 @@ scope-widened commit, a rewritten shared history, a destructive reset).
     trap 'rm -rf "$d"' 0
     git init -q "$d" \
       && git -C "$d" commit --allow-empty -q -m check \
-      && git -C "$d" log -1 --format='sig=%G? author=%an <%ae> committer=%cn <%ce>'
+      && out=$(git -C "$d" log -1 --format='sig=%G? author=%an <%ae> committer=%cn <%ce>') \
+      && echo "$out" \
+      && case "$out" in sig=G\ *) true ;; *) false ;; esac
   )
   ```
 
@@ -79,7 +81,8 @@ scope-widened commit, a rewritten shared history, a destructive reset).
   try {
     git init -q "$d" `
       && git -C "$d" commit --allow-empty -q -m check `
-      && git -C "$d" log -1 --format='sig=%G? author=%an <%ae> committer=%cn <%ce>'
+      && git -C "$d" log -1 --format='sig=%G? author=%an <%ae> committer=%cn <%ce>' | Tee-Object -Variable out
+    if ($out -notmatch '^sig=G ') { throw "signing check failed: $out" }
   } finally {
     if (Test-Path "$d") { Remove-Item -Recurse -Force "$d" }
   }
