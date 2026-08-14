@@ -50,6 +50,34 @@ class SourceRefCase(unittest.TestCase):
             str(skills_install.CLAUDE_PLUGIN_DIR.relative_to(skills_install.ROOT).as_posix()), status_call
         )
 
+    def test_a_handed_in_commit_stands_in_where_git_cannot_answer(self) -> None:
+        """A bootstrap runs the installer from a tarball tree with no .git, and hands in the commit
+        it resolved before downloading, so the stamp stays checkable rather than permanently stale."""
+        def no_git(args, **kwargs):
+            result = mock.Mock()
+            result.returncode = 128
+            result.stdout = ""
+            return result
+
+        with mock.patch("subprocess.run", side_effect=no_git):
+            with mock.patch.dict("os.environ", {"SKILLS_SOURCE_COMMIT": "cafe1234"}):
+                self.assertEqual(skills_install.source_ref(),
+                                 {"vcs": "archive", "commit": "cafe1234", "dirty": False})
+            with mock.patch.dict("os.environ", {}, clear=True):
+                self.assertEqual(skills_install.source_ref(), {"vcs": "none"})
+
+    def test_a_git_answer_outranks_a_handed_in_commit(self) -> None:
+        """In a real checkout the environment variable is stray state, and the checkout is the truth."""
+        def fake_run(args, **kwargs):
+            result = mock.Mock()
+            result.returncode = 0
+            result.stdout = "deadbeef\n" if "rev-parse" in args else ""
+            return result
+
+        with mock.patch("subprocess.run", side_effect=fake_run):
+            with mock.patch.dict("os.environ", {"SKILLS_SOURCE_COMMIT": "cafe1234"}):
+                self.assertEqual(skills_install.source_ref()["commit"], "deadbeef")
+
 
 class MaterializeCase(unittest.TestCase):
     def setUp(self) -> None:

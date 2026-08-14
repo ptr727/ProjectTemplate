@@ -293,7 +293,7 @@ def indexed_modes() -> dict[str, str]:
 def test_every_managed_tool_is_executable() -> None:
     """Each script the loader hands control to is present and executable."""
     modes = indexed_modes()
-    for name in ('install-tools.sh', 'upgrade-host.sh', 'setup-github.sh'):
+    for name in ('install-skills.sh', 'install-tools.sh', 'upgrade-host.sh', 'setup-github.sh'):
         path = LINUX / name
         check(path.is_file(), f'{name} is missing from host-setup/linux')
         if path.is_file() and modes:
@@ -314,7 +314,7 @@ def test_every_windows_script_is_present() -> None:
     default with no pin of their own. A shebang added later would fail that gate from a file nobody
     would think to look at.
     """
-    scripts = ('install-tools.ps1', 'upgrade-host.ps1', 'setup-github.ps1', 'setup-wsl.ps1')
+    scripts = ('install-skills.ps1', 'install-tools.ps1', 'upgrade-host.ps1', 'setup-github.ps1', 'setup-wsl.ps1')
     for name in scripts + ('README.md',):
         check((WINDOWS / name).is_file(), f'{name} is missing from host-setup/windows')
 
