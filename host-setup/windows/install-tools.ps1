@@ -490,7 +490,8 @@ function Add-ToolNote {
 # Docker Desktop's own documented floor for the WSL platform, per docs.docker.com/desktop/features/wsl.
 $DOCKER_WSL_FLOOR = '2.1.5'
 
-# Every wsl.exe call goes through here, because wsl.exe emits UTF-16 by default and its output then reads as NUL separated characters.
+# Every wsl.exe read goes through here, because wsl.exe emits UTF-16 by default and its output then reads as NUL separated characters.
+# A wsl.exe call that changes the host instead of reading it goes through Invoke-WslRun below, which applies the same guard to a live streamed run rather than a captured one.
 # Mirrored from upgrade-host.ps1 rather than shared with it, on the same rule as the rest of this directory: a script here has to stay independently fetchable.
 function Invoke-Wsl {
     param([Parameter(ValueFromRemainingArguments)][string[]]$Arguments)
@@ -500,6 +501,19 @@ function Invoke-Wsl {
         $text = (& wsl.exe @Arguments 2>&1 | Out-String -Width 500)
         if ($text.Contains([char]0)) { $text = $text -replace "`0", '' }
         return $text
+    } finally {
+        if ($null -eq $previous) { Remove-Item Env:\WSL_UTF8 -ErrorAction SilentlyContinue }
+        else { $env:WSL_UTF8 = $previous }
+    }
+}
+
+# The mutation-side counterpart to Invoke-Wsl: runs a wsl.exe command that changes the host through the same run wrapper every other mutating command in this script uses, with the same WSL_UTF8 guard applied around it, so its live streamed output does not read to a person as NUL separated characters either.
+function Invoke-WslRun {
+    param([Parameter(ValueFromRemainingArguments)][string[]]$Arguments)
+    $previous = $env:WSL_UTF8
+    try {
+        $env:WSL_UTF8 = '1'
+        return (run 'wsl.exe' @Arguments)
     } finally {
         if ($null -eq $previous) { Remove-Item Env:\WSL_UTF8 -ErrorAction SilentlyContinue }
         else { $env:WSL_UTF8 = $previous }
@@ -603,7 +617,7 @@ function Enter-DockerMaintenance {
         }
         info 'Updating the WSL platform'
         info 'This restarts every distribution, so anything running inside one is stopped'
-        $updateCode = run 'wsl.exe' @('--update')
+        $updateCode = Invoke-WslRun '--update'
         if ($updateCode -ne 0) { warn "wsl --update exited $updateCode" }
         $stillBroken = Test-WslReadyForDocker
         if ($stillBroken) {
@@ -622,7 +636,7 @@ function Exit-DockerMaintenance {
     param([Parameter(Mandatory)][bool]$Stopped)
     if (-not $Stopped) { return }
     info 'Shutting down WSL'
-    $shutdownCode = run 'wsl.exe' @('--shutdown')
+    $shutdownCode = Invoke-WslRun '--shutdown'
     if ($shutdownCode -ne 0) { warn "wsl --shutdown exited $shutdownCode" }
     Start-DockerDesktop | Out-Null
 }
