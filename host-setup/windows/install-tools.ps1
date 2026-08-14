@@ -570,7 +570,8 @@ function Invoke-ToolApply {
     } elseif ($state.Status -eq 'multiple') {
         log "${ToolName}: winget lists $($state.Rows -join ', ') under one id, so -Reinstall is the action that resolves it"
         return
-    } elseif ($script:MODE -eq 'upgrade' -and $state.Status -eq 'outdated' -and $target -ne $state.Package) {
+    } elseif (($script:MODE -eq 'upgrade' -or $script:MODE -eq 'install') -and $state.Status -eq 'outdated' -and $target -ne $state.Package) {
+        # Named ahead of the plain install-mode branch below, since -Upgrade would hit this same fixed-release wall, so pointing -Install at -Upgrade here would only trade one dead end for another.
         log "${ToolName}: $($state.Package) at $($state.Installed) is a fixed release and cannot advance under that id, -Reinstall $ToolName replaces it with $target"
         return
     } elseif ($script:MODE -eq 'install' -and $state.Status -eq 'outdated') {
