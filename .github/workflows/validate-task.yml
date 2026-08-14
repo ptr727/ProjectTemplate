@@ -91,6 +91,9 @@ jobs:
       - name: Lint Python step
         run: uvx ruff@latest check .
 
+      - name: Check Python formatting step
+        run: uvx ruff@latest format --check .
+
       - name: Type check Python step
         run: uvx mypy@latest
 

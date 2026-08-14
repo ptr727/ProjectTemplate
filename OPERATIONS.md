@@ -12,6 +12,7 @@ CI passes explicit `--check` lists, and a bare `python3 scripts/prose_lint.py [f
 
 ```sh
 uvx ruff@latest check .
+uvx ruff@latest format --check .
 uvx mypy@latest
 uvx coverage@latest run --source=scripts,spec,host-setup -m unittest discover -s scripts/tests
 uvx coverage@latest run --source=scripts,spec,host-setup --append spec/audit.py --selftest

@@ -80,7 +80,8 @@ whether the Python has third-party runtime dependencies, which shows up structur
   test never reads as a tool. Within the scripts directory the name carries the kind: a gate that
   checks and exits non-zero on a finding takes a `_lint` or `_gate` suffix, and a utility that
   does work takes none. Any repo carrying Python carries the Python tooling in CI, coverage
-  included, this profile too: `uvx ruff@latest check`, `uvx mypy@latest`, and the unittest suite
+  included, this profile too: `uvx ruff@latest check`, `uvx ruff@latest format --check`,
+  `uvx mypy@latest`, and the unittest suite
   under `uvx coverage@latest run -m unittest discover -s <scripts-dir>/tests` with
   `coverage report`, informational with no threshold adopted. A co-present `csharp` type still
   carries `codecov.yml` for its own tests.
