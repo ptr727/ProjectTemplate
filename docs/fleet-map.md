@@ -2,9 +2,7 @@
 
 The **map** of how a human or an agent enters the fleet system, the **register** of the gaps and loose ends between its parts, and the roadmap that closes them. This doc is **hub-only** and is not carried downstream, because it describes the hub's own seams rather than a fact about any one repo. It is a map and never the procedure: [`AGENTS.md`][agents], [`STANDUP.md`][standup], [`RESYNC.md`][resync], and [`AUDIT.md`][audit] keep authority over their flows, and where this doc and a procedure doc disagree, the procedure doc wins and this map is what needs fixing.
 
-**Maintenance rule.** A pull request that closes a register gap edits that gap's row and detail block in the same change, per [GOVERNANCE.md "Durable Knowledge and Self-Improvement"][governance-durable-knowledge]. A register describing a gap that is already closed is itself the staleness gap G4 describes, so the register is only trustworthy while this rule holds.
-
-Every `Checked` evidence anchor below reads `develop` at `ba392f9` on 2026-08-13 unless it says otherwise.
+**Maintenance rule.** A pull request that closes a register gap edits that gap's row and detail block in the same change, per [GOVERNANCE.md "Durable Knowledge and Self-Improvement"][governance-durable-knowledge]. A register describing a gap that is already closed is itself stale prose, so the register is only trustworthy while this rule holds. The same rule covers the map: a pull request that changes a mapped seam, or a flow this doc draws or points to, updates this doc in the same change.
 
 ## Table of Contents <!-- omit from toc -->
 
@@ -61,7 +59,7 @@ The layers, one line each. The lifecycle docs route and procedure ([`AGENTS.md`]
 
 ## Entry Points
 
-Five doors into the system. Each subsection names its flow, the docs that own it, and the register gaps that sit on its path. Solid arrows are the flow as built, dashed arrows mark a gap by its register ID.
+Five doors into the system. Each subsection names its flow, the docs that own it, and the closed register gaps that sit on its path. Where the owning procedure doc draws its own flow diagram, that diagram keeps authority and this map points to it rather than carrying a copy that can drift. The diagrams below draw only the flows no procedure doc draws.
 
 ### Pre-Agent Cold Start
 
@@ -73,7 +71,7 @@ flowchart TD
   paste --> boot["bootstrap.sh / bootstrap.ps1"]
   boot --> fetch["hub tarball fetch, no git needed"]
   fetch --> upgrade["upgrade host packages"]
-  upgrade --> tools["install-tools: git gh jq node python uv dotnet"]
+  upgrade --> tools["install-tools: the host toolchain, floors in spec/host-tools.json"]
   tools --> github["setup-github: identity, SSH signing, gh auth"]
   github --> skillsinstall["install-skills: fleet skills for the user"]
   skillsinstall --> safety["agent-safety install: write guard + CLAUDE.md blocks"]
@@ -81,21 +79,13 @@ flowchart TD
   verify --> session["first agent session"]
 ```
 
-Owned by [`host-setup/`][host-setup-readme] and [`docs/host-setup.md`][host-setup-doc]. No open gaps sit on this path: G1, the skills install with no home in the provisioning flow, is closed and its row records the resolution.
+Owned by [`host-setup/`][host-setup-readme] and [`docs/host-setup.md`][host-setup-doc]. The tools step also polices its own PATH: a stray copy shadowing a managed `uv`, `jq`, or `git-restore-mtime` install is named in the report and removed by an install or upgrade run when removal is safe. No open gaps sit on this path: G1, the skills install with no home in the provisioning flow, is closed and its row records the resolution.
 
 ### A New Repository
 
 An agent is told to create or stand up a repo. The router of last resort is the byte-locked `Fleet Bootstrap` section of [`AGENTS.md`][agents], mirrored host-wide by the `CLAUDE.md` block the agent-safety installer deploys, so the routing reaches an agent even in a directory holding nothing.
 
-```mermaid
-flowchart TD
-  ask["stand up a new repo"] --> route["AGENTS.md Fleet Bootstrap routes by repo state"]
-  route --> s0["STANDUP section 0: identity and signing, host gate"]
-  s0 --> s1["section 1: classify, registry entry, carry instruction set first"]
-  s1 --> s2["sections 2-4: baseline, workflows, settings and rulesets"]
-  s2 --> s5["section 5: run the audit"]
-  s5 --> report["committed report under reports/"]
-```
+The section-by-section flow is diagrammed at the top of [`STANDUP.md`][standup], and the routing into it in the `Fleet Bootstrap` section of [`AGENTS.md`][agents].
 
 Owned by [`STANDUP.md`][standup], packaged as the `standup-a-repo` skill. No open gaps sit on this path: G2, the silent bare-run overlay skip, is closed and its row records the resolution.
 
@@ -103,15 +93,7 @@ Owned by [`STANDUP.md`][standup], packaged as the `standup-a-repo` skill. No ope
 
 The hub has moved and a downstream repo is behind. The agent runs [`RESYNC.md`][resync] from a hub checkout, which runs [`AUDIT.md`][audit] end to end and applies the findings in a load-bearing order.
 
-```mermaid
-flowchart TD
-  ask["bring this repo back into conformance"] --> resync["RESYNC from a hub checkout"]
-  resync --> audit["AUDIT end to end, read-only"]
-  audit --> apply["apply in order: rules, deletions, re-vendors, workflows, config"]
-  audit --> hostcheck["host gate on the way in"]
-  hostcheck --> remedy["a failed floor prints its install command"]
-  apply --> reaudit["re-audit"] --> report["committed report"]
-```
+The routing and the load-bearing apply order are diagrammed at the top of [`RESYNC.md`][resync], the deletion triage in its section 4, and the audit pipeline with its verdicts in [`AUDIT.md`][audit].
 
 Owned by [`RESYNC.md`][resync] and [`AUDIT.md`][audit], packaged as the `resync-a-repo` skill with the `carried-instruction-file-guard` and `copilot-instructions-keeper` skills firing inside it. No open gaps sit on this path: G3, the audit-to-install bridge, G4, the prose-deletion sweep, and G5, the intent-staleness advisory, are closed and their rows record the resolutions.
 
@@ -129,7 +111,7 @@ flowchart TD
   review --> merge["merge per registry workflowModel"]
 ```
 
-Owned by the per-language sections of [`CODESTYLE.md`][codestyle] and the conduct skills. No open gaps sit on this path: G6, the unwired staleness check, and G7, the operational direct-commit allowance, are closed and their rows record the resolutions.
+Owned by the per-language sections of [`CODESTYLE.md`][codestyle] and the conduct skills. The gates node is the [`OPERATIONS.md`][operations] "Run the gates the way CI runs them" section, and the review node runs through [`scripts/pr_review.py`][pr-review]. No open gaps sit on this path: G6, the unwired staleness check, and G7, the operational direct-commit allowance, are closed and their rows record the resolutions.
 
 ### Hub-Side Operations
 
@@ -148,7 +130,7 @@ flowchart LR
   end
 ```
 
-Owned by [`AUDIT.md`][audit] section 10, [`GOVERNANCE.md` "Hub-Hosted Tooling"][governance-hub-hosted-tooling], and [`.agents/skills/README.md`][skills-readme]. The gaps this path carried (G9, G10, G12) are closed: the four skills below cover the topics, the lifecycle, and the conduct rules, and the register rows record the resolutions.
+Owned by [`AUDIT.md`][audit] section 10, [`GOVERNANCE.md` "Hub-Hosted Tooling"][governance-hub-hosted-tooling], and [`.agents/skills/README.md`][skills-readme]. The runnable form of this door is [`OPERATIONS.md`][operations]: its "Audit the fleet" and "Apply or verify repository configuration" runbooks drive [`spec/audit.py`][audit-py] and the `repo-config/` apply, and its "Run the gates the way CI runs them" section runs [`scripts/repo_gate.py`][repo-gate] beside the prose gates. The gaps this path carried (G9, G10, G12) are closed: the four skills below cover the topics, the lifecycle, and the conduct rules, and the register rows record the resolutions.
 
 ## Skills Install Model
 
@@ -218,7 +200,7 @@ flowchart LR
 ### G5: Intent-Fidelity Drift Is Invisible (Closed)
 
 - **Gap** - A carried file at `intent` fidelity was presence-checked only, so it could trail the hub by many revisions while the audit read clean. This class hid real drift before.
-- **Resolution** - The advisory ships in `spec/audit.py`: for each applicable intent unit the audit compares when the hub canonical and the repo copy each last changed, and a canonical changing later reports the copy as possibly trailing, at DRIFT and never failing. A copy content-identical to the canonical is skipped, being both current and the promotion candidate `spec/fidelity_honesty.py` exists to find. Measured on its first run: a fleet repo's carried `WORKFLOW.md`, `CODESTYLE.md`, and `.editorconfig` each reported as trailing hub changes made weeks earlier, findings no prior check produced.
+- **Resolution** - The advisory ships in [`spec/audit.py`][audit-py]: for each applicable intent unit the audit compares when the hub canonical and the repo copy each last changed, and a canonical changing later reports the copy as possibly trailing, at DRIFT and never failing. A copy content-identical to the canonical is skipped, being both current and the promotion candidate `spec/fidelity_honesty.py` exists to find. Measured on its first run: a fleet repo's carried `WORKFLOW.md`, `CODESTYLE.md`, and `.editorconfig` each reported as trailing hub changes made weeks earlier, findings no prior check produced.
 - **Decisions** - The handoff imagined reporting the hub revision each unit was last reconciled against, and no reconciliation record exists anywhere, so the last-modified comparison is the implementable proxy and ships instead of inventing a per-repo stamp. The advisory therefore says possibly: a copy touched after the hub change without actually reconciling reads current, a blind spot stated in [`RESYNC.md`][resync] section 5, [`AUDIT.md`][audit], and [`spec/fidelity-model.md`][fidelity-model] rather than papered over.
 
 ### G6: Session Entry Never Checks Skill Staleness (Closed)
@@ -339,7 +321,7 @@ Design-doc first: this doc merges, then each unchecked item becomes an issue lin
 ### P3: Audit-Depth Decisions
 
 - [x] G4 disposition: the `dead-path` lint ships for the named-path half, the manual read stands for the name-shaped half
-- [x] G5 disposition: the last-modified advisory ships in `spec/audit.py`
+- [x] G5 disposition: the last-modified advisory ships in [`spec/audit.py`][audit-py]
 - [x] G7 disposition: `accepted`, recorded in [`STANDUP.md`][standup] section 0B
 
 ### P4: Steady State
@@ -351,12 +333,13 @@ Design-doc first: this doc merges, then each unchecked item becomes an issue lin
 
 ## Decision Ledger Cross-References
 
-[`TODO.md`][todo] stays the running backlog, and this register does not fork it. The peer-messaging item resolves to [`docs/peer-messaging.md`][peer-messaging] and section G11. The host-tooling cluster ([#671][issue-671], [#672][issue-672], [#673][issue-673]) touches the same `host-setup/` surface as G1 and G3, so those issues and the P1 items cross-link rather than duplicate. A future TODO entry about an adoption gap lands as a register row here instead, with TODO carrying only the pointer.
+[`TODO.md`][todo] stays the running backlog, and this register does not fork it. The peer-messaging item resolves to [`docs/peer-messaging.md`][peer-messaging] and section G11. The host-tooling cluster ([#671][issue-671], [#672][issue-672], [#673][issue-673]) touches the same `host-setup/` surface as G1 and G3, so those issues and the P1 items cross-link rather than duplicate. A future TODO entry about an adoption gap lands as a register row here instead, with TODO carrying only the pointer. The open issues [#699][issue-699] (a repo and worktree layout convention with its own skill) and [#700][issue-700] (Python tooling in CI with a scripts split) each touch a mapped seam and stay on their own tracks, cross-linked here rather than duplicated.
 
 <!-- Repo -->
 
 [agents]: ../AGENTS.md
 [audit]: ../AUDIT.md
+[audit-py]: ../spec/audit.py
 [bootstrap]: ../host-setup/bootstrap.sh
 [bootstrap-ps1]: ../host-setup/bootstrap.ps1
 [build-dist]: ../scripts/build_dist.py
@@ -373,10 +356,13 @@ Design-doc first: this doc merges, then each unchecked item becomes an issue lin
 [host-setup-readme]: ../host-setup/README.md
 [host-tools]: ../spec/host-tools.json
 [marketplace]: ../.claude-plugin/marketplace.json
+[operations]: ../OPERATIONS.md
 [peer-messaging]: ./peer-messaging.md
+[pr-review]: ../scripts/pr_review.py
 [prose-lint]: ../scripts/prose_lint.py
 [readme]: ../README.md
 [repo-config-readme]: ../repo-config/README.md
+[repo-gate]: ../scripts/repo_gate.py
 [repos]: ../registry/repos.json
 [resync]: ../RESYNC.md
 [scripts-readme]: ../scripts/README.md
@@ -394,4 +380,6 @@ Design-doc first: this doc merges, then each unchecked item becomes an issue lin
 [issue-671]: https://github.com/ptr727/ProjectTemplate/issues/671
 [issue-672]: https://github.com/ptr727/ProjectTemplate/issues/672
 [issue-673]: https://github.com/ptr727/ProjectTemplate/issues/673
+[issue-699]: https://github.com/ptr727/ProjectTemplate/issues/699
+[issue-700]: https://github.com/ptr727/ProjectTemplate/issues/700
 [pr-676]: https://github.com/ptr727/ProjectTemplate/pull/676
