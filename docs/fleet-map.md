@@ -50,7 +50,6 @@ flowchart TD
   scripts["scripts/ hub-hosted tooling"] --> audit
   skills[".agents/skills/ source"] --> build[build_dist.py]
   build --> plugin[".claude-plugin/ generated"]
-  build -.->|"G8: no CI staleness gate"| plugin
   plugin --> install[skills_install.py]
   skills --> install
   install --> host["host: ~/.agents/skills + plugin + stamp"]
@@ -146,15 +145,14 @@ flowchart LR
     reg["registry iterate"] --> peraudit["per-repo audit"] --> issues["convergence issues"]
   end
   subgraph lifecycle["skill lifecycle"]
-    author["edit .agents/skills/"] --> gen["build_dist.py"] --> check["--check"] --> prq["PR"] --> merged["merge"] --> refresh["hosts re-run installer"]
-    author -.->|"G8: a missed regen ships silently"| prq
+    author["edit .agents/skills/"] --> gen["build_dist.py"] --> check["CI runs --check"] --> prq["PR"] --> merged["merge"] --> refresh["hosts re-run installer"]
   end
   subgraph rollout["carried-change rollout"]
     specedit["spec or law edit"] --> revendor["fleet re-vendor per RESYNC"]
   end
 ```
 
-Owned by [`AUDIT.md`][audit] section 10, [`GOVERNANCE.md` "Hub-Hosted Tooling"][governance-hub-hosted-tooling], and [`.agents/skills/README.md`][skills-readme]. Gaps on this path: G8 (no CI gate runs `build_dist.py --check`), G9 and G10 (topics and the skill lifecycle itself lack skills), G12 (conduct rules are scattered).
+Owned by [`AUDIT.md`][audit] section 10, [`GOVERNANCE.md` "Hub-Hosted Tooling"][governance-hub-hosted-tooling], and [`.agents/skills/README.md`][skills-readme]. Gaps on this path: G9 and G10 (topics and the skill lifecycle itself lack skills), G12 (conduct rules are scattered).
 
 ## Skills Install Model
 
@@ -180,7 +178,7 @@ Four wiring points close the model, each a register gap with its own deliverable
 | G5 | Intent-fidelity carried files have no drift detection | spec + decision | P3 |
 | G6 | Session entry never checks skill staleness | doc + skill | P1 |
 | G7 | Operational develop PR-only rule is prose-enforced | decision | P3 |
-| G8 | Generated plugin can ship stale with no CI gate | CI | P1 |
+| G8 | Generated plugin can ship stale with no CI gate | CI | closed |
 | G9 | WORKFLOW.md and AUDIT.md have no skill coverage | skill | P2 |
 | G10 | The skill lifecycle itself has no skill | skill | P2 |
 | G11 | Peer messaging is live but undeclared | doc | P0 |
@@ -253,13 +251,11 @@ flowchart LR
 - **Closed when** - The maintainer records the disposition, mirroring the [`spec/divergences.json`][divergences] vocabulary.
 - **Target** - A disposition, not necessarily code.
 
-### G8: Generated Plugin Can Ship Stale
+### G8: Generated Plugin Can Ship Stale (Closed)
 
-- **Gap** - `.claude-plugin/` is generated from `.agents/skills/`, and a merge that edits the source without re-running [`scripts/build_dist.py`][build-dist] ships a plugin that no longer matches it. `--check` exists and nothing in CI runs it.
-- **Checked** - [`.github/workflows/validate-task.yml`][validate-task] runs markdownlint, cspell, JSON validation, and actionlint, and does not run `build_dist.py --check`.
-- **Handoff** - When a pull request touches `.agents/skills/` or `.claude-plugin/`, CI runs `build_dist.py --check` and the aggregator gates on it.
-- **Closed when** - A PR desyncing the two trees fails the required check.
-- **Target** - A step in [`validate-task.yml`][validate-task].
+- **Gap** - `.claude-plugin/` is generated from `.agents/skills/`, and a merge that edits the source without re-running [`scripts/build_dist.py`][build-dist] would ship a plugin that no longer matches it.
+- **Resolution** - [`.github/workflows/validate-task.yml`][validate-task] runs `build_dist.py --check` as its own step in the lint job, on every pull request, and the required aggregator check gates on that job. A PR desyncing the two trees therefore fails the required check, which is this row's closing test.
+- **Provenance** - The step landed in [#676][pr-676], which predates this register's merge, so this row's original `Checked` claim was stale on arrival. Recording that here rather than silently deleting the row is the maintenance rule doing its job.
 
 ### G9: WORKFLOW.md and AUDIT.md Have No Skill
 
@@ -358,7 +354,7 @@ Design-doc first: this doc merges, then each unchecked item becomes an issue lin
 - [ ] G2 `host_gate.py` bare-run warning
 - [ ] G3 failed-floor remedy output
 - [ ] G6 staleness cadence wording
-- [ ] G8 `build_dist.py --check` in CI
+- [x] G8 `build_dist.py --check` in CI, found already in place via [#676][pr-676] and recorded closed
 
 ### P2: Close the Skill Coverage
 
@@ -418,8 +414,9 @@ Design-doc first: this doc merges, then each unchecked item becomes an issue lin
 [validate-task]: ../.github/workflows/validate-task.yml
 [workflow]: ../WORKFLOW.md
 
-<!-- Issues -->
+<!-- Issues and Pull Requests -->
 
 [issue-671]: https://github.com/ptr727/ProjectTemplate/issues/671
 [issue-672]: https://github.com/ptr727/ProjectTemplate/issues/672
 [issue-673]: https://github.com/ptr727/ProjectTemplate/issues/673
+[pr-676]: https://github.com/ptr727/ProjectTemplate/pull/676
