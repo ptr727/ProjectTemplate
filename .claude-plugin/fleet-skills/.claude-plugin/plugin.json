@@ -17,6 +17,7 @@
     "./skills/operational-vs-release-workflow",
     "./skills/pr-review-conduct",
     "./skills/python-codestyle",
+    "./skills/repo-worktree",
     "./skills/resync-a-repo",
     "./skills/shell-codestyle",
     "./skills/skill-lifecycle",
