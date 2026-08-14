@@ -642,6 +642,18 @@ tool_status() {
     fi
 }
 
+# Where PATH currently resolves $1 to, when that is not $BIN_DIR/$1, or empty when it already is.
+# Shared by the report, which only names the shadow, and --install/--upgrade, which act on it (apply_tool decides when it is safe to remove).
+# "type -P" skips aliases and shell functions, which "command -v" answers for with no file behind them.
+tool_shadow_path() {
+    local name="$1" resolved
+    resolved=$(type -P "$name" 2> /dev/null || true)
+    # A relative PATH entry (".", "./bin") makes this relative to the caller's current directory, not a real shadow.
+    # What this returns gets removed by tool_unshadow, so only an absolute path is ever trusted as one.
+    [[ $resolved == /* && $resolved != "$BIN_DIR/$name" ]] && printf '%s' "$resolved"
+    return 0
+}
+
 # Per-tool detail worth a line under the report: a package set that is part installed, or a feed that is not configured yet.
 tool_note() {
     local tool="$1"
@@ -673,9 +685,10 @@ tool_note() {
             ;;
         jq | uv | git-restore-mtime)
             # A copy earlier on the PATH keeps answering after this script installs a newer one, which reads as an upgrade that did not take.
+            # --upgrade removes it. --install removes it only when nothing managed exists yet, and warns instead when it leaves one in place.
             local resolved
-            resolved=$(command -v "$tool" 2> /dev/null || true)
-            if [[ -n $resolved && $resolved != "$BIN_DIR/$tool" ]]; then
+            resolved=$(tool_shadow_path "$tool")
+            if [[ -n $resolved ]]; then
                 if [[ -x "$BIN_DIR/$tool" ]]; then
                     note "$tool" "$resolved comes first on the PATH and shadows the managed copy at $BIN_DIR/$tool"
                 else
@@ -727,12 +740,65 @@ report() {
     done
 }
 
+# Remove a copy of a managed tool found earlier on PATH than $BIN_DIR, so the managed copy is what PATH resolves to afterward.
+# Only jq, uv, and git-restore-mtime install as loose binaries outside apt, and uv's companion uvx is unshadowed alongside it.
+tool_unshadow() {
+    local tool="$1"
+    local -a names=()
+    case "$tool" in
+        jq | git-restore-mtime) names=("$tool") ;;
+        uv) names=(uv uvx) ;;
+        *) return 0 ;;
+    esac
+
+    # A loop, not one check, since PATH can stack more than one shadow ahead of $BIN_DIR.
+    # Removing only the nearest would still leave $BIN_DIR shadowed by the next one.
+    local name resolved
+    for name in "${names[@]}"; do
+        while true; do
+            resolved=$(tool_shadow_path "$name")
+            [[ -n $resolved ]] || break
+
+            # A distro package's own file, found only when PATH puts it ahead of $BIN_DIR, which this script does not set up.
+            # Removing it directly would desync dpkg's database from the filesystem, so it stays, and the fix is the PATH order.
+            if dpkg-query -S "$resolved" > /dev/null 2>&1; then
+                warn "$tool: $resolved belongs to a distro package and stays, put $BIN_DIR ahead of it on PATH instead"
+                break
+            fi
+
+            log "$tool: $resolved shadows $BIN_DIR/$name, removing it"
+            if ! confirm "  Remove $resolved?"; then
+                warn "$tool: left $resolved in place, it will keep shadowing $BIN_DIR/$name"
+                break
+            fi
+            # A guarded call, not a bare one, so a real removal failure (a read-only filesystem) does not take set -e's whole run down with it.
+            # Leaves this one tool shadowed and moves on instead.
+            run_root rm -f "$resolved" || {
+                warn "$tool: failed to remove $resolved, it will keep shadowing $BIN_DIR/$name"
+                break
+            }
+            # Under --dry-run nothing is actually removed, so the same path would resolve again forever.
+            [[ $DRY_RUN == true ]] && break
+        done
+    done
+}
+
 # Install or upgrade one tool.
 # A tool whose install returns non-zero is collected rather than fatal, so one failure does not strand the rest of the run.
 # A refusal is not a failure and does end the run: an unverifiable keyring, a checksum mismatch, or a declined prompt stops everything rather than being collected, because continuing past one would install something nobody vouched for.
 # Some upstream lookups also end the run today where collecting them would match the intent above, which TODO.md records rather than changes here.
 apply_tool() {
     local tool="$1" installed target status
+
+    # Unshadowing first is safe only when nothing at $BIN_DIR could be made worse by it.
+    # --upgrade brings $BIN_DIR current regardless, and --install with nothing there yet has nothing to protect.
+    # --install with a managed copy already in place leaves it at its version by design, so removing a newer shadow first would downgrade what PATH resolves to.
+    if [[ $MODE == "upgrade" || ! -x "$BIN_DIR/$tool" ]]; then
+        tool_unshadow "$tool"
+    elif [[ -n $(tool_shadow_path "$tool") ]]; then
+        log "$tool: still shadowed on PATH, --upgrade removes it, --install leaves it to avoid downgrading what's shadowing it"
+    fi
+
     installed=$("$(tool_function "$tool" version)" 2> /dev/null || true)
     target=$("$(tool_function "$tool" target)" 2> /dev/null || true)
     status=$(tool_effective_status "$tool" "$installed" "$target")
