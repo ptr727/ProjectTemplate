@@ -27,6 +27,7 @@ from __future__ import annotations
 import argparse
 import json
 import re
+import shlex
 import subprocess
 import sys
 from pathlib import Path
@@ -202,7 +203,9 @@ def contract_problems(tools: list[dict]) -> list[str]:
         # The remedy is shape-checked and not required, so a repository floor without one degrades to the source line rather than failing the merge.
         # Requiring it fleet-wide is the hub declaration's contract, held by spec/validate.py and scripts/test_bootstrap.py rather than here.
         rem = t.get('remedy')
-        if isinstance(rem, dict):
+        if rem is not None and not isinstance(rem, dict):
+            problems.append(f'{name} remedy must be an object keyed by platform, so its command was not read')
+        elif isinstance(rem, dict):
             stray = sorted(set(rem) - set(PLATFORM_KEYS))
             if stray:
                 problems.append(f'{name} remedy names {", ".join(stray)}, which no platform reads - use {", ".join(PLATFORM_KEYS)}')
@@ -278,18 +281,36 @@ def platform_key() -> str:
     return 'macos' if sys.platform == 'darwin' else 'windows'
 
 
-def resolve_remedy(command: str) -> str:
+def platform_field(tool: dict, field: str) -> str | None:
+    """The current platform's value under `field`, or None where the entry does not usably carry one.
+
+    The shape checks report a malformed declaration, and this read stays crash-free beside them,
+    so one bad field costs its own output line rather than the whole run and the findings already
+    collected.
+    """
+    values = tool.get(field)
+    value = values.get(platform_key()) if isinstance(values, dict) else None
+    return value if isinstance(value, str) and value else None
+
+
+def resolve_remedy(command: str, root: Path | None = None) -> str:
     """A remedy command with a repo-relative installer path made absolute against this checkout.
 
     The catalog stores host-setup/ paths repo-relative so the data stays portable, and the gate
     runs from any working directory, so the path is resolved against the tree this script lives in
-    to keep the printed command runnable as printed.
+    and quoted where the shell needs it, to keep the printed command runnable as printed.
     """
     if not command.startswith('host-setup/'):
         return command
     script, _, rest = command.partition(' ')
-    resolved = Path(__file__).resolve().parent.parent / script
-    return f'{resolved} {rest}' if rest else str(resolved)
+    resolved = str((root or Path(__file__).resolve().parent.parent) / script)
+    if platform_key() == 'windows':
+        # PowerShell runs a quoted path only through the call operator, and a single-quoted literal doubles its own quote character.
+        escaped = resolved.replace("'", "''")
+        quoted = f"& '{escaped}'" if resolved != escaped or ' ' in resolved else resolved
+    else:
+        quoted = shlex.quote(resolved)
+    return f'{quoted} {rest}' if rest else quoted
 
 
 def overlay_above(start: Path) -> Path | None:
@@ -338,8 +359,8 @@ def check(tools: list[dict]) -> list[str]:
             issues.append(f'{name} reported {version!r}, which is not dot-separated integers, so its floor was not applied')
         elif compare(found, floor) < 0:
             # The remedy rides on the finding rather than beside it, since a separate line would count as a second issue.
-            src = (tool.get('source') or {}).get(platform_key())
-            rem = (tool.get('remedy') or {}).get(platform_key())
+            src = platform_field(tool, 'source')
+            rem = platform_field(tool, 'remedy')
             # The head line stays the scannable fact and the rationale follows it, rather than being inlined into it.
             # An entry's why runs to a paragraph, so inlining made the one line a reader scans in CI output unreadable, and the longest entry is not the one that needs it least.
             issues.append(f'{name} {version} is below the {floor_text} floor'

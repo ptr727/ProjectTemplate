@@ -152,6 +152,35 @@ class TestCheck(unittest.TestCase):
         self.assertTrue(resolved.endswith('install-tools.sh --upgrade gh'))
         self.assertEqual(host_gate.resolve_remedy('brew upgrade gh'), 'brew upgrade gh')
 
+    def test_a_checkout_path_needing_quoting_is_quoted(self):
+        """Runnable as printed holds for a checkout path carrying a space, on either shell."""
+        resolved = host_gate.resolve_remedy('host-setup/linux/install-tools.sh --upgrade gh',
+                                            root=Path('/tmp/space dir'))
+        self.assertTrue(resolved.endswith("--upgrade gh"))
+        if host_gate.platform_key() == 'windows':
+            self.assertTrue(resolved.startswith("& '"))
+        else:
+            self.assertIn("'", resolved.partition(' --upgrade')[0])
+
+    def test_a_malformed_source_or_remedy_reports_rather_than_crashing(self):
+        """One bad field costs its own output line, not the run and the findings already collected.
+
+        The hub declaration is shape-checked by spec/validate.py in CI and by nothing at gate
+        runtime, so the below-floor read has to survive a non-dict field and a non-string command.
+        """
+        entry = tool('gh', minimum='2.47.0', probes=self.probe_for('v2.46.0'),
+                     source='not a dict', remedy={'linux': 7, 'macos': 7, 'windows': 7})
+        issues = host_gate.check([entry])
+        self.assertEqual(len(issues), 1)
+        self.assertNotIn('INSTALL FROM', issues[0])
+        self.assertNotIn('REMEDY', issues[0])
+
+    def test_a_non_dict_remedy_on_a_floored_tool_is_a_contract_problem(self):
+        problems = host_gate.contract_problems(
+            [tool('gh', minimum='2.47.0', source={'linux': 'somewhere'}, remedy='not a dict')])
+        self.assertEqual(len(problems), 1)
+        self.assertIn('remedy must be an object', problems[0])
+
     def test_a_version_at_the_floor_passes(self):
         self.assertEqual(host_gate.check([tool('gh', minimum='2.47.0', probes=self.probe_for('v2.47.0'))]), [])
 
