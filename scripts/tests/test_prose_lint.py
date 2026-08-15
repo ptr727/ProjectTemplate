@@ -2795,6 +2795,33 @@ class TestDeadPath(unittest.TestCase):
         self.addCleanup(prose_lint.carried_paths.cache_clear)
         self.assertEqual([], self.kinds(root, "Run `scripts/gone.py` to apply.\n"))
 
+    def test_a_hub_hosted_path_is_exempt(self) -> None:
+        """A repo that retired its copy still names the hub's, which is the pointer the rule wants.
+
+        The manifest exemption cannot reach this one, since no repository carries `spec/files.json`,
+        so without the literal set every retirement fails its own promotion gate.
+        """
+        root = self.tmp / "retired"
+        (root / "repo-config").mkdir(parents=True)
+        (root / "repo-config" / "configure.sh").write_text("#!/bin/sh\n", encoding="utf-8")
+        self.git(root, "init", "-q")
+        self.git(root, "add", "-A")
+        self.git(root, "commit", "-qm", "base")
+        self.git(root, "rm", "-q", "repo-config/configure.sh")
+        self.git(root, "commit", "-qm", "retire")
+        self.assertEqual([], self.kinds(root, "Run the hub's `repo-config/configure.sh`.\n"))
+
+    def test_the_hub_hosted_set_matches_the_ledger(self) -> None:
+        """The literal is a copy of the ledger, so a retirement that misses it fails here loudly."""
+        ledger = json.loads((REPO / "spec" / "divergences.json").read_text(encoding="utf-8"))
+        retired = {
+            e["path"]
+            for group in ("dispositions", "gaps")
+            for e in ledger.get(group, [])
+            if isinstance(e, dict) and e.get("disposition") == "retire"
+        }
+        self.assertEqual(retired, set(prose_lint.HUB_HOSTED))
+
     def test_without_git_the_rule_stands_down(self) -> None:
         """No history means no deletion signature, so nothing is reported rather than guessed."""
         bare = self.tmp / "bare"
