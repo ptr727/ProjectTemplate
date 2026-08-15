@@ -1,22 +1,22 @@
 # Audit: PhotoCleaner
 
-- **Audited branch:** main (`c457ff3`)
+- **Audited branch:** main (`f56178a`)
 - **Types:** csharp, console, docker (from registry)
-- **Verdict:** not operational on `main`, converged on `develop`, promotion in flight
+- **Verdict:** operational
 - **Date:** 2026-08-15
-- **Run stamps:** `audit run 2026-08-15T14:28:27Z | hub 0e84805` (main), `audit run 2026-08-15T14:58:12Z | hub d54862a | branch override develop` (develop at `e8b7a81`)
+- **Run stamp:** `audit run 2026-08-15T18:43:20Z | hub b09078e`
 
-Supersedes the 2026-08-01 snapshot. Everything that snapshot listed as a defect or drift has landed on `develop`: the `AGENTS.md`/`GOVERNANCE.md` router split, the `validate-release` gate, the README structure, and the two 2026-08-13 and 2026-08-15 resyncs against the hub ([#49](https://github.com/ptr727/PhotoCleaner/pull/49), [#50](https://github.com/ptr727/PhotoCleaner/pull/50)). None of it has reached `main` yet, so `main` still measures as the pre-resync state and this report says so rather than reading `develop` as ground truth.
+Supersedes the earlier 2026-08-15 snapshot, which measured `main` before the promotion. The resyncs against the hub ([#49](https://github.com/ptr727/PhotoCleaner/pull/49), [#50](https://github.com/ptr727/PhotoCleaner/pull/50), [#52](https://github.com/ptr727/PhotoCleaner/pull/52)) are promoted to `main` by [#51](https://github.com/ptr727/PhotoCleaner/pull/51), and the deterministic audit reports **clean** at `main` and at `develop` with the hub at `b09078e`. The two hub-only workflow findings the earlier snapshot carried are gone as well, since the hub now declares the publisher and validator workflows at intent fidelity (#736).
 
 ## Develop Drift
 
-`develop` vs `main`: two content commits ahead (#49, #50), nothing behind. This is convergence awaiting promotion, not divergence. The audit at `main` reports 43 findings, 6 of them letters (README section and reference-name letters, `host-tools.json` absent). The audit at `develop` reports 2, both the `investigate`-dispositioned hub-only files (`publish-release.yml`, `validate-task.yml`) that every repo carries and that are settled in `spec/divergences.json` rather than per repo.
+`develop` vs `main`: identical content, since #51 merged `develop` at `ab23034` and nothing has landed since. The audit at `develop` reports zero findings.
 
-The promotion [#51](https://github.com/ptr727/PhotoCleaner/pull/51) is open and **blocked by a hub defect, not a repo one**: the prose gate diffs a promotion against `main`, and `prose_lint.py dead-path` flags three mentions of `repo-config/configure.sh` (a file the repo retired per the `retire` disposition), two of them in verbatim hub text the repo cannot reword. Filed as [#721](https://github.com/ptr727/ProjectTemplate/issues/721). Copilot read 18 of 19 files on the promotion, omitting `GOVERNANCE.md`, and generated no comments.
+The promotion was blocked for one round by the prose gate's `dead-path` rule flagging verbatim mentions of the retired `repo-config/configure.sh`, filed as [#721](https://github.com/ptr727/ProjectTemplate/issues/721) and fixed by #731. The gate fetches its rules from hub `develop` on a `develop`-targeted run, so a re-run cleared it with no repo change. Copilot read 18 of 19 changed files on the promotion in both rounds and raised no thread. Its one suppressed finding, a Mermaid edge in the hub-carried `WORKFLOW.md` diagram, was answered on the pull request as declined, since the diagram is hub content and the D1 text beside it already states the rule.
 
 ## Dimensions
 
-Judged at `main` unless the row says otherwise. Type-dimension checks are hand-judged per AUDIT.md section 4 and are unchanged from the 2026-08-01 snapshot, since #49 and #50 touched governance and configuration only.
+Judged at `main`. Type-dimension checks are hand-judged per AUDIT.md section 4 and are unchanged from the 2026-08-01 snapshot, since #49, #50, and #52 touched governance and configuration only.
 
 | Dimension | Letter | Intent | Verdict | Evidence (file:line) |
 | --- | --- | --- | --- | --- |
@@ -27,33 +27,31 @@ Judged at `main` unless the row says otherwise. Type-dimension checks are hand-j
 | repo-setup | pass | pass | pass | Every name in `spec/secrets.json` present in both the Actions and Dependabot stores (`CODECOV_TOKEN` included), no forbidden name |
 | linter-parity | pass | pass | pass | `validate-task.yml` runs csharpier check, `dotnet format style --verify-no-changes`, markdownlint, cspell, actionlint, editorconfig-checker, and the hub prose gate. One config per linter |
 | recurring-violations | pass | pass | pass | `prose_lint.py --diff origin/develop` clean on #50, `repo_gate.py` clean on `develop` (the `eol-coverage` forward-declaration gap closed in #50) |
-| readme-structure | fail | pass | drift | At `main`: no `3rd Party Tools` section, four reference-name letters, an `Internal` link group. All fixed on `develop` in #49 |
-| workflow (WORKFLOW.md 5A/5B) | pass | pass | pass | `build-release-task.yml` carries `validate-release` and the re-vendored `github-release` job (interface contract satisfied by name), the two hub-only workflows are `investigate` in the ledger |
-| agent-instruction-set | fail | pass | drift | At `main`: `Fleet Bootstrap` and `Hub-Hosted Tooling` absent, 15 verbatim sections stale, `AGENTS.md`/`GOVERNANCE.md`/`CODESTYLE.md`/`WORKFLOW.md`/`copilot-instructions.md` intent copies trail the hub. All re-vendored or reconciled on `develop` in #49 and #50, where the audit reports no instruction-set finding |
+| readme-structure | pass | pass | pass | Required sections present in order, reference names and link groups per `spec/readme-structure.md`, all mechanical README checks clean at `main` |
+| workflow (WORKFLOW.md 5A/5B) | pass | pass | pass | `build-release-task.yml` carries `validate-release` and the re-vendored `github-release` job (interface contract satisfied by name), and `publish-release.yml` and `validate-task.yml` are declared intent carries as of hub #736 |
+| agent-instruction-set | pass | pass | pass | Every verbatim `AGENTS.md`/`GOVERNANCE.md` section byte-matches the hub canonical, and every intent carry (`CODESTYLE.md`, `WORKFLOW.md`, `AUDIT.md`, `.github/copilot-instructions.md`, the linter configs) is reconciled against the hub's history in #50 and #52 with the repo's own adaptations kept |
 
 nuget, pypi, python: N/A (no packaging, no Python).
 
 ## Defects (most severe first)
 
-None on `develop`. On `main`, the readme-structure and agent-instruction-set rows above are letter misses whose intent holds (the content exists and is correct on `develop`), so they are drift awaiting promotion rather than defects.
+None.
 
 ## Drift Findings
 
-- Every finding the `main` audit reports is closed on `develop` by #49 or #50, and the promotion is #51.
-- `publish-release.yml` and `validate-task.yml` are `hub-only` at `investigate` in `spec/divergences.json`, a fleet-wide question rather than this repo's.
+None. The deterministic audit is clean at `main` and `develop`, and no hand-judged dimension reports a letter miss.
 
 ## Convergence in Flight
 
-- [#50](https://github.com/ptr727/PhotoCleaner/pull/50) merged to `develop` at `e8b7a81`: re-vendors the 10 stale verbatim sections, reconciles the intent carries against the hub's history since each last synced (with the repo's own adaptations kept, per the carried-instruction-file-guard probe), claims `CODECOV_TOKEN` in both stores, and clears the `eol-coverage` gap.
-- [#51](https://github.com/ptr727/PhotoCleaner/pull/51) `develop -> main` promotion, open, blocked on the hub prose gate ([#721](https://github.com/ptr727/ProjectTemplate/issues/721)).
+None. #50, #52 (to `develop`) and #51 (`develop -> main`) are merged.
 
 ## Proposed Registry / Spec Updates
 
-- The `driftNotes` are unchanged. The first describes the publish shape (multi-arch Docker plus a github-release 7z, two-phase release), which still holds. The second records the private-for-now decision, which still holds (`isPrivate: true` at the time of this run) and still means the GitHub-sourced shields render broken.
+- The `driftNotes` are unchanged. The first describes the publish shape (multi-arch Docker plus a github-release 7z, two-phase release), which still holds. The second records the private-for-now decision, which still holds (`isPrivate: true` at the time of this run) and still means the GitHub-sourced shields render broken. Neither asserts outstanding work.
 
 ## Escalations
 
-Two hub findings from this pass, filed rather than patched per repo:
+Two hub findings from this pass, filed rather than patched per repo, both closed since:
 
-1. [#721](https://github.com/ptr727/ProjectTemplate/issues/721): `prose_lint.py dead-path` cannot recognize a hub-hosted path in a repo that retired the file, so verbatim text naming `repo-config/configure.sh` fails a downstream promotion gate.
-2. [#722](https://github.com/ptr727/ProjectTemplate/issues/722): the hub's `.github/copilot-instructions.md` links `GOVERNANCE.md#every-finding-ends-in-an-action`, an anchor that left `GOVERNANCE.md` when PR Review Etiquette was packaged as a Skill. PhotoCleaner re-pointed its copy in #50 after Copilot raised it.
+1. [#721](https://github.com/ptr727/ProjectTemplate/issues/721): `prose_lint.py dead-path` could not recognize a hub-hosted path in a repo that retired the file, so verbatim text naming `repo-config/configure.sh` failed a downstream promotion gate. Fixed by #731.
+2. [#722](https://github.com/ptr727/ProjectTemplate/issues/722): the hub's `.github/copilot-instructions.md` linked `GOVERNANCE.md#every-finding-ends-in-an-action`, an anchor that left `GOVERNANCE.md` when PR Review Etiquette was packaged as a Skill. PhotoCleaner re-pointed its copy in #50 after Copilot raised it, and #52 carried the canonical wording #730 landed.
