@@ -114,7 +114,7 @@
             "consumerModel": "pull",
             "releaseTrigger": "two-phase",
             "configLayout": { "rulesetsDir": "repo-config", "pythonConfig": null },
-            "driftNotes": ["Carries ARCHITECTURE.md and codecov.yml beyond the baseline.", "First csharp+python repo: a C# console app at the root plus a stdlib-only Python tooling subtree (RegressionTests/, uvx scripts profile - no uv.lock, pyproject carries only ruff+mypy config; PlexCleaner#855). python.uvlock.pinned and python.coverage.codecov are N/A for that subtree (no uv project, no tests); codecov.yml stays required for the C# side. Reference for the csharp+python shape (issue #339).", "Branch hygiene: 3 stale Dependabot nuget branches (PRs closed/superseded) and an unmerged feature/727-decouple-release-assets branch linger; main+develop otherwise clean after the 2026-07 sweep."]
+            "driftNotes": ["Carries ARCHITECTURE.md and codecov.yml beyond the baseline.", "First csharp+python repo: a C# console app at the root plus a stdlib-only Python tooling subtree (RegressionTests/, uvx scripts profile - no uv.lock, pyproject carries only ruff+mypy config; PlexCleaner#855). python.uvlock.pinned and python.coverage.codecov are N/A for that subtree (no uv project, no tests); codecov.yml stays required for the C# side. Reference for the csharp+python shape (issue #339)."]
         },
         {
             "name": "ESPHome-NonRoot",
