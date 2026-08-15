@@ -11,7 +11,7 @@ Carried content is a class with virtual functions. The **fixed** part is the int
 Each [`spec/files.json`][files] entry declares one `fidelity`, defaulting to `presence`.
 
 - **presence** - the unit exists (a file, or a Markdown section heading). The audit's baseline check.
-- **intent** - carried faithfully but judged by meaning, not bytes. A downstream copy legitimately differs (a governed divergence or a paraphrase), and equivalence is a human call via `intentRef`. The audit asserts nothing beyond presence.
+- **intent** - carried faithfully but judged by meaning, not bytes. A downstream copy legitimately differs (a governed divergence or a paraphrase), and equivalence is a human call via `intentRef`. The audit asserts presence, plus a last-modified staleness advisory at drift: a hub canonical changing after the copy's own last commit marks the copy as possibly trailing, a hint rather than proof, and content is never judged.
 - **verbatim** - byte-identical to the hub's canonical after line-ending, action-pin, and job-needs normalization. The audit content-hashes the downstream copy against canonical. It applies to a whole file, a workflow job region (a job selected by key), or a Markdown section region (a `## heading` block selected by name). The section granularity lets one file be **intent overall while a few of its sections are verbatim**. A universal rule block stays byte-identical fleet-wide even though the rest of the document is a repo-adapted paraphrase, so a stale section or a missing rule is caught while its heading still passes the presence check.
 - **interface** - an overridable body that must honor a named contract. The audit checks the contract by name and wiring, never the body.
 

@@ -1,14 +1,24 @@
 {
     "$schema": "./host-tools.schema.json",
-    "note": "The host contract in docs/host-setup.md, as data a gate can read. docs/host-setup.md states which tools a host needs and which repo procedure stops working without each one; this file adds the version floors, and each floor records the defect it encodes rather than a preference. A floor is one of two kinds and says which in its own why. A measured floor sits immediately above a version known to break a documented procedure, and is the kind most floors here are. A target floor declares the version the repo's own toolchain is configured for, where a lower interpreter is unverified rather than known broken, and it is honest about that rather than implying a defect nobody found. Everything else is presence-only, which is deliberate: a floor nobody can justify becomes a host failure nobody can act on. An entry is required unless it declares otherwise, and an optional tool that is absent is skipped rather than failed, since it is needed by one repository rather than by the fleet. Probes are tried in order and the first that runs is the answer, which is how a host whose interpreter is not called python3 still reports a version. The pattern is matched against the probe's combined output and its first capture group is the version, read as dot-separated integers, so a two-part YYYY.MM version compares correctly against a three-part semantic one.",
+    "note": "The host contract in docs/host-setup.md, as data a gate can read. docs/host-setup.md states which tools a host needs and which repo procedure stops working without each one; this file adds the version floors, and each floor records the defect it encodes rather than a preference. A floor is one of two kinds and says which in its own why. A measured floor sits immediately above a version known to break a documented procedure, and is the kind most floors here are. A target floor declares the version the repo's own toolchain is configured for, where a lower interpreter is unverified rather than known broken, and it is honest about that rather than implying a defect nobody found. Everything else is presence-only, which is deliberate: a floor nobody can justify becomes a host failure nobody can act on. An entry is required unless it declares otherwise, and an optional tool that is absent is skipped rather than failed, since it is needed by one repository rather than by the fleet. Probes are tried in order and the first that runs is the answer, which is how a host whose interpreter is not called python3 still reports a version. The pattern is matched against the probe's combined output and its first capture group is the version, read as dot-separated integers, so a two-part YYYY.MM version compares correctly against a three-part semantic one. A floor also carries a remedy beside its source: the source says where the tool must come from and why, and the remedy is the one command that installs or upgrades it on each platform, printed under a below-floor failure so the finding carries its own fix. A remedy is written for the below-floor state, which is why the host-setup installers run in their upgrade mode there. A macOS remedy runs brew install rather than brew upgrade where the entry's source is the platform rather than Homebrew: brew install upgrades a formula that is installed but outdated, per the Homebrew manpage's install entry, and brew upgrade refuses a tool Homebrew never installed, so install is the one form that fixes both below-floor states. A remedy path under host-setup/ is repo-relative and the gate resolves it against the checkout it runs from, so the printed command is runnable as printed. A platform where the tool does not apply carries no remedy key, and scripts/tests/test_bootstrap.py is what keeps this mapping total and pointing at tools the installers actually manage.",
     "tools": [
         {
             "name": "docker",
             "required": true,
             "probes": [["docker", "--version"]],
             "pattern": "Docker version (\\d+(?:\\.\\d+)*)",
-            "minimum": null,
-            "why": "The four linters run as pinned images rather than local installs, so the image tag fixes the linter version and the daemon's own version has never been the thing that broke a run. No floor is declared because none has been measured here."
+            "minimum": "29.6.2",
+            "why": "The four linters run as pinned images rather than local installs, so the image tag fixes the linter version and the daemon's own version has never been the thing that broke a run, and this floor is a target rather than a measured breakage for exactly that reason. It is anchored to what one host already carries, the same reasoning jq's and uv's floors use: issue #695 recorded Docker Desktop 4.85.0 and Engine 29.6.2 on a Windows host, and the probe reads the engine version, not the Desktop application version winget tracks separately, so the floor is written against the number the probe actually sees. A host below it is therefore unverified rather than known broken. Inside a WSL distribution, docker comes from Docker Desktop's own WSL integration rather than a local package, and the Linux remedy below reflects that: run inside a WSL distribution, it refuses the native install and points at enabling that integration and at upgrading Docker Desktop on the Windows host the distribution runs under, rather than installing anything itself.",
+            "source": {
+                "linux": "Docker's own apt repository at download.docker.com, per https://docs.docker.com/engine/install/, and never the distribution's docker.io package, which trails upstream and conflicts with docker-ce. Not applicable inside a WSL distribution, which takes docker only from Docker Desktop's own WSL integration.",
+                "macos": "Docker Desktop for Mac, via Homebrew Cask, which tracks upstream Desktop releases.",
+                "windows": "winget (Docker.DockerDesktop), which tracks upstream Desktop releases."
+            },
+            "remedy": {
+                "linux": "host-setup/linux/install-tools.sh --upgrade docker",
+                "macos": "brew install --cask docker",
+                "windows": "host-setup/windows/install-tools.ps1 -Upgrade docker"
+            }
         },
         {
             "name": "gh",
@@ -21,6 +31,11 @@
                 "linux": "The official apt repository at cli.github.com, per https://github.com/cli/cli/blob/trunk/docs/install_linux.md, and never the distribution's own package.",
                 "macos": "Homebrew, which tracks upstream releases.",
                 "windows": "winget, which tracks upstream releases, so the hazard the Linux note describes does not arise."
+            },
+            "remedy": {
+                "linux": "host-setup/linux/install-tools.sh --upgrade gh",
+                "macos": "brew upgrade gh",
+                "windows": "host-setup/windows/install-tools.ps1 -Upgrade gh"
             }
         },
         {
@@ -42,6 +57,10 @@
                 "linux": "The upstream release at https://github.com/MestreLion/git-tools, or in CI the action at https://github.com/chetan/git-restore-mtime-action which vendors it, and never the distribution's own package.",
                 "macos": "Homebrew's git-tools, checked against the floor like any other source.",
                 "windows": "Not applicable, since the tool is used by a Linux deploy path."
+            },
+            "remedy": {
+                "linux": "host-setup/linux/install-tools.sh --upgrade git-restore-mtime",
+                "macos": "brew upgrade git-tools"
             }
         },
         {
@@ -55,6 +74,11 @@
                 "linux": "The distribution package where it meets the floor, which on current Debian stable it does at 1.7.1, so the floor is chosen to be satisfiable without a manual build. An older release sits below it, and there the upstream release at https://github.com/jqlang/jq is the source. Preferring the current upstream release everywhere keeps the fleet on one version in practice, which is what the other two platforms already do.",
                 "macos": "Homebrew, which tracks upstream releases.",
                 "windows": "winget, which tracks upstream releases, so the hazard the Linux note describes does not arise."
+            },
+            "remedy": {
+                "linux": "host-setup/linux/install-tools.sh --upgrade jq",
+                "macos": "brew upgrade jq",
+                "windows": "host-setup/windows/install-tools.ps1 -Upgrade jq"
             }
         },
         {
@@ -63,11 +87,16 @@
             "probes": [["python3", "--version"], ["py", "-3", "--version"]],
             "pattern": "Python (\\d+(?:\\.\\d+)*)",
             "minimum": "3.13",
-            "why": "Every script here is standard library only, so a bare interpreter is enough and no package floor exists. The floor is the toolchain target rather than a measured breakage one version below it, which is the one entry here that reads that way and says so rather than implying a defect nobody found. pyproject.toml sets ruff target-version to py313 and mypy python_version to 3.13, so what those tools report describes 3.13 and describes no other interpreter, and a run below the floor is unverified rather than known broken. Neither tool runs in CI. What CI does run is markdownlint, cspell, actionlint and editorconfig-checker, the registry and spec validation, the script self-tests, and the repo and prose gates, and no Python linter or type checker among them. So this floor is a configuration choice rather than an enforced result, and a host failing it has no CI failure to point at. Two hard requirements are measured, both sit lower, and they fail differently. str.removeprefix and str.removesuffix need 3.9, and each is called where the tree actually calls it: removeprefix in scripts/prose_lint.py and spec/audit.py, removesuffix in spec/audit.py alone. An older interpreter starts, runs, and raises AttributeError when it reaches one. datetime.UTC needs 3.11 and arrives through a module-level from datetime import UTC in spec/audit.py, scripts/pr_review.py and its tests, so an older interpreter raises ImportError before any of those modules run at all. Which mode a host sees is decided by the script it runs rather than by the interpreter alone: spec/audit.py carries both and fails at import, scripts/pr_review.py carries only the import and fails the same way, and scripts/prose_lint.py carries only the call and therefore starts, runs, and fails partway through. The name rather than the version is what differs per platform, which the second probe covers.",
+            "why": "Every script here is standard library only, so a bare interpreter is enough and no package floor exists. The floor is the toolchain target rather than a measured breakage one version below it, which is the one entry here that reads that way and says so rather than implying a defect nobody found. pyproject.toml sets ruff target-version to py313 and mypy python_version to 3.13, so what those tools report describes 3.13 and describes no other interpreter, and a run below the floor is unverified rather than known broken. Both tools run in CI through uvx at their latest releases, beside the doc linters, the registry and spec validation, the script self-tests under coverage, and the repo and prose gates. That run judges the code rather than any host, so this floor is still a configuration choice rather than an enforced result, and a host failing it has no CI failure to point at. Two hard requirements are measured, both sit lower, and they fail differently. str.removeprefix and str.removesuffix need 3.9, and each is called where the tree actually calls it: removeprefix in scripts/prose_lint.py and spec/audit.py, removesuffix in spec/audit.py alone. An older interpreter starts, runs, and raises AttributeError when it reaches one. datetime.UTC needs 3.11 and arrives through a module-level from datetime import UTC in spec/audit.py, scripts/pr_review.py and its tests, so an older interpreter raises ImportError before any of those modules run at all. Which mode a host sees is decided by the script it runs rather than by the interpreter alone: spec/audit.py carries both and fails at import, scripts/pr_review.py carries only the import and fails the same way, and scripts/prose_lint.py carries only the call and therefore starts, runs, and fails partway through. The name rather than the version is what differs per platform, which the second probe covers.",
             "source": {
                 "linux": "Whatever the platform provides at or above the floor, since the scripts need an interpreter and no packages, so no distribution or build is pinned here.",
                 "macos": "Whatever the platform provides at or above the floor, on the same reasoning as Linux.",
                 "windows": "The python.org installer, which registers py, python and python3.13 but not python3, so the gate reaches it through the py -3 probe rather than the python3 name that resolves to the Microsoft Store alias stub."
+            },
+            "remedy": {
+                "linux": "host-setup/linux/install-tools.sh --upgrade python",
+                "macos": "brew install python",
+                "windows": "host-setup/windows/install-tools.ps1 -Upgrade python"
             }
         },
         {
@@ -75,8 +104,18 @@
             "required": true,
             "probes": [["uv", "--version"]],
             "pattern": "uv (\\d+(?:\\.\\d+)*)",
-            "minimum": null,
-            "why": "Used for coverage runs and the Python toolchain in a Python repository, where the pinned tool versions live in that repository rather than in uv itself. No floor has been measured here."
+            "minimum": "0.12.2",
+            "why": "Used for coverage runs and the Python toolchain in a Python repository, where the pinned tool versions live in that repository rather than in uv itself, so no uv feature is what a floor here would guard. The floor is a target rather than a measured breakage, and it says so rather than implying a defect nobody found. It is anchored to what two independently set-up hosts already carry rather than to a version anyone has verified good, the same reasoning jq's floor uses. A winget install on Windows carried 0.12.2 while winget already offered 0.12.4, so the winget package can lag upstream by a release, and host-setup/linux/install-tools.sh, which fetches upstream's latest release directly rather than a distribution package, carried 0.12.4 on a separate Linux host. The floor sits at the lower of the two, so a host on either managed install path already clears it, and a host below it is unverified rather than known broken.",
+            "source": {
+                "linux": "The upstream release archive at https://github.com/astral-sh/uv, which host-setup/linux/install-tools.sh fetches directly, and no distribution packages it.",
+                "macos": "Homebrew, which tracks upstream releases.",
+                "windows": "winget (astral-sh.uv), which can lag upstream by a release rather than tracking it release for release."
+            },
+            "remedy": {
+                "linux": "host-setup/linux/install-tools.sh --upgrade uv",
+                "macos": "brew upgrade uv",
+                "windows": "host-setup/windows/install-tools.ps1 -Upgrade uv"
+            }
         }
     ]
 }

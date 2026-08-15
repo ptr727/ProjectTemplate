@@ -6,6 +6,8 @@ An entry carries `Blocked by`, `Issue` and `Checked` exactly once each, in that 
 
 A cluster's `State` is one of four. `ready` means every open question is answerable by the session doing the work. `blocked` names the cluster it waits on. `decision` needs the maintainer. `measure` means the first action is a count rather than an edit.
 
+Adoption gaps for the skill-based fleet system are registered in [`docs/fleet-map.md`][fleet-map] rather than here, so the two files do not fork. A new observation about such a gap lands as a register row there, and this file carries only the pointer.
+
 ## How to Select the Next Item
 
 The steps below are followed in order rather than sampled.
@@ -22,6 +24,20 @@ The steps below are followed in order rather than sampled.
 10. Delete a cluster heading when its pull request merges, and move anything the pull request did not carry into a new cluster with its own state.
 
 ## Work Clusters
+
+### Default `.py` to LF Fleet-Wide, Retiring the Per-Path Pin List
+
+One pull request changing [`GOVERNANCE.md`][governance] "Line Endings", [`.editorconfig`][editorconfig], and [`.gitattributes`][gitattributes] to pin `*.py` LF by extension, replacing the growing list of individually-pinned shebang scripts, plus the one-time renormalization it obliges fleet-wide.
+
+**State** `decision`. **Touches** `GOVERNANCE.md` "Line Endings" (verbatim, so it re-vendors fleet-wide), `.editorconfig`, `.gitattributes`, and every downstream repo carrying a CRLF `.py` file. **Cost** one hub edit plus a renormalization pass per affected repo. The hub itself needs no renormalization, since every `.py` file it tracks is already LF.
+
+- **Pin `*.py text eol=lf` by extension and drop the by-path list it replaces.** The by-path list exists because the fleet's default is CRLF for `.py` and only a shebang-executed script needs LF, so each new script has needed its own `.gitattributes` line and its own `.editorconfig` override. It reads 25 entries today, up from the roughly dozen it carried before this session added four more for two new scripts and their tests, which is the divergence outweighing the reason it was chosen.
+  - **Blocked by** - Nothing.
+  - **Issue** - None filed.
+  - **Checked** - `develop` at `7f9caaa` on 2026-08-12, where `.gitattributes` carries 25 LF pins (3 forward-declared) over 19 tracked `.py` files, and every one of those 19 is already LF (none is a vanilla CRLF `.py`), so the hub side of this change is comment-and-pattern-only.
+  - **Open** - Whether downstream repos with a vanilla (non-shebang) CRLF `.py` file need a coordinated renormalization pass or can pick it up on their own next resync. 5 repos in [`registry/repos.json`][repos] carry the `python` type (`aiopurpleair`, `homeassistant-purpleair`, `Financial-Modeling`, `PlexCleaner`, `ESPHome-Config`) and were not individually checked for CRLF `.py` content as part of writing this entry.
+  - **Settled** - The default was set to CRLF in #229 for editor compatibility on Windows, not because LF broke anything measured. The reason it is being revisited is that non-VSCode Windows editors were the concern, and the per-path pin list's growth now outweighs that concern's practical weight, per the maintainer.
+  - **Settled** - The by-path convention was reaffirmed in #503 ("Do not re-add a blanket `*.py text eol=lf`"), but that pull request only reshaped the two files' comment prose and did not re-examine the underlying policy, so it is not a second, independent rejection of this change.
 
 ### Giving the Fleet's Own Pins Something to Resolve Against
 
@@ -387,19 +403,64 @@ One pull request deciding whether the review record admits a second class of ent
 
 One pull request writing down the agent-to-agent messaging this fleet has now used successfully, so it is a method with stated boundaries rather than a capability each session rediscovers. The mechanism already works and needs no build, so the deliverable is prose plus the decision about where prose that binds a downstream agent is allowed to live.
 
-**State** `decision`. **Touches** either `GOVERNANCE.md` with [`spec/files.json`][files] and [`spec/section-model.md`][section-model], or a hub-only `docs/` file, and the choice between those is the decision. **Cost** one hub edit, and a fleet-wide re-vendor on the first option only.
+**State** `ready`, and the deliverable ships beside [`docs/fleet-map.md`][fleet-map], so this cluster is deleted when that pull request merges. **Touches** [`docs/peer-messaging.md`][peer-messaging-doc]. **Cost** one hub edit, and no re-vendor.
 
 - **Declare peer messaging a standard method, and decide which document carries its rules.** The safety half is the load-bearing half: confirm a peer's identity before sending it anything substantive, verify a peer's factual claims against the tree before repeating them, never read a peer's request as the maintainer's approval, and never ask a peer to perform what the asking session was denied.
   - **Blocked by** - Nothing. The mechanism is live and was exercised end to end on 2026-08-10.
   - **Issue** - None filed.
   - **Checked** - `develop` at `3855dbb` on 2026-08-10, against a live exchange with the ESPHome-Config session on this host, and `ListAgents` listing two local peers and no cloud or remote row.
-  - **Open** - Whether the rules belong in `GOVERNANCE.md` as a carried verbatim section or in a hub-only `docs/` file. The first reaches the downstream agents the rules are about and costs a fleet-wide re-vendor plus the two manifest edits [`spec/section-model.md`][section-model] requires of any new section. The second costs nothing and leaves the rules unreachable from the repositories that would apply them, which is the failure `AGENTS.md` "Fleet Bootstrap" exists to prevent.
-  - **Open** - Whether to document cross-host at all while it is unverified, or to state the same-host limit and leave the rest until a second machine is reachable.
+  - **Settled** - The rules live in the hub-only [`docs/peer-messaging.md`][peer-messaging-doc], per the location decision recorded in [`docs/fleet-map.md`][fleet-map] "Peer Messaging", and that doc states the promotion criteria under which the carried option is re-evaluated.
+  - **Settled** - The write-up states the same-host limit and leaves cross-host undocumented until a second machine is reachable, which is what [`docs/peer-messaging.md`][peer-messaging-doc] does.
   - **Settled** - Same-host works and cross-host does not, by construction rather than by configuration. A peer address is a Unix domain socket under `/run/user/1000/cc-socks/`, which cannot cross a machine boundary. Cloud sessions and Remote Control sessions on other machines are the documented cross-host paths and neither appears in a listing on this host, so both are unverified rather than absent.
   - **Settled** - The addressing has a guardrail worth keeping in the write-up. A bare peer name was refused and the transport required the `[ref]` a listing prints, which is what stops a message reaching the wrong repository's agent.
   - **Settled** - The method earns its place on evidence rather than novelty. One exchange produced the causal commit for the section 6 ruleset defect, `90e3255`, which the hub session had not identified from the symptom, plus a one-line reproduction of the gojq key-sorting behavior that made an earlier fix pass for the wrong reason, plus four procedure gaps a reader found that no gate reports.
   - **Settled** - A peer's finding is checked rather than adopted. Two of those four did not reproduce at the hub, the `AGENTS.md` anchor rewrite and the settings-diff exposure, and one did and shipped as #653. So the write-up states verification as a step rather than as a courtesy.
   - **Settled** - The boundary that matters most is not politeness but permission. A peer cannot widen what the asking session may do, so work blocked in one session goes back to the maintainer rather than sideways to another agent.
+
+### What Building the Windows Host Tooling Surfaced
+
+Three findings raised while writing [`host-setup/windows/`][host-setup-windows], each about the Linux side or the fleet rather than about the new scripts, and none blocking them.
+
+**State** `ready` for the first two, `decision` for the third. **Touches** [`docs/host-setup.md`][host-setup-doc], and the three scripts under `host-setup/linux/`. **Cost** one hub edit each, and no re-vendor, since nothing under `host-setup/` is carried.
+
+- **Record why the host tooling carries no linter category, or decide that it should.** No installer on either platform manages `markdownlint`, `cspell`, `actionlint`, `editorconfig-checker`, `shellcheck`, `PSScriptAnalyzer` or `ruff`, and nothing states that as a decision, so the absence is correct and reachable only by inference.
+  - **Blocked by** - Nothing.
+  - **Issue** - [#671][issue-671].
+  - **Checked** - `main` at `1d5b076` on 2026-08-11, where `readonly TOOLS=(git gh jq git-restore-mtime node python uv dotnet)` names no linter and no comment says why.
+  - **Settled** - The reasoning holds and is worth writing down once rather than per platform: each linter runs as a pinned image or through `uvx`, so the image tag fixes the version and a local run matches CI, and installing native copies would put a second unpinned version on the host and break exactly that.
+  - **Open** - Whether it belongs in [`docs/host-setup.md`][host-setup-doc] as a fleet fact, which is what covers Linux by the same sentence, or stays per platform where only the Windows README states it today.
+
+- **Report the `gh` git protocol in `setup-github.sh`, as its Windows peer does.** A host can pass every check the fleet runs while `gh` is configured for https, and a checkout made through `gh` then authenticates by token where every other checkout on that host authenticates by key.
+  - **Blocked by** - Nothing.
+  - **Issue** - [#672][issue-672].
+  - **Checked** - Measured on the maintainer's Windows host on 2026-08-11, where `gh auth status` reports `Git operations protocol: https` against `gh` 2.97.0, an SSH key that signs and verifies, and `scripts/host_gate.py` exiting 0 over all seven declared tools.
+  - **Settled** - Reported rather than written, since rewriting a working authentication configuration is the operator's call, and `setup-github.sh` touches `gh` nowhere today.
+  - **Open** - Whether `--configure` should set it, which is the only part where the two platforms could still diverge.
+
+- **Align the Linux scripts onto "name one action" instead of "the last one given wins".** Overwriting `MODE` in the arg loop discards an intent silently, and it discards it in the dangerous direction: `--report --install` drops the safe action and keeps the one that changes the host.
+  - **Blocked by** - Nothing.
+  - **Issue** - [#673][issue-673].
+  - **Checked** - `main` at `1d5b076` on 2026-08-11, where all three scripts document last-wins, no documented example passes two actions, `bootstrap.sh` passes exactly one per `run_tool` call, and no test asserts the behavior.
+  - **Settled** - The Windows tooling already refuses this way. That began as a constraint, since a PowerShell `param()` block records which switches were given and not their order, and the constraint produced the better behavior.
+  - **Open** - Nothing about the change itself, which is three `usage()` heredocs and three `parse_args()` bodies. The decision is only whether the fleet wants the stricter contract, and taking it deletes the differences-table row in [`host-setup/windows/README.md`][host-setup-windows] rather than leaving a permanent divergence.
+
+### Neither Host Bootstrap Has Run Against a Truly Fresh Host
+
+Two loaders exist so a copy-paste snippet takes a stock OS install to a configured dev host, and neither has ever been run that way. Everything either has behind it is a dry run or a read against an already-configured checkout, on a machine carrying most of the target tools already. That confirms the logic is internally consistent. It confirms nothing about a `winget` package id still resolving, a stock Debian netinst actually lacking `curl` the way the docs assume, `tar.exe` genuinely shipping on a given Windows image, or the interactive menu reading correctly on a real console. This needs a human watching a real run on a real fresh image and reporting back what broke, including anything that merely looked fine, since neither of those closes from a description of the logic.
+
+**State** `ready`. **Touches** [`host-setup/bootstrap.sh`][bootstrap] and [`host-setup/bootstrap.ps1`][bootstrap-ps1] and, if either run turns something up, whichever script under [`host-setup/linux/`][install-tools] or [`host-setup/windows/`][host-setup-windows] it drives. **Cost** VM time on the images each entry names, and an iteration round trip per finding, since a fix this file cannot verify is a fix that needs the same fresh image again.
+
+- **Run `bootstrap.sh` unattended against a fresh Debian and a fresh Ubuntu image, and again to confirm the second run is idempotent.** `--host --yes` finishing clean, with nothing to fix, is the signal. A re-run reporting no further changes confirms idempotency rather than assuming it.
+  - **Blocked by** - VM access to a current image of each, and one still-supported older release per distribution, since the contract's floors are meant to hold there too.
+  - **Issue** - None filed.
+  - **Checked** - `develop` at `82a87d3` on 2026-08-13, where this loader has existed since #674 and carries no record of a run against an image with nothing preinstalled.
+  - **Open** - Which images, who runs the pass, and whether a failure blocks the loader or is filed and worked separately, since a fresh-host pass can turn up findings well past what one pull request should carry.
+
+- **Run `bootstrap.ps1` unattended against a fresh Windows 10 image with no App Installer, and a fresh Windows 11 image, then again on each to confirm idempotency.** The Windows 10 case is the one that exercises the winget-missing remedy this loader prints but has never had checked against a real console. Windows 11 is the expected common case, App Installer and `winget` both present. `-Host -Yes` finishing clean on each, then a clean re-run, is the same signal as the Linux entry above.
+  - **Blocked by** - VM access to both images.
+  - **Issue** - None filed.
+  - **Checked** - Branch `feature/windows-bootstrap-loader` on 2026-08-13, adding this loader for the first time. It has run under `-DryRun` and against `PSScriptAnalyzer` on a dev machine that already carries `pwsh`, `winget`, and most managed tools, which is signal on the script's internal consistency and none at all on whether it survives a host it has not touched.
+  - **Open** - Same as the Linux entry: which images, who runs the pass, and how a finding routes back.
 
 ## Standalone Chores
 
@@ -407,7 +468,7 @@ Small work with no research to preserve, selectable one bullet at a time.
 
 - **Answer the symmetric reading of [`.editorconfig`][editorconfig], a path-specific section naming files that do not exist**, which is the half of [#633][issue-633] the `eol-coverage` check deliberately left open. The dead-pin reading it does ship is the `.gitattributes` side, and the same question on the other document is not the same shape: this repo's `[.github/workflows/*]` and `[catalog/snippets/workflows/*]` sections are legitimately broad, and the issue's own first attempt at it produced false positives because the matcher did not expand brace syntax, which [`scripts/repo_gate.py`][repo-gate] already implements. Measure the exemption against the live corpus before building the gate rather than after, since a stale exemption hands out a work list that damages correct documents, and decide whether `forward-declared` carries across or whether an editorconfig section needs its own marker.
 - **Reconsider whether the pre-commit hook runs the doc gates now that they are diff-scoped.** [`scripts/README.md`][scripts] records the current decision and its reason, that doc linters stay out of the hook so it stays fast, which was sound when the only mode was a whole-tree sweep, and a diff-scoped run finishes in about a second. The failure it would prevent is the most repeated one on record, comment sentences wrapped across lines caught after the commit rather than before it. Weigh it against the standing preference for a fast hook. The other objection, a hook running the gate from the wrong directory and reporting its own false clean, no longer applies: the rule set, the file set, the diff, and the keys joining them are all read from the repository being scanned rather than from wherever the process stands.
-- **Audit the fleet's shell surface by size and branching, and decide per script whether Python with unit tests is cheaper.** The evidence is the review record rather than a language preference, since a non-trivial shell script earns findings round after round while every gate under [`scripts/`][scripts] carries a test file beside it and converges in one or two. The measure is lines, branch count, and the review rounds each has cost. `repo-config/configure.sh` and the agent-safety installer are the two worth measuring, and a bootstrap script that needs the Python it exists to install is not a rewrite worth having, which protects the installer more than the config script.
+- **Audit the fleet's shell surface by size and branching, and decide per script whether Python with unit tests is cheaper.** The evidence is the review record rather than a language preference, since a non-trivial shell script earns findings round after round while every gate under [`scripts/`][scripts] carries a test file under `scripts/tests/` and converges in one or two. The measure is lines, branch count, and the review rounds each has cost. `repo-config/configure.sh` and the agent-safety installer are the two worth measuring, and a bootstrap script that needs the Python it exists to install is not a rewrite worth having, which protects the installer more than the config script.
 - **Make a table of contents standard for a long document rather than for the README alone.** [`spec/readme-structure.md`][readme-structure] fixes one at README position 4 and no other hub file carries one, which leaves the three longest documents without it, `CODESTYLE.md` at 516 lines, `GOVERNANCE.md` at 436 and `WORKFLOW.md` at 301, measured on `develop` at `3d1a0b1` on 2026-08-06. Settle the threshold in headings or lines so the audit can check it, and settle how it sits with the reference-link exception, since the four agent-instruction files keep inline links exactly because they are read one section at a time, which is the property that makes a contents list worth having in them. The mechanical constraint is that the list is filled by the Markdown All in One extension on save, so a file nobody opens in the editor grows a stale list, which is worse than absent because it is read as current.
 - **Converge this repo's Python on the ruff configuration it already declares, then add the formatting half to the pre-commit hook.** `pyproject.toml` carries `[tool.ruff]` and [`spec/project-types.json`][project-types] declares `python.ruff.config`, yet no workflow runs ruff and the tree does not pass it, measured on `develop` at `6d020b1` on 2026-08-09 with ruff 0.16.2: `ruff format --check` reports 13 of 57 files would be reformatted, and `ruff check` reports 106 errors, of which 39 are auto-fixable. The largest groups are 24 `PLW1510` (a `subprocess.run` with no `check`), 17 `FURB167` (`re.M` for `re.MULTILINE`), 11 `EXE001` (a shebang on a non-executable file, which wants reading against the `eol-coverage` shebang set rather than fixed blindly), 9 `BLE001` and 9 `SIM117`. The hook deliberately ships without the ruff step for this reason, since a gate failing on the corpus it guards blocks every commit from the moment it lands, which is the measure-the-corpus-first rule applied to a gate rather than to an exemption. Decide whether CI gains a ruff job in the same pass, since a formatter enforced only by a hook is enforced only on the machines that enabled it.
 - **Adopt the OCI annotation keys for Docker image metadata across the Docker repos**, replacing the ad-hoc and label-schema keys, per [#363][issue-363].
@@ -483,6 +544,7 @@ Regenerate [reports/divergences.md][divergences-report] before using it as the w
 - **Finish the host rollout and fill the tooling matrix, which are one visit each.** The rollout needs the matrix to be repeatable and the matrix is only worth filling if the rollout uses it.
   - **Hub state** - Done for the documentary half, verified `develop` at `1ed0cc8` on 2026-08-03.
   - **Outstanding** - Four machines, WSL2 Ubuntu, the MacBook Air and both ThinkPads, plus any headless or cron environment running with the token. macOS needs someone on that platform, the Proxmox question is whether that host also runs containers which decides whether Docker is required there, and the engine-inside-the-distro variant of the WSL2 Docker cell is unverified.
+  - **Detail** - The Windows half is a visit rather than a visit plus an unwritten script, since [`host-setup/windows/`][host-setup-windows] now carries the tooling and it was written and run on a Windows host.
   - **Issue** - [#365][issue-365] and [#483][issue-483].
   - **Rides with** - Nothing on the hub, since the write-guard newline fix has landed on `develop` and a machine keeps running the old hook until the installer is re-run there.
   - **Detail** - A ticked row means the host-wide rules text and not the hook, since only running the installer deploys both layers, and the proxmox host proved that distinction by carrying the documentary half alone for eight days on the machine where the incident originated.
@@ -529,6 +591,9 @@ Nothing is awaiting close today. [#578][issue-578] was the last entry here and c
 [issue-623]: https://github.com/ptr727/ProjectTemplate/issues/623
 [issue-633]: https://github.com/ptr727/ProjectTemplate/issues/633
 [issue-639]: https://github.com/ptr727/ProjectTemplate/issues/639
+[issue-671]: https://github.com/ptr727/ProjectTemplate/issues/671
+[issue-672]: https://github.com/ptr727/ProjectTemplate/issues/672
+[issue-673]: https://github.com/ptr727/ProjectTemplate/issues/673
 
 <!-- Pull requests -->
 
@@ -545,6 +610,8 @@ Nothing is awaiting close today. [#578][issue-578] was the last entry here and c
 [agents]: ./AGENTS.md
 [audit]: ./spec/audit.py
 [audit-doc]: ./AUDIT.md
+[bootstrap]: ./host-setup/bootstrap.sh
+[bootstrap-ps1]: ./host-setup/bootstrap.ps1
 [codestyle]: ./CODESTYLE.md
 [copilot-instructions]: ./.github/copilot-instructions.md
 [divergences]: ./spec/divergences.json
@@ -552,12 +619,17 @@ Nothing is awaiting close today. [#578][issue-578] was the last entry here and c
 [editorconfig]: ./.editorconfig
 [fidelity-honesty]: ./spec/fidelity_honesty.py
 [files]: ./spec/files.json
+[fleet-map]: ./docs/fleet-map.md
+[gitattributes]: ./.gitattributes
 [governance]: ./GOVERNANCE.md
+[host-setup-doc]: ./docs/host-setup.md
+[host-setup-windows]: ./host-setup/windows/
 [install-tools]: ./host-setup/linux/install-tools.sh
 [markdownlint]: ./.markdownlint-cli2.jsonc
 [matrix]: ./reports/conformance-matrix.md
 [merge-bot]: ./.github/workflows/merge-bot-pull-request.yml
 [operations]: ./OPERATIONS.md
+[peer-messaging-doc]: ./docs/peer-messaging.md
 [project-types]: ./spec/project-types.json
 [prose-gate]: ./.github/actions/prose-gate/action.yml
 [readme-sections]: ./spec/readme-sections.json

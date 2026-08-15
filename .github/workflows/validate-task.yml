@@ -16,8 +16,12 @@ jobs:
 
     steps:
 
+      # Full history, since the dead-path prose rule keys on deletion history.
+      # A shallow clone holds none, and the rule stands down there rather than pass blind.
       - name: Checkout code step
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
 
       # Doc linters run as pinned action wrappers.
       # The editorconfig-checker action is install-only, so it runs via Docker instead.
@@ -52,6 +56,47 @@ jobs:
           mapfile -t scripts < <(git ls-files '*.sh')
           docker run --rm --pull=always -v "$PWD":/mnt --workdir /mnt koalaman/shellcheck:stable "${scripts[@]}"
 
+      # The peer of the step above, built the same way: the file list comes from git, and the checker runs as a container rather than an install.
+      # The module version is pinned beside the image because the image alone does not fix it, and a floating install would make this a different check here than the one a maintainer runs locally.
+      # 1.23.0 rather than the newest: 1.24.0 needs a newer System.Management.Automation than this image carries, so it installs and then fails to import, which reads as a broken gate rather than a version mismatch.
+      # The count is printed because a checker that read no files reports the same clean as one that read them all, which is how this step first passed having read nothing.
+      # The list splits on whitespace rather than on a newline, because the same command is documented for a local run and a PowerShell caller joins the file list with spaces where a shell joins it with newlines.
+      # Splitting on the newline alone hands the analyzer one path holding every file, which it reports as one file it cannot find and then a count of one and no findings, having analyzed nothing at all.
+      - name: Check PowerShell scripts step
+        run: |
+          set -Eeuo pipefail
+          PS_SCRIPTS="$(git ls-files '*.ps1')"
+          docker run --rm --pull=always -e PS_SCRIPTS="$PS_SCRIPTS" -v "$PWD":/mnt --workdir /mnt mcr.microsoft.com/powershell:latest \
+            pwsh -NoProfile -Command '
+              Set-PSRepository PSGallery -InstallationPolicy Trusted
+              Install-Module PSScriptAnalyzer -RequiredVersion 1.23.0 -Force -Scope AllUsers
+              Import-Module PSScriptAnalyzer
+              $files = $env:PS_SCRIPTS -split "\s+" | Where-Object { $_ }
+              if (-not $files) { Write-Host "no PowerShell scripts are tracked"; exit 0 }
+              $found = @()
+              foreach ($file in $files) { $found += Invoke-ScriptAnalyzer -Path $file -Settings ./PSScriptAnalyzerSettings.psd1 }
+              Write-Host "Checked $($files.Count) file(s)"
+              if ($found) { $found | Format-Table RuleName,Severity,ScriptName,Line,Message -AutoSize | Out-String -Width 200 | Write-Host; exit 1 }
+              Write-Host "no findings"
+            '
+
+      # The Python lint and type gates for the Scripts profile, CODESTYLE.md "Python".
+      # @latest rather than a version pin, since a `uvx <tool>@<ver>` pin is nothing Dependabot tracks and would silently go stale, where the action SHA below is tracked.
+      - name: Setup uv step
+        uses: astral-sh/setup-uv@08807647e7069bb48b6ef5acd8ec9567f424441b # v8.1.0
+        with:
+          # The interpreter for the uv-run steps matches the pyproject py313 target, bumped in lockstep with it.
+          python-version: "3.13"
+
+      - name: Lint Python step
+        run: uvx ruff@latest check .
+
+      - name: Check Python formatting step
+        run: uvx ruff@latest format --check .
+
+      - name: Type check Python step
+        run: uvx mypy@latest
+
       - name: Validate registry and spec step
         run: |
           set -Eeuo pipefail
@@ -61,29 +106,31 @@ jobs:
           python3 spec/validate.py
 
       # Each gate here is proven by a case that reintroduces the fault it catches, wherever it lives.
-      # A test sits with the layer that owns it rather than beside the file it names, so a read-only gate over the spec and the host tooling is scripts/ even where its subject is shell, and the agent-safety kit carries its own because it ships as a unit.
-      # Standard library only, so no install step and no dependency to pin.
+      # A test sits with the layer that owns it rather than beside the file it names, so a read-only gate over the spec and the host tooling lives in scripts/tests/ even where its subject is shell, and the agent-safety kit carries its own because it ships as a unit.
+      # The tests are standard library only, so uvx coverage at its unpinned latest is the one tool the step fetches.
       # The audit engine self-test is offline, so it runs here rather than only on an owner sweep.
       # The write-guard self-test is offline too, and it otherwise runs only when a host installs the hook, which is where a regression in it would surface as a broken machine.
+      # Every run goes through coverage with --append, so one report covers the whole self-test surface, informational with no threshold adopted.
       - name: Run script self-tests step
         run: |
           set -Eeuo pipefail
-          python3 scripts/test_bootstrap.py
-          python3 scripts/test_host_gate.py
-          python3 scripts/test_prose_lint.py
-          python3 scripts/test_repo_gate.py
-          python3 scripts/test_pr_review.py
-          python3 spec/audit.py --selftest
-          python3 host-setup/agent-safety/gh-write-guard.py --selftest
-          python3 host-setup/agent-safety/test_install.py
+          uvx coverage@latest run --source=scripts,spec,host-setup -m unittest discover -s scripts/tests
+          uvx coverage@latest run --source=scripts,spec,host-setup --append spec/audit.py --selftest
+          uvx coverage@latest run --source=scripts,spec,host-setup --append host-setup/agent-safety/gh-write-guard.py --selftest
+          uvx coverage@latest run --source=scripts,spec,host-setup --append host-setup/agent-safety/test_install.py
+          uvx coverage@latest report
 
       - name: Check repo gates step
         run: python3 scripts/repo_gate.py
 
+      # Read-only: fails if .claude-plugin/fleet-skills/ was not regenerated from .agents/skills/.
+      - name: Check fleet skills are current step
+        run: python3 scripts/build_dist.py --check
+
       # Every default prose rule is clean tree-wide, so all but one block a change that adds a finding.
       # `charset-unknown` is the exception and reports in the step below, for the reason given there.
       - name: Check prose step
-        run: python3 scripts/prose_lint.py . --check charset --check semicolon --check dash --check dupword --check spelling --check comment-wrap --check comment-case --check home-path
+        run: python3 scripts/prose_lint.py . --check charset --check semicolon --check dash --check dupword --check spelling --check comment-wrap --check comment-case --check home-path --check dead-path
 
       # Warn-only, and visible rather than absent: an unrun check is one nobody acts on.
       # A finding here names a character no tier covers, and classifying it is a fleet-law edit rather than a prose fix.

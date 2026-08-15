@@ -22,15 +22,18 @@
             "additionalProperties": false,
             "allOf": [
                 {
-                    "title": "A declared floor carries a source",
-                    "description": "A host below a floor is told where to install from rather than only to upgrade, which is the whole reason source exists. spec/validate.py enforces this, and encoding it here stops a declaration being schema-valid and validator-invalid at once. A null minimum declares no floor, so the requirement does not apply to it.",
+                    "title": "A declared floor carries a source and a remedy",
+                    "description": "A host below a floor is told where to install from and the command that does it, rather than only to upgrade, which is the whole reason source and remedy exist. spec/validate.py enforces this, and encoding it here stops a declaration being schema-valid and validator-invalid at once. A null minimum declares no floor, so the requirement does not apply to it.",
                     "if": {
                         "required": ["minimum"],
                         "properties": { "minimum": { "type": "string" } }
                     },
                     "then": {
-                        "required": ["source"],
-                        "properties": { "source": { "minProperties": 1 } }
+                        "required": ["source", "remedy"],
+                        "properties": {
+                            "source": { "minProperties": 1 },
+                            "remedy": { "minProperties": 1 }
+                        }
                     }
                 }
             ],
@@ -73,6 +76,16 @@
                 "source": {
                     "type": "object",
                     "description": "Where the tool must come from, per platform, where the source rather than the presence is what the contract requires.",
+                    "additionalProperties": false,
+                    "properties": {
+                        "linux": { "type": "string", "minLength": 1 },
+                        "macos": { "type": "string", "minLength": 1 },
+                        "windows": { "type": "string", "minLength": 1 }
+                    }
+                },
+                "remedy": {
+                    "type": "object",
+                    "description": "The command that installs or upgrades the tool, per platform, printed under a below-floor failure so the finding carries its own fix. A host-setup/ path is repo-relative and the gate resolves it against the checkout it runs from. A platform where the tool does not apply carries no key.",
                     "additionalProperties": false,
                     "properties": {
                         "linux": { "type": "string", "minLength": 1 },

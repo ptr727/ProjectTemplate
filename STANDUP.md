@@ -4,6 +4,21 @@ How an agent takes a repository from nothing (or a partial state) to **operation
 
 Standing up a repo is **applying the manifests until the audit passes**, nothing more invented. If a repo needs a construct no manifest covers, that is a spec gap: raise it ([`AUDIT.md`][audit] section 9), never improvise a per-repo answer. This is the downward-audit model (standard-style repos the hub audits against their declared type), which the fleet uses because managing downstream divergence is too costly.
 
+```mermaid
+flowchart TD
+  s0["0: verify identity, signing, host_gate"] --> s0a["0A: maintainer hands over repo, App, secrets"]
+  s0a --> s0b["0B: create main + develop empty, feature branch off develop"]
+  s0b --> s1["1: classify, write registry/repos.json entry"]
+  s1 --> s1a["1A: carry the instruction set, before authoring anything"]
+  s1a --> s1b["1B: capture external source, if this repo replaces one"]
+  s1b --> s2["2: carry the baseline files"]
+  s2 --> s3["3: stand up the workflows"]
+  s3 --> s4["4: apply settings, rulesets, secrets"]
+  s4 --> s5["5: run AUDIT.md"]
+  s5 -->|"operational, or deltas tracked with an issue"| done["stood up"]
+  s5 -->|"a construct no manifest covers"| gap["spec gap: raise it, AUDIT.md section 9"]
+```
+
 ## 0. Verify Commit Identity and Signing, Before the First Commit
 
 Do this before `git init` or any commit, because the window closes at the first one. A repo whose initial history is unsigned or committed under the wrong identity cannot be cleanly repaired: `Require signed commits` blocks the first `develop -> main` release, re-signing that history is a non-fast-forward the `Block force pushes` rule rejects, and completing it needs the ruleset temporarily disabled plus a maintainer force-push that [`docs/repo-config-carry.md`][repo-config-carry] forbids an agent to perform. Greenfield repos where signing is live before the first commit never hit this.
@@ -16,8 +31,14 @@ git config --global --get commit.gpgsign    # true
 git config --global --get user.signingkey   # set
 git config --global --get gpg.format        # ssh for an SSH key; unset or openpgp for GPG
 
-# the agent holding the key, selected by the format above
-if [ "$(git config --global --get gpg.format)" = ssh ]; then ssh-add -L; else gpg --list-secret-keys; fi
+# prove signing works with a live scratch commit in a disposable scratch repo, not this
+# repo (its own git init is still section 0B, below), and not an agent-liveness probe
+# (ssh-add -L, gpg --list-secret-keys): a host that signs straight from a key file with no
+# agent running passes cleanly and fails that probe. See
+# .agents/skills/git-commit-conventions/SKILL.md "Signing, verified not configured" for why.
+# One physical line, not backslash-joined: this file is CRLF (the repo's Markdown default),
+# and a `\` continuation stops working the moment a stray `\r` lands after it.
+d=$(mktemp -d "${TMPDIR:-/tmp}/sign-check.XXXXXX") && ( trap 'rm -rf "$d"' 0; email=$(git config --global --get user.email) && git init -q "$d" && git -C "$d" commit --allow-empty -q -m check && out=$(git -C "$d" log -1 --format='sig=%G? author=%an <%ae> committer=%cn <%ce>') && echo "$out" && ae=$(git -C "$d" log -1 --format='%ae') && ce=$(git -C "$d" log -1 --format='%ce') && case "$out" in sig=G\ *|sig=U\ *) true ;; *) false ;; esac && case "$email" in *@users.noreply.github.com) true ;; *) false ;; esac && [ "$ae" = "$email" ] && [ "$ce" = "$email" ] )
 ```
 
 `--global` rather than the effective config, because the effective value depends on where the command runs: inside any existing repository a repo-local override wins, so a bare `git config --get user.email` there reports that repository's identity and hides the host setting this step exists to check. The two scopes together are what make the result sound, since this block proves the host is right and the block below proves nothing shadows it.
@@ -30,7 +51,7 @@ python3 scripts/host_gate.py            # from a hub checkout, against the fleet
 
 **No `--repo` here, and that is the one place in these procedures where it is omitted deliberately.** The flag points the gate at a repo's own `host-tools.json` so its floors are layered over the fleet ones, and at this step there is no repo to point it at: the target does not exist yet, since this section runs before the `git init` in section 0B, and the file itself arrives with the baseline in section 2. So this run checks the fleet floors, which is all that is knowable now.
 
-**Re-run it with `--repo` once section 2 has carried the file**, because a bare run does not read the target's declaration at all, so any floor that repo adds goes unapplied and the run cannot tell you it was skipped:
+**Re-run it with `--repo` once section 2 has carried the file**, because a bare run reads no declaration but the one at its own working directory, so any floor the target adds goes unapplied. The gate warns when its working directory sits inside a repo whose overlay it did not read, and no warning can name a target that does not exist yet, so this re-run is the only thing that counts the target's floors:
 
 ```shell
 python3 scripts/host_gate.py --repo <path-to-target-checkout>   # after section 2, so the repo's own floors count
@@ -38,7 +59,7 @@ python3 scripts/host_gate.py --repo <path-to-target-checkout>   # after section 
 
 A finding at either point is a **host** misconfiguration to fix on the machine or surface to the maintainer, never something to patch per repo, and [`docs/host-setup.md`][host-setup] is the contract it checks.
 
-The agent check branches rather than listing both forms, because they are alternatives and running the wrong one fails on a correctly configured host: an SSH host need not have `gpg` installed at all. Signing is **SSH or GPG**, so judge the format and its agent together rather than requiring `ssh`: what matters is that the configured format has a matching agent holding the key, which is the check [GOVERNANCE.md "Git and Commit Rules"][governance-git-and-commit-rules] prescribes. Any of these wrong or absent is a **host** misconfiguration to surface to the maintainer ([`docs/host-setup.md`][host-setup] is the setup procedure), not something to patch per repo. Patching it locally hides a broken host that then produces wrong identities in every other repo on that machine.
+The scratch commit exercises the whole signing pipeline rather than one delivery path, since `ssh-add -L` or `gpg --list-secret-keys` only prove an agent holds a key and say nothing about a host that signs straight from a key file with no agent running at all, a live and correctly configured case [git-commit-conventions][git-commit-conventions] documents in "Signing, verified not configured", the same rules [GOVERNANCE.md "Git and Commit Rules"][governance-git-and-commit-rules] points to. Signing is **SSH or GPG**, so this judges the configured format by its actual result (`sig=G`, or `sig=U` for a cryptographically good signature from an unrecognized signer, either a GPG key whose trust is merely undefined or an SSH key missing from the local `allowed_signers` file), never by which delivery path produced it. A missing `--global` value, `sig` not reading `G` or `U`, or either printed email not matching the noreply address is a **host** misconfiguration to surface to the maintainer ([`docs/host-setup.md`][host-setup] is the setup procedure), not something to patch per repo. Patching it locally hides a broken host that then produces wrong identities in every other repo on that machine.
 
 After `git init` and before the first commit, confirm the repo added no override of its own. This one needs a repository, since `--local` fails outside one. Read it here and run it in section 0B, which places it between the init and the first commit, so nothing here is a prompt to init early:
 
@@ -89,7 +110,7 @@ The rename runs unconditionally rather than behind a test of `init.defaultBranch
 
 **Committing onto `develop` and squashing afterwards does not work**, because `non_fast_forward` is set on both `develop` payloads and rewriting that history is exactly what the rule rejects. This is not hypothetical, since a repo stood up that way was correctly blocked at the point the history needed rewriting, with the standup already written into the branch it had to be lifted off.
 
-**The protection is uneven, so on an operational repo this instruction is the only thing holding the line.** A release repo's `repo-config/develop.json` carries a `pull_request` rule that blocks a direct commit outright, while `repo-config/operational/develop.json` carries three rules, `deletion`, `non_fast_forward` and `required_signatures`, and none of them stops one. A conformant operational repo therefore accepts the commit that this step exists to prevent, and reports nothing wrong afterwards.
+**The protection is uneven, so on an operational repo this instruction is the only thing holding the line.** A release repo's `repo-config/develop.json` carries a `pull_request` rule that blocks a direct commit outright, while `repo-config/operational/develop.json` carries three rules, `deletion`, `non_fast_forward` and `required_signatures`, and none of them stops one. A conformant operational repo therefore accepts the commit that this step exists to prevent, and reports nothing wrong afterwards. That is a recorded disposition rather than an oversight, `accepted` in the [`docs/fleet-map.md`][fleet-map] register (G7): the allowance is the operational model's foundation, a standup runs on a feature branch either way, and a ruleset tightened for standup alone would leave a window where the live ruleset contradicts the registry's model, so this instruction stays the enforcement.
 
 **On a public repo the squash is the one chance to leave the exploratory history out.** Standup is where a wrong secret value, a throwaway credential, and a run of noise commits accumulate, and a squashed feature branch publishes the result rather than the route to it.
 
@@ -121,6 +142,8 @@ Capture the source, verify the capture **against the source**, and hold the veri
 ## 2. Carry the Baseline Files
 
 Copy every [`spec/files.json`][files] entry whose `appliesTo` matches the repo's **selector set**, **adapted, not cloned**. The selector set is the repo's `types` plus its `workflowModel`, `releaseTrigger`, and `consumerModel`, so filtering on type alone silently drops the entries a non-type selector carries ([`spec/scope-model.md`][scope-model] defines the four namespaces and how they resolve). The prose files (`CODESTYLE.md`, `README.md`, and the like) describe the repo's own toolchain, so adapt them to reality rather than propagating template specifics verbatim (see the "Adapt before propagating" callout in [`CODESTYLE.md`][codestyle], since a verbatim copy that misdescribes the repo is rejected in review). The baseline covers `WORKFLOW.md`, `version.json`, the two rulesets, `.github/dependabot.yml`, `.editorconfig`, `.gitattributes`, `host-tools.json`, the linter configs, and the per-type files (`.vscode/tasks.json` from the language's snippet, `codecov.yml`, `.dockerignore`, `Docker/README.md`). **Every repo carries `repo-config/main.json`**, and only the `develop` payload varies by workflow model: `repo-config/develop.json` for a release repo, `repo-config/operational/develop.json` for an operational one.
+
+Carry `AGENTS.md`'s skill-dependency pointer paragraph, the one naming `scripts/skills_install.py` and where the fleet's Skills live, as one more verbatim unit in this same step, not a separate pass. It reads like boilerplate next to the surrounding text a new repo adapts to describe itself, and a repo that carries `AGENTS.md` without it stands up with no path to the fleet's Skills at all. `RESYNC.md` carries the identical instruction for a repo already stood up, so the two procedures agree on what belongs in every copy.
 
 **`version.json` is a file to carry and a floor to choose.** [`WORKFLOW.md`][workflow] D3.3 makes its `version` field the repo's own major.minor floor, with NBGV appending the git height as the patch, so the number carried in with the file is a claim about a release history the new repo does not have. Set it deliberately, at standup, before the first release:
 
@@ -204,6 +227,8 @@ The same [`AUDIT.md`][audit] run is the on-demand audit for any known repo, and 
 [codestyle]: ./CODESTYLE.md
 [content-import]: ./docs/content-import.md
 [files]: ./spec/files.json
+[fleet-map]: ./docs/fleet-map.md
+[git-commit-conventions]: ./.agents/skills/git-commit-conventions/SKILL.md
 [governance]: ./GOVERNANCE.md
 [governance-git-and-commit-rules]: ./GOVERNANCE.md#git-and-commit-rules
 [governance-repository-boundaries-and-write-safety]: ./GOVERNANCE.md#repository-boundaries-and-write-safety

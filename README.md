@@ -50,6 +50,7 @@ Nothing here is installed as a dependency. The rules are read, the baseline is c
 - [How This Repo Operates](#how-this-repo-operates)
 - [Using This Repo](#using-this-repo)
   - [Deploy the Host Guardrails](#deploy-the-host-guardrails)
+  - [Install the Fleet Skills](#install-the-fleet-skills)
   - [Carry the Rules Into a Repository](#carry-the-rules-into-a-repository)
   - [Adopting Outside This Fleet](#adopting-outside-this-fleet)
 - [Diverging From a Rule](#diverging-from-a-rule)
@@ -130,6 +131,25 @@ Keeping a fleet of repositories consistent has always been a tax paid in review 
 
 ProjectTemplate follows the same model it documents, and audits its own rules against itself (it classifies as the source-only project type in [WORKFLOW.md][workflow]).
 
+The doors a session enters through, and where each leads, matching the "Getting Started" table above:
+
+```mermaid
+flowchart TD
+  start["new session: human via this README, or agent via AGENTS.md Fleet Bootstrap"]
+  start -->|"set up a machine"| hostsetup["host-setup/: guardrails, then fleet skills"]
+  start -->|"repo does not exist yet"| standup["STANDUP.md"]
+  start -->|"repo exists, in or out of conformance"| resync["RESYNC.md"]
+  hostsetup --> standup
+  standup --> audit["AUDIT.md: verify"]
+  resync --> audit
+  audit -->|"blocked by a rule"| diverging["Diverging From a Rule"]
+  audit -->|"gap in the rules or docs"| issues["Questions or Issues"]
+```
+
+The full entry-point map behind these doors, with the gap register and the roadmap that closes it, is [docs/fleet-map.md][fleet-map].
+
+Within this repo, day-to-day development follows the same branching, CI, review, and release model it documents for the fleet:
+
 - **Branching.** Persistent `main` and `develop`, each with its own ruleset. This repo uses the default `release` workflow model: commit on feature branches only, feature branch to `develop` is squash-merged, `develop` to `main` is a merge commit, and `develop` is forward-only (no `main -> develop` back-merges). Live-service config repos instead use the `operational` model (registry `workflowModel`), with direct signed commits to `develop`, promoted to `main` by an occasional PR. See [GOVERNANCE.md "Branching Model"][governance-branching-model].
 - **CI is lint-only.** There is no build or unit test. The PR gate runs markdownlint, cspell, JSON validation (`jq` parses `registry/`, `spec/`, and `repo-config/`, plus the `spec/validate.py` cross-reference and shape checks), and actionlint, and exposes the ruleset-bound `Check pull request workflow status job` aggregator. The same lint configs (`.markdownlint-cli2.jsonc`, `cspell.json`) drive the editor extensions, the CLI, and CI.
 - **Review loop.** Every PR is reviewed by GitHub Copilot, and the agent drives the review loop to green and merges only with explicit maintainer permission. See [GOVERNANCE.md "PR Review Etiquette"][governance-pr-review-etiquette].
@@ -137,7 +157,7 @@ ProjectTemplate follows the same model it documents, and audits its own rules ag
 
 ## Using This Repo
 
-Three things are deployed from here, and they land in different places. The host guardrails install once per machine, the baseline is carried once per repository, and the audit is run whenever a repository changes materially. Do them in that order on a new machine, because the guardrails bound every session that follows and retrofitting them means the sessions in between ran unguarded.
+Four things are deployed from here, and they land in different places. The host guardrails install once per machine, the fleet skills install once per user on that machine, the baseline is carried once per repository, and the audit is run whenever a repository changes materially. Do them in that order on a new machine, because the guardrails bound every session that follows and retrofitting them means the sessions in between ran unguarded.
 
 ### Deploy the Host Guardrails
 
@@ -152,6 +172,17 @@ host-setup/agent-safety/install.sh        # Linux, WSL, macOS
 ```
 
 Restart Claude Code sessions on the machine afterward so the hook and the `CLAUDE.md` blocks load. The installer is idempotent, so re-running it is also how a machine picks up an upstream change to the guard. What it installs, how to verify it, and what it deliberately does not catch are in [`host-setup/agent-safety/README.md`][agent-safety], and the surrounding host prerequisites (git identity, SSH signing, `gh`, `docker`, `uv`) are in [`docs/host-setup.md`][host-setup].
+
+### Install the Fleet Skills
+
+The skills are the per-topic rules packaged so they surface in an agent session by trigger, instead of being re-read from the law docs each time. They install once per user per machine, from a hub checkout, and land beside the guardrails rather than in any repository:
+
+```shell
+python3 scripts/skills_install.py            # or the scripts/skills_install.sh / .ps1 wrapper
+python3 scripts/skills_install.py --report   # read-only: is this machine current?
+```
+
+A host stood up end to end by the [`host-setup/`][host-setup-dir] bootstrap gets this step at the end of its host mode, so a fresh machine finishes with the tools, the identity, and the skills together. [`docs/host-setup.md`][host-setup] "Fleet Skills Install" carries the details, including how the install degrades where the `claude` CLI is absent.
 
 ### Carry the Rules Into a Repository
 
@@ -316,6 +347,7 @@ Licensed under the [MIT License][license]\
 [docs]: ./docs/
 [fidelity-model]: ./spec/fidelity-model.md
 [files]: ./spec/files.json
+[fleet-map]: ./docs/fleet-map.md
 [governance]: ./GOVERNANCE.md
 [governance-branching-model]: ./GOVERNANCE.md#branching-model
 [governance-hub-hosted-tooling]: ./GOVERNANCE.md#hub-hosted-tooling

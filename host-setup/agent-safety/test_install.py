@@ -6,6 +6,7 @@ a real home by default, so a test that forgot the override would rewrite the dev
 
 Standard library only, matching the rest of the gates, so CI needs no install step.
 """
+
 import json
 import os
 import pathlib
@@ -20,14 +21,15 @@ HERE = pathlib.Path(__file__).resolve().parent
 INSTALL = HERE / "install.py"
 
 sys.path.insert(0, str(HERE))
-import install  # noqa: E402
+import install
 
 
 def run(home, *args):
     """Invoke the installer as a subprocess, the way a host actually runs it."""
     env = dict(os.environ, CLAUDE_HOME=str(home))
-    return subprocess.run([sys.executable, str(INSTALL), *args],
-                          capture_output=True, text=True, env=env)
+    return subprocess.run(
+        [sys.executable, str(INSTALL), *args], capture_output=True, text=True, env=env, check=False
+    )
 
 
 class StampCase(unittest.TestCase):
@@ -73,8 +75,14 @@ class TestReportVerdicts(StampCase):
         self.install()
         text = self.md.read_text(encoding="utf-8")
         self.md.write_text(
-            re.sub(r"<!-- fleet-bootstrap v\d+ start -->.*?<!-- fleet-bootstrap v\d+ end -->",
-                   "", text, flags=re.DOTALL), encoding="utf-8")
+            re.sub(
+                r"<!-- fleet-bootstrap v\d+ start -->.*?<!-- fleet-bootstrap v\d+ end -->",
+                "",
+                text,
+                flags=re.DOTALL,
+            ),
+            encoding="utf-8",
+        )
         r = run(self.home, "--report")
         self.assertEqual(r.returncode, 1, r.stdout + r.stderr)
         self.assertIn("CLAUDE.md now holds", r.stdout)
@@ -83,8 +91,15 @@ class TestReportVerdicts(StampCase):
         """The remedy the report prints has to actually work, or the verdict is a dead end."""
         self.install()
         text = self.md.read_text(encoding="utf-8")
-        self.md.write_text(re.sub(r"<!-- fleet-bootstrap v\d+ start -->.*?<!-- fleet-bootstrap v\d+ end -->",
-                                  "", text, flags=re.DOTALL), encoding="utf-8")
+        self.md.write_text(
+            re.sub(
+                r"<!-- fleet-bootstrap v\d+ start -->.*?<!-- fleet-bootstrap v\d+ end -->",
+                "",
+                text,
+                flags=re.DOTALL,
+            ),
+            encoding="utf-8",
+        )
         self.assertEqual(run(self.home, "--report").returncode, 1)
         self.install()
         self.assertEqual(run(self.home, "--report").returncode, 0)
@@ -129,12 +144,16 @@ class TestInstalledContent(StampCase):
         """The marker and version are untouched, so a presence check calls this machine current."""
         self.install()
         text = self.md.read_text(encoding="utf-8")
-        edited = text.replace("<!-- agent-safety v1 start -->",
-                              "<!-- agent-safety v1 start -->\nSomeone weakened this rule by hand.")
+        edited = text.replace(
+            "<!-- agent-safety v1 start -->",
+            "<!-- agent-safety v1 start -->\nSomeone weakened this rule by hand.",
+        )
         self.assertNotEqual(edited, text)
         self.md.write_text(edited, encoding="utf-8")
         # Presence is unchanged: the markers and versions still read exactly as before.
-        self.assertEqual(install.blocks_present(self.md), {"agent-safety": "v1", "fleet-bootstrap": "v1"})
+        self.assertEqual(
+            install.blocks_present(self.md), {"agent-safety": "v1", "fleet-bootstrap": "v1"}
+        )
         r = run(self.home, "--report")
         self.assertEqual(r.returncode, 1, r.stdout + r.stderr)
         self.assertIn("installed content differs", r.stdout)
@@ -167,8 +186,12 @@ class TestInstalledContent(StampCase):
     def test_reinstalling_clears_an_edited_block(self):
         self.install()
         text = self.md.read_text(encoding="utf-8")
-        self.md.write_text(text.replace("<!-- agent-safety v1 start -->",
-                                        "<!-- agent-safety v1 start -->\nedited"), encoding="utf-8")
+        self.md.write_text(
+            text.replace(
+                "<!-- agent-safety v1 start -->", "<!-- agent-safety v1 start -->\nedited"
+            ),
+            encoding="utf-8",
+        )
         self.assertEqual(run(self.home, "--report").returncode, 1)
         self.install()
         self.assertEqual(run(self.home, "--report").returncode, 0)
@@ -179,16 +202,18 @@ class TestDuplicateBlocks(StampCase):
         """Two blocks mean the second silently governs, and naming the first hides that."""
         self.install()
         text = self.md.read_text(encoding="utf-8")
-        block = re.search(r"<!-- agent-safety v1 start -->.*?<!-- agent-safety v1 end -->",
-                          text, re.DOTALL).group(0)
+        block = re.search(
+            r"<!-- agent-safety v1 start -->.*?<!-- agent-safety v1 end -->", text, re.DOTALL
+        ).group(0)
         self.md.write_text(text + "\n" + block + "\n", encoding="utf-8")
         self.assertNotIn("agent-safety", install.blocks_present(self.md))
 
     def test_a_duplicated_block_reports_stale_rather_than_current(self):
         self.install()
         text = self.md.read_text(encoding="utf-8")
-        block = re.search(r"<!-- agent-safety v1 start -->.*?<!-- agent-safety v1 end -->",
-                          text, re.DOTALL).group(0)
+        block = re.search(
+            r"<!-- agent-safety v1 start -->.*?<!-- agent-safety v1 end -->", text, re.DOTALL
+        ).group(0)
         self.md.write_text(text + "\n" + block + "\n", encoding="utf-8")
         r = run(self.home, "--report")
         self.assertEqual(r.returncode, 1, r.stdout + r.stderr)
@@ -198,7 +223,9 @@ class TestDegradedEnvironments(StampCase):
     def test_a_host_without_git_stamps_rather_than_crashing(self):
         """A tarball install on a minimal host has no git, which is normal rather than an error."""
         env = dict(os.environ, CLAUDE_HOME=str(self.home), PATH="")
-        r = subprocess.run([sys.executable, str(INSTALL)], capture_output=True, text=True, env=env)
+        r = subprocess.run(
+            [sys.executable, str(INSTALL)], capture_output=True, text=True, env=env, check=False
+        )
         self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
         stamp = json.loads(self.stamp.read_text(encoding="utf-8"))
         self.assertEqual(stamp["source"]["vcs"], "none")
@@ -239,8 +266,13 @@ class TestDegradedEnvironments(StampCase):
         """Presence is not shape. Each of these carries every key and crashes a key-only check."""
         self.install()
         good = json.loads(self.stamp.read_text(encoding="utf-8"))
-        for key, bad in (("host", "server"), ("source", "git"), ("payloadDigest", 12),
-                         ("blocks", ["agent-safety"]), ("installedUtc", None)):
+        for key, bad in (
+            ("host", "server"),
+            ("source", "git"),
+            ("payloadDigest", 12),
+            ("blocks", ["agent-safety"]),
+            ("installedUtc", None),
+        ):
             with self.subTest(key=key):
                 broken = dict(good, **{key: bad})
                 self.stamp.write_text(json.dumps(broken) + "\n", encoding="utf-8")
@@ -251,9 +283,12 @@ class TestDegradedEnvironments(StampCase):
 
     def test_the_formatter_stays_printable_on_a_stamp_the_validator_would_reject(self):
         """Belt and braces: a formatter that raises turns a verdict into the crash it reports on."""
-        for broken in ({}, {"host": None, "source": None},
-                       {"host": {}, "source": {}, "blocks": None},
-                       {"host": {"hostname": "h"}, "source": {"commit": 12345}}):
+        for broken in (
+            {},
+            {"host": None, "source": None},
+            {"host": {}, "source": {}, "blocks": None},
+            {"host": {"hostname": "h"}, "source": {"commit": 12345}},
+        ):
             with self.subTest(stamp=broken):
                 self.assertIsInstance(install.stamp_line(broken), str)
 
@@ -265,7 +300,9 @@ class TestRegistration(StampCase):
         return json.loads((self.home / "settings.json").read_text(encoding="utf-8"))
 
     def _write(self, data):
-        (self.home / "settings.json").write_text(json.dumps(data, indent=2) + "\n", encoding="utf-8")
+        (self.home / "settings.json").write_text(
+            json.dumps(data, indent=2) + "\n", encoding="utf-8"
+        )
 
     def test_an_unregistered_hook_reports_stale_rather_than_current(self):
         """Every byte is correct and the guard never runs, which every other check calls fine."""
@@ -318,8 +355,9 @@ class TestPreexistingCorruption(StampCase):
 
     def _duplicate(self, marker="agent-safety"):
         text = self.md.read_text(encoding="utf-8")
-        block = re.search(rf"<!-- {marker} v1 start -->.*?<!-- {marker} v1 end -->",
-                          text, re.DOTALL).group(0)
+        block = re.search(
+            rf"<!-- {marker} v1 start -->.*?<!-- {marker} v1 end -->", text, re.DOTALL
+        ).group(0)
         self.md.write_text(text + "\n" + block + "\n", encoding="utf-8")
 
     def test_installing_onto_a_duplicated_block_does_not_report_current(self):
@@ -331,7 +369,9 @@ class TestPreexistingCorruption(StampCase):
         r = run(self.home, "--report")
         self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
         # The install collapsed it, which is why this is CURRENT rather than a standing STALE.
-        self.assertEqual(install.blocks_present(self.md), {"agent-safety": "v1", "fleet-bootstrap": "v1"})
+        self.assertEqual(
+            install.blocks_present(self.md), {"agent-safety": "v1", "fleet-bootstrap": "v1"}
+        )
 
     def test_the_installer_collapses_a_duplicate_rather_than_preserving_it(self):
         """Substituting every match kept both blocks, so the printed remedy never worked."""
@@ -357,8 +397,10 @@ class TestPreexistingCorruption(StampCase):
         self.install()
         text = self.md.read_text(encoding="utf-8")
         self.md.write_text(re.sub(r"<!-- agent-safety v1 end -->", "", text), encoding="utf-8")
-        self.assertEqual(install.marker_corruption(self.md),
-                         ["the agent-safety markers in CLAUDE.md are duplicated or incomplete"])
+        self.assertEqual(
+            install.marker_corruption(self.md),
+            ["the agent-safety markers in CLAUDE.md are duplicated or incomplete"],
+        )
 
     def test_a_clean_file_reports_no_corruption(self):
         self.install()
@@ -409,8 +451,11 @@ class TestStampContent(StampCase):
             original = target.read_bytes()
             try:
                 target.write_bytes(original + b"\n# sentinel\n")
-                self.assertNotEqual(install.payload_digest(), baseline,
-                                    f"{name} is in PAYLOAD_FILES but changing it did not move the digest")
+                self.assertNotEqual(
+                    install.payload_digest(),
+                    baseline,
+                    f"{name} is in PAYLOAD_FILES but changing it did not move the digest",
+                )
             finally:
                 target.write_bytes(original)
 
@@ -458,8 +503,12 @@ class TestStampContent(StampCase):
         target = HERE / "claude-md-safety.md"
         original = target.read_bytes()
         try:
-            target.write_bytes(original.replace(b"<!-- agent-safety v1 end -->",
-                                                b"Weakened by hand.\n<!-- agent-safety v1 end -->"))
+            target.write_bytes(
+                original.replace(
+                    b"<!-- agent-safety v1 end -->",
+                    b"Weakened by hand.\n<!-- agent-safety v1 end -->",
+                )
+            )
             self.assertNotEqual(install.payload_digest(), baseline)
         finally:
             target.write_bytes(original)
@@ -477,21 +526,31 @@ class TestStampContent(StampCase):
         named |= {filename for _, filename in install.CLAUDE_MD_BLOCKS}
         named.discard("install.py")
         # The hook is the only literal read; every other entry arrives from the block list.
-        self.assertGreater(len(named), 1, "the scan matched only one file, so it is not covering the blocks")
+        self.assertGreater(
+            len(named), 1, "the scan matched only one file, so it is not covering the blocks"
+        )
         for name in sorted(named):
-            self.assertIn(name, install.PAYLOAD_FILES,
-                          f"install.py reads {name} but PAYLOAD_FILES omits it, so the digest misses it")
+            self.assertIn(
+                name,
+                install.PAYLOAD_FILES,
+                f"install.py reads {name} but PAYLOAD_FILES omits it, so the digest misses it",
+            )
 
     def test_the_payload_list_is_derived_from_the_block_list(self):
         """Written out by hand, the two drifted and the digest stopped covering a deployed file."""
-        self.assertEqual(install.PAYLOAD_FILES,
-                         ("gh-write-guard.py",) + tuple(f for _, f in install.CLAUDE_MD_BLOCKS))
+        self.assertEqual(
+            install.PAYLOAD_FILES,
+            ("gh-write-guard.py",) + tuple(f for _, f in install.CLAUDE_MD_BLOCKS),
+        )
 
     def test_every_reader_uses_the_same_marker_list(self):
         """Three readers each carried their own marker pair, so a new block could reach one only."""
         source = INSTALL.read_text(encoding="utf-8")
-        self.assertNotIn('("agent-safety", "fleet-bootstrap")', source,
-                         "a reader is carrying its own marker pair instead of BLOCK_MARKERS")
+        self.assertNotIn(
+            '("agent-safety", "fleet-bootstrap")',
+            source,
+            "a reader is carrying its own marker pair instead of BLOCK_MARKERS",
+        )
         self.assertEqual(install.BLOCK_MARKERS, tuple(m for m, _ in install.CLAUDE_MD_BLOCKS))
 
     def test_the_one_line_summary_names_the_host_and_the_commit(self):

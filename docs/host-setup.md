@@ -6,9 +6,9 @@ Supported hosts:
 
 - **Linux** - both the devcontainer flow and the host-install flow.
 - **macOS** - both the devcontainer flow and the host-install flow.
-- **Windows** - the devcontainer flow requires **WSL2**, and native Windows (PowerShell + winget) is supported only for the host-install flow described in `README.md`. The bind-mounts in `.devcontainer/dotnet/devcontainer.json` and `.devcontainer/python/devcontainer.json` rely on POSIX paths and only work from Linux/macOS/WSL2.
+- **Windows** - the devcontainer flow requires **WSL2**, and native Windows (PowerShell + winget) is supported only for the host-install flow described in `README.md`. The bind-mounts in the `catalog/snippets/devcontainer/` definitions rely on POSIX paths and only work from Linux/macOS/WSL2.
 
-> **Shell assumptions in this doc**: every command snippet below assumes a **POSIX shell** (bash/zsh) and POSIX path conventions (`~/.ssh/...`, `mkdir -p`, `$(...)` command substitution), with one exception. A block marked `powershell` is the **Windows-native** form of the step it sits in, meant to run in PowerShell rather than translated. On Windows, run the POSIX snippets from **WSL2** or **Git Bash**, since they will not work as-is in PowerShell or `cmd.exe`. The git config and `gh` commands are portable, and only the file and path manipulation differs by shell.
+> **Shell assumptions in this doc**: every command snippet below assumes a **POSIX shell** (bash/zsh) and POSIX path conventions (`~/.ssh/...`, `mkdir -p`, `$(...)` command substitution), except where a block is marked `powershell`. Such a block is the **Windows-native** form of the step it sits in, meant to run in PowerShell rather than translated. On Windows, run the POSIX snippets from **WSL2** or **Git Bash**, since they will not work as-is in PowerShell or `cmd.exe`. The git config and `gh` commands are portable, and only the file and path manipulation differs by shell.
 
 ## What a Host Must Provide
 
@@ -20,8 +20,8 @@ This section is the **contract**: which tools a host needs and which repo proced
 | `gh` | the PR and review loop, `gh api` queries, `repo-config/configure.sh` | `gh --version` | **2.47.0**, measured |
 | Python 3 | `scripts/` and `spec/` (standard library only, no packages to install) | `python3 --version`, or `py -3 --version` on native Windows | **3.13**, target |
 | `jq` | the ruleset normalizer in `repo-config/configure.sh`, the ruleset diff in [`AUDIT.md`][audit] section 6, and payload regeneration | `jq --version` | **1.7**, target |
-| `docker` | the four linters, which run as pinned images rather than local installs | `docker --version` | none |
-| `uv` / `uvx` | coverage runs, and the Python toolchain (`ruff`, `pyright` or `mypy`) in a Python repo | `uv --version` | none |
+| `docker` | the four linters, which run as pinned images rather than local installs | `docker --version` | **29.6.2**, target |
+| `uv` / `uvx` | coverage runs, and the Python toolchain (`ruff`, `pyright` or `mypy`) in a Python repo | `uv --version` | **0.12.2**, target |
 
 The **Floor** column exists because presence and sufficiency are different questions and the answer to the first was being read as the answer to the second. A tool below its floor still answers `--version`, so every other column reports it as fine while `scripts/host_gate.py` fails it. The kind is named beside the number, since a **measured** floor sits above a version known to break a documented procedure and gives a failing host a defect to point at, where a **target** floor names the version the repo's toolchain is configured for and does not. The next section carries the reasoning behind each one.
 
@@ -39,13 +39,15 @@ Presence is the weaker half of this contract. Both host defects this fleet has a
 
 **`git-restore-mtime` must not come from it either, where a repo uses it.** Debian and Ubuntu package **2022.12**, which shells out to `git whatchanged`. Current `git` refuses that without a hidden opt-in flag a caller cannot pass through, so the tool restores nothing, prints its ordinary statistics and **exits 0**. A deploy keyed on mtimes then ships a full copy and reports success. Take the upstream release from [git-tools][git-tools-link], or in CI the [action][git-restore-mtime-action-link] that vendors it. Note the direction of that interaction: a **newer** `git` is the trigger rather than the remedy, so a host old enough to still allow `whatchanged` hides the defect rather than avoiding it. No procedure in this repo needs the tool, so the gate declares it **optional** and skips it when absent.
 
-**The rest of the table takes the distribution's package, and two more do not.** `git`, `docker` and the Python interpreter come from the distribution, because each keeps up well enough that a second source buys nothing and costs a repository to trust. `jq` is the same on a current Debian or Ubuntu, which carries a version at or above the floor, and the upstream release binary is the answer only where it does not. `uv` is published by its authors as a release archive and packaged by neither distribution, so upstream is the only source there is. Where a repository needs `node`, the distribution's package trails upstream by whole release lines, so it comes from the NodeSource repository on the line upstream currently carries as long term support. Where a repository needs `dotnet`, the distribution's feed is preferred where it carries an SDK and Microsoft's feed is the fallback, because mixing the two is what breaks a host rather than either one alone, and Microsoft's carries `amd64` only.
+**`docker` must not come from the distribution's own package either, with one exception.** Debian and Ubuntu package `docker.io`, an older build that trails and conflicts with `docker-ce`, so [`host-setup/linux/install-tools.sh`][host-setup-dir] removes it and installs from Docker's own apt repository at [download.docker.com][docker-install-link] instead, the same shape it already uses for `gh` and `node`. The exception is a **WSL distribution**, where the only sanctioned source is Docker Desktop's own WSL integration (Settings, Resources, WSL integration, on the Windows side, reported read-only by [`setup-wsl.ps1`][host-setup-windows]) and a native install is refused outright, with no override: running `docker-ce` directly inside a WSL distribution risks a second engine beside Desktop's own. On native **Windows**, `winget` already tracks upstream Desktop releases, so neither hazard arises there.
+
+**The rest of the table takes the distribution's package, and one more does not.** `git` and the Python interpreter come from the distribution, because each keeps up well enough that a second source buys nothing and costs a repository to trust. `jq` is the same on a current Debian or Ubuntu, which carries a version at or above the floor, and the upstream release binary is the answer only where it does not. `uv` is published by its authors as a release archive and packaged by neither distribution, so upstream is the only source there is. Where a repository needs `node`, the distribution's package trails upstream by whole release lines, so it comes from the NodeSource repository on the line upstream currently carries as long term support. Where a repository needs `dotnet`, the distribution's feed is preferred where it carries an SDK and Microsoft's feed is the fallback, because mixing the two is what breaks a host rather than either one alone, and Microsoft's carries `amd64` only.
 
 Neither `node` nor `dotnet` is in the table above, deliberately: they serve the repositories that need them rather than the fleet contract, and a repository needing one declares it in a `host-tools.json` of its own, which [`scripts/host_gate.py`][host-gate] merges over this one. The merge tightens only, so a repository may raise a floor or add one and may not lower or remove one.
 
-**A host being stood up needs no Python.** The tooling under [`host-setup/`][host-setup-dir] is shell, deliberately, because requiring an interpreter to upgrade a package or install a tool would make the first step of standing a host up depend on the thing that step exists to provide. The Python floor above is a development requirement, meaning [`scripts/`][scripts-dir] and [`spec/`][spec-dir], and a host that only runs services never has to meet it. `bootstrap.sh` needs `curl` and `tar`, both of which a base install carries or can install without a network tool of its own.
+**A host being stood up needs no Python.** The tooling under [`host-setup/`][host-setup-dir] is shell and PowerShell, deliberately, because requiring an interpreter to upgrade a package or install a tool would make the first step of standing a host up depend on the thing that step exists to provide. The Python floor above is a development requirement, meaning [`scripts/`][scripts-dir] and [`spec/`][spec-dir], and a host that only runs services never has to meet it. `bootstrap.sh` needs `curl` and `tar`, both of which a base install carries or can install without a network tool of its own. `bootstrap.ps1` needs only `tar.exe`, which has shipped with Windows since 1803, and installs its one further dependency, PowerShell 7, itself through `winget`. The one exception is the skills step at the end of a stand-up, which drives the Python installer in [`scripts/`][scripts-dir], and it runs last for exactly that reason: `install-tools` has provided the interpreter by then, and run alone on a host without one it stops and names the tools step as its prerequisite.
 
-**Standing a host up.** [`host-setup/`][host-setup-dir] carries the tooling that makes a host satisfy this contract, and its README is the usage. A host with nothing runs [`host-setup/bootstrap.sh`][bootstrap], which fetches this repository and runs that tooling from the fetched tree. It is not called by [`scripts/host_gate.py`][host-gate] and it does not call it: the gate measures a host against the floors above, and the tooling is a remedy a person chooses when the gate reports a gap.
+**Standing a host up.** [`host-setup/`][host-setup-dir] carries the tooling that makes a host satisfy this contract, and its README is the usage. A host with nothing runs [`host-setup/bootstrap.sh`][bootstrap], which fetches this repository and runs that tooling from the fetched tree. A native Windows host with nothing runs [`host-setup/bootstrap.ps1`][bootstrap-ps1] the same way, which finds or installs PowerShell 7 before it fetches anything, since every script under [`host-setup/windows/`][host-setup-windows] requires it. Neither is called by [`scripts/host_gate.py`][host-gate] and neither calls it: the gate measures a host against the floors above, and the tooling is a remedy a person chooses when the gate reports a gap.
 
 A repository that needs more than the fleet does adds its own `host-tools.json` at its root, which the gate layers over the hub's. It may add a tool nobody else uses, raise a floor, or turn an optional tool required. It may **not** lower a floor or turn a required tool optional, since those edits retire a fleet check from inside the repository it protects, and the gate reports a rejected relaxation rather than dropping it.
 
@@ -135,8 +137,7 @@ Required for SSH signature verification by `git verify-commit` and similar tools
 
 ```shell
 mkdir -p ~/.config/git
-echo "$(git config user.email) namespaces=\"git\" $(cat ~/.ssh/id_ed25519.pub)" \
-    >> ~/.config/git/allowed_signers
+echo "$(git config --global user.email) namespaces=\"git\" $(cat ~/.ssh/id_ed25519.pub)" >> ~/.config/git/allowed_signers
 git config --global gpg.ssh.allowedSignersFile ~/.config/git/allowed_signers
 ```
 
@@ -213,22 +214,67 @@ Run it bare, with no `VAR=value` prefix of its own, which would report a value t
 
 Withdraw a grant by deleting the `env` entry and restarting. Nothing expires it, so a grant left in place stays live for every later session in that checkout, which is the reason to remove it once the work that needed it is done.
 
+## Fleet Skills Install
+
+The fleet's agent skills are hand-authored in the hub at `.agents/skills/` and installed per user by [`scripts/skills_install.py`][skills-install]: an overlay copy into `~/.agents/skills/` for Codex and opencode, and a user-scope Claude Code plugin install where the `claude` CLI is present. Every run stamps the hub commit it installed from into `~/.agents/skills-install-stamp.json`, and `--report` reads that stamp against the checkout and exits non-zero where the machine is behind it.
+
+Install from a hub checkout, once per machine:
+
+```shell
+python3 scripts/skills_install.py            # or the scripts/skills_install.sh / .ps1 wrapper
+python3 scripts/skills_install.py --report   # read-only: is this machine current?
+```
+
+A bootstrapped host does not run this by hand: the `--host` mode of [`host-setup/bootstrap.sh`][bootstrap] and [`bootstrap.ps1`][bootstrap-ps1] ends with the same installer, driven from the fetched tree by `install-skills.sh` or `install-skills.ps1`, and the `--skills` action runs that step on its own.
+
+The `claude` CLI is deliberately absent from the tool catalog in [`spec/host-tools.json`][host-tools]. A Codex-only machine is a complete machine, so the installer degrades where the CLI is missing, still landing the overlay half, saying so, and recording the partial install in the stamp, where cataloging the CLI would instead fail every host that never wanted it.
+
+**The refresh cadence**: re-run the installer when `--report` exits non-zero, and after any hub merge that touches `.agents/skills/`. Session entry runs no automatic check, by design: the trigger is suspicion, and a rule that keeps needing to be restated in a session is the loudest form of it, which is the symptom the `fleet-conformance-check` skill routes to this report. The maintainer runs the refresh by hand, and an automated one stays out of scope until the fleet has evidence the manual cadence fails.
+
 ## Verify Host Setup
 
 ```shell
 python3 scripts/host_gate.py           # presence and version floors, from spec/host-tools.json
+python3 scripts/skills_install.py --report   # the skills install stamp is current
 git config --global --list | grep -E "user\.|signing|gpg\."
-ssh-add -L                                   # should list your public key
-git -c gpg.format=ssh commit -S --allow-empty -m "verify-signing"
-git log --show-signature -1
+# One physical line, not backslash-joined: this file is CRLF (the repo's Markdown default),
+# and a `\` continuation stops working the moment a stray `\r` lands after it.
+d=$(mktemp -d "${TMPDIR:-/tmp}/sign-check.XXXXXX") && ( trap 'rm -rf "$d"' 0; email=$(git config --global --get user.email) && git init -q "$d" && git -C "$d" commit --allow-empty -q -m check && out=$(git -C "$d" log -1 --format='sig=%G? author=%an <%ae> committer=%cn <%ce>') && echo "$out" && ae=$(git -C "$d" log -1 --format='%ae') && ce=$(git -C "$d" log -1 --format='%ce') && case "$out" in sig=G\ *|sig=U\ *) true ;; *) false ;; esac && case "$email" in *@users.noreply.github.com) true ;; *) false ;; esac && [ "$ae" = "$email" ] && [ "$ce" = "$email" ] )
 gh auth status
 ```
 
-If signing fails locally, the devcontainer will fail too, so fix here first.
+`sig` must read `G` (good signature) or `U` (good signature, unrecognized signer). For GPG, `U` is a valid signature from a key whose trust level is merely undefined, common right after generating a new key. For SSH, it's a valid signature from a key not found in the local `allowed_signers` file, which doesn't affect whether GitHub itself verifies the commit, only local `git verify-commit` output. Both the `author` and `committer` email must be an actual noreply address, and both must match `user.email` from the config line above, all enforced by the snippet itself. `ssh-add -L` (or a `gpg --list-secret-keys` equivalent) is not a substitute: it only proves an agent holds a key, and a host that signs straight from a key file with no agent running passes this scratch commit while failing that probe, per [GOVERNANCE.md "Git and Commit Rules"][governance-git-and-commit-rules]. If signing fails locally, the devcontainer will fail too, so fix here first.
 
-The gate replaced a line that ran `--version` on each tool and read only whether it answered. That form reported a host carrying the broken `gh` as fully set up, which is the failure it exists to stop. It exits non-zero on a missing required tool or one below its floor, prints the defect behind the floor rather than the number alone, and names where to install from.
+The gate replaced a line that ran `--version` on each tool and read only whether it answered. That form reported a host carrying the broken `gh` as fully set up, which is the failure it exists to stop. It exits non-zero on a missing required tool or one below its floor, and a below-floor finding prints the defect behind the floor rather than the number alone, names where to install from, and prints the command that installs or upgrades the tool on the current platform, so that failure carries its own fix. A missing tool prints the one-line fact, and [`host-setup/`][host-setup-dir] is its remedy.
 
-**This block is POSIX, and on native Windows the interpreter line needs translating**, since `python3` is the one name a correctly set-up Windows host does not have. Read it as `py -3 scripts/host_gate.py` there, matching the contract table above, and run the rest from WSL2 or Git Bash per the shell note. Git Bash inherits the Windows `PATH`, so `python3` reaches the same Store alias stub it does in PowerShell and reports a working interpreter as missing. A PowerShell equivalent of this block is deliberately **not** given here, because it has not been run on a Windows host, and an unverified verification command is worse than none. [#483][issue-483] is where one belongs once someone has executed it.
+**This block is POSIX, and on native Windows two lines need translating.** Run the POSIX form from WSL2 or Git Bash per the shell note, or use the PowerShell form below. Git Bash inherits the Windows `PATH`, so `python3` reaches the same Store alias stub it does in PowerShell and reports a working interpreter as missing.
+
+```powershell
+py -3 scripts/host_gate.py                   # presence and version floors, from spec/host-tools.json
+py -3 scripts/skills_install.py --report     # the skills install stamp is current
+git config --global --list | Select-String "user\.|signing|gpg\."
+$d = Join-Path $env:TEMP ([guid]::NewGuid())
+try {
+  $email = git config --global --get user.email
+  git init -q "$d" `
+    && git -C "$d" commit --allow-empty -q -m check
+  $out = git -C "$d" log -1 --format='sig=%G? author=%an <%ae> committer=%cn <%ce>'
+  $out
+  $ae = git -C "$d" log -1 --format='%ae'
+  $ce = git -C "$d" log -1 --format='%ce'
+  if ($out -notmatch '^sig=[GU] ' -or $email -notmatch '@users\.noreply\.github\.com$' `
+      -or $ae -ne $email -or $ce -ne $email) {
+    throw "signing/identity check failed: $out"
+  }
+} finally {
+  if (Test-Path "$d") { Remove-Item -Recurse -Force "$d" }
+}
+gh auth status
+```
+
+Verified on Windows 11 Pro 10.0.26200 with PowerShell 7.6.4, where `py -3 scripts/host_gate.py` exits 0 over seven declared tools. It was supplied under [#483][issue-483], which had deferred it until somebody had executed it on a Windows host. Only two lines differ from the POSIX block: the interpreter, and the filter, because `grep` has no Windows peer and `Select-String` is the one that ships.
+
+**`py -3` rather than `python`, and the reason is not only the Store stub.** Both names reach the same interpreter on a correctly set-up host, so the stub rules out `python3` and chooses nothing between the other two. What chooses is that an activated virtual environment puts its own interpreter first, so `python` resolves to that environment's. That is right for running project code and wrong here, because this gate measures **the host's** interpreter against a floor, and run as `python` from an activated environment it grades the environment instead. `py` is the launcher and reaches a registered system interpreter whatever is active. The prescription is therefore narrow: `py -3` for this gate, and `python` for everything else.
 
 **What the host can do once this passes**, which is the point of the contract above:
 
@@ -239,6 +285,7 @@ The gate replaced a line that ran `--version` on each tool and read only whether
 | Run the repo's own gates and tests | Python 3 covers `scripts/` and `spec/` with no packages to install |
 | Drive the PR and Copilot review loop | `gh` and an authenticated session |
 | Let an agent work with the `gh` credentials live | the write-safety kit is installed |
+| Have the fleet skills surface in every agent session | the skills install stamp is current per `skills_install.py --report` |
 
 A host that fails any row is not ready for the procedure that row names, and the fix belongs on the host rather than in a repo.
 
@@ -252,14 +299,17 @@ A host that fails any row is not ready for the procedure that row names, and the
 [agent-safety]: ../host-setup/agent-safety/README.md
 [audit]: ../AUDIT.md
 [bootstrap]: ../host-setup/bootstrap.sh
+[bootstrap-ps1]: ../host-setup/bootstrap.ps1
 [devcontainer]: ./devcontainer.md
 [governance-git-and-commit-rules]: ../GOVERNANCE.md#git-and-commit-rules
 [host-gate]: ../scripts/host_gate.py
 [host-setup-dir]: ../host-setup/
+[host-setup-windows]: ../host-setup/windows/
 [host-tools]: ../spec/host-tools.json
 [issue-483]: https://github.com/ptr727/ProjectTemplate/issues/483
 [operations]: ../OPERATIONS.md
 [scripts-dir]: ../scripts/
+[skills-install]: ../scripts/skills_install.py
 [spec-dir]: ../spec/
 [ssh-signing]: ./ssh-signing.md
 [standup]: ../STANDUP.md
@@ -269,6 +319,7 @@ A host that fails any row is not ready for the procedure that row names, and the
 
 [cli-install-link]: https://github.com/cli/cli/blob/trunk/docs/install_linux.md
 [cli-link]: https://cli.github.com/
+[docker-install-link]: https://docs.docker.com/engine/install/
 [git-restore-mtime-action-link]: https://github.com/chetan/git-restore-mtime-action
 [git-tools-link]: https://github.com/MestreLion/git-tools
 [keys-link]: https://github.com/settings/keys

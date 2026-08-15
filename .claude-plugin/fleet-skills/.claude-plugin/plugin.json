@@ -1,0 +1,28 @@
+{
+  "name": "fleet-skills",
+  "version": "0.0.0",
+  "description": "Fleet-wide agent rules and per-language conventions packaged as Claude Code Skills, generated from .agents/skills/.",
+  "author": {
+    "name": "ptr727"
+  },
+  "skills": [
+    "./skills/agent-conduct",
+    "./skills/audit-a-repo",
+    "./skills/carried-instruction-file-guard",
+    "./skills/comment-and-doc-style",
+    "./skills/copilot-instructions-keeper",
+    "./skills/dotnet-codestyle",
+    "./skills/fleet-conformance-check",
+    "./skills/git-commit-conventions",
+    "./skills/operational-vs-release-workflow",
+    "./skills/pr-review-conduct",
+    "./skills/python-codestyle",
+    "./skills/repo-worktree",
+    "./skills/resync-a-repo",
+    "./skills/shell-codestyle",
+    "./skills/skill-lifecycle",
+    "./skills/standup-a-repo",
+    "./skills/upstream-contribution-workflow",
+    "./skills/workflow-ci-contract"
+  ]
+}

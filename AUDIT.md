@@ -7,6 +7,21 @@ The verdict vocabulary is [`WORKFLOW.md`][workflow]'s: **operational / not opera
 
 **This file measures. It does not decide the order a finding is applied in.** Section 10 states that converging is a separate phase and how a fix ships, and [`RESYNC.md`][resync] is that phase for a repository that is already stood up and has fallen behind, sequencing the remedies so the rules land before the files they govern and a deletion lands before the re-vendor that would otherwise refresh it.
 
+```mermaid
+flowchart TD
+  s0["0: has the repo been stood up? if not, STANDUP.md"] --> s1["1: scope, ground-truth branch (main)"]
+  s1 --> s2["2: resolve the repo's type(s)"]
+  s2 --> s3["3: applicability gate, per check"]
+  s3 --> s4["4: per-dimension checks, letter and intent"]
+  s4 --> s5["5: assert Actions implement WORKFLOW.md"]
+  s5 --> s6["6: validate settings, rulesets, secrets"]
+  s6 --> s7["7: verdict model"]
+  s7 -->|"every applicable check passes"| operational["operational"]
+  s7 -->|"a letter miss, intent satisfied"| drift["drift finding"]
+  s7 -->|"letter and intent both miss"| defect["defect: not operational"]
+  s7 --> s8["8: report, under reports/"]
+```
+
 ## 0. When to Run and What "Done" Means
 
 **Start here only if the repo already carries its instruction set.** This file measures a repo against the fleet ground truth, and measuring assumes the thing being measured arrived. A repo holding no carried files, or a partial set, has a baseline that never arrived rather than drift to report, so it goes to [`STANDUP.md`][standup] sections 1A and 2 first and comes back here afterwards. The `AGENTS.md` "Fleet Bootstrap" section states that routing in the repo itself, byte-locked, so an agent finds it without knowing this file exists. Running the audit against a repo with nothing to audit produces a report that is all absences, which reads as a catastrophic result rather than as a repo that was never stood up.
@@ -14,7 +29,7 @@ The verdict vocabulary is [`WORKFLOW.md`][workflow]'s: **operational / not opera
 This audit is not occasional. Run it whenever you **create, adopt, or materially change** a fleet repo, and on demand for any known repo:
 
 - **Onboarding a repo is complete only when it either passes this audit** (operational on every applicable check) **or carries a committed `reports/<repo>/audit.md` plus a tracking issue** enumerating every residual delta. A repo that is partially set up but never audited is itself a **defect**, the exact state this process prevents. The create-to-conformance counterpart is [`STANDUP.md`][standup]. Because both read the same manifests, a repo stood up by that file passes this audit by construction.
-- **Touching a repo** (any conformance-affecting change) ends by re-running the applicable checks and **reconciling the registry entry to reality**: `status`, `types`, `releaseTrigger`, `workflowModel`, `driftNotes`. The registry records reality, not intent. [`spec/validate.py`][validate] proves the catalog is self-consistent, not that it matches the live repo. Closing that gap is this audit's job. The deterministic subset (settings, rulesets, secret names, file presence, per-scope Markdown section presence, workflow interface conformance, verbatim content, hub-hosted files a repo carries, branch facts) is mechanized in [`spec/audit.py`][audit-runner]: owner-initiated, run on demand when onboarding a repo, on suspected drift, or before fleet-wide changes. A required section missing from a carried Markdown file is a **drift finding**, not a letter, because a heading rename reads as missing and equivalence is judged by hand. A carried `interface` workflow (spec/fidelity-model.md) is checked by name and wiring (required jobs, the ruleset-bound check name, the artifact-name handoff, and the forbidden `artifact-ids:` fork), all at **drift**, since the body is owned and a rename is a hint to verify. A carried `verbatim` unit, whether a whole file (`.markdownlint-cli2.jsonc`) or a canonical workflow job region (the `github-release` job), is content-hashed against the hub's canonical after line-ending normalization. A mismatch is classified **stale** (matches a past hub revision, re-vendor) or **modified** (matches none, the repo changed fixed content), both at **drift**, since equivalence is intent-governed and a byte diff is a hint to review.
+- **Touching a repo** (any conformance-affecting change) ends by re-running the applicable checks and **reconciling the registry entry to reality**: `status`, `types`, `releaseTrigger`, `workflowModel`, `driftNotes`. The registry records reality, not intent. [`spec/validate.py`][validate] proves the catalog is self-consistent, not that it matches the live repo. Closing that gap is this audit's job. The deterministic subset (settings, rulesets, secret names, file presence, per-scope Markdown section presence, workflow interface conformance, verbatim content, hub-hosted files a repo carries, branch facts) is mechanized in [`spec/audit.py`][audit-runner]: owner-initiated, run on demand when onboarding a repo, on suspected drift, or before fleet-wide changes. A required section missing from a carried Markdown file is a **drift finding**, not a letter, because a heading rename reads as missing and equivalence is judged by hand. A carried `interface` workflow (spec/fidelity-model.md) is checked by name and wiring (required jobs, the ruleset-bound check name, the artifact-name handoff, and the forbidden `artifact-ids:` fork), all at **drift**, since the body is owned and a rename is a hint to verify. A carried `verbatim` unit, whether a whole file (`.markdownlint-cli2.jsonc`) or a canonical workflow job region (the `github-release` job), is content-hashed against the hub's canonical after line-ending normalization. A mismatch is classified **stale** (matches a past hub revision, re-vendor) or **modified** (matches none, the repo changed fixed content), both at **drift**, since equivalence is intent-governed and a byte diff is a hint to review. A carried `intent` unit gets one advisory beyond presence, a last-modified comparison: a hub canonical changing after the copy's own last commit marks the copy as possibly trailing, at **drift**, a hint rather than proof, since a copy touched without reconciling reads current and content is never judged.
 
 **Verify the host before running any hub tool.** The tools carry version floors, and a host below one answers `--version`, looks healthy, and produces a wrong answer, so a clean audit run from a broken host is a clean-looking result rather than a result.
 
@@ -156,6 +171,16 @@ What a downstream repo does instead is unchanged and is where its context is wor
 ## 9. Escalate
 
 Surface spec questions rather than resolving them silently, for example the Python config-placement canonicalization, or a new construct no type covers. A repeated letter miss that many repos share is a signal the spec (not each repo) needs adjusting, so raise it.
+
+```mermaid
+flowchart LR
+  finding["a finding from 7: Verdict Model"] -->|"the same miss, many repos"| s9["9: Escalate, fix the spec instead"]
+  finding -->|"one repo"| s10["10: Converge, branch + fix + PR"]
+  s10 --> review["review loop to green"]
+  review --> merge["maintainer merges"]
+  merge --> reaudit["re-audit, commit the report"]
+  s9 --> reaudit
+```
 
 ## 10. Converge: Apply the Fixes
 

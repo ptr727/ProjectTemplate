@@ -8,23 +8,33 @@ What verifying a change here requires, including the part CI cannot perform. The
 
 ### Run the gates the way CI runs them
 
-CI passes explicit `--check` lists, and a bare `python3 scripts/prose_lint.py [file]` runs `DEFAULT_RULES`, which is those two lists together. What differs is the exit code rather than the coverage: CI gates on eight of the nine and reports `charset-unknown` warn-only, where a bare run exits non-zero on any of the nine. `sentence-split` is in neither, so nothing below runs it and a local run reaches it only by naming it. Run the CI invocations:
+CI passes explicit `--check` lists, and a bare `python3 scripts/prose_lint.py [file]` runs `DEFAULT_RULES`, which is those two lists together. What differs is the exit code rather than the coverage. CI gates on nine of the ten and reports `charset-unknown` warn-only, where a bare run exits non-zero on any of the ten. `sentence-split` and `sentence-length` are in neither, so nothing below runs them and a local run reaches them only by naming them. Run the CI invocations:
 
 ```sh
-python3 scripts/test_prose_lint.py
-python3 scripts/test_repo_gate.py
-python3 scripts/test_pr_review.py
-python3 spec/audit.py --selftest
-python3 host-setup/agent-safety/gh-write-guard.py --selftest
+uvx ruff@latest check .
+uvx ruff@latest format --check .
+uvx mypy@latest
+uvx coverage@latest run --source=scripts,spec,host-setup -m unittest discover -s scripts/tests
+uvx coverage@latest run --source=scripts,spec,host-setup --append spec/audit.py --selftest
+uvx coverage@latest run --source=scripts,spec,host-setup --append host-setup/agent-safety/gh-write-guard.py --selftest
+uvx coverage@latest run --source=scripts,spec,host-setup --append host-setup/agent-safety/test_install.py
+uvx coverage@latest report
+python3 scripts/build_dist.py --check
 python3 scripts/repo_gate.py
-python3 scripts/prose_lint.py . --check charset --check semicolon --check dash --check dupword --check spelling --check comment-wrap --check comment-case --check home-path
+python3 scripts/prose_lint.py . --check charset --check semicolon --check dash --check dupword --check spelling --check comment-wrap --check comment-case --check home-path --check dead-path
 python3 scripts/prose_lint.py . --check charset-unknown --summary
 for f in registry/*.json spec/*.json repo-config/*.json; do jq empty "$f"; done
 python3 spec/validate.py
 docker run --rm --pull=always -v "$PWD":/check --workdir /check mstruebing/editorconfig-checker:latest
+scripts=(); while IFS= read -r f; do scripts+=("$f"); done < <(git ls-files '*.sh'); docker run --rm --pull=always -v "$PWD":/mnt --workdir /mnt koalaman/shellcheck:stable "${scripts[@]}"
+docker run --rm --pull=always -e PS_SCRIPTS="$(git ls-files '*.ps1')" -v "$PWD":/mnt --workdir /mnt mcr.microsoft.com/powershell:latest pwsh -NoProfile -Command 'Set-PSRepository PSGallery -InstallationPolicy Trusted; Install-Module PSScriptAnalyzer -RequiredVersion 1.23.0 -Force -Scope AllUsers; Import-Module PSScriptAnalyzer; $files = $env:PS_SCRIPTS -split "\s+" | Where-Object { $_ }; if (-not $files) { Write-Host "no PowerShell scripts are tracked"; exit 0 }; $found = @(); foreach ($f in $files) { $found += Invoke-ScriptAnalyzer -Path $f -Settings ./PSScriptAnalyzerSettings.psd1 }; Write-Host "Checked $($files.Count) file(s)"; if ($found) { $found | Format-Table RuleName,Severity,ScriptName,Line,Message -AutoSize | Out-String -Width 200 | Write-Host; exit 1 }; Write-Host "no findings"'
 ```
 
-Two gaps in that list are CI's rather than this runbook's, reproduced here so a local run matches CI rather than quietly exceeding it. The `jq` glob covers `repo-config/*.json` and does not reach `repo-config/operational/develop.json`, so a malformed operational payload passes. The second is that `sentence-split` is implemented and tested but named by no invocation, so nothing runs it.
+The `test_install.py` line behaves differently here than in CI, stated so its failure reads as the verdict it is. Its report cases install from this checkout and assert the machine then reads as current. An install from a checkout carrying uncommitted changes records a dirty stamp that reads as stale. So on a working tree mid-change those cases fail by design where CI's clean checkout passes. The remedy is to run them again once the change is committed, not to read the failure as a regression.
+
+The two container lines that take a file list differ from the workflow in **form** and not in what they check, and both differences exist because this runbook runs on a developer's machine where the workflow runs on `ubuntu-latest`. The shell list is collected with a `while read` loop rather than the workflow's `mapfile`, since `mapfile` arrives in bash 4 and macOS ships 3.2, and it stays an array so a path carrying whitespace is still passed as one argument. The PowerShell list splits on whitespace rather than on a newline, since a shell joins `git ls-files` output with newlines and PowerShell joins it with spaces, and splitting on the newline alone hands the analyzer one argument holding every path, which it reports as one file it cannot find and a clean run over nothing.
+
+Two gaps in that list are CI's rather than this runbook's, reproduced here so a local run matches CI rather than quietly exceeding it. The `jq` glob covers `repo-config/*.json` and does not reach `repo-config/operational/develop.json`, so a malformed operational payload passes. The second is that `sentence-split` and `sentence-length` are implemented and tested but named by no invocation, so nothing runs them.
 
 Run the `editorconfig-checker` line before pushing a new file, and before pushing an existing file that a script rewrote rather than an editor. This repository defaults to CRLF and most tooling writes LF, so a new file fails that check on its first CI run rather than locally. A scripted rewrite is the same hazard on a file that was already correct, since reading and rewriting a whole file in text mode converts every line ending in it, which no prose or Markdown gate reports.
 

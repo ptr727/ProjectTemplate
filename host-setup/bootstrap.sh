@@ -42,11 +42,12 @@ describe them come from one revision rather than from whatever a host happens to
 
 Actions, the last one given wins, default --report on a terminal is the menu:
   -r, --report      Report what each tool would do, change nothing
-      --host        Upgrade packages, install the tools, configure git and GitHub
+      --host        Upgrade packages, install the tools, configure git and GitHub, install the skills
       --dev         As --host, and add the tools a development machine needs
       --upgrade     Upgrade the packages of the current release only
       --tools       Install the host tools only
       --github      Configure git, the SSH key, and commit signing only
+      --skills      Install the fleet skills for the current user only
       --release     Upgrade to the next distribution release, on its own
   -h, --help        Show this help
 
@@ -173,10 +174,15 @@ report() {
     run_tool upgrade-host.sh --status
     run_tool install-tools.sh --report
     run_tool setup-github.sh --status
+    # Tolerated rather than fatal, since a missing install is a finding for a report to name and not a reason to stop naming the rest.
+    if ! SKILLS_SOURCE_COMMIT="$RESOLVED" run_tool install-skills.sh --report; then
+        info "The fleet skills install is missing or stale, and --host or --skills lands it"
+    fi
 }
 
 # The order is fixed rather than chosen.
 # Packages come first so a keyring or a repository is added against a current apt state, and GitHub comes last because it is the only step that waits on a person in a browser.
+# The skills step runs after the tools, because install-tools.sh provides the interpreter it needs.
 stand_up() {
     local profile="$1"
 
@@ -187,6 +193,7 @@ stand_up() {
         run_tool install-tools.sh --install
     fi
     run_tool setup-github.sh --configure
+    SKILLS_SOURCE_COMMIT="$RESOLVED" run_tool install-skills.sh
 }
 
 # Names the host in the menu heading.
@@ -208,8 +215,9 @@ menu() {
     log "  2  Upgrade the packages of the current release"
     log "  3  Install the host tools"
     log "  4  Configure git and GitHub"
-    log "  5  All of the above, which is a host stood up"
-    log "  6  All of the above plus the development tools"
+    log "  5  Install the fleet skills"
+    log "  6  All of the above, which is a host stood up"
+    log "  7  All of the above plus the development tools"
     log "  q  Quit"
     log ""
 
@@ -220,8 +228,9 @@ menu() {
         2) MODE="upgrade" ;;
         3) MODE="tools" ;;
         4) MODE="github" ;;
-        5) MODE="host" ;;
-        6) MODE="dev" ;;
+        5) MODE="skills" ;;
+        6) MODE="host" ;;
+        7) MODE="dev" ;;
         q | Q) exit 0 ;;
         *) die "Not one of the choices" ;;
     esac
@@ -238,6 +247,7 @@ parse_args() {
             --upgrade) MODE="upgrade" ;;
             --tools) MODE="tools" ;;
             --github) MODE="github" ;;
+            --skills) MODE="skills" ;;
             --release) MODE="release" ;;
             -y | --yes) ASSUME_YES=true ;;
             -n | --dry-run) DRY_RUN=true ;;
@@ -295,6 +305,7 @@ main() {
         upgrade) run_tool upgrade-host.sh --packages ;;
         tools) run_tool install-tools.sh --install ;;
         github) run_tool setup-github.sh --configure ;;
+        skills) SKILLS_SOURCE_COMMIT="$RESOLVED" run_tool install-skills.sh ;;
         release) run_tool upgrade-host.sh --release ;;
         host) stand_up host ;;
         dev) stand_up dev ;;
