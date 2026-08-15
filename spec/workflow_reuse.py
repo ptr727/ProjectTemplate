@@ -13,8 +13,8 @@ an impression:
      and compared line by line against the hub canonical of the same name (the hub's own workflow or the
      catalog snippet), after the same normalization the verbatim engine applies (line endings, action pins,
      job needs), so a Dependabot bump is not counted as divergence.
-  2. Copies of one canonical are clustered by pairwise similarity, which answers the question that decides
-     whether a job is worth hosting once: how many genuinely distinct variants of it the fleet runs.
+  2. Copies of one canonical are clustered by similarity to a cluster leader, which answers the question that
+     decides whether a job is worth hosting once: how many genuinely distinct variants of it the fleet runs.
   3. A file that reaches a hub reusable workflow or a hub composite action is counted as a caller, which is
      the state every carried copy converges to.
 
@@ -91,10 +91,13 @@ def hub_reach(text, hub_slug):
 
 
 def cluster(copies):
-    """Greedy single-link clusters of {repo: text} at CLUSTER_THRESHOLD, each a sorted repo list.
+    """Leader clusters of {repo: text} at CLUSTER_THRESHOLD, each a sorted repo list.
 
-    Greedy rather than exhaustive on purpose: the count of variants is what the report needs, and a stricter
-    partition would only split a borderline pair into two clusters that read the same to a maintainer.
+    Each copy, in name order, joins the first cluster whose leader (its first member) it matches at the
+    threshold, else it starts a cluster. So a member is guaranteed similar to its leader rather than to every
+    other member. Leader clustering rather than an exhaustive partition on purpose: the count of variants is
+    what the report needs, and a stricter partition would only split a borderline pair into two clusters that
+    read the same to a maintainer.
     """
     lines = {r: norm_lines(t) for r, t in copies.items()}
     clusters = []
@@ -219,7 +222,7 @@ def render_report(rows, unreadable, empty, hub_sha):
     w("## Per Workflow")
     w("")
     w(
-        f"Downstream copies of each hub canonical. A variant is a cluster of copies at or above {CLUSTER_THRESHOLD} pairwise similarity, so the cluster count is how many distinct shapes of one workflow the fleet runs today. Callers are the copies that already reach the hub rather than carrying the job bodies."
+        f"Downstream copies of each hub canonical. A variant is a cluster of copies each at or above {CLUSTER_THRESHOLD} similarity to the cluster's first member, so the cluster count is how many distinct shapes of one workflow the fleet runs today. Callers are the copies that already reach the hub rather than carrying the job bodies."
     )
     w("")
     w("| File | Copies | Lines | Identical to hub | Variants | Callers |")
