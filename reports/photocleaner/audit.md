@@ -6,13 +6,13 @@
 - **Date:** 2026-08-15
 - **Run stamp:** `audit run 2026-08-15T18:43:20Z | hub b09078e`
 
-Supersedes the earlier 2026-08-15 snapshot, which measured `main` before the promotion. The resyncs against the hub ([#49](https://github.com/ptr727/PhotoCleaner/pull/49), [#50](https://github.com/ptr727/PhotoCleaner/pull/50), [#52](https://github.com/ptr727/PhotoCleaner/pull/52)) are promoted to `main` by [#51](https://github.com/ptr727/PhotoCleaner/pull/51), and the deterministic audit reports **clean** at `main` and at `develop` with the hub at `b09078e`. The two hub-only workflow findings the earlier snapshot carried are gone as well, since the hub now declares the publisher and validator workflows at intent fidelity (#736).
+Supersedes the earlier 2026-08-15 snapshot, which measured `main` before the promotion. The resyncs against the hub (ptr727/PhotoCleaner#49, ptr727/PhotoCleaner#50, ptr727/PhotoCleaner#52) are promoted to `main` by ptr727/PhotoCleaner#51, and the deterministic audit reports **clean** at `main` and at `develop` with the hub at `b09078e`. The two hub-only workflow findings the earlier snapshot carried are gone as well, since the hub now declares the publisher and validator workflows at intent fidelity (#736).
 
 ## Develop Drift
 
 `develop` vs `main`: identical content, since #51 merged `develop` at `ab23034` and nothing has landed since. The audit at `develop` reports zero findings.
 
-The promotion was blocked for one round by the prose gate's `dead-path` rule flagging verbatim mentions of the retired `repo-config/configure.sh`, filed as [#721](https://github.com/ptr727/ProjectTemplate/issues/721) and fixed by #731. The gate fetches its rules from hub `develop` on a `develop`-targeted run, so a re-run cleared it with no repo change. Copilot read 18 of 19 changed files on the promotion in both rounds and raised no thread. Its one suppressed finding, a Mermaid edge in the hub-carried `WORKFLOW.md` diagram, was answered on the pull request as declined, since the diagram is hub content and the D1 text beside it already states the rule.
+The promotion was blocked for one round by the prose gate's `dead-path` rule flagging verbatim mentions of the retired `repo-config/configure.sh`, filed as #721 and fixed by #731. The gate fetches its rules from hub `develop` on a `develop`-targeted run, so a re-run cleared it with no repo change. Copilot read 18 of 19 changed files on the promotion in both rounds and raised no thread. Its one suppressed finding, a Mermaid edge in the hub-carried `WORKFLOW.md` diagram, was answered on the pull request as declined, since the diagram is hub content and the D1 text beside it already states the rule.
 
 ## Dimensions
 
@@ -53,5 +53,5 @@ None. #50, #52 (to `develop`) and #51 (`develop -> main`) are merged.
 
 Two hub findings from this pass, filed rather than patched per repo, both closed since:
 
-1. [#721](https://github.com/ptr727/ProjectTemplate/issues/721): `prose_lint.py dead-path` could not recognize a hub-hosted path in a repo that retired the file, so verbatim text naming `repo-config/configure.sh` failed a downstream promotion gate. Fixed by #731.
-2. [#722](https://github.com/ptr727/ProjectTemplate/issues/722): the hub's `.github/copilot-instructions.md` linked `GOVERNANCE.md#every-finding-ends-in-an-action`, an anchor that left `GOVERNANCE.md` when PR Review Etiquette was packaged as a Skill. PhotoCleaner re-pointed its copy in #50 after Copilot raised it, and #52 carried the canonical wording #730 landed.
+1. #721: `prose_lint.py dead-path` could not recognize a hub-hosted path in a repo that retired the file, so verbatim text naming `repo-config/configure.sh` failed a downstream promotion gate. Fixed by #731.
+2. #722: the hub's `.github/copilot-instructions.md` linked `GOVERNANCE.md#every-finding-ends-in-an-action`, an anchor that left `GOVERNANCE.md` when PR Review Etiquette was packaged as a Skill. PhotoCleaner re-pointed its copy in #50 after Copilot raised it, and #52 carried the canonical wording #730 landed.
