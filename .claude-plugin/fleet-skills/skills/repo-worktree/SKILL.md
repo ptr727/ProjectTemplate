@@ -60,12 +60,34 @@ is whatever it last fetched rather than the branch it names.
 ## Creating a Worktree
 
 The fleet layout convention keeps every base clone and every in-flight task visible in one
-place, with no owner segment since every repo here is under one owner:
+place:
 
 ```text
 ~/repos/<Repo>                          base clone, on its default/working branch
 ~/repos/worktrees/<Repo>-<task-slug>    one worktree per in-flight task, own branch
+~/repos/upstream/<owner>-<repo>         clone of a repo under another owner, not a fork
 ```
+
+The top level carries no owner segment because everything in it is the fleet owner's own, an
+original repo and a fork alike. A fork is named `<upstream-owner>-<upstream-repo>` at fork time,
+`esphome-esphome` for `esphome/esphome` and `home-assistant-core` for `home-assistant/core`, so
+its name identifies the upstream project and stays unique in the flat namespace without an owner
+segment of its own. A repository adopted as the owner's own work rather than kept as a fork is
+detached from its parent and keeps a plain name, `aiopurpleair` rather than
+`bachya-aiopurpleair`, since it no longer tracks anything upstream.
+
+A clone of a repository under another owner is neither of those, and flattening one collides
+rather than merely reading oddly: `home-assistant/core` joined the way a fork is joined **is**
+the fork's name, `home-assistant-core`, while reduced to a bare `core` it names no project and
+collides with the next `core` cloned from any other owner. Those clones live one level down
+under `upstream/`, named by that same join, so `upstream/home-assistant-core` sits beside the
+fork it would otherwise land on. The segment states the relationship rather than the owner, so a
+reference checkout is told from a working repo without a `git remote` call, and the names under
+it never compete with the flat namespace above. A worktree off one of them keeps the flat
+worktrees path under the same name, `~/repos/worktrees/<owner>-<repo>-<task-slug>`. Contributing
+a change from such a clone is never a push out of it: fork the upstream first, per the
+`upstream-contribution-workflow` skill, and that fork's own clone then belongs in the flat
+namespace above, under the name this one already has.
 
 ```sh
 git -C ~/repos/<Repo> fetch origin develop
