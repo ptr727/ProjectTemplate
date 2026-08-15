@@ -1,7 +1,8 @@
 #!/usr/bin/env python3
 """Workflow-reuse measurement: how much of the fleet's GitHub Actions YAML is a copy of a hub canonical.
 
-Read-only, owner-run, not wired into CI. Reuses spec/audit.py's fleet machinery (gh, normalize, registry).
+Read-only and owner-run. The measurement reads the live fleet, so it is not wired into CI beyond the offline
+--selftest CI runs beside the audit engine's. Reuses spec/audit.py's fleet machinery (gh, normalize, registry).
 
 The hub hosts a standard workflow once, as a `workflow_call` reusable workflow a downstream repo reaches by a
 pinned `uses:`, and a downstream repo carries only a caller stub plus a composite-action hook for what is
