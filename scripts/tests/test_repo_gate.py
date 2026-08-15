@@ -157,6 +157,13 @@ class TestShaPinResolves(ResolveCase):
         self.assertEqual([], repo_gate.check_sha_pin(self.tmp, self.pins(ref)))
         stub.assert_called_once_with(f"repos/{self.OWNER}/Fleet/commits/{PINNED}")
 
+    def test_a_reusable_workflow_ref_resolves_against_its_repository(self) -> None:
+        """A caller stub pins `owner/repo/.github/workflows/x-task.yml@sha`, one repository again."""
+        stub = self.answers({f"repos/{self.OWNER}/Fleet/commits/{PINNED}": True})
+        ref = f"{self.OWNER}/Fleet/.github/workflows/merge-bot-task.yml@{PINNED}"
+        self.assertEqual([], repo_gate.check_sha_pin(self.tmp, self.pins(ref)))
+        stub.assert_called_once_with(f"repos/{self.OWNER}/Fleet/commits/{PINNED}")
+
     def test_a_pin_under_another_owner_is_read_for_shape_and_never_fetched(self) -> None:
         """The scope is a decision, so a case holds it rather than leaving it to the docstring."""
         stub = self.answers({})

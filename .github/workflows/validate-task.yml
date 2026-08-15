@@ -108,7 +108,7 @@ jobs:
       # Each gate here is proven by a case that reintroduces the fault it catches, wherever it lives.
       # A test sits with the layer that owns it rather than beside the file it names, so a read-only gate over the spec and the host tooling lives in scripts/tests/ even where its subject is shell, and the agent-safety kit carries its own because it ships as a unit.
       # The tests are standard library only, so uvx coverage at its unpinned latest is the one tool the step fetches.
-      # The audit engine self-test is offline, so it runs here rather than only on an owner sweep.
+      # The audit engine self-test and the workflow-reuse measurement self-test are offline, so they run here rather than only on an owner sweep.
       # The write-guard self-test is offline too, and it otherwise runs only when a host installs the hook, which is where a regression in it would surface as a broken machine.
       # Every run goes through coverage with --append, so one report covers the whole self-test surface, informational with no threshold adopted.
       - name: Run script self-tests step
@@ -116,6 +116,7 @@ jobs:
           set -Eeuo pipefail
           uvx coverage@latest run --source=scripts,spec,host-setup -m unittest discover -s scripts/tests
           uvx coverage@latest run --source=scripts,spec,host-setup --append spec/audit.py --selftest
+          uvx coverage@latest run --source=scripts,spec,host-setup --append spec/workflow_reuse.py --selftest
           uvx coverage@latest run --source=scripts,spec,host-setup --append host-setup/agent-safety/gh-write-guard.py --selftest
           uvx coverage@latest run --source=scripts,spec,host-setup --append host-setup/agent-safety/test_install.py
           uvx coverage@latest report

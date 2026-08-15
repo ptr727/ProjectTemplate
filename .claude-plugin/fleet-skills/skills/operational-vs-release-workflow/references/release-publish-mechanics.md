@@ -49,8 +49,9 @@ looks tidier for 1:1 but forks the `github-release` download and breaks its verb
 `build-release-task.yml`. Per the per-target subsetting rule above, delete the target jobs not
 shipped and add the ones that are. `build-release-task.yml`'s `github-release` job is untouched, but the file
 is not byte-identical because its `needs`/job list reflects the repo's own targets. Making that
-list itself target-agnostic is a larger "factor build from orchestration" refactor that is
-intentionally not done.
+list itself target-agnostic is the release-chain phase of `docs/reusable-workflows.md` in the
+hub, where the orchestrator becomes a hub-hosted task and each target a composite-action hook,
+and until that phase ships the list stays per repo.
 
 ## Map your outputs to the right seam
 
