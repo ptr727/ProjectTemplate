@@ -83,8 +83,13 @@ collides with the next `core` cloned from any other owner. Those clones live one
 under `upstream/`, named by that same join, so `upstream/home-assistant-core` sits beside the
 fork it would otherwise land on. The segment states the relationship rather than the owner, so a
 reference checkout is told from a working repo without a `git remote` call, and the names under
-it never compete with the flat namespace above. A worktree off one of them keeps the flat
-worktrees path under the same name, `~/repos/worktrees/<owner>-<repo>-<task-slug>`. Contributing
+it never compete with the flat namespace above. The join is ambiguous in the abstract, since a
+hyphen in either half means `foo-bar/baz` and `foo/bar-baz` produce one name, and it is kept
+anyway because it is the fork convention's own join: the ambiguity is inherited from the flat
+namespace above rather than introduced here, and it surfaces at clone time as a directory that
+already exists, where the second clone takes a hand-picked name. A worktree off one of them
+keeps the flat worktrees path under the same name,
+`~/repos/worktrees/<owner>-<repo>-<task-slug>`. Contributing
 a change from such a clone is never a push out of it: fork the upstream first, per the
 `upstream-contribution-workflow` skill, and that fork's own clone then belongs in the flat
 namespace above, under the name this one already has.
