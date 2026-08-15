@@ -12,7 +12,7 @@ Supersedes the earlier 2026-08-15 snapshot, which measured `main` before the pro
 
 `develop` vs `main`: identical content, since #51 merged `develop` at `ab23034` and nothing has landed since. The audit at `develop` reports zero findings.
 
-The promotion was blocked for one round by the prose gate's `dead-path` rule flagging verbatim mentions of the retired `repo-config/configure.sh`, filed as #721 and fixed by #731. The gate fetches its rules from hub `develop` on a `develop`-targeted run, so a re-run cleared it with no repo change. Copilot read 18 of 19 changed files on the promotion in both rounds and raised no thread. Its one suppressed finding, a Mermaid edge in the hub-carried `WORKFLOW.md` diagram, was answered on the pull request as declined, since the diagram is hub content and the D1 text beside it already states the rule.
+The promotion was blocked for one round by the prose gate's `dead-path` rule flagging verbatim mentions of the retired `repo-config/configure.sh`, filed as #721 and fixed by #731. The gate fetches its rules from hub `develop` on a `develop`-targeted run, so a re-run cleared it with no repo change. Copilot read 18 of 19 changed files on the promotion in both rounds and raised no threads. Its one suppressed finding, a Mermaid edge in the hub-carried `WORKFLOW.md` diagram, was answered on the pull request as declined, since the diagram is hub content and the D1 text beside it already states the rule.
 
 ## Dimensions
 
@@ -54,4 +54,4 @@ None. #50, #52 (to `develop`) and #51 (`develop -> main`) are merged.
 Two hub findings from this pass, filed rather than patched per repo, both closed since:
 
 1. #721: `prose_lint.py dead-path` could not recognize a hub-hosted path in a repo that retired the file, so verbatim text naming `repo-config/configure.sh` failed a downstream promotion gate. Fixed by #731.
-2. #722: the hub's `.github/copilot-instructions.md` linked `GOVERNANCE.md#every-finding-ends-in-an-action`, an anchor that left `GOVERNANCE.md` when PR Review Etiquette was packaged as a Skill. PhotoCleaner re-pointed its copy in #50 after Copilot raised it, and #52 carried the canonical wording #730 landed.
+2. #722: the hub's `.github/copilot-instructions.md` linked `GOVERNANCE.md#every-finding-ends-in-an-action`, an anchor that left `GOVERNANCE.md` when PR Review Etiquette was packaged as a Skill. PhotoCleaner re-pointed its copy in #50 after Copilot raised it, and #52 carried the canonical wording that #730 landed.
