@@ -1230,7 +1230,7 @@ def check_interface(path, contract, text):
                     findings.append(
                         (
                             "DRIFT",
-                            f"interface: {path} job '{job}' uses forbidden '{t}' (forks the verbatim github-release download - see AGENTS.md override seam)",
+                            f"interface: {path} job '{job}' uses forbidden '{t}' (forks the verbatim github-release download, see WORKFLOW.md \"The Seam Contract\")",
                         )
                     )
     return findings
@@ -2084,6 +2084,22 @@ def _selftest():
         "requireTokensInJob": {"github-release": ["pattern:", "merge-multiple:"]},
         "forbidTokensInJob": {"github-release": ["artifact-ids:"]},
     }
+    # The merge-bot caller stub, the shape every repo carries once the merge-bot is hub-hosted.
+    bot_stub = (
+        "jobs:\n"
+        "  merge-bot:\n"
+        "    name: Merge bot pull request job\n"
+        "    uses: acme/hub/.github/workflows/merge-bot-task.yml@" + "a" * 40 + " # 2.0.1\n"
+        "    secrets:\n"
+        "      CODEGEN_APP_CLIENT_ID: ${{ secrets.CODEGEN_APP_CLIENT_ID }}\n"
+        "      CODEGEN_APP_PRIVATE_KEY: ${{ secrets.CODEGEN_APP_PRIVATE_KEY }}\n"
+    )
+    bot_contract = {
+        "requiredJobKeys": ["merge-bot"],
+        "requireTokensInJob": {
+            "merge-bot": ["merge-bot-task.yml", "CODEGEN_APP_CLIENT_ID", "CODEGEN_APP_PRIVATE_KEY"]
+        },
+    }
     cases = [
         ("conformant PR workflow", pr_head + pr_check, pr_contract, 0),
         ("PR workflow missing the required job and its check name", pr_head, pr_contract, 2),
@@ -2153,6 +2169,38 @@ def _selftest():
                 "          merge-multiple: true\n", "          # merge-multiple: true (was here)\n"
             ),
             rel_contract,
+            1,
+        ),
+        (
+            "merge-bot caller stub reaching the hub task with both secrets mapped",
+            bot_stub,
+            bot_contract,
+            0,
+        ),
+        (
+            "merge-bot caller stub with the hub's own local uses",
+            bot_stub.replace(
+                "acme/hub/.github/workflows/merge-bot-task.yml@" + "a" * 40 + " # 2.0.1",
+                "./.github/workflows/merge-bot-task.yml",
+            ),
+            bot_contract,
+            0,
+        ),
+        (
+            "merge-bot copy still carrying the job bodies reports the missing caller job once",
+            (
+                "jobs:\n  merge-dependabot:\n    runs-on: ubuntu-latest\n    steps: []\n"
+                "  disable-auto-merge-on-maintainer-push:\n    runs-on: ubuntu-latest\n    steps: []\n"
+            ),
+            bot_contract,
+            1,
+        ),
+        (
+            "merge-bot caller stub that maps only one secret",
+            bot_stub.replace(
+                "      CODEGEN_APP_PRIVATE_KEY: ${{ secrets.CODEGEN_APP_PRIVATE_KEY }}\n", ""
+            ),
+            bot_contract,
             1,
         ),
     ]

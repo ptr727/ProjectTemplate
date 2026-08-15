@@ -351,6 +351,11 @@ After the final push, sweep-resolve stale older threads for removed code paths.
   - **Proved against** - the paragraph following the agent snippet in `STANDUP.md` section 0 on `develop` at `676a2bd`, unchanged since `77be3a3`.
   - **Delete when** - the sentence is reworded for any reason, since the entry is about this phrasing rather than about the rule it states.
 
+- **A hyphenated key such as `inputs.app-login` or `inputs.delete-branch` cannot be read with dot notation in a GitHub Actions expression, since `-` parses as subtraction, so the merge-bot task's `if:` conditions never match and its `env:` values never resolve.** Raised as four suppressed findings against `.github/workflows/merge-bot-task.yml`, each a variant of the one claim.
+  - **Disproved by** - reading the expressions reference, which states that property dereference syntax needs a name that starts with a letter or `_` and contains only alphanumeric characters, `-`, or `_`, so a hyphen is inside the allowed set and index syntax is required only for a name outside it. And by the same file, whose every job reads `steps.app-token.outputs.token` with dot notation on the same hyphenated shape, the expression the fleet's merge-bot has resolved on every Dependabot merge it has performed. `actionlint` parses the file without a finding.
+  - **Proved against** - `.github/workflows/merge-bot-task.yml` on `feature/reusable-workflows` at `210d88f`, and the "About contexts" property dereference rule in the GitHub Actions contexts reference read on 2026-08-15.
+  - **Delete when** - the task stops declaring hyphenated inputs, or the expressions reference changes the allowed set.
+
 ## When in Doubt
 
 Read [AGENTS.md](../AGENTS.md) to find the section that governs your change, and [GOVERNANCE.md](../GOVERNANCE.md) for the rule text itself. For code-style rules, [`CODESTYLE.md`](../CODESTYLE.md) (its General section plus the relevant language section) is authoritative. Don't restate any of these files' rules in commit bodies or PR descriptions, and keep those focused on the change itself.

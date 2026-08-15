@@ -28,9 +28,9 @@ on:
         type: string
         default: '["main", "develop"]'
       bump-branch-prefix:
-        # The merge-bot-pull-request.yml workflow hard-codes the head refs upstream-version-main/-develop.
-        # Keep this default unless you also update the merge-upstream-version job, or auto-merge will not fire.
-        description: Head-branch prefix; must match the merge-bot's upstream-version-<base> head refs.
+        # The hub's merge-bot task carries upstream-version-main/-develop as built-in rules.
+        # Keep this default unless the caller passes a matching rules entry, or auto-merge will not fire.
+        description: Head-branch prefix, which must match a merge-bot rule such as the built-in upstream-version-<base> head refs.
         required: false
         type: string
         default: upstream-version

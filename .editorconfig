@@ -72,7 +72,7 @@ end_of_line = lf
 # Python is CRLF by the `[*]` default, since universal newlines accept it and it is commonly edited on Windows.
 # Pin LF only for a `.py` executed directly via its shebang, by path.
 # Here that is the CI validation entry point and the fleet-audit runner.
-[spec/{validate,audit,fidelity_honesty}.py]
+[spec/{validate,audit,fidelity_honesty,workflow_reuse}.py]
 end_of_line = lf
 
 # The agent-safety kit's Python is shebang-executable tooling run by path, namely the PreToolUse hook and its installer.
