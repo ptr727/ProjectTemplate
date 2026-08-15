@@ -4,7 +4,8 @@ description: >-
   Mandates and mechanizes task isolation in ptr727/ProjectTemplate fleet repos: every task,
   including a continuation of a prior session's task, creates its own git worktree on its own
   feature branch before its first file edit, based on the branch work starts on (develop on both
-  fleet workflow models, never whichever branch a tool defaulted to). Also wraps the mechanics:
+  fleet workflow models unless the task is explicitly about main-only content, never whichever
+  branch a tool defaulted to). Also wraps the mechanics:
   creating a worktree with git worktree add, the fleet layout convention, listing what is in
   flight, and removing a worktree and its branch after merge. Use this whenever about to create
   or edit files in a fleet repo, whenever starting or resuming a task, whenever the task's
