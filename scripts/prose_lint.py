@@ -411,11 +411,12 @@ def dead_path_findings(
             except ValueError:
                 continue
             # Both exemption sets are keyed by the posix path the manifest and the ledger hold.
-            # The comparison is made in that form rather than in the platform's separator.
+            # A git pathspec is posix too, which `rel` already relies on for the diff scope.
+            # So one key serves both, rather than the platform's separator reaching either.
             key = tracked_rel.as_posix()
             if key in carried_paths(str(root)) or key in HUB_HOSTED:
                 continue
-            if once_tracked(str(root), str(tracked_rel)):
+            if once_tracked(str(root), key):
                 out.append(
                     (
                         lineno,
