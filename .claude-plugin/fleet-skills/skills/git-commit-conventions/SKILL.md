@@ -32,6 +32,12 @@ scope-widened commit, a rewritten shared history, a destructive reset).
   developer unless the developer has explicitly authorized committing for the current ask ("commit
   this", "open a PR"). Authorization is scope-bound: it covers the commits that specific task
   needs, not a blanket license for the rest of the session.
+- **Stage by explicit path, never `git add -A` or `git add .`.** A blanket add stages whatever
+  else happens to be in the tree, and what it sweeps in is another task's uncommitted work,
+  landing in a commit whose subject never mentions it, committed by a session that never saw it.
+  That sweep has happened, which is why task isolation exists (the `repo-worktree` skill), and
+  isolation makes a shared tree rare rather than impossible. Name the files this task changed,
+  and let anything else stay unstaged.
 - **"Commit" means commit and push.** An authorization to commit carries the push to the feature
   branch the work belongs on, because nothing reviews a local commit. The Copilot review loop, the
   required status checks, and the maintainer all read the remote, so stopping at `git commit`
@@ -39,10 +45,14 @@ scope-widened commit, a rewritten shared history, a destructive reset).
   progress while none of the gates have run. Push to the feature branch, never to a protected
   branch, and never with `--force`. Holding a commit locally is the narrower case: it happens when
   the developer asks for it, not by default.
-- **Check `git status` for the maintainer's own uncommitted edits before committing.** The
-  maintainer hand-edits files live, often `README.md`/`HISTORY.md`, sometimes with an editor's
-  LF -> CRLF flip on top. If there are changes not made this session, ask whether to include them
-  rather than bundling half-finished work or stranding it in an unrelated commit.
+- **Check `git status` before committing, and treat any change this session did not make as a
+  stop.** The maintainer hand-edits files live, often `README.md`/`HISTORY.md`, sometimes with an
+  editor's LF -> CRLF flip on top, and a sibling agent session sharing the tree leaves its edits
+  the same way. Whoever the author is, a change this session did not make is never bundled: ask
+  whether to include it, or leave it unstaged and say so, rather than committing half-finished
+  work or stranding it in an unrelated commit. An unexpected change in the tree is also the
+  signal to re-check isolation per the `repo-worktree` skill, since it may mean another task is
+  live in this checkout.
 
 ## Signing, verified not configured
 

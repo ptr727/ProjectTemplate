@@ -41,6 +41,7 @@ rather than guessing from the repo's contents.
 
 ## Branching (release model)
 
+- **GitHub's repository setting for "default branch" reads `main`, but `develop` is where work starts and where in-flight content lives.** A worktree or clone that defaults to "the default branch" lands on `main` and can silently miss content that has merged to `develop` but not yet been promoted. Before branching off a change, or asserting something absent from this repo, check `develop`, not just whichever branch a tool defaulted to. See GOVERNANCE.md "Verification Discipline" on naming the branch a "does not exist" claim was checked against, and the `repo-worktree` skill, which owns the worktree-creation moment this base-branch choice is made at.
 - `develop` is the integration branch. Feature branches -> `develop` is **squash-only**, which
   keeps `develop` linear.
 - `develop -> main` is **merge-commit only** (no squash, no rebase). Merge commits preserve
