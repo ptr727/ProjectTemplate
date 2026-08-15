@@ -42,7 +42,7 @@ Agent-authored text illustrates with data the agent constructed, never with data
 
 ## Git and Commit Rules
 
-The fleet's mechanical git rules: default to staging rather than committing and stage by explicit path only, never a blanket add, commit means commit and push, every commit is signed and carries the committer's own verified GitHub `noreply` identity, never force push, a history rewrite re-identifies only the commits it touches that aren't yours, and destructive git commands run only on explicit instruction.
+The fleet's mechanical git rules: default to staging rather than committing, stage by explicit path only and never with a blanket add, commit means commit and push, every commit is signed and carries the committer's own verified GitHub `noreply` identity, never force push, a history rewrite re-identifies only the commits it touches that aren't yours, and destructive git commands run only on explicit instruction.
 
 This is packaged as the `git-commit-conventions` Skill at
 `.agents/skills/git-commit-conventions/SKILL.md` in the hub, not a repo-relative link since that
