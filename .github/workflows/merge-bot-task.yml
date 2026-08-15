@@ -1,0 +1,181 @@
+name: Merge bot task
+
+# The fleet merge-bot, hosted here once and reached by every repo through a thin pull_request_target caller pinned to a hub commit.
+# Auto-merges in-repo bot PRs (Dependabot, the App's codegen and version-bump PRs): enable on opened/reopened, disable on a maintainer push.
+# - Merge method by base: develop = squash, main = merge, since each base's ruleset allows only that form.
+# - App token, not GITHUB_TOKEN: fires downstream workflows on merge, and grants write on read-only Dependabot PRs.
+#   Every write uses the App token, so no job here declares a GITHUB_TOKEN scope and the caller grants none.
+# - The caller triggers on pull_request_target, so the workflow and action SHAs resolve from the trusted base rather than the PR head.
+#   This is safe because no job checks out PR code, each one running gh pr merge by URL.
+# - The github context in a called workflow is the caller's, so github.event.pull_request is the caller's pull_request_target payload.
+# - Concurrency lives in the caller, keyed on the PR number with cancel-in-progress false, so no group is declared here.
+on:
+  workflow_call:
+    inputs:
+      app-login:
+        description: Login of the App that opens codegen and version-bump pull requests.
+        required: false
+        type: string
+        default: ptr727-codegen[bot]
+      rules:
+        description: >-
+          JSON array of extra App pull request rules, appended to the built-in codegen and upstream-version pairs.
+          Each rule is {"head": "<exact head ref>"} or {"head-prefix": "<head ref prefix>"} plus {"base": "<base ref>"}.
+          The merge method follows the base, so a rule carries none.
+        required: false
+        type: string
+        default: '[]'
+      delete-branch:
+        description: Pass --delete-branch to gh pr merge, for a repo that keeps the repository-wide auto-delete off and still wants bot branches gone.
+        required: false
+        type: boolean
+        default: false
+    secrets:
+      CODEGEN_APP_CLIENT_ID:
+        required: true
+      CODEGEN_APP_PRIVATE_KEY:
+        required: true
+
+jobs:
+
+  merge-dependabot:
+    name: Merge dependabot pull request job
+    runs-on: ubuntu-latest
+    # Dependabot PRs from this repo rather than from forks.
+    # Only on opened or reopened, so the disable job stays sticky.
+    if: >-
+      (github.event.action == 'opened' || github.event.action == 'reopened') &&
+      github.event.pull_request.user.login == 'dependabot[bot]' &&
+      github.event.pull_request.head.repo.full_name == github.repository
+
+    steps:
+
+      - name: Generate GitHub App token step
+        id: app-token
+        uses: actions/create-github-app-token@bcd2ba49218906704ab6c1aa796996da409d3eb1 # v3.2.0
+        with:
+          client-id: ${{ secrets.CODEGEN_APP_CLIENT_ID }}
+          private-key: ${{ secrets.CODEGEN_APP_PRIVATE_KEY }}
+
+      # Auto-merge every tier, semver-major included: the required checks are the gate, not the bump magnitude.
+      - name: Merge pull request step
+        run: |
+          set -Eeuo pipefail
+          case "$BASE_REF" in
+            develop) method=--squash ;;
+            main) method=--merge ;;
+            *)
+              echo "::error::Unsupported base branch: $BASE_REF"
+              exit 1
+              ;;
+          esac
+          args=(--auto "$method")
+          if [[ "$DELETE_BRANCH" == "true" ]]; then args+=(--delete-branch); fi
+          gh pr merge "${args[@]}" "$PR_URL"
+        env:
+          BASE_REF: ${{ github.event.pull_request.base.ref }}
+          DELETE_BRANCH: ${{ inputs.delete-branch }}
+          PR_URL: ${{ github.event.pull_request.html_url }}
+          GH_TOKEN: ${{ steps.app-token.outputs.token }}
+
+  merge-app:
+    name: Merge App pull request job
+    runs-on: ubuntu-latest
+    # App PRs from this repo, on opened or reopened so the disable job stays sticky.
+    # Which head and base pairs merge is data: the built-in codegen and upstream-version pairs plus the caller's rules.
+    if: >-
+      (github.event.action == 'opened' || github.event.action == 'reopened') &&
+      github.event.pull_request.user.login == inputs.app-login &&
+      github.event.pull_request.head.repo.full_name == github.repository
+
+    steps:
+
+      # Validate the rules input at entry and resolve the match once, so a malformed rule fails naming itself rather than as a silent non-merge.
+      # An App PR matching no rule is annotated rather than skipped silently, so a renamed tracker branch is visible.
+      - name: Resolve merge rule step
+        id: rule
+        run: |
+          set -Eeuo pipefail
+          if ! jq -e 'type == "array" and all(.[]; type == "object" and (.base | type) == "string" and ((.head | type) == "string" or (."head-prefix" | type) == "string"))' <<<"$RULES" >/dev/null 2>&1; then
+            echo "::error::inputs.rules is not a JSON array of {head|head-prefix, base} objects: $RULES"
+            exit 1
+          fi
+          builtin='[
+            {"head": "codegen-main", "base": "main"},
+            {"head": "codegen-develop", "base": "develop"},
+            {"head": "upstream-version-main", "base": "main"},
+            {"head": "upstream-version-develop", "base": "develop"}
+          ]'
+          matched=$(jq -r --argjson extra "$RULES" --arg head "$HEAD_REF" --arg base "$BASE_REF" '
+            . + $extra
+            | map(select(.base == $base)
+                  | select((.head // "") == $head or ((."head-prefix" // "") as $p | $p != "" and ($head | startswith($p)))))
+            | length > 0' <<<"$builtin")
+          if [[ "$matched" != "true" ]]; then
+            echo "::warning::App pull request $HEAD_REF -> $BASE_REF matches no merge rule, not auto-merging"
+          fi
+          echo "matched=$matched" >>"$GITHUB_OUTPUT"
+        env:
+          RULES: ${{ inputs.rules }}
+          HEAD_REF: ${{ github.event.pull_request.head.ref }}
+          BASE_REF: ${{ github.event.pull_request.base.ref }}
+
+      - name: Generate GitHub App token step
+        if: ${{ steps.rule.outputs.matched == 'true' }}
+        id: app-token
+        uses: actions/create-github-app-token@bcd2ba49218906704ab6c1aa796996da409d3eb1 # v3.2.0
+        with:
+          client-id: ${{ secrets.CODEGEN_APP_CLIENT_ID }}
+          private-key: ${{ secrets.CODEGEN_APP_PRIVATE_KEY }}
+
+      - name: Merge pull request step
+        if: ${{ steps.rule.outputs.matched == 'true' }}
+        run: |
+          set -Eeuo pipefail
+          case "$BASE_REF" in
+            develop) method=--squash ;;
+            main) method=--merge ;;
+            *)
+              echo "::error::Unsupported base branch: $BASE_REF"
+              exit 1
+              ;;
+          esac
+          args=(--auto "$method")
+          if [[ "$DELETE_BRANCH" == "true" ]]; then args+=(--delete-branch); fi
+          gh pr merge "${args[@]}" "$PR_URL"
+        env:
+          BASE_REF: ${{ github.event.pull_request.base.ref }}
+          DELETE_BRANCH: ${{ inputs.delete-branch }}
+          PR_URL: ${{ github.event.pull_request.html_url }}
+          GH_TOKEN: ${{ steps.app-token.outputs.token }}
+
+  disable-auto-merge-on-maintainer-push:
+    name: Disable auto-merge on maintainer push job
+    runs-on: ubuntu-latest
+    # Fires when a maintainer pushes to a bot's branch, meaning a synchronize whose actor is not the bot.
+    # It disables auto-merge so the maintainer's commits do not merge with the bot's, and the maintainer re-enables it manually.
+    # The disable call is idempotent.
+    if: >-
+      github.event.action == 'synchronize' &&
+      github.event.pull_request.head.repo.full_name == github.repository &&
+      (
+        github.event.pull_request.user.login == 'dependabot[bot]' ||
+        github.event.pull_request.user.login == inputs.app-login
+      ) &&
+      github.actor != github.event.pull_request.user.login
+
+    steps:
+
+      - name: Generate GitHub App token step
+        # App token because a Dependabot PR's GITHUB_TOKEN is read-only regardless of who triggered the event.
+        id: app-token
+        uses: actions/create-github-app-token@bcd2ba49218906704ab6c1aa796996da409d3eb1 # v3.2.0
+        with:
+          client-id: ${{ secrets.CODEGEN_APP_CLIENT_ID }}
+          private-key: ${{ secrets.CODEGEN_APP_PRIVATE_KEY }}
+
+      - name: Disable auto-merge step
+        run: gh pr merge --disable-auto "$PR_URL"
+        env:
+          PR_URL: ${{ github.event.pull_request.html_url }}
+          GH_TOKEN: ${{ steps.app-token.outputs.token }}

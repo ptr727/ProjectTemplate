@@ -1,6 +1,6 @@
 # Workflow snippets
 
-The reusable build/publish workflow tasks a code-shipping repo runs. They are **inert reference here**: this repo is source-only and keeps just the orchestrator set (`test-pull-request`, `publish-release`, `validate-task`, `merge-bot-pull-request`) in `.github/workflows/`. Each file below is the canonical implementation of one or more `WORKFLOW.md` guarantees. The audit asserts a downstream repo's own Actions satisfy those guarantees, not that they match these bytes.
+The reusable build/publish workflow tasks a code-shipping repo runs. They are **inert reference here**: this repo is source-only and keeps just the orchestrator set (`test-pull-request`, `publish-release`, `validate-task`, `merge-bot-pull-request`) in `.github/workflows/`, plus the hub-hosted reusable tasks a downstream repo reaches rather than carries (`merge-bot-task`, per [`docs/reusable-workflows.md`][reusable-workflows]). Each file below is the canonical implementation of one or more `WORKFLOW.md` guarantees. The audit asserts a downstream repo's own Actions satisfy those guarantees, not that they match these bytes.
 
 | File | Role | WORKFLOW.md guarantees |
 | --- | --- | --- |
@@ -18,3 +18,7 @@ The reusable build/publish workflow tasks a code-shipping repo runs. They are **
 | `check-upstream-version-task.yml` | Upstream-version tracker for wrapper repos | D3.5, D8.3 |
 | `run-codegen-pull-request-task.yml` | Deterministic codegen executor (per-branch PR) | D8.2 |
 | `run-periodic-codegen-pull-request.yml` | Scheduled codegen trigger over both branches | D8.2 |
+
+<!-- Repo -->
+
+[reusable-workflows]: ../../../docs/reusable-workflows.md
