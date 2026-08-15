@@ -170,7 +170,7 @@
             "requiredSecrets": [],
             "consumerModel": "pull",
             "releaseTrigger": "dispatch-only",
-            "driftNotes": ["Maintainer config/ops repo (docker-compose stacks, lifecycle scripts, Firewalla configs); Linux-consumed on the Proxmox host, so lineEndings lf.", "Renamed from HomeAutomation for fleet naming consistency (config repos are *-Config). The Vantage controller config is split out to its own Windows/CRLF Vantage-Config repo, not carried here; the legacy Vantage/ subtree is stripped.", "Private; README self-flags previously-committed secrets - secrets-hygiene concern."]
+            "driftNotes": ["Maintainer config/ops repo (docker-compose stacks, lifecycle scripts, Firewalla configs); Linux-consumed on the Proxmox host, so lineEndings lf.", "Renamed from HomeAutomation for fleet naming consistency (config repos are *-Config). The Vantage controller config is split out to its own Windows/CRLF Vantage-Config repo, not carried here; the legacy Vantage/ subtree is stripped."]
         },
         {
             "name": "KiCadLibrary",
