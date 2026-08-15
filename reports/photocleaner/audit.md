@@ -51,7 +51,7 @@ None. #50, #52 (to `develop`) and #51 (`develop -> main`) are merged.
 
 ## Escalations
 
-Two hub findings from this pass, filed rather than patched per repo, both closed since:
+Two hub findings surfaced by the resync this report measures, filed rather than patched per repo, both closed before this run, so neither is a finding of the current audit:
 
 1. #721: `prose_lint.py dead-path` could not recognize a hub-hosted path in a repo that retired the file, so verbatim text naming `repo-config/configure.sh` failed a downstream promotion gate. Fixed by #731.
 2. #722: the hub's `.github/copilot-instructions.md` linked `GOVERNANCE.md#every-finding-ends-in-an-action`, an anchor that left `GOVERNANCE.md` when PR Review Etiquette was packaged as a Skill. PhotoCleaner re-pointed its copy in #50 after Copilot raised it, and #52 carried the canonical wording that #730 landed.
