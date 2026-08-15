@@ -333,6 +333,18 @@ def path_candidate(token: str, in_span: bool = True) -> str | None:
     return token.removeprefix("./")
 
 
+# Paths the hub hosts and no repository carries, per GOVERNANCE.md "Hub-Hosted Tooling".
+# A mention of one names the hub's copy rather than a file this tree lost.
+# Carried text naming a tool is required to name it that way, so the mention is never a dead path.
+# The manifest exemption cannot reach this class, since no repository carries `spec/files.json`.
+# Downstream that set is empty, and a repository that retired its copy carries the full signature.
+# It surfaces at the promotion, whose diff base brings the retirement and its prose into scope.
+# That is the gate with the least room to fix it, and a ruleset bypass is the only local remedy.
+# Held as a literal because the prose-gate action fetches this one file with no hub tree beside it.
+# The `retire` dispositions in `spec/divergences.json` are the source, and a hub test asserts this.
+HUB_HOSTED = frozenset({"repo-config/configure.sh"})
+
+
 @functools.cache
 def carried_paths(root: str) -> frozenset[str]:
     """Paths the manifest declares as carried, exempt because docs name them as fleet layout.
@@ -374,7 +386,9 @@ def dead_path_findings(
 
     Requiring a history is what scopes this to the deletion-sweep shape, a file removed with
     its describing prose left standing. A path another repository holds, a proposed file a
-    backlog names, and a layout pattern each have no history here, so none is reported.
+    backlog names, and a layout pattern each have no history here, so none is reported. A
+    carried path and a hub-hosted one are exempt with a history, since each names a file that
+    lives elsewhere by design rather than a description this tree left behind.
     """
     m = REF_DEF.match(line)
     if m:
@@ -396,9 +410,13 @@ def dead_path_findings(
                 tracked_rel = (anchor / rel_path).resolve().relative_to(root.resolve())
             except ValueError:
                 continue
-            if str(tracked_rel) in carried_paths(str(root)):
+            # Both exemption sets are keyed by the posix path the manifest and the ledger hold.
+            # A git pathspec is posix too, which `rel` already relies on for the diff scope.
+            # So one key serves both, rather than the platform's separator reaching either.
+            key = tracked_rel.as_posix()
+            if key in carried_paths(str(root)) or key in HUB_HOSTED:
                 continue
-            if once_tracked(str(root), str(tracked_rel)):
+            if once_tracked(str(root), key):
                 out.append(
                     (
                         lineno,
