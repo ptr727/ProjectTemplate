@@ -1,16 +1,16 @@
 # Audit: HomeAutomation-Config
 
-- **Audited branch:** main (`e10a2cf`), with the convergence in flight read at `develop` (`c8252c7`)
+- **Audited branch:** main (`22ed137`), after the promotion of `develop` (`c8252c7`)
 - **Types:** source-only (from registry), operational workflow model
-- **Verdict:** main not operational (stale carried content), `develop` operational on every mechanized check
+- **Verdict:** operational on every mechanized check and every hand-judged dimension
 - **Date:** 2026-08-15
-- **Run stamps:** `audit run 2026-08-15T14:58:02Z | hub d54862a` (main) and `audit run 2026-08-15T14:58:25Z | hub d54862a | branch override develop`
+- **Run stamp:** `audit run 2026-08-15T15:19:01Z | hub 704223a`, with the pre-promotion pair `audit run 2026-08-15T14:58:02Z | hub d54862a` (main at `e10a2cf`) and `audit run 2026-08-15T14:58:25Z | hub d54862a | branch override develop` kept for the record
 
-First committed report for this repository. It was resynced against the hub's `main` (`0e84805`) on this date per `RESYNC.md`, the resync landed on `develop` as ptr727/HomeAutomation-Config#51, and the promotion to `main` is open as ptr727/HomeAutomation-Config#52. So `main` at the time of writing still reads the pre-resync findings, and `develop` is the state `main` takes when that promotion merges. This report grades the two apart rather than letting either stand for the other.
+First committed report for this repository. It was resynced against the hub's `main` (`0e84805`) on this date per `RESYNC.md`, the resync landed on `develop` as ptr727/HomeAutomation-Config#51, and the promotion to `main` merged as ptr727/HomeAutomation-Config#52. The pre-promotion runs read `main` at `e10a2cf` with the whole stale-carried-content class open and `develop` clean, and the post-promotion run at `22ed137` reads what `develop` read, so the two branches now grade the same.
 
 ## Develop Drift
 
-`develop` vs `main`: `develop` is ahead by 15 content commits since the last promotion (#36), and `main` carries no content `develop` lacks (the trial `git merge-tree` of the two is conflict-free). The commit-count gap in the other direction is the promotion-merge ancestry artifact and is **benign**. The content drift is real and is the resync itself, closed by the promotion.
+`develop` vs `main`: identical trees after the #52 promotion merge (15 content commits since #36, conflict-free). The commit-count gap in `main`'s favor is the promotion-merge ancestry artifact and is **benign**. No action.
 
 ## Dimensions
 
@@ -23,15 +23,15 @@ First committed report for this repository. It was resynced against the hub's `m
 | repo-setup | pass | pass | pass | `spec/secrets.json` carries `baseline` plus `note` only, the shape `docs/repo-config-carry.md` states for a source-only repository whose only publish target maps to no mechanism (the dead `targetMechanisms` map dropped in #51). `configure.sh check` reports the Dependabot security features enabled |
 | linter-parity | pass | pass | pass | `.github/workflows/validate-task.yml:30-50` runs markdownlint-cli2, cspell (README and HISTORY scope), actionlint, and editorconfig-checker as pinned action wrappers or Docker, one config per linter at the root. `.github/workflows/test-pull-request.yml:31` carries the ruleset-bound `Check pull request workflow status job` |
 | recurring-violations | pass | pass | pass | Hub prose lint over the resync diff is clean. LF throughout, per the registry `lineEndings: lf` and the repository's `.editorconfig`. Three pre-existing whole-tree `dead-path` mentions remain (`GOVERNANCE.md:29`, `GOVERNANCE.md:282`, `OPERATIONS.md:306`), the first two inside carried text and all three left for the files' next edit per the fix-as-edited policy |
-| readme-structure | pass on `develop` | pass | pass | The seven README letters the `main` run reports (license shield placement, `-link` suffixes, `github-link` naming, group membership) are all closed on `develop` since #40, where the run reports none |
-| agent-instruction-set | pass on `develop` | pass | pass | Every `AGENTS.md` and `GOVERNANCE.md` verbatim section matches the current canonical after #51. Before the re-vendor, each differing line in every stale region was traced to a past hub commit, so no repository-local rule sat inside a verbatim region. `CODESTYLE.md` carries the hub's skill-pointer form with the repository's own shell rules kept as a subsection of Shell. `.github/copilot-instructions.md` carries the current runbook with an empty Disproved Claims ledger |
+| readme-structure | pass | pass | pass | The seven README letters the pre-promotion `main` run reported (license shield placement, `-link` suffixes, `github-link` naming, group membership) were closed in #40 and the post-promotion run reports none |
+| agent-instruction-set | pass | pass | pass | Every `AGENTS.md` and `GOVERNANCE.md` verbatim section matches the current canonical after #51. Before the re-vendor, each differing line in every stale region was traced to a past hub commit, so no repository-local rule sat inside a verbatim region. `CODESTYLE.md` carries the hub's skill-pointer form with the repository's own shell rules kept as a subsection of Shell. `.github/copilot-instructions.md` carries the current runbook with an empty Disproved Claims ledger |
 | workflow (WORKFLOW.md 5A/5B) | pass | pass | pass | Operational model: `.github/workflows/test-pull-request.yml:9-12` runs on `push` to `develop` (advisory) and `pull_request` into `main` (the enforced gate). `.github/workflows/publish-release.yml:4` is `workflow_dispatch` only, matching `releaseTrigger: dispatch-only`. `.github/workflows/merge-bot-pull-request.yml` uses `actions/create-github-app-token` (SHA-pinned) with the client-id input, matching the baseline mechanism note. `.github/dependabot.yml` declares `github-actions` for both `main` and `develop` |
 
 csharp, nuget, pypi, python, console, docker, hugo: N/A (no packaging, no application code, no site).
 
 ## Defects (most severe first)
 
-None on `develop`. On `main`, the whole class of stale carried content (2 `AGENTS.md` and 13 `GOVERNANCE.md` verbatim sections, `.markdownlint-cli2.jsonc`, the carried `configure.sh`, and the README letters) is what #40, #43, #50, and #51 already closed, and it is a defect only until #52 merges.
+None. The whole class of stale carried content the pre-promotion `main` run reported (2 `AGENTS.md` and 13 `GOVERNANCE.md` verbatim sections, `.markdownlint-cli2.jsonc`, the carried `configure.sh`, and the README letters) was closed by #40, #43, #50, and #51 and reached `main` with #52.
 
 ## Drift Findings
 
@@ -41,7 +41,7 @@ None on `develop`. On `main`, the whole class of stale carried content (2 `AGENT
 ## Convergence in Flight
 
 - ptr727/HomeAutomation-Config#51 (merged into `develop` at `c8252c7`): the resync, one commit per drift class, driven to a Copilot review on its head, one finding fixed and resolved. Coverage read 9 of 11 files on both rounds, which the maintainer accepted at merge.
-- ptr727/HomeAutomation-Config#52 (open): the `develop` to `main` promotion. Copilot reviewed the head, one finding deferred to ptr727/HomeAutomation-Config#53 (Duplicacy credentials on a command line in `Duplicacy/init-storage.sh`, content from #45 rather than from the resync), thread resolved, checks 6/6, coverage 72 of 76 files, left for the maintainer to merge.
+- ptr727/HomeAutomation-Config#52 (merged as `22ed137`): the `develop` to `main` promotion. Copilot reviewed the head, one finding deferred to ptr727/HomeAutomation-Config#53 (Duplicacy credentials on a command line in `Duplicacy/init-storage.sh`, content from #45 rather than from the resync), thread resolved, checks 6/6, coverage 72 of 76 files, which the maintainer accepted at merge.
 
 ## Proposed Registry / Spec Updates
 
