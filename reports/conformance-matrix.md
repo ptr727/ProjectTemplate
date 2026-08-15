@@ -20,7 +20,7 @@ The primary shapes are stood up as whole repos. The **composable targets** (`nug
 | `upstream-wrapper` | - | not-tested | - | Tag from a committed state file, not SemVer2. |
 | `codegen` | - | not-tested | - | Deterministic matrix over both branches. |
 | `docs` | ProjectTemplate | not-tested | - | Governance hub, and CI is lint-only. |
-| `operational` config | - | not-tested | - | `workflowModel: operational`, direct signed commits to `develop`, promotion-PR gate. Its `develop` ruleset carries no `pull_request` rule, so the branch discipline rests on the instruction rather than the gate. |
+| `operational` config | HomeAutomation-Config | not-tested | 2026-08-15 | `workflowModel: operational`, direct signed commits to `develop`, promotion-PR gate. Its `develop` ruleset carries no `pull_request` rule, so the branch discipline rests on the instruction rather than the gate. HomeAutomation-Config is the first operational repository with a committed report (`reports/homeautomation-config/audit.md`): `source-only` plus `operational`, `develop` clean on every mechanized check after its 2026-08-15 resync, with the promotion to `main` open at the time of the report. Its `.editorconfig` and `.gitattributes` are an LF adaptation that the intent advisory keeps flagging by construction. |
 
 ## Composable Targets
 
