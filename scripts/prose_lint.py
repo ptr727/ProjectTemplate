@@ -335,7 +335,8 @@ def path_candidate(token: str, in_span: bool = True) -> str | None:
 
 # Paths retired per a `retire` disposition in `spec/divergences.json`, per GOVERNANCE.md "Hub-Hosted Tooling".
 # Most are hub-hosted, so a mention names the hub's copy rather than a file this tree lost.
-# A minority are retired outright with no hub replacement (`run-periodic-codegen-pull-request.yml`, `build-datebadge-task.yml`): the mention still names a real, intentional deletion rather than a stale reference, so the same exemption applies.
+# One is retired outright with no hub replacement (`build-datebadge-task.yml`): the mention still names a real, intentional deletion rather than a stale reference, so the same exemption applies.
+# A caller stub that persists with edited content, such as `run-periodic-codegen-pull-request.yml`, is neither of these: it stays a per-repo file, so it carries no entry here at all.
 # Carried text naming a tool is required to name it that way, so the mention is never a dead path.
 # The manifest exemption cannot reach this class, since no repository carries `spec/files.json`.
 # Downstream that set is empty, and a repository that retired its copy carries the full signature.
@@ -352,7 +353,6 @@ HUB_HOSTED = frozenset(
         ".github/workflows/publish-docker-readme-task.yml",
         ".github/workflows/check-upstream-version-task.yml",
         ".github/workflows/run-codegen-pull-request-task.yml",
-        ".github/workflows/run-periodic-codegen-pull-request.yml",
         ".github/workflows/build-datebadge-task.yml",
     }
 )
