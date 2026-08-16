@@ -27,6 +27,10 @@ inputs:
     description: Path to the console project file.
     required: false
     default: ./Console/Console.csproj
+  asset-name:
+    description: Name of the release archive without its .7z extension. Empty derives it from the project file's stem, so ./Widget/Widget.csproj gives Widget.7z.
+    required: false
+    default: ''
 
 runs:
   using: composite
@@ -70,10 +74,19 @@ runs:
             -property:PackageVersion="$SEMVER2"
         done
 
+    # The archive is named for the project unless the caller names it, since a release asset called Console.7z tells a downloader nothing.
     - name: Zip build output step
+      id: zip
       if: ${{ inputs.smoke != 'true' }}
       shell: bash
-      run: 7z a -t7z "$RUNNER_TEMP/Console.7z" "$RUNNER_TEMP"/publish/*
+      env:
+        PROJECT_FILE: ${{ inputs.project-file }}
+        ASSET_NAME: ${{ inputs.asset-name }}
+      run: |
+        set -Eeuo pipefail
+        name="${ASSET_NAME:-$(basename "$PROJECT_FILE" .csproj)}"
+        7z a -t7z "$RUNNER_TEMP/$name.7z" "$RUNNER_TEMP"/publish/*
+        echo "asset-path=$RUNNER_TEMP/$name.7z" >> "$GITHUB_OUTPUT"
 
     # GitHub-release asset, uploaded under the release-asset-<branch>-<target> pattern the github-release job collects.
     - name: Upload release asset step
@@ -81,6 +94,6 @@ runs:
       uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
       with:
         name: release-asset-${{ inputs.branch }}-executable
-        path: ${{ runner.temp }}/Console.7z
+        path: ${{ steps.zip.outputs.asset-path }}
         # Consumed within the run by the github-release job, so minimize artifact storage.
         retention-days: 1

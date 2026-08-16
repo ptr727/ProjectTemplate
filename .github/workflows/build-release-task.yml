@@ -97,6 +97,11 @@ on:
         required: false
         type: string
         default: ./Console/Console.csproj
+      # The release archive's name without .7z, derived from the project file's stem when empty.
+      executable_asset_name:
+        required: false
+        type: string
+        default: ''
       nuget_project:
         required: false
         type: string
@@ -213,6 +218,7 @@ jobs:
           assembly-file-version: ${{ needs.get-version.outputs.AssemblyFileVersion }}
           assembly-informational-version: ${{ needs.get-version.outputs.AssemblyInformationalVersion }}
           project-file: ${{ inputs.executable_project }}
+          asset-name: ${{ inputs.executable_asset_name }}
 
       - name: Run hub build-executable default step
         if: ${{ hashFiles('.github/actions/build-executable/action.yml') == '' }}
@@ -225,6 +231,7 @@ jobs:
           assembly-file-version: ${{ needs.get-version.outputs.AssemblyFileVersion }}
           assembly-informational-version: ${{ needs.get-version.outputs.AssemblyInformationalVersion }}
           project-file: ${{ inputs.executable_project }}
+          asset-name: ${{ inputs.executable_asset_name }}
 
   build-nuget:
     name: Build NuGet library job

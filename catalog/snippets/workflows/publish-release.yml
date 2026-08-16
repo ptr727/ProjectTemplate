@@ -14,6 +14,9 @@ concurrency:
   group: ${{ github.workflow }}
   cancel-in-progress: false
 
+# GITHUB_TOKEN gets no scope by default, and each job below grants only what its hub task writes with.
+permissions: {}
+
 jobs:
 
   # Single source of the release-gate decision (publish or not, stable or not), reused by every job below.
@@ -31,6 +34,8 @@ jobs:
     needs: [plan]
     if: ${{ needs.plan.outputs.publish == 'true' }}
     uses: ptr727/ProjectTemplate/.github/workflows/validate-task.yml@0b07a59d7c65d07d8df275a96deaf2e06cbefd51 # 2.0.352
+    permissions:
+      contents: read
     secrets:
       CODECOV_TOKEN: ${{ secrets.CODECOV_TOKEN }}
 
