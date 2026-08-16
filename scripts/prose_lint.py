@@ -349,6 +349,7 @@ HUB_HOSTED = frozenset(
         ".github/workflows/publish-plan-task.yml",
         ".github/workflows/build-release-task.yml",
         ".github/workflows/build-docker-task.yml",
+        ".github/workflows/validate-task.yml",
     }
 )
 

@@ -2068,6 +2068,32 @@ def _selftest():
         "requiredJobKeys": ["check-workflow-status"],
         "requiredCheckName": "Check pull request workflow status job",
     }
+    # The validate-task.yml stub contract: a caller's validate job must exist and reach the hub task by name.
+    # A token check alone would pass a stub that drops the validate job entirely, since it only runs for a job that is present.
+    # Naming the validate job in requiredJobKeys too catches a dropped job on its own.
+    pr_stub_contract = dict(
+        pr_contract,
+        requiredJobKeys=["check-workflow-status", "validate"],
+        requireTokensInJob={"validate": ["validate-task.yml"]},
+    )
+    pr_validate_head = (
+        "name: Test\non: pull_request\njobs:\n"
+        "  validate:\n"
+        "    name: Validate sources job\n"
+        "    uses: ptr727/ProjectTemplate/.github/workflows/validate-task.yml@"
+        + "a" * 40
+        + " # 2.0.1\n"
+    )
+    pr_validate_inline = (
+        "name: Test\non: pull_request\njobs:\n"
+        "  validate:\n"
+        "    name: Validate sources job\n"
+        "    runs-on: ubuntu-latest\n"
+        "    steps:\n      - run: echo inline lint\n"
+    )
+    # A validate-task.yml stub's own aggregator needs the validate job, never the release-shape changes job.
+    # The shared pr_check fixture needs a changes job these two fixtures do not define, so this one needs validate instead.
+    pr_check_validate = "  check-workflow-status:\n    name: Check pull request workflow status job\n    needs: [validate]\n    runs-on: ubuntu-latest\n"
     gh_rel = (
         "  github-release:\n    needs: [get-version, build-widget]\n    runs-on: ubuntu-latest\n    steps:\n"
         "      - uses: actions/download-artifact@v4\n        with:\n          pattern: release-asset-${{ inputs.branch }}-*\n          merge-multiple: true\n"
@@ -2145,6 +2171,24 @@ def _selftest():
             pr_head
             + "  check-workflow-status:\n    runs-on: ubuntu-latest\n    steps:\n      - name: Check pull request workflow status job\n        run: true\n",
             pr_contract,
+            1,
+        ),
+        (
+            "PR stub validate job reaching the hub validate-task",
+            pr_validate_head + pr_check_validate,
+            pr_stub_contract,
+            0,
+        ),
+        (
+            "PR stub validate job still carrying an inline lint job",
+            pr_validate_inline + pr_check_validate,
+            pr_stub_contract,
+            1,
+        ),
+        (
+            "PR stub dropping the validate job entirely",
+            pr_head + pr_check,
+            pr_stub_contract,
             1,
         ),
         ("conformant release task", rel_ok, rel_contract, 0),

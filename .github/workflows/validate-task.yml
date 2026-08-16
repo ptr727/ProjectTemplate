@@ -1,13 +1,18 @@
 name: Validate task
 
-# The single validation gate - reused by test-pull-request (feeding the required check) and publish-release.
-
+# The fleet validation gate, hosted here once and reached by every repo's test-pull-request stub and its own publish-release stub.
+# Three jobs: lint (the fleet doc-lint block plus language lint by tree detection, the prose gate, and the repo gate), unit-test (a generic dotnet test or uv run pytest, skipped where the caller has no test project), and validate (the validate hook, a repo's own domain checks such as an ESPHome compile, a Hugo build, a KiCad ERC, a codegen-drift check, or PowerShell tests).
+# No permissions beyond contents: read where a job needs one, since every job here only checks out and reads.
+# No required inputs, and CODECOV_TOKEN is the one optional secret, since coverage upload is best-effort.
+# The hook resolution in the validate job checks out the hub at job.workflow_sha under .hub, the exact commit the caller pinned, so a hub default or a hub script is reproducible against a released pin.
 on:
   workflow_call:
+    secrets:
+      CODECOV_TOKEN:
+        required: false
 
 jobs:
 
-  # Source-only repo: lint-only validation, using the same configs the editor and CLI use (linter parity); no build or tests.
   lint:
     name: Lint sources job
     runs-on: ubuntu-latest
@@ -16,24 +21,20 @@ jobs:
 
     steps:
 
-      # Full history, since the dead-path prose rule keys on deletion history.
-      # A shallow clone holds none, and the rule stands down there rather than pass blind.
+      # Full history, since the dead-path prose rule keys on deletion history and the prose gate diffs against a base branch.
+      # A shallow clone holds neither, and both stand down there rather than pass blind.
       - name: Checkout code step
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           fetch-depth: 0
 
-      # Doc linters run as pinned action wrappers.
-      # The editorconfig-checker action is install-only, so it runs via Docker instead.
+      # The fleet doc-lint block, hosted once rather than carried by every repo of every type.
       - name: Lint Markdown step
         uses: DavidAnson/markdownlint-cli2-action@21c1be1b93ad9ed58fa840aacc3f279cde2a72ff # v24.2.0
         with:
           globs: '**/*.md'
 
-      # The cspell gate covers README + HISTORY only.
-      # Gating all *.md would mean endlessly padding cspell.json for technical terms.
-      # Broad live spell-check is the editor extension's job.
-      # See CODESTYLE.md "Markdown and Spelling".
+      # The spell check covers README + HISTORY only, per CODESTYLE.md "Markdown and Spelling".
       - name: Spell check step
         uses: streetsidesoftware/cspell-action@de2a73e963e7443969755b648a1008f77033c5b2 # v8.4.0
         with:
@@ -49,93 +50,234 @@ jobs:
       - name: Check EditorConfig step
         run: docker run --rm --pull=always -v "$PWD":/check --workdir /check mstruebing/editorconfig-checker:latest
 
-      # The file list comes from git rather than a glob, so a script added later is gated without editing this step.
-      # A finding that is correct for the shell and wrong for the program it quotes carries an inline disable naming the reason, as repo-config/configure.sh does for its jq filter.
+      # The file list comes from git rather than a glob, and the docker run is skipped rather than invoked on an empty argument list.
+      # That is how a repo with no shell scripts stays clean instead of failing on shellcheck's own no-file usage error.
       - name: Check shell scripts step
         run: |
           set -Eeuo pipefail
           mapfile -t scripts < <(git ls-files '*.sh')
-          docker run --rm --pull=always -v "$PWD":/mnt --workdir /mnt koalaman/shellcheck:stable "${scripts[@]}"
+          if [ "${#scripts[@]}" -gt 0 ]; then
+            docker run --rm --pull=always -v "$PWD":/mnt --workdir /mnt koalaman/shellcheck:stable "${scripts[@]}"
+          else
+            echo "no shell scripts are tracked"
+          fi
 
-      # The peer of the step above, built the same way: the file list comes from git, and the checker runs as a container rather than an install.
-      # The module version is pinned beside the image because the image alone does not fix it, and a floating install would make this a different check here than the one a maintainer runs locally.
-      # 1.23.0 rather than the newest: 1.24.0 needs a newer System.Management.Automation than this image carries, so it installs and then fails to import, which reads as a broken gate rather than a version mismatch.
-      # The count is printed because a checker that read no files reports the same clean as one that read them all, which is how this step first passed having read nothing.
-      # The list splits on whitespace rather than on a newline, because the same command is documented for a local run and a PowerShell caller joins the file list with spaces where a shell joins it with newlines.
-      # Splitting on the newline alone hands the analyzer one path holding every file, which it reports as one file it cannot find and then a count of one and no findings, having analyzed nothing at all.
+      # The peer of the step above: the file list comes from git, and the container only starts when there is something for it to check.
+      # A repo with no .ps1 files pays nothing for the pull.
+      # 1.23.0 rather than the newest, since 1.24.0 needs a newer System.Management.Automation than this image carries, which installs and then fails to import.
       - name: Check PowerShell scripts step
         run: |
           set -Eeuo pipefail
-          PS_SCRIPTS="$(git ls-files '*.ps1')"
-          docker run --rm --pull=always -e PS_SCRIPTS="$PS_SCRIPTS" -v "$PWD":/mnt --workdir /mnt mcr.microsoft.com/powershell:latest \
-            pwsh -NoProfile -Command '
-              Set-PSRepository PSGallery -InstallationPolicy Trusted
-              Install-Module PSScriptAnalyzer -RequiredVersion 1.23.0 -Force -Scope AllUsers
-              Import-Module PSScriptAnalyzer
-              $files = $env:PS_SCRIPTS -split "\s+" | Where-Object { $_ }
-              if (-not $files) { Write-Host "no PowerShell scripts are tracked"; exit 0 }
-              $found = @()
-              foreach ($file in $files) { $found += Invoke-ScriptAnalyzer -Path $file -Settings ./PSScriptAnalyzerSettings.psd1 }
-              Write-Host "Checked $($files.Count) file(s)"
-              if ($found) { $found | Format-Table RuleName,Severity,ScriptName,Line,Message -AutoSize | Out-String -Width 200 | Write-Host; exit 1 }
-              Write-Host "no findings"
-            '
+          mapfile -t ps_scripts < <(git ls-files '*.ps1')
+          if [ "${#ps_scripts[@]}" -gt 0 ]; then
+            docker run --rm --pull=always -e PS_SCRIPTS="$(git ls-files '*.ps1')" -v "$PWD":/mnt --workdir /mnt mcr.microsoft.com/powershell:latest \
+              pwsh -NoProfile -Command '
+                Set-PSRepository PSGallery -InstallationPolicy Trusted
+                Install-Module PSScriptAnalyzer -RequiredVersion 1.23.0 -Force -Scope AllUsers
+                Import-Module PSScriptAnalyzer
+                $files = $env:PS_SCRIPTS -split "\s+" | Where-Object { $_ }
+                $found = @()
+                foreach ($file in $files) { $found += Invoke-ScriptAnalyzer -Path $file -Settings ./PSScriptAnalyzerSettings.psd1 }
+                Write-Host "Checked $($files.Count) file(s)"
+                if ($found) { $found | Format-Table RuleName,Severity,ScriptName,Line,Message -AutoSize | Out-String -Width 200 | Write-Host; exit 1 }
+                Write-Host "no findings"
+              '
+          else
+            echo "no PowerShell scripts are tracked"
+          fi
 
-      # The Python lint and type gates for the Scripts profile, CODESTYLE.md "Python".
-      # @latest rather than a version pin, since a `uvx <tool>@<ver>` pin is nothing Dependabot tracks and would silently go stale, where the action SHA below is tracked.
+      # Language lint by tree detection: a caller carries a language marker file or it does not.
+      # No per-repo input and no registry read decide it, only what the checkout actually holds.
+      - name: Setup .NET SDK step
+        if: hashFiles('**/*.csproj') != ''
+        uses: actions/setup-dotnet@a98b56852c35b8e3190ac28c8c2271da59106c68 # v6.0.0
+        with:
+          dotnet-version: 10.x
+
+      - name: Restore dotnet tools step
+        if: >-
+          hashFiles('**/*.csproj') != '' && hashFiles('.config/dotnet-tools.json') != ''
+        run: dotnet tool restore
+
+      # CSharpier is a local dotnet tool, so it needs the manifest restored above.
+      # A caller with no manifest skips rather than failing on a generic unknown-command error against a tool the runner never installed.
+      - name: Check C# formatting step
+        if: >-
+          hashFiles('**/*.csproj') != '' && hashFiles('.config/dotnet-tools.json') != ''
+        run: dotnet csharpier check .
+
+      # The dotnet SDK ships dotnet format, so it needs no tool restore.
+      # The severity and verbosity flags match the fleet's canonical invocation, per CODESTYLE.md and PhotoCleaner's own gate.
+      - name: Check C# style step
+        if: hashFiles('**/*.csproj') != ''
+        run: dotnet format style --verify-no-changes --severity=info --verbosity=detailed
+
+      # @latest rather than a version pin, since a `uvx <tool>@<ver>` pin is nothing Dependabot tracks and would silently go stale, where the action SHA above is Dependabot-tracked.
+      # This is #729, decided here, the one place the fleet's uvx tools are pinned or floated.
       - name: Setup uv step
+        if: hashFiles('pyproject.toml') != ''
         uses: astral-sh/setup-uv@08807647e7069bb48b6ef5acd8ec9567f424441b # v8.1.0
         with:
-          # The interpreter for the uv-run steps matches the pyproject py313 target, bumped in lockstep with it.
           python-version: "3.13"
 
       - name: Lint Python step
+        if: hashFiles('pyproject.toml') != ''
         run: uvx ruff@latest check .
 
       - name: Check Python formatting step
+        if: hashFiles('pyproject.toml') != ''
         run: uvx ruff@latest format --check .
 
+      # Mypy takes precedence where a pyproject declares both sections, matching every repo that runs mypy in CI today.
+      # A pyright-only pyproject, with no [tool.mypy] section, falls back to pyright instead.
+      # A repo that genuinely wants both enforced adds the second as its own validate hook step.
       - name: Type check Python step
-        run: uvx mypy@latest
-
-      - name: Validate registry and spec step
+        if: hashFiles('pyproject.toml') != ''
         run: |
           set -Eeuo pipefail
-          for f in registry/*.json spec/*.json repo-config/*.json; do
-            jq empty "$f"
-          done
-          python3 spec/validate.py
+          if grep -Eq '^[[:space:]]*\[tool\.mypy\]' pyproject.toml; then
+            uvx mypy@latest
+          elif grep -Eq '^[[:space:]]*\[tool\.pyright\]' pyproject.toml; then
+            uvx pyright@latest
+          else
+            echo "no [tool.mypy] or [tool.pyright] section, skipping"
+          fi
 
-      # Each gate here is proven by a case that reintroduces the fault it catches, wherever it lives.
-      # A test sits with the layer that owns it rather than beside the file it names, so a read-only gate over the spec and the host tooling lives in scripts/tests/ even where its subject is shell, and the agent-safety kit carries its own because it ships as a unit.
-      # The tests are standard library only, so uvx coverage at its unpinned latest is the one tool the step fetches.
-      # The audit engine self-test and the workflow-reuse measurement self-test are offline, so they run here rather than only on an owner sweep.
-      # The write-guard self-test is offline too, and it otherwise runs only when a host installs the hook, which is where a regression in it would surface as a broken machine.
-      # Every run goes through coverage with --append, so one report covers the whole self-test surface, informational with no threshold adopted.
-      - name: Run script self-tests step
-        run: |
-          set -Eeuo pipefail
-          uvx coverage@latest run --source=scripts,spec,host-setup -m unittest discover -s scripts/tests
-          uvx coverage@latest run --source=scripts,spec,host-setup --append spec/audit.py --selftest
-          uvx coverage@latest run --source=scripts,spec,host-setup --append spec/workflow_reuse.py --selftest
-          uvx coverage@latest run --source=scripts,spec,host-setup --append host-setup/agent-safety/gh-write-guard.py --selftest
-          uvx coverage@latest run --source=scripts,spec,host-setup --append host-setup/agent-safety/test_install.py
-          uvx coverage@latest report
+      # Checked out here, right before the two steps that read it, so the doc-lint block above scans only the caller's own tree and never the hub commit copied in for the prose gate and the repo gate.
+      # The hub at the exact commit the caller pinned, for the prose gate's bundled script and the repo gate.
+      - name: Checkout hub step
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          repository: ${{ job.workflow_repository }}
+          ref: ${{ job.workflow_sha }}
+          path: .hub
 
-      - name: Check repo gates step
-        run: python3 scripts/repo_gate.py
-
-      # Read-only: fails if .claude-plugin/fleet-skills/ was not regenerated from .agents/skills/.
-      - name: Check fleet skills are current step
-        run: python3 scripts/build_dist.py --check
-
-      # Every default prose rule is clean tree-wide, so all but one block a change that adds a finding.
-      # `charset-unknown` is the exception and reports in the step below, for the reason given there.
+      # The fleet prose rules, scoped to a pull request's own diff so the existing backlog blocks nothing.
+      # This mirrors .github/actions/prose-gate/action.yml's branch rule.
+      # A main-target run reads the bundled script at the exact commit the caller pinned, the .hub checkout above.
+      # Every other target reads the live hub develop copy, so an unpromoted rule change is exercised fleet-wide before it reaches main.
+      # Skipped outside a pull request, since there is no base to diff and a publish run's content was already gated when it was pushed.
+      # The event name here is always workflow_call, since that is what triggers this callee, so pull-request detection reads the inherited event payload's pull_request key instead.
       - name: Check prose step
-        run: python3 scripts/prose_lint.py . --check charset --check semicolon --check dash --check dupword --check spelling --check comment-wrap --check comment-case --check home-path --check dead-path
+        if: github.event.pull_request != null
+        run: |
+          set -Eeuo pipefail
+          if [ "$BASE_REF" = "main" ]; then
+            script=.hub/scripts/prose_lint.py
+          else
+            script="$RUNNER_TEMP/prose_lint.py"
+            curl -fsSL --retry 3 --retry-delay 2 --retry-all-errors \
+              -H "Authorization: Bearer $GITHUB_TOKEN" \
+              "https://raw.githubusercontent.com/$HUB_REPO/develop/scripts/prose_lint.py" -o "$script"
+          fi
+          if ! git rev-parse --verify --quiet "$BASE_SHA^{commit}" >/dev/null; then
+            echo "::error::Diff base '$BASE_SHA' does not resolve in this checkout." >&2
+            exit 1
+          fi
+          python3 "$script" --diff "$BASE_SHA" --check charset --check semicolon --check dash --check dupword --check spelling --check comment-wrap --check comment-case --check home-path --check dead-path .
+        env:
+          # The base ref context field is unset here for the same reason, so both read from the inherited event payload instead.
+          # The exact base commit needs no remote-tracking branch ref to be present in the checkout, unlike a branch name would.
+          BASE_REF: ${{ github.event.pull_request.base.ref }}
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          # The repository hosting this reusable workflow, so a fork of the hub reads its own develop rather than upstream's.
+          HUB_REPO: ${{ job.workflow_repository }}
+          # A private hub fork needs this to read raw content; a public one ignores it, since the request still succeeds.
+          GITHUB_TOKEN: ${{ github.token }}
 
-      # Warn-only, and visible rather than absent: an unrun check is one nobody acts on.
-      # A finding here names a character no tier covers, and classifying it is a fleet-law edit rather than a prose fix.
-      - name: Report unclassified characters step
+      # A runner's gh is unauthenticated on its own, and gh api needs one.
+      # Without this the sha-pin check silently degrades to "GitHub did not answer" for every same-owner pin.
+      - name: Check repo gates step
+        run: python3 .hub/scripts/repo_gate.py
+        env:
+          GH_TOKEN: ${{ github.token }}
+
+  # No job-level if: here, since GitHub Actions does not evaluate hashFiles in a job condition, only a step one.
+  # Every step below carries its own tree-detection guard instead.
+  # A caller with neither a *Tests*.csproj nor a uv.lock-backed tests/ directory beside a pyproject.toml runs every step's guard false, and the job reports success having done nothing, which is the clean skip this job promises.
+  # The uv.lock guard excludes the lint-only Python profile (spec/project-types.json python profileNote), which is stdlib-only, uvx-run, and carries no lockfile to sync from.
+  unit-test:
+    name: Unit test job
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+
+    steps:
+
+      - name: Checkout code step
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Setup .NET SDK step
+        if: hashFiles('**/*Tests*.csproj') != ''
+        uses: actions/setup-dotnet@a98b56852c35b8e3190ac28c8c2271da59106c68 # v6.0.0
+        with:
+          dotnet-version: 10.x
+
+      # --collect drives coverlet.collector to emit Cobertura XML into ./coverage/<guid>/.
+      - name: Run unit tests step
+        if: hashFiles('**/*Tests*.csproj') != ''
+        run: dotnet test --collect:"XPlat Code Coverage" --results-directory ./coverage
+
+      # Report-only: fail_ci_if_error is false so a Codecov hiccup or an absent token never fails the gate.
+      - name: Upload coverage to Codecov step
+        if: hashFiles('**/*Tests*.csproj') != ''
+        uses: codecov/codecov-action@fb8b3582c8e4def4969c97caa2f19720cb33a72f # v7.0.0
+        with:
+          directory: ./coverage
+          fail_ci_if_error: false
+        env:
+          CODECOV_TOKEN: ${{ secrets.CODECOV_TOKEN }}
+
+      - name: Setup uv step
+        if: hashFiles('pyproject.toml') != '' && hashFiles('tests/**') != '' && hashFiles('uv.lock') != ''
+        uses: astral-sh/setup-uv@08807647e7069bb48b6ef5acd8ec9567f424441b # v8.1.0
+        with:
+          python-version: "3.13"
+
+      - name: Sync dependencies step
+        if: hashFiles('pyproject.toml') != '' && hashFiles('tests/**') != '' && hashFiles('uv.lock') != ''
+        run: uv sync --all-groups --frozen
+
+      - name: Run pytest step
+        if: hashFiles('pyproject.toml') != '' && hashFiles('tests/**') != '' && hashFiles('uv.lock') != ''
+        run: uv run pytest --cov-report=xml
+
+      # Best-effort: continue-on-error plus fail_ci_if_error false, so a missing token never reds the gate.
+      - name: Upload coverage to Codecov step (Python)
+        if: hashFiles('pyproject.toml') != '' && hashFiles('tests/**') != '' && hashFiles('uv.lock') != ''
         continue-on-error: true
-        run: python3 scripts/prose_lint.py . --check charset-unknown --summary
+        uses: codecov/codecov-action@fb8b3582c8e4def4969c97caa2f19720cb33a72f # v7.0.0
+        with:
+          token: ${{ secrets.CODECOV_TOKEN }}
+          files: ./coverage.xml
+          fail_ci_if_error: false
+
+  validate:
+    name: Validate repository job
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+
+    steps:
+
+      - name: Checkout code step
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      # The hub default runs from this checkout, so it is fetched only when the caller carries no hook of its own.
+      - name: Checkout hub step
+        if: hashFiles('.github/actions/validate/action.yml') == ''
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          repository: ${{ job.workflow_repository }}
+          ref: ${{ job.workflow_sha }}
+          path: .hub
+
+      # A local composite action resolves at step time from the workspace, which is what makes this fallback expressible at all.
+      # It runs the caller's own hook when it carries one, else the hub's no-op default.
+      - name: Run repository validate hook step
+        if: hashFiles('.github/actions/validate/action.yml') != ''
+        uses: ./.github/actions/validate
+
+      - name: Run default validate hook step
+        if: hashFiles('.github/actions/validate/action.yml') == ''
+        uses: ./.hub/.github/actions/validate-default
