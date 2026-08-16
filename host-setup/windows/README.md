@@ -98,6 +98,7 @@ This moved a boundary the tool used to hold: WSL used to be read-only here, and 
 | `git-restore-mtime` is managed | not managed | The spec declares it not applicable on Windows, since it serves a Linux deploy path |
 | `install-tools.sh` refuses docker entirely inside a WSL *distribution* | `install-tools.ps1` checks the WSL *platform* version before installing docker | A WSL distribution takes docker only from Docker Desktop's own WSL integration, and Windows needs WSL2 present for Docker Desktop's own backend |
 | `sudo` re-runs a command as root | nothing elevates | `winget` raises UAC per installer, which is the path with the fewest failures |
+| `install-tools.sh --sudo-timestamp` shares one sudo credential cache across a user's terminals | no peer | Nothing here elevates on Windows, so there is no cached credential to share |
 | `unmanaged` means the upstream repository is unconfigured | `unmanaged` means the tool is on `PATH` and winget knows no package for it | The same question, by a different mechanism |
 | `credential.helper cache --timeout=3600` | `credential.helper manager`, and only where unset | Git Credential Manager ships with Git for Windows |
 | `ssh-agent` is a socket, started per shell | `ssh-agent` is a Windows service, reported and not started | Starting it needs administrator, and nothing here elevates |

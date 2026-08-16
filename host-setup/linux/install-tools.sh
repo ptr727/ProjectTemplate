@@ -14,6 +14,12 @@ readonly KEYRING_DIR="/etc/apt/keyrings"
 readonly SOURCES_DIR="/etc/apt/sources.list.d"
 readonly BIN_DIR="/usr/local/bin"
 
+# The sudo credential cache drop-in, named for the tooling that writes it, and numbered to sort after a drop-in that arrived with a package.
+readonly SUDOERS_FILE="/etc/sudoers.d/90-host-setup-sudo-timestamp"
+
+# Minutes the cache stays valid, long enough to cover a run started from another terminal and short enough that a host left alone does not stay elevated.
+readonly SUDO_TIMESTAMP_TIMEOUT=60
+
 # Managed tools, in dependency order: node asks jq to read the upstream release index.
 readonly TOOLS=(git gh jq git-restore-mtime node python uv docker dotnet)
 
@@ -67,6 +73,8 @@ Actions, the last one given wins, default --report:
   -i, --install     Install what is missing, leave an installed tool at its version
   -u, --upgrade     Install what is missing and upgrade what is behind
   -l, --list        List the managed tools and their package sets
+      --sudo-timestamp
+                    Share one sudo credential cache across this user's terminals
   -h, --help        Show this help
 
 Options:
@@ -78,6 +86,10 @@ Versions read as apt versions for an apt-managed tool and as upstream versions f
 binary, so a column compares like with like. A report reads the apt cache as it stands and does
 not refresh it, so an available version is as current as the last apt update.
 
+--sudo-timestamp writes a sudoers drop-in for the invoking user alone, so one "sudo -v" covers
+every terminal that user has open rather than only the one it ran in. It touches no tool, and
+removing the file it names undoes it.
+
 Examples:
   install-tools.sh                       Report on every tool
   install-tools.sh --install             Install what is missing
@@ -85,6 +97,7 @@ Examples:
   install-tools.sh --upgrade node jq     Bring two tools current
   install-tools.sh --install --optional python dotnet
   install-tools.sh --upgrade --dry-run   Show what an upgrade would run
+  install-tools.sh --sudo-timestamp      Share one sudo credential cache across terminals
 EOF
 }
 
@@ -978,6 +991,162 @@ list_tools() {
     info "dotnet optional : every other SDK line the feed carries"
 }
 
+# --- sudo timestamp ---
+
+# The user whose credential cache this widens, which is the one who runs sudo rather than the one sudo runs as.
+# Under sudo, $EUID is root's, and widening root's cache would leave the caller prompted in every terminal exactly as before.
+sudo_target_user() {
+    if [[ $EUID -ne 0 ]]; then
+        id -un
+        return 0
+    fi
+    [[ -n ${SUDO_USER:-} ]] ||
+        die "Running as root with no invoking user to widen the cache for, run this as the user who runs sudo"
+    printf '%s' "$SUDO_USER"
+}
+
+# The drop-in, scoped to one user, so every other account on this host keeps sudo's per-terminal default.
+sudo_timestamp_content() {
+    local user="$1"
+    cat << EOF
+# Written by host-setup/linux/install-tools.sh --sudo-timestamp, and removing this file undoes it.
+# One credential cache for $user across every terminal, so a "sudo -v" in one is what a program started in another runs under.
+Defaults:$user timestamp_type=global
+Defaults:$user timestamp_timeout=$SUDO_TIMESTAMP_TIMEOUT
+EOF
+}
+
+# Every installed sudo implementation, as "sudo-path visudo-path".
+# The original sudo hides behind update-alternatives wherever sudo-rs holds the link, and it is the alternative rather than the link that names it.
+sudo_implementations() {
+    command -v update-alternatives > /dev/null || return 0
+    local query
+    query=$(update-alternatives --query sudo 2> /dev/null) || return 0
+    awk '$1 == "Alternative:" { alt = $2 } alt != "" && $1 == "visudo" { print alt, $2 }' <<< "$query"
+}
+
+# Whether an implementation parses the drop-in, asked of its own visudo rather than of a version number.
+# Ubuntu ships sudo-rs as its default sudo from 25.10, and it carries no timestamp_type at all, so a host can hold a sudo that rejects the one setting this writes.
+sudo_parses() {
+    local file="$1" checker="$2"
+    command -v "$checker" > /dev/null || return 1
+    "$checker" -cqf "$file" > /dev/null 2>&1
+}
+
+# What sudo itself reports as in effect, which is the only answer that accounts for the order it reads the drop-ins in.
+# A read that needs a password prints nothing rather than waiting, since a run reaching here has already changed the host.
+sudo_timestamp_report() {
+    local user="$1" defaults="" effective=""
+
+    if [[ $EUID -eq 0 ]]; then
+        defaults=$(sudo -n -l -U "$user" 2> /dev/null) || defaults=""
+    else
+        defaults=$(sudo -n -l 2> /dev/null) || defaults=""
+    fi
+    if [[ -n $defaults ]]; then
+        effective=$(grep -oE 'timestamp_(type|timeout)=[^, ]+' <<< "$defaults" | tr '\n' ' ') || effective=""
+        effective="${effective% }"
+    fi
+
+    if [[ -z $effective ]]; then
+        info "Could not read the settings back, so check them with \"sudo -l\" as $user"
+    elif [[ $effective == *"timestamp_type=global"* ]]; then
+        info "In effect for $user: $effective"
+    else
+        warn "sudo reports \"$effective\" for $user, so something it reads after $SUDOERS_FILE overrides it"
+    fi
+}
+
+# Share one sudo credential cache across a user's terminals, rather than sudo's default of one per terminal.
+configure_sudo_timestamp() {
+    local user staged
+    user=$(sudo_target_user)
+    id -u "$user" > /dev/null 2>&1 || die "This host has no account named \"$user\""
+
+    log "Sudo timestamp: one credential cache for $user across every terminal, valid $SUDO_TIMESTAMP_TIMEOUT minutes"
+
+    staged="$TMP_DIR/sudo-timestamp"
+    sudo_timestamp_content "$user" > "$staged"
+
+    # The implementation already in place is preferred, so a host carrying the original sudo changes nothing but the drop-in.
+    local switch_to="" switch_checker="" alternative checker
+    if ! sudo_parses "$staged" visudo; then
+        while read -r alternative checker; do
+            [[ -n $checker ]] || continue
+            if sudo_parses "$staged" "$checker"; then
+                switch_to="$alternative"
+                switch_checker="$checker"
+                break
+            fi
+        done < <(sudo_implementations)
+        [[ -n $switch_to ]] ||
+            die "No sudo on this host parses timestamp_type, which is the setting that shares one cache across terminals. sudo-rs carries no such setting, so install the original sudo with \"apt-get install sudo\" and run this again."
+    fi
+
+    # A parse error in any file sudo reads makes every sudo on the host fail, so the set is proved to parse before this adds to it.
+    "${SUDO[@]}" visudo -cq > /dev/null 2>&1 ||
+        die "This host's sudoers does not parse as it stands, so fix that before adding to it (\"visudo -c\" names the file)"
+
+    # An implementation this run would switch to has to parse the set as well, since switching to one that cannot is what locks every user out.
+    if [[ -n $switch_checker ]]; then
+        "${SUDO[@]}" "$switch_checker" -cq > /dev/null 2>&1 ||
+            die "$switch_to does not parse this host's sudoers, so switching to it would lock every user out. This host is unchanged."
+    fi
+
+    if "${SUDO[@]}" cmp -s "$staged" "$SUDOERS_FILE" 2> /dev/null; then
+        log "$SUDOERS_FILE already carries exactly this, leaving it alone"
+        sudo_timestamp_report "$user"
+        return 0
+    fi
+
+    # Another file setting either option is named rather than merged into, since which one wins is the order sudo reads them in and not something this can decide.
+    local elsewhere
+    elsewhere=$("${SUDO[@]}" grep -rnsE '^[[:space:]]*Defaults.*timestamp_(type|timeout)' \
+        --exclude="${SUDOERS_FILE##*/}" /etc/sudoers /etc/sudoers.d 2> /dev/null) || elsewhere=""
+    if [[ -n $elsewhere ]]; then
+        warn "A timestamp option is already set elsewhere, and the file sudo reads last wins:"
+        local line
+        while read -r line; do
+            info "$line"
+        done <<< "$elsewhere"
+    fi
+
+    if [[ -n $switch_to ]]; then
+        log "The sudo this host runs parses no timestamp_type, and $switch_to does"
+        info "Switching the alternative changes which sudo implementation every user on this host runs"
+        info "\"update-alternatives --auto sudo\" puts that back"
+    fi
+    confirm "Change this host?" || die "Declined"
+
+    if [[ -n $switch_to ]]; then
+        run_root update-alternatives --set sudo "$switch_to"
+        # Each implementation keeps its own credential cache, so the switch invalidates the one this run was using.
+        info "The cached credential does not carry across the switch, so the next step may ask for a password"
+    fi
+
+    # A drop-in whose name holds a dot is one sudo skips, so the content lands under such a name, is proved where it will be read, and only then is renamed over.
+    # Renaming is atomic, which a copy into place is not, and a half-written file in that directory locks every user out of sudo.
+    local pending="${SUDOERS_FILE%/*}/.${SUDOERS_FILE##*/}.pending"
+    run_root install -m 0440 -o root -g root "$staged" "$pending"
+    if [[ $DRY_RUN == false ]]; then
+        "${SUDO[@]}" visudo -cqf "$pending" > /dev/null 2>&1 || {
+            run_root rm -f "$pending"
+            die "The staged drop-in does not parse where sudo would read it, so this host is unchanged"
+        }
+    fi
+    run_root mv "$pending" "$SUDOERS_FILE"
+
+    if [[ $DRY_RUN == true ]]; then
+        return 0
+    fi
+
+    "${SUDO[@]}" visudo -cq > /dev/null 2>&1 ||
+        die "sudoers stopped parsing once $SUDOERS_FILE landed. Remove that file from a root shell to restore sudo."
+
+    log "Wrote $SUDOERS_FILE"
+    sudo_timestamp_report "$user"
+}
+
 # --- Entry ---
 
 parse_args() {
@@ -989,6 +1158,7 @@ parse_args() {
             -i | --install) MODE="install" ;;
             -u | --upgrade) MODE="upgrade" ;;
             -l | --list) MODE="list" ;;
+            --sudo-timestamp) MODE="sudo-timestamp" ;;
             -n | --dry-run) DRY_RUN=true ;;
             -y | --yes) ASSUME_YES=true ;;
             -o | --optional) WITH_OPTIONAL=true ;;
@@ -1040,6 +1210,7 @@ main() {
     case "$MODE" in
         report) report ;;
         install | upgrade) apply ;;
+        sudo-timestamp) configure_sudo_timestamp ;;
     esac
 }
 
