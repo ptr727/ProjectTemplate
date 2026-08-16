@@ -101,7 +101,12 @@ jobs:
           if [ -n "$REPOSITORIES" ]; then
             echo "repositories=$REPOSITORIES" >> "$GITHUB_OUTPUT"
           elif [ -n "$MANIFEST" ]; then
-            echo "repositories=$(jq --compact-output "$MANIFEST_JQ" "$MANIFEST")" >> "$GITHUB_OUTPUT"
+            derived="$(jq --compact-output "$MANIFEST_JQ" "$MANIFEST")"
+            if ! echo "$derived" | jq -e 'type == "array" and length > 0 and all(.[]; type == "string")' >/dev/null 2>&1; then
+              echo "::error::'manifest-jq' must derive a non-empty JSON array of strings, got: $derived"
+              exit 1
+            fi
+            echo "repositories=$derived" >> "$GITHUB_OUTPUT"
           else
             # Default to this repo's own Docker Hub repository, the lowercased owner/name.
             # A single-image caller then carries the orchestration verbatim with no repo-specific value.
