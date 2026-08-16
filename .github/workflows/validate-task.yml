@@ -28,14 +28,6 @@ jobs:
         with:
           fetch-depth: 0
 
-      # The hub at the exact commit the caller pinned, for the prose gate's bundled script and the repo gate.
-      - name: Checkout hub step
-        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        with:
-          repository: ${{ job.workflow_repository }}
-          ref: ${{ job.workflow_sha }}
-          path: .hub
-
       # The fleet doc-lint block, hosted once rather than carried by every repo of every type.
       - name: Lint Markdown step
         uses: DavidAnson/markdownlint-cli2-action@21c1be1b93ad9ed58fa840aacc3f279cde2a72ff # v24.2.0
@@ -149,6 +141,15 @@ jobs:
           else
             echo "no [tool.mypy] or [tool.pyright] section, skipping"
           fi
+
+      # Checked out here, right before the two steps that read it, so the doc-lint block above scans only the caller's own tree and never the hub commit copied in for the prose gate and the repo gate.
+      # The hub at the exact commit the caller pinned, for the prose gate's bundled script and the repo gate.
+      - name: Checkout hub step
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          repository: ${{ job.workflow_repository }}
+          ref: ${{ job.workflow_sha }}
+          path: .hub
 
       # The fleet prose rules, scoped to a pull request's own diff so the existing backlog blocks nothing.
       # This mirrors .github/actions/prose-gate/action.yml's branch rule.
