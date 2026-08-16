@@ -90,13 +90,15 @@ jobs:
           fetch-depth: 0
 
       # Fail fast on a misconfigured environment, before any build, upload, or flip work runs.
-      # A silently empty variable would otherwise let the deploy proceed and only surface as a broken site-url output or a late transport failure.
-      - name: Assert environment variables are set step
+      # A silently empty variable or secret would otherwise let the deploy proceed and only surface as a broken site-url output or a late SSH/rsync failure.
+      # GitHub enforces only that the caller maps a required secret, never that the mapped value is non-empty, so an unset environment secret reaches here as an empty string.
+      - name: Assert environment variables and secrets are set step
         env:
           SITE_BASE_URL: ${{ vars.SITE_BASE_URL }}
           DEPLOY_SSH_USER: ${{ vars.DEPLOY_SSH_USER }}
           DEPLOY_SSH_HOST: ${{ vars.DEPLOY_SSH_HOST }}
           DEPLOY_SSH_KNOWN_HOSTS: ${{ vars.DEPLOY_SSH_KNOWN_HOSTS }}
+          DEPLOY_SSH_PRIVATE_KEY: ${{ secrets.DEPLOY_SSH_PRIVATE_KEY }}
         run: |
           set -Eeuo pipefail
           missing=()
@@ -104,8 +106,9 @@ jobs:
           [ -n "$DEPLOY_SSH_USER" ] || missing+=(DEPLOY_SSH_USER)
           [ -n "$DEPLOY_SSH_HOST" ] || missing+=(DEPLOY_SSH_HOST)
           [ -n "$DEPLOY_SSH_KNOWN_HOSTS" ] || missing+=(DEPLOY_SSH_KNOWN_HOSTS)
+          [ -n "$DEPLOY_SSH_PRIVATE_KEY" ] || missing+=(DEPLOY_SSH_PRIVATE_KEY)
           if [ "${#missing[@]}" -gt 0 ]; then
-            echo "::error::Missing GitHub Environment variable(s) on '${{ inputs.environment }}': ${missing[*]}"
+            echo "::error::Missing or empty GitHub Environment value(s) on '${{ inputs.environment }}': ${missing[*]}"
             exit 1
           fi
 
