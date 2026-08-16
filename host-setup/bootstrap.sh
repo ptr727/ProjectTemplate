@@ -40,7 +40,7 @@ Stands a host up: upgrades its packages, installs the host tools, and configures
 Fetches this repository and runs the tooling from that tree, so the tools and the rules that
 describe them come from one revision rather than from whatever a host happens to hold.
 
-Actions, the last one given wins, default --report on a terminal is the menu:
+Actions, name one, default --report on a terminal is the menu:
   -r, --report      Report what each tool would do, change nothing
       --host        Share the sudo cache, upgrade packages, install the tools, configure git and
                     GitHub, install the skills
@@ -246,17 +246,19 @@ menu() {
 # --- Entry ---
 
 parse_args() {
+    local -a actions=()
+
     while [[ $# -gt 0 ]]; do
         case "$1" in
-            -r | --report) MODE="report" ;;
-            --host) MODE="host" ;;
-            --dev) MODE="dev" ;;
-            --upgrade) MODE="upgrade" ;;
-            --tools) MODE="tools" ;;
-            --github) MODE="github" ;;
-            --skills) MODE="skills" ;;
-            --sudo) MODE="sudo" ;;
-            --release) MODE="release" ;;
+            -r | --report) actions+=(report) ;;
+            --host) actions+=(host) ;;
+            --dev) actions+=(dev) ;;
+            --upgrade) actions+=(upgrade) ;;
+            --tools) actions+=(tools) ;;
+            --github) actions+=(github) ;;
+            --skills) actions+=(skills) ;;
+            --sudo) actions+=(sudo) ;;
+            --release) actions+=(release) ;;
             -y | --yes) ASSUME_YES=true ;;
             -n | --dry-run) DRY_RUN=true ;;
             --keep) KEEP=true ;;
@@ -281,6 +283,13 @@ parse_args() {
         esac
         shift
     done
+
+    # The order the actions were given is not a contract, so more than one is a refusal rather than the last one winning.
+    if ((${#actions[@]} > 1)); then
+        die "More than one action given (${actions[*]}), name one"
+    fi
+    [[ ${#actions[@]} -eq 1 ]] && MODE="${actions[0]}"
+    return 0
 }
 
 main() {

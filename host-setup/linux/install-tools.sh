@@ -68,7 +68,7 @@ Usage: install-tools.sh [options] [tool ...]
 Installs the host tools the fleet's repositories expect, from upstream where the distro package
 trails upstream. With no tool named, every managed tool is selected.
 
-Actions, the last one given wins, default --report:
+Actions, name one, default --report:
   -r, --report      Report installed and available versions, change nothing
   -i, --install     Install what is missing, leave an installed tool at its version
   -u, --upgrade     Install what is missing and upgrade what is behind
@@ -1257,15 +1257,15 @@ configure_sudo_timestamp() {
 # --- Entry ---
 
 parse_args() {
-    local -a requested=()
+    local -a requested=() actions=()
 
     while [[ $# -gt 0 ]]; do
         case "$1" in
-            -r | --report) MODE="report" ;;
-            -i | --install) MODE="install" ;;
-            -u | --upgrade) MODE="upgrade" ;;
-            -l | --list) MODE="list" ;;
-            --sudo-timestamp) MODE="sudo-timestamp" ;;
+            -r | --report) actions+=(report) ;;
+            -i | --install) actions+=(install) ;;
+            -u | --upgrade) actions+=(upgrade) ;;
+            -l | --list) actions+=(list) ;;
+            --sudo-timestamp) actions+=(sudo-timestamp) ;;
             -n | --dry-run) DRY_RUN=true ;;
             -y | --yes) ASSUME_YES=true ;;
             -o | --optional) WITH_OPTIONAL=true ;;
@@ -1288,7 +1288,13 @@ parse_args() {
         shift
     done
 
-    # Checked against the action that won rather than inside the loop, since the last action given is the one that runs.
+    # The order the actions were given is not a contract, so more than one is a refusal rather than the last one winning.
+    if ((${#actions[@]} > 1)); then
+        die "More than one action given (${actions[*]}), name one"
+    fi
+    [[ ${#actions[@]} -eq 1 ]] && MODE="${actions[0]}"
+
+    # The sudo-timestamp refusal needs the whole set of tool names a run asked for, so it is checked after the loop rather than inside it.
     if [[ $MODE == "sudo-timestamp" && ${#requested[@]} -gt 0 ]]; then
         die "--sudo-timestamp changes the host rather than a tool, so it takes no tool, and \"${requested[*]}\" names one"
     fi
@@ -1307,6 +1313,7 @@ parse_args() {
     else
         SELECTED=("${TOOLS[@]}")
     fi
+    return 0
 }
 
 main() {
