@@ -1073,15 +1073,24 @@ sudo_timestamp_report() {
     else
         defaults=$(sudo -n -l 2> /dev/null) || defaults=""
     fi
-    if [[ -n $defaults ]]; then
-        effective=$(grep -oE 'timestamp_(type|timeout)=[^, ]+' <<< "$defaults" | tr '\n' ' ') || effective=""
-        effective="${effective% }"
+    # An unreadable list and a list naming no timestamp option are different answers, and only the raw read separates them.
+    if [[ -z $defaults ]]; then
+        info "Could not read the settings back, so check them with \"sudo -l\" as $user"
+        return 0
+    fi
+    effective=$(grep -oE 'timestamp_(type|timeout)=[^, ]+' <<< "$defaults" | tr '\n' ' ') || effective=""
+    effective="${effective% }"
+
+    # A dry run reports the state it found rather than one this run reached, since nothing was written to reach it.
+    if [[ $DRY_RUN == true ]]; then
+        info "Set for $user as it stands: ${effective:-neither option, so one cache per terminal}"
+        return 0
     fi
 
-    if [[ -z $effective ]]; then
-        info "Could not read the settings back, so check them with \"sudo -l\" as $user"
-    elif [[ $effective == *"timestamp_type=global"* ]]; then
+    if [[ $effective == *"timestamp_type=global"* ]]; then
         info "In effect for $user: $effective"
+    elif [[ -z $effective ]]; then
+        warn "sudo names no timestamp option for $user, so $SUDOERS_FILE is not being read"
     else
         warn "sudo reports \"$effective\" for $user, so something it reads after $SUDOERS_FILE overrides it"
     fi
@@ -1169,6 +1178,7 @@ configure_sudo_timestamp() {
     run_root mv "$pending" "$SUDOERS_FILE"
 
     if [[ $DRY_RUN == true ]]; then
+        sudo_timestamp_report "$user"
         return 0
     fi
 
