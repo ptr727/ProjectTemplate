@@ -6,7 +6,8 @@ name: Deploy site task
 # See WORKFLOW.md D4.6 and D5.6.
 #
 # A required deploy hook, one composite action the caller owns, covers what is genuinely the site's own: assembling the release bundle (its generator, its precompression, whatever it stamps into the bundle), pruning old releases, and verifying the live site against its own URL contract.
-# It runs three times with a distinct mode input.
+# It runs three times, once each for build, prune, and verify, passing mode plus whichever of bundle-path, release-id, and environment that mode needs.
+# A hook declares all four inputs in its own action.yml, since a composite action rejects an invocation that supplies an input it does not declare, even one a different mode leaves unset.
 # The upload and the flip stay here as the one atomic sequence every site repo shares, so a hook cannot fork that guarantee.
 #
 # The transport's options are pinned rather than left to the runner's OpenSSH defaults, and declared once so the two transfers cannot drift apart.
