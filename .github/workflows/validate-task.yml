@@ -165,7 +165,7 @@ jobs:
           else
             script="$RUNNER_TEMP/prose_lint.py"
             curl -fsSL --retry 3 --retry-delay 2 --retry-all-errors \
-              "https://raw.githubusercontent.com/ptr727/ProjectTemplate/develop/scripts/prose_lint.py" -o "$script"
+              "https://raw.githubusercontent.com/$HUB_REPO/develop/scripts/prose_lint.py" -o "$script"
           fi
           if ! git rev-parse --verify --quiet "$BASE_SHA^{commit}" >/dev/null; then
             echo "::error::Diff base '$BASE_SHA' does not resolve in this checkout." >&2
@@ -177,6 +177,8 @@ jobs:
           # The exact base commit needs no remote-tracking branch ref to be present in the checkout, unlike a branch name would.
           BASE_REF: ${{ github.event.pull_request.base.ref }}
           BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          # The repository hosting this reusable workflow, so a fork of the hub reads its own develop rather than upstream's.
+          HUB_REPO: ${{ job.workflow_repository }}
 
       - name: Check repo gates step
         run: python3 .hub/scripts/repo_gate.py
