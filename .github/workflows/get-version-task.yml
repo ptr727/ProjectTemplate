@@ -81,8 +81,9 @@ jobs:
 
       # NBGV's PrereleaseVersion output only carries version.json's `-tag` segment, empty for a bare SemVer base.
       # The auto-appended -g{sha} segment lives in SemVer2 but is not exposed there.
-      # Detect prerelease by testing SemVer2 for any `-` instead.
-      # That reads true for `1.0.5-g1a2b3c4`, a prerelease branch, and false for `1.0.5`, the public branch.
+      # Detect prerelease by testing SemVer2 for any `-` instead, the same test validate-release uses.
+      # Strip '+buildmetadata' first, since SemVer2 allows a `-` there and it carries no prerelease meaning.
+      # That reads true for `1.0.5-g1a2b3c4`, a prerelease branch, and false for `1.0.5` or `1.0.5+abc-def`, both public.
       # This also keeps a manual workflow_dispatch from the wrong branch honest about its prerelease status.
       - name: Compose workflow outputs step
         id: out
@@ -90,7 +91,8 @@ jobs:
           SEMVER2: ${{ steps.nbgv.outputs.SemVer2 }}
         run: |
           set -Eeuo pipefail
-          if [[ "$SEMVER2" == *-* ]]; then
+          CORE_AND_PRE="${SEMVER2%%+*}"
+          if [[ "$CORE_AND_PRE" == *-* ]]; then
             PRERELEASE=true
           else
             PRERELEASE=false
