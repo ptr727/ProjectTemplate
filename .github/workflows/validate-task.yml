@@ -166,6 +166,7 @@ jobs:
           else
             script="$RUNNER_TEMP/prose_lint.py"
             curl -fsSL --retry 3 --retry-delay 2 --retry-all-errors \
+              -H "Authorization: Bearer $GITHUB_TOKEN" \
               "https://raw.githubusercontent.com/$HUB_REPO/develop/scripts/prose_lint.py" -o "$script"
           fi
           if ! git rev-parse --verify --quiet "$BASE_SHA^{commit}" >/dev/null; then
@@ -180,6 +181,8 @@ jobs:
           BASE_SHA: ${{ github.event.pull_request.base.sha }}
           # The repository hosting this reusable workflow, so a fork of the hub reads its own develop rather than upstream's.
           HUB_REPO: ${{ job.workflow_repository }}
+          # A private hub fork needs this to read raw content; a public one ignores it, since the request still succeeds.
+          GITHUB_TOKEN: ${{ github.token }}
 
       # A runner's gh is unauthenticated on its own, and gh api needs one.
       # Without this the sha-pin check silently degrades to "GitHub did not answer" for every same-owner pin.
