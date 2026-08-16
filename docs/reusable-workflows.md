@@ -259,8 +259,8 @@ Four things the hub cannot prove fall to the first downstream adopter. They are 
 [governance-hub-hosted-tooling]: ../GOVERNANCE.md#hub-hosted-tooling
 [governance-workflow-yaml-conventions]: ../GOVERNANCE.md#workflow-yaml-conventions
 [secrets]: ../spec/secrets.json
+[todo]: ../TODO.md
 [workflow]: ../WORKFLOW.md
 [workflow-d8]: ../WORKFLOW.md#d8---bots--automation
 [workflow-reusable-task-parameter-contract]: ../WORKFLOW.md#reusable-task-parameter-contract
-[todo]: ../TODO.md
 [workflow-reuse-report]: ../reports/workflow-reuse.md
