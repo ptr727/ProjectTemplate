@@ -2219,7 +2219,9 @@ def _selftest():
     )
     deploy_contract = {
         "requiredJobKeys": ["assert-ref", "validate", "deploy"],
-        "requireTokensInJob": {"deploy": ["deploy-site-task.yml", "DEPLOY_SSH_PRIVATE_KEY"]},
+        "requireTokensInJob": {
+            "deploy": ["deploy-site-task.yml", "environment:", "DEPLOY_SSH_PRIVATE_KEY"]
+        },
     }
     cases += [
         (
@@ -2234,6 +2236,12 @@ def _selftest():
                 "    secrets:\n      DEPLOY_SSH_PRIVATE_KEY: ${{ secrets.DEPLOY_SSH_PRIVATE_KEY }}\n",
                 "    secrets: inherit\n",
             ),
+            deploy_contract,
+            1,
+        ),
+        (
+            "deploy-site.yml caller stub missing the environment binding the crossing secret needs",
+            deploy_stub.replace("    environment: ${{ inputs.environment }}\n", ""),
             deploy_contract,
             1,
         ),
