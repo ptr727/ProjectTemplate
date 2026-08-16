@@ -183,7 +183,7 @@ Hub: `build-release-task.yml` with `build-executable`, `build-nuget`, `build-pyp
 
 `build-release-task.yml` inlines its own `get-version` and `validate-release` jobs (no `./` nesting of the sibling `get-version-task.yml`) and duplicates the Docker core from `build-docker-task.yml` in its own `build-docker` job for the same reason: a hub task cannot reach a sibling hub task by a `./` path, since that path resolves against the caller's repository. `build-docker-task.yml` ships as its own hub task rather than being folded away, for a caller that wants the Docker leg without the rest of the release chain. The two carry the same job body and are kept in lockstep by hand, recorded in each file's own header comment. The `build-executable`, `build-nuget`, and `build-pypi` hub defaults take a `project-file` (or `project-dir`) input beyond the fixed `ref`/`branch`/`smoke` set, since the vanilla project layout (Console/Console.csproj, NuGetLibrary/NuGetLibrary.csproj, `PyPiLibrary/`) is a convention a real repo's own project name never matches. This mirrors the Docker hook's own `image` input rather than widening the fixed contract.
 
-- [ ] Hub pull request on `develop`.
+- [x] Hub pull request on `develop` in #762.
 - [ ] Promoted and released, tag recorded here.
 - [ ] PhotoCleaner (pilot, vanilla Docker plus executable)
 - [ ] PlexCleaner (second, the same shape)
