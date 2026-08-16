@@ -2267,7 +2267,8 @@ def _selftest():
         "requireTokensInJob": {
             "deploy": [
                 "deploy-site-task.yml",
-                "environment:",
+                # Indent-anchored (4 spaces) so a with: input of the same name, indented 6, cannot satisfy this on its own.
+                "\n    environment:",
                 "contents: read",
                 "DEPLOY_SSH_PRIVATE_KEY",
             ]
@@ -2291,7 +2292,11 @@ def _selftest():
         ),
         (
             "deploy-site.yml caller stub missing the environment binding the crossing secret needs",
-            deploy_stub.replace("    environment: ${{ inputs.environment }}\n", ""),
+            # Removes only the job-level environment: line, leaving the with:-nested environment: input untouched, the exact ambiguity an unanchored token would miss.
+            deploy_stub.replace(
+                "    name: Deploy job\n    environment: ${{ inputs.environment }}\n",
+                "    name: Deploy job\n",
+            ),
             deploy_contract,
             1,
         ),
