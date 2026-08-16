@@ -1,0 +1,242 @@
+name: Build Docker image task
+
+# The Docker core, hosted once: QEMU/Buildx, a Docker Hub login on every build for the higher rate limit, and docker/build-push-action with a type=registry buildcache-<branch> cache.
+# Every image carries the moving tag (latest/develop) plus a :SemVer2 tag and a LABEL_VERSION build-arg.
+# Multi-arch (amd64+arm64) applies only to a non-smoke main build, and every other build is amd64 only.
+# The cache policy and the platform selection are decided once here, per docs/reusable-workflows.md "The Docker Family", never per caller.
+#
+# This file exists both as a hub task in its own right, for a caller that wants only the Docker leg with no NBGV release/version chain, and as the source build-release-task.yml duplicates into its own build-docker job.
+# A hub task cannot call a sibling hub task by a ./ path, since that path resolves against the caller's repository, not the hub.
+# The two carry the same job body rather than one calling the other, so keep them in lockstep by hand.
+#
+# The in-job Docker Hub description push that earlier per-repo copies carried is dropped here in favor of publish-docker-readme-task.yml, per docs/reusable-workflows.md "The Docker Family" (stage 5).
+# The overview then publishes once per release rather than once per image build.
+#
+# The image set comes from a docker-prepare hook, the caller's own, or the hub default emitting the single vanilla entry the image input implies, unless the caller passes matrix directly.
+# A required docker-build-base hook, with no hub default, runs first when build-base is set, for a multi-image repo whose base layer is built once and shared across every product image.
+# See docs/reusable-workflows.md "The Docker Family" for the design.
+
+on:
+  workflow_call:
+    inputs:
+      # Push the built image(s), never true on a smoke build, since the caller forwards smoke && push as one flag.
+      push:
+        required: false
+        type: boolean
+        default: false
+      # Git ref to check out (empty = default checkout ref).
+      ref:
+        required: false
+        type: string
+        default: ''
+      # Logical branch: main gives the latest moving tag, anything else develop.
+      # Required, with no github.ref_name fallback, since a publish run builds one branch and a fallback could mistag a develop build made from main.
+      branch:
+        required: true
+        type: string
+      # Smoke: amd64 only, never pushed, no shared cache-to, for fast PR feedback.
+      smoke:
+        required: false
+        type: boolean
+        default: false
+      # NBGV version outputs threaded from the caller's single get-version job, never re-run here.
+      semver2:
+        required: true
+        type: string
+      # Optional .NET version properties, forwarded as extra build-args only when assembly_version is non-empty.
+      # This is for an image whose Dockerfile bakes them, a repo built from a versioned .NET assembly.
+      assembly_version:
+        required: false
+        type: string
+        default: ''
+      assembly_file_version:
+        required: false
+        type: string
+        default: ''
+      assembly_informational_version:
+        required: false
+        type: string
+        default: ''
+      # A plain Docker Hub repository, e.g. ptr727/widget.
+      # Feeds the docker-prepare hook, the caller's own, or the hub default emitting the single vanilla entry this implies.
+      # Ignored once matrix is set directly.
+      image:
+        required: false
+        type: string
+        default: ''
+      # Caller-supplied JSON list of {name, tags, build-args, context, dockerfile, cache-repo}, bypassing the docker-prepare hook entirely.
+      # Empty resolves the hook instead (see image above).
+      matrix:
+        required: false
+        type: string
+        default: ''
+      # Build the shared base image(s) first, through the required docker-build-base hook with no hub default.
+      build-base:
+        required: false
+        type: boolean
+        default: false
+
+jobs:
+
+  # Resolves the image matrix once: the caller's own docker-prepare hook, else the hub default built from image.
+  # Skipped entirely when the caller passed matrix directly.
+  docker-prepare:
+    name: Resolve Docker build matrix job
+    if: ${{ inputs.matrix == '' }}
+    runs-on: ubuntu-latest
+    outputs:
+      matrix: ${{ steps.hook.outputs.matrix || steps.default.outputs.matrix }}
+    steps:
+
+      - name: Checkout code step
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ inputs.ref }}
+
+      - name: Checkout hub for hook default step
+        if: ${{ hashFiles('.github/actions/docker-prepare/action.yml') == '' }}
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          repository: ptr727/ProjectTemplate
+          ref: ${{ github.job_workflow_sha }}
+          path: .hub
+
+      - name: Run caller docker-prepare hook step
+        if: ${{ hashFiles('.github/actions/docker-prepare/action.yml') != '' }}
+        id: hook
+        uses: ./.github/actions/docker-prepare
+        with:
+          image: ${{ inputs.image }}
+          branch: ${{ inputs.branch }}
+          semver2: ${{ inputs.semver2 }}
+
+      - name: Run hub docker-prepare default step
+        if: ${{ hashFiles('.github/actions/docker-prepare/action.yml') == '' }}
+        id: default
+        uses: ./.hub/.github/actions/docker-prepare-default
+        with:
+          image: ${{ inputs.image }}
+          branch: ${{ inputs.branch }}
+          semver2: ${{ inputs.semver2 }}
+
+  # Required hook, no hub default.
+  # A repo with a shared base layer, a multi-image manifest per docs/reusable-workflows.md "The Docker Family", must carry .github/actions/docker-build-base itself.
+  # Skipped entirely when build-base is false.
+  docker-build-base:
+    name: Build Docker base image job
+    if: ${{ inputs.build-base == true || inputs.build-base == 'true' }}
+    runs-on: ubuntu-latest
+    steps:
+
+      - name: Checkout code step
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ inputs.ref }}
+
+      - name: Require caller docker-build-base hook step
+        if: ${{ hashFiles('.github/actions/docker-build-base/action.yml') == '' }}
+        run: |
+          set -Eeuo pipefail
+          echo "::error::inputs.build-base is true but .github/actions/docker-build-base/action.yml is missing."
+          echo "::error::This hook has no hub default; a repo enabling build-base must carry it."
+          exit 1
+
+      - name: Run caller docker-build-base hook step
+        if: ${{ hashFiles('.github/actions/docker-build-base/action.yml') != '' }}
+        uses: ./.github/actions/docker-build-base
+        with:
+          push: ${{ inputs.push }}
+          ref: ${{ inputs.ref }}
+
+  build-docker:
+    name: Build Docker image job
+    needs: [docker-prepare, docker-build-base]
+    if: >-
+      ${{ always() &&
+      (needs.docker-prepare.result == 'success' || needs.docker-prepare.result == 'skipped') &&
+      (needs.docker-build-base.result == 'success' || needs.docker-build-base.result == 'skipped') }}
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        image: ${{ fromJSON(inputs.matrix != '' && inputs.matrix || needs.docker-prepare.outputs.matrix) }}
+    env:
+      # Multi-arch (amd64+arm64) only on a full main publish, and smoke and develop build amd64 only.
+      PLATFORMS: ${{ (!inputs.smoke && inputs.branch == 'main') && 'linux/amd64,linux/arm64' || 'linux/amd64' }}
+
+    steps:
+
+      - name: Checkout step
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ inputs.ref }}
+
+      # An arm64 build is non-native on the amd64 runner.
+      # Install its QEMU emulator only when the build includes it.
+      - name: Setup QEMU step
+        if: ${{ contains(env.PLATFORMS, 'arm64') }}
+        uses: docker/setup-qemu-action@96fe6ef7f33517b61c61be40b68a1882f3264fb8 # v4.2.0
+        with:
+          platforms: arm64
+
+      - name: Setup Buildx step
+        uses: docker/setup-buildx-action@bb05f3f5519dd87d3ba754cc423b652a5edd6d2c # v4.2.0
+        with:
+          platforms: ${{ env.PLATFORMS }}
+
+      # Always login, even for smoke, for the higher Docker rate limits on pulls and cache reads.
+      # Fork PRs without the secrets cannot run the Docker smoke build, which is acceptable for same-repo PRs.
+      - name: Login to Docker Hub step
+        uses: docker/login-action@dbcb813823bdd20940b903addbd779551569679f # v4.6.0
+        with:
+          username: ${{ secrets.DOCKER_HUB_USERNAME }}
+          password: ${{ secrets.DOCKER_HUB_ACCESS_TOKEN }}
+
+      # Combine the matrix entry's own tags/build-args with the universal LABEL_VERSION.
+      # Add the optional .NET version properties when the caller threaded an assembly version.
+      - name: Compose tags and build-args step
+        id: compose
+        env:
+          TAGS_JSON: ${{ toJSON(matrix.image.tags) }}
+          ARGS_JSON: ${{ toJSON(matrix.image['build-args']) }}
+          SEMVER2: ${{ inputs.semver2 }}
+          ASSEMBLY_VERSION: ${{ inputs.assembly_version }}
+          ASSEMBLY_FILE_VERSION: ${{ inputs.assembly_file_version }}
+          ASSEMBLY_INFORMATIONAL_VERSION: ${{ inputs.assembly_informational_version }}
+          BRANCH: ${{ inputs.branch }}
+        run: |
+          set -Eeuo pipefail
+          {
+            echo "tags<<TAGEOF"
+            jq -r '.[]' <<<"$TAGS_JSON"
+            echo "TAGEOF"
+            echo "args<<ARGEOF"
+            jq -r '.[]' <<<"$ARGS_JSON"
+            echo "LABEL_VERSION=$SEMVER2"
+            if [[ -n "$ASSEMBLY_VERSION" ]]; then
+              configuration=Debug
+              [[ "$BRANCH" == "main" ]] && configuration=Release
+              echo "BUILD_CONFIGURATION=$configuration"
+              echo "BUILD_VERSION=$ASSEMBLY_VERSION"
+              echo "BUILD_FILE_VERSION=$ASSEMBLY_FILE_VERSION"
+              echo "BUILD_ASSEMBLY_VERSION=$ASSEMBLY_VERSION"
+              echo "BUILD_INFORMATION_VERSION=$ASSEMBLY_INFORMATIONAL_VERSION"
+              echo "BUILD_PACKAGE_VERSION=$SEMVER2"
+            fi
+            echo "ARGEOF"
+          } >> "$GITHUB_OUTPUT"
+
+      - name: Docker build and push step
+        uses: docker/build-push-action@53b7df96c91f9c12dcc8a07bcb9ccacbed38856a # v7.3.0
+        with:
+          context: ${{ matrix.image.context }}
+          push: ${{ inputs.push }}
+          file: ${{ matrix.image.dockerfile }}
+          tags: ${{ steps.compose.outputs.tags }}
+          platforms: ${{ env.PLATFORMS }}
+          # Read both branches' caches, whose layers are near-identical, but write only this branch's tag.
+          # Write only when pushing, so a PR-smoke or develop-only run never overwrites the shared cache.
+          cache-from: |
+            type=registry,ref=${{ matrix.image['cache-repo'] }}:buildcache-main
+            type=registry,ref=${{ matrix.image['cache-repo'] }}:buildcache-develop
+          cache-to: ${{ inputs.push && format('type=registry,ref={0}:buildcache-{1},mode=max,ignore-error=true', matrix.image['cache-repo'], inputs.branch) || '' }}
+          build-args: ${{ steps.compose.outputs.args }}

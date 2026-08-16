@@ -17,11 +17,13 @@ publisher passes `branch: ${{ github.ref_name }}`, which the tasks forward and r
 
 ## Per-target subsetting
 
-`build-release-task.yml` has per-target `enable_*` gates and self-contained leaf tasks, so a
-project that drops a target deletes: its `build-<target>-task.yml`, the matching job plus
-`github-release`'s `needs` entry in `build-release-task.yml`, its path-filter entry in
-`test-pull-request.yml`, and (for PyPI) the `publish-pypi` job in `publish-release.yml`. CodeGen,
-versioning, badge, merge-bot, and Dependabot are target-agnostic.
+`build-release-task.yml` is a hub-hosted task with per-target `enable_*` inputs, so a repo drops a
+target by setting its `enable_<target>: false` at the caller stub rather than deleting a job: the
+hub task carries the full job graph for every repo, and the caller stub's `with:` block is where
+the target list is expressed. A repo still curates its path-filter entry in
+`test-pull-request.yml`, and (for PyPI) the `publish-pypi` job in its own `publish-release.yml`,
+since `id-token: write` belongs at that one entry point. CodeGen, versioning, badge, merge-bot,
+and Dependabot are target-agnostic.
 
 ## Orchestration vs. build: the override seam
 
@@ -31,8 +33,11 @@ plus `github-release` jobs inside `build-release-task.yml`, `get-version-task.ym
 `build-datebadge-task.yml`, and the aggregator shape of `test-pull-request.yml`. Within
 `test-pull-request.yml`, only the `changes -> smoke-build -> check-workflow-status` aggregator
 wiring and the ruleset-bound job name are verbatim orchestration, while the `unit-test` job and
-the `dorny/paths-filter` entries are owned/per-target. The **build** layer (the
-`build-<target>-task.yml` leaf tasks) is what a derived project owns and replaces.
+the `dorny/paths-filter` entries are owned/per-target. The **build** layer is now a hook: a composite
+action at `.github/actions/build-<target>` the hub-hosted `build-release-task.yml` reaches, with a
+hub default for the vanilla project layout (Console/Console.csproj,
+NuGetLibrary/NuGetLibrary.csproj, `PyPiLibrary/`). A project whose layout differs carries its own
+hook instead of relying on the default.
 
 The contract that keeps the seam clean: **a target contributes files to the GitHub release by
 uploading a workflow artifact named `release-asset-<branch>-<target>`.** The `github-release` job
@@ -45,36 +50,39 @@ name-pattern handoff is canonical for every repo, single-target included**: name
 single-target repo to an `artifact-id` output plus `download-artifact` `artifact-ids:`, which
 looks tidier for 1:1 but forks the `github-release` download and breaks its verbatim carry.
 
-**What a repo still curates** (by design, not a leak): the *list* of leaf jobs in
-`build-release-task.yml`. Per the per-target subsetting rule above, delete the target jobs not
-shipped and add the ones that are. `build-release-task.yml`'s `github-release` job is untouched, but the file
-is not byte-identical because its `needs`/job list reflects the repo's own targets. Making that
-list itself target-agnostic is the release-chain phase of `docs/reusable-workflows.md` in the
-hub, where the orchestrator becomes a hub-hosted task and each target a composite-action hook,
-and until that phase ships the list stays per repo.
+**What a repo still curates** (by design, not a leak): which `enable_<target>` inputs its caller
+stub sets, per the per-target subsetting rule above. `build-release-task.yml` is hub-hosted
+(`docs/reusable-workflows.md` "Stage 4: The Release Chain and the Docker Core"), so its job graph
+and its `github-release` job are the hub's, not a per-repo file a caller edits. A repo adopting the
+release chain carries only the caller stub in its own `publish-release.yml` and
+`test-pull-request.yml`, naming the hub task by pin and setting the `enable_*`, `docker_image`,
+and project-path inputs its targets need.
 
 ## Map your outputs to the right seam
 
 Pick by where each artifact *goes*, not by language:
 
-- **Files attached to the GitHub Release** (zips, binaries, packaged libraries): one leaf task per
-  output, each uploading `release-asset-<branch>-<name>`. A data-only repo (e.g. a symbol library)
-  has exactly one such task: validate -> `zip` -> upload `release-asset-<branch>-library`. It
-  deletes the nuget/pypi/executable/docker jobs and the `publish-pypi` job, keeps `github-release`
-  as-is. This is also where the .NET `build-executable-task` lives, and it is *not* a generic file
-  step but specifically `dotnet publish` of the console app, so replace it wholesale, don't adapt
-  it.
-- **Package-registry pushes** (NuGet.org, PyPI): the leaf task both builds **and** publishes to
-  its registry. NuGet pushes from inside `build-nugetlibrary-task` (`dotnet nuget push
-  --skip-duplicate`) *and* also uploads a `release-asset-*` (.7z) for the GitHub release. PyPI is
-  split: `build-pypilibrary-task` only builds and uploads the `pypilibrary-build-<branch>`
-  artifact, and the separate `publish-pypi` job in `publish-release.yml` does the OIDC
-  Trusted-Publishing upload (`id-token: write` is granted only at that one entry point), and PyPI
-  contributes **no** `release-asset-*`.
-- **Image-registry pushes** (Docker Hub): `build-docker-task` pushes multi-arch tags directly and
-  contributes **no** `release-asset-*`. The image tag is build-layer-owned, so drive it from
-  whatever version source fits (NBGV `SemVer2`, an upstream-release pin, or a per-image matrix).
-  To publish the Docker Hub repository overview, `publish-docker-readme-task.yml` pushes
+- **Files attached to the GitHub Release** (zips, binaries, packaged libraries): a build-executable
+  or build-nuget hook per output, each uploading `release-asset-<branch>-<name>`. This is where the
+  .NET `dotnet publish` of the console app or `dotnet build`/push of the library project lives, and
+  it is *not* a generic file step, so a project whose layout differs from the hub default's
+  Console/Console.csproj or NuGetLibrary/NuGetLibrary.csproj replaces the hook wholesale rather
+  than adapting the default. A data-only repo's own output (e.g. a symbol library) is not yet
+  expressible as a hub hook or an `enable_*` input, so it stays a carried leaf until the hub task
+  grows one.
+- **Package-registry pushes** (NuGet.org, PyPI): the target both builds **and** publishes to its
+  registry. NuGet pushes from inside the build-nuget hook (OIDC trusted publishing through
+  `NuGet/login`, no stored API key) *and* also uploads a `release-asset-*` (.7z) for the GitHub
+  release. PyPI is split: the build-pypi hook only builds and uploads the
+  `pypilibrary-build-<branch>` artifact, and the separate `publish-pypi` job in the caller's own
+  `publish-release.yml` does the OIDC Trusted-Publishing upload (`id-token: write` is granted only
+  at that one entry point), and PyPI contributes **no** `release-asset-*`.
+- **Image-registry pushes** (Docker Hub): `build-docker-task.yml`, hub-hosted like
+  `build-release-task.yml`, pushes multi-arch tags directly and contributes **no**
+  `release-asset-*`. The image set comes from a docker-prepare hook (the hub default emits the
+  single vanilla entry an `image` input implies. A multi-image or upstream-pinned repo carries its
+  own hook, and a shared base layer comes from a required docker-build-base hook with no hub
+  default. To publish the Docker Hub repository overview, `publish-docker-readme-task.yml` pushes
   `Docker/README.md` via `peter-evans/dockerhub-description` (single-repo by default, matrix per
   image for multi-image repos), wired into `publish-release.yml` and gated to `main`.
 - **Filesystem on a host the project owns** (a static site, a config tree): a deploy leaf builds

@@ -1,0 +1,86 @@
+# Hub default for the build-executable hook, run when a caller carries no .github/actions/build-executable/action.yml of its own.
+# It publishes a .NET console project across the runtime matrix and zips every runtime into one archive.
+# This matches the vanilla project layout catalog/snippets/workflows/build-executable-task.yml once carried (./Console/Console.csproj).
+# A caller whose project lives elsewhere sets project-file rather than carrying a hook.
+# A composite action runs in one job, so the matrix is a sequential bash loop here rather than a job-level strategy.
+name: Build executable default
+description: Publish the console project across the runtime matrix and upload the release asset.
+
+inputs:
+  branch:
+    description: Logical branch driving build configuration. main gives Release, anything else Debug.
+    required: true
+  smoke:
+    description: Smoke mode builds a two-runtime subset and skips the release-asset upload.
+    required: false
+    default: 'false'
+  semver2:
+    description: NBGV SemVer2 output, threaded from the caller's single get-version job.
+    required: true
+  assembly-version:
+    required: true
+  assembly-file-version:
+    required: true
+  assembly-informational-version:
+    required: true
+  project-file:
+    description: Path to the console project file.
+    required: false
+    default: ./Console/Console.csproj
+
+runs:
+  using: composite
+  steps:
+
+    - name: Setup .NET SDK step
+      uses: actions/setup-dotnet@a98b56852c35b8e3190ac28c8c2271da59106c68 # v6.0.0
+      with:
+        dotnet-version: 10.x
+
+    - name: Build executable project step
+      shell: bash
+      env:
+        BRANCH: ${{ inputs.branch }}
+        SMOKE: ${{ inputs.smoke }}
+        SEMVER2: ${{ inputs.semver2 }}
+        ASSEMBLY_VERSION: ${{ inputs.assembly-version }}
+        ASSEMBLY_FILE_VERSION: ${{ inputs.assembly-file-version }}
+        ASSEMBLY_INFORMATIONAL_VERSION: ${{ inputs.assembly-informational-version }}
+        PROJECT_FILE: ${{ inputs.project-file }}
+      run: |
+        set -Eeuo pipefail
+        if [[ "$SMOKE" == "true" ]]; then
+          runtimes=(linux-x64 win-x64)
+        else
+          runtimes=(win-x64 linux-x64 linux-musl-x64 linux-arm linux-arm64 osx-x64 osx-arm64)
+        fi
+        configuration=Debug
+        [[ "$BRANCH" == "main" ]] && configuration=Release
+        for runtime in "${runtimes[@]}"; do
+          echo "Publishing $runtime ($configuration)"
+          dotnet publish "$PROJECT_FILE" \
+            --runtime "$runtime" \
+            -property:PublishDir="$RUNNER_TEMP/publish/$runtime/" \
+            --configuration "$configuration" \
+            -property:PublishAot=false \
+            -property:Version="$ASSEMBLY_VERSION" \
+            -property:FileVersion="$ASSEMBLY_FILE_VERSION" \
+            -property:AssemblyVersion="$ASSEMBLY_VERSION" \
+            -property:InformationalVersion="$ASSEMBLY_INFORMATIONAL_VERSION" \
+            -property:PackageVersion="$SEMVER2"
+        done
+
+    - name: Zip build output step
+      if: ${{ inputs.smoke != 'true' }}
+      shell: bash
+      run: 7z a -t7z "$RUNNER_TEMP/executable.7z" "$RUNNER_TEMP"/publish/*
+
+    # GitHub-release asset, uploaded under the release-asset-<branch>-<target> pattern the github-release job collects.
+    - name: Upload release asset step
+      if: ${{ inputs.smoke != 'true' }}
+      uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+      with:
+        name: release-asset-${{ inputs.branch }}-executable
+        path: ${{ runner.temp }}/executable.7z
+        # Consumed within the run by the github-release job, so minimize artifact storage.
+        retention-days: 1

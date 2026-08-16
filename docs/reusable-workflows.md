@@ -23,6 +23,7 @@ The design for moving the fleet's standard GitHub Actions workflows out of every
   - [Stage 5: The Type-Specific Tasks](#stage-5-the-type-specific-tasks)
 - [Adopting the Merge-Bot](#adopting-the-merge-bot)
 - [Adopting the Pure Functions](#adopting-the-pure-functions)
+- [Adopting the Release Chain](#adopting-the-release-chain)
 - [What a Pilot Proves](#what-a-pilot-proves)
 - [Open Decisions](#open-decisions)
 
@@ -83,10 +84,9 @@ The target set. A row exists once its hub task ships, and until then the row is 
 | `validate-task.yml` | `validate` (repo tests and lint beyond the fleet doc-lint block) | no-op |
 | `test-pull-request-task.yml` | none, wires validate, smoke and the aggregator, `smoke` is a boolean input | not applicable |
 | `get-version-task.yml`, `publish-plan-task.yml` | none | not applicable |
-| `build-release-task.yml` | `build-executable`, `build-nuget`, `build-pypi`, `release-assets` (extra files) | executable, nuget and pypi defaults from today's snippets |
+| `build-release-task.yml` | `build-executable`, `build-nuget`, `build-pypi` | executable, nuget and pypi defaults from today's snippets |
 | `build-docker-task.yml` | `docker-prepare` (extra tags, build-args, matrix), `docker-build-base` | vanilla single-target from `image`, base build required when `build-base` |
 | `publish-docker-readme-task.yml` | `docker-readme-transform` | publish `Docker/README.md` or `README.md` as-is |
-| `publish-release-task.yml` | none, trigger policy stays in the caller stub and reaches the plan job as `event_name`, `actor` and `ref_name` | not applicable |
 | `check-upstream-version-task.yml` | `resolve-upstream` | none, required |
 | `deploy-site-task.yml`, `codegen-task.yml` | `deploy`, `codegen` | none, required |
 
@@ -98,7 +98,7 @@ The five live `build-docker-task.yml` copies share an identical core. It is QEMU
 - **Upstream-pinned** repos read a committed upstream version file before the build and add a `:<upstream-version>` tag and version build-args. That is a `docker-prepare` hook.
 - **Multi-image** repos read a matrix file, optionally build base images first, then build each image with its own tags, args and cache repository. That is a `docker-prepare` hook emitting the matrix, plus a `docker-build-base` hook the task calls when `build-base` is set.
 
-The hub task takes `push`, `ref`, `branch`, `smoke`, the NBGV version outputs, `image`, an optional `matrix` (a JSON list of `{name, tags, build-args, context, dockerfile, cache-repo}`, defaulting to the single entry `image` implies), and `build-base`. The core job body stays hub-owned, so the cache policy, the multi-arch platform selection (`linux/amd64,linux/arm64` on a non-smoke `main` build), the login-on-smoke, and the description push are decided once.
+The hub task takes `push`, `ref`, `branch`, `smoke`, the NBGV version outputs, `image`, an optional `matrix` (a JSON list of `{name, tags, build-args, context, dockerfile, cache-repo}`, defaulting to the single entry `image` implies), and `build-base`. The core job body stays hub-owned, so the cache policy, the multi-arch platform selection (`linux/amd64,linux/arm64` on a non-smoke `main` build), and the login-on-smoke are decided once. The in-job description push earlier per-repo copies carried is not part of the hub core (see the readme paragraph below).
 
 Docker Hub README publishing is a hub task of its own, `publish-docker-readme-task.yml`, with the size-limited overview, the repository list, and a `docker-readme-transform` hook in place of today's `transform-run` string input. The in-job description push in the build task is dropped in its favor, so the readme publishes once per release rather than once per image build. Upstream dependency monitoring is one hub task, `check-upstream-version-task.yml`, with a `resolve-upstream` hook in place of today's `resolver-command` string input and an `auto-merge` input. A tracker whose bump must wait for a human sets `auto-merge: false`, which gives the pull request a head prefix the merge-bot rules do not match. The rebuild-on-upstream-change trigger stays in the caller stub as a `push` filtered to the state file. Multi-stage Dockerfile builds are inconsistent across the Docker repos, and that is Dockerfile content rather than workflow content, so it is tracked as a type-level improvement beside this work rather than inside it.
 
@@ -179,7 +179,9 @@ Hub: `get-version-task.yml` and `publish-plan-task.yml` hosted, and the downstre
 
 ### Stage 4: The Release Chain and the Docker Core
 
-Hub: `build-release-task.yml` with `build-executable`, `build-nuget`, `build-pypi` and `release-assets` hooks, `publish-release-task.yml`, and `build-docker-task.yml` per [The Docker Family][the-docker-family]. The three no-asset release shapes collapse into `expect_release_assets`.
+Hub: `build-release-task.yml` with `build-executable`, `build-nuget`, `build-pypi` hooks, and `build-docker-task.yml` per [The Docker Family][the-docker-family]. The three no-asset release shapes collapse into `expect_release_assets`. No `publish-release-task.yml` ships: a caller stub's trigger policy and its `plan`, `validate`, `publish`, and `publish-pypi` jobs each reach one hub task directly, and none of that wiring is generic enough across the fleet's five trigger shapes (dispatch-only Docker schedule, push-gated NuGet/PyPI, KiCad's branch-matrix dispatch) to host as a further reusable workflow without becoming another set of caller-owned inputs. The `release-assets` hook (extra files beyond a target's own) stays unshipped too: no cataloged repo needs it today, and adding an unexercised hook is deferred until one does.
+
+`build-release-task.yml` inlines its own `get-version` and `validate-release` jobs (no `./` nesting of the sibling `get-version-task.yml`) and duplicates the Docker core from `build-docker-task.yml` in its own `build-docker` job for the same reason: a hub task cannot reach a sibling hub task by a `./` path, since that path resolves against the caller's repository. `build-docker-task.yml` ships as its own hub task rather than being folded away, for a caller that wants the Docker leg without the rest of the release chain. The two carry the same job body and are kept in lockstep by hand, recorded in each file's own header comment. The `build-executable`, `build-nuget`, and `build-pypi` hub defaults take a `project-file` (or `project-dir`) input beyond the fixed `ref`/`branch`/`smoke` set, since the vanilla project layout (Console/Console.csproj, NuGetLibrary/NuGetLibrary.csproj, `PyPiLibrary/`) is a convention a real repo's own project name never matches. This mirrors the Docker hook's own `image` input rather than widening the fixed contract.
 
 - [ ] Hub pull request on `develop`.
 - [ ] Promoted and released, tag recorded here.
@@ -189,6 +191,8 @@ Hub: `build-release-task.yml` with `build-executable`, `build-nuget`, `build-pyp
 - [ ] ESPHome-NonRoot (`docker-prepare` hook for the upstream pin)
 - [ ] NxWitness (matrix hook and `build-base`)
 - [ ] The NuGet, PyPI and remaining release repos, one checkbox each added when the pilots close.
+- [ ] A smoke build through `build-release-task.yml` observed on the PhotoCleaner or PlexCleaner pilot's pull request, run URL recorded here.
+- [ ] A real publish through `build-release-task.yml` observed on the PhotoCleaner or PlexCleaner pilot, run URL recorded here.
 - [ ] `reports/workflow-reuse.md` regenerated with `build-release-task.yml` and `build-docker-task.yml` at 0 copies (hub-only files) and `publish-release.yml` showing callers equal to copies.
 
 ### Stage 5: The Type-Specific Tasks
@@ -273,6 +277,100 @@ A repo whose publisher needs the release-gate decision reaches `publish-plan-tas
 ```
 
 `build-release-task.yml` (stage 4) does not call `get-version-task.yml` this way. It inlines the get-version and validate-release jobs rather than nesting a sibling hub task, per the design's no-`./`-nesting rule: a local `uses:` inside a called workflow would resolve against the top-level caller's repository, not the hub. Only a caller that reads the version outputs on their own, without the rest of the release orchestrator, reaches `get-version-task.yml` directly, and a downstream `publish-release.yml` stub that does exactly that is the shape shown above.
+
+## Adopting the Release Chain
+
+A downstream repo replaces the whole of its `.github/workflows/build-release-task.yml`, and every per-target leaf task it carries (`build-executable-task.yml`, `build-nugetlibrary-task.yml`, `build-pypilibrary-task.yml`, `build-docker-task.yml`), with a caller stub in its own `publish-release.yml` reaching the hub tasks by pin. `test-pull-request.yml`'s smoke job calls `build-release-task.yml` the same way, with `smoke: true` and the paths-filter's `enable_*` outputs. Nothing here lands as a catalog snippet in this pull request, since a caller stub's pin can only name a released hub commit and no release yet carries `build-release-task.yml` ([Pinning][pinning]). The snippet follows the release that first ships it, tracked in the [Rollout][rollout] section below.
+
+The stub keeps its own trigger policy exactly as today: `workflow_dispatch` plus a main-only weekly `schedule` for a Docker repo, or `workflow_dispatch` plus a paths-filtered `push` to `main` for a NuGet or PyPI repo whose merges should auto-publish. What moves to the hub is the release-gate decision, the build/version/publish job graph, and the Docker core, never the trigger. This is the full shape, a NuGet-library repo whose merges publish:
+
+```yaml
+name: Publish project release action
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'Widget/**'
+      - 'version.json'
+      - 'Directory.Build.props'
+      - 'Directory.Packages.props'
+  workflow_dispatch:
+
+concurrency:
+  group: ${{ github.workflow }}
+  cancel-in-progress: false
+
+jobs:
+
+  # Single source of the release-gate decision (publish? stable?), reused by every job below.
+  plan:
+    name: Plan release job
+    uses: ptr727/ProjectTemplate/.github/workflows/publish-plan-task.yml@<sha> # <tag>
+    with:
+      event_name: ${{ github.event_name }}
+      actor: ${{ github.actor }}
+      ref_name: ${{ github.ref_name }}
+
+  # The same reusable gate the PR runs, on the branch tip; runs only when a publish will happen.
+  validate:
+    name: Validate job
+    needs: [plan]
+    if: ${{ needs.plan.outputs.publish == 'true' }}
+    uses: ptr727/ProjectTemplate/.github/workflows/validate-task.yml@<sha> # <tag>
+    secrets: inherit
+
+  # Build, version, validate, push, and release the triggering branch. Grants the write scopes the hub
+  # task needs (it declares none of its own except where a job genuinely writes, per its own header).
+  publish:
+    name: Publish project release job
+    needs: [plan, validate]
+    if: ${{ needs.plan.outputs.publish == 'true' }}
+    uses: ptr727/ProjectTemplate/.github/workflows/build-release-task.yml@<sha> # <tag>
+    secrets:
+      NUGET_USERNAME: ${{ secrets.NUGET_USERNAME }}
+    permissions:
+      contents: write
+      id-token: write
+      actions: write
+    with:
+      branch: ${{ github.ref_name }}
+      smoke: false
+      github: true
+      nuget: true
+      enable_docker: false
+      enable_pypi: false
+      enable_executable: false
+      nuget_project: ./Widget/Widget.csproj
+```
+
+A Docker repo's stub adds `schedule: - cron: '0 2 * * MON'` to the trigger block, sets `enable_docker: true`, `dockerhub: true`, and `docker_image: ptr727/widget`, and maps `DOCKER_HUB_USERNAME`/`DOCKER_HUB_ACCESS_TOKEN` under `secrets:` instead of `NUGET_USERNAME`. A PyPI repo keeps `enable_pypi: true` and drops `id-token: write` from the `publish` job's grant, since PyPI publishing stays a separate job at the caller stub, `id-token: write` belonging at that one entry point, verbatim in shape to today's:
+
+```yaml
+  publish-pypi:
+    name: Publish PyPI library job
+    needs: [validate, build]
+    runs-on: ubuntu-latest
+    environment:
+      name: pypi
+      url: https://pypi.org/project/<package>/
+    permissions:
+      id-token: write
+      contents: read
+    steps:
+      - name: Download build artifacts step
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: pypilibrary-build-${{ github.ref_name }}
+          path: ./dist
+      - name: Publish to PyPI step
+        uses: pypa/gh-action-pypi-publish@dc37677b2e1c63e2034f94d8a5b11f265b73ba33 # v1.14.2
+        with:
+          packages-dir: ./dist
+          skip-existing: true
+```
+
+No `publish-release-task.yml` ships alongside `build-release-task.yml`: the four jobs above are each a thin call to one hub task or a verbatim OIDC upload, and the trigger policy that ties them together genuinely differs enough across the fleet's shapes (dispatch-only Docker schedule, push-gated NuGet or PyPI, KiCadLibrary's branch-matrix dispatch) that hosting it would just move the same `with:` block one file over rather than removing it.
 
 ## What a Pilot Proves
 

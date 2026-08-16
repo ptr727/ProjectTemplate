@@ -42,8 +42,14 @@ jobs:
             HISTORY.md
           incremental_files_only: false
 
+      # The job_workflow_sha context property resolves the exact commit a caller pinned a hub task to.
+      # It is the mechanism docs/reusable-workflows.md "Target Model" uses to check out the hub for a hook default.
+      # The pinned actionlint 1.7.12 does not yet recognize this real GitHub context property.
+      # The one finding it produces for that field is ignored here rather than silenced by weakening the workflow.
       - name: Lint workflows step
         uses: raven-actions/actionlint@3d39aea434753780c3b3d4a1a31c854b4dbf49d7 # v2.2.0
+        with:
+          flags: -ignore 'property "job_workflow_sha" is not defined'
 
       - name: Check EditorConfig step
         run: docker run --rm --pull=always -v "$PWD":/check --workdir /check mstruebing/editorconfig-checker:latest
