@@ -14,20 +14,32 @@ concurrency:
 
 jobs:
 
+  # Fail fast (D2.3) on a dispatch from anything but main or develop, before validation or the build run.
+  assert-dispatch-ref:
+    name: Assert dispatch ref job
+    runs-on: ubuntu-latest
+    steps:
+      - name: Assert dispatch ref step
+        run: |
+          set -Eeuo pipefail
+          if [ "${{ github.ref_name }}" != "main" ] && [ "${{ github.ref_name }}" != "develop" ]; then
+            echo "::error::Dispatch publish-release from main (release) or develop (prerelease); got ${{ github.ref_name }}."
+            exit 1
+          fi
+
   # The same reusable gate the PR runs - a dispatch cannot release a ref that fails validation.
   validate:
     name: Validate sources job
+    needs: [ assert-dispatch-ref ]
     uses: ./.github/workflows/validate-task.yml
     permissions:
       contents: read
 
   # Publish the dispatched branch, where main gives a release and develop a prerelease.
-  # Only the long-lived branches publish; a stray dispatch from a feature branch is a no-op.
   # Pin to the dispatch-time commit so a push landing after dispatch does not release unvalidated.
   publish:
     name: Publish project release job
-    needs: [ validate ]
-    if: ${{ github.ref_name == 'main' || github.ref_name == 'develop' }}
+    needs: [ assert-dispatch-ref, validate ]
     uses: ./.github/workflows/build-release-task.yml
     permissions:
       contents: write

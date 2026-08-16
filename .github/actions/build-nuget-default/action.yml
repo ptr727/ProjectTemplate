@@ -71,6 +71,14 @@ runs:
 
     # OIDC trusted publishing trades the GitHub OIDC token for a short-lived NuGet key, so there is no stored API key.
     # Needs id-token: write from the caller, granted only on a real, non-smoke publish.
+    - name: Require nuget-username step
+      if: ${{ inputs.push == 'true' && inputs.smoke != 'true' && inputs.nuget-username == '' }}
+      shell: bash
+      run: |
+        set -Eeuo pipefail
+        echo "::error::inputs.push is true but nuget-username is empty. The caller must map secrets.NUGET_USERNAME through to this hook."
+        exit 1
+
     - name: NuGet login step
       if: ${{ inputs.push == 'true' && inputs.smoke != 'true' }}
       id: nuget-login
