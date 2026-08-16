@@ -683,6 +683,11 @@ dotnet_feed() {
 # Register Microsoft's apt repository, the feed powershell always needs and dotnet falls back to when the distro carries no SDK.
 # The upstream deb is the whole registration, keyring and sources file in one, so this installs it rather than reimplementing it with install_keyring and write_sources.
 microsoft_feed() {
+    # The feed already configured is the fast path, so a repeat run or a run selecting both dotnet and powershell does not re-install the deb and force the apt refresh this file reserves for a changed sources file.
+    if [[ -f "$SOURCES_DIR/microsoft-prod.sources" || -f "$SOURCES_DIR/microsoft-prod.list" ]]; then
+        return 0
+    fi
+
     local deb="$TMP_DIR/packages-microsoft-prod.deb"
     fetch -o "$deb" "https://packages.microsoft.com/config/$DISTRO_ID/$DISTRO_VERSION/packages-microsoft-prod.deb" ||
         die "Microsoft publishes no feed for $DISTRO_ID $DISTRO_VERSION"
