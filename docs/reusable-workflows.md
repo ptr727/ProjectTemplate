@@ -197,6 +197,7 @@ Hub: `publish-docker-readme-task.yml` with a `docker-readme-transform` hook, `ch
 - [ ] Catalog snippets for `publish-docker-readme-task.yml`, `check-upstream-version-task.yml`, `deploy-site.yml`, `deploy-site-task.yml`, and `run-codegen-pull-request-task.yml` pinned to the release that first carries each task.
 - [ ] `reports/workflow-reuse.md` regenerated, and the fleet total's callers equal to the sum of the stubs the fleet needs.
 - [ ] The environment-secret handoff in the deploy-site adoption, the caller job's own `environment:` binding resolving `DEPLOY_SSH_PRIVATE_KEY` for an explicit `secrets:` map across a cross-repository `uses:`, observed on Blog's first live deploy run. Tick with the run URL.
+- [ ] The default `docker-readme-transform` hook's hub checkout, `job.workflow_sha` and `job.workflow_repository` resolving the exact commit a caller's `uses:` line pinned, observed on a caller that carries no override hook. Tick with the run URL.
 - [ ] `job.workflow_sha` and `job.workflow_repository` recognized by a released actionlint, so the `.github/actionlint.yaml` ignore entry for `publish-docker-readme-task.yml` can drop.
 
 ## Adopting the Merge-Bot
