@@ -356,6 +356,11 @@ After the final push, sweep-resolve stale older threads for removed code paths.
   - **Proved against** - `.github/workflows/merge-bot-task.yml` on `feature/reusable-workflows` at `210d88f`, and the "About contexts" property dereference rule in the GitHub Actions contexts reference read on 2026-08-15.
   - **Delete when** - the task stops declaring hyphenated inputs, or the expressions reference changes the allowed set.
 
+- **`sudo_implementations()` in `host-setup/linux/install-tools.sh` never matches, because `update-alternatives --query sudo` prints a slave as `visudo:` with a trailing colon, so a host whose active `visudo` rejects the drop-in always reaches the "No sudo on this host parses timestamp_type" refusal even where an alternative would parse it.** Raised as a suppressed finding against the sudo timestamp action.
+  - **Disproved by** - running the subcommand the function actually calls. `update-alternatives --query sudo` prints each slave as two space-separated fields under `Slaves:`, one space-indented line reading `visudo /usr/sbin/visudo.ws`, and the awk over that output prints `/usr/bin/sudo.ws /usr/sbin/visudo.ws` and `/usr/lib/cargo/bin/sudo /usr/lib/cargo/bin/visudo`. The colon form the finding describes belongs to `update-alternatives --display sudo`, a different subcommand, which prints `slave visudo: /usr/sbin/visudo.ws`. The path the finding says is unreachable was also driven end to end in an `ubuntu:25.10` container, where the run found `/usr/bin/sudo.ws`, switched the alternative to it, and wrote the drop-in.
+  - **Proved against** - `sudo_implementations` in `host-setup/linux/install-tools.sh` on `feature/sudo-timestamp-global` at `13e689f`, against `update-alternatives` 1.22.x on Ubuntu 25.10.
+  - **Delete when** - the function stops reading `update-alternatives --query`, or that subcommand changes its slave format.
+
 ## When in Doubt
 
 Read [AGENTS.md](../AGENTS.md) to find the section that governs your change, and [GOVERNANCE.md](../GOVERNANCE.md) for the rule text itself. For code-style rules, [`CODESTYLE.md`](../CODESTYLE.md) (its General section plus the relevant language section) is authoritative. Don't restate any of these files' rules in commit bodies or PR descriptions, and keep those focused on the change itself.
