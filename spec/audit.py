@@ -2345,6 +2345,155 @@ def _selftest():
             1,
         ),
     ]
+    # The deploy-site.yml caller stub once deploy-site-task.yml is hub-hosted: no secrets: inherit
+    # (a cross-repository reusable workflow cannot use it), the one crossing secret named instead.
+    deploy_stub = (
+        "jobs:\n"
+        "  assert-ref:\n    runs-on: ubuntu-latest\n    steps: []\n"
+        "  validate:\n    uses: ./.github/workflows/validate-task.yml\n"
+        "  deploy:\n"
+        "    name: Deploy job\n"
+        "    environment: ${{ inputs.environment }}\n"
+        "    permissions:\n      contents: read\n"
+        "    uses: acme/hub/.github/workflows/deploy-site-task.yml@" + "a" * 40 + " # 2.0.1\n"
+        "    with:\n      environment: ${{ inputs.environment }}\n"
+        "    secrets:\n      DEPLOY_SSH_PRIVATE_KEY: ${{ secrets.DEPLOY_SSH_PRIVATE_KEY }}\n"
+    )
+    deploy_contract = {
+        "requiredJobKeys": ["assert-ref", "validate", "deploy"],
+        "requireTokensInJob": {
+            "deploy": [
+                "deploy-site-task.yml",
+                # Indent-anchored (4 spaces) so a with: input of the same name, indented 6, cannot satisfy this on its own.
+                "\n    environment:",
+                "contents: read",
+                "DEPLOY_SSH_PRIVATE_KEY",
+            ]
+        },
+    }
+    cases += [
+        (
+            "deploy-site.yml caller stub reaching the hub task with the crossing secret mapped",
+            deploy_stub,
+            deploy_contract,
+            0,
+        ),
+        (
+            "deploy-site.yml caller stub still using secrets: inherit reports the missing secret",
+            deploy_stub.replace(
+                "    secrets:\n      DEPLOY_SSH_PRIVATE_KEY: ${{ secrets.DEPLOY_SSH_PRIVATE_KEY }}\n",
+                "    secrets: inherit\n",
+            ),
+            deploy_contract,
+            1,
+        ),
+        (
+            "deploy-site.yml caller stub missing the environment binding the crossing secret needs",
+            # Removes only the job-level environment: line, leaving the with:-nested environment: input untouched, the exact ambiguity an unanchored token would miss.
+            deploy_stub.replace(
+                "    name: Deploy job\n    environment: ${{ inputs.environment }}\n",
+                "    name: Deploy job\n",
+            ),
+            deploy_contract,
+            1,
+        ),
+        (
+            "deploy-site.yml caller stub missing the contents: read grant the task's jobs declare",
+            deploy_stub.replace("    permissions:\n      contents: read\n", ""),
+            deploy_contract,
+            1,
+        ),
+    ]
+    # The stage-5 type-specific hub tasks carry no manifest entry yet, since no repo has adopted a caller stub for them.
+    # These fixtures exercise the contract adoption will register, proving the interface engine reads it correctly before any downstream repo depends on that reading.
+    readme_stub = (
+        "jobs:\n"
+        "  publish-docker-readme:\n"
+        "    name: Publish Docker Hub readme job\n"
+        "    permissions:\n      contents: read\n"
+        "    uses: acme/hub/.github/workflows/publish-docker-readme-task.yml@"
+        + "a"
+        * 40
+        + " # 2.0.1\n"
+        "    with:\n      branch: ${{ github.ref_name }}\n"
+        "    secrets:\n"
+        "      DOCKER_HUB_USERNAME: ${{ secrets.DOCKER_HUB_USERNAME }}\n"
+        "      DOCKER_HUB_ACCESS_TOKEN: ${{ secrets.DOCKER_HUB_ACCESS_TOKEN }}\n"
+    )
+    readme_contract = {
+        "requiredJobKeys": ["publish-docker-readme"],
+        "requireTokensInJob": {
+            "publish-docker-readme": [
+                "publish-docker-readme-task.yml",
+                "contents: read",
+                "DOCKER_HUB_USERNAME",
+                "DOCKER_HUB_ACCESS_TOKEN",
+            ]
+        },
+    }
+    upstream_stub = (
+        "jobs:\n"
+        "  check-upstream-version:\n"
+        "    name: Check upstream version job\n"
+        "    uses: acme/hub/.github/workflows/check-upstream-version-task.yml@"
+        + "a"
+        * 40
+        + " # 2.0.1\n"
+        "    secrets:\n"
+        "      CODEGEN_APP_CLIENT_ID: ${{ secrets.CODEGEN_APP_CLIENT_ID }}\n"
+        "      CODEGEN_APP_PRIVATE_KEY: ${{ secrets.CODEGEN_APP_PRIVATE_KEY }}\n"
+    )
+    upstream_contract = {
+        "requiredJobKeys": ["check-upstream-version"],
+        "requireTokensInJob": {
+            "check-upstream-version": [
+                "check-upstream-version-task.yml",
+                "CODEGEN_APP_CLIENT_ID",
+                "CODEGEN_APP_PRIVATE_KEY",
+            ]
+        },
+    }
+    codegen_stub = (
+        "jobs:\n"
+        "  run-codegen:\n"
+        "    name: Run codegen and pull request job\n"
+        "    uses: acme/hub/.github/workflows/run-codegen-pull-request-task.yml@"
+        + "a"
+        * 40
+        + " # 2.0.1\n"
+        "    secrets:\n"
+        "      CODEGEN_APP_CLIENT_ID: ${{ secrets.CODEGEN_APP_CLIENT_ID }}\n"
+        "      CODEGEN_APP_PRIVATE_KEY: ${{ secrets.CODEGEN_APP_PRIVATE_KEY }}\n"
+    )
+    codegen_contract = {
+        "requiredJobKeys": ["run-codegen"],
+        "requireTokensInJob": {
+            "run-codegen": [
+                "run-codegen-pull-request-task.yml",
+                "CODEGEN_APP_CLIENT_ID",
+                "CODEGEN_APP_PRIVATE_KEY",
+            ]
+        },
+    }
+    for label_prefix, stub, contract in (
+        ("publish-docker-readme.yml", readme_stub, readme_contract),
+        ("check-upstream-version.yml", upstream_stub, upstream_contract),
+        ("run-codegen-pull-request.yml", codegen_stub, codegen_contract),
+    ):
+        cases += [
+            (
+                f"{label_prefix} caller stub reaching the hub task with secrets mapped",
+                stub,
+                contract,
+                0,
+            ),
+            (
+                f"{label_prefix} copy still carrying the job body reports the missing caller job",
+                "jobs:\n  some-other-job:\n    runs-on: ubuntu-latest\n    steps: []\n",
+                contract,
+                1,
+            ),
+        ]
     ok = True
     for label, text, contract, want in cases:
         got = len(check_interface("wf", contract, text))

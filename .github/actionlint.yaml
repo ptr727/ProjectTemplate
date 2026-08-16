@@ -14,6 +14,10 @@ paths:
     ignore:
       - 'property "workflow_repository" is not defined in object type'
       - 'property "workflow_sha" is not defined in object type'
+  '.github/workflows/publish-docker-readme-task.yml':
+    ignore:
+      - 'property "workflow_repository" is not defined in object type'
+      - 'property "workflow_sha" is not defined in object type'
   '.github/workflows/validate-task.yml':
     ignore:
       - 'property "workflow_repository" is not defined in object type'
