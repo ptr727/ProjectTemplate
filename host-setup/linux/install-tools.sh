@@ -1184,7 +1184,8 @@ configure_sudo_timestamp() {
         done < <(grep -E "Defaults:${user_re}[[:space:]]+.*timestamp_(type|timeout)=" <<< "$elsewhere" | awk -F: '{print $1}' | sort -u)
     fi
 
-    if [[ $own_current == true && ${#delete_files[@]} -eq 0 ]]; then
+    # A standing unsafe file still reaches the die below even when this run's own file needs no change, since silently returning here would report success over a same-user conflict this cannot resolve on its own.
+    if [[ $own_current == true && ${#delete_files[@]} -eq 0 && ${#unsafe_files[@]} -eq 0 ]]; then
         log "$SUDOERS_FILE already carries exactly this, leaving it alone"
         sudo_timestamp_report "$user"
         return 0
