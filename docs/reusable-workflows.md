@@ -142,7 +142,7 @@ Adoptable since `2.0.338`. Each repo replaces the whole of its `.github/workflow
 - [ ] EspDinIoT (same)
 - [ ] Financial-Modeling (same)
 - [ ] HolidayLights (same)
-- [ ] `reports/workflow-reuse.md` regenerated with `merge-bot-pull-request.yml` at 0 copies carrying job bodies and callers equal to the adopters.
+- [ ] `reports/workflow-reuse.md` regenerated with `merge-bot-pull-request.yml` showing callers equal to copies.
 
 ### Stage 2: The Gates
 
@@ -155,7 +155,7 @@ Hub: `validate-task.yml` hosts the per-type doc-lint block once and calls the `v
 - [ ] PhotoCleaner (pilot, release trigger shape with smoke, the same repo that piloted stage 1)
 - [ ] HomeAutomation-Config (second pilot, operational trigger shape)
 - [ ] The remaining repos, one checkbox each added when the pilots close, since the sweep list is every cataloged repo.
-- [ ] `reports/workflow-reuse.md` regenerated with `validate-task.yml` and `test-pull-request.yml` at 0 copies carrying job bodies.
+- [ ] `reports/workflow-reuse.md` regenerated with `validate-task.yml` at 0 copies (a hub-only file no repo carries) and `test-pull-request.yml` showing callers equal to copies.
 
 ### Stage 3: The Pure Functions
 
@@ -164,7 +164,7 @@ Hub: `get-version-task.yml` and `publish-plan-task.yml` hosted, and the downstre
 - [ ] Hub pull request on `develop`.
 - [ ] Promoted and released, tag recorded here.
 - [ ] Adoption, one checkbox per carrier added when the hub pull request merges: today `get-version-task.yml` has 8 carriers and `publish-plan-task.yml` 3.
-- [ ] `reports/workflow-reuse.md` regenerated with both at 0 copies.
+- [ ] `reports/workflow-reuse.md` regenerated with `get-version-task.yml` and `publish-plan-task.yml` at 0 copies, since both are hub-only files no repo carries.
 
 ### Stage 4: The Release Chain and the Docker Core
 
@@ -178,7 +178,7 @@ Hub: `build-release-task.yml` with `build-executable`, `build-nuget`, `build-pyp
 - [ ] ESPHome-NonRoot (`docker-prepare` hook for the upstream pin)
 - [ ] NxWitness (matrix hook and `build-base`)
 - [ ] The NuGet, PyPI and remaining release repos, one checkbox each added when the pilots close.
-- [ ] `reports/workflow-reuse.md` regenerated with `build-release-task.yml`, `publish-release.yml` and `build-docker-task.yml` at 0 copies.
+- [ ] `reports/workflow-reuse.md` regenerated with `build-release-task.yml` and `build-docker-task.yml` at 0 copies (hub-only files) and `publish-release.yml` showing callers equal to copies.
 
 ### Stage 5: The Type-Specific Tasks
 
