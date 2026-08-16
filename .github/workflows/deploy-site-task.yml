@@ -8,6 +8,7 @@ name: Deploy site task
 # A required deploy hook, one composite action the caller owns, covers what is genuinely the site's own: assembling the release bundle (its generator, its precompression, whatever it stamps into the bundle), pruning old releases, and verifying the live site against its own URL contract.
 # It runs three times, once each for build, prune, and verify, passing mode plus whichever of bundle-path, release-id, and environment that mode needs.
 # A hook declares all four inputs in its own action.yml, since a composite action rejects an invocation that supplies an input it does not declare, even one a different mode leaves unset.
+# A composite action's own steps are not guaranteed to read the caller's vars context directly, so each invocation also passes the GitHub Environment variables that mode needs (SITE_BASE_URL, DEPLOY_SSH_USER, DEPLOY_SSH_HOST) as plain env vars, the same mechanism the upload and flip steps below use.
 # The upload and the flip stay here as the one atomic sequence every site repo shares, so a hook cannot fork that guarantee.
 #
 # The transport's options are pinned rather than left to the runner's OpenSSH defaults, and declared once so the two transfers cannot drift apart.
@@ -126,6 +127,8 @@ jobs:
       - name: Run deploy hook build step
         if: ${{ hashFiles('.github/actions/deploy/action.yml') != '' }}
         uses: ./.github/actions/deploy
+        env:
+          SITE_BASE_URL: ${{ vars.SITE_BASE_URL }}
         with:
           mode: build
           bundle-path: ${{ runner.temp }}/bundle
@@ -207,6 +210,9 @@ jobs:
       - name: Run deploy hook prune step
         if: ${{ hashFiles('.github/actions/deploy/action.yml') != '' }}
         uses: ./.github/actions/deploy
+        env:
+          DEPLOY_SSH_USER: ${{ vars.DEPLOY_SSH_USER }}
+          DEPLOY_SSH_HOST: ${{ vars.DEPLOY_SSH_HOST }}
         with:
           mode: prune
           environment: ${{ inputs.environment }}
@@ -217,6 +223,8 @@ jobs:
       - name: Run deploy hook verify step
         if: ${{ hashFiles('.github/actions/deploy/action.yml') != '' }}
         uses: ./.github/actions/deploy
+        env:
+          SITE_BASE_URL: ${{ vars.SITE_BASE_URL }}
         with:
           mode: verify
           environment: ${{ inputs.environment }}
