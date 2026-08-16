@@ -1,6 +1,8 @@
 # Workflow snippets
 
-The reusable build/publish workflow tasks a code-shipping repo runs. They are **inert reference here**: this repo is source-only and keeps just the orchestrator set (`test-pull-request`, `publish-release`, `validate-task`, `merge-bot-pull-request`) in `.github/workflows/`, plus the hub-hosted reusable tasks a downstream repo reaches rather than carries (`merge-bot-task`, `get-version-task`, `publish-plan-task`, per [`docs/reusable-workflows.md`][reusable-workflows]). Each row below names the canonical implementation of one or more `WORKFLOW.md` guarantees, whether the file lives in this directory or is hub-hosted and reached by pin. The audit asserts a downstream repo's own Actions satisfy those guarantees, not that they match these bytes.
+The reusable build/publish workflow tasks a code-shipping repo runs. They are **inert reference here**: this repo is source-only and keeps just the orchestrator set (`test-pull-request`, `publish-release`, `validate-task`, `merge-bot-pull-request`) in `.github/workflows/`, plus the hub-hosted reusable tasks a downstream repo reaches rather than carries (`merge-bot-task`, `get-version-task`, `publish-plan-task`, `publish-docker-readme-task`, `check-upstream-version-task`, `deploy-site-task`, `run-codegen-pull-request-task`, per [`docs/reusable-workflows.md`][reusable-workflows]). Each row below names the canonical implementation of one or more `WORKFLOW.md` guarantees, whether the file lives in this directory or is hub-hosted and reached by pin. The audit asserts a downstream repo's own Actions satisfy those guarantees, not that they match these bytes. The table does not yet carry a row for every name in the parenthetical above: `publish-docker-readme-task.yml`, `check-upstream-version-task.yml`, `deploy-site-task.yml`, and `run-codegen-pull-request-task.yml` are hub-hosted with no row here, for the reason the next paragraph gives.
+
+A caller stub for a hub-hosted task carries no snippet of its own once the task ships: its `uses:` line would pin a commit no release carries yet, which the pin gate rejects. [`docs/reusable-workflows.md`][reusable-workflows] "Adopting the Type-Specific Tasks" carries the stub shapes instead, and the catalog gains each snippet back one release after its task ships. `get-version-task.yml` and `publish-plan-task.yml` below carry no snippet at all, for a different reason: each is called as a job inside a larger stub rather than reached by its own top-level caller.
 
 | File | Role | WORKFLOW.md guarantees |
 | --- | --- | --- |
@@ -12,13 +14,6 @@ The reusable build/publish workflow tasks a code-shipping repo runs. They are **
 | `build-nugetlibrary-task.yml` | Build + `dotnet nuget push` (OIDC), upload release asset | D3.4, D4.4, D6, and section 6 NuGet walkthrough |
 | `build-pypilibrary-task.yml` | Build PyPI package, with publishing split to an OIDC job | D3.4, D4, D7.2, and section 6 PyPI walkthrough |
 | `build-docker-task.yml` | Multi-arch image build + push, registry layer cache | D4.4, D6, D9.4, and section 6 Docker walkthrough |
-| `build-datebadge-task.yml` | BYOB date/last-build badge on the default branch | D4, and section 3 Release Model |
-| `publish-docker-readme-task.yml` | Push the size-limited Docker Hub overview | D2.4, and section 6 Docker walkthrough |
-| `deploy-site.yml` | Dispatch entry point for a site deploy: environment choice, per-environment concurrency, ref gate, shared validation | D2.1, D2.3, D7.1 |
-| `deploy-site-task.yml` | Build a site and ship it to a filesystem on a host the project owns, then verify against the running host | D4.6, D5.6, D7.2 (section 6 static-site walkthrough) |
-| `check-upstream-version-task.yml` | Upstream-version tracker for wrapper repos | D3.5, D8.3 |
-| `run-codegen-pull-request-task.yml` | Deterministic codegen executor (per-branch PR) | D8.2 |
-| `run-periodic-codegen-pull-request.yml` | Scheduled codegen trigger over both branches | D8.2 |
 
 <!-- Repo -->
 

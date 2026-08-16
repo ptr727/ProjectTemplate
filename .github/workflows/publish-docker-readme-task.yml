@@ -1,0 +1,165 @@
+name: Publish Docker Hub readme task
+
+# Pushes the size-limited Docker Hub repository overview, hosted here once since the login, the repository-list resolution, and the push step are identical across every Docker repo.
+# Caller-gated in the doc sense, the publisher invokes this from its main leg, and gated again here on the branch input, so a caller that invokes this task on every branch still pushes only once.
+# The overview has no per-branch context.
+# The repository list is either passed directly (repositories) or derived from a manifest (manifest plus manifest-jq).
+# That covers single- and multi-image repos without per-repo glue.
+# A docker-readme-transform hook sets a readme-filepath step output naming the file to push, defaulting to Docker/README.md when present, else README.md as-is.
+# A repo needs a hook only to override that choice or to render the file first, an m4 template, for example.
+
+on:
+  workflow_call:
+    inputs:
+      # Ref whose readme, and any hook sources, to publish, where empty uses the caller's ref.
+      # The publisher passes the versioned commit so the overview tracks the exact release build.
+      ref:
+        required: false
+        type: string
+        default: ''
+      # Logical branch this run is for.
+      # The push only fires on main, since the overview has no per-branch content, so a develop leg of the same caller is a harmless no-op.
+      branch:
+        required: true
+        type: string
+      # JSON array of Docker Hub repositories to update, for example '["owner/image"]'.
+      # Leave empty to derive the list from a manifest instead, see manifest.
+      repositories:
+        required: false
+        type: string
+        default: ''
+      # Derive the repository list from a checked-out manifest file when repositories is empty, for example ./Make/Matrix.json.
+      # The manifest-jq input is the jq program that turns it into the JSON array of repository names.
+      manifest:
+        required: false
+        type: string
+        default: ''
+      manifest-jq:
+        required: false
+        type: string
+        default: ''
+    secrets:
+      DOCKER_HUB_USERNAME:
+        required: true
+      DOCKER_HUB_ACCESS_TOKEN:
+        required: true
+
+jobs:
+
+  # Resolve the repository list once, from either the static repositories input or a jq program over a manifest.
+  # The publish matrix is then the same shape for single- and multi-image repos.
+  get-repos:
+    name: Get repository list job
+    runs-on: ubuntu-latest
+    if: ${{ inputs.branch == 'main' }}
+    permissions:
+      contents: read
+    outputs:
+      repositories: ${{ steps.list.outputs.repositories }}
+
+    steps:
+
+      # Enforce the input contract once so the downstream steps can trust it.
+      # The list comes from exactly one source, repositories, the manifest plus manifest-jq pair, or neither, defaulting to this repo.
+      # A half-filled manifest pair, or both sources passed at once, are the cases a silent fall-through would otherwise mask.
+      - name: Validate inputs step
+        env:
+          REPOSITORIES: ${{ inputs.repositories }}
+          MANIFEST: ${{ inputs.manifest }}
+          MANIFEST_JQ: ${{ inputs.manifest-jq }}
+        run: |
+          set -Eeuo pipefail
+          if [ -n "$REPOSITORIES" ] && [ -n "$MANIFEST" ]; then
+            echo "::error::Pass either 'repositories' or 'manifest', not both."
+            exit 1
+          fi
+          if { [ -n "$MANIFEST" ] && [ -z "$MANIFEST_JQ" ]; } || { [ -z "$MANIFEST" ] && [ -n "$MANIFEST_JQ" ]; }; then
+            echo "::error::'manifest' and 'manifest-jq' must be set together."
+            exit 1
+          fi
+          if [ -n "$REPOSITORIES" ] && ! echo "$REPOSITORIES" | jq -e 'type == "array" and length > 0 and all(.[]; type == "string")' >/dev/null 2>&1; then
+            echo "::error::'repositories' must be a non-empty JSON array of strings, got: $REPOSITORIES"
+            exit 1
+          fi
+
+      # Only the manifest path needs the tree, the static and default paths do not check out.
+      - name: Checkout code step
+        if: ${{ inputs.repositories == '' && inputs.manifest != '' }}
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ inputs.ref || github.ref }}
+
+      - name: Resolve repository list step
+        id: list
+        env:
+          REPOSITORIES: ${{ inputs.repositories }}
+          MANIFEST: ${{ inputs.manifest }}
+          MANIFEST_JQ: ${{ inputs.manifest-jq }}
+        run: |
+          set -Eeuo pipefail
+          # Inputs validated above, at most one of repositories or manifest is set, and manifest implies manifest-jq.
+          # Compacted to one line before writing, since GITHUB_OUTPUT is line-oriented and a pretty-printed JSON array would otherwise corrupt it.
+          if [ -n "$REPOSITORIES" ]; then
+            echo "repositories=$(jq --compact-output '.' <<<"$REPOSITORIES")" >> "$GITHUB_OUTPUT"
+          elif [ -n "$MANIFEST" ]; then
+            derived="$(jq --compact-output "$MANIFEST_JQ" "$MANIFEST")"
+            if ! echo "$derived" | jq -e 'type == "array" and length > 0 and all(.[]; type == "string")' >/dev/null 2>&1; then
+              echo "::error::'manifest-jq' must derive a non-empty JSON array of strings, got: $derived"
+              exit 1
+            fi
+            echo "repositories=$derived" >> "$GITHUB_OUTPUT"
+          else
+            # Default to this repo's own Docker Hub repository, the lowercased owner/name.
+            # A single-image caller then carries the orchestration verbatim with no repo-specific value.
+            echo "repositories=[\"$(echo "$GITHUB_REPOSITORY" | tr '[:upper:]' '[:lower:]')\"]" >> "$GITHUB_OUTPUT"
+          fi
+
+  publish-readme:
+    name: Publish Docker Hub readme job
+    runs-on: ubuntu-latest
+    needs: get-repos
+    # Redundant with get-repos's own branch gate (a skipped need already skips this job by default), stated explicitly so the main-only guarantee does not depend on the needs skip-cascade alone.
+    if: ${{ inputs.branch == 'main' }}
+    permissions:
+      contents: read
+    strategy:
+      matrix:
+        repository: ${{ fromJSON(needs.get-repos.outputs.repositories) }}
+
+    steps:
+
+      - name: Checkout code step
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ inputs.ref || github.ref }}
+
+      # The job.workflow_repository and job.workflow_sha properties name the exact commit of this reusable workflow file, which is the commit the caller's uses: line pinned.
+      # The default hook is then the version the caller chose rather than whatever the hub's default branch holds today.
+      - name: Checkout hub step
+        if: ${{ hashFiles('.github/actions/docker-readme-transform/action.yml') == '' }}
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          repository: ${{ job.workflow_repository }}
+          ref: ${{ job.workflow_sha }}
+          path: .hub
+
+      # A hook lets a repo render the readme first, an m4 template with version includes, for example.
+      # It always resolves which file the push step ships.
+      - name: Resolve readme via caller hook step
+        id: transform-caller
+        if: ${{ hashFiles('.github/actions/docker-readme-transform/action.yml') != '' }}
+        uses: ./.github/actions/docker-readme-transform
+
+      - name: Resolve readme via hub default step
+        id: transform-default
+        if: ${{ hashFiles('.github/actions/docker-readme-transform/action.yml') == '' }}
+        uses: ./.hub/.github/actions/docker-readme-transform-default
+
+      - name: Publish Docker Hub readme step
+        uses: peter-evans/dockerhub-description@1b9a80c056b620d92cedb9d9b5a223409c68ddfa # v5.0.0
+        with:
+          username: ${{ secrets.DOCKER_HUB_USERNAME }}
+          password: ${{ secrets.DOCKER_HUB_ACCESS_TOKEN }}
+          repository: ${{ matrix.repository }}
+          short-description: ${{ github.event.repository.description }}
+          readme-filepath: ${{ steps.transform-caller.outputs.readme-filepath || steps.transform-default.outputs.readme-filepath }}
