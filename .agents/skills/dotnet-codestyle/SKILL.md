@@ -201,9 +201,9 @@ parameterized tests. See `references/testing.md` for the framework setup templat
 
 ## Project configuration
 
-.NET 10.0 target, AOT-compatible (`<IsAotCompatible>true`), SourceLink, embedded untracked
-sources, `InternalsVisibleTo` for test/benchmark access. See `references/project-config.md` for
-the full property list.
+.NET 10.0 target, AOT-compatible (`IsAotCompatible=true`, `VerifyReferenceAotCompatibility=true`),
+SourceLink, embedded untracked sources, `InternalsVisibleTo` for test/benchmark access. See
+`references/project-config.md` for the full property list.
 
 ## Best practices
 
