@@ -398,7 +398,7 @@ def main():
         eol = repo.get("lineEndings")
         if eol is not None and eol not in ("lf", "crlf"):
             errors.append(f"{name}: lineEndings '{eol}' invalid (expected lf or crlf)")
-        # An operational repo's endings follow the consuming app's platform, so they must be declared, where a release repo omits the field and takes the fleet CRLF default.
+        # An operational repo's endings follow the consuming app's platform, so they must be declared, where a release repo omits the field and takes the fleet LF default.
         # Resolve the effective model the way configure.sh does, from the repo, then the defaults, then release.
         # The requirement then holds even where a repo relies on an operational defaults.workflowModel rather than setting its own.
         effective_model = model or default_model or "release"

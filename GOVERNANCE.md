@@ -95,7 +95,7 @@ since that path is hub-local and not carried into every fleet repo. The summary 
 the contract. Read the skill for the full rules, including when a config change still earns a
 pull request.
 
-Line-ending governance for an operational repo is in [Line Endings](#line-endings), where its `[*]` default follows the consuming app's native platform per the registry `lineEndings` field, not the fleet CRLF default.
+Line-ending governance for an operational repo is in [Line Endings](#line-endings), where its `[*]` default follows the consuming app's native platform per the registry `lineEndings` field, not the fleet LF default.
 
 ## Repository Onboarding and Conformance
 

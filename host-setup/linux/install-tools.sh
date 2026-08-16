@@ -561,13 +561,22 @@ docker_source() {
 
 # Read directly from the CLI rather than from apt_installed_version docker-ce, unlike gh and node.
 # On a WSL distribution using Docker Desktop's own WSL integration, docker is a working command with no docker-ce apt package behind it at all, and reading the apt package version would misreport that working install as absent.
-# This also matches exactly what scripts/host_gate.py's own probe and pattern read.
+# This also matches exactly what scripts/host_gate.py's own probes and pattern read, in the same order, so the two never disagree about one host.
+# The daemon is asked first and its own banner is the fallback, because the docker on PATH inside a WSL distribution can be a separately packaged client talking to Docker Desktop's engine, and the two carry different versions (issue #751 recorded a 29.1.3 client against a 29.7.2 engine).
+# A stopped or unreachable daemon makes the first reading exit non-zero, which is what the banner answers, so this reports the weaker number rather than nothing.
 docker_version() {
     command -v docker > /dev/null || return 0
+    local engine
+    engine=$(docker version --format '{{.Server.Version}}' 2> /dev/null) || engine=""
+    if [[ $engine =~ ^[0-9]+(\.[0-9]+)*$ ]]; then
+        printf '%s' "$engine"
+        return 0
+    fi
     docker --version 2> /dev/null | sed -n 's/^Docker version \([0-9][0-9.]*\).*/\1/p'
 }
 
-# Stripped of the epoch and the Debian package revision apt_candidate_version otherwise carries (e.g. "5:29.7.2-1~debian.13~trixie"), so this compares like for like against docker_version's plain CLI reading rather than against dpkg's own packaging metadata.
+# Stripped of the epoch and the Debian package revision apt_candidate_version otherwise carries (e.g. "5:29.7.2-1~debian.13~trixie"), so this compares like for like against docker_version's plain reading rather than against dpkg's own packaging metadata.
+# Only the native path reaches here, where the engine docker_version reports and the docker-ce package this reads are the same install, so the two remain comparable now that the engine is what it asks for.
 docker_target() {
     local raw
     raw=$(apt_candidate_version docker-ce)

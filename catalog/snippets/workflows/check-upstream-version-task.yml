@@ -89,9 +89,9 @@ jobs:
           # A valid-JSON-but-non-object file would otherwise break the `$old + $new` union below.
           if [ -f "$STATE_FILE" ] && old="$(jq -S 'if type == "object" then . else empty end' "$STATE_FILE" 2>/dev/null)" && [ -n "$old" ]; then :; else old='{}'; fi
 
-          # Write the canonical state file as CRLF, since jq emits LF, to match .editorconfig's .json rule.
+          # Write the canonical state file as jq emits it, LF, matching .editorconfig's .json rule.
           # Unchanged content means no diff, and therefore no PR.
-          printf '%s\n' "$new" | sed 's/$/\r/' > "$STATE_FILE"
+          printf '%s\n' "$new" > "$STATE_FILE"
 
           # Diff across the union of old+new keys so an added, moved, or removed key is all caught.
           # Removals carry a null .new.

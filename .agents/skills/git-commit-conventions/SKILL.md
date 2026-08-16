@@ -73,9 +73,8 @@ scope-widened commit, a rewritten shared history, a destructive reset).
   `commit.gpgsign` is unset or false, which is the exact default-config gap this probe exists to
   catch, since every real commit an agent makes is plain too:
 
-  This file is CRLF (the repo's Markdown default), and a `\` line continuation stops working
-  the moment a stray `\r` lands after it, so the probe is one physical line, not backslash-joined
-  ones:
+  The probe is one physical line, not backslash-joined ones, so it copy-pastes cleanly into a
+  shell:
 
   ```sh
   d=$(mktemp -d "${TMPDIR:-/tmp}/sign-check.XXXXXX") && ( trap 'rm -rf "$d"' 0; email=$(git config --global --get user.email) && git init -q "$d" && git -C "$d" commit --allow-empty -q -m check && out=$(git -C "$d" log -1 --format='sig=%G? author=%an <%ae> committer=%cn <%ce>') && echo "$out" && ae=$(git -C "$d" log -1 --format='%ae') && ce=$(git -C "$d" log -1 --format='%ce') && case "$out" in sig=G\ *|sig=U\ *) true ;; *) false ;; esac && case "$email" in *@users.noreply.github.com) true ;; *) false ;; esac && [ "$ae" = "$email" ] && [ "$ce" = "$email" ] )

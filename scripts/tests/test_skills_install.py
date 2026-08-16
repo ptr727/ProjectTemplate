@@ -8,7 +8,9 @@ Run as `python3 scripts/tests/test_skills_install.py`, or under `python3 -m unit
 from __future__ import annotations
 
 import json
+import os
 import shutil
+import subprocess
 import sys
 import tempfile
 import unittest
@@ -396,6 +398,101 @@ class MainExitCodeCase(unittest.TestCase):
     def test_claude_absent_is_a_partial_install_not_a_failure(self) -> None:
         mock.patch("skills_install.claude_available", return_value=False).start()
         self.assertEqual(skills_install.main(), 0)
+
+
+LINUX_WRAPPER = (
+    Path(__file__).resolve().parent.parent.parent / "host-setup" / "linux" / "install-skills.sh"
+)
+
+
+def unprivileged_root_is_available() -> bool:
+    """Whether `unshare -r` gives this process an EUID of 0 without any real privilege.
+
+    The guard under test reads `$EUID`, which bash makes read-only, so the sudo'd run cannot be
+    faked by setting a variable and has to be a real EUID 0. A user namespace is the one way to
+    reach that without root, and it is unavailable on a host that restricts unprivileged user
+    namespaces, which is why this is probed rather than assumed.
+    """
+    if sys.platform != "linux" or not shutil.which("unshare"):
+        return False
+    try:
+        return (
+            subprocess.run(
+                ["unshare", "-r", "id", "-u"],
+                capture_output=True,
+                text=True,
+                timeout=20,
+                check=False,
+            ).stdout.strip()
+            == "0"
+        )
+    except (OSError, subprocess.SubprocessError):
+        return False
+
+
+@unittest.skipUnless(
+    unprivileged_root_is_available(), "needs an unprivileged user namespace to reach EUID 0"
+)
+class LinuxWrapperSudoGuardCase(unittest.TestCase):
+    """`install-skills.sh` refuses a sudo'd run rather than installing for root and exiting 0.
+
+    Every case runs `--dry-run`, so the installer itself is never reached and nothing is written
+    under any home. What is under test is which runs get past the guard at all.
+    """
+
+    def run_wrapper(self, root: bool, sudo_user: str | None) -> subprocess.CompletedProcess[str]:
+        argv = ["unshare", "-r"] if root else []
+        env = {"PATH": os.environ.get("PATH", ""), "HOME": os.environ.get("HOME", "")}
+        if sudo_user is not None:
+            env["SUDO_USER"] = sudo_user
+        return subprocess.run(
+            [*argv, str(LINUX_WRAPPER), "--dry-run"],
+            capture_output=True,
+            text=True,
+            timeout=60,
+            check=False,
+            env=env,
+        )
+
+    def test_a_sudo_run_is_refused_and_names_the_invoking_user(self) -> None:
+        """The defect this guards: the run installed to /root/.agents/skills and exited 0."""
+        r = self.run_wrapper(root=True, sudo_user="someone")
+        self.assertEqual(r.returncode, 1)
+        self.assertIn("someone", r.stderr)
+        self.assertNotIn("[dry run]", r.stdout)
+
+    def test_a_root_account_with_no_sudo_user_still_installs(self) -> None:
+        """A container or a Proxmox node whose working account is root installs for root, which
+        is correct there, so the guard reads SUDO_USER rather than EUID alone."""
+        r = self.run_wrapper(root=True, sudo_user=None)
+        self.assertEqual(r.returncode, 0)
+        self.assertIn("[dry run]", r.stdout)
+
+    def test_root_running_its_own_sudo_is_not_a_user_install_gone_wrong(self) -> None:
+        """SUDO_USER=root names no user whose home was missed, so there is nothing to refuse."""
+        r = self.run_wrapper(root=True, sudo_user="root")
+        self.assertEqual(r.returncode, 0)
+        self.assertIn("[dry run]", r.stdout)
+
+    def test_an_ordinary_user_with_sudo_user_set_is_not_refused(self) -> None:
+        """SUDO_USER survives into a shell started under sudo -u, so reading it alone would refuse
+        a run that is already targeting the right home."""
+        r = self.run_wrapper(root=False, sudo_user="someone")
+        self.assertEqual(r.returncode, 0)
+        self.assertIn("[dry run]", r.stdout)
+
+    def test_help_still_answers_under_sudo(self) -> None:
+        """A refused run has to be able to say what to run instead, and --help is where that is."""
+        r = subprocess.run(
+            ["unshare", "-r", str(LINUX_WRAPPER), "--help"],
+            capture_output=True,
+            text=True,
+            timeout=60,
+            check=False,
+            env={"PATH": os.environ.get("PATH", ""), "SUDO_USER": "someone"},
+        )
+        self.assertEqual(r.returncode, 0)
+        self.assertIn("never under sudo", r.stdout)
 
 
 if __name__ == "__main__":
