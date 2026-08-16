@@ -2126,8 +2126,10 @@ def _selftest():
             "merge-bot": ["merge-bot-task.yml", "CODEGEN_APP_CLIENT_ID", "CODEGEN_APP_PRIVATE_KEY"]
         },
     }
-    # The publish-release.yml caller stub once the release chain is hub-hosted, plan and publish job keys.
+    # The publish-release.yml caller stub once the release chain is hub-hosted, plan, validate and publish job keys.
     # Each names its hub task by token, per docs/reusable-workflows.md "Adopting the Release Chain".
+    # Validate carries no token requirement of its own.
+    # Its presence as a job key is what stops a stub from skipping the gate, per WORKFLOW.md's source-only shape.
     publish_stub = (
         "jobs:\n"
         "  plan:\n"
@@ -2135,16 +2137,21 @@ def _selftest():
         "    uses: acme/hub/.github/workflows/publish-plan-task.yml@" + "a" * 40 + " # 2.0.1\n"
         "    with:\n"
         "      event_name: ${{ github.event_name }}\n"
+        "  validate:\n"
+        "    name: Validate sources job\n"
+        "    needs: [plan]\n"
+        "    if: ${{ needs.plan.outputs.publish == 'true' }}\n"
+        "    uses: ./.github/workflows/validate-task.yml\n"
         "  publish:\n"
         "    name: Publish project release job\n"
-        "    needs: [plan]\n"
+        "    needs: [plan, validate]\n"
         "    if: ${{ needs.plan.outputs.publish == 'true' }}\n"
         "    uses: acme/hub/.github/workflows/build-release-task.yml@" + "a" * 40 + " # 2.0.1\n"
         "    with:\n"
         "      github: true\n"
     )
     publish_contract = {
-        "requiredJobKeys": ["plan", "publish"],
+        "requiredJobKeys": ["plan", "validate", "publish"],
         "requireTokensInJob": {
             "plan": ["publish-plan-task.yml"],
             "publish": ["build-release-task.yml"],
@@ -2292,8 +2299,27 @@ def _selftest():
         (
             "publish-release.yml stub missing the plan job reports it once",
             "jobs:\n"
+            "  validate:\n"
+            "    name: Validate sources job\n"
+            "    uses: ./.github/workflows/validate-task.yml\n"
             "  publish:\n"
             "    name: Publish project release job\n"
+            "    needs: [validate]\n"
+            "    uses: acme/hub/.github/workflows/build-release-task.yml@"
+            + "a" * 40
+            + " # 2.0.1\n",
+            publish_contract,
+            1,
+        ),
+        (
+            "publish-release.yml stub missing the validate job reports it once",
+            "jobs:\n"
+            "  plan:\n"
+            "    name: Plan release job\n"
+            "    uses: acme/hub/.github/workflows/publish-plan-task.yml@" + "a" * 40 + " # 2.0.1\n"
+            "  publish:\n"
+            "    name: Publish project release job\n"
+            "    needs: [plan]\n"
             "    uses: acme/hub/.github/workflows/build-release-task.yml@"
             + "a" * 40
             + " # 2.0.1\n",

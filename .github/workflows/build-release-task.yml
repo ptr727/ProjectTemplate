@@ -90,8 +90,9 @@ on:
         required: false
         type: boolean
         default: false
-      # NuGet / executable: project file paths for the hub default hooks.
-      # A caller whose layout differs from the vanilla Console/NuGetLibrary/PyPiLibrary convention carries its own hook instead of setting these.
+      # NuGet / executable / PyPI: project path inputs forwarded to the hub default hooks' project-file/project-dir input.
+      # A caller whose layout differs only in path sets these.
+      # A caller needing build steps beyond a path override carries its own hook instead.
       executable_project:
         required: false
         type: string
