@@ -89,6 +89,26 @@ jobs:
         with:
           fetch-depth: 0
 
+      # Fail fast on a misconfigured environment, before any build, upload, or flip work runs.
+      # A silently empty variable would otherwise let the deploy proceed and only surface as a broken site-url output or a late transport failure.
+      - name: Assert environment variables are set step
+        env:
+          SITE_BASE_URL: ${{ vars.SITE_BASE_URL }}
+          DEPLOY_SSH_USER: ${{ vars.DEPLOY_SSH_USER }}
+          DEPLOY_SSH_HOST: ${{ vars.DEPLOY_SSH_HOST }}
+          DEPLOY_SSH_KNOWN_HOSTS: ${{ vars.DEPLOY_SSH_KNOWN_HOSTS }}
+        run: |
+          set -Eeuo pipefail
+          missing=()
+          [ -n "$SITE_BASE_URL" ] || missing+=(SITE_BASE_URL)
+          [ -n "$DEPLOY_SSH_USER" ] || missing+=(DEPLOY_SSH_USER)
+          [ -n "$DEPLOY_SSH_HOST" ] || missing+=(DEPLOY_SSH_HOST)
+          [ -n "$DEPLOY_SSH_KNOWN_HOSTS" ] || missing+=(DEPLOY_SSH_KNOWN_HOSTS)
+          if [ "${#missing[@]}" -gt 0 ]; then
+            echo "::error::Missing GitHub Environment variable(s) on '${{ inputs.environment }}': ${missing[*]}"
+            exit 1
+          fi
+
       # Derived once and used three times: the directory name, the stamp the bundle carries, and the value the live check expects.
       # Deriving it twice yields ids seconds apart, and the check then asserts a version nothing installed.
       - name: Resolve release id step
