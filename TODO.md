@@ -532,7 +532,7 @@ Regenerate [reports/divergences.md][divergences-report] before using it as the w
 
 - **Adopt the merge-bot caller stub, which is one file per repo replacing the copied job bodies.** The audit reports the missing `merge-bot` caller job on every copy until the repo adopts, which is the work list.
   - **Hub state** - Done on `develop`, where `.github/workflows/merge-bot-task.yml` is the task and the hub's own `merge-bot-pull-request.yml` is the stub. The stub a repo copies is in [`docs/reusable-workflows.md`][reusable-workflows-doc] "Adopting the Merge-Bot", and its pin is the first hub release carrying the task, so no repo can adopt before that release.
-  - **Outstanding** - Every repo carrying the file, 16 on their ground-truth branches today, of which PhotoCleaner adopted on `develop` in ptr727/PhotoCleaner#53 on 2026-08-15 and counts as done once it promotes, then HomeAutomation-Config for the operational path and homeassistant-purpleair for the `rules` input.
+  - **Outstanding** - Every repo carrying the file, 15 after PhotoCleaner adopted in ptr727/PhotoCleaner#53 and promoted it in ptr727/PhotoCleaner#54 on 2026-08-15, then HomeAutomation-Config for the operational path and homeassistant-purpleair for the `rules` input.
   - **Issue** - [#521][issue-521], whose hub half is done and whose sweep half this is.
   - **Rides with** - The `verbatim` re-vendor above.
   - **Detail** - The unused `GITHUB_TOKEN` grants #521 names are gone with the copy, since the task declares none and the stub sets `permissions: {}`.
