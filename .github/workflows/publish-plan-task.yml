@@ -1,6 +1,6 @@
 name: Publish plan task
 
-# Single source of truth for the release-gate decision, reused by every publish-release.yml job.
+# Single source of truth for the release-gate decision, hosted here once and reused by every publish-release job.
 # The policy therefore lives here rather than scattered across job `if:` conditions.
 # A human PR merge never auto-publishes.
 # A release is a deliberate dispatch, a bot (Dependabot/codegen) code-merge to main, or the Docker weekly schedule.

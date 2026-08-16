@@ -1,0 +1,101 @@
+name: Get version information task
+
+# The fleet's single NBGV run, hosted here once and reached by a leaf or a publisher through a pinned uses:.
+# It has no repo-specific line, since version.json and the git history it walks are the only per-repo input.
+# Every caller reads the same five outputs plus the derived Prerelease flag.
+# The ref input defaults to the caller's own checkout ref.
+# A caller may pass a different ref, for example a publisher versioning a branch other than the one it dispatched from.
+# IGNORE_GITHUB_REF below keeps NBGV honest even when inputs.ref and github.ref disagree.
+# That check costs nothing on the common path where the two already match.
+# AssemblyVersion, AssemblyFileVersion and AssemblyInformationalVersion are exposed for a .NET build to stamp.
+# A caller with no compiled code, a PyPI or HACS package, simply leaves them unused rather than the task growing a per-ecosystem branch.
+# Prerelease is a real derivation two callers duplicated identically, a Python package and a Home Assistant integration, neither versioning a .NET assembly.
+# It is hosted here rather than as per-repo logic.
+# It reads 'true' whenever SemVer2 carries a prerelease '-' segment, and 'false' on a clean public version.
+on:
+  workflow_call:
+    inputs:
+      # Git ref to check out and version.
+      # Empty falls back to the caller's default checkout ref (`github.ref`).
+      # The publisher passes an explicit branch so a scheduled run can still compute versions for `develop`.
+      ref:
+        required: false
+        type: string
+        default: ''
+    outputs:
+      SemVer2:
+        description: "SemVer2-shaped version from NBGV (version.json + git history); the release tag name, no v prefix."
+        value: ${{ jobs.get-version.outputs.SemVer2 }}
+      AssemblyVersion:
+        value: ${{ jobs.get-version.outputs.AssemblyVersion }}
+      AssemblyFileVersion:
+        value: ${{ jobs.get-version.outputs.AssemblyFileVersion }}
+      AssemblyInformationalVersion:
+        value: ${{ jobs.get-version.outputs.AssemblyInformationalVersion }}
+      # Full SHA of the commit the version was computed from, used to pin the release tag to the exact built commit.
+      GitCommitId:
+        value: ${{ jobs.get-version.outputs.GitCommitId }}
+      Prerelease:
+        description: "'true' when SemVer2 carries a prerelease '-' segment, 'false' on a clean public version."
+        value: ${{ jobs.get-version.outputs.Prerelease }}
+
+jobs:
+
+  get-version:
+    name: Get version information job
+    runs-on: ubuntu-latest
+    outputs:
+      SemVer2: ${{ steps.nbgv.outputs.SemVer2 }}
+      AssemblyVersion: ${{ steps.nbgv.outputs.AssemblyVersion }}
+      AssemblyFileVersion: ${{ steps.nbgv.outputs.AssemblyFileVersion }}
+      AssemblyInformationalVersion: ${{ steps.nbgv.outputs.AssemblyInformationalVersion }}
+      GitCommitId: ${{ steps.nbgv.outputs.GitCommitId }}
+      Prerelease: ${{ steps.out.outputs.Prerelease }}
+
+    steps:
+
+      - name: Setup .NET SDK step
+        uses: actions/setup-dotnet@a98b56852c35b8e3190ac28c8c2271da59106c68 # v6.0.0
+        with:
+          dotnet-version: 10.x
+
+      - name: Checkout code step
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ inputs.ref }}
+          fetch-depth: 0
+
+      # The nbgv action is floated on @master, because its tag stream lags master.
+      # Dependabot tag-tracking would otherwise propose a downgrade.
+      # Revisit if dotnet/nbgv resumes regular tagged releases.
+      - name: Run Nerdbank.GitVersioning tool step
+        id: nbgv
+        uses: dotnet/nbgv@master
+        env:
+          # Version from the checked-out branch rather than the CI ref.
+          # GITHUB_REF is reserved and a step env can't reliably override it, since the runner re-injects the dispatch ref.
+          # On a publish dispatched from the default branch, NBGV would therefore classify every leg as the public ref.
+          # IGNORE_GITHUB_REF makes NBGV ignore GITHUB_REF and use the checked-out branch, which each caller already is.
+          # The validate-release gate backstops any misclassification.
+          IGNORE_GITHUB_REF: "true"
+
+      # NBGV's PrereleaseVersion output only carries version.json's `-tag` segment, empty for a bare SemVer base.
+      # The auto-appended -g{sha} segment lives in SemVer2 but is not exposed there.
+      # Detect prerelease by testing SemVer2 for any `-` instead, the same test validate-release uses.
+      # Strip '+buildmetadata' first, since SemVer2 allows a `-` there and it carries no prerelease meaning.
+      # That reads true for `1.0.5-g1a2b3c4`, a prerelease branch, and false for `1.0.5` or `1.0.5+abc-def`, both public.
+      # This also keeps a manual workflow_dispatch from the wrong branch honest about its prerelease status.
+      - name: Compose workflow outputs step
+        id: out
+        env:
+          SEMVER2: ${{ steps.nbgv.outputs.SemVer2 }}
+        run: |
+          set -Eeuo pipefail
+          CORE_AND_PRE="${SEMVER2%%+*}"
+          if [[ "$CORE_AND_PRE" == *-* ]]; then
+            PRERELEASE=true
+          else
+            PRERELEASE=false
+          fi
+          echo "Prerelease=$PRERELEASE" >> "$GITHUB_OUTPUT"
+          echo "Version: $SEMVER2 (prerelease: $PRERELEASE)"

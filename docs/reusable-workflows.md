@@ -22,6 +22,7 @@ The design for moving the fleet's standard GitHub Actions workflows out of every
   - [Stage 4: The Release Chain and the Docker Core](#stage-4-the-release-chain-and-the-docker-core)
   - [Stage 5: The Type-Specific Tasks](#stage-5-the-type-specific-tasks)
 - [Adopting the Merge-Bot](#adopting-the-merge-bot)
+- [Adopting the Pure Functions](#adopting-the-pure-functions)
 - [Adopting the Type-Specific Tasks](#adopting-the-type-specific-tasks)
 - [What a Pilot Proves](#what-a-pilot-proves)
 - [Open Decisions](#open-decisions)
@@ -162,9 +163,19 @@ Hub: `validate-task.yml` hosts the per-type doc-lint block once and calls the `v
 
 Hub: `get-version-task.yml` and `publish-plan-task.yml` hosted, and the downstream copies deleted on adoption. PlexCleaner gains the `plan` job D4.1 requires by adopting rather than by a copy.
 
-- [ ] Hub pull request on `develop`.
+- [x] Hub pull request on `develop`, #759.
 - [ ] Promoted and released, tag recorded here.
-- [ ] Adoption, one checkbox per carrier added when the hub pull request merges: today `get-version-task.yml` has 8 carriers and `publish-plan-task.yml` 3.
+- [ ] Catalog snippet for a caller stub, after the release: a caller of either task is a job inside a repo's own `publish-release.yml` or a future `build-release-task.yml` rather than a standalone top-level workflow, so today's honest answer is no snippet, only the `with:`/`uses:` lines in [Adopting the Pure Functions](#adopting-the-pure-functions). Revisit if an adopting repo's shape argues otherwise.
+- [ ] Adoption, one checkbox per carrier added when the hub pull request merges: today `get-version-task.yml` has 8 carriers and `publish-plan-task.yml` 3, with ESPHome-NonRoot and NxWitness carrying both.
+  - [ ] ESPHome-NonRoot (`get-version-task.yml` and `publish-plan-task.yml`)
+  - [ ] NxWitness (`get-version-task.yml` and `publish-plan-task.yml`)
+  - [ ] PhotoCleaner (`get-version-task.yml`)
+  - [ ] PlexCleaner (`get-version-task.yml`, and gains the `plan` job D4.1 requires by adopting `publish-plan-task.yml` rather than by a copy)
+  - [ ] VSCode-Server-DotNetCore (`get-version-task.yml`)
+  - [ ] KiCadLibrary (`get-version-task.yml`)
+  - [ ] aiopurpleair (`get-version-task.yml`)
+  - [ ] homeassistant-purpleair (`get-version-task.yml`)
+  - [ ] Utilities (`publish-plan-task.yml`)
 - [ ] `reports/workflow-reuse.md` regenerated with `get-version-task.yml` and `publish-plan-task.yml` at 0 copies, since both are hub-only files no repo carries.
 
 ### Stage 4: The Release Chain and the Docker Core
@@ -245,6 +256,34 @@ A repo that needs either input appends the block to the `merge-bot` job. This is
 The task's inputs are `app-login` (default `ptr727-codegen[bot]`), `rules` (a JSON array of `{"head": "<exact>"}` or `{"head-prefix": "<prefix>"}` plus `"base"`, default `[]`), and `delete-branch` (default `false`). The merge method follows the base, `develop` squashes and `main` merges, so a rule carries none. An App pull request that matches no rule is annotated with a warning rather than merged, so a renamed tracker branch is visible in the run rather than silent.
 
 Two copies today filter Dependabot by ecosystem and semver tier before merging. [WORKFLOW.md D8.1][workflow-d8] says every Dependabot tier auto-merges and the required checks are the gate, so those two repos drop the filter on adoption unless the [Open Decisions][open-decisions] below settle otherwise.
+
+## Adopting the Pure Functions
+
+Neither `get-version-task.yml` nor `publish-plan-task.yml` has a caller-stub snippet of its own, since a caller reaching either one is a job inside a repo's own `publish-release.yml` or a future `build-release-task.yml`, not a standalone top-level workflow. A repo whose publisher reads NBGV's version outputs directly, without carrying the whole release orchestrator, reaches `get-version-task.yml` by pin in place of its own copy:
+
+```yaml
+  get-version:
+    name: Get version information job
+    uses: ptr727/ProjectTemplate/.github/workflows/get-version-task.yml@<hub-main-commit-sha> # <release-tag>
+    with:
+      ref: ${{ github.ref }}
+    # Outputs: SemVer2, AssemblyVersion, AssemblyFileVersion, AssemblyInformationalVersion, GitCommitId, Prerelease.
+```
+
+A repo whose publisher needs the release-gate decision reaches `publish-plan-task.yml` by pin the same way:
+
+```yaml
+  plan:
+    name: Plan release job
+    uses: ptr727/ProjectTemplate/.github/workflows/publish-plan-task.yml@<hub-main-commit-sha> # <release-tag>
+    with:
+      event_name: ${{ github.event_name }}
+      actor: ${{ github.actor }}
+      ref_name: ${{ github.ref_name }}
+    # Outputs: publish, stable.
+```
+
+`build-release-task.yml` (stage 4) does not call `get-version-task.yml` this way. It inlines the get-version and validate-release jobs rather than nesting a sibling hub task, per the design's no-`./`-nesting rule: a local `uses:` inside a called workflow would resolve against the top-level caller's repository, not the hub. Only a caller that reads the version outputs on their own, without the rest of the release orchestrator, reaches `get-version-task.yml` directly, and a downstream `publish-release.yml` stub that does exactly that is the shape shown above.
 
 ## Adopting the Type-Specific Tasks
 

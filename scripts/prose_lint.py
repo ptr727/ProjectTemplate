@@ -345,6 +345,8 @@ def path_candidate(token: str, in_span: bool = True) -> str | None:
 HUB_HOSTED = frozenset(
     {
         "repo-config/configure.sh",
+        ".github/workflows/get-version-task.yml",
+        ".github/workflows/publish-plan-task.yml",
         ".github/workflows/deploy-site-task.yml",
         ".github/workflows/publish-docker-readme-task.yml",
         ".github/workflows/check-upstream-version-task.yml",
