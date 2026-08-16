@@ -20,12 +20,10 @@ on:
 
 jobs:
 
+  # No job-level permissions declared: every write here (the checkout, the pull request) uses the App token, so GITHUB_TOKEN needs no scope and the caller can grant permissions: {}.
   codegen:
     name: Run ${{ matrix.target.ref }} codegen and pull request job
     runs-on: ubuntu-latest
-    permissions:
-      contents: write
-      pull-requests: write
     strategy:
       # Each branch gets its own parallel codegen run and PR.
       # One branch's failure does not affect the other.

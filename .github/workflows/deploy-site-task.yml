@@ -134,6 +134,21 @@ jobs:
           echo "::error::Required hook missing: .github/actions/deploy/action.yml"
           exit 1
 
+      # Asserted here rather than left to the upload's rsync error, so a hook that misses the contract fails naming the hook rather than a path that looks like a transport problem.
+      - name: Assert build hook produced the bundle contract step
+        env:
+          RELEASE_ID: ${{ steps.release.outputs.id }}
+        run: |
+          set -Eeuo pipefail
+          if [ ! -d "${RUNNER_TEMP}/bundle/releases/${RELEASE_ID}" ]; then
+            echo "::error::deploy hook (mode: build) did not create bundle/releases/${RELEASE_ID}/"
+            exit 1
+          fi
+          if [ ! -e "${RUNNER_TEMP}/bundle/current" ]; then
+            echo "::error::deploy hook (mode: build) did not create bundle/current"
+            exit 1
+          fi
+
       # The known-hosts value is a variable rather than a secret, it is integrity-critical but not confidential, and a variable keeps it diff-visible.
       # StrictHostKeyChecking is never disabled.
       - name: Install deploy key step

@@ -77,6 +77,10 @@ jobs:
             echo "::error::'manifest' and 'manifest-jq' must be set together."
             exit 1
           fi
+          if [ -n "$REPOSITORIES" ] && ! echo "$REPOSITORIES" | jq -e 'type == "array" and length > 0 and all(.[]; type == "string")' >/dev/null 2>&1; then
+            echo "::error::'repositories' must be a non-empty JSON array of strings, got: $REPOSITORIES"
+            exit 1
+          fi
 
       # Only the manifest path needs the tree, the static and default paths do not check out.
       - name: Checkout code step
