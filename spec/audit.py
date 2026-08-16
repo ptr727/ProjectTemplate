@@ -2264,6 +2264,7 @@ def _selftest():
         "jobs:\n"
         "  publish-docker-readme:\n"
         "    name: Publish Docker Hub readme job\n"
+        "    permissions:\n      contents: read\n"
         "    uses: acme/hub/.github/workflows/publish-docker-readme-task.yml@"
         + "a"
         * 40
@@ -2278,6 +2279,7 @@ def _selftest():
         "requireTokensInJob": {
             "publish-docker-readme": [
                 "publish-docker-readme-task.yml",
+                "contents: read",
                 "DOCKER_HUB_USERNAME",
                 "DOCKER_HUB_ACCESS_TOKEN",
             ]

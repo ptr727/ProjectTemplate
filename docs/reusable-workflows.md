@@ -340,7 +340,7 @@ ESPHome-NonRoot carries two trackers today. `check-upstream-version.yml` adopts 
 **Codegen.** A repo generating checked-in files from an external source replaces `run-codegen-pull-request-task.yml`'s job body with a caller stub, and carries a required `codegen` hook, `.github/actions/codegen/action.yml`, running only the generator invocation. `run-periodic-codegen-pull-request.yml` stays a per-repo caller stub the same shape it is today, calling the hub task by its pinned `uses:` in place of `./`.
 
 ```yaml
-  codegen:
+  run-codegen:
     name: Run codegen and pull request job
     uses: ptr727/ProjectTemplate/.github/workflows/run-codegen-pull-request-task.yml@<sha> # <tag>
     secrets:
