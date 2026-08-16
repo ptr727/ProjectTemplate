@@ -76,7 +76,8 @@ on:
         type: boolean
         default: false
     secrets:
-      # Not needed on a smoke build, but declared required since a real caller always logs in for cache reads.
+      # Required rather than optional, since even a smoke build logs in for the higher Docker Hub rate limits on cache reads.
+      # A fork PR carrying neither secret cannot run the Docker smoke build, which is acceptable for a same-repo PR.
       DOCKER_HUB_USERNAME:
         required: true
       DOCKER_HUB_ACCESS_TOKEN:
