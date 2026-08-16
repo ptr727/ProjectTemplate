@@ -1096,11 +1096,26 @@ sudo_timestamp_report() {
     fi
 }
 
+# A username escaped for safe embedding in an ERE.
+# A username can legally hold a regex metacharacter (a dot is common in a domain-joined account), and left unescaped it can match a different user's line as if it were this one's.
+sudo_timestamp_user_re() {
+    local user="$1" out="" i c
+    for ((i = 0; i < ${#user}; i++)); do
+        c="${user:i:1}"
+        case "$c" in
+            '.' | '[' | $'\\' | '^' | '$' | '(' | ')' | '*' | '+' | '?' | '{' | '}' | '|') out+="\\$c" ;;
+            *) out+="$c" ;;
+        esac
+    done
+    printf '%s' "$out"
+}
+
 # Whether a drop-in holds nothing but this user's timestamp Defaults, aside from blank lines and comments.
 # That purity is what makes deleting the whole file safe, since a mixed file would lose whatever else it sets, and picking lines back out of one is guessing, not reading.
 sudo_timestamp_file_is_pure() {
-    local user="$1" file="$2" other
-    other=$("${SUDO[@]}" grep -vE "^[[:space:]]*(#.*)?\$|^[[:space:]]*Defaults:${user}[[:space:]]+timestamp_(type|timeout)=" \
+    local user="$1" file="$2" other user_re
+    user_re=$(sudo_timestamp_user_re "$user")
+    other=$("${SUDO[@]}" grep -vE "^[[:space:]]*(#.*)?\$|^[[:space:]]*Defaults:${user_re}[[:space:]]+timestamp_(type|timeout)=" \
         "$file" 2> /dev/null) || other=""
     [[ -z $other ]]
 }
@@ -1154,7 +1169,8 @@ configure_sudo_timestamp() {
     # Only this user's own entry is ever a delete candidate; a different user's entry, or one with no user named at all, changes something beyond what this run was asked to change, so it is reported and left alone.
     local -a delete_files=() unsafe_files=()
     if [[ -n $elsewhere ]]; then
-        local candidate
+        local candidate user_re
+        user_re=$(sudo_timestamp_user_re "$user")
         while read -r candidate; do
             [[ -n $candidate ]] || continue
             # The main sudoers file is never auto-edited, and a drop-in that sets something else besides is never guessed at line by line, since either mistake risks removing a rule unrelated to this.
@@ -1163,7 +1179,7 @@ configure_sudo_timestamp() {
             else
                 unsafe_files+=("$candidate")
             fi
-        done < <(grep -E "Defaults:${user}[[:space:]]+timestamp_(type|timeout)=" <<< "$elsewhere" | awk -F: '{print $1}' | sort -u)
+        done < <(grep -E "Defaults:${user_re}[[:space:]]+timestamp_(type|timeout)=" <<< "$elsewhere" | awk -F: '{print $1}' | sort -u)
     fi
 
     if [[ $own_current == true && ${#delete_files[@]} -eq 0 ]]; then
