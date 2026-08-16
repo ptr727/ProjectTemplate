@@ -1116,7 +1116,8 @@ sudo_timestamp_user_re() {
 sudo_timestamp_file_is_pure() {
     local user="$1" file="$2" user_re allow status
     user_re=$(sudo_timestamp_user_re "$user")
-    allow="^[[:space:]]*(#.*)?\$|^[[:space:]]*Defaults:${user_re}[[:space:]]+timestamp_(type|timeout)=[^,[:space:]]+(,[[:space:]]*timestamp_(type|timeout)=[^,[:space:]]+)*[[:space:]]*\$"
+    # $ here is bash's own end-of-string, and the double quotes strip a backslash before it, so grep receives a plain $ (ERE's end-of-line anchor), never a literal one.
+    allow="^[[:space:]]*(#.*)?$|^[[:space:]]*Defaults:${user_re}[[:space:]]+timestamp_(type|timeout)=[^,[:space:]]+(,[[:space:]]*timestamp_(type|timeout)=[^,[:space:]]+)*[[:space:]]*$"
     "${SUDO[@]}" grep -vE "$allow" "$file" > /dev/null 2>&1 && status=0 || status=$?
     # Exit 1 means every line matched the allowlist (pure), 0 means one did not (impure), and anything else is a read failure this cannot tell apart from either, so it is never treated as pure.
     [[ $status -eq 1 ]]
