@@ -28,7 +28,7 @@ inputs:
     required: false
     default: ./Console/Console.csproj
   asset-name:
-    description: Name of the release archive without its .7z extension. Empty derives it from the project file's stem, so ./Widget/Widget.csproj gives Widget.7z.
+    description: Name of the release archive without its .7z extension, so Widget produces Widget.7z. Empty derives it from the project file's stem, so ./Widget/Widget.csproj also produces Widget.7z.
     required: false
     default: ''
 
