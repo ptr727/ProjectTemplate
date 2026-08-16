@@ -31,6 +31,10 @@ runs:
         SEMVER2: ${{ inputs.semver2 }}
       run: |
         set -Eeuo pipefail
+        if [[ -z "$IMAGE" ]]; then
+          echo "::error::inputs.image is empty. The hub default docker-prepare hook needs docker_image set, or a caller's own .github/actions/docker-prepare hook."
+          exit 1
+        fi
         moving=develop
         [[ "$BRANCH" == "main" ]] && moving=latest
         matrix=$(jq -cn \
