@@ -447,7 +447,8 @@ jobs:
     needs: [plan]
     if: ${{ needs.plan.outputs.publish == 'true' }}
     uses: ptr727/ProjectTemplate/.github/workflows/validate-task.yml@<sha> # <tag>
-    secrets: inherit
+    secrets:
+      CODECOV_TOKEN: ${{ secrets.CODECOV_TOKEN }}
 
   # Build, version, validate, push, and release the triggering branch. Grants the write scopes the hub
   # task needs (it declares none of its own except where a job genuinely writes, per its own header).

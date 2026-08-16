@@ -2128,8 +2128,7 @@ def _selftest():
     }
     # The publish-release.yml caller stub once the release chain is hub-hosted, plan, validate and publish job keys.
     # Each names its hub task by token, per docs/reusable-workflows.md "Adopting the Release Chain".
-    # Validate carries no token requirement of its own.
-    # Its presence as a job key is what stops a stub from skipping the gate, per WORKFLOW.md's source-only shape.
+    # Validate's own token requirement is what stops a stub from satisfying the job key with a no-op job.
     publish_stub = (
         "jobs:\n"
         "  plan:\n"
@@ -2154,6 +2153,7 @@ def _selftest():
         "requiredJobKeys": ["plan", "validate", "publish"],
         "requireTokensInJob": {
             "plan": ["publish-plan-task.yml"],
+            "validate": ["validate-task.yml"],
             "publish": ["build-release-task.yml"],
         },
     }
@@ -2331,6 +2331,15 @@ def _selftest():
             publish_stub.replace(
                 "acme/hub/.github/workflows/build-release-task.yml@" + "a" * 40 + " # 2.0.1",
                 "./.github/workflows/build-release-task-renamed.yml",
+            ),
+            publish_contract,
+            1,
+        ),
+        (
+            "publish-release.yml stub whose validate job never names validate-task.yml",
+            publish_stub.replace(
+                "    uses: ./.github/workflows/validate-task.yml\n",
+                "    uses: ./.github/workflows/validate-task-renamed.yml\n",
             ),
             publish_contract,
             1,
