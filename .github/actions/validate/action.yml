@@ -1,0 +1,50 @@
+# The hub's own validate hook, run by validate-task.yml's validate job for this repo.
+# The fleet doc-lint block and the generic unit-test job in validate-task.yml do not cover the hub's own machinery.
+# Carrying this hook makes the hub exercise the override path on every hub pull request, where a repo with no hook of its own exercises the hub default at .github/actions/validate-default.
+name: Validate repository (hub)
+description: Registry and spec validation, the script self-test suite, the fleet-skills freshness check, and the unclassified-character report.
+
+runs:
+  using: composite
+  steps:
+
+    - name: Validate registry and spec step
+      shell: bash
+      run: |
+        set -Eeuo pipefail
+        for f in registry/*.json spec/*.json repo-config/*.json; do
+          jq empty "$f"
+        done
+        python3 spec/validate.py
+
+    - name: Setup uv step
+      uses: astral-sh/setup-uv@08807647e7069bb48b6ef5acd8ec9567f424441b # v8.1.0
+      with:
+        python-version: "3.13"
+
+    # Each gate here is proven by a case that reintroduces the fault it catches, wherever it lives.
+    # A test sits with the layer that owns it rather than beside the file it names, so a read-only gate over the spec and the host tooling lives in scripts/tests/ even where its subject is shell.
+    # The agent-safety kit carries its own tests because it ships as a unit.
+    # Every run goes through coverage with --append, so one report covers the whole self-test surface, informational with no threshold adopted.
+    - name: Run script self-tests step
+      shell: bash
+      run: |
+        set -Eeuo pipefail
+        uvx coverage@latest run --source=scripts,spec,host-setup -m unittest discover -s scripts/tests
+        uvx coverage@latest run --source=scripts,spec,host-setup --append spec/audit.py --selftest
+        uvx coverage@latest run --source=scripts,spec,host-setup --append spec/workflow_reuse.py --selftest
+        uvx coverage@latest run --source=scripts,spec,host-setup --append host-setup/agent-safety/gh-write-guard.py --selftest
+        uvx coverage@latest run --source=scripts,spec,host-setup --append host-setup/agent-safety/test_install.py
+        uvx coverage@latest report
+
+    # Read-only: fails if .claude-plugin/fleet-skills/ was not regenerated from .agents/skills/.
+    - name: Check fleet skills are current step
+      shell: bash
+      run: python3 scripts/build_dist.py --check
+
+    # Warn-only, and visible rather than absent: an unrun check is one nobody acts on.
+    # A finding here names a character no tier covers, and classifying it is a fleet-law edit rather than a prose fix.
+    - name: Report unclassified characters step
+      shell: bash
+      continue-on-error: true
+      run: python3 scripts/prose_lint.py . --check charset-unknown --summary

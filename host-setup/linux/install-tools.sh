@@ -1096,6 +1096,33 @@ sudo_timestamp_report() {
     fi
 }
 
+# A username escaped for safe embedding in an ERE.
+# A username can legally hold a regex metacharacter (a dot is common in a domain-joined account), and left unescaped it can match a different user's line as if it were this one's.
+sudo_timestamp_user_re() {
+    local user="$1" out="" i c
+    for ((i = 0; i < ${#user}; i++)); do
+        c="${user:i:1}"
+        case "$c" in
+            '.' | '[' | $'\\' | '^' | '$' | '(' | ')' | '*' | '+' | '?' | '{' | '}' | '|') out+="\\$c" ;;
+            *) out+="$c" ;;
+        esac
+    done
+    printf '%s' "$out"
+}
+
+# Whether a drop-in holds nothing but this user's timestamp Defaults, aside from a blank line or a full-line comment.
+# That purity is what makes deleting the whole file safe, since a mixed file would lose whatever else it sets, and picking lines back out of one is guessing, not reading.
+# The allowlist is anchored at both ends, so a line carrying a timestamp assignment plus anything else (a trailing ",requiretty") fails it rather than passing as a prefix match.
+sudo_timestamp_file_is_pure() {
+    local user="$1" file="$2" user_re allow status
+    user_re=$(sudo_timestamp_user_re "$user")
+    # $ here is bash's own end-of-string, and the double quotes strip a backslash before it, so grep receives a plain $ (ERE's end-of-line anchor), never a literal one.
+    allow="^[[:space:]]*(#.*)?$|^[[:space:]]*Defaults:${user_re}[[:space:]]+timestamp_(type|timeout)=[^,[:space:]]+(,[[:space:]]*timestamp_(type|timeout)=[^,[:space:]]+)*[[:space:]]*$"
+    "${SUDO[@]}" grep -vE "$allow" "$file" > /dev/null 2>&1 && status=0 || status=$?
+    # Exit 1 means every line matched the allowlist (pure), 0 means one did not (impure), and anything else is a read failure this cannot tell apart from either, so it is never treated as pure.
+    [[ $status -eq 1 ]]
+}
+
 # Share one sudo credential cache across a user's terminals, rather than sudo's default of one per terminal.
 configure_sudo_timestamp() {
     local user staged
@@ -1132,11 +1159,8 @@ configure_sudo_timestamp() {
             die "$switch_to does not parse this host's sudoers, so switching to it would lock every user out. This host is unchanged."
     fi
 
-    if "${SUDO[@]}" cmp -s "$staged" "$SUDOERS_FILE" 2> /dev/null; then
-        log "$SUDOERS_FILE already carries exactly this, leaving it alone"
-        sudo_timestamp_report "$user"
-        return 0
-    fi
+    local own_current=false
+    "${SUDO[@]}" cmp -s "$staged" "$SUDOERS_FILE" 2> /dev/null && own_current=true
 
     # Another file setting either option is named rather than merged into, since which one wins is the order sudo reads them in and not something this can decide.
     local elsewhere
@@ -1144,6 +1168,30 @@ configure_sudo_timestamp() {
     elsewhere=$("${SUDO[@]}" grep -rnsE '^[[:space:]]*Defaults.*timestamp_(type|timeout)' \
         --exclude='*.*' --exclude='*~' --exclude="${SUDOERS_FILE##*/}" \
         /etc/sudoers /etc/sudoers.d 2> /dev/null) || elsewhere=""
+
+    # Only this user's own entry is ever a delete candidate; a different user's entry, or one with no user named at all, changes something beyond what this run was asked to change, so it is reported and left alone.
+    local -a delete_files=() unsafe_files=()
+    if [[ -n $elsewhere ]]; then
+        local candidate user_re
+        user_re=$(sudo_timestamp_user_re "$user")
+        while read -r candidate; do
+            [[ -n $candidate ]] || continue
+            # The main sudoers file is never auto-edited, and a drop-in that sets something else besides is never guessed at line by line, since either mistake risks removing a rule unrelated to this.
+            if [[ $candidate == "${SUDOERS_FILE%/*}"/* ]] && sudo_timestamp_file_is_pure "$user" "$candidate"; then
+                delete_files+=("$candidate")
+            else
+                unsafe_files+=("$candidate")
+            fi
+        done < <(grep -E "Defaults:${user_re}[[:space:]]+.*timestamp_(type|timeout)=" <<< "$elsewhere" | awk -F: '{print $1}' | sort -u)
+    fi
+
+    # A standing unsafe file still reaches the die below even when this run's own file needs no change, since silently returning here would report success over a same-user conflict this cannot resolve on its own.
+    if [[ $own_current == true && ${#delete_files[@]} -eq 0 && ${#unsafe_files[@]} -eq 0 ]]; then
+        log "$SUDOERS_FILE already carries exactly this, leaving it alone"
+        sudo_timestamp_report "$user"
+        return 0
+    fi
+
     if [[ -n $elsewhere ]]; then
         warn "A timestamp option is already set elsewhere, and the file sudo reads last wins:"
         local line
@@ -1152,12 +1200,20 @@ configure_sudo_timestamp() {
         done <<< "$elsewhere"
     fi
 
+    if [[ ${#unsafe_files[@]} -gt 0 ]]; then
+        die "${unsafe_files[*]} sets $user's timestamp option but also carries something unrelated (or is the main sudoers file itself), so this will not guess which lines are safe to remove. Resolve it by hand with visudo, then run this again."
+    fi
+
+    if [[ ${#delete_files[@]} -gt 0 ]]; then
+        info "Continuing deletes: ${delete_files[*]} (nothing in it but $user's timestamp Defaults), leaving $SUDOERS_FILE as the one place setting this"
+    fi
+
     if [[ -n $switch_to ]]; then
         log "The sudo this host runs parses no timestamp_type, and $switch_to does"
         info "Switching the alternative changes which sudo implementation every user on this host runs"
         info "\"update-alternatives --auto sudo\" puts that back"
     fi
-    confirm "Change this host?" || die "Declined"
+    confirm "Change this host?" || die "Declined, leaving the host unchanged"
 
     if [[ -n $switch_to ]]; then
         run_root update-alternatives --set sudo "$switch_to"
@@ -1165,17 +1221,26 @@ configure_sudo_timestamp() {
         info "The cached credential does not carry across the switch, so the next step may ask for a password"
     fi
 
-    # A drop-in whose name holds a dot is one sudo skips, so the content lands under such a name, is proved where it will be read, and only then is renamed over.
-    # Renaming is atomic, which a copy into place is not, and a half-written file in that directory locks every user out of sudo.
-    local pending="${SUDOERS_FILE%/*}/.${SUDOERS_FILE##*/}.pending"
-    run_root install -m 0440 -o root -g root "$staged" "$pending"
-    if [[ $DRY_RUN == false ]]; then
-        "${SUDO[@]}" visudo -cqf "$pending" > /dev/null 2>&1 || {
-            run_root rm -f "$pending"
-            die "The staged drop-in does not parse where sudo would read it, so this host is unchanged"
-        }
+    if [[ $own_current == false ]]; then
+        # A drop-in whose name holds a dot is one sudo skips, so the content lands under such a name, is proved where it will be read, and only then is renamed over.
+        # Renaming is atomic, which a copy into place is not, and a half-written file in that directory locks every user out of sudo.
+        local pending="${SUDOERS_FILE%/*}/.${SUDOERS_FILE##*/}.pending"
+        run_root install -m 0440 -o root -g root "$staged" "$pending"
+        if [[ $DRY_RUN == false ]]; then
+            "${SUDO[@]}" visudo -cqf "$pending" > /dev/null 2>&1 || {
+                run_root rm -f "$pending"
+                die "The staged drop-in does not parse where sudo would read it, so this host is unchanged"
+            }
+        fi
+        run_root mv "$pending" "$SUDOERS_FILE"
     fi
-    run_root mv "$pending" "$SUDOERS_FILE"
+
+    # A superseded file is removed only once $SUDOERS_FILE is proved in place, so a failure above never leaves this user's cache unset.
+    local old
+    for old in "${delete_files[@]}"; do
+        run_root rm -f "$old"
+        [[ $DRY_RUN == true ]] || log "Removed $old, superseded by $SUDOERS_FILE"
+    done
 
     if [[ $DRY_RUN == true ]]; then
         sudo_timestamp_report "$user"
@@ -1183,9 +1248,9 @@ configure_sudo_timestamp() {
     fi
 
     "${SUDO[@]}" visudo -cq > /dev/null 2>&1 ||
-        die "sudoers stopped parsing once $SUDOERS_FILE landed. Remove that file from a root shell to restore sudo."
+        die "sudoers stopped parsing once this run's changes landed. Remove $SUDOERS_FILE from a root shell to restore sudo, and recreate ${delete_files[*]:-any file this run deleted} if it turns out to have been needed."
 
-    log "Wrote $SUDOERS_FILE"
+    [[ $own_current == false ]] && log "Wrote $SUDOERS_FILE"
     sudo_timestamp_report "$user"
 }
 
