@@ -406,9 +406,9 @@ def main():
     rows, unreadable, empty = measure(registry, canonical_texts(), hub_slug)
     if "--report" in argv:
         content = render_report(rows, unreadable, empty, hub_sha())
-        # CRLF matches the fleet default, since reports/*.md is CRLF.
+        # LF matches the fleet default, since reports/*.md is LF.
         # Bytes are written so the local platform does not re-translate them.
-        (audit.ROOT / REPORT_PATH).write_bytes(content.replace("\n", "\r\n").encode("utf-8"))
+        (audit.ROOT / REPORT_PATH).write_bytes(content.encode("utf-8"))
         print(f"Wrote {REPORT_PATH} ({len(content.splitlines())} lines)")
         return 0
     total = summarize(rows)

@@ -321,9 +321,8 @@ def test_every_windows_script_is_present() -> None:
 
     The exec bit is the Linux form of "this will run", and on Windows the equivalent property is the
     absence of a shebang: `scripts/repo_gate.py --check eol-coverage` requires git to resolve any
-    tracked file opening `#!` to `eol=lf`, and these files are CRLF by the `[*]` .editorconfig
-    default with no pin of their own. A shebang added later would fail that gate from a file nobody
-    would think to look at.
+    tracked file opening `#!` to `eol=lf` via a `.gitattributes` pin, and these files carry none of
+    their own. A shebang added later would fail that gate from a file nobody would think to look at.
     """
     scripts = (
         "install-skills.ps1",
@@ -340,8 +339,8 @@ def test_every_windows_script_is_present() -> None:
         if path.is_file():
             check(
                 not path.read_bytes().startswith(b"#!"),
-                f"{name} opens with a shebang, which the eol-coverage gate then pins to LF, "
-                f"against the CRLF these files are written with",
+                f"{name} opens with a shebang, which the eol-coverage gate then requires a "
+                f"`.gitattributes` pin for",
             )
 
 
@@ -351,15 +350,15 @@ def test_bootstrap_ps1_is_present_and_unmarked() -> None:
     Kept apart from `test_every_windows_script_is_present` rather than folded into it, because
     `bootstrap.ps1` deliberately sits beside `bootstrap.sh` at `host-setup/`, not inside
     `host-setup/windows/` with the four scripts that test checks. Same reasoning as that test: the
-    `eol-coverage` gate pins a tracked file opening `#!` to `eol=lf`, against the CRLF this file is
-    written with.
+    `eol-coverage` gate requires a `.gitattributes` pin for any tracked file opening `#!`, and this
+    file carries none of its own.
     """
     check(BOOTSTRAP_PS.is_file(), "bootstrap.ps1 is missing from host-setup")
     if BOOTSTRAP_PS.is_file():
         check(
             not BOOTSTRAP_PS.read_bytes().startswith(b"#!"),
-            "bootstrap.ps1 opens with a shebang, which the eol-coverage gate then pins to LF, "
-            "against the CRLF this file is written with",
+            "bootstrap.ps1 opens with a shebang, which the eol-coverage gate then requires a "
+            "`.gitattributes` pin for",
         )
 
 
