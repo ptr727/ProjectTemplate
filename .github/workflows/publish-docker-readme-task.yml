@@ -118,6 +118,8 @@ jobs:
     name: Publish Docker Hub readme job
     runs-on: ubuntu-latest
     needs: get-repos
+    # Redundant with get-repos's own branch gate (a skipped need already skips this job by default), stated explicitly so the main-only guarantee does not depend on the needs skip-cascade alone.
+    if: ${{ inputs.branch == 'main' }}
     permissions:
       contents: read
     strategy:
