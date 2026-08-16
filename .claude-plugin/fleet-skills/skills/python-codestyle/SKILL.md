@@ -121,8 +121,8 @@ Key rules for every Python task:
   false positives belong in `[tool.ruff.lint]` `ignore` or `per-file-ignores`.
 - **All public APIs are typed.** Use modern syntax (`list[int]`, `X | None`). Don't add
   `# type: ignore` without an explaining comment.
-- **Don't add backward-compat shims.** Just delete unused code; git history is the audit trail.
-- **Don't add error handling for impossible cases.** Trust internal code; validate only at boundaries.
+- **Don't add backward-compat shims.** Just delete unused code. Git history is the audit trail.
+- **Don't add error handling for impossible cases.** Trust internal code. Validate only at boundaries.
 
 For comments, docstrings, full type-hint rules, naming, imports, and all patterns to avoid, see
 `references/code-style.md`.
@@ -135,7 +135,7 @@ fakes over mocks. Test the docstring's contract, not implementation details. See
 
 ## Versioning
 
-Published packages use `_version.py` with `__version__ = "0.0.0"` as a placeholder; wire
+Published packages use `_version.py` with `__version__ = "0.0.0"` as a placeholder. Wire
 `hatch-vcs` or equivalent to increment, publish with `skip-existing: true`. Source-only repos use
 a static `version` in `[project]` with no `_version.py`. See `references/profiles.md` for details.
 
