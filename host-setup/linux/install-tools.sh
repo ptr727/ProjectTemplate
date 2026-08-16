@@ -1191,6 +1191,11 @@ parse_args() {
         shift
     done
 
+    # Checked against the action that won rather than inside the loop, since the last action given is the one that runs.
+    if [[ $MODE == "sudo-timestamp" && ${#requested[@]} -gt 0 ]]; then
+        die "--sudo-timestamp changes the host rather than a tool, so it takes no tool, and \"${requested[*]}\" names one"
+    fi
+
     if [[ ${#requested[@]} -gt 0 ]]; then
         # Keep the registry's dependency order rather than the order given on the command line.
         local tool requested_tool
