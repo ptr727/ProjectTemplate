@@ -32,7 +32,7 @@ runs:
       run: |
         set -Eeuo pipefail
         if [[ -z "$IMAGE" ]]; then
-          echo "::error::inputs.image is empty. The hub default docker-prepare hook needs docker_image set, or a caller's own .github/actions/docker-prepare hook."
+          echo "::error::inputs.image is empty. build-docker-task.yml callers set image, build-release-task.yml callers set docker_image, or a repo carries its own .github/actions/docker-prepare hook instead."
           exit 1
         fi
         moving=develop
