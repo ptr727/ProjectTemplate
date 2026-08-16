@@ -1110,7 +1110,7 @@ sudo_timestamp_user_re() {
     printf '%s' "$out"
 }
 
-# Whether a drop-in holds nothing but this user's timestamp Defaults, aside from blank lines and comments.
+# Whether a drop-in holds nothing but this user's timestamp Defaults, aside from a blank line or a full-line comment.
 # That purity is what makes deleting the whole file safe, since a mixed file would lose whatever else it sets, and picking lines back out of one is guessing, not reading.
 # The allowlist is anchored at both ends, so a line carrying a timestamp assignment plus anything else (a trailing ",requiretty") fails it rather than passing as a prefix match.
 sudo_timestamp_file_is_pure() {
