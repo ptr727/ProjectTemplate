@@ -1,0 +1,25 @@
+name: Run daily codegen and pull request action
+
+# Thin caller: the codegen cycle is the hub's reusable run-codegen-pull-request-task.yml, which every fleet repo generating checked-in files from an external source reaches rather than carries.
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: '0 4 * * *'
+
+# Workflow-only group (no -${{ github.ref }}): the task writes to the fixed codegen-main/codegen-develop branches regardless of the triggering ref, so a dispatch and the scheduled run must not race on them.
+concurrency:
+  group: ${{ github.workflow }}
+  cancel-in-progress: true
+
+permissions: {}
+
+jobs:
+
+  run-codegen:
+    name: Run codegen and pull request job
+    uses: ptr727/ProjectTemplate/.github/workflows/run-codegen-pull-request-task.yml@0b07a59d7c65d07d8df275a96deaf2e06cbefd51 # 2.0.352
+    secrets:
+      CODEGEN_APP_CLIENT_ID: ${{ secrets.CODEGEN_APP_CLIENT_ID }}
+      CODEGEN_APP_PRIVATE_KEY: ${{ secrets.CODEGEN_APP_PRIVATE_KEY }}
+      # Optional, mapped only when the codegen hook's generator calls a metered upstream API.
+      NINJA_API_KEY: ${{ secrets.NINJA_API_KEY }}
