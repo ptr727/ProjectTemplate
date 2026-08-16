@@ -1112,12 +1112,14 @@ sudo_timestamp_user_re() {
 
 # Whether a drop-in holds nothing but this user's timestamp Defaults, aside from blank lines and comments.
 # That purity is what makes deleting the whole file safe, since a mixed file would lose whatever else it sets, and picking lines back out of one is guessing, not reading.
+# The allowlist is anchored at both ends, so a line carrying a timestamp assignment plus anything else (a trailing ",requiretty") fails it rather than passing as a prefix match.
 sudo_timestamp_file_is_pure() {
-    local user="$1" file="$2" other user_re
+    local user="$1" file="$2" user_re allow status
     user_re=$(sudo_timestamp_user_re "$user")
-    other=$("${SUDO[@]}" grep -vE "^[[:space:]]*(#.*)?\$|^[[:space:]]*Defaults:${user_re}[[:space:]]+timestamp_(type|timeout)=" \
-        "$file" 2> /dev/null) || other=""
-    [[ -z $other ]]
+    allow="^[[:space:]]*(#.*)?\$|^[[:space:]]*Defaults:${user_re}[[:space:]]+timestamp_(type|timeout)=[^,[:space:]]+(,[[:space:]]*timestamp_(type|timeout)=[^,[:space:]]+)*[[:space:]]*\$"
+    "${SUDO[@]}" grep -vE "$allow" "$file" > /dev/null 2>&1 && status=0 || status=$?
+    # Exit 1 means every line matched the allowlist (pure), 0 means one did not (impure), and anything else is a read failure this cannot tell apart from either, so it is never treated as pure.
+    [[ $status -eq 1 ]]
 }
 
 # Share one sudo credential cache across a user's terminals, rather than sudo's default of one per terminal.
@@ -1179,7 +1181,7 @@ configure_sudo_timestamp() {
             else
                 unsafe_files+=("$candidate")
             fi
-        done < <(grep -E "Defaults:${user_re}[[:space:]]+timestamp_(type|timeout)=" <<< "$elsewhere" | awk -F: '{print $1}' | sort -u)
+        done < <(grep -E "Defaults:${user_re}[[:space:]]+.*timestamp_(type|timeout)=" <<< "$elsewhere" | awk -F: '{print $1}' | sort -u)
     fi
 
     if [[ $own_current == true && ${#delete_files[@]} -eq 0 ]]; then
