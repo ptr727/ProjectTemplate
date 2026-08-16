@@ -5,7 +5,7 @@ name: Publish Docker Hub readme task
 # The overview has no per-branch context.
 # The repository list is either passed directly (repositories) or derived from a manifest (manifest plus manifest-jq).
 # That covers single- and multi-image repos without per-repo glue.
-# A docker-readme-transform hook resolves which file to push, defaulting to Docker/README.md when present, else README.md as-is.
+# A docker-readme-transform hook sets a readme-filepath step output naming the file to push, defaulting to Docker/README.md when present, else README.md as-is.
 # A repo needs a hook only to override that choice or to render the file first, an m4 template, for example.
 
 on:

@@ -251,7 +251,7 @@ Stage 5 hosts four more tasks: `publish-docker-readme-task.yml`, `check-upstream
 
 `build-datebadge-task.yml` is retired rather than hosted. TODO.md "Delete the retired `byob.yarr.is` last-build badge" already settles that the badge service is deprecated and the badge is deleted rather than replaced, so no repo adopts a caller stub for it and KiCadLibrary's deletion is that same cleanup, not a migration to a hub task.
 
-**Docker Hub readme.** A repo publishing an image replaces its `publish-docker-readme-task.yml` job body with a caller stub reaching the hub task. A `docker-readme-transform` hook, `.github/actions/docker-readme-transform/action.yml`, is needed only to render the readme first or to override the hub default, which publishes `Docker/README.md` if present else `README.md` as-is.
+**Docker Hub readme.** A repo publishing an image replaces its `publish-docker-readme-task.yml` job body with a caller stub reaching the hub task. A `docker-readme-transform` hook, `.github/actions/docker-readme-transform/action.yml`, sets a `readme-filepath` step output naming the file to push, and is needed only to render the readme first or to override the hub default, which publishes `Docker/README.md` if present else `README.md` as-is.
 
 ```yaml
   publish-docker-readme:
@@ -266,7 +266,7 @@ Stage 5 hosts four more tasks: `publish-docker-readme-task.yml`, `check-upstream
 
 A multi-image repo passes `manifest` and `manifest-jq` in place of relying on the single-repository default, the same as today. NxWitness derives its Docker Hub repository list from `./Make/Matrix.json` inline in `publish-release.yml` today rather than through a standalone file, so its adoption also moves that job to the stub above.
 
-**Upstream-version tracker.** A repo tracking an upstream release replaces `check-upstream-version-task.yml`'s job body with a caller stub, and carries a required `resolve-upstream` hook, `.github/actions/resolve-upstream/action.yml`, printing the upstream version(s) as a JSON object of name -> version.
+**Upstream-version tracker.** A repo tracking an upstream release replaces `check-upstream-version-task.yml`'s job body with a caller stub, and carries a required `resolve-upstream` hook, `.github/actions/resolve-upstream/action.yml`, setting a `versions` step output, a JSON object of name -> version.
 
 ```yaml
   check-upstream-version:
@@ -277,7 +277,7 @@ A multi-image repo passes `manifest` and `manifest-jq` in place of relying on th
       CODEGEN_APP_PRIVATE_KEY: ${{ secrets.CODEGEN_APP_PRIVATE_KEY }}
 ```
 
-ESPHome-NonRoot carries two trackers today. `check-upstream-version.yml` adopts the stub above as-is. `check-upstream-dependency.yml`, whose bump waits for a human because its head deliberately does not match a merge-bot rule, adopts a second instance of the same stub with `with: { branches: '["develop"]', bump-branch-prefix: upstream-dependency, auto-merge: false }` and a `resolve-upstream` hook shaped around its apt-package snapshot, printing `{"docker_base_packages": "<sorted, comma-joined package list>"}` rather than a name-to-version map. The generic title and body this produces read less specifically than today's bespoke "packages added/removed" wording, which is the cost of folding a bespoke tracker into the shared task.
+ESPHome-NonRoot carries two trackers today. `check-upstream-version.yml` adopts the stub above as-is. `check-upstream-dependency.yml`, whose bump waits for a human because its head deliberately does not match a merge-bot rule, adopts a second instance of the same stub with `with: { branches: '["develop"]', bump-branch-prefix: upstream-dependency, auto-merge: false }` and a `resolve-upstream` hook shaped around its apt-package snapshot, setting `versions` to `{"docker_base_packages": "<sorted, comma-joined package list>"}` rather than a name-to-version map. The generic title and body this produces read less specifically than today's bespoke "packages added/removed" wording, which is the cost of folding a bespoke tracker into the shared task.
 
 **Deploy-site.** A site repo keeps `deploy-site.yml` as a per-repo caller (it has no manifest-wide catalog snippet either, since its `uses:` now names the hub, and it still carries the dispatch, the ref gate, and the shared validation call), but its `deploy` job reaches the hub-hosted `deploy-site-task.yml` and binds the same `environment:` the task binds, which is what lets the one crossing secret, `DEPLOY_SSH_PRIVATE_KEY`, resolve from the GitHub Environment store at the call site rather than through `secrets: inherit`, unusable across repositories. The three scripts `deploy/make-release.sh`, `deploy/prune-releases.sh`, and `checks/check-live-urls.sh` fold into one required `deploy` hook, `.github/actions/deploy/action.yml`, invoked three times with a `mode` input (`build`, `prune`, `verify`) so the site keeps its own generator, precompression, and URL contract while the upload-then-flip sequence stays hub-owned. Blog's own copy already carries more than three clean scripts, an `install-hugo` composite action, a git-mtime restore step, and PANGOLIN tokens for its staging auth check, which is why a hook, not a path convention, is the better contract here: it gives a site exactly this freedom instead of constraining it to fixed script names.
 

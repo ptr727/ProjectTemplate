@@ -77,9 +77,10 @@ Pick by where each artifact *goes*, not by language:
   To publish the Docker Hub repository overview, the hub-hosted `publish-docker-readme-task.yml`
   pushes a readme via `peter-evans/dockerhub-description` (single-repo by default, matrix per
   image for multi-image repos), wired into `publish-release.yml` and gated to `main` both by the
-  caller's `branch` input and inside the task itself. A `docker-readme-transform` hook resolves
-  which file to push, defaulting to `Docker/README.md` if present else `README.md` as-is, so a
-  repo needs a hook only to render the file first or to override that default.
+  caller's `branch` input and inside the task itself. A `docker-readme-transform` hook sets a
+  `readme-filepath` step output naming which file to push, defaulting to `Docker/README.md` if
+  present else `README.md` as-is, so a repo needs a hook only to render the file first or to
+  override that default.
 - **Filesystem on a host the project owns** (a static site, a config tree): a deploy leaf builds
   the tree and ships it over the repo's own transport, contributing **no** `release-asset-*`. It
   is a **separate `workflow_dispatch`** from the release, so a redeploy of an unchanged commit
@@ -115,7 +116,7 @@ are intentionally not added.
 ## Wrapper repos that track an upstream release
 
 A repo wrapping an upstream release uses the hub-hosted `check-upstream-version-task.yml`: a
-required `resolve-upstream` hook prints the upstream version(s) as a **JSON object of
+required `resolve-upstream` hook sets a `versions` step output, a **JSON object of
 `name -> version`**, written to a committed state file at the **repo root beside `version.json`**
 (default `upstream-version.json`, since it is a build-input version source, not GitHub-platform
 config, so it does not belong under `.github/`), and opens a rolling App-signed bump PR per branch
