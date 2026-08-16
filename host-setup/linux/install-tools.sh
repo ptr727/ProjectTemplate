@@ -1035,11 +1035,31 @@ sudo_implementations() {
     awk '$1 == "Alternative:" { alt = $2 } alt != "" && $1 == "visudo" { print alt, $2 }' <<< "$query"
 }
 
+# A visudo named by a bare name resolved to a path, since a Debian host keeps /usr/sbin off an unprivileged PATH and the name alone would read there as an implementation that is not installed.
+sudo_visudo_path() {
+    local name="$1" candidate
+    if [[ $name == /* ]]; then
+        printf '%s' "$name"
+        return 0
+    fi
+    if candidate=$(command -v "$name" 2> /dev/null); then
+        printf '%s' "$candidate"
+        return 0
+    fi
+    for candidate in /usr/local/sbin /usr/sbin /sbin /usr/bin; do
+        if [[ -x "$candidate/$name" ]]; then
+            printf '%s' "$candidate/$name"
+            return 0
+        fi
+    done
+    return 1
+}
+
 # Whether an implementation parses the drop-in, asked of its own visudo rather than of a version number.
 # Ubuntu ships sudo-rs as its default sudo from 25.10, and it carries no timestamp_type at all, so a host can hold a sudo that rejects the one setting this writes.
 sudo_parses() {
-    local file="$1" checker="$2"
-    command -v "$checker" > /dev/null || return 1
+    local file="$1" checker
+    checker=$(sudo_visudo_path "$2") || return 1
     "$checker" -cqf "$file" > /dev/null 2>&1
 }
 
