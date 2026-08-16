@@ -2213,6 +2213,7 @@ def _selftest():
         "  deploy:\n"
         "    name: Deploy job\n"
         "    environment: ${{ inputs.environment }}\n"
+        "    permissions:\n      contents: read\n"
         "    uses: acme/hub/.github/workflows/deploy-site-task.yml@" + "a" * 40 + " # 2.0.1\n"
         "    with:\n      environment: ${{ inputs.environment }}\n"
         "    secrets:\n      DEPLOY_SSH_PRIVATE_KEY: ${{ secrets.DEPLOY_SSH_PRIVATE_KEY }}\n"
@@ -2220,7 +2221,12 @@ def _selftest():
     deploy_contract = {
         "requiredJobKeys": ["assert-ref", "validate", "deploy"],
         "requireTokensInJob": {
-            "deploy": ["deploy-site-task.yml", "environment:", "DEPLOY_SSH_PRIVATE_KEY"]
+            "deploy": [
+                "deploy-site-task.yml",
+                "environment:",
+                "contents: read",
+                "DEPLOY_SSH_PRIVATE_KEY",
+            ]
         },
     }
     cases += [
@@ -2242,6 +2248,12 @@ def _selftest():
         (
             "deploy-site.yml caller stub missing the environment binding the crossing secret needs",
             deploy_stub.replace("    environment: ${{ inputs.environment }}\n", ""),
+            deploy_contract,
+            1,
+        ),
+        (
+            "deploy-site.yml caller stub missing the contents: read grant the task's jobs declare",
+            deploy_stub.replace("    permissions:\n      contents: read\n", ""),
             deploy_contract,
             1,
         ),

@@ -296,6 +296,8 @@ Stage 5 hosts four more tasks: `publish-docker-readme-task.yml`, `check-upstream
 ```yaml
   publish-docker-readme:
     name: Publish Docker Hub readme job
+    permissions:
+      contents: read
     uses: ptr727/ProjectTemplate/.github/workflows/publish-docker-readme-task.yml@<sha> # <tag>
     with:
       branch: ${{ github.ref_name }}
@@ -304,7 +306,7 @@ Stage 5 hosts four more tasks: `publish-docker-readme-task.yml`, `check-upstream
       DOCKER_HUB_ACCESS_TOKEN: ${{ secrets.DOCKER_HUB_ACCESS_TOKEN }}
 ```
 
-A multi-image repo passes `manifest` and `manifest-jq` in place of relying on the single-repository default, the same as today. NxWitness derives its Docker Hub repository list from `./Make/Matrix.json` inline in `publish-release.yml` today rather than through a standalone file, so its adoption also moves that job to the stub above.
+The caller grants `contents: read` explicitly, since the task's own jobs declare that scope for their checkout steps and a callee can only keep or reduce what its caller grants, never widen it. A multi-image repo passes `manifest` and `manifest-jq` in place of relying on the single-repository default, the same as today. NxWitness derives its Docker Hub repository list from `./Make/Matrix.json` inline in `publish-release.yml` today rather than through a standalone file, so its adoption also moves that job to the stub above.
 
 **Upstream-version tracker.** A repo tracking an upstream release replaces `check-upstream-version-task.yml`'s job body with a caller stub, and carries a required `resolve-upstream` hook, `.github/actions/resolve-upstream/action.yml`, setting a `versions` step output, a JSON object of name -> version.
 
