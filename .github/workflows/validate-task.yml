@@ -160,21 +160,23 @@ jobs:
         if: github.event.pull_request != null
         run: |
           set -Eeuo pipefail
-          if [ "$BASE" = "main" ]; then
+          if [ "$BASE_REF" = "main" ]; then
             script=.hub/scripts/prose_lint.py
           else
             script="$RUNNER_TEMP/prose_lint.py"
             curl -fsSL --retry 3 --retry-delay 2 --retry-all-errors \
               "https://raw.githubusercontent.com/ptr727/ProjectTemplate/develop/scripts/prose_lint.py" -o "$script"
           fi
-          if ! git rev-parse --verify --quiet "origin/$BASE^{commit}" >/dev/null; then
-            echo "::error::Diff base 'origin/$BASE' does not resolve in this checkout." >&2
+          if ! git rev-parse --verify --quiet "$BASE_SHA^{commit}" >/dev/null; then
+            echo "::error::Diff base '$BASE_SHA' does not resolve in this checkout." >&2
             exit 1
           fi
-          python3 "$script" --diff "origin/$BASE" --check charset --check semicolon --check dash --check dupword --check spelling --check comment-wrap --check comment-case --check home-path --check dead-path .
+          python3 "$script" --diff "$BASE_SHA" --check charset --check semicolon --check dash --check dupword --check spelling --check comment-wrap --check comment-case --check home-path --check dead-path .
         env:
-          # The base ref context field is unset here for the same reason, so it reads from the inherited event payload instead.
-          BASE: ${{ github.event.pull_request.base.ref }}
+          # The base ref context field is unset here for the same reason, so both read from the inherited event payload instead.
+          # The exact base commit needs no remote-tracking branch ref to be present in the checkout, unlike a branch name would.
+          BASE_REF: ${{ github.event.pull_request.base.ref }}
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
 
       - name: Check repo gates step
         run: python3 .hub/scripts/repo_gate.py
