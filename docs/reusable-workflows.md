@@ -117,10 +117,13 @@ A stage carries three kinds of item, plus a proof item where a claim needs a liv
 
 ### Stage 1: Merge-Bot Adoption
 
-Adoptable since `2.0.338`. Each repo replaces the whole of its `.github/workflows/merge-bot-pull-request.yml` with the stub in [Adopting the Merge-Bot](#adopting-the-merge-bot), on its own feature branch, and the audit's `missing required job 'merge-bot'` finding on that file is the work list. The pilot goes first and records what the hub cannot prove, cross-repository resolution of the pin, the `rules` input where the repo has a tracker, and the first Dependabot bump of the pin, in its audit report.
+Adoptable since `2.0.338`. Each repo replaces the whole of its `.github/workflows/merge-bot-pull-request.yml` with the stub in [Adopting the Merge-Bot](#adopting-the-merge-bot), on its own feature branch, and the audit's `missing required job 'merge-bot'` finding on that file is the work list. The pilot goes first and records what the hub cannot prove, cross-repository resolution of the pin, the `rules` input where the repo has a tracker, and the first Dependabot bump of the pin, as proof items here.
 
-- [ ] HomeAutomation-Config (pilot, operational model)
-- [ ] homeassistant-purpleair (second, `rules: '[{"head-prefix": "ha-version-bump/", "base": "develop"}]'` and `delete-branch: true`)
+- [ ] PhotoCleaner (pilot, chosen as a release-model repo with Dependabot, C#, executable and Docker targets and a fresh resync, so what it shows is the mechanism): adopted on `develop` in ptr727/PhotoCleaner#53 at `a3158ce` on 2026-08-15, where `spec/audit.py PhotoCleaner --branch develop` reports no `interface` finding on the file. Ticks when that repo promotes `develop` to `main`, its ground-truth branch, which is also when the report below counts it as a caller. The three live proofs it owes, cross-repository resolution of the pin, a Dependabot PR to `develop` merged with `--squash` through the callee, and Dependabot bumping the pin, are the proof items in stage 0 and below, ticked with their run URLs when they happen.
+- [ ] Proof: the first `pull_request_target` run on PhotoCleaner `develop` after `a3158ce` resolves the owner-scoped `uses:` and merges the Dependabot PR that opened it. Tick with the run URL.
+- [ ] Proof: Dependabot opens a `Bump ptr727/ProjectTemplate` PR on PhotoCleaner after the next hub release. Tick with the PR.
+- [ ] HomeAutomation-Config (operational model, the direct-to-develop path)
+- [ ] homeassistant-purpleair (third, `rules: '[{"head-prefix": "ha-version-bump/", "base": "develop"}]'` and `delete-branch: true`)
 - [ ] ESPHome-NonRoot (`delete-branch: true`, built-in upstream-version pairs cover its tracker)
 - [ ] NxWitness (`delete-branch: true`, drops the Dependabot semver-major filter per D8.1 unless the open decision lands first)
 - [ ] KiCadLibrary (drops the Dependabot semver-major filter per D8.1 unless the open decision lands first)
@@ -131,7 +134,6 @@ Adoptable since `2.0.338`. Each repo replaces the whole of its `.github/workflow
 - [ ] Blog
 - [ ] ESPHome-Config
 - [ ] HomeAssistant-Config
-- [ ] PhotoCleaner
 - [ ] PlexCleaner
 - [ ] Utilities
 - [ ] Vantage-Config
@@ -150,8 +152,8 @@ Hub: `validate-task.yml` hosts the per-type doc-lint block once and calls the `v
 - [ ] Promoted and released, tag recorded here.
 - [ ] Catalog snippets for both stubs pinned to that release.
 - [ ] Hook fallback observed on a hub pull request run (default path) and on the pilot (override path), run URLs recorded here.
-- [ ] HomeAutomation-Config (pilot, operational trigger shape)
-- [ ] One C# repo (second pilot, release trigger shape with smoke)
+- [ ] PhotoCleaner (pilot, release trigger shape with smoke, the same repo that piloted stage 1)
+- [ ] HomeAutomation-Config (second pilot, operational trigger shape)
 - [ ] The remaining repos, one checkbox each added when the pilots close, since the sweep list is every cataloged repo.
 - [ ] `reports/workflow-reuse.md` regenerated with `validate-task.yml` and `test-pull-request.yml` at 0 copies carrying job bodies.
 
@@ -170,7 +172,8 @@ Hub: `build-release-task.yml` with `build-executable`, `build-nuget`, `build-pyp
 
 - [ ] Hub pull request on `develop`.
 - [ ] Promoted and released, tag recorded here.
-- [ ] PhotoCleaner and PlexCleaner (pilots, vanilla Docker plus executable)
+- [ ] PhotoCleaner (pilot, vanilla Docker plus executable)
+- [ ] PlexCleaner (second, the same shape)
 - [ ] VSCode-Server-DotNetCore (vanilla Docker only)
 - [ ] ESPHome-NonRoot (`docker-prepare` hook for the upstream pin)
 - [ ] NxWitness (matrix hook and `build-base`)

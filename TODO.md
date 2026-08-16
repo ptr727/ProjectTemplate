@@ -259,7 +259,7 @@ One pull request per stage moving a standard workflow out of every repo and into
   - **Checked** - `develop` at `7c67328` on 2026-08-15, where the report counts 20 copies of `test-pull-request.yml` in 13 variants and 13 copies of `validate-task.yml` in 11, and the doc-lint block (markdownlint, cspell, actionlint, editorconfig-checker) repeats in every one.
   - **Open** - Whether the per-type lint steps are selected by an input the stub sets or read from the repo's registry entry through a hub checkout at `github.job_workflow_sha`, since the second needs no per-repo input and the first needs no network read.
   - **Open** - Whether a `validate` hook that runs a domain compile (an ESPHome build, a KiCad ERC) is one hook or several, given the two repos carrying such a step run it as a separate job today.
-  - **Settled** - Pilots are HomeAutomation-Config, the smallest operational tree, then a C# repo, so both trigger shapes are exercised before the sweep.
+  - **Settled** - Pilots are PhotoCleaner, which piloted the merge-bot stub in ptr727/PhotoCleaner#53 on 2026-08-15 as a release-model repo with Dependabot, C#, executable and Docker targets, then HomeAutomation-Config for the operational trigger shape, so both shapes are exercised before the sweep.
   - **Settled** - The step gated on `hashFiles('.github/actions/validate/action.yml') != ''` runs the caller's hook from its own checkout, else the default from a hub checkout under `.hub/`, and a local composite action resolves at step time from the workspace, which is what makes the fallback expressible at all.
 
 - **Host the pure functions: `get-version-task.yml` and `publish-plan-task.yml`.** Neither has a repo-specific line, and the plan job is missing where D4.1 needs it.
@@ -532,7 +532,7 @@ Regenerate [reports/divergences.md][divergences-report] before using it as the w
 
 - **Adopt the merge-bot caller stub, which is one file per repo replacing the copied job bodies.** The audit reports the missing `merge-bot` caller job on every copy until the repo adopts, which is the work list.
   - **Hub state** - Done on `develop`, where `.github/workflows/merge-bot-task.yml` is the task and the hub's own `merge-bot-pull-request.yml` is the stub. The stub a repo copies is in [`docs/reusable-workflows.md`][reusable-workflows-doc] "Adopting the Merge-Bot", and its pin is the first hub release carrying the task, so no repo can adopt before that release.
-  - **Outstanding** - Every repo carrying the file, 16 today, pilot on HomeAutomation-Config, then homeassistant-purpleair for the `rules` input.
+  - **Outstanding** - Every repo carrying the file, 15 after PhotoCleaner adopted in ptr727/PhotoCleaner#53 on 2026-08-15, then HomeAutomation-Config for the operational path and homeassistant-purpleair for the `rules` input.
   - **Issue** - [#521][issue-521], whose hub half is done and whose sweep half this is.
   - **Rides with** - The `verbatim` re-vendor above.
   - **Detail** - The unused `GITHUB_TOKEN` grants #521 names are gone with the copy, since the task declares none and the stub sets `permissions: {}`.
