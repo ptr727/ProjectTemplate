@@ -4,6 +4,7 @@ The reusable build/publish workflow tasks a code-shipping repo runs. They are **
 
 | File | Role | WORKFLOW.md guarantees |
 | --- | --- | --- |
+| `merge-bot-pull-request.yml` | Caller stub for the hub-hosted merge-bot task, pinned to a hub release, the shape every repo carries | D8.1, D8.3, D8.4 |
 | `build-release-task.yml` | Multi-target release orchestrator: get-version, validate-release, github-release plus per-target build jobs | D3, D4, D5, D6 |
 | `get-version-task.yml` | NBGV version/tag computation (reusable) | D3 |
 | `publish-plan-task.yml` | Single-source release-gate decision (publish? stable?) reused by every publish-release job | D4 |
