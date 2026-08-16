@@ -86,7 +86,7 @@ runs:
         set -Eeuo pipefail
         name="${ASSET_NAME:-$(basename "$PROJECT_FILE" .csproj)}"
         if [[ ! "$name" =~ ^[A-Za-z0-9._-]+$ ]]; then
-          echo "::error::asset-name must be a bare file name of letters, digits, dot, underscore or hyphen, got '$name'"
+          echo "::error::asset-name must be a bare file name of letters, digits, dot, underscore or hyphen"
           exit 1
         fi
         7z a -t7z "$RUNNER_TEMP/$name.7z" "$RUNNER_TEMP"/publish/*
