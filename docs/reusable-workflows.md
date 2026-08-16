@@ -185,7 +185,7 @@ Hub: `build-release-task.yml` with `build-executable`, `build-nuget`, `build-pyp
 
 Hub: `publish-docker-readme-task.yml` with a `docker-readme-transform` hook, `check-upstream-version-task.yml` with a `resolve-upstream` hook and an `auto-merge` input, `deploy-site-task.yml` with a `deploy` hook, and `run-codegen-pull-request-task.yml` with a `codegen` hook. `build-datebadge-task.yml` is retired rather than hosted, TODO.md already tracks deleting the retired badge from its one remaining carrier. The `operational-vs-release-workflow` skill's note that the target list stays per repo is retired here, once the release-chain stage that makes it true has shipped.
 
-- [ ] Hub pull request on `develop`.
+- [x] Hub pull request on `develop` in #761.
 - [ ] Promoted and released, tag recorded here.
 - [ ] Adoption, one checkbox per carrier added when the hub pull request merges.
   - [ ] VSCode-Server-DotNetCore (`publish-docker-readme-task.yml`)
