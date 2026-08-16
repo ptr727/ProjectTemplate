@@ -2385,7 +2385,7 @@ def _selftest():
 
     # Coordination-reference scan: the hub name inside a verbatim section is exempt, outside one is not.
     # The first case is the real AGENTS.md shape, where the byte-locked Fleet Bootstrap block must name the hub and a repo therefore cannot clear a finding against it.
-    # The CRLF case matters because extract_section normalizes EOLs while carried files are CRLF on this fleet, so excision must survive that.
+    # The CRLF case matters because extract_section normalizes EOLs while a carried file can still arrive CRLF (an operational repo's Windows-native override, or a stale copy mid-resync), so excision must survive that.
     boot = "## Fleet Bootstrap\n\nThe canonical rules live in `github.com/acme/Hub`.\n"
     owned = "## Where the Rules Live\n\nReport a rule discrepancy to acme/Hub.\n"
     clean_doc = (

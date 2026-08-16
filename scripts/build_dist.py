@@ -106,10 +106,10 @@ def expected_manifest(names):
 def write_plugin_manifest(names):
     PLUGIN_MANIFEST.parent.mkdir(parents=True, exist_ok=True)
     manifest = expected_manifest(names)
-    # CRLF, matching this repo's JSON default (.editorconfig `[*] end_of_line = crlf`).
-    # No LF pin applies here, since this is not a shebang-executed or shell-consumed path.
+    # LF, matching this repo's JSON default (.editorconfig `[*] end_of_line = lf`).
+    # Explicit, not the platform default: a Windows host writing plain LF (newline=None) would translate it to CRLF on write, which disagrees with this repo's LF default.
     PLUGIN_MANIFEST.write_text(
-        json.dumps(manifest, indent=2) + "\n", encoding="utf-8", newline="\r\n"
+        json.dumps(manifest, indent=2) + "\n", encoding="utf-8", newline="\n"
     )
 
 
@@ -125,10 +125,8 @@ def regenerate():
         reject_symlinks(SKILLS_SRC / name)
         shutil.copytree(SKILLS_SRC / name, dist_skills / name)
     write_plugin_manifest(names)
-    # CRLF, same as write_plugin_manifest.
-    # The platform default would write plain LF on Linux.
-    # That disagrees with this repo's CRLF default for a path no LF pin covers.
-    DIGEST_STAMP.write_text(source_digest(names) + "\n", encoding="utf-8", newline="\r\n")
+    # LF, same as write_plugin_manifest, explicit for the same Windows-platform-default reason.
+    DIGEST_STAMP.write_text(source_digest(names) + "\n", encoding="utf-8", newline="\n")
     return names
 
 
