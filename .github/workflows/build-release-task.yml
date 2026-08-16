@@ -231,7 +231,9 @@ jobs:
     needs: [get-version, validate-release]
     runs-on: ubuntu-latest
     # OIDC trusted publishing through NuGet/login needs id-token: write, granted by the caller on its call to this task.
+    # It is declared alongside contents: read, since a job-level permissions: block zeroes every unlisted scope, and this job's checkout steps need it.
     permissions:
+      contents: read
       id-token: write
     steps:
 
