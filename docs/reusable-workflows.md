@@ -1,6 +1,6 @@
 # Hub-Hosted Reusable Workflows (Hub-Only)
 
-The design for moving the fleet's standard GitHub Actions workflows out of every repo and into the hub, once, as reusable workflows a downstream repo reaches rather than carries. This doc is **hub-only** and is not carried downstream. It states the target model, the hook contract, the pin and secrets policy, the migration phases, and the measurement that tracks the burn-down. [GOVERNANCE.md "Hub-Hosted Tooling"][governance-hub-hosted-tooling] is the law this doc applies to workflows. [WORKFLOW.md][workflow] keeps the CI/CD contract every hosted workflow still has to satisfy.
+The design for moving the fleet's standard GitHub Actions workflows out of every repo and into the hub, once, as reusable workflows a downstream repo reaches rather than carries. This doc is **hub-only** and is not carried downstream. It states the target model, the hook contract, the pin and secrets policy, the staged rollout with its completion state, and the measurement that tracks the burn-down. [GOVERNANCE.md "Hub-Hosted Tooling"][governance-hub-hosted-tooling] is the law this doc applies to workflows. [WORKFLOW.md][workflow] keeps the CI/CD contract every hosted workflow still has to satisfy.
 
 ## Table of Contents <!-- omit from toc -->
 
@@ -14,7 +14,13 @@ The design for moving the fleet's standard GitHub Actions workflows out of every
   - [The Hub Is Its Own First Consumer](#the-hub-is-its-own-first-consumer)
 - [Hook Catalog](#hook-catalog)
 - [The Docker Family](#the-docker-family)
-- [Migration Phases](#migration-phases)
+- [Rollout](#rollout)
+  - [Stage 0: Design, Measurement, and the Merge-Bot Task](#stage-0-design-measurement-and-the-merge-bot-task)
+  - [Stage 1: Merge-Bot Adoption](#stage-1-merge-bot-adoption)
+  - [Stage 2: The Gates](#stage-2-the-gates)
+  - [Stage 3: The Pure Functions](#stage-3-the-pure-functions)
+  - [Stage 4: The Release Chain and the Docker Core](#stage-4-the-release-chain-and-the-docker-core)
+  - [Stage 5: The Type-Specific Tasks](#stage-5-the-type-specific-tasks)
 - [Adopting the Merge-Bot](#adopting-the-merge-bot)
 - [What a Pilot Proves](#what-a-pilot-proves)
 - [Open Decisions](#open-decisions)
@@ -54,7 +60,7 @@ A downstream `uses:` reads `ptr727/ProjectTemplate/.github/workflows/<name>-task
 
 A downstream pull request may pin a hub feature-branch SHA to test a hub change that is still in flight, and re-pins to a released `main` SHA before it merges. `scripts/repo_gate.py check_sha_pin` reads the owner and repository out of the reference and confirms the SHA resolves, for a reusable workflow exactly as for an action.
 
-The sequencing consequence is that a hub task lands on `develop`, promotes to `main`, and is released before any downstream carries a bumpable pin. The catalog snippet for a caller stub therefore lands one release after the task it names, since a snippet under `catalog/snippets/workflows/` is scanned by the same pin gate and cannot carry a placeholder SHA.
+The sequencing consequence is that a hub task lands on `develop`, promotes to `main`, and is released before any downstream carries a bumpable pin. The catalog snippet for a caller stub therefore lands one release after the task it names, since a snippet under `catalog/snippets/workflows/` is scanned by the same pin gate and cannot carry a placeholder SHA. The [Rollout](#rollout) section carries that ordering as checkboxes per stage.
 
 ### Secrets and Permissions
 
@@ -95,19 +101,90 @@ The hub task takes `push`, `ref`, `branch`, `smoke`, the NBGV version outputs, `
 
 Docker Hub README publishing is a hub task of its own, `publish-docker-readme-task.yml`, with the size-limited overview, the repository list, and a `docker-readme-transform` hook in place of today's `transform-run` string input. The in-job description push in the build task is dropped in its favor, so the readme publishes once per release rather than once per image build. Upstream dependency monitoring is one hub task, `check-upstream-version-task.yml`, with a `resolve-upstream` hook in place of today's `resolver-command` string input and an `auto-merge` input. A tracker whose bump must wait for a human sets `auto-merge: false`, which gives the pull request a head prefix the merge-bot rules do not match. The rebuild-on-upstream-change trigger stays in the caller stub as a `push` filtered to the state file. Multi-stage Dockerfile builds are inconsistent across the Docker repos, and that is Dockerfile content rather than workflow content, so it is tracked as a type-level improvement beside this work rather than inside it.
 
-## Migration Phases
+## Rollout
 
-Each phase is one hub pull request, followed by a per-repo adoption on that repo's next visit. The exit metric per phase comes from [reports/workflow-reuse.md][workflow-reuse-report]. Downstream copies of the phase's files fall to zero. Callers rise to the number of repos that need the workflow. Downstream workflow lines fall from 10,964 toward the stubs plus the genuinely repo-specific hooks.
+This section is the tracker a session resumes from, and git is its only persistence. Every item is a checkbox with the evidence that closed it, a pull request, a commit, or a release tag, written into the item by the change that closed it. A session picking this work up reads this section first, takes the first unchecked item whose stage is open, verifies its claim against the current tree before acting on it, does the work in its own worktree, and ticks the item in the same pull request. Nothing here is ticked by intention: an item is ticked when the thing it names is on `develop`, or, for an adoption, on the named repo's ground-truth branch. [`TODO.md`][todo] "Hub-Hosted Reusable Workflows" carries the reasoning behind each stage, the open questions and what is settled, and this section carries the state.
 
-1. **Merge-bot** (this phase). `merge-bot-task.yml` is hosted, the hub's own `merge-bot-pull-request.yml` becomes the caller stub, and the manifest contract for `merge-bot-pull-request.yml` becomes the caller job, the hub task token, and the two mapped secrets. The 16 downstream copies report the missing caller job until each adopts, and the [Adopting the Merge-Bot](#adopting-the-merge-bot) section is the adoption.
-2. **Gates.** `validate-task.yml` hosts the per-type doc-lint block once and calls the `validate` hook for a repo's own tests. `test-pull-request-task.yml` wires validate, smoke and the fixed aggregator name, with the operational trigger shape in the stub. This phase is where the hook fallback is first proven live, on the hub for the default and on a pilot for the override.
-3. **Pure functions.** `get-version-task.yml` and `publish-plan-task.yml` are hosted and the downstream copies deleted.
-4. **The release chain.** `build-release-task.yml` with `build-<target>` hooks, `publish-release-task.yml`, and the Docker core per [The Docker Family](#the-docker-family). The three no-asset release shapes the fleet runs today collapse into `expect_release_assets`.
-5. **Type-specific tasks.** Docker Hub readme, upstream-version tracking, deploy-site, codegen, and the date badge, each with its hook.
+A stage has three parts. **Hub** is the hub pull request that ships the task and its stub. **Release** is the promotion and release that gives the task a pinnable `main` commit, since a downstream stub pins a released tag and nothing can adopt before one exists. **Adoption** is one checkbox per repo, ticked when that repo's ground-truth branch carries the stub and the audit reports no `interface` finding on the file. The exit metric per stage comes from [reports/workflow-reuse.md][workflow-reuse-report]: downstream copies of the stage's files fall to zero, callers rise to the number of repos that need the workflow, and downstream workflow lines fall from 10,964 toward the stubs plus the genuinely repo-specific hooks. Regenerate that report in the pull request that ticks a stage's last adoption, so the number and the tick land together.
+
+### Stage 0: Design, Measurement, and the Merge-Bot Task
+
+- [x] `docs/reusable-workflows.md`, `spec/workflow_reuse.py`, `reports/workflow-reuse.md`, `.github/workflows/merge-bot-task.yml`, the hub's own caller stub, and the manifest contract for `merge-bot-pull-request.yml`, on `develop` in #744 (`f33fa7e`).
+- [x] Promoted to `main` in #746 (`20616e0`) and released as `2.0.338`, the first tag carrying `merge-bot-task.yml`.
+- [x] The catalog caller snippet `catalog/snippets/workflows/merge-bot-pull-request.yml`, pinned to `20616e0` `# 2.0.338`, in the pull request that added this section.
+- [ ] The first Dependabot pull request against hub `develop` after `f33fa7e` merges through `merge-bot-task.yml`, proving the callee reads the caller's `pull_request_target` payload, the explicit `secrets:` map, App-token minting in a callee, and `permissions: {}` at the caller. Tick with the run URL. If it fails, the fallback order is `permissions: {}` per callee job, then `contents: read`.
+- [ ] The first Dependabot pull request against hub `main` after `20616e0` merges with `--merge`. Tick with the run URL.
+
+### Stage 1: Merge-Bot Adoption
+
+Adoptable since `2.0.338`. Each repo replaces the whole of its `.github/workflows/merge-bot-pull-request.yml` with the stub in [Adopting the Merge-Bot](#adopting-the-merge-bot), on its own feature branch, and the audit's `missing required job 'merge-bot'` finding on that file is the work list. The pilot goes first and records what the hub cannot prove, cross-repository resolution of the pin, the `rules` input where the repo has a tracker, and the first Dependabot bump of the pin, in its audit report.
+
+- [ ] HomeAutomation-Config (pilot, operational model)
+- [ ] homeassistant-purpleair (second, `rules: '[{"head-prefix": "ha-version-bump/", "base": "develop"}]'` and `delete-branch: true`)
+- [ ] ESPHome-NonRoot (`delete-branch: true`, built-in upstream-version pairs cover its tracker)
+- [ ] NxWitness (`delete-branch: true`, drops the Dependabot semver-major filter per D8.1 unless the open decision lands first)
+- [ ] KiCadLibrary (drops the Dependabot semver-major filter per D8.1 unless the open decision lands first)
+- [ ] LanguageTags (`delete-branch: true`)
+- [ ] aiopurpleair (`delete-branch: true`)
+- [ ] MediaTools (`delete-branch: true`)
+- [ ] VSCode-Server-DotNetCore (`delete-branch: true`)
+- [ ] Blog
+- [ ] ESPHome-Config
+- [ ] HomeAssistant-Config
+- [ ] PhotoCleaner
+- [ ] PlexCleaner
+- [ ] Utilities
+- [ ] Vantage-Config
+- [ ] AudioCleaner, DevKitCIoT, EspDinIoT, Financial-Modeling, HolidayLights carry no merge-bot today and take the stub on their next standup or resync, since the manifest applies it to every repo.
+- [ ] `reports/workflow-reuse.md` regenerated with `merge-bot-pull-request.yml` at 0 copies carrying job bodies and callers equal to the adopters.
+
+### Stage 2: The Gates
+
+Hub: `validate-task.yml` hosts the per-type doc-lint block once and calls the `validate` hook for a repo's own tests, deciding #729 in the one place the `uvx` tools are pinned or floated. `test-pull-request-task.yml` wires validate, smoke and the fixed aggregator name, and the stub carries the trigger shape, release or operational, which settles #585. This stage is where the hook fallback is first proven live: the hub carries no hook, so the default runs on every hub pull request, and the pilot's hook proves the override.
+
+- [ ] Hub pull request on `develop` with both tasks, the hub's own stubs, the manifest contracts, and the catalog snippets left for the release that follows.
+- [ ] Promoted and released, tag recorded here.
+- [ ] Catalog snippets for both stubs pinned to that release.
+- [ ] Hook fallback observed on a hub pull request run (default path) and on the pilot (override path), run URLs recorded here.
+- [ ] HomeAutomation-Config (pilot, operational trigger shape)
+- [ ] One C# repo (second pilot, release trigger shape with smoke)
+- [ ] The remaining repos, one checkbox each added when the pilots close, since the sweep list is every cataloged repo.
+- [ ] `reports/workflow-reuse.md` regenerated with `validate-task.yml` and `test-pull-request.yml` at 0 copies carrying job bodies.
+
+### Stage 3: The Pure Functions
+
+Hub: `get-version-task.yml` and `publish-plan-task.yml` hosted, and the downstream copies deleted on adoption. PlexCleaner gains the `plan` job D4.1 requires by adopting rather than by a copy.
+
+- [ ] Hub pull request on `develop`.
+- [ ] Promoted and released, tag recorded here.
+- [ ] Adoption, one checkbox per carrier added when the hub pull request merges: today `get-version-task.yml` has 8 carriers and `publish-plan-task.yml` 3.
+- [ ] `reports/workflow-reuse.md` regenerated with both at 0 copies.
+
+### Stage 4: The Release Chain and the Docker Core
+
+Hub: `build-release-task.yml` with `build-executable`, `build-nuget`, `build-pypi` and `release-assets` hooks, `publish-release-task.yml`, and `build-docker-task.yml` per [The Docker Family](#the-docker-family). The three no-asset release shapes collapse into `expect_release_assets`.
+
+- [ ] Hub pull request on `develop`.
+- [ ] Promoted and released, tag recorded here.
+- [ ] PhotoCleaner and PlexCleaner (pilots, vanilla Docker plus executable)
+- [ ] VSCode-Server-DotNetCore (vanilla Docker only)
+- [ ] ESPHome-NonRoot (`docker-prepare` hook for the upstream pin)
+- [ ] NxWitness (matrix hook and `build-base`)
+- [ ] The NuGet, PyPI and remaining release repos, one checkbox each added when the pilots close.
+- [ ] `reports/workflow-reuse.md` regenerated with `build-release-task.yml`, `publish-release.yml` and `build-docker-task.yml` at 0 copies.
+
+### Stage 5: The Type-Specific Tasks
+
+Hub: `publish-docker-readme-task.yml` with a `docker-readme-transform` hook, `check-upstream-version-task.yml` with a `resolve-upstream` hook and an `auto-merge` input, deploy-site, codegen and the date badge, each with its hook. The `operational-vs-release-workflow` skill's note that the target list stays per repo is retired here.
+
+- [ ] Hub pull request on `develop`.
+- [ ] Promoted and released, tag recorded here.
+- [ ] Adoption, one checkbox per carrier added when the hub pull request merges.
+- [ ] `reports/workflow-reuse.md` regenerated, and the fleet total's callers equal to the sum of the stubs the fleet needs.
 
 ## Adopting the Merge-Bot
 
-A downstream repo replaces the whole of its `.github/workflows/merge-bot-pull-request.yml` with the stub below, pinned to a released hub commit, and deletes nothing else. Its App-signed pull requests keep merging by the built-in rules (`codegen-main` to `main`, `codegen-develop` to `develop`, `upstream-version-main` to `main`, `upstream-version-develop` to `develop`). A repo with a tracker outside those pairs adds one `rules` entry per pair, and a repo that keeps its repository-wide branch auto-delete off and still wants bot branches gone sets `delete-branch: true`.
+A downstream repo replaces the whole of its `.github/workflows/merge-bot-pull-request.yml` with the stub below, which the catalog snippet `catalog/snippets/workflows/merge-bot-pull-request.yml` carries with the `with:` block commented out, and deletes nothing else. The pin is the release that first carried the task, and Dependabot bumps it from there. Its App-signed pull requests keep merging by the built-in rules (`codegen-main` to `main`, `codegen-develop` to `develop`, `upstream-version-main` to `main`, `upstream-version-develop` to `develop`). A repo with a tracker outside those pairs adds one `rules` entry per pair, and a repo that keeps its repository-wide branch auto-delete off and still wants bot branches gone sets `delete-branch: true`.
 
 ```yaml
 name: Merge bot pull request action
@@ -131,7 +208,7 @@ jobs:
 
   merge-bot:
     name: Merge bot pull request job
-    uses: ptr727/ProjectTemplate/.github/workflows/merge-bot-task.yml@<hub-main-commit-sha> # <release-tag>
+    uses: ptr727/ProjectTemplate/.github/workflows/merge-bot-task.yml@20616e0a70613ad8727d567990f5d0e082f5275c # 2.0.338
     secrets:
       CODEGEN_APP_CLIENT_ID: ${{ secrets.CODEGEN_APP_CLIENT_ID }}
       CODEGEN_APP_PRIVATE_KEY: ${{ secrets.CODEGEN_APP_PRIVATE_KEY }}
@@ -165,4 +242,5 @@ Four things the hub cannot prove fall to the first downstream adopter. They are 
 [workflow]: ../WORKFLOW.md
 [workflow-d8]: ../WORKFLOW.md#d8---bots--automation
 [workflow-reusable-task-parameter-contract]: ../WORKFLOW.md#reusable-task-parameter-contract
+[todo]: ../TODO.md
 [workflow-reuse-report]: ../reports/workflow-reuse.md
