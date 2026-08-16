@@ -28,7 +28,7 @@ Fidelity is a declared field defaulting to `presence`, never inferred from `whol
 
 The fixed interface of a workflow is stated in [`WORKFLOW.md`][workflow] ("Two Layers: Orchestration vs Build" and "The Seam Contract") and [`GOVERNANCE.md`][governance] ("Workflow YAML Conventions"), and the `interface` check enforces it by name and structure: the ruleset-bound required check `name: Check pull request workflow status job`, the `github-release` and `get-version` job keys, the `release-asset-<branch>-<target>` artifact-name handoff, and that `github-release` collects assets by `pattern:` / `merge-multiple:` and never by an `artifact-ids:` that names a build job's output. A repo owns the leaf `build-<target>-task` job list, its `needs` targets, and its paths-filter, and none of those are checked.
 
-Once a workflow's job graph moves into the hub, the carried unit is a caller stub rather than the job graph itself, and the contract moves with it: `publish-release.yml`'s `interface` check asserts the `plan` and `publish` job keys and that each names its hub task by token (`publish-plan-task.yml`, `build-release-task.yml`), never the build job list a carried `build-release-task.yml` used to expose.
+Once a workflow's job graph moves into the hub, the carried unit is a caller stub rather than the job graph itself, and the contract moves with it: `publish-release.yml`'s `interface` check asserts the `plan`, `validate`, and `publish` job keys and that `plan` and `publish` each name their hub task by token (`publish-plan-task.yml`, `build-release-task.yml`), never the build job list a carried `build-release-task.yml` used to expose.
 
 ## Normalization
 
