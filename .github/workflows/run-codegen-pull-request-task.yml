@@ -59,12 +59,12 @@ jobs:
           ref: ${{ matrix.target.ref }}
           token: ${{ steps.app-token.outputs.token }}
 
-      # Composite actions never see the secrets context directly, so a hook that calls a metered API needs the key passed as an explicit input.
+      # Composite actions never see the secrets context directly, and a with: input the hook does not declare fails the step, so an optional key crosses as an env var instead.
       - name: Run codegen hook step
         if: ${{ hashFiles('.github/actions/codegen/action.yml') != '' }}
         uses: ./.github/actions/codegen
-        with:
-          ninja-api-key: ${{ secrets.NINJA_API_KEY }}
+        env:
+          NINJA_API_KEY: ${{ secrets.NINJA_API_KEY }}
 
       - name: Missing codegen hook step
         if: ${{ hashFiles('.github/actions/codegen/action.yml') == '' }}

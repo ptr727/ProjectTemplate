@@ -309,7 +309,7 @@ ESPHome-NonRoot carries two trackers today. `check-upstream-version.yml` adopts 
       NINJA_API_KEY: ${{ secrets.NINJA_API_KEY }}
 ```
 
-The hub task passes `NINJA_API_KEY` to the hook as a `ninja-api-key` input, since a composite action never sees the `secrets` context directly and a hook whose generator calls a metered API needs the key handed to it explicitly. Neither LanguageTags nor NxWitness calls a metered API from its generator today, so neither maps `NINJA_API_KEY` and neither hook declares the input. Both add `dotnet husky install` ahead of the `dotnet csharpier format` step in their present copies, which the hub task carries verbatim, so a hook needs only the generator invocation itself (`dotnet run --project ...`).
+The hub task passes `NINJA_API_KEY` to the hook as a `NINJA_API_KEY` environment variable on the hook's own step, rather than a `with:` input, since a composite action never sees the `secrets` context directly and a `with:` input the hook does not declare in its own `inputs:` fails the step outright. An environment variable carries no such declaration requirement, so it crosses even when a hook, like LanguageTags's or NxWitness's, has no use for it and reads nothing from it. Neither calls a metered API from its generator today, so neither maps `NINJA_API_KEY`. Both add `dotnet husky install` ahead of the `dotnet csharpier format` step in their present copies, which the hub task carries verbatim, so a hook needs only the generator invocation itself (`dotnet run --project ...`).
 
 ## What a Pilot Proves
 
