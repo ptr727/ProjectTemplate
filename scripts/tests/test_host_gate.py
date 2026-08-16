@@ -860,6 +860,41 @@ class TestShippedDeclaration(unittest.TestCase):
             self.assertIn("target", entry["why"])
             self.assertIn("unverified rather than known broken", entry["why"])
 
+    def test_the_docker_floor_is_read_from_the_engine_before_the_client_banner(self):
+        """The docker floor is an engine number, so the engine is what has to be asked for it.
+
+        The client and the engine are one package on a native install and two on a WSL host taking
+        docker from Docker Desktop's integration, where the CLI on PATH is packaged by the
+        distribution. A 29.1.3 client was recorded there against a 29.7.2 engine, so reading the
+        banner failed a host that clears this floor. Probe order is the whole fix, which is why it
+        is asserted as an order rather than as a set, and the banner stays as the second probe
+        because a stopped daemon answers nothing at all.
+        """
+        docker = {t["name"]: t for t in self.data["tools"]}["docker"]
+        self.assertEqual(
+            docker["probes"],
+            [["docker", "version", "--format", "{{.Server.Version}}"], ["docker", "--version"]],
+        )
+
+    def test_the_docker_pattern_reads_both_of_its_probes_and_nothing_else(self):
+        """One pattern spans two probes whose output shares no prefix, which is what makes the
+        `Docker version ` half optional. An optional prefix that is not anchored reads the first
+        digits anywhere in the output, so the anchor is asserted here by the case it exists for."""
+        pattern = {t["name"]: t for t in self.data["tools"]}["docker"]["pattern"]
+
+        def read(text):
+            m = re.search(pattern, text)
+            return m.group(1) if m else None
+
+        # Exactly what each probe puts on stdout, joined the way host_gate.probe() joins it.
+        self.assertEqual(read("29.7.2\n\n"), "29.7.2")
+        self.assertEqual(read("Docker version 29.1.3, build 29.1.3-0ubuntu3~25.10.1\n\n"), "29.1.3")
+        # A banner arriving on stderr instead reaches the pattern behind the empty stdout and its separator.
+        self.assertEqual(read("\nDocker version 29.1.3, build x\n"), "29.1.3")
+        # `docker version --format` renders an unreachable server field as this, rather than as a version.
+        self.assertIsNone(read("<no value>\n\n"))
+        self.assertIsNone(read("cannot connect to the daemon at 1.2.3.4\n\n"))
+
 
 if __name__ == "__main__":
     unittest.main(verbosity=2)
