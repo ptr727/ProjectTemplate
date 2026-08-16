@@ -231,7 +231,8 @@ jobs:
     if: ${{ inputs.enable_nuget }}
     needs: [get-version, validate-release]
     runs-on: ubuntu-latest
-    # OIDC trusted publishing through NuGet/login needs id-token: write, and the caller grants it on its call to this task when it enables nuget.
+    # OIDC trusted publishing through NuGet/login needs id-token: write, and the caller grants it on its call to this task when it sets nuget: true, a real push.
+    # A build-only run (enable_nuget without nuget, or any smoke build) never reaches NuGet/login and needs no such grant.
     # No job-level permissions: block here, because a called job's block is validated against the caller's grant before its if: runs.
     # A block naming id-token would fail every caller that does not grant it at startup, including a smoke build under a read-only pull request token.
     steps:
@@ -532,7 +533,8 @@ jobs:
     if: ${{ inputs.github && !inputs.smoke && !failure() && !cancelled() }}
     runs-on: ubuntu-latest
     needs: [get-version, validate-release, build-executable, build-nuget, build-pypi, build-docker]
-    # The release upload and the artifact-delete cleanup both write with GITHUB_TOKEN, and the caller grants contents: write and actions: write on a publish.
+    # The release upload and the artifact-delete cleanup both write with GITHUB_TOKEN, and the caller grants contents: write and actions: write when it sets github: true on a non-smoke run.
+    # A caller publishing only to a registry, or smoke building, leaves this job disabled and grants neither.
     # No job-level permissions: block here, for the reason build-nuget gives: a block is validated against the caller's grant before if: runs, and a smoke caller holds a read-only token.
 
     steps:
