@@ -134,9 +134,9 @@ jobs:
         if: hashFiles('pyproject.toml') != ''
         run: |
           set -Eeuo pipefail
-          if grep -q '^\[tool\.mypy\]' pyproject.toml; then
+          if grep -Eq '^[[:space:]]*\[tool\.mypy\]' pyproject.toml; then
             uvx mypy@latest
-          elif grep -q '^\[tool\.pyright\]' pyproject.toml; then
+          elif grep -Eq '^[[:space:]]*\[tool\.pyright\]' pyproject.toml; then
             uvx pyright@latest
           else
             echo "no [tool.mypy] or [tool.pyright] section, skipping"

@@ -2091,6 +2091,9 @@ def _selftest():
         "    runs-on: ubuntu-latest\n"
         "    steps:\n      - run: echo inline lint\n"
     )
+    # A validate-task.yml stub's own aggregator needs the validate job, never the release-shape changes job.
+    # The shared pr_check fixture needs a changes job these two fixtures do not define, so this one needs validate instead.
+    pr_check_validate = "  check-workflow-status:\n    name: Check pull request workflow status job\n    needs: [validate]\n    runs-on: ubuntu-latest\n"
     gh_rel = (
         "  github-release:\n    needs: [get-version, build-widget]\n    runs-on: ubuntu-latest\n    steps:\n"
         "      - uses: actions/download-artifact@v4\n        with:\n          pattern: release-asset-${{ inputs.branch }}-*\n          merge-multiple: true\n"
@@ -2148,13 +2151,13 @@ def _selftest():
         ),
         (
             "PR stub validate job reaching the hub validate-task",
-            pr_validate_head + pr_check,
+            pr_validate_head + pr_check_validate,
             pr_stub_contract,
             0,
         ),
         (
             "PR stub validate job still carrying an inline lint job",
-            pr_validate_inline + pr_check,
+            pr_validate_inline + pr_check_validate,
             pr_stub_contract,
             1,
         ),

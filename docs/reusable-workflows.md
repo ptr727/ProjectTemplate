@@ -351,7 +351,9 @@ jobs:
       smoke: true
       github: false
       dockerhub: false
-      branch: ${{ github.ref_name }}
+      # On a pull_request event github.ref_name is the PR ref (for example 123/merge), never the target branch,
+      # so the logical branch reads base_ref first and only falls back to ref_name on a non-PR trigger.
+      branch: ${{ github.base_ref || github.ref_name }}
 
   # Treats a skipped smoke-build (an unchanged target) as pass, and blocks on failure or cancelled (D1.5, D7.4).
   check-workflow-status:
