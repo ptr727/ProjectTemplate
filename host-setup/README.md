@@ -26,7 +26,7 @@ Piping it is still detected: with no action and no terminal it reports rather th
 
 ```shell
 ./bootstrap.sh --report                 # what each tool would do, changing nothing
-./bootstrap.sh --host --yes             # packages, tools, git and GitHub, unattended
+./bootstrap.sh --host --yes             # sudo cache, packages, tools, git and GitHub, unattended
 ./bootstrap.sh --ref develop --report   # run the tooling as it is on develop
 ./bootstrap.sh --help                   # every action and option
 ```

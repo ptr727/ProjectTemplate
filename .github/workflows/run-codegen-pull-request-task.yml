@@ -1,0 +1,94 @@
+name: Run codegen and pull request task
+
+# Deterministic codegen executor, hosted here once since the App-token machinery, the branch matrix, and the PR-opening steps are identical across every codegen repo.
+# A required codegen hook runs the repo's own generator against the checked-out branch.
+# Runs against main and develop in parallel via a matrix and opens a PR against each base (codegen-main -> main, codegen-develop -> develop), which the merge-bot auto-merges independently.
+# The hook's output must be deterministic from the source it reads, never a per-run timestamp or GUID.
+# A non-deterministic hook opens a PR on every run and the two branches would diverge and conflict on the next promotion.
+
+on:
+  workflow_call:
+    secrets:
+      CODEGEN_APP_CLIENT_ID:
+        required: true
+      CODEGEN_APP_PRIVATE_KEY:
+        required: true
+      # Consumed by the codegen hook when its generator calls a metered upstream API, not by this task.
+      # A repo whose generator needs no key leaves it unmapped.
+      NINJA_API_KEY:
+        required: false
+
+jobs:
+
+  # No job-level permissions declared: every write here (the checkout, the pull request) uses the App token, so GITHUB_TOKEN needs no scope and the caller can grant permissions: {}.
+  codegen:
+    name: Run ${{ matrix.target.ref }} codegen and pull request job
+    runs-on: ubuntu-latest
+    strategy:
+      # Each branch gets its own parallel codegen run and PR.
+      # One branch's failure does not affect the other.
+      fail-fast: false
+      matrix:
+        target:
+          - ref: main
+            branch: codegen-main
+          - ref: develop
+            branch: codegen-develop
+
+    steps:
+
+      # App token so the PR open fires pull_request workflow events.
+      # A GITHUB_TOKEN open does not.
+      - name: Generate GitHub App token step
+        id: app-token
+        uses: actions/create-github-app-token@bcd2ba49218906704ab6c1aa796996da409d3eb1 # v3.2.0
+        with:
+          client-id: ${{ secrets.CODEGEN_APP_CLIENT_ID }}
+          private-key: ${{ secrets.CODEGEN_APP_PRIVATE_KEY }}
+
+      - name: Setup .NET SDK step
+        uses: actions/setup-dotnet@a98b56852c35b8e3190ac28c8c2271da59106c68 # v6.0.0
+        with:
+          dotnet-version: 10.x
+
+      - name: Checkout code step
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ matrix.target.ref }}
+          token: ${{ steps.app-token.outputs.token }}
+
+      # Composite actions never see the secrets context directly, and a with: input the hook does not declare fails the step, so an optional key crosses as an env var instead.
+      - name: Run codegen hook step
+        if: ${{ hashFiles('.github/actions/codegen/action.yml') != '' }}
+        uses: ./.github/actions/codegen
+        env:
+          NINJA_API_KEY: ${{ secrets.NINJA_API_KEY }}
+
+      - name: Missing codegen hook step
+        if: ${{ hashFiles('.github/actions/codegen/action.yml') == '' }}
+        run: |
+          set -Eeuo pipefail
+          echo "::error::Required hook missing: .github/actions/codegen/action.yml"
+          exit 1
+
+      - name: Format code step
+        run: |
+          set -Eeuo pipefail
+          dotnet tool restore
+          dotnet husky install
+          dotnet csharpier format --log-level=debug .
+          git status
+
+      # App token: fires pull_request workflow events and creates verified commits as the app.
+      - name: Create pull request step
+        id: cpr
+        uses: peter-evans/create-pull-request@5f6978faf089d4d20b00c7766989d076bb2fc7f1 # v8.1.1
+        with:
+          token: ${{ steps.app-token.outputs.token }}
+          base: ${{ matrix.target.ref }}
+          branch: ${{ matrix.target.branch }}
+          title: 'Update codegen files'
+          body: 'This PR updates the codegen files.'
+          commit-message: 'Update codegen files'
+          delete-branch: true
+          sign-commits: true

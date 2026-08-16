@@ -389,10 +389,10 @@ def main():
 
     if report_mode:
         content = render_report(spreads, promote, gaps, unreadable, load_ledger())
-        # CRLF matches the fleet default, since reports/*.md is CRLF.
+        # LF matches the fleet default, since reports/*.md is LF.
         # Bytes are written so the local platform does not re-translate them.
         # Git dates the file, so no timestamp is embedded, which would churn on every regeneration.
-        (audit.ROOT / REPORT_PATH).write_bytes(content.replace("\n", "\r\n").encode("utf-8"))
+        (audit.ROOT / REPORT_PATH).write_bytes(content.encode("utf-8"))
         print(f"Wrote {REPORT_PATH} ({len(content.splitlines())} lines)")
         return 0
 

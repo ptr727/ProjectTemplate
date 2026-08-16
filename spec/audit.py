@@ -2068,6 +2068,32 @@ def _selftest():
         "requiredJobKeys": ["check-workflow-status"],
         "requiredCheckName": "Check pull request workflow status job",
     }
+    # The validate-task.yml stub contract: a caller's validate job must exist and reach the hub task by name.
+    # A token check alone would pass a stub that drops the validate job entirely, since it only runs for a job that is present.
+    # Naming the validate job in requiredJobKeys too catches a dropped job on its own.
+    pr_stub_contract = dict(
+        pr_contract,
+        requiredJobKeys=["check-workflow-status", "validate"],
+        requireTokensInJob={"validate": ["validate-task.yml"]},
+    )
+    pr_validate_head = (
+        "name: Test\non: pull_request\njobs:\n"
+        "  validate:\n"
+        "    name: Validate sources job\n"
+        "    uses: ptr727/ProjectTemplate/.github/workflows/validate-task.yml@"
+        + "a" * 40
+        + " # 2.0.1\n"
+    )
+    pr_validate_inline = (
+        "name: Test\non: pull_request\njobs:\n"
+        "  validate:\n"
+        "    name: Validate sources job\n"
+        "    runs-on: ubuntu-latest\n"
+        "    steps:\n      - run: echo inline lint\n"
+    )
+    # A validate-task.yml stub's own aggregator needs the validate job, never the release-shape changes job.
+    # The shared pr_check fixture needs a changes job these two fixtures do not define, so this one needs validate instead.
+    pr_check_validate = "  check-workflow-status:\n    name: Check pull request workflow status job\n    needs: [validate]\n    runs-on: ubuntu-latest\n"
     gh_rel = (
         "  github-release:\n    needs: [get-version, build-widget]\n    runs-on: ubuntu-latest\n    steps:\n"
         "      - uses: actions/download-artifact@v4\n        with:\n          pattern: release-asset-${{ inputs.branch }}-*\n          merge-multiple: true\n"
@@ -2100,6 +2126,37 @@ def _selftest():
             "merge-bot": ["merge-bot-task.yml", "CODEGEN_APP_CLIENT_ID", "CODEGEN_APP_PRIVATE_KEY"]
         },
     }
+    # The publish-release.yml caller stub once the release chain is hub-hosted, plan, validate and publish job keys.
+    # Each names its hub task by token, per docs/reusable-workflows.md "Adopting the Release Chain".
+    # Validate's own token requirement is what stops a stub from satisfying the job key with a no-op job.
+    publish_stub = (
+        "jobs:\n"
+        "  plan:\n"
+        "    name: Plan release job\n"
+        "    uses: acme/hub/.github/workflows/publish-plan-task.yml@" + "a" * 40 + " # 2.0.1\n"
+        "    with:\n"
+        "      event_name: ${{ github.event_name }}\n"
+        "  validate:\n"
+        "    name: Validate sources job\n"
+        "    needs: [plan]\n"
+        "    if: ${{ needs.plan.outputs.publish == 'true' }}\n"
+        "    uses: ./.github/workflows/validate-task.yml\n"
+        "  publish:\n"
+        "    name: Publish project release job\n"
+        "    needs: [plan, validate]\n"
+        "    if: ${{ needs.plan.outputs.publish == 'true' }}\n"
+        "    uses: acme/hub/.github/workflows/build-release-task.yml@" + "a" * 40 + " # 2.0.1\n"
+        "    with:\n"
+        "      github: true\n"
+    )
+    publish_contract = {
+        "requiredJobKeys": ["plan", "validate", "publish"],
+        "requireTokensInJob": {
+            "plan": ["publish-plan-task.yml"],
+            "validate": ["validate-task.yml"],
+            "publish": ["build-release-task.yml"],
+        },
+    }
     cases = [
         ("conformant PR workflow", pr_head + pr_check, pr_contract, 0),
         ("PR workflow missing the required job and its check name", pr_head, pr_contract, 2),
@@ -2121,6 +2178,24 @@ def _selftest():
             pr_head
             + "  check-workflow-status:\n    runs-on: ubuntu-latest\n    steps:\n      - name: Check pull request workflow status job\n        run: true\n",
             pr_contract,
+            1,
+        ),
+        (
+            "PR stub validate job reaching the hub validate-task",
+            pr_validate_head + pr_check_validate,
+            pr_stub_contract,
+            0,
+        ),
+        (
+            "PR stub validate job still carrying an inline lint job",
+            pr_validate_inline + pr_check_validate,
+            pr_stub_contract,
+            1,
+        ),
+        (
+            "PR stub dropping the validate job entirely",
+            pr_head + pr_check,
+            pr_stub_contract,
             1,
         ),
         ("conformant release task", rel_ok, rel_contract, 0),
@@ -2203,7 +2278,222 @@ def _selftest():
             bot_contract,
             1,
         ),
+        (
+            "publish-release.yml stub reaching both hub tasks by pin",
+            publish_stub,
+            publish_contract,
+            0,
+        ),
+        (
+            "publish-release.yml stub with the hub's own local uses",
+            publish_stub.replace(
+                "acme/hub/.github/workflows/publish-plan-task.yml@" + "a" * 40 + " # 2.0.1",
+                "./.github/workflows/publish-plan-task.yml",
+            ).replace(
+                "acme/hub/.github/workflows/build-release-task.yml@" + "a" * 40 + " # 2.0.1",
+                "./.github/workflows/build-release-task.yml",
+            ),
+            publish_contract,
+            0,
+        ),
+        (
+            "publish-release.yml stub missing the plan job reports it once",
+            "jobs:\n"
+            "  validate:\n"
+            "    name: Validate sources job\n"
+            "    uses: ./.github/workflows/validate-task.yml\n"
+            "  publish:\n"
+            "    name: Publish project release job\n"
+            "    needs: [validate]\n"
+            "    uses: acme/hub/.github/workflows/build-release-task.yml@"
+            + "a" * 40
+            + " # 2.0.1\n",
+            publish_contract,
+            1,
+        ),
+        (
+            "publish-release.yml stub missing the validate job reports it once",
+            "jobs:\n"
+            "  plan:\n"
+            "    name: Plan release job\n"
+            "    uses: acme/hub/.github/workflows/publish-plan-task.yml@" + "a" * 40 + " # 2.0.1\n"
+            "  publish:\n"
+            "    name: Publish project release job\n"
+            "    needs: [plan]\n"
+            "    uses: acme/hub/.github/workflows/build-release-task.yml@"
+            + "a" * 40
+            + " # 2.0.1\n",
+            publish_contract,
+            1,
+        ),
+        (
+            "publish-release.yml stub whose publish job never names build-release-task.yml",
+            publish_stub.replace(
+                "acme/hub/.github/workflows/build-release-task.yml@" + "a" * 40 + " # 2.0.1",
+                "./.github/workflows/build-release-task-renamed.yml",
+            ),
+            publish_contract,
+            1,
+        ),
+        (
+            "publish-release.yml stub whose validate job never names validate-task.yml",
+            publish_stub.replace(
+                "    uses: ./.github/workflows/validate-task.yml\n",
+                "    uses: ./.github/workflows/validate-task-renamed.yml\n",
+            ),
+            publish_contract,
+            1,
+        ),
     ]
+    # The deploy-site.yml caller stub once deploy-site-task.yml is hub-hosted: no secrets: inherit
+    # (a cross-repository reusable workflow cannot use it), the one crossing secret named instead.
+    deploy_stub = (
+        "jobs:\n"
+        "  assert-ref:\n    runs-on: ubuntu-latest\n    steps: []\n"
+        "  validate:\n    uses: ./.github/workflows/validate-task.yml\n"
+        "  deploy:\n"
+        "    name: Deploy job\n"
+        "    environment: ${{ inputs.environment }}\n"
+        "    permissions:\n      contents: read\n"
+        "    uses: acme/hub/.github/workflows/deploy-site-task.yml@" + "a" * 40 + " # 2.0.1\n"
+        "    with:\n      environment: ${{ inputs.environment }}\n"
+        "    secrets:\n      DEPLOY_SSH_PRIVATE_KEY: ${{ secrets.DEPLOY_SSH_PRIVATE_KEY }}\n"
+    )
+    deploy_contract = {
+        "requiredJobKeys": ["assert-ref", "validate", "deploy"],
+        "requireTokensInJob": {
+            "deploy": [
+                "deploy-site-task.yml",
+                # Indent-anchored (4 spaces) so a with: input of the same name, indented 6, cannot satisfy this on its own.
+                "\n    environment:",
+                "contents: read",
+                "DEPLOY_SSH_PRIVATE_KEY",
+            ]
+        },
+    }
+    cases += [
+        (
+            "deploy-site.yml caller stub reaching the hub task with the crossing secret mapped",
+            deploy_stub,
+            deploy_contract,
+            0,
+        ),
+        (
+            "deploy-site.yml caller stub still using secrets: inherit reports the missing secret",
+            deploy_stub.replace(
+                "    secrets:\n      DEPLOY_SSH_PRIVATE_KEY: ${{ secrets.DEPLOY_SSH_PRIVATE_KEY }}\n",
+                "    secrets: inherit\n",
+            ),
+            deploy_contract,
+            1,
+        ),
+        (
+            "deploy-site.yml caller stub missing the environment binding the crossing secret needs",
+            # Removes only the job-level environment: line, leaving the with:-nested environment: input untouched, the exact ambiguity an unanchored token would miss.
+            deploy_stub.replace(
+                "    name: Deploy job\n    environment: ${{ inputs.environment }}\n",
+                "    name: Deploy job\n",
+            ),
+            deploy_contract,
+            1,
+        ),
+        (
+            "deploy-site.yml caller stub missing the contents: read grant the task's jobs declare",
+            deploy_stub.replace("    permissions:\n      contents: read\n", ""),
+            deploy_contract,
+            1,
+        ),
+    ]
+    # The stage-5 type-specific hub tasks carry no manifest entry yet, since no repo has adopted a caller stub for them.
+    # These fixtures exercise the contract adoption will register, proving the interface engine reads it correctly before any downstream repo depends on that reading.
+    readme_stub = (
+        "jobs:\n"
+        "  publish-docker-readme:\n"
+        "    name: Publish Docker Hub readme job\n"
+        "    permissions:\n      contents: read\n"
+        "    uses: acme/hub/.github/workflows/publish-docker-readme-task.yml@"
+        + "a"
+        * 40
+        + " # 2.0.1\n"
+        "    with:\n      branch: ${{ github.ref_name }}\n"
+        "    secrets:\n"
+        "      DOCKER_HUB_USERNAME: ${{ secrets.DOCKER_HUB_USERNAME }}\n"
+        "      DOCKER_HUB_ACCESS_TOKEN: ${{ secrets.DOCKER_HUB_ACCESS_TOKEN }}\n"
+    )
+    readme_contract = {
+        "requiredJobKeys": ["publish-docker-readme"],
+        "requireTokensInJob": {
+            "publish-docker-readme": [
+                "publish-docker-readme-task.yml",
+                "contents: read",
+                "DOCKER_HUB_USERNAME",
+                "DOCKER_HUB_ACCESS_TOKEN",
+            ]
+        },
+    }
+    upstream_stub = (
+        "jobs:\n"
+        "  check-upstream-version:\n"
+        "    name: Check upstream version job\n"
+        "    uses: acme/hub/.github/workflows/check-upstream-version-task.yml@"
+        + "a"
+        * 40
+        + " # 2.0.1\n"
+        "    secrets:\n"
+        "      CODEGEN_APP_CLIENT_ID: ${{ secrets.CODEGEN_APP_CLIENT_ID }}\n"
+        "      CODEGEN_APP_PRIVATE_KEY: ${{ secrets.CODEGEN_APP_PRIVATE_KEY }}\n"
+    )
+    upstream_contract = {
+        "requiredJobKeys": ["check-upstream-version"],
+        "requireTokensInJob": {
+            "check-upstream-version": [
+                "check-upstream-version-task.yml",
+                "CODEGEN_APP_CLIENT_ID",
+                "CODEGEN_APP_PRIVATE_KEY",
+            ]
+        },
+    }
+    codegen_stub = (
+        "jobs:\n"
+        "  run-codegen:\n"
+        "    name: Run codegen and pull request job\n"
+        "    uses: acme/hub/.github/workflows/run-codegen-pull-request-task.yml@"
+        + "a"
+        * 40
+        + " # 2.0.1\n"
+        "    secrets:\n"
+        "      CODEGEN_APP_CLIENT_ID: ${{ secrets.CODEGEN_APP_CLIENT_ID }}\n"
+        "      CODEGEN_APP_PRIVATE_KEY: ${{ secrets.CODEGEN_APP_PRIVATE_KEY }}\n"
+    )
+    codegen_contract = {
+        "requiredJobKeys": ["run-codegen"],
+        "requireTokensInJob": {
+            "run-codegen": [
+                "run-codegen-pull-request-task.yml",
+                "CODEGEN_APP_CLIENT_ID",
+                "CODEGEN_APP_PRIVATE_KEY",
+            ]
+        },
+    }
+    for label_prefix, stub, contract in (
+        ("publish-docker-readme.yml", readme_stub, readme_contract),
+        ("check-upstream-version.yml", upstream_stub, upstream_contract),
+        ("run-codegen-pull-request.yml", codegen_stub, codegen_contract),
+    ):
+        cases += [
+            (
+                f"{label_prefix} caller stub reaching the hub task with secrets mapped",
+                stub,
+                contract,
+                0,
+            ),
+            (
+                f"{label_prefix} copy still carrying the job body reports the missing caller job",
+                "jobs:\n  some-other-job:\n    runs-on: ubuntu-latest\n    steps: []\n",
+                contract,
+                1,
+            ),
+        ]
     ok = True
     for label, text, contract, want in cases:
         got = len(check_interface("wf", contract, text))
@@ -2385,7 +2675,7 @@ def _selftest():
 
     # Coordination-reference scan: the hub name inside a verbatim section is exempt, outside one is not.
     # The first case is the real AGENTS.md shape, where the byte-locked Fleet Bootstrap block must name the hub and a repo therefore cannot clear a finding against it.
-    # The CRLF case matters because extract_section normalizes EOLs while carried files are CRLF on this fleet, so excision must survive that.
+    # The CRLF case matters because extract_section normalizes EOLs while a carried file can still arrive CRLF (an operational repo's Windows-native override, or a stale copy mid-resync), so excision must survive that.
     boot = "## Fleet Bootstrap\n\nThe canonical rules live in `github.com/acme/Hub`.\n"
     owned = "## Where the Rules Live\n\nReport a rule discrepancy to acme/Hub.\n"
     clean_doc = (

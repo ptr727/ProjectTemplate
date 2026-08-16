@@ -151,5 +151,5 @@ stays the same:
   **every** tier, operational included, so both branches stay in sync and a promotion stays a
   clean forward merge.
 - **Line-ending policy differs too**, following the consuming app's native platform rather than the
-  fleet CRLF default, per the registry `lineEndings` field. That rule belongs to
+  fleet LF default, per the registry `lineEndings` field. That rule belongs to
   `comment-and-doc-style`, not repeated here.

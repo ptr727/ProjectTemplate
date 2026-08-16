@@ -25,20 +25,6 @@ The steps below are followed in order rather than sampled.
 
 ## Work Clusters
 
-### Default `.py` to LF Fleet-Wide, Retiring the Per-Path Pin List
-
-One pull request changing [`GOVERNANCE.md`][governance] "Line Endings", [`.editorconfig`][editorconfig], and [`.gitattributes`][gitattributes] to pin `*.py` LF by extension, replacing the growing list of individually-pinned shebang scripts, plus the one-time renormalization it obliges fleet-wide.
-
-**State** `decision`. **Touches** `GOVERNANCE.md` "Line Endings" (verbatim, so it re-vendors fleet-wide), `.editorconfig`, `.gitattributes`, and every downstream repo carrying a CRLF `.py` file. **Cost** one hub edit plus a renormalization pass per affected repo. The hub itself needs no renormalization, since every `.py` file it tracks is already LF.
-
-- **Pin `*.py text eol=lf` by extension and drop the by-path list it replaces.** The by-path list exists because the fleet's default is CRLF for `.py` and only a shebang-executed script needs LF, so each new script has needed its own `.gitattributes` line and its own `.editorconfig` override. It reads 25 entries today, up from the roughly dozen it carried before this session added four more for two new scripts and their tests, which is the divergence outweighing the reason it was chosen.
-  - **Blocked by** - Nothing.
-  - **Issue** - None filed.
-  - **Checked** - `develop` at `7f9caaa` on 2026-08-12, where `.gitattributes` carries 25 LF pins (3 forward-declared) over 19 tracked `.py` files, and every one of those 19 is already LF (none is a vanilla CRLF `.py`), so the hub side of this change is comment-and-pattern-only.
-  - **Open** - Whether downstream repos with a vanilla (non-shebang) CRLF `.py` file need a coordinated renormalization pass or can pick it up on their own next resync. 5 repos in [`registry/repos.json`][repos] carry the `python` type (`aiopurpleair`, `homeassistant-purpleair`, `Financial-Modeling`, `PlexCleaner`, `ESPHome-Config`) and were not individually checked for CRLF `.py` content as part of writing this entry.
-  - **Settled** - The default was set to CRLF in #229 for editor compatibility on Windows, not because LF broke anything measured. The reason it is being revisited is that non-VSCode Windows editors were the concern, and the per-path pin list's growth now outweighs that concern's practical weight, per the maintainer.
-  - **Settled** - The by-path convention was reaffirmed in #503 ("Do not re-add a blanket `*.py text eol=lf`"), but that pull request only reshaped the two files' comment prose and did not re-examine the underlying policy, so it is not a second, independent rejection of this change.
-
 ### Giving the Fleet's Own Pins Something to Resolve Against
 
 One pull request pointing a hub `uses:` at a hub-owned action, so that the resolvability pass added beside it has a reference under this owner to read. It is separated from that pass because it changes what a workflow runs, where the pass only changes what a gate reports.
@@ -73,7 +59,7 @@ One pull request moving the canonical short description into declared data, so e
 - **Close the README-to-About hop, which is the only one nothing writes.** The audit reports a drifted About panel, and no tool sets it.
   - **Blocked by** - The entry above, since the field is what `repo-config/configure.sh` would set the panel from.
   - **Issue** - [#639][issue-639], filed on 2026-08-09 because this entry had been carrying [#577][issue-577], whose body covers only the README tagline and never mentions the About panel, and whose tagline half shipped on 2026-08-08.
-  - **Checked** - `develop` on 2026-08-08, where `repo-config/configure.sh` sets every other repository setting and carries no `description` handling, and [`catalog/snippets/workflows/publish-docker-readme-task.yml`][workflows] pushes `github.event.repository.description` to Docker Hub.
+  - **Checked** - `develop` on 2026-08-08, where `repo-config/configure.sh` sets every other repository setting and carries no `description` handling, and the hub-hosted [`publish-docker-readme-task.yml`][publish-docker-readme-task] pushes `github.event.repository.description` to Docker Hub.
   - **Open** - Nothing beyond sequencing.
   - **Settled** - The chain is README, then the About panel by hand, then Docker Hub by CI, so the unautomated hop is the first one and it is the one that drifts. PhotoCleaner is the worked case, where the About panel still matched the README and only the Docker Hub short description had diverged.
   - **Settled** - CI keeps reading `repository.description` rather than the README. Pointing it at the README puts a Markdown parser in a publish job, which PhotoCleaner#32 measured at nine guards, every one of which fails the release rather than the tagline.
@@ -249,18 +235,19 @@ One pull request stating that an agent never assumes a Docker image is present l
 
 ### Hub-Hosted Reusable Workflows
 
-One pull request per phase moving a standard workflow out of every repo and into the hub as a `workflow_call` task, with a downstream caller stub and a composite-action hook for what is genuinely repo-specific. The design, the hook contract, the pin policy and the phases are in [`docs/reusable-workflows.md`][reusable-workflows-doc], and the burn-down is [`reports/workflow-reuse.md`][workflow-reuse-report], regenerated by `python3 spec/workflow_reuse.py --report`. The merge-bot phase shipped with the design, so this cluster starts at the gates.
+One pull request per stage moving a standard workflow out of every repo and into the hub as a `workflow_call` task, with a downstream caller stub and a composite-action hook for what is genuinely repo-specific. The design, the hook contract, the pin policy and the staged rollout are in [`docs/reusable-workflows.md`][reusable-workflows-doc], and the burn-down is [`reports/workflow-reuse.md`][workflow-reuse-report], regenerated by `python3 spec/workflow_reuse.py --report`. The merge-bot task shipped with the design and its adoption is a sweep, so this cluster starts at the gates. The stage-by-stage completion state, one checkbox per hub change and per adopting repo with the evidence that closed it, is that doc's "Rollout" section, and a session resumes from there rather than from here.
 
-**State** `ready` for the gates, `blocked` on the gates for everything after. **Touches** the hub's `.github/workflows/`, [`spec/files.json`][files], [`catalog/snippets/workflows/`][workflows], and [`WORKFLOW.md`][workflow] where a guarantee names a copied job. **Cost** one hub edit per phase plus an adoption per repo on its next visit, and no re-vendor beyond the stub each phase introduces.
+**State** `ready` for the gates, `blocked` on the gates for everything after. **Touches** the hub's `.github/workflows/`, [`spec/files.json`][files], [`catalog/snippets/workflows/`][workflows], and [`WORKFLOW.md`][workflow] where a guarantee names a copied job. **Cost** one hub edit per stage plus an adoption per repo on its next visit, and no re-vendor beyond the stub each stage introduces.
 
-- **Host the gates: `validate-task.yml` with a `validate` hook, and `test-pull-request-task.yml` with the fixed aggregator.** The hub owns the per-type doc-lint block once, the hook carries a repo's own tests, and the stub carries the trigger shape, operational or release. This phase is where the hook fallback is first proven live, on the hub for the default and on a pilot for the override.
+- **Host the gates: `validate-task.yml` with a `validate` hook.** The hub owns the fleet doc-lint block, the language lint by tree detection, the prose gate and the repo gate in a lint job, a generic unit-test job, and the validate hook for a repo's own domain checks. There is no `test-pull-request-task.yml`: the stub shapes carrying the trigger, operational or release, live in [`docs/reusable-workflows.md`][reusable-workflows-doc] "Adopting the Gates" instead.
   - **Blocked by** - Nothing.
-  - **Issue** - None filed. [#585][issue-585] and [#729][issue-729] are settled inside this phase, the first by the operational stub's trigger and the second by the one place the hub validate task pins or floats its `uvx` tools.
+  - **Issue** - None filed. [#585][issue-585] and [#729][issue-729] are settled by design in this stage, the first by the stub's trigger shape and the second by the one place the hub validate task pins or floats its `uvx` tools.
   - **Checked** - `develop` at `7c67328` on 2026-08-15, where the report counts 20 copies of `test-pull-request.yml` in 13 variants and 13 copies of `validate-task.yml` in 11, and the doc-lint block (markdownlint, cspell, actionlint, editorconfig-checker) repeats in every one.
-  - **Open** - Whether the per-type lint steps are selected by an input the stub sets or read from the repo's registry entry through a hub checkout at `github.job_workflow_sha`, since the second needs no per-repo input and the first needs no network read.
-  - **Open** - Whether a `validate` hook that runs a domain compile (an ESPHome build, a KiCad ERC) is one hook or several, given the two repos carrying such a step run it as a separate job today.
-  - **Settled** - Pilots are HomeAutomation-Config, the smallest operational tree, then a C# repo, so both trigger shapes are exercised before the sweep.
+  - **Settled** - Pilots are PhotoCleaner, which piloted the merge-bot stub in ptr727/PhotoCleaner#53 on 2026-08-15 as a release-model repo with Dependabot, C#, executable and Docker targets, then HomeAutomation-Config for the operational trigger shape, so both shapes are exercised before the sweep.
   - **Settled** - The step gated on `hashFiles('.github/actions/validate/action.yml') != ''` runs the caller's hook from its own checkout, else the default from a hub checkout under `.hub/`, and a local composite action resolves at step time from the workspace, which is what makes the fallback expressible at all.
+  - **Settled** - The per-type lint steps are selected by tree detection (`hashFiles` against a `*.csproj` or a `pyproject.toml`), a third option needing neither a per-repo input nor a network read.
+  - **Settled** - The `validate` hook is one hook, not several. A domain compile, a Hugo build, a KiCad ERC, a codegen-drift check, and PowerShell tests are each a repo's own business behind the same hook, and a repo needing more than one check composes them inside its own composite action.
+  - **Settled** - `test-pull-request-task.yml` hosts nothing generic. The ruleset-bound aggregator stays in the caller stub by design (a called job's check context would read `<caller job> / <callee job>` and break the ruleset binding), so the only job left for a second hub task to wrap is one line calling `validate-task.yml`, which a caller stub already writes for itself.
 
 - **Host the pure functions: `get-version-task.yml` and `publish-plan-task.yml`.** Neither has a repo-specific line, and the plan job is missing where D4.1 needs it.
   - **Blocked by** - The gates, only for sequencing, since a repo adopts one stub per visit and the gates come first.
@@ -268,27 +255,29 @@ One pull request per phase moving a standard workflow out of every repo and into
   - **Checked** - `develop` at `7c67328` on 2026-08-15, where 5 of 8 `get-version-task.yml` copies are identical and all 3 `publish-plan-task.yml` copies are.
   - **Open** - Nothing.
   - **Settled** - PlexCleaner carries no `plan` job, so its next scheduled run ships a Dependabot bump, and the hub-hosted plan job is the fix rather than a per-repo copy.
+  - **Settled** - Of the 3 `get-version-task.yml` copies that differ, KiCadLibrary only documents the same design the canonical already carries, and aiopurpleair and homeassistant-purpleair each add a `Prerelease` output derived from `SemVer2` with identical logic. The hub task hosts `Prerelease` as a sixth output rather than leaving it as per-repo logic, and drops homeassistant-purpleair's `Tag` alias since it is a bare copy of `SemVer2` with no derivation of its own.
+  - **Settled** - All 3 `publish-plan-task.yml` copies are a strict subset of the canonical, missing the `-E` in `set -Eeuo pipefail` and the `::warning::` branch for an unrecognized actor pushing to `main` (D8.4). The hub task carries the canonical as is.
+  - **Settled** - Neither task is nested inside the other or inside a future `build-release-task.yml`, so a caller that only needs the version, not the whole release orchestrator, reaches `get-version-task.yml` directly. `build-release-task.yml` (stage 4) inlines the get-version and validate-release jobs rather than nesting a sibling hub task, per the no-`./`-nesting rule.
 
-- **Host the release chain: `build-release-task.yml` with `build-<target>` hooks, `publish-release-task.yml`, and the Docker core.** The orchestration is generic and the target list is per repo, which the hooks express without a per-repo copy of the orchestrator.
+- **Host the release chain: `build-release-task.yml` with `build-<target>` hooks, and the Docker core.** The orchestration is generic and the target list is per repo, which the hooks express without a per-repo copy of the orchestrator. No `publish-release-task.yml` ships beside it, settled below.
   - **Blocked by** - The pure functions, since the release task calls both.
   - **Issue** - None filed.
   - **Checked** - `develop` at `7c67328` on 2026-08-15, where the report counts 10 copies of `build-release-task.yml` in 6 variants, 17 of `publish-release.yml` in 12, and 5 of `build-docker-task.yml` in 4, with the Docker core identical in every copy.
-  - **Open** - The `matrix` input shape for a multi-image Docker repo, and whether a base-image build is a hook or a second task the stub calls first.
+  - **Open** - Nothing left for this cluster. The matrix shape and the base-image hook are settled below, and the sweep-list adoption items are their own later checkboxes.
+  - **Settled** - The hub's own `publish-release.yml` carries a `plan` job calling `publish-plan-task.yml` by `./` path, adopted once #759 (Host Get-Version and Publish-Plan as Hub Reusable Tasks) merged, satisfying the `interface` contract this stage adds to `spec/files.json` (`requiredJobKeys: ["plan", "validate", "publish"]`).
   - **Settled** - The three no-asset release shapes the fleet runs today collapse into `expect_release_assets`, and PhotoCleaner and PlexCleaner pilot, then the NuGet, PyPI and Docker-only repos.
   - **Settled** - Vanilla Docker repos need only `image` and build-args, ESPHome-NonRoot adds a `docker-prepare` hook for its upstream pin, and NxWitness adds the matrix hook and `build-base`, in that order.
+  - **Settled** - The `matrix` input is a JSON list of `{name, tags, build-args, context, dockerfile, cache-repo}`, resolved by a `docker-prepare` hook (the hub default emits the single vanilla entry `image` implies) unless the caller passes `matrix` directly.
+  - **Settled** - A base-image build is a required hook, `docker-build-base`, with no hub default: the cache policy and platform selection stay hub-owned, but which base images exist and how they are built is content only a multi-image repo like NxWitness has.
+  - **Settled** - `build-release-task.yml` inlines `get-version` and `validate-release` and duplicates the Docker core into its own `build-docker` job, since a hub task cannot reach a sibling hub task by a `./` path. `build-docker-task.yml` ships separately for a caller that wants the Docker leg alone.
+  - **Settled** - No `publish-release-task.yml` ships: a caller stub's `plan`, `validate`, `publish`, and `publish-pypi` jobs are each a thin call to one hub task or a verbatim OIDC upload, and the trigger policy tying them together differs enough across the fleet's shapes that hosting it would not remove the per-repo `with:` block, only move it.
 
-- **Host the type-specific tasks: Docker Hub readme, upstream-version tracking, deploy-site, codegen, and the date badge.** Each with its hook, and the two string-command inputs the catalog carries today (`transform-run`, `resolver-command`) become hooks.
+- **Host the type-specific tasks: Docker Hub readme, upstream-version tracking, deploy-site, and codegen.** Each with its hook, and the two string-command inputs the catalog carries today (`transform-run`, `resolver-command`) become hooks. The date badge is retired outright rather than hosted, TODO.md's own retired-badge entry already tracks its deletion.
   - **Blocked by** - The release chain, since the readme task replaces the in-job description push.
   - **Issue** - None filed.
   - **Checked** - `develop` at `7c67328` on 2026-08-15, where each of these has one or two carriers.
-  - **Open** - Whether ESPHome-NonRoot's second tracker, whose bump waits for a human, is the same task with `auto-merge: false` or stays repo-local.
-  - **Settled** - The `operational-vs-release-workflow` skill's note that a target-agnostic target list is "intentionally not done" is retired by this phase rather than before it, since it is true until then.
-
-- **Land the merge-bot caller snippet in the catalog once a release names the task.** The snippet under `catalog/snippets/workflows/` is scanned by the pin gate and cannot carry a placeholder SHA, so it lands one release after the task.
-  - **Blocked by** - The first hub release carrying `merge-bot-task.yml`.
-  - **Issue** - None filed.
-  - **Checked** - `develop` at `7c67328` on 2026-08-15, where `scripts/repo_gate.py check_sha_pin` scans every `workflows/*.yml` path including the catalog.
-  - **Open** - Nothing, and the stub's text is already in [`docs/reusable-workflows.md`][reusable-workflows-doc] "Adopting the Merge-Bot".
+  - **Settled** - ESPHome-NonRoot's second tracker, whose bump waits for a human, is the same task with `auto-merge: false`, printing its apt-package snapshot as a name -> version object of one key rather than staying repo-local.
+  - **Settled** - The `operational-vs-release-workflow` skill's note that a target-agnostic target list is "intentionally not done" is retired by this stage rather than before it, since it is true until then.
 
 - **Decide the three merge-bot inputs the design leaves open.** The `delete-branch` default, the Dependabot semver-major filter two repos carry, and a `requiredHubUses` audit contract.
   - **Blocked by** - Nothing, and each is a maintainer call rather than a finding.
@@ -538,7 +527,7 @@ Regenerate [reports/divergences.md][divergences-report] before using it as the w
 
 - **Adopt the merge-bot caller stub, which is one file per repo replacing the copied job bodies.** The audit reports the missing `merge-bot` caller job on every copy until the repo adopts, which is the work list.
   - **Hub state** - Done on `develop`, where `.github/workflows/merge-bot-task.yml` is the task and the hub's own `merge-bot-pull-request.yml` is the stub. The stub a repo copies is in [`docs/reusable-workflows.md`][reusable-workflows-doc] "Adopting the Merge-Bot", and its pin is the first hub release carrying the task, so no repo can adopt before that release.
-  - **Outstanding** - Every repo carrying the file, 16 today, pilot on HomeAutomation-Config, then homeassistant-purpleair for the `rules` input.
+  - **Outstanding** - Every repo still carrying the job bodies rather than the stub, 15 of the 16 copies after PhotoCleaner adopted in ptr727/PhotoCleaner#53 and promoted it in ptr727/PhotoCleaner#54 on 2026-08-15, then HomeAutomation-Config for the operational path and homeassistant-purpleair for the `rules` input.
   - **Issue** - [#521][issue-521], whose hub half is done and whose sweep half this is.
   - **Rides with** - The `verbatim` re-vendor above.
   - **Detail** - The unused `GITHUB_TOKEN` grants #521 names are gone with the copy, since the task declares none and the stub sets `permissions: {}`.
@@ -662,7 +651,6 @@ Nothing is awaiting close today. [#578][issue-578] was the last entry here and c
 [fidelity-honesty]: ./spec/fidelity_honesty.py
 [files]: ./spec/files.json
 [fleet-map]: ./docs/fleet-map.md
-[gitattributes]: ./.gitattributes
 [governance]: ./GOVERNANCE.md
 [host-setup-doc]: ./docs/host-setup.md
 [host-setup-windows]: ./host-setup/windows/
@@ -673,6 +661,7 @@ Nothing is awaiting close today. [#578][issue-578] was the last entry here and c
 [peer-messaging-doc]: ./docs/peer-messaging.md
 [project-types]: ./spec/project-types.json
 [prose-gate]: ./.github/actions/prose-gate/action.yml
+[publish-docker-readme-task]: ./.github/workflows/publish-docker-readme-task.yml
 [readme-sections]: ./spec/readme-sections.json
 [readme-structure]: ./spec/readme-structure.md
 [repo-gate]: ./scripts/repo_gate.py

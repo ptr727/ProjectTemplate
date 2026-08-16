@@ -1,0 +1,629 @@
+name: Build project release task
+
+# The fleet release chain, hosted here once and reached by every release repo through a caller stub, per docs/reusable-workflows.md "Adopting the Release Chain".
+# NBGV runs once in get-version and threads the version to every target.
+# The validate-release job gates branch<->version consistency once before any build or publish.
+# The github-release job is verbatim in shape: pattern download, exists gate, target_commitish, consume-then-delete.
+# The expect_release_assets input collapses the fleet's three no-asset release shapes (Docker-only, PyPI-only, NuGet symbols-only) into one flag.
+#
+# Each target is a hub job whose body is a hook: the caller's own composite action at .github/actions/build-<target> when it carries one, else the hub default built from today's leaf catalog snippets.
+# A caller that matches the vanilla project layout (Console/Console.csproj, NuGetLibrary/NuGetLibrary.csproj, PyPiLibrary/) carries no hook at all.
+# Docker is the exception: its core (QEMU, Buildx, login, the registry buildcache, the tag/build-arg composition) is hub-owned rather than a hook, per docs/reusable-workflows.md "The Docker Family".
+# It is duplicated here from build-docker-task.yml rather than called by a ./ path, since a hub task cannot nest a sibling hub task that way.
+# A local uses: in a called workflow resolves against the top-level caller's repository, never the hub.
+# The build-docker-task.yml file stays published separately for a caller that wants the Docker leg without the rest of this chain.
+#
+# The get-version and validate-release jobs are inlined here rather than reached through get-version-task.yml, for the same no-nesting reason.
+# This file is a hub task itself, so its own get-version job carries the NBGV steps directly.
+
+on:
+  workflow_call:
+    inputs:
+      # Whether to create a GitHub release.
+      github:
+        required: false
+        type: boolean
+        default: false
+      # Whether to push the library to NuGet.org.
+      nuget:
+        required: false
+        type: boolean
+        default: false
+      # Whether to push the docker image to Docker Hub.
+      dockerhub:
+        required: false
+        type: boolean
+        default: false
+      # Git ref to check out / version (empty = default checkout ref).
+      ref:
+        required: false
+        type: string
+        default: ''
+      # Logical branch driving config / tags / prerelease for every target.
+      # Required, with no fallback, because each publish run builds a single branch, the trigger ref.
+      # A silent fallback would therefore mislabel the build.
+      branch:
+        required: true
+        type: string
+      # Smoke mode: a reduced, never-published build for fast PR feedback.
+      # Forwarded to every target and hard-disables every push below, so a smoke run can never publish regardless of the publish flags.
+      smoke:
+        required: false
+        type: boolean
+        default: false
+      # Per-target presence gates, defaulting to true so everything builds.
+      # A PR smoke run sets these from the paths-filter so only changed targets build.
+      enable_docker:
+        required: false
+        type: boolean
+        default: true
+      enable_nuget:
+        required: false
+        type: boolean
+        default: true
+      enable_pypi:
+        required: false
+        type: boolean
+        default: true
+      enable_executable:
+        required: false
+        type: boolean
+        default: true
+      # Set false for a repo that produces no release-asset-* files, such as a Docker-only or PyPI-only one.
+      # The release is then just the tag + source zip + README + LICENSE.
+      # The artifact download is skipped and the unmatched-files guard relaxes.
+      expect_release_assets:
+        required: false
+        type: boolean
+        default: true
+      # Docker: a plain Docker Hub repository (e.g. ptr727/widget), and an optional pre-built matrix, per build-docker-task.yml.
+      # See that file's inputs for the full docker-prepare / docker-build-base contract.
+      docker_image:
+        required: false
+        type: string
+        default: ''
+      docker_matrix:
+        required: false
+        type: string
+        default: ''
+      docker_build_base:
+        required: false
+        type: boolean
+        default: false
+      # NuGet / executable / PyPI: project path inputs forwarded to the hub default hooks' project-file/project-dir input.
+      # A caller whose layout differs only in path sets these.
+      # A caller needing build steps beyond a path override carries its own hook instead.
+      executable_project:
+        required: false
+        type: string
+        default: ./Console/Console.csproj
+      nuget_project:
+        required: false
+        type: string
+        default: ./NuGetLibrary/NuGetLibrary.csproj
+      pypi_project_dir:
+        required: false
+        type: string
+        default: ./PyPiLibrary
+    secrets:
+      # The nuget.org profile name for OIDC trusted publishing.
+      # Not needed when enable_nuget is false.
+      NUGET_USERNAME:
+        required: false
+      # Not needed when enable_docker is false.
+      DOCKER_HUB_USERNAME:
+        required: false
+      DOCKER_HUB_ACCESS_TOKEN:
+        required: false
+
+jobs:
+
+  get-version:
+    name: Get version information job
+    runs-on: ubuntu-latest
+    outputs:
+      SemVer2: ${{ steps.nbgv.outputs.SemVer2 }}
+      AssemblyVersion: ${{ steps.nbgv.outputs.AssemblyVersion }}
+      AssemblyFileVersion: ${{ steps.nbgv.outputs.AssemblyFileVersion }}
+      AssemblyInformationalVersion: ${{ steps.nbgv.outputs.AssemblyInformationalVersion }}
+      GitCommitId: ${{ steps.nbgv.outputs.GitCommitId }}
+
+    steps:
+
+      - name: Setup .NET SDK step
+        uses: actions/setup-dotnet@a98b56852c35b8e3190ac28c8c2271da59106c68 # v6.0.0
+        with:
+          dotnet-version: 10.x
+
+      - name: Checkout code step
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ inputs.ref }}
+          fetch-depth: 0
+
+      # The nbgv action is floated on @master, because its tag stream lags master.
+      # Dependabot tag-tracking would otherwise propose a downgrade.
+      - name: Run Nerdbank.GitVersioning tool step
+        id: nbgv
+        uses: dotnet/nbgv@master
+
+  # Entry gate: validate branch<->version consistency once, before the build jobs.
+  # An NBGV mis-classification then fails fast instead of after building and publishing.
+  # The main branch must be a public release, carrying no prerelease '-'.
+  # Every other branch must carry a prerelease '-', which guards a develop leg being published as stable.
+  # Strip '+buildmetadata' first, since a '-' there is legitimate.
+  # Only a '-' in the core/prerelease segment marks a prerelease.
+  validate-release:
+    name: Validate release version job
+    needs: [get-version]
+    runs-on: ubuntu-latest
+    steps:
+      - name: Validate branch and version consistency step
+        env:
+          SEMVER2: ${{ needs.get-version.outputs.SemVer2 }}
+          BRANCH: ${{ inputs.branch }}
+          SMOKE: ${{ inputs.smoke }}
+        run: |
+          set -Eeuo pipefail
+          # Smoke builds never publish and always version as prerelease (detached PR HEAD), which would trip the main arm.
+          if [[ "$SMOKE" == "true" ]]; then
+            echo "Smoke build; skipping release version validation."
+            exit 0
+          fi
+          CORE_AND_PRE="${SEMVER2%%+*}"
+          if [[ "$BRANCH" == "main" ]]; then
+            if [[ "$CORE_AND_PRE" == *-* ]]; then
+              echo "::error::Public (main) release version '$SEMVER2' carries a prerelease suffix; refusing to publish."
+              exit 1
+            fi
+          elif [[ "$CORE_AND_PRE" != *-* ]]; then
+            echo "::error::Prerelease ($BRANCH) version '$SEMVER2' has no prerelease suffix (NBGV classified it public); refusing to publish."
+            exit 1
+          fi
+
+  build-executable:
+    name: Build executable job
+    if: ${{ inputs.enable_executable }}
+    needs: [get-version, validate-release]
+    runs-on: ubuntu-latest
+    steps:
+
+      # Pin to the resolved commit so the artifacts match the release tag even if the branch advances mid-run.
+      - name: Checkout code step
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ needs.get-version.outputs.GitCommitId }}
+
+      - name: Checkout hub for hook default step
+        if: ${{ hashFiles('.github/actions/build-executable/action.yml') == '' }}
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          repository: ${{ job.workflow_repository }}
+          ref: ${{ job.workflow_sha }}
+          path: .hub
+
+      - name: Run caller build-executable hook step
+        if: ${{ hashFiles('.github/actions/build-executable/action.yml') != '' }}
+        uses: ./.github/actions/build-executable
+        with:
+          branch: ${{ inputs.branch }}
+          smoke: ${{ inputs.smoke }}
+          semver2: ${{ needs.get-version.outputs.SemVer2 }}
+          assembly-version: ${{ needs.get-version.outputs.AssemblyVersion }}
+          assembly-file-version: ${{ needs.get-version.outputs.AssemblyFileVersion }}
+          assembly-informational-version: ${{ needs.get-version.outputs.AssemblyInformationalVersion }}
+          project-file: ${{ inputs.executable_project }}
+
+      - name: Run hub build-executable default step
+        if: ${{ hashFiles('.github/actions/build-executable/action.yml') == '' }}
+        uses: ./.hub/.github/actions/build-executable-default
+        with:
+          branch: ${{ inputs.branch }}
+          smoke: ${{ inputs.smoke }}
+          semver2: ${{ needs.get-version.outputs.SemVer2 }}
+          assembly-version: ${{ needs.get-version.outputs.AssemblyVersion }}
+          assembly-file-version: ${{ needs.get-version.outputs.AssemblyFileVersion }}
+          assembly-informational-version: ${{ needs.get-version.outputs.AssemblyInformationalVersion }}
+          project-file: ${{ inputs.executable_project }}
+
+  build-nuget:
+    name: Build NuGet library job
+    if: ${{ inputs.enable_nuget }}
+    needs: [get-version, validate-release]
+    runs-on: ubuntu-latest
+    # OIDC trusted publishing through NuGet/login needs id-token: write, granted by the caller on its call to this task.
+    # It is declared alongside contents: read, since a job-level permissions: block zeroes every unlisted scope, and this job's checkout steps need it.
+    permissions:
+      contents: read
+      id-token: write
+    steps:
+
+      - name: Checkout code step
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ needs.get-version.outputs.GitCommitId }}
+
+      - name: Checkout hub for hook default step
+        if: ${{ hashFiles('.github/actions/build-nuget/action.yml') == '' }}
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          repository: ${{ job.workflow_repository }}
+          ref: ${{ job.workflow_sha }}
+          path: .hub
+
+      - name: Run caller build-nuget hook step
+        if: ${{ hashFiles('.github/actions/build-nuget/action.yml') != '' }}
+        uses: ./.github/actions/build-nuget
+        with:
+          branch: ${{ inputs.branch }}
+          smoke: ${{ inputs.smoke }}
+          push: ${{ inputs.nuget && !inputs.smoke }}
+          semver2: ${{ needs.get-version.outputs.SemVer2 }}
+          assembly-version: ${{ needs.get-version.outputs.AssemblyVersion }}
+          assembly-file-version: ${{ needs.get-version.outputs.AssemblyFileVersion }}
+          assembly-informational-version: ${{ needs.get-version.outputs.AssemblyInformationalVersion }}
+          project-file: ${{ inputs.nuget_project }}
+          nuget-username: ${{ secrets.NUGET_USERNAME }}
+
+      - name: Run hub build-nuget default step
+        if: ${{ hashFiles('.github/actions/build-nuget/action.yml') == '' }}
+        uses: ./.hub/.github/actions/build-nuget-default
+        with:
+          branch: ${{ inputs.branch }}
+          smoke: ${{ inputs.smoke }}
+          push: ${{ inputs.nuget && !inputs.smoke }}
+          semver2: ${{ needs.get-version.outputs.SemVer2 }}
+          assembly-version: ${{ needs.get-version.outputs.AssemblyVersion }}
+          assembly-file-version: ${{ needs.get-version.outputs.AssemblyFileVersion }}
+          assembly-informational-version: ${{ needs.get-version.outputs.AssemblyInformationalVersion }}
+          project-file: ${{ inputs.nuget_project }}
+          nuget-username: ${{ secrets.NUGET_USERNAME }}
+
+  # PyPI publishing happens in the caller stub's own publish-pypi job, since id-token: write is granted only at that one entry point.
+  # This job just builds and uploads the artifact for that job to download.
+  build-pypi:
+    name: Build PyPI library job
+    if: ${{ inputs.enable_pypi }}
+    needs: [get-version, validate-release]
+    runs-on: ubuntu-latest
+    steps:
+
+      - name: Checkout code step
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ needs.get-version.outputs.GitCommitId }}
+
+      - name: Checkout hub for hook default step
+        if: ${{ hashFiles('.github/actions/build-pypi/action.yml') == '' }}
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          repository: ${{ job.workflow_repository }}
+          ref: ${{ job.workflow_sha }}
+          path: .hub
+
+      - name: Run caller build-pypi hook step
+        if: ${{ hashFiles('.github/actions/build-pypi/action.yml') != '' }}
+        uses: ./.github/actions/build-pypi
+        with:
+          branch: ${{ inputs.branch }}
+          smoke: ${{ inputs.smoke }}
+          assembly-file-version: ${{ needs.get-version.outputs.AssemblyFileVersion }}
+          project-dir: ${{ inputs.pypi_project_dir }}
+
+      - name: Run hub build-pypi default step
+        if: ${{ hashFiles('.github/actions/build-pypi/action.yml') == '' }}
+        uses: ./.hub/.github/actions/build-pypi-default
+        with:
+          branch: ${{ inputs.branch }}
+          smoke: ${{ inputs.smoke }}
+          assembly-file-version: ${{ needs.get-version.outputs.AssemblyFileVersion }}
+          project-dir: ${{ inputs.pypi_project_dir }}
+
+  # The Docker core, duplicated from build-docker-task.yml rather than reached by a ./ path (see the header comment).
+  # Resolves the image matrix once: the caller's docker_matrix input directly, else the caller's own docker-prepare hook, else the hub default built from docker_image.
+  # Skipped entirely when docker is disabled.
+  docker-prepare:
+    name: Resolve Docker build matrix job
+    if: ${{ inputs.enable_docker }}
+    needs: [get-version, validate-release]
+    runs-on: ubuntu-latest
+    outputs:
+      matrix: ${{ inputs.docker_matrix != '' && inputs.docker_matrix || (steps.hook.outputs.matrix || steps.default.outputs.matrix) }}
+    steps:
+
+      - name: Checkout code step
+        if: ${{ inputs.docker_matrix == '' }}
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ needs.get-version.outputs.GitCommitId }}
+
+      - name: Checkout hub for hook default step
+        if: ${{ inputs.docker_matrix == '' && hashFiles('.github/actions/docker-prepare/action.yml') == '' }}
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          repository: ${{ job.workflow_repository }}
+          ref: ${{ job.workflow_sha }}
+          path: .hub
+
+      - name: Run caller docker-prepare hook step
+        if: ${{ inputs.docker_matrix == '' && hashFiles('.github/actions/docker-prepare/action.yml') != '' }}
+        id: hook
+        uses: ./.github/actions/docker-prepare
+        with:
+          image: ${{ inputs.docker_image }}
+          branch: ${{ inputs.branch }}
+          semver2: ${{ needs.get-version.outputs.SemVer2 }}
+
+      - name: Run hub docker-prepare default step
+        if: ${{ inputs.docker_matrix == '' && hashFiles('.github/actions/docker-prepare/action.yml') == '' }}
+        id: default
+        uses: ./.hub/.github/actions/docker-prepare-default
+        with:
+          image: ${{ inputs.docker_image }}
+          branch: ${{ inputs.branch }}
+          semver2: ${{ needs.get-version.outputs.SemVer2 }}
+
+      # Fails here with a named cause, rather than later inside fromJSON, whichever path produced the matrix
+      # (the caller's docker_matrix input, a caller's own docker-prepare hook, or the hub default).
+      - name: Validate Docker build matrix step
+        env:
+          MATRIX: ${{ inputs.docker_matrix != '' && inputs.docker_matrix || (steps.hook.outputs.matrix || steps.default.outputs.matrix) }}
+        run: |
+          set -Eeuo pipefail
+          if [[ -z "$MATRIX" ]]; then
+            echo "::error::No Docker build matrix resolved. Set docker_matrix directly, or a docker-prepare hook must set outputs.matrix."
+            exit 1
+          fi
+          if ! jq -e 'type == "array" and length > 0' <<<"$MATRIX" >/dev/null 2>&1; then
+            echo "::error::The Docker build matrix is not a non-empty JSON array: $MATRIX"
+            exit 1
+          fi
+          # Each entry needs every key the build-docker job reads: tags/build-args as arrays, the rest as strings.
+          if ! jq -e '
+            all(.[];
+              (.name | type == "string")
+              and (.tags | type == "array")
+              and (."build-args" | type == "array")
+              and (.context | type == "string")
+              and (.dockerfile | type == "string")
+              and (."cache-repo" | type == "string")
+            )' <<<"$MATRIX" >/dev/null 2>&1; then
+            echo "::error::A Docker build matrix entry is missing or mistypes one of name, tags, build-args, context, dockerfile, cache-repo: $MATRIX"
+            exit 1
+          fi
+
+  # Required hook, no hub default.
+  # A multi-image repo whose base layer is shared across product images must carry .github/actions/docker-build-base itself.
+  # Skipped entirely when docker_build_base is false.
+  docker-build-base:
+    name: Build Docker base image job
+    if: ${{ inputs.enable_docker && (inputs.docker_build_base == true || inputs.docker_build_base == 'true') }}
+    needs: [get-version, validate-release]
+    runs-on: ubuntu-latest
+    steps:
+
+      - name: Checkout code step
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ needs.get-version.outputs.GitCommitId }}
+
+      - name: Require caller docker-build-base hook step
+        if: ${{ hashFiles('.github/actions/docker-build-base/action.yml') == '' }}
+        run: |
+          set -Eeuo pipefail
+          echo "::error::inputs.docker_build_base is true but .github/actions/docker-build-base/action.yml is missing."
+          echo "::error::This hook has no hub default; a repo enabling it must carry it."
+          exit 1
+
+      - name: Run caller docker-build-base hook step
+        if: ${{ hashFiles('.github/actions/docker-build-base/action.yml') != '' }}
+        uses: ./.github/actions/docker-build-base
+        with:
+          push: ${{ inputs.dockerhub && !inputs.smoke }}
+          ref: ${{ needs.get-version.outputs.GitCommitId }}
+
+  # Docker is the terminal publish target, so it must never build on a partial run.
+  # A failed build skips it, no build and no push, while a skipped build, a disabled or unvendored target, does not, so Docker still builds on smoke.
+  # The github-release job reaches the same intent more simply, since it only runs on a real publish, where nothing is disabled.
+  build-docker:
+    name: Build Docker image job
+    needs: [get-version, validate-release, build-executable, build-nuget, build-pypi, docker-prepare, docker-build-base]
+    if: >-
+      ${{ inputs.enable_docker && !failure() && !cancelled() &&
+      (needs.docker-prepare.result == 'success' || needs.docker-prepare.result == 'skipped') &&
+      (needs.docker-build-base.result == 'success' || needs.docker-build-base.result == 'skipped') }}
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        image: ${{ fromJSON(needs.docker-prepare.outputs.matrix) }}
+    env:
+      # Multi-arch (amd64+arm64) only on a full main publish, and smoke and develop build amd64 only.
+      PLATFORMS: ${{ (!inputs.smoke && inputs.branch == 'main') && 'linux/amd64,linux/arm64' || 'linux/amd64' }}
+
+    steps:
+
+      - name: Checkout step
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ needs.get-version.outputs.GitCommitId }}
+
+      - name: Setup QEMU step
+        if: ${{ contains(env.PLATFORMS, 'arm64') }}
+        uses: docker/setup-qemu-action@96fe6ef7f33517b61c61be40b68a1882f3264fb8 # v4.2.0
+        with:
+          platforms: arm64
+
+      - name: Setup Buildx step
+        uses: docker/setup-buildx-action@bb05f3f5519dd87d3ba754cc423b652a5edd6d2c # v4.2.0
+        with:
+          platforms: ${{ env.PLATFORMS }}
+
+      # DOCKER_HUB_USERNAME / DOCKER_HUB_ACCESS_TOKEN are optional workflow_call secrets, since a caller with enable_docker: false never needs them.
+      # A caller enabling Docker without mapping them fails here by name, rather than inside the login action with a less actionable error.
+      # The secrets context is not allowed in a step if:, so the check runs unconditionally and reads them through env instead.
+      - name: Require Docker Hub secrets step
+        env:
+          DOCKER_HUB_USERNAME: ${{ secrets.DOCKER_HUB_USERNAME }}
+          DOCKER_HUB_ACCESS_TOKEN: ${{ secrets.DOCKER_HUB_ACCESS_TOKEN }}
+        run: |
+          set -Eeuo pipefail
+          if [[ -z "$DOCKER_HUB_USERNAME" || -z "$DOCKER_HUB_ACCESS_TOKEN" ]]; then
+            echo "::error::inputs.enable_docker is true but DOCKER_HUB_USERNAME and/or DOCKER_HUB_ACCESS_TOKEN is empty. The caller must map both secrets through to this task."
+            exit 1
+          fi
+
+      - name: Login to Docker Hub step
+        uses: docker/login-action@dbcb813823bdd20940b903addbd779551569679f # v4.6.0
+        with:
+          username: ${{ secrets.DOCKER_HUB_USERNAME }}
+          password: ${{ secrets.DOCKER_HUB_ACCESS_TOKEN }}
+
+      - name: Compose tags and build-args step
+        id: compose
+        env:
+          TAGS_JSON: ${{ toJSON(matrix.image.tags) }}
+          ARGS_JSON: ${{ toJSON(matrix.image['build-args']) }}
+          SEMVER2: ${{ needs.get-version.outputs.SemVer2 }}
+          ASSEMBLY_VERSION: ${{ needs.get-version.outputs.AssemblyVersion }}
+          ASSEMBLY_FILE_VERSION: ${{ needs.get-version.outputs.AssemblyFileVersion }}
+          ASSEMBLY_INFORMATIONAL_VERSION: ${{ needs.get-version.outputs.AssemblyInformationalVersion }}
+          BRANCH: ${{ inputs.branch }}
+        run: |
+          set -Eeuo pipefail
+          {
+            echo "tags<<TAGEOF"
+            jq -r '.[]' <<<"$TAGS_JSON"
+            echo "TAGEOF"
+            echo "args<<ARGEOF"
+            jq -r '.[]' <<<"$ARGS_JSON"
+            echo "LABEL_VERSION=$SEMVER2"
+            if [[ -n "$ASSEMBLY_VERSION" ]]; then
+              configuration=Debug
+              [[ "$BRANCH" == "main" ]] && configuration=Release
+              echo "BUILD_CONFIGURATION=$configuration"
+              echo "BUILD_VERSION=$ASSEMBLY_VERSION"
+              echo "BUILD_FILE_VERSION=$ASSEMBLY_FILE_VERSION"
+              echo "BUILD_ASSEMBLY_VERSION=$ASSEMBLY_VERSION"
+              echo "BUILD_INFORMATION_VERSION=$ASSEMBLY_INFORMATIONAL_VERSION"
+              echo "BUILD_PACKAGE_VERSION=$SEMVER2"
+            fi
+            echo "ARGEOF"
+          } >> "$GITHUB_OUTPUT"
+
+      - name: Docker build and push step
+        uses: docker/build-push-action@53b7df96c91f9c12dcc8a07bcb9ccacbed38856a # v7.3.0
+        with:
+          context: ${{ matrix.image.context }}
+          push: ${{ inputs.dockerhub && !inputs.smoke }}
+          file: ${{ matrix.image.dockerfile }}
+          tags: ${{ steps.compose.outputs.tags }}
+          platforms: ${{ env.PLATFORMS }}
+          cache-from: |
+            type=registry,ref=${{ matrix.image['cache-repo'] }}:buildcache-main
+            type=registry,ref=${{ matrix.image['cache-repo'] }}:buildcache-develop
+          cache-to: ${{ (inputs.dockerhub && !inputs.smoke) && format('type=registry,ref={0}:buildcache-{1},mode=max,ignore-error=true', matrix.image['cache-repo'], inputs.branch) || '' }}
+          build-args: ${{ steps.compose.outputs.args }}
+
+  github-release:
+    name: Publish GitHub release job
+    # !inputs.smoke enforces "smoke never publishes" at the job level, so a smoke caller that also set github: true still can't create a release.
+    # The failure()/cancelled() checks are required here, not decorative.
+    # An if: with no status-check function gets an implicit success() added, and success() is false when any needs job was skipped, a disabled target.
+    # That would skip this job on every run with a disabled target, including the hub's own publish-release.yml, which disables every target.
+    # The explicit functions replace that implicit success() instead, tolerating a skipped need while still failing closed on a real failure.
+    if: ${{ inputs.github && !inputs.smoke && !failure() && !cancelled() }}
+    runs-on: ubuntu-latest
+    needs: [get-version, validate-release, build-executable, build-nuget, build-pypi, build-docker]
+    # The release upload and the artifact-delete cleanup both write with GITHUB_TOKEN, and the caller grants these.
+    permissions:
+      contents: write
+      actions: write
+
+    steps:
+
+      # Check out the exact built commit so the uploaded release files match the tag even if the branch advances mid-run.
+      - name: Checkout code step
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ needs.get-version.outputs.GitCommitId }}
+
+      # Collect assets by the release-asset-<branch>-* pattern so this step is target-agnostic.
+      # Subset releases by disabling the target, not by editing this job.
+      # A skipped needs job still lets this job run, since it only needs a real, non-smoke publish.
+      # The release step guards fail_on_unmatched_files: true, so at least one release-asset-* must match.
+      # A repo that drops every file-producing target relaxes that guard.
+      # A Docker-only or PyPI-only repo is the case, its release carrying only the source zip + README + LICENSE.
+      - name: Download release asset artifacts step
+        if: ${{ inputs.expect_release_assets }}
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          pattern: release-asset-${{ inputs.branch }}-*
+          merge-multiple: true
+          path: ./Publish
+
+      # The weekly publisher re-runs even with no new commits, so the version may already be released.
+      # Skip the release step when a release for this tag already exists, to avoid a no-op republish.
+      - name: Check for existing release step
+        id: release-exists
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ needs.get-version.outputs.SemVer2 }}
+        run: |
+          set -Eeuo pipefail
+          if gh release view "$TAG" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
+            echo "exists=true" >> "$GITHUB_OUTPUT"
+            if [[ "${{ github.event_name }}" == "workflow_dispatch" ]]; then
+              echo "Release $TAG already exists; workflow_dispatch will refresh it."
+            else
+              echo "Release $TAG already exists; skipping release creation (no-op republish)."
+            fi
+          else
+            echo "exists=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      # The target_commitish input must be set explicitly, or GitHub's REST API tags the release on the default branch.
+      # Pin it to GitCommitId so the tag is on the exact built commit, consistent with the SemVer2 tag and artifacts.
+      # Skip when the release already exists, but always let a manual workflow_dispatch through to refresh it.
+      # Every release, on any branch and for any target, is a tag on the built commit plus the auto-attached source zip, README, and LICENSE.
+      # Targets amend it by uploading release-asset-* files (binaries/packages) or by pushing elsewhere (image/registry).
+      # Setting fail_on_unmatched_files true fails loudly if a promised release-asset-* is missing or misnamed.
+      # A no-file-target repo relaxes it (see download step).
+      - name: Create GitHub release step
+        if: ${{ steps.release-exists.outputs.exists == 'false' || github.event_name == 'workflow_dispatch' }}
+        uses: softprops/action-gh-release@3d0d9888cb7fd7b750713d6e236d1fcb99157228 # v3.0.2
+        with:
+          generate_release_notes: true
+          tag_name: ${{ needs.get-version.outputs.SemVer2 }}
+          target_commitish: ${{ needs.get-version.outputs.GitCommitId }}
+          prerelease: ${{ inputs.branch != 'main' }}
+          fail_on_unmatched_files: ${{ inputs.expect_release_assets }}
+          files: |
+            LICENSE
+            README.md
+            ./Publish/*
+
+      # Surgical cleanup at the point of consumption, since the release-asset-<branch>-* transfer artifacts now have durable copies on the release.
+      # Delete them by exact pattern to free the storage quota.
+      # The pattern is scoped to this branch's assets, leaving diagnostics and any other artifacts.
+      # It is gated to the same condition as the create step, so it only deletes when a release was actually created or refreshed this run.
+      # On a skipped create, an existing tag with no new commits, the fresh artifacts stay for the run, reaped by the retention-days: 1 backstop.
+      - name: Delete consumed release asset artifacts step
+        if: ${{ inputs.expect_release_assets && (steps.release-exists.outputs.exists == 'false' || github.event_name == 'workflow_dispatch') }}
+        # Best-effort, since the release is already published, so a listing or delete hiccup must never red the job.
+        # The retention-days: 1 backstop reaps anything missed.
+        # It deletes every matching id, because a rerun can upload duplicates.
+        continue-on-error: true
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -Eeuo pipefail
+          if ! ids=$(gh api "repos/$GITHUB_REPOSITORY/actions/runs/${{ github.run_id }}/artifacts" --paginate \
+            --jq ".artifacts[] | select(.name | startswith(\"release-asset-${{ inputs.branch }}-\")) | .id"); then
+            echo "::warning::Could not list run artifacts; retention-days backstop will reap them."
+            ids=""
+          fi
+          for id in $ids; do
+            if ! gh api --method DELETE "repos/$GITHUB_REPOSITORY/actions/artifacts/$id"; then
+              echo "::warning::Failed to delete artifact $id; retention-days backstop will reap it."
+            fi
+          done

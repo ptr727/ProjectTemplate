@@ -4,7 +4,7 @@ The tooling that makes a Debian or Ubuntu based host satisfy the contract in [`d
 
 ## What Is Here
 
-- [`install-tools.sh`][install-tools] installs and upgrades the host tools. It reports what each is installed at, what upstream carries, where it comes from, and its status.
+- [`install-tools.sh`][install-tools] installs and upgrades the host tools. It reports what each is installed at, what upstream carries, where it comes from, and its status. Its `--sudo-timestamp` action is the one thing it does that is about the host rather than a tool.
 - [`upgrade-host.sh`][upgrade-host] upgrades the packages of the current release. Moving to the next release is a separate action behind its own flag.
 - [`setup-github.sh`][setup-github] configures the SSH key, git, and commit signing. It checks both key registrations against what GitHub publishes.
 - [`install-skills.sh`][install-skills] drives the hub's skills installer at [`scripts/skills_install.py`][skills-install] from this tree.
@@ -66,6 +66,20 @@ An install or upgrade collects a tool whose install fails and carries on, so one
 **Installing `node` displaces distro packages.** The upstream package carries `npm` itself and conflicts with the distro's `npm` and `nodejs-doc`. The script asks apt what it would remove and puts that list in front of the operator first. Asking apt beats naming the conflicts here, because the conflict set belongs to the upstream package and changes without notice. The major line installed is whatever upstream currently marks LTS, read from its release index at run time.
 
 **For `dotnet`, the distro feed is the default and Microsoft's feed is the fallback.** The fallback is added only where the distro carries no SDK at all, because mixing the two feeds is what breaks a host. Microsoft's feed carries amd64 only, so any other architecture without a distro SDK is a named skip. The default set is the newest SDK line the feed carries. `--optional` adds every other line, for a host that builds against more than one.
+
+## The Sudo Credential Cache
+
+`install-tools.sh --sudo-timestamp` shares one sudo credential cache across the invoking user's terminals. Sudo's default is one cache per terminal, so a `sudo -v` answered in one terminal does nothing for a program started in another. The action installs no tool and reports on none. It sits here because a host stand-up already runs this script.
+
+**The drop-in is scoped to one user.** It lands at `/etc/sudoers.d/90-host-setup-sudo-timestamp` and names the invoking user, so every other account keeps the per-terminal default. Under `sudo` the invoking user is `$SUDO_USER` rather than root, since widening root's cache leaves the caller prompted exactly as before. A run as root with no invoking user to name is refused.
+
+**Writing to `/etc/sudoers.d` is the one change here that can lock a host out.** A parse error in any file sudo reads makes every `sudo` on that host fail, and the remedy then needs a root shell. So the whole set is proved to parse before anything is added to it. The new content then lands under a name sudo skips, since sudo ignores a file name holding a dot. It is proved again where sudo will read it, and only then is renamed over. A rename is atomic and a copy into place is not.
+
+**A re-run that would write the same bytes changes nothing.** A drop-in carrying something else is replaced, and a timestamp option set in another file is named rather than merged into. Which of the two wins is the order sudo reads them in, not something this can decide.
+
+**Ubuntu 25.10 and later ship `sudo-rs` as the default `sudo`, and it carries no `timestamp_type` setting at all.** Nothing there shares a cache across terminals. The action therefore asks each installed implementation's own `visudo` whether it parses the drop-in, rather than reading a version number. Where the active one does not, the run offers to point the `sudo` alternative at one that does. That changes which sudo every user on the host runs, so it is stated before the prompt, and `update-alternatives --auto sudo` puts it back. A host where no installed sudo parses the setting is refused, naming `apt-get install sudo` as the remedy.
+
+The cache stays valid for 60 minutes, from `SUDO_TIMESTAMP_TIMEOUT` in the script. Removing the drop-in undoes the sharing. Where the run also switched the sudo alternative, `update-alternatives --auto sudo` is what undoes that half.
 
 ## Release Upgrades
 
@@ -134,11 +148,14 @@ Then the dry runs, which print what each action would run:
 
 ```shell
 host-setup/linux/install-tools.sh --upgrade --dry-run
+host-setup/linux/install-tools.sh --sudo-timestamp --dry-run
 host-setup/linux/upgrade-host.sh --release --dry-run
 host-setup/linux/setup-github.sh --configure --dry-run
 ```
 
 Two of those are guards rather than previews. `--release --dry-run` on a Proxmox host prints the refusal, not the commands. A docker `--upgrade --dry-run` inside a WSL distribution prints the skip. A `[dry run]` line from either means the guard sits in the wrong place.
+
+`--sudo-timestamp --dry-run` is the one dry run that can ask for a password. Only root reads `/etc/sudoers`, and what is already set there is what the run reports on.
 
 The scripts are checked by `shellcheck`, which runs in CI over every `.sh` file `git ls-files` returns. A local run uses the same `koalaman/shellcheck:stable` container. [`scripts/tests/test_bootstrap.py`][test-bootstrap] asserts that every tool the spec requires on Linux is one `install-tools.sh` can provide, or a recorded exception. It also asserts each script here is tracked executable, so a fresh checkout can run it.
 
