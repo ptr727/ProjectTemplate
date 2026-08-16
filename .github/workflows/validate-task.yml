@@ -130,26 +130,19 @@ jobs:
         if: hashFiles('pyproject.toml') != ''
         run: uvx ruff@latest format --check .
 
-      # Mypy and pyright are independent: a pyproject declaring both sections runs both, and a pyproject declaring only one runs that one.
-      # Neither runs unless its own section exists.
-      - name: Type check Python (mypy) step
+      # Mypy takes precedence where a pyproject declares both sections, matching every repo that runs mypy in CI today.
+      # A pyright-only pyproject, with no [tool.mypy] section, falls back to pyright instead.
+      # A repo that genuinely wants both enforced adds the second as its own validate hook step.
+      - name: Type check Python step
         if: hashFiles('pyproject.toml') != ''
         run: |
           set -Eeuo pipefail
           if grep -q '^\[tool\.mypy\]' pyproject.toml; then
             uvx mypy@latest
-          else
-            echo "no [tool.mypy] section, skipping"
-          fi
-
-      - name: Type check Python (pyright) step
-        if: hashFiles('pyproject.toml') != ''
-        run: |
-          set -Eeuo pipefail
-          if grep -q '^\[tool\.pyright\]' pyproject.toml; then
+          elif grep -q '^\[tool\.pyright\]' pyproject.toml; then
             uvx pyright@latest
           else
-            echo "no [tool.pyright] section, skipping"
+            echo "no [tool.mypy] or [tool.pyright] section, skipping"
           fi
 
       # The fleet prose rules, scoped to a pull request's own diff so the existing backlog blocks nothing.
