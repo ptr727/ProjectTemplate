@@ -28,7 +28,7 @@ inputs:
     required: false
     default: ./Console/Console.csproj
   asset-name:
-    description: Name of the release archive without its .7z extension, so Widget produces Widget.7z. Empty derives it from the project file's stem, so ./Widget/Widget.csproj also produces Widget.7z.
+    description: Name of the release archive without its .7z extension, so Widget produces Widget.7z. Empty derives it from the project file's stem, so ./Widget/Widget.csproj also produces Widget.7z. Letters, digits, dot, underscore and hyphen only, given or derived, and anything else fails the step.
     required: false
     default: ''
 
@@ -84,7 +84,7 @@ runs:
         ASSET_NAME: ${{ inputs.asset-name }}
       run: |
         set -Eeuo pipefail
-        name="${ASSET_NAME:-$(basename "$PROJECT_FILE" .csproj)}"
+        name="${ASSET_NAME:-$(basename -- "$PROJECT_FILE" .csproj)}"
         name="${name%.7z}"
         if [[ ! "$name" =~ ^[A-Za-z0-9._-]+$ ]]; then
           echo "::error::asset-name must be a bare file name of letters, digits, dot, underscore or hyphen"
