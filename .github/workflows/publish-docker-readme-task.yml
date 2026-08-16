@@ -52,6 +52,8 @@ jobs:
     name: Get repository list job
     runs-on: ubuntu-latest
     if: ${{ inputs.branch == 'main' }}
+    permissions:
+      contents: read
     outputs:
       repositories: ${{ steps.list.outputs.repositories }}
 
@@ -106,6 +108,8 @@ jobs:
     name: Publish Docker Hub readme job
     runs-on: ubuntu-latest
     needs: get-repos
+    permissions:
+      contents: read
     strategy:
       matrix:
         repository: ${{ fromJSON(needs.get-repos.outputs.repositories) }}

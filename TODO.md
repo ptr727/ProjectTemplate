@@ -59,7 +59,7 @@ One pull request moving the canonical short description into declared data, so e
 - **Close the README-to-About hop, which is the only one nothing writes.** The audit reports a drifted About panel, and no tool sets it.
   - **Blocked by** - The entry above, since the field is what `repo-config/configure.sh` would set the panel from.
   - **Issue** - [#639][issue-639], filed on 2026-08-09 because this entry had been carrying [#577][issue-577], whose body covers only the README tagline and never mentions the About panel, and whose tagline half shipped on 2026-08-08.
-  - **Checked** - `develop` on 2026-08-08, where `repo-config/configure.sh` sets every other repository setting and carries no `description` handling, and the hub-hosted [`publish-docker-readme-task.yml`][workflows] pushes `github.event.repository.description` to Docker Hub.
+  - **Checked** - `develop` on 2026-08-08, where `repo-config/configure.sh` sets every other repository setting and carries no `description` handling, and the hub-hosted [`publish-docker-readme-task.yml`][publish-docker-readme-task] pushes `github.event.repository.description` to Docker Hub.
   - **Open** - Nothing beyond sequencing.
   - **Settled** - The chain is README, then the About panel by hand, then Docker Hub by CI, so the unautomated hop is the first one and it is the one that drifts. PhotoCleaner is the worked case, where the About panel still matched the README and only the Docker Hub short description had diverged.
   - **Settled** - CI keeps reading `repository.description` rather than the README. Pointing it at the README puts a Markdown parser in a publish job, which PhotoCleaner#32 measured at nine guards, every one of which fails the release rather than the tagline.
@@ -652,6 +652,7 @@ Nothing is awaiting close today. [#578][issue-578] was the last entry here and c
 [peer-messaging-doc]: ./docs/peer-messaging.md
 [project-types]: ./spec/project-types.json
 [prose-gate]: ./.github/actions/prose-gate/action.yml
+[publish-docker-readme-task]: ./.github/workflows/publish-docker-readme-task.yml
 [readme-sections]: ./spec/readme-sections.json
 [readme-structure]: ./spec/readme-structure.md
 [repo-gate]: ./scripts/repo_gate.py
