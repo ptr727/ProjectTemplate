@@ -135,7 +135,11 @@ Adoptable since `2.0.338`. Each repo replaces the whole of its `.github/workflow
 - [ ] PlexCleaner
 - [ ] Utilities
 - [ ] Vantage-Config
-- [ ] AudioCleaner, DevKitCIoT, EspDinIoT, Financial-Modeling, HolidayLights carry no merge-bot today and take the stub on their next standup or resync, since the manifest applies it to every repo.
+- [ ] AudioCleaner (carries no merge-bot today, takes the stub on its next standup or resync, since the manifest applies it to every repo)
+- [ ] DevKitCIoT (same)
+- [ ] EspDinIoT (same)
+- [ ] Financial-Modeling (same)
+- [ ] HolidayLights (same)
 - [ ] `reports/workflow-reuse.md` regenerated with `merge-bot-pull-request.yml` at 0 copies carrying job bodies and callers equal to the adopters.
 
 ### Stage 2: The Gates
