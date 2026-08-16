@@ -511,7 +511,11 @@ jobs:
   github-release:
     name: Publish GitHub release job
     # !inputs.smoke enforces "smoke never publishes" at the job level, so a smoke caller that also set github: true still can't create a release.
-    if: ${{ inputs.github && !inputs.smoke }}
+    # The failure()/cancelled() checks are required here, not decorative.
+    # An if: with no status-check function gets an implicit success() added, and success() is false when any needs job was skipped, a disabled target.
+    # That would skip this job on every run with a disabled target, including the hub's own publish-release.yml, which disables every target.
+    # The explicit functions replace that implicit success() instead, tolerating a skipped need while still failing closed on a real failure.
+    if: ${{ inputs.github && !inputs.smoke && !failure() && !cancelled() }}
     runs-on: ubuntu-latest
     needs: [get-version, validate-release, build-executable, build-nuget, build-pypi, build-docker]
     # The release upload and the artifact-delete cleanup both write with GITHUB_TOKEN, and the caller grants these.
