@@ -140,6 +140,19 @@ jobs:
             echo "::error::The Docker build matrix is not a non-empty JSON array: $MATRIX"
             exit 1
           fi
+          # Each entry needs every key the build-docker job reads: tags/build-args as arrays, the rest as strings.
+          if ! jq -e '
+            all(.[];
+              (.name | type == "string")
+              and (.tags | type == "array")
+              and (."build-args" | type == "array")
+              and (.context | type == "string")
+              and (.dockerfile | type == "string")
+              and (."cache-repo" | type == "string")
+            )' <<<"$MATRIX" >/dev/null 2>&1; then
+            echo "::error::A Docker build matrix entry is missing or mistypes one of name, tags, build-args, context, dockerfile, cache-repo: $MATRIX"
+            exit 1
+          fi
 
   # Required hook, no hub default.
   # A repo with a shared base layer, a multi-image manifest per docs/reusable-workflows.md "The Docker Family", must carry .github/actions/docker-build-base itself.
