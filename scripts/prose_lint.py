@@ -347,6 +347,7 @@ HUB_HOSTED = frozenset(
         "repo-config/configure.sh",
         ".github/workflows/get-version-task.yml",
         ".github/workflows/publish-plan-task.yml",
+        ".github/workflows/validate-task.yml",
     }
 )
 
