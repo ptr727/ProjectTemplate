@@ -483,14 +483,16 @@ jobs:
             echo "args<<ARGEOF"
             jq -r '.[]' <<<"$ARGS_JSON"
             echo "LABEL_VERSION=$SEMVER2"
-            configuration=Debug
-            [[ "$BRANCH" == "main" ]] && configuration=Release
-            echo "BUILD_CONFIGURATION=$configuration"
-            echo "BUILD_VERSION=$ASSEMBLY_VERSION"
-            echo "BUILD_FILE_VERSION=$ASSEMBLY_FILE_VERSION"
-            echo "BUILD_ASSEMBLY_VERSION=$ASSEMBLY_VERSION"
-            echo "BUILD_INFORMATION_VERSION=$ASSEMBLY_INFORMATIONAL_VERSION"
-            echo "BUILD_PACKAGE_VERSION=$SEMVER2"
+            if [[ -n "$ASSEMBLY_VERSION" ]]; then
+              configuration=Debug
+              [[ "$BRANCH" == "main" ]] && configuration=Release
+              echo "BUILD_CONFIGURATION=$configuration"
+              echo "BUILD_VERSION=$ASSEMBLY_VERSION"
+              echo "BUILD_FILE_VERSION=$ASSEMBLY_FILE_VERSION"
+              echo "BUILD_ASSEMBLY_VERSION=$ASSEMBLY_VERSION"
+              echo "BUILD_INFORMATION_VERSION=$ASSEMBLY_INFORMATIONAL_VERSION"
+              echo "BUILD_PACKAGE_VERSION=$SEMVER2"
+            fi
             echo "ARGEOF"
           } >> "$GITHUB_OUTPUT"
 
