@@ -79,7 +79,7 @@ An install or upgrade collects a tool whose install fails and carries on, so one
 
 **Ubuntu 25.10 and later ship `sudo-rs` as the default `sudo`, and it carries no `timestamp_type` setting at all.** Nothing there shares a cache across terminals. The action therefore asks each installed implementation's own `visudo` whether it parses the drop-in, rather than reading a version number. Where the active one does not, the run offers to point the `sudo` alternative at one that does. That changes which sudo every user on the host runs, so it is stated before the prompt, and `update-alternatives --auto sudo` puts it back. A host where no installed sudo parses the setting is refused, naming `apt-get install sudo` as the remedy.
 
-The cache stays valid for 60 minutes, from `SUDO_TIMESTAMP_TIMEOUT` in the script. Removing the drop-in undoes all of it.
+The cache stays valid for 60 minutes, from `SUDO_TIMESTAMP_TIMEOUT` in the script. Removing the drop-in undoes the sharing. Where the run also switched the sudo alternative, `update-alternatives --auto sudo` is what undoes that half.
 
 ## Release Upgrades
 

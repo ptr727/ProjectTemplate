@@ -87,8 +87,9 @@ binary, so a column compares like with like. A report reads the apt cache as it 
 not refresh it, so an available version is as current as the last apt update.
 
 --sudo-timestamp writes a sudoers drop-in for the invoking user alone, so one "sudo -v" covers
-every terminal that user has open rather than only the one it ran in. It touches no tool, and
-removing the file it names undoes it.
+every terminal that user has open rather than only the one it ran in. It touches no tool.
+Removing the file it names undoes it, and "update-alternatives --auto sudo" undoes the
+implementation switch it asks for on a host whose sudo parses no timestamp_type.
 
 Examples:
   install-tools.sh                       Report on every tool
