@@ -1,0 +1,16 @@
+# This is the actionlint config.
+# The paths.<glob>.ignore key filters specific error messages by regex, scoped to the file that needs it, rather than disabling the rule fleet-wide.
+#
+# The job.workflow_sha and job.workflow_repository properties are documented GitHub Actions context fields (GitHub Docs, "Contexts", the job context).
+# They exist specifically so a reusable workflow can check out its own repository at the exact commit its caller pinned.
+# The actionlint context schema has not caught up to them yet, so it reports a false property-not-defined finding here.
+# Drop this entry once a released actionlint recognizes both properties.
+paths:
+  '.github/workflows/build-release-task.yml':
+    ignore:
+      - 'property "workflow_repository" is not defined in object type'
+      - 'property "workflow_sha" is not defined in object type'
+  '.github/workflows/build-docker-task.yml':
+    ignore:
+      - 'property "workflow_repository" is not defined in object type'
+      - 'property "workflow_sha" is not defined in object type'

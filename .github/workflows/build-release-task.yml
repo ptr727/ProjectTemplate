@@ -197,7 +197,7 @@ jobs:
         if: ${{ hashFiles('.github/actions/build-executable/action.yml') == '' }}
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
-          repository: ptr727/ProjectTemplate
+          repository: ${{ job.workflow_repository }}
           ref: ${{ job.workflow_sha }}
           path: .hub
 
@@ -244,7 +244,7 @@ jobs:
         if: ${{ hashFiles('.github/actions/build-nuget/action.yml') == '' }}
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
-          repository: ptr727/ProjectTemplate
+          repository: ${{ job.workflow_repository }}
           ref: ${{ job.workflow_sha }}
           path: .hub
 
@@ -294,7 +294,7 @@ jobs:
         if: ${{ hashFiles('.github/actions/build-pypi/action.yml') == '' }}
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
-          repository: ptr727/ProjectTemplate
+          repository: ${{ job.workflow_repository }}
           ref: ${{ job.workflow_sha }}
           path: .hub
 
@@ -337,7 +337,7 @@ jobs:
         if: ${{ hashFiles('.github/actions/docker-prepare/action.yml') == '' }}
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
-          repository: ptr727/ProjectTemplate
+          repository: ${{ job.workflow_repository }}
           ref: ${{ job.workflow_sha }}
           path: .hub
 

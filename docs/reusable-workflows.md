@@ -334,6 +334,7 @@ jobs:
       id-token: write
       actions: write
     with:
+      ref: ${{ github.sha }}
       branch: ${{ github.ref_name }}
       smoke: false
       github: true
