@@ -278,6 +278,7 @@ One pull request per stage moving a standard workflow out of every repo and into
   - **Checked** - `develop` at `7c67328` on 2026-08-15, where each of these has one or two carriers.
   - **Settled** - ESPHome-NonRoot's second tracker, whose bump waits for a human, is the same task with `auto-merge: false`, printing its apt-package snapshot as a name -> version object of one key rather than staying repo-local.
   - **Settled** - The `operational-vs-release-workflow` skill's note that a target-agnostic target list is "intentionally not done" is retired by this stage rather than before it, since it is true until then.
+  - **Settled** - Release `2.0.352` on `main` commit `0b07a59d7c65d07d8df275a96deaf2e06cbefd51` (promoted in #774) carries every hub task from the gates through this stage, making stages 2 to 5 adoptable. The publish-release run at [run-2-0-352][run-2-0-352] proved the release chain itself: `build-release-task.yml` ran with every target disabled, and its `github-release` job succeeded while all five build jobs skipped. [#769][issue-769] (reconciling `IGNORE_GITHUB_REF` between `get-version-task.yml` and WORKFLOW.md D3.1) is the one open follow-up from the promotion review.
 
 - **Decide the three merge-bot inputs the design leaves open.** The `delete-branch` default, the Dependabot semver-major filter two repos carry, and a `requiredHubUses` audit contract.
   - **Blocked by** - Nothing, and each is a maintainer call rather than a finding.
@@ -627,6 +628,7 @@ Nothing is awaiting close today. [#578][issue-578] was the last entry here and c
 [issue-673]: https://github.com/ptr727/ProjectTemplate/issues/673
 [issue-729]: https://github.com/ptr727/ProjectTemplate/issues/729
 [issue-767]: https://github.com/ptr727/ProjectTemplate/issues/767
+[issue-769]: https://github.com/ptr727/ProjectTemplate/issues/769
 
 <!-- Pull requests -->
 
@@ -670,6 +672,7 @@ Nothing is awaiting close today. [#578][issue-578] was the last entry here and c
 [reports]: ./reports/
 [repos]: ./registry/repos.json
 [reusable-workflows-doc]: ./docs/reusable-workflows.md
+[run-2-0-352]: https://github.com/ptr727/ProjectTemplate/actions/runs/31974067182
 [scripts]: ./scripts/README.md
 [secrets]: ./spec/secrets.json
 [secrets-schema]: ./spec/secrets.schema.json

@@ -1,0 +1,59 @@
+name: Publish project release action
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'Widget/**'
+      - 'version.json'
+      - 'Directory.Build.props'
+      - 'Directory.Packages.props'
+  workflow_dispatch:
+
+concurrency:
+  group: ${{ github.workflow }}
+  cancel-in-progress: false
+
+jobs:
+
+  # Single source of the release-gate decision (publish or not, stable or not), reused by every job below.
+  plan:
+    name: Plan release job
+    uses: ptr727/ProjectTemplate/.github/workflows/publish-plan-task.yml@0b07a59d7c65d07d8df275a96deaf2e06cbefd51 # 2.0.352
+    with:
+      event_name: ${{ github.event_name }}
+      actor: ${{ github.actor }}
+      ref_name: ${{ github.ref_name }}
+
+  # The same reusable gate the PR runs, on the branch tip, running only when a publish will happen.
+  validate:
+    name: Validate job
+    needs: [plan]
+    if: ${{ needs.plan.outputs.publish == 'true' }}
+    uses: ptr727/ProjectTemplate/.github/workflows/validate-task.yml@0b07a59d7c65d07d8df275a96deaf2e06cbefd51 # 2.0.352
+    secrets:
+      CODECOV_TOKEN: ${{ secrets.CODECOV_TOKEN }}
+
+  # Build, version, validate, push, and release the triggering branch.
+  # Grants the write scopes the hub task needs (it declares none of its own except where a job genuinely writes, per its own header).
+  publish:
+    name: Publish project release job
+    needs: [plan, validate]
+    if: ${{ needs.plan.outputs.publish == 'true' }}
+    uses: ptr727/ProjectTemplate/.github/workflows/build-release-task.yml@0b07a59d7c65d07d8df275a96deaf2e06cbefd51 # 2.0.352
+    secrets:
+      NUGET_USERNAME: ${{ secrets.NUGET_USERNAME }}
+    permissions:
+      contents: write
+      id-token: write
+      actions: write
+    with:
+      ref: ${{ github.sha }}
+      branch: ${{ github.ref_name }}
+      smoke: false
+      github: true
+      nuget: true
+      enable_docker: false
+      enable_pypi: false
+      enable_executable: false
+      nuget_project: ./Widget/Widget.csproj
