@@ -333,8 +333,9 @@ def path_candidate(token: str, in_span: bool = True) -> str | None:
     return token.removeprefix("./")
 
 
-# Paths the hub hosts and no repository carries, per GOVERNANCE.md "Hub-Hosted Tooling".
-# A mention of one names the hub's copy rather than a file this tree lost.
+# Paths retired per a `retire` disposition in `spec/divergences.json`, per GOVERNANCE.md "Hub-Hosted Tooling".
+# Most are hub-hosted, so a mention names the hub's copy rather than a file this tree lost.
+# A minority are retired outright with no hub replacement (`run-periodic-codegen-pull-request.yml`, `build-datebadge-task.yml`): the mention still names a real, intentional deletion rather than a stale reference, so the same exemption applies.
 # Carried text naming a tool is required to name it that way, so the mention is never a dead path.
 # The manifest exemption cannot reach this class, since no repository carries `spec/files.json`.
 # Downstream that set is empty, and a repository that retired its copy carries the full signature.
