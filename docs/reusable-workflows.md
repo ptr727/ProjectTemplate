@@ -389,6 +389,7 @@ Four things the hub cannot prove fall to the first downstream adopter. They are 
 
 [adopting-the-merge-bot]: #adopting-the-merge-bot
 [open-decisions]: #open-decisions
+[pinning]: #pinning
 [rollout]: #rollout
 [the-docker-family]: #the-docker-family
 
