@@ -75,6 +75,12 @@ on:
         required: false
         type: boolean
         default: false
+    secrets:
+      # Not needed on a smoke build, but declared required since a real caller always logs in for cache reads.
+      DOCKER_HUB_USERNAME:
+        required: true
+      DOCKER_HUB_ACCESS_TOKEN:
+        required: true
 
 jobs:
 
