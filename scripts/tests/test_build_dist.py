@@ -83,13 +83,16 @@ class RegenerateCase(unittest.TestCase):
         (self.skills_src / "half-written" / "notes.txt").write_text("wip", encoding="utf-8")
         self.assertEqual(build_dist.skill_names(), [])
 
-    def test_digest_stamp_ends_with_a_final_crlf(self) -> None:
+    def test_digest_stamp_is_lf_only(self) -> None:
         """Read as bytes, not text: a text-mode read applies universal-newline translation and
-        would report a plain LF ending as "\\n" too, hiding exactly the platform-default-newline
-        bug this asserts against."""
+        would hide a stray CR. build_dist.py's explicit `newline="\\n"` is what keeps this LF on
+        a Windows host too; a Linux-CI runner's platform default is also LF, so this assertion
+        alone cannot tell "explicit" from "happened to match", only that the shape is right."""
         self.make_skill("foo")
         build_dist.regenerate()
-        self.assertTrue(build_dist.DIGEST_STAMP.read_bytes().endswith(b"\r\n"))
+        content = build_dist.DIGEST_STAMP.read_bytes()
+        self.assertNotIn(b"\r", content)
+        self.assertTrue(content.endswith(b"\n"))
 
     def test_regenerate_copies_skill_content_and_lists_it_in_the_manifest(self) -> None:
         self.make_skill("foo")

@@ -4,4 +4,4 @@
 
 Full linting (line endings, workflow YAML, Markdown, spelling) is **not** run in the hook. It runs in CI as pinned action wrappers, and on demand via the VS Code **Lint** tasks in `catalog/snippets/configs/vscode-tasks.json` (Docker at `:latest`). Keeping the doc linters out of the hook is what keeps it simple.
 
-A copied `.husky/pre-commit` is an extensionless shebang script, so pin it to **LF** in both `.gitattributes` (`.husky/pre-commit text eol=lf`) and `.editorconfig` (`[.husky/pre-commit] end_of_line = lf`). A CRLF shebang breaks execution. Drop the `dotnet husky run` line in a non-.NET repo.
+A copied `.husky/pre-commit` is an extensionless shebang script, so pin it to **LF** in `.gitattributes` (`.husky/pre-commit text eol=lf`), git-level enforcement independent of the editor. The fleet's `[*]` `.editorconfig` default already gives it LF, no path-specific override needed. A CRLF shebang breaks execution. Drop the `dotnet husky run` line in a non-.NET repo.

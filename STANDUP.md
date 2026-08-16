@@ -36,8 +36,7 @@ git config --global --get gpg.format        # ssh for an SSH key; unset or openp
 # (ssh-add -L, gpg --list-secret-keys): a host that signs straight from a key file with no
 # agent running passes cleanly and fails that probe. See
 # .agents/skills/git-commit-conventions/SKILL.md "Signing, verified not configured" for why.
-# One physical line, not backslash-joined: this file is CRLF (the repo's Markdown default),
-# and a `\` continuation stops working the moment a stray `\r` lands after it.
+# One physical line, not backslash-joined, so the whole probe copy-pastes cleanly into a shell.
 d=$(mktemp -d "${TMPDIR:-/tmp}/sign-check.XXXXXX") && ( trap 'rm -rf "$d"' 0; email=$(git config --global --get user.email) && git init -q "$d" && git -C "$d" commit --allow-empty -q -m check && out=$(git -C "$d" log -1 --format='sig=%G? author=%an <%ae> committer=%cn <%ce>') && echo "$out" && ae=$(git -C "$d" log -1 --format='%ae') && ce=$(git -C "$d" log -1 --format='%ce') && case "$out" in sig=G\ *|sig=U\ *) true ;; *) false ;; esac && case "$email" in *@users.noreply.github.com) true ;; *) false ;; esac && [ "$ae" = "$email" ] && [ "$ce" = "$email" ] )
 ```
 

@@ -228,7 +228,7 @@ A human-readable index of the rules agents enforce, implement, and audit. The au
 - Write US English and ASCII only (no em-dash, straight quotes).
 - Write docs and comments in the present tense, describing only the current state, never as a change from a prior one.
 - Keep comments concise and only for the non-obvious, and never grow them on edit.
-- Follow `.editorconfig` line endings (CRLF default, LF for shell and Docker) and preserve a file's endings on edit.
+- Follow `.editorconfig` line endings (LF default, CRLF for `.bat`/`.cmd`) and preserve a file's endings on edit.
 - One logical paragraph per line, with a trailing `\` for an intentional hard break.
 - Pin every GitHub Action to a commit SHA with a version comment.
 - Share one lint config per tool across the editor, the CLI, and CI.

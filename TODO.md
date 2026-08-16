@@ -25,20 +25,6 @@ The steps below are followed in order rather than sampled.
 
 ## Work Clusters
 
-### Default `.py` to LF Fleet-Wide, Retiring the Per-Path Pin List
-
-One pull request changing [`GOVERNANCE.md`][governance] "Line Endings", [`.editorconfig`][editorconfig], and [`.gitattributes`][gitattributes] to pin `*.py` LF by extension, replacing the growing list of individually-pinned shebang scripts, plus the one-time renormalization it obliges fleet-wide.
-
-**State** `decision`. **Touches** `GOVERNANCE.md` "Line Endings" (verbatim, so it re-vendors fleet-wide), `.editorconfig`, `.gitattributes`, and every downstream repo carrying a CRLF `.py` file. **Cost** one hub edit plus a renormalization pass per affected repo. The hub itself needs no renormalization, since every `.py` file it tracks is already LF.
-
-- **Pin `*.py text eol=lf` by extension and drop the by-path list it replaces.** The by-path list exists because the fleet's default is CRLF for `.py` and only a shebang-executed script needs LF, so each new script has needed its own `.gitattributes` line and its own `.editorconfig` override. It reads 25 entries today, up from the roughly dozen it carried before this session added four more for two new scripts and their tests, which is the divergence outweighing the reason it was chosen.
-  - **Blocked by** - Nothing.
-  - **Issue** - None filed.
-  - **Checked** - `develop` at `7f9caaa` on 2026-08-12, where `.gitattributes` carries 25 LF pins (3 forward-declared) over 19 tracked `.py` files, and every one of those 19 is already LF (none is a vanilla CRLF `.py`), so the hub side of this change is comment-and-pattern-only.
-  - **Open** - Whether downstream repos with a vanilla (non-shebang) CRLF `.py` file need a coordinated renormalization pass or can pick it up on their own next resync. 5 repos in [`registry/repos.json`][repos] carry the `python` type (`aiopurpleair`, `homeassistant-purpleair`, `Financial-Modeling`, `PlexCleaner`, `ESPHome-Config`) and were not individually checked for CRLF `.py` content as part of writing this entry.
-  - **Settled** - The default was set to CRLF in #229 for editor compatibility on Windows, not because LF broke anything measured. The reason it is being revisited is that non-VSCode Windows editors were the concern, and the per-path pin list's growth now outweighs that concern's practical weight, per the maintainer.
-  - **Settled** - The by-path convention was reaffirmed in #503 ("Do not re-add a blanket `*.py text eol=lf`"), but that pull request only reshaped the two files' comment prose and did not re-examine the underlying policy, so it is not a second, independent rejection of this change.
-
 ### Giving the Fleet's Own Pins Something to Resolve Against
 
 One pull request pointing a hub `uses:` at a hub-owned action, so that the resolvability pass added beside it has a reference under this owner to read. It is separated from that pass because it changes what a workflow runs, where the pass only changes what a gate reports.
@@ -656,7 +642,6 @@ Nothing is awaiting close today. [#578][issue-578] was the last entry here and c
 [fidelity-honesty]: ./spec/fidelity_honesty.py
 [files]: ./spec/files.json
 [fleet-map]: ./docs/fleet-map.md
-[gitattributes]: ./.gitattributes
 [governance]: ./GOVERNANCE.md
 [host-setup-doc]: ./docs/host-setup.md
 [host-setup-windows]: ./host-setup/windows/

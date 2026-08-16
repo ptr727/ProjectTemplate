@@ -180,8 +180,8 @@ silent pass.
 
 ## Line endings
 
-This repo's default is CRLF (`[*] end_of_line = crlf` in `.editorconfig`), with LF pinned for
-execution-sensitive files (`*.sh`, Dockerfiles, a shebang-executed `.py` pinned by path).
+This repo's default is LF (`[*] end_of_line = lf` in `.editorconfig`), with CRLF pinned only for
+`*.bat` and `*.cmd`, the one type Windows itself requires it for.
 **Preserve a file's existing line ending when editing it, never reflow as a side effect of a
 content change.** A text-mode tool, including a naive programmatic write, can silently flip CRLF
 to LF and turn a one-line change into a whole-file diff. After any programmatic edit, verify with

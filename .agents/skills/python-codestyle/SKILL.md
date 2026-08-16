@@ -71,9 +71,8 @@ whether the Python has third-party runtime dependencies, which shows up structur
   step is not something Dependabot tracks, so CI runs `uvx ruff@latest` / `uvx mypy@latest` rather
   than a manual pin that would silently go stale. The fleet rule is to pin only what Dependabot
   auto-updates (SHA-pinned actions, package deps) and otherwise run latest, so the VS Code tasks,
-  README, and CI all run the unpinned latest here. `.py` files follow the repo's line-ending
-  default (CRLF in a CRLF-default repo, and a shebang-executed script is LF-pinned by path, per
-  GOVERNANCE.md's "Line Endings" section). There is no pytest suite, and `unittest` is the runner
+  README, and CI all run the unpinned latest here. `.py` files follow the repo's LF line-ending
+  default (per GOVERNANCE.md's "Line Endings" section). There is no pytest suite, and `unittest` is the runner
   instead. A script that carries a gate still earns tests, written with the standard library's
   `unittest` so they run under bare `python3` with nothing installed, as `test_<script>.py` under
   a `tests/` directory beside the scripts it exercises (`<scripts-dir>/tests/`), kept apart so a
