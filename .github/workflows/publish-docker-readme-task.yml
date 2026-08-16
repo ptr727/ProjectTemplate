@@ -98,8 +98,9 @@ jobs:
         run: |
           set -Eeuo pipefail
           # Inputs validated above, at most one of repositories or manifest is set, and manifest implies manifest-jq.
+          # Compacted to one line before writing, since GITHUB_OUTPUT is line-oriented and a pretty-printed JSON array would otherwise corrupt it.
           if [ -n "$REPOSITORIES" ]; then
-            echo "repositories=$REPOSITORIES" >> "$GITHUB_OUTPUT"
+            echo "repositories=$(jq --compact-output '.' <<<"$REPOSITORIES")" >> "$GITHUB_OUTPUT"
           elif [ -n "$MANIFEST" ]; then
             derived="$(jq --compact-output "$MANIFEST_JQ" "$MANIFEST")"
             if ! echo "$derived" | jq -e 'type == "array" and length > 0 and all(.[]; type == "string")' >/dev/null 2>&1; then
