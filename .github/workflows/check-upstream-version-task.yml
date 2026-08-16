@@ -1,24 +1,18 @@
 name: Check upstream version task
 
-# Skeleton for a wrapper repo tracking an upstream release.
-# A resolver prints the upstream version(s) as a JSON object of name -> version, one key or N for a multi-component pin.
-# That object is written to a committed state file beside version.json.
-# It then opens a rolling App-signed bump PR per branch that the merge-bot auto-merges.
-# Call it from a scheduled entry-point workflow.
-# Matrix only the branches that ship the version, since a CI-only version uses ["develop"].
+# Upstream-version tracker for a wrapper repo, hosted here once.
+# A required resolve-upstream hook prints the upstream version(s) as a JSON object of name -> version, one key or several for a multi-component pin.
+# The task writes that object to a committed state file beside version.json, diffs it against the prior state, and opens a rolling App-signed bump PR per branch that the merge-bot auto-merges.
+# Call it from a scheduled entry-point workflow, and matrix only the branches that ship the version, since a CI-only version uses ["develop"].
+# A tracker whose bump waits for a human sets auto-merge false.
+# The head then carries a marker no merge-bot rule matches, whatever bump-branch-prefix names, so the pull request needs a maintainer decision instead of merging on its own.
+# With auto-merge true the default bump-branch-prefix, upstream-version, matches the merge-bot task's built-in upstream-version-main and upstream-version-develop pairs.
 
 on:
   workflow_call:
     inputs:
-      resolver-command:
-        # Single-version wrappers print {"version":"X"}.
-        # Multi-component wrappers print one key per pinned upstream component.
-        # An example is {"esphome":"2026.6.2","device_builder":"1.0.12"}.
-        description: Shell command that prints the resolved upstream version(s) as a JSON object of name -> version to stdout.
-        required: true
-        type: string
       state-file:
-        description: Committed version-state file (a JSON object of name -> version), at the repo root beside version.json.
+        description: Committed version-state file, a JSON object of name -> version, at the repo root beside version.json.
         required: false
         type: string
         default: upstream-version.json
@@ -28,12 +22,24 @@ on:
         type: string
         default: '["main", "develop"]'
       bump-branch-prefix:
-        # The hub's merge-bot task carries upstream-version-main/-develop as built-in rules.
-        # Keep this default unless the caller passes a matching rules entry, or auto-merge will not fire.
-        description: Head-branch prefix, which must match a merge-bot rule such as the built-in upstream-version-<base> head refs.
+        description: >-
+          Head-branch prefix used when auto-merge is true.
+          Keep the default unless the caller also passes a matching merge-bot rules entry, or auto-merge will not fire.
         required: false
         type: string
         default: upstream-version
+      auto-merge:
+        description: >-
+          Whether the bump pull request auto-merges.
+          False routes the bump to a human by prefixing the head with a marker no merge-bot rule matches.
+        required: false
+        type: boolean
+        default: true
+    secrets:
+      CODEGEN_APP_CLIENT_ID:
+        required: true
+      CODEGEN_APP_PRIVATE_KEY:
+        required: true
 
 jobs:
 
@@ -59,43 +65,56 @@ jobs:
           private-key: ${{ secrets.CODEGEN_APP_PRIVATE_KEY }}
 
       - name: Checkout code step
-        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           ref: ${{ matrix.branch }}
           token: ${{ steps.app-token.outputs.token }}
 
+      - name: Run resolve-upstream hook step
+        id: resolve-upstream
+        if: ${{ hashFiles('.github/actions/resolve-upstream/action.yml') != '' }}
+        uses: ./.github/actions/resolve-upstream
+
+      - name: Missing resolve-upstream hook step
+        if: ${{ hashFiles('.github/actions/resolve-upstream/action.yml') == '' }}
+        run: |
+          set -Eeuo pipefail
+          echo "::error::Required hook missing: .github/actions/resolve-upstream/action.yml"
+          exit 1
+
       # Normalize the resolved JSON with sorted keys, so the committed file and its diff are stable.
-      # The old-vs-new key diff drives the PR title/body, naming only components that moved.
-      - name: Resolve upstream version step
+      # The old-vs-new key diff drives the PR title and body, naming only components that moved.
+      # The head carries a no-auto-merge marker when the caller opted out, so a merge-bot rule can never match it by accident.
+      - name: Compute upstream version diff step
         id: resolve
         env:
-          RESOLVER_COMMAND: ${{ inputs.resolver-command }}
+          NEW_VERSIONS: ${{ steps.resolve-upstream.outputs.versions }}
           STATE_FILE: ${{ inputs.state-file }}
+          BUMP_BRANCH_PREFIX: ${{ inputs.bump-branch-prefix }}
+          AUTO_MERGE: ${{ inputs.auto-merge }}
+          BRANCH: ${{ matrix.branch }}
         run: |
           set -Eeuo pipefail
 
           # Require a non-empty JSON object of single-line name -> version strings.
-          # A CR/LF would corrupt the single-line GITHUB_OUTPUT.
-          # Reject it here instead of committing unconsumable state.
-          raw="$(bash -c "$RESOLVER_COMMAND")"
-          if ! new="$(printf '%s' "$raw" | jq -S '.' 2>/dev/null)" \
+          # A CR/LF would corrupt the single-line GITHUB_OUTPUT, so reject it here instead of committing unconsumable state.
+          if ! new="$(printf '%s' "$NEW_VERSIONS" | jq -S '.' 2>/dev/null)" \
              || [ "$(printf '%s' "$new" | jq -r 'type == "object" and length > 0 and all(.[]; type == "string" and (test("[\r\n]") | not)) and (keys | all(test("[\r\n]") | not))')" != "true" ]; then
-            echo "Resolver must print a non-empty JSON object of single-line name -> version strings, no CR/LF (single-version wrappers print {\"version\":\"X\"}); got: $raw" >&2
+            echo "::error::resolve-upstream must output a non-empty JSON object of single-line name -> version strings, no CR/LF; got: $NEW_VERSIONS"
             exit 1
           fi
 
           # Missing, non-JSON, or non-object state becomes an empty object.
           # The first run and any unusable prior file then both diff cleanly against the resolved object instead of failing.
-          # A valid-JSON-but-non-object file would otherwise break the `$old + $new` union below.
           if [ -f "$STATE_FILE" ] && old="$(jq -S 'if type == "object" then . else empty end' "$STATE_FILE" 2>/dev/null)" && [ -n "$old" ]; then :; else old='{}'; fi
 
           # Write the canonical state file as jq emits it, LF, matching .editorconfig's .json rule.
           # Unchanged content means no diff, and therefore no PR.
           printf '%s\n' "$new" > "$STATE_FILE"
 
-          # Diff across the union of old+new keys so an added, moved, or removed key is all caught.
+          # Diff across the union of old+new keys so an added, moved, or removed key is caught.
           # Removals carry a null .new.
-          # These drive the PR title/body, naming only the keys that moved.
+          # These drive the PR title and body, naming only the keys that moved.
           changed="$(jq -n --argjson old "$old" --argjson new "$new" '
             [ (($old + $new) | keys[]) | { key: ., new: $new[.] } | select($old[.key] != .new) ]')"
           summary="$(printf '%s' "$changed" | jq -r '
@@ -103,8 +122,7 @@ jobs:
 
           # Title: a canonicalization-only change, meaning the state was reserialized with no key moved.
           # That happens when the prior file was valid but differently formatted.
-          # The trivial single-version case renders bare.
-          # Otherwise name each moved component.
+          # The trivial single-version case renders bare, otherwise each moved component is named.
           if [ "$(printf '%s' "$changed" | jq 'length == 0')" = "true" ]; then
             title="Canonicalize upstream version state file"
           elif [ "$(printf '%s' "$new" | jq -r 'keys == ["version"]')" = "true" ]; then
@@ -112,7 +130,15 @@ jobs:
           else
             title="Update upstream versions: $summary"
           fi
+
+          if [ "$AUTO_MERGE" = "true" ]; then
+            head="${BUMP_BRANCH_PREFIX}-${BRANCH}"
+          else
+            head="no-auto-merge-${BUMP_BRANCH_PREFIX}-${BRANCH}"
+          fi
+
           {
+            echo "head=$head"
             echo "title=$title"
             echo "body<<EOF"
             if [ "$(printf '%s' "$changed" | jq 'length == 0')" = "true" ]; then
@@ -125,13 +151,14 @@ jobs:
             echo "EOF"
           } >> "$GITHUB_OUTPUT"
 
-      # Rolling PR: signed by the API (satisfies Require signed commits), auto-merged by the merge-bot.
+      # Rolling PR: signed by the API, satisfies Require signed commits.
+      # Auto-merged by the merge-bot when the head matches one of its rules.
       - name: Open bump pull request step
         uses: peter-evans/create-pull-request@5f6978faf089d4d20b00c7766989d076bb2fc7f1 # v8.1.1
         with:
           token: ${{ steps.app-token.outputs.token }}
           base: ${{ matrix.branch }}
-          branch: ${{ inputs.bump-branch-prefix }}-${{ matrix.branch }}
+          branch: ${{ steps.resolve.outputs.head }}
           title: ${{ steps.resolve.outputs.title }}
           commit-message: ${{ steps.resolve.outputs.title }}
           body: ${{ steps.resolve.outputs.body }}

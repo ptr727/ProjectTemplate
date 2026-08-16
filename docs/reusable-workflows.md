@@ -22,6 +22,7 @@ The design for moving the fleet's standard GitHub Actions workflows out of every
   - [Stage 4: The Release Chain and the Docker Core](#stage-4-the-release-chain-and-the-docker-core)
   - [Stage 5: The Type-Specific Tasks](#stage-5-the-type-specific-tasks)
 - [Adopting the Merge-Bot](#adopting-the-merge-bot)
+- [Adopting the Type-Specific Tasks](#adopting-the-type-specific-tasks)
 - [What a Pilot Proves](#what-a-pilot-proves)
 - [Open Decisions](#open-decisions)
 
@@ -45,7 +46,7 @@ A workflow whose job graph is identical across repos of a type is reached, not c
 
 ### Layers
 
-1. **The hub reusable workflow**, at `.github/workflows/<name>-task.yml` in the hub. It follows [GOVERNANCE.md "Workflow YAML Conventions"][governance-workflow-yaml-conventions], so the file ends `-task.yml` and its `name:` ends "task". It owns the job graph, the permissions each job needs, the validate-at-entry step, the artifact seam, retention, and the ruleset-bound aggregator name. It checks out the caller's repo by default. When it needs its own defaults or scripts, it checks out the hub at `${{ github.job_workflow_sha }}` under `.hub/`, which is the commit the caller pinned.
+1. **The hub reusable workflow**, at `.github/workflows/<name>-task.yml` in the hub. It follows [GOVERNANCE.md "Workflow YAML Conventions"][governance-workflow-yaml-conventions], so the file ends `-task.yml` and its `name:` ends "task". It owns the job graph, the permissions each job needs, the validate-at-entry step, the artifact seam, retention, and the ruleset-bound aggregator name. It checks out the caller's repo by default. When it needs its own defaults or scripts, it checks out the hub at `${{ job.workflow_sha }}` (`${{ job.workflow_repository }}` names the hub itself) under `.hub/`, which is the commit the caller pinned. actionlint's context schema has not caught up to these job-context properties yet, so a task using them carries a scoped `.github/actionlint.yaml` ignore entry until a released actionlint recognizes both.
 2. **The hook**, a composite action at `.github/actions/<hook>/action.yml` in the caller's repo. A hub job resolves it in one order: the caller's path when `hashFiles('.github/actions/<hook>/action.yml')` is non-empty, else the hub default at the same name under `.hub/`. A required hook with no default fails its job with `::error::` naming the missing path.
 3. **The caller stub**, downstream, under thirty lines. The audit grades it at `interface` fidelity: the caller job key, the hub task the `uses:` names, and the secrets it maps are the contract, and the `with:` block is the repo's own.
 4. **The hub's own use.** The hub calls its own task files by `./` path, so every hub pull request exercises the reusable file at least at parse level, and fully for the workflows the hub itself runs.
@@ -182,12 +183,21 @@ Hub: `build-release-task.yml` with `build-executable`, `build-nuget`, `build-pyp
 
 ### Stage 5: The Type-Specific Tasks
 
-Hub: `publish-docker-readme-task.yml` with a `docker-readme-transform` hook, `check-upstream-version-task.yml` with a `resolve-upstream` hook and an `auto-merge` input, deploy-site, codegen and the date badge, each with its hook. The `operational-vs-release-workflow` skill's note that the target list stays per repo is retired here.
+Hub: `publish-docker-readme-task.yml` with a `docker-readme-transform` hook, `check-upstream-version-task.yml` with a `resolve-upstream` hook and an `auto-merge` input, `deploy-site-task.yml` with a `deploy` hook, and `run-codegen-pull-request-task.yml` with a `codegen` hook. `build-datebadge-task.yml` is retired rather than hosted, TODO.md already tracks deleting the retired badge from its one remaining carrier. The `operational-vs-release-workflow` skill's note that the target list stays per repo is retired here, once the release-chain stage that makes it true has shipped.
 
 - [ ] Hub pull request on `develop`.
 - [ ] Promoted and released, tag recorded here.
 - [ ] Adoption, one checkbox per carrier added when the hub pull request merges.
+  - [ ] VSCode-Server-DotNetCore (`publish-docker-readme-task.yml`)
+  - [ ] NxWitness (`publish-docker-readme-task.yml`, moving the readme job out of `publish-release.yml`, and `run-codegen-pull-request-task.yml` with its scheduler)
+  - [ ] ESPHome-NonRoot (`check-upstream-version-task.yml`, both trackers, the second with `auto-merge: false`)
+  - [ ] Blog (`deploy-site-task.yml`, keeping `deploy-site.yml` as its own caller)
+  - [ ] LanguageTags (`run-codegen-pull-request-task.yml` and its scheduler)
+  - [ ] KiCadLibrary (deletes `build-datebadge-task.yml` and its caller job outright, per TODO.md's retired-badge cleanup, adopting no new stub)
+- [ ] Catalog snippets for `publish-docker-readme-task.yml`, `check-upstream-version-task.yml`, `deploy-site.yml`, `deploy-site-task.yml`, and `run-codegen-pull-request-task.yml` pinned to the release that first carries each task.
 - [ ] `reports/workflow-reuse.md` regenerated, and the fleet total's callers equal to the sum of the stubs the fleet needs.
+- [ ] The environment-secret handoff in the deploy-site adoption, the caller job's own `environment:` binding resolving `DEPLOY_SSH_PRIVATE_KEY` for an explicit `secrets:` map across a cross-repository `uses:`, observed on Blog's first live deploy run. Tick with the run URL.
+- [ ] `job.workflow_sha` and `job.workflow_repository` recognized by a released actionlint, so the `.github/actionlint.yaml` ignore entry for `publish-docker-readme-task.yml` can drop.
 
 ## Adopting the Merge-Bot
 
@@ -234,6 +244,71 @@ A repo that needs either input appends the block to the `merge-bot` job. This is
 The task's inputs are `app-login` (default `ptr727-codegen[bot]`), `rules` (a JSON array of `{"head": "<exact>"}` or `{"head-prefix": "<prefix>"}` plus `"base"`, default `[]`), and `delete-branch` (default `false`). The merge method follows the base, `develop` squashes and `main` merges, so a rule carries none. An App pull request that matches no rule is annotated with a warning rather than merged, so a renamed tracker branch is visible in the run rather than silent.
 
 Two copies today filter Dependabot by ecosystem and semver tier before merging. [WORKFLOW.md D8.1][workflow-d8] says every Dependabot tier auto-merges and the required checks are the gate, so those two repos drop the filter on adoption unless the [Open Decisions][open-decisions] below settle otherwise.
+
+## Adopting the Type-Specific Tasks
+
+Stage 5 hosts four more tasks: `publish-docker-readme-task.yml`, `check-upstream-version-task.yml`, `deploy-site-task.yml`, and `run-codegen-pull-request-task.yml`. Each pin below is a placeholder, `<sha>` and `<tag>`, filled in from the release that first carries the task, the same way the merge-bot's pin is. None of these stub shapes lands as a catalog snippet in the pull request that ships its task, per [Pinning](#pinning), so this section is the adoption reference until the follow-on catalog change lands.
+
+`build-datebadge-task.yml` is retired rather than hosted. TODO.md "Delete the retired `byob.yarr.is` last-build badge" already settles that the badge service is deprecated and the badge is deleted rather than replaced, so no repo adopts a caller stub for it and KiCadLibrary's deletion is that same cleanup, not a migration to a hub task.
+
+**Docker Hub readme.** A repo publishing an image replaces its `publish-docker-readme-task.yml` job body with a caller stub reaching the hub task. A `docker-readme-transform` hook, `.github/actions/docker-readme-transform/action.yml`, is needed only to render the readme first or to override the hub default, which publishes `Docker/README.md` if present else `README.md` as-is.
+
+```yaml
+  publish-docker-readme:
+    name: Publish Docker Hub readme job
+    uses: ptr727/ProjectTemplate/.github/workflows/publish-docker-readme-task.yml@<sha> # <tag>
+    with:
+      branch: ${{ github.ref_name }}
+    secrets:
+      DOCKER_HUB_USERNAME: ${{ secrets.DOCKER_HUB_USERNAME }}
+      DOCKER_HUB_ACCESS_TOKEN: ${{ secrets.DOCKER_HUB_ACCESS_TOKEN }}
+```
+
+A multi-image repo passes `manifest` and `manifest-jq` in place of relying on the single-repository default, the same as today. NxWitness derives its Docker Hub repository list from `./Make/Matrix.json` inline in `publish-release.yml` today rather than through a standalone file, so its adoption also moves that job to the stub above.
+
+**Upstream-version tracker.** A repo tracking an upstream release replaces `check-upstream-version-task.yml`'s job body with a caller stub, and carries a required `resolve-upstream` hook, `.github/actions/resolve-upstream/action.yml`, printing the upstream version(s) as a JSON object of name -> version.
+
+```yaml
+  check-upstream-version:
+    name: Check upstream version job
+    uses: ptr727/ProjectTemplate/.github/workflows/check-upstream-version-task.yml@<sha> # <tag>
+    secrets:
+      CODEGEN_APP_CLIENT_ID: ${{ secrets.CODEGEN_APP_CLIENT_ID }}
+      CODEGEN_APP_PRIVATE_KEY: ${{ secrets.CODEGEN_APP_PRIVATE_KEY }}
+```
+
+ESPHome-NonRoot carries two trackers today. `check-upstream-version.yml` adopts the stub above as-is. `check-upstream-dependency.yml`, whose bump waits for a human because its head deliberately does not match a merge-bot rule, adopts a second instance of the same stub with `with: { branches: '["develop"]', bump-branch-prefix: upstream-dependency, auto-merge: false }` and a `resolve-upstream` hook shaped around its apt-package snapshot, printing `{"docker_base_packages": "<sorted, comma-joined package list>"}` rather than a name-to-version map. The generic title and body this produces read less specifically than today's bespoke "packages added/removed" wording, which is the cost of folding a bespoke tracker into the shared task.
+
+**Deploy-site.** A site repo keeps `deploy-site.yml` as a per-repo caller (it has no manifest-wide catalog snippet either, since its `uses:` now names the hub, and it still carries the dispatch, the ref gate, and the shared validation call), but its `deploy` job reaches the hub-hosted `deploy-site-task.yml` and binds the same `environment:` the task binds, which is what lets the one crossing secret, `DEPLOY_SSH_PRIVATE_KEY`, resolve from the GitHub Environment store at the call site rather than through `secrets: inherit`, unusable across repositories. The three scripts `deploy/make-release.sh`, `deploy/prune-releases.sh`, and `checks/check-live-urls.sh` fold into one required `deploy` hook, `.github/actions/deploy/action.yml`, invoked three times with a `mode` input (`build`, `prune`, `verify`) so the site keeps its own generator, precompression, and URL contract while the upload-then-flip sequence stays hub-owned. Blog's own copy already carries more than three clean scripts, an `install-hugo` composite action, a git-mtime restore step, and PANGOLIN tokens for its staging auth check, which is why a hook, not a path convention, is the better contract here: it gives a site exactly this freedom instead of constraining it to fixed script names.
+
+```yaml
+  deploy:
+    name: Deploy job
+    needs: [validate]
+    environment: ${{ inputs.environment }}
+    permissions:
+      contents: read
+    uses: ptr727/ProjectTemplate/.github/workflows/deploy-site-task.yml@<sha> # <tag>
+    with:
+      environment: ${{ inputs.environment }}
+    secrets:
+      DEPLOY_SSH_PRIVATE_KEY: ${{ secrets.DEPLOY_SSH_PRIVATE_KEY }}
+```
+
+**Codegen.** A repo generating checked-in files from an external source replaces `run-codegen-pull-request-task.yml`'s job body with a caller stub, and carries a required `codegen` hook, `.github/actions/codegen/action.yml`, running only the generator invocation. `run-periodic-codegen-pull-request.yml` stays a per-repo caller stub the same shape it is today, calling the hub task by its pinned `uses:` in place of `./`.
+
+```yaml
+  codegen:
+    name: Run codegen and pull request job
+    uses: ptr727/ProjectTemplate/.github/workflows/run-codegen-pull-request-task.yml@<sha> # <tag>
+    secrets:
+      CODEGEN_APP_CLIENT_ID: ${{ secrets.CODEGEN_APP_CLIENT_ID }}
+      CODEGEN_APP_PRIVATE_KEY: ${{ secrets.CODEGEN_APP_PRIVATE_KEY }}
+      # Optional, mapped only when the codegen hook's generator calls a metered upstream API.
+      NINJA_API_KEY: ${{ secrets.NINJA_API_KEY }}
+```
+
+Neither LanguageTags nor NxWitness calls a metered API from its generator today, so neither maps `NINJA_API_KEY`. Both add `dotnet husky install` ahead of the `dotnet csharpier format` step in their present copies, which the hub task carries verbatim, so a hook needs only the generator invocation itself (`dotnet run --project ...`).
 
 ## What a Pilot Proves
 

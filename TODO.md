@@ -59,7 +59,7 @@ One pull request moving the canonical short description into declared data, so e
 - **Close the README-to-About hop, which is the only one nothing writes.** The audit reports a drifted About panel, and no tool sets it.
   - **Blocked by** - The entry above, since the field is what `repo-config/configure.sh` would set the panel from.
   - **Issue** - [#639][issue-639], filed on 2026-08-09 because this entry had been carrying [#577][issue-577], whose body covers only the README tagline and never mentions the About panel, and whose tagline half shipped on 2026-08-08.
-  - **Checked** - `develop` on 2026-08-08, where `repo-config/configure.sh` sets every other repository setting and carries no `description` handling, and [`catalog/snippets/workflows/publish-docker-readme-task.yml`][workflows] pushes `github.event.repository.description` to Docker Hub.
+  - **Checked** - `develop` on 2026-08-08, where `repo-config/configure.sh` sets every other repository setting and carries no `description` handling, and the hub-hosted [`publish-docker-readme-task.yml`][workflows] pushes `github.event.repository.description` to Docker Hub.
   - **Open** - Nothing beyond sequencing.
   - **Settled** - The chain is README, then the About panel by hand, then Docker Hub by CI, so the unautomated hop is the first one and it is the one that drifts. PhotoCleaner is the worked case, where the About panel still matched the README and only the Docker Hub short description had diverged.
   - **Settled** - CI keeps reading `repository.description` rather than the README. Pointing it at the README puts a Markdown parser in a publish job, which PhotoCleaner#32 measured at nine guards, every one of which fails the release rather than the tagline.
@@ -263,11 +263,11 @@ One pull request per stage moving a standard workflow out of every repo and into
   - **Settled** - The three no-asset release shapes the fleet runs today collapse into `expect_release_assets`, and PhotoCleaner and PlexCleaner pilot, then the NuGet, PyPI and Docker-only repos.
   - **Settled** - Vanilla Docker repos need only `image` and build-args, ESPHome-NonRoot adds a `docker-prepare` hook for its upstream pin, and NxWitness adds the matrix hook and `build-base`, in that order.
 
-- **Host the type-specific tasks: Docker Hub readme, upstream-version tracking, deploy-site, codegen, and the date badge.** Each with its hook, and the two string-command inputs the catalog carries today (`transform-run`, `resolver-command`) become hooks.
+- **Host the type-specific tasks: Docker Hub readme, upstream-version tracking, deploy-site, and codegen.** Each with its hook, and the two string-command inputs the catalog carries today (`transform-run`, `resolver-command`) become hooks. The date badge is retired outright rather than hosted, TODO.md's own retired-badge entry already tracks its deletion.
   - **Blocked by** - The release chain, since the readme task replaces the in-job description push.
   - **Issue** - None filed.
   - **Checked** - `develop` at `7c67328` on 2026-08-15, where each of these has one or two carriers.
-  - **Open** - Whether ESPHome-NonRoot's second tracker, whose bump waits for a human, is the same task with `auto-merge: false` or stays repo-local.
+  - **Settled** - ESPHome-NonRoot's second tracker, whose bump waits for a human, is the same task with `auto-merge: false`, printing its apt-package snapshot as a name -> version object of one key rather than staying repo-local.
   - **Settled** - The `operational-vs-release-workflow` skill's note that a target-agnostic target list is "intentionally not done" is retired by this stage rather than before it, since it is true until then.
 
 - **Decide the three merge-bot inputs the design leaves open.** The `delete-branch` default, the Dependabot semver-major filter two repos carry, and a `requiredHubUses` audit contract.

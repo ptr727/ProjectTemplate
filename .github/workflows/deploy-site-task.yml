@@ -1,0 +1,184 @@
+name: Deploy site task
+
+# Reusable deploy of a built site to a filesystem on a host the project owns, hosted here once since the environment binding, the deploy-key handling, and the atomic upload-then-flip sequence are identical across every site repo.
+# It is a separate dispatch from the release, so a redeploy of an unchanged commit mints no tag.
+# That matters because redeploying is routine: a host rebuild, a rollback, or proving a branch on a non-production environment.
+# See WORKFLOW.md D4.6 and D5.6.
+#
+# A required deploy hook, one composite action the caller owns, covers what is genuinely the site's own: assembling the release bundle (its generator, its precompression, whatever it stamps into the bundle), pruning old releases, and verifying the live site against its own URL contract.
+# It runs three times with a distinct mode input.
+# The upload and the flip stay here as the one atomic sequence every site repo shares, so a hook cannot fork that guarantee.
+#
+# The transport's options are pinned rather than left to the runner's OpenSSH defaults, and declared once so the two transfers cannot drift apart.
+# StrictHostKeyChecking=yes refuses an unknown or changed host key outright, where the default asks and a non-interactive runner then resolves that ambiguously.
+# UserKnownHostsFile names the file the deploy key step writes, so the check reads the pinned value rather than whatever the runner image happens to carry.
+# BatchMode=yes makes every prompt an immediate failure, so a credential problem surfaces as a failed step rather than as a job that hangs to its timeout.
+# IdentitiesOnly=yes stops the agent offering other keys, so the deploy authenticates as the confined account or not at all.
+
+on:
+  workflow_call:
+    inputs:
+      # Selects the GitHub Environment, and is also the path segment the release lands under on the host.
+      environment:
+        description: The GitHub Environment to deploy to.
+        required: true
+        type: string
+    secrets:
+      # The one credential that crosses this reusable workflow's boundary as a named secret.
+      # The host address, the user, and the known-hosts value are GitHub Environment variables instead, since they are integrity-critical but not confidential.
+      # The deploy job below reads them directly through its own environment binding.
+      DEPLOY_SSH_PRIVATE_KEY:
+        required: true
+    outputs:
+      # The caller records what shipped, without this a rollback has to read the host to find out.
+      release-id:
+        value: ${{ jobs.deploy.outputs.release-id }}
+      site-url:
+        value: ${{ jobs.deploy.outputs.site-url }}
+
+env:
+  SSH_TRANSPORT: >-
+    ssh -i ~/.ssh/deploy
+    -o IdentitiesOnly=yes
+    -o StrictHostKeyChecking=yes
+    -o UserKnownHostsFile=~/.ssh/known_hosts
+    -o BatchMode=yes
+
+jobs:
+
+  # A job of its own, because the environment binding on the deploy job resolves before any step runs.
+  # A workflow_call caller is not bound by the dispatch choice list a human sees, so an unknown name would otherwise bind nothing and run anyway.
+  assert-environment:
+    name: Assert environment name job
+    runs-on: ubuntu-latest
+    permissions: {}
+
+    steps:
+
+      - name: Assert environment is known step
+        env:
+          ENVIRONMENT: ${{ inputs.environment }}
+        run: |
+          set -Eeuo pipefail
+          case "$ENVIRONMENT" in
+          production | staging) ;;
+          *)
+            echo "::error::environment must be production or staging, got '$ENVIRONMENT'."
+            exit 1
+            ;;
+          esac
+
+  # Every host-specific value comes from the environment, so this file names no host, path, or address.
+  # The caller's own job binds the same environment, which is what makes the secret mapped into DEPLOY_SSH_PRIVATE_KEY below resolve from the environment store rather than from the repository store.
+  deploy:
+    name: Deploy site job
+    runs-on: ubuntu-latest
+    needs: [assert-environment]
+    environment: ${{ inputs.environment }}
+    permissions:
+      contents: read
+    outputs:
+      release-id: ${{ steps.release.outputs.id }}
+      site-url: ${{ vars.SITE_BASE_URL }}
+
+    steps:
+
+      # Full history, because a shallow clone silently changes page metadata where the generator reads git info.
+      - name: Checkout code step
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+
+      # Derived once and used three times: the directory name, the stamp the bundle carries, and the value the live check expects.
+      # Deriving it twice yields ids seconds apart, and the check then asserts a version nothing installed.
+      - name: Resolve release id step
+        id: release
+        run: |
+          set -Eeuo pipefail
+          echo "id=$(date -u +%Y%m%d-%H%M%S)-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}" >> "$GITHUB_OUTPUT"
+
+      # Assembled to a scratch path, since the environment's deploy root is on the far host.
+      # The hook owns the generator, any precompression, and stamping the release id into whatever the bundle serves.
+      - name: Run deploy hook build step
+        if: ${{ hashFiles('.github/actions/deploy/action.yml') != '' }}
+        uses: ./.github/actions/deploy
+        with:
+          mode: build
+          bundle-path: ${{ runner.temp }}/bundle
+          release-id: ${{ steps.release.outputs.id }}
+
+      - name: Missing deploy hook step
+        if: ${{ hashFiles('.github/actions/deploy/action.yml') == '' }}
+        run: |
+          set -Eeuo pipefail
+          echo "::error::Required hook missing: .github/actions/deploy/action.yml"
+          exit 1
+
+      # The known-hosts value is a variable rather than a secret, it is integrity-critical but not confidential, and a variable keeps it diff-visible.
+      # StrictHostKeyChecking is never disabled.
+      - name: Install deploy key step
+        env:
+          DEPLOY_SSH_PRIVATE_KEY: ${{ secrets.DEPLOY_SSH_PRIVATE_KEY }}
+          DEPLOY_SSH_KNOWN_HOSTS: ${{ vars.DEPLOY_SSH_KNOWN_HOSTS }}
+        run: |
+          set -Eeuo pipefail
+          mkdir -p ~/.ssh
+          chmod 700 ~/.ssh
+          printf '%s\n' "$DEPLOY_SSH_PRIVATE_KEY" > ~/.ssh/deploy
+          chmod 600 ~/.ssh/deploy
+          printf '%s\n' "$DEPLOY_SSH_KNOWN_HOSTS" > ~/.ssh/known_hosts
+          chmod 600 ~/.ssh/known_hosts
+
+      # The destination is anchored at the key's confinement root, so no host path appears here.
+      # The hard-link source points at current, which still resolves to the previous release until the flip, so CI carries no state.
+      # A missing target is a warning rather than an error, so a first deploy into a fresh environment needs no special case.
+      # The mkpath flag creates the releases parent, which the transport will not create on its own.
+      # No delete flag: at an environment root it silently removes the releases a rollback needs.
+      - name: Upload release step
+        env:
+          DEPLOY_SSH_USER: ${{ vars.DEPLOY_SSH_USER }}
+          DEPLOY_SSH_HOST: ${{ vars.DEPLOY_SSH_HOST }}
+          RELEASE_ID: ${{ steps.release.outputs.id }}
+          ENVIRONMENT: ${{ inputs.environment }}
+        run: |
+          set -Eeuo pipefail
+          rsync -az --mkpath --no-g --chmod=D2755,F644 \
+            --link-dest="/${ENVIRONMENT}/current/" \
+            -e "$SSH_TRANSPORT" \
+            "${RUNNER_TEMP}/bundle/releases/${RELEASE_ID}/" \
+            "${DEPLOY_SSH_USER}@${DEPLOY_SSH_HOST}:/${ENVIRONMENT}/releases/${RELEASE_ID}/"
+
+      # A separate step from the upload, so a failed transfer cannot half-publish a site.
+      # The pointer is relative, so one bundle works at any remote root.
+      # The transport replaces a symlink through a temporary and a rename, so it is never absent to a request in flight.
+      - name: Flip current step
+        env:
+          DEPLOY_SSH_USER: ${{ vars.DEPLOY_SSH_USER }}
+          DEPLOY_SSH_HOST: ${{ vars.DEPLOY_SSH_HOST }}
+          ENVIRONMENT: ${{ inputs.environment }}
+        run: |
+          set -Eeuo pipefail
+          rsync -a --no-recursive \
+            -e "$SSH_TRANSPORT" \
+            "${RUNNER_TEMP}/bundle/current" \
+            "${DEPLOY_SSH_USER}@${DEPLOY_SSH_HOST}:/${ENVIRONMENT}/"
+
+      # Retention is bounded and owned per WORKFLOW.md D5.6, and pruning is the hook's own concern since only a repo whose credential can observe the destination runs this mode at all.
+      # A credential confined write-only skips this by carrying a hook whose prune mode is a no-op, and the repo's runbook records the host-side timer that owns it instead.
+      - name: Run deploy hook prune step
+        if: ${{ hashFiles('.github/actions/deploy/action.yml') != '' }}
+        uses: ./.github/actions/deploy
+        with:
+          mode: prune
+          environment: ${{ inputs.environment }}
+
+      # The only step that observes the running site (WORKFLOW.md D4.6).
+      # An upload succeeds against a container serving nothing, and a flip succeeds against a server that never reloads its rules.
+      # The hook asserts its own golden-list floors, the environment, the release id, and its URL contract, however it chooses to observe them.
+      - name: Run deploy hook verify step
+        if: ${{ hashFiles('.github/actions/deploy/action.yml') != '' }}
+        uses: ./.github/actions/deploy
+        with:
+          mode: verify
+          environment: ${{ inputs.environment }}
+          release-id: ${{ steps.release.outputs.id }}

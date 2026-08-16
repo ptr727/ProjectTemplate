@@ -27,8 +27,8 @@ versioning, badge, merge-bot, and Dependabot are target-agnostic.
 
 The pipeline splits into two layers. The **orchestration** layer is generic and is the
 standardization baseline: `publish-release.yml` (single-branch publish plan), the `get-version`
-plus `github-release` jobs inside `build-release-task.yml`, `get-version-task.yml`,
-`build-datebadge-task.yml`, and the aggregator shape of `test-pull-request.yml`. Within
+plus `github-release` jobs inside `build-release-task.yml`, `get-version-task.yml`, and the
+aggregator shape of `test-pull-request.yml`. Within
 `test-pull-request.yml`, only the `changes -> smoke-build -> check-workflow-status` aggregator
 wiring and the ruleset-bound job name are verbatim orchestration, while the `unit-test` job and
 the `dorny/paths-filter` entries are owned/per-target. The **build** layer (the
@@ -74,9 +74,12 @@ Pick by where each artifact *goes*, not by language:
 - **Image-registry pushes** (Docker Hub): `build-docker-task` pushes multi-arch tags directly and
   contributes **no** `release-asset-*`. The image tag is build-layer-owned, so drive it from
   whatever version source fits (NBGV `SemVer2`, an upstream-release pin, or a per-image matrix).
-  To publish the Docker Hub repository overview, `publish-docker-readme-task.yml` pushes
-  `Docker/README.md` via `peter-evans/dockerhub-description` (single-repo by default, matrix per
-  image for multi-image repos), wired into `publish-release.yml` and gated to `main`.
+  To publish the Docker Hub repository overview, the hub-hosted `publish-docker-readme-task.yml`
+  pushes a readme via `peter-evans/dockerhub-description` (single-repo by default, matrix per
+  image for multi-image repos), wired into `publish-release.yml` and gated to `main` both by the
+  caller's `branch` input and inside the task itself. A `docker-readme-transform` hook resolves
+  which file to push, defaulting to `Docker/README.md` if present else `README.md` as-is, so a
+  repo needs a hook only to render the file first or to override that default.
 - **Filesystem on a host the project owns** (a static site, a config tree): a deploy leaf builds
   the tree and ships it over the repo's own transport, contributing **no** `release-asset-*`. It
   is a **separate `workflow_dispatch`** from the release, so a redeploy of an unchanged commit
@@ -88,7 +91,7 @@ Pick by where each artifact *goes*, not by language:
   write-only.
 - **Source-only / no build** (validate + tag + release): this seam does not apply. A source-only
   repo carries **no** `build-release-task.yml` (its `appliesTo` excludes it), so there are no leaf
-  tasks and no `get-version`/`github-release`/`date-badge` jobs to curate. Its whole release is
+  tasks and no `get-version`/`github-release` jobs to curate. Its whole release is
   the standalone `publish-release.yml` on `workflow_dispatch`: a `validate` job (the repo's
   reusable validation task) gates a publish job that **inlines** NBGV for the tag and
   `action-gh-release` for the release (tag, auto source archive, README, LICENSE).
@@ -111,14 +114,17 @@ are intentionally not added.
 
 ## Wrapper repos that track an upstream release
 
-A repo wrapping an upstream release uses `check-upstream-version-task.yml`: a resolver command
-prints the upstream version(s) as a **JSON object of `name -> version`**, written to a committed
-state file at the **repo root beside `version.json`** (default `upstream-version.json`, since it
-is a build-input version source, not GitHub-platform config, so it does not belong under
-`.github/`), and opens a rolling App-signed bump PR per branch that the merge-bot auto-merges
-(`merge-upstream-version`). The object carries one key for the common single-version case
-(`{"version": "X"}`) or N keys for a wrapper that pins several upstream components (e.g. an image
-plus a companion tool), and the build reads each component by key, and the bump PR's title/body
-name only the keys that actually moved. Call it from a scheduled entry-point workflow and matrix
-only the branches that ship the version (a CI-only version uses `["develop"]`). A merged bump
-ships on the **next publish**, not immediately, which is the two-phase latency tradeoff.
+A repo wrapping an upstream release uses the hub-hosted `check-upstream-version-task.yml`: a
+required `resolve-upstream` hook prints the upstream version(s) as a **JSON object of
+`name -> version`**, written to a committed state file at the **repo root beside `version.json`**
+(default `upstream-version.json`, since it is a build-input version source, not GitHub-platform
+config, so it does not belong under `.github/`), and opens a rolling App-signed bump PR per branch
+that the merge-bot auto-merges (`merge-upstream-version`). The object carries one key for the
+common single-version case (`{"version": "X"}`) or N keys for a wrapper that pins several upstream
+components (e.g. an image plus a companion tool), and the build reads each component by key, and
+the bump PR's title/body name only the keys that actually moved. Call it from a scheduled
+entry-point workflow and matrix only the branches that ship the version (a CI-only version uses
+`["develop"]`). A merged bump ships on the **next publish**, not immediately, which is the
+two-phase latency tradeoff. A tracker whose bump needs a human decision instead of auto-merge, for
+example one that snapshots a package list to review rather than a version to adopt outright, sets
+`auto-merge: false`, which prefixes the head so no merge-bot rule matches it.

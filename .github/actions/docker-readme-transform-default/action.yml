@@ -1,0 +1,24 @@
+# Hub default for the docker-readme-transform hook, run when a caller carries no override at
+# .github/actions/docker-readme-transform/action.yml.
+# Publishes Docker/README.md when present, else README.md as-is, with no rendering step.
+name: Docker Hub readme transform default
+description: Resolve the readme file to publish, Docker/README.md if present else README.md as-is.
+
+outputs:
+  readme-filepath:
+    description: Path to the readme file the caller's checkout carries, to push as-is.
+    value: ${{ steps.resolve.outputs.readme-filepath }}
+
+runs:
+  using: composite
+  steps:
+    - name: Resolve readme filepath step
+      id: resolve
+      shell: bash
+      run: |
+        set -Eeuo pipefail
+        if [ -f Docker/README.md ]; then
+          echo "readme-filepath=Docker/README.md" >>"$GITHUB_OUTPUT"
+        else
+          echo "readme-filepath=README.md" >>"$GITHUB_OUTPUT"
+        fi

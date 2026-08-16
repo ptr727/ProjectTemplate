@@ -342,7 +342,17 @@ def path_candidate(token: str, in_span: bool = True) -> str | None:
 # That is the gate with the least room to fix it, and a ruleset bypass is the only local remedy.
 # Held as a literal because the prose-gate action fetches this one file with no hub tree beside it.
 # The `retire` dispositions in `spec/divergences.json` are the source, and a hub test asserts this.
-HUB_HOSTED = frozenset({"repo-config/configure.sh"})
+HUB_HOSTED = frozenset(
+    {
+        "repo-config/configure.sh",
+        ".github/workflows/deploy-site-task.yml",
+        ".github/workflows/publish-docker-readme-task.yml",
+        ".github/workflows/check-upstream-version-task.yml",
+        ".github/workflows/run-codegen-pull-request-task.yml",
+        ".github/workflows/run-periodic-codegen-pull-request.yml",
+        ".github/workflows/build-datebadge-task.yml",
+    }
+)
 
 
 @functools.cache
