@@ -207,6 +207,7 @@ jobs:
           ref: ${{ job.workflow_sha }}
           path: .hub
 
+      # A caller's own hook names its archive itself, so the asset name input reaches only the hub default.
       - name: Run caller build-executable hook step
         if: ${{ hashFiles('.github/actions/build-executable/action.yml') != '' }}
         uses: ./.github/actions/build-executable
@@ -218,7 +219,6 @@ jobs:
           assembly-file-version: ${{ needs.get-version.outputs.AssemblyFileVersion }}
           assembly-informational-version: ${{ needs.get-version.outputs.AssemblyInformationalVersion }}
           project-file: ${{ inputs.executable_project }}
-          asset-name: ${{ inputs.executable_asset_name }}
 
       - name: Run hub build-executable default step
         if: ${{ hashFiles('.github/actions/build-executable/action.yml') == '' }}
