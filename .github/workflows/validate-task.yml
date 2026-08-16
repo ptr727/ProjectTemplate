@@ -150,8 +150,9 @@ jobs:
       # A main-target run reads the bundled script at the exact commit the caller pinned, the .hub checkout above.
       # Every other target reads the live hub develop copy, so an unpromoted rule change is exercised fleet-wide before it reaches main.
       # Skipped outside a pull request, since there is no base to diff and a publish run's content was already gated when it was pushed.
+      # The event name here is always workflow_call, since that is what triggers this callee, so pull-request detection reads the inherited event payload's pull_request key instead.
       - name: Check prose step
-        if: github.event_name == 'pull_request'
+        if: github.event.pull_request != null
         run: |
           set -Eeuo pipefail
           if [ "$BASE" = "main" ]; then
@@ -167,7 +168,8 @@ jobs:
           fi
           python3 "$script" --diff "origin/$BASE" --check charset --check semicolon --check dash --check dupword --check spelling --check comment-wrap --check comment-case --check home-path --check dead-path .
         env:
-          BASE: ${{ github.base_ref }}
+          # The base ref context field is unset here for the same reason, so it reads from the inherited event payload instead.
+          BASE: ${{ github.event.pull_request.base.ref }}
 
       - name: Check repo gates step
         run: python3 .hub/scripts/repo_gate.py
