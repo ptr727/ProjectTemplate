@@ -1,0 +1,115 @@
+# Hub default for the build-nuget hook, run when a caller carries no .github/actions/build-nuget/action.yml of its own.
+# It builds a NuGet library project and publishes it to NuGet.org through OIDC trusted publishing, so there is no stored API key.
+# See spec/secrets.json "nuget-oidc" for the mechanism this matches.
+# It also uploads the release asset.
+# A caller whose project lives elsewhere sets project-file rather than carrying a hook.
+# Every live NuGet repo today carries its own hook for that reason.
+name: Build NuGet library default
+description: Build, OIDC-publish, and upload the release asset for a NuGet library project.
+
+inputs:
+  branch:
+    description: Logical branch driving build configuration. main gives Release, anything else Debug.
+    required: true
+  smoke:
+    description: Smoke mode skips the NuGet.org push and the release-asset upload.
+    required: false
+    default: 'false'
+  push:
+    description: Push to NuGet.org through OIDC trusted publishing. Ignored on smoke.
+    required: false
+    default: 'false'
+  semver2:
+    required: true
+  assembly-version:
+    required: true
+  assembly-file-version:
+    required: true
+  assembly-informational-version:
+    required: true
+  project-file:
+    description: Path to the library project file.
+    required: false
+    default: ./NuGetLibrary/NuGetLibrary.csproj
+  nuget-username:
+    description: nuget.org profile name for OIDC trusted publishing. Empty when push is false.
+    required: false
+    default: ''
+
+runs:
+  using: composite
+  steps:
+
+    - name: Setup .NET SDK step
+      uses: actions/setup-dotnet@a98b56852c35b8e3190ac28c8c2271da59106c68 # v6.0.0
+      with:
+        dotnet-version: 10.x
+
+    # Build output and packages land in the same publish/ folder so they archive together.
+    - name: Build library step
+      shell: bash
+      env:
+        BRANCH: ${{ inputs.branch }}
+        PROJECT_FILE: ${{ inputs.project-file }}
+        SEMVER2: ${{ inputs.semver2 }}
+        ASSEMBLY_VERSION: ${{ inputs.assembly-version }}
+        ASSEMBLY_FILE_VERSION: ${{ inputs.assembly-file-version }}
+        ASSEMBLY_INFORMATIONAL_VERSION: ${{ inputs.assembly-informational-version }}
+      run: |
+        set -Eeuo pipefail
+        configuration=Debug
+        [[ "$BRANCH" == "main" ]] && configuration=Release
+        dotnet build "$PROJECT_FILE" \
+          --configuration "$configuration" \
+          -property:OutputPath="$RUNNER_TEMP/publish/" \
+          -property:PackageOutputPath="$RUNNER_TEMP/publish/" \
+          -property:Version="$SEMVER2" \
+          -property:FileVersion="$ASSEMBLY_FILE_VERSION" \
+          -property:AssemblyVersion="$ASSEMBLY_VERSION" \
+          -property:InformationalVersion="$ASSEMBLY_INFORMATIONAL_VERSION" \
+          -property:PackageVersion="$SEMVER2"
+
+    # OIDC trusted publishing trades the GitHub OIDC token for a short-lived NuGet key, so there is no stored API key.
+    # Needs id-token: write from the caller, granted only on a real, non-smoke publish.
+    - name: Require nuget-username step
+      if: ${{ inputs.push == 'true' && inputs.smoke != 'true' && inputs.nuget-username == '' }}
+      shell: bash
+      run: |
+        set -Eeuo pipefail
+        echo "::error::inputs.push is true but nuget-username is empty. The caller must map secrets.NUGET_USERNAME through to this hook."
+        exit 1
+
+    - name: NuGet login step
+      if: ${{ inputs.push == 'true' && inputs.smoke != 'true' }}
+      id: nuget-login
+      uses: NuGet/login@8d196754b4036150537f80ac539e15c2f1028841 # v1.2.0
+      with:
+        user: ${{ inputs.nuget-username }}
+
+    # Pushing the .nupkg also pushes the co-located .snupkg to nuget.org's symbol server, since no --no-symbols flag is set.
+    - name: Push to NuGet.org step
+      if: ${{ inputs.push == 'true' && inputs.smoke != 'true' }}
+      shell: bash
+      env:
+        NUGET_API_KEY: ${{ steps.nuget-login.outputs.NUGET_API_KEY }}
+      run: |
+        set -Eeuo pipefail
+        dotnet nuget push "$RUNNER_TEMP"/publish/*.nupkg \
+          --source https://api.nuget.org/v3/index.json \
+          --api-key "$NUGET_API_KEY" \
+          --skip-duplicate
+
+    - name: Zip output step
+      if: ${{ inputs.smoke != 'true' }}
+      shell: bash
+      run: 7z a -t7z "$RUNNER_TEMP/nugetlibrary.7z" "$RUNNER_TEMP"/publish/*
+
+    # GitHub-release asset, uploaded under the release-asset-<branch>-<target> pattern the github-release job collects.
+    - name: Upload release asset step
+      if: ${{ inputs.smoke != 'true' }}
+      uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+      with:
+        name: release-asset-${{ inputs.branch }}-nugetlibrary
+        path: ${{ runner.temp }}/nugetlibrary.7z
+        # Consumed within the run by the github-release job, so minimize artifact storage.
+        retention-days: 1

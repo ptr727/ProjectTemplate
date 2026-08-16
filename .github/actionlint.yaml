@@ -6,6 +6,14 @@
 # The actionlint context schema has not caught up to them yet, so it reports a false property-not-defined finding here.
 # Drop this entry once a released actionlint recognizes both properties.
 paths:
+  '.github/workflows/build-release-task.yml':
+    ignore:
+      - 'property "workflow_repository" is not defined in object type'
+      - 'property "workflow_sha" is not defined in object type'
+  '.github/workflows/build-docker-task.yml':
+    ignore:
+      - 'property "workflow_repository" is not defined in object type'
+      - 'property "workflow_sha" is not defined in object type'
   '.github/workflows/publish-docker-readme-task.yml':
     ignore:
       - 'property "workflow_repository" is not defined in object type'

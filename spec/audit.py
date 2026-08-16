@@ -2126,6 +2126,37 @@ def _selftest():
             "merge-bot": ["merge-bot-task.yml", "CODEGEN_APP_CLIENT_ID", "CODEGEN_APP_PRIVATE_KEY"]
         },
     }
+    # The publish-release.yml caller stub once the release chain is hub-hosted, plan, validate and publish job keys.
+    # Each names its hub task by token, per docs/reusable-workflows.md "Adopting the Release Chain".
+    # Validate's own token requirement is what stops a stub from satisfying the job key with a no-op job.
+    publish_stub = (
+        "jobs:\n"
+        "  plan:\n"
+        "    name: Plan release job\n"
+        "    uses: acme/hub/.github/workflows/publish-plan-task.yml@" + "a" * 40 + " # 2.0.1\n"
+        "    with:\n"
+        "      event_name: ${{ github.event_name }}\n"
+        "  validate:\n"
+        "    name: Validate sources job\n"
+        "    needs: [plan]\n"
+        "    if: ${{ needs.plan.outputs.publish == 'true' }}\n"
+        "    uses: ./.github/workflows/validate-task.yml\n"
+        "  publish:\n"
+        "    name: Publish project release job\n"
+        "    needs: [plan, validate]\n"
+        "    if: ${{ needs.plan.outputs.publish == 'true' }}\n"
+        "    uses: acme/hub/.github/workflows/build-release-task.yml@" + "a" * 40 + " # 2.0.1\n"
+        "    with:\n"
+        "      github: true\n"
+    )
+    publish_contract = {
+        "requiredJobKeys": ["plan", "validate", "publish"],
+        "requireTokensInJob": {
+            "plan": ["publish-plan-task.yml"],
+            "validate": ["validate-task.yml"],
+            "publish": ["build-release-task.yml"],
+        },
+    }
     cases = [
         ("conformant PR workflow", pr_head + pr_check, pr_contract, 0),
         ("PR workflow missing the required job and its check name", pr_head, pr_contract, 2),
@@ -2245,6 +2276,72 @@ def _selftest():
                 "      CODEGEN_APP_PRIVATE_KEY: ${{ secrets.CODEGEN_APP_PRIVATE_KEY }}\n", ""
             ),
             bot_contract,
+            1,
+        ),
+        (
+            "publish-release.yml stub reaching both hub tasks by pin",
+            publish_stub,
+            publish_contract,
+            0,
+        ),
+        (
+            "publish-release.yml stub with the hub's own local uses",
+            publish_stub.replace(
+                "acme/hub/.github/workflows/publish-plan-task.yml@" + "a" * 40 + " # 2.0.1",
+                "./.github/workflows/publish-plan-task.yml",
+            ).replace(
+                "acme/hub/.github/workflows/build-release-task.yml@" + "a" * 40 + " # 2.0.1",
+                "./.github/workflows/build-release-task.yml",
+            ),
+            publish_contract,
+            0,
+        ),
+        (
+            "publish-release.yml stub missing the plan job reports it once",
+            "jobs:\n"
+            "  validate:\n"
+            "    name: Validate sources job\n"
+            "    uses: ./.github/workflows/validate-task.yml\n"
+            "  publish:\n"
+            "    name: Publish project release job\n"
+            "    needs: [validate]\n"
+            "    uses: acme/hub/.github/workflows/build-release-task.yml@"
+            + "a" * 40
+            + " # 2.0.1\n",
+            publish_contract,
+            1,
+        ),
+        (
+            "publish-release.yml stub missing the validate job reports it once",
+            "jobs:\n"
+            "  plan:\n"
+            "    name: Plan release job\n"
+            "    uses: acme/hub/.github/workflows/publish-plan-task.yml@" + "a" * 40 + " # 2.0.1\n"
+            "  publish:\n"
+            "    name: Publish project release job\n"
+            "    needs: [plan]\n"
+            "    uses: acme/hub/.github/workflows/build-release-task.yml@"
+            + "a" * 40
+            + " # 2.0.1\n",
+            publish_contract,
+            1,
+        ),
+        (
+            "publish-release.yml stub whose publish job never names build-release-task.yml",
+            publish_stub.replace(
+                "acme/hub/.github/workflows/build-release-task.yml@" + "a" * 40 + " # 2.0.1",
+                "./.github/workflows/build-release-task-renamed.yml",
+            ),
+            publish_contract,
+            1,
+        ),
+        (
+            "publish-release.yml stub whose validate job never names validate-task.yml",
+            publish_stub.replace(
+                "    uses: ./.github/workflows/validate-task.yml\n",
+                "    uses: ./.github/workflows/validate-task-renamed.yml\n",
+            ),
+            publish_contract,
             1,
         ),
     ]

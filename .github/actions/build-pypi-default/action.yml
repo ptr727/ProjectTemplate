@@ -1,0 +1,117 @@
+# Hub default for the build-pypi hook, run when a caller carries no .github/actions/build-pypi/action.yml of its own.
+# It builds the wheel and sdist and uploads the build artifact.
+# Publishing is a separate publish-pypi job at the caller stub, since id-token: write belongs at one entry point.
+# This hook contributes no release-asset-*.
+# It matches the vanilla project layout catalog/snippets/workflows/build-pypilibrary-task.yml once carried
+# (./PyPiLibrary, hatchling reading src/ptr727_projecttemplate_library/_version.py).
+name: Build PyPI library default
+description: Build the PyPI wheel and sdist and upload the build artifact for the publish-pypi job.
+
+inputs:
+  branch:
+    description: Logical branch driving the PEP 440 version. develop gives a .dev0 prerelease, else a plain release.
+    required: true
+  smoke:
+    description: Smoke mode skips the build-artifact upload, since nothing would consume it.
+    required: false
+    default: 'false'
+  assembly-file-version:
+    description: NBGV AssemblyFileVersion (M.N.P.B), the PEP 440 version source.
+    required: true
+  project-dir:
+    description: Working directory of the PyPI project.
+    required: false
+    default: ./PyPiLibrary
+  version-file:
+    description: Repo-relative path of the file carrying the hardcoded __version__ hatchling reads.
+    required: false
+    default: PyPiLibrary/src/ptr727_projecttemplate_library/_version.py
+  uv-version:
+    description: uv version, pinned in lockstep with the devcontainer's UV_VERSION.
+    required: false
+    default: "0.11.8"
+
+runs:
+  using: composite
+  steps:
+
+    - name: Setup uv step
+      uses: astral-sh/setup-uv@c771a70e6277c0a99b617c7a806ffedaca235ff9 # v9.0.0
+      with:
+        version: ${{ inputs.uv-version }}
+        enable-cache: true
+        cache-dependency-glob: ${{ inputs.project-dir }}/uv.lock
+
+    - name: Sync dependencies step
+      shell: bash
+      working-directory: ${{ inputs.project-dir }}
+      run: uv sync --all-groups --frozen
+
+    - name: Lint with ruff step
+      shell: bash
+      working-directory: ${{ inputs.project-dir }}
+      run: uv run ruff check
+
+    - name: Verify formatting with ruff step
+      shell: bash
+      working-directory: ${{ inputs.project-dir }}
+      run: uv run ruff format --check
+
+    - name: Type check with pyright step
+      shell: bash
+      working-directory: ${{ inputs.project-dir }}
+      run: uv run pyright
+
+    - name: Run pytest step
+      shell: bash
+      working-directory: ${{ inputs.project-dir }}
+      run: uv run pytest
+
+    # PEP 440 version: develop gives M.N.P.B.dev0 as a prerelease, and anything else gives M.N.P.B.
+    # The NBGV git height sits in the release segment, so develop's normally exceeds main's.
+    # A pip install --pre therefore picks the dev build over the main release.
+    - name: Compute PyPI version step
+      id: pypiver
+      shell: bash
+      env:
+        AFV: ${{ inputs.assembly-file-version }}
+        BRANCH: ${{ inputs.branch }}
+      run: |
+        set -Eeuo pipefail
+        if [[ "$BRANCH" == "develop" ]]; then
+          version="${AFV}.dev0"
+        else
+          version="$AFV"
+        fi
+        echo "PyPI version for branch $BRANCH: $version"
+        echo "version=$version" >> "$GITHUB_OUTPUT"
+
+    # This rewrites the hardcoded __version__ after tests run, so a test asserting it is non-empty is unaffected.
+    - name: Write version into _version.py step
+      shell: bash
+      env:
+        VERSION: ${{ steps.pypiver.outputs.version }}
+        VERSION_FILE: ${{ inputs.version-file }}
+      run: |
+        set -Eeuo pipefail
+        if [[ ! -f "$VERSION_FILE" ]]; then
+          echo "::error::version-file '$VERSION_FILE' does not exist. Set version-file to the file carrying __version__, or carry a caller's own .github/actions/build-pypi hook."
+          exit 1
+        fi
+        sed -i 's/^__version__ = .*/__version__ = "'"$VERSION"'"/' "$VERSION_FILE"
+
+    - name: Build sdist and wheel step
+      shell: bash
+      working-directory: ${{ inputs.project-dir }}
+      run: uv build
+
+    # Branch-suffixed so the publisher can build both branches in one run without colliding.
+    # Skipped on smoke, since the publish-pypi job runs only on a real publish and nothing would consume it.
+    - name: Upload build artifacts step
+      if: ${{ inputs.smoke != 'true' }}
+      uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+      with:
+        name: pypilibrary-build-${{ inputs.branch }}
+        path: ${{ inputs.project-dir }}/dist/*
+        # Consumed within the run by the caller stub's publish-pypi job, so minimize artifact storage.
+        retention-days: 1

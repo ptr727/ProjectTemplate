@@ -1,0 +1,46 @@
+# Hub default for the docker-prepare hook, run when a caller carries no .github/actions/docker-prepare/action.yml of its own.
+# It emits the vanilla single-target matrix entry that build-docker-task.yml builds when the caller passes only image.
+# That is a plain Docker Hub repository, with no upstream pin and no multi-image manifest.
+name: Docker prepare default
+description: Emit the vanilla single-target matrix entry for build-docker-task.yml from the image input.
+
+inputs:
+  image:
+    description: Docker Hub repository, e.g. ptr727/widget.
+    required: true
+  branch:
+    description: Logical branch driving the moving tag. main gives latest, anything else develop.
+    required: true
+  semver2:
+    required: true
+
+outputs:
+  matrix:
+    description: Compact JSON array of one {name, tags, build-args, context, dockerfile, cache-repo} entry.
+    value: ${{ steps.emit.outputs.matrix }}
+
+runs:
+  using: composite
+  steps:
+    - name: Emit vanilla matrix step
+      id: emit
+      shell: bash
+      env:
+        IMAGE: ${{ inputs.image }}
+        BRANCH: ${{ inputs.branch }}
+        SEMVER2: ${{ inputs.semver2 }}
+      run: |
+        set -Eeuo pipefail
+        if [[ -z "$IMAGE" ]]; then
+          echo "::error::inputs.image is empty. build-docker-task.yml callers set image, build-release-task.yml callers set docker_image, or a repo carries its own .github/actions/docker-prepare hook instead."
+          exit 1
+        fi
+        moving=develop
+        [[ "$BRANCH" == "main" ]] && moving=latest
+        matrix=$(jq -cn \
+          --arg name "$IMAGE" \
+          --arg tag1 "docker.io/$IMAGE:$moving" \
+          --arg tag2 "docker.io/$IMAGE:$SEMVER2" \
+          --arg cache "docker.io/$IMAGE" \
+          '[{name: $name, tags: [$tag1, $tag2], "build-args": [], context: ".", dockerfile: "./Docker/Dockerfile", "cache-repo": $cache}]')
+        echo "matrix=$matrix" >> "$GITHUB_OUTPUT"
