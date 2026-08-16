@@ -152,7 +152,7 @@ Hub: `validate-task.yml` hosts a `lint` job (the fleet doc-lint block, language 
 - [x] Hub pull request on `develop` with the task, the hub's own hook and default, the manifest contracts, and the catalog snippets left for the release that follows, [#760][pr-760].
 - [ ] Promoted and released, tag recorded here.
 - [ ] Catalog snippets for both stub shapes in [Adopting the Gates][adopting-the-gates] pinned to that release.
-- [x] Hook override path observed on a hub pull request run, <https://github.com/ptr727/ProjectTemplate/actions/runs/31950332387/job/95172710046> (runs `./.github/actions/validate`, no hub checkout). Default path awaits a repo with no `validate` hook of its own.
+- [x] Hook override path observed on a hub pull request run, [proof run][override-path-run] (runs `./.github/actions/validate`, no hub checkout). Default path awaits a repo with no `validate` hook of its own.
 - [ ] PhotoCleaner (pilot, release trigger shape with smoke, the same repo that piloted stage 1)
 - [ ] HomeAutomation-Config (second pilot, operational trigger shape)
 - [ ] The remaining repos, one checkbox each added when the pilots close, since the sweep list is every cataloged repo.
@@ -427,6 +427,7 @@ Four things the hub cannot prove fall to the first downstream adopter. They are 
 [governance-hub-hosted-tooling]: ../GOVERNANCE.md#hub-hosted-tooling
 [governance-workflow-yaml-conventions]: ../GOVERNANCE.md#workflow-yaml-conventions
 [issue-585]: https://github.com/ptr727/ProjectTemplate/issues/585
+[override-path-run]: https://github.com/ptr727/ProjectTemplate/actions/runs/31950332387/job/95172710046
 [pr-760]: https://github.com/ptr727/ProjectTemplate/pull/760
 [secrets]: ../spec/secrets.json
 [todo]: ../TODO.md

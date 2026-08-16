@@ -174,7 +174,8 @@ jobs:
 
   # No job-level if: here, since GitHub Actions does not evaluate hashFiles in a job condition, only a step one.
   # Every step below carries its own tree-detection guard instead.
-  # A caller with neither a *Tests*.csproj nor a tests/ directory beside a pyproject.toml runs every step's guard false, and the job reports success having done nothing, which is the clean skip this job promises.
+  # A caller with neither a *Tests*.csproj nor a uv.lock-backed tests/ directory beside a pyproject.toml runs every step's guard false, and the job reports success having done nothing, which is the clean skip this job promises.
+  # The uv.lock guard excludes the lint-only Python profile (spec/project-types.json python profileNote), which is stdlib-only, uvx-run, and carries no lockfile to sync from.
   unit-test:
     name: Unit test job
     runs-on: ubuntu-latest
@@ -208,22 +209,22 @@ jobs:
           CODECOV_TOKEN: ${{ secrets.CODECOV_TOKEN }}
 
       - name: Setup uv step
-        if: hashFiles('pyproject.toml') != '' && hashFiles('tests/**') != ''
+        if: hashFiles('pyproject.toml') != '' && hashFiles('tests/**') != '' && hashFiles('uv.lock') != ''
         uses: astral-sh/setup-uv@08807647e7069bb48b6ef5acd8ec9567f424441b # v8.1.0
         with:
           python-version: "3.13"
 
       - name: Sync dependencies step
-        if: hashFiles('pyproject.toml') != '' && hashFiles('tests/**') != ''
+        if: hashFiles('pyproject.toml') != '' && hashFiles('tests/**') != '' && hashFiles('uv.lock') != ''
         run: uv sync --all-groups --frozen
 
       - name: Run pytest step
-        if: hashFiles('pyproject.toml') != '' && hashFiles('tests/**') != ''
+        if: hashFiles('pyproject.toml') != '' && hashFiles('tests/**') != '' && hashFiles('uv.lock') != ''
         run: uv run pytest --cov-report=xml
 
       # Best-effort: continue-on-error plus fail_ci_if_error false, so a missing token never reds the gate.
       - name: Upload coverage to Codecov step (Python)
-        if: hashFiles('pyproject.toml') != '' && hashFiles('tests/**') != ''
+        if: hashFiles('pyproject.toml') != '' && hashFiles('tests/**') != '' && hashFiles('uv.lock') != ''
         continue-on-error: true
         uses: codecov/codecov-action@fb8b3582c8e4def4969c97caa2f19720cb33a72f # v7.0.0
         with:
