@@ -59,7 +59,7 @@ Usage: setup-github.sh [options]
 
 Sets up git and GitHub on this host: the SSH key, the git configuration, and commit signing.
 
-Actions, the last one given wins, default --status:
+Actions, name one, default --status:
   -s, --status      Report what is set up and what is not, change nothing
   -c, --configure   Create the key, apply the configuration, and check both registrations
   -h, --help        Show this help
@@ -594,10 +594,12 @@ configure() {
 # --- Entry ---
 
 parse_args() {
+    local -a actions=()
+
     while [[ $# -gt 0 ]]; do
         case "$1" in
-            -s | --status) MODE="status" ;;
-            -c | --configure) MODE="configure" ;;
+            -s | --status) actions+=(status) ;;
+            -c | --configure) actions+=(configure) ;;
             -n | --dry-run) DRY_RUN=true ;;
             -y | --yes) ASSUME_YES=true ;;
             --name)
@@ -623,6 +625,13 @@ parse_args() {
         esac
         shift
     done
+
+    # The order the actions were given is not a contract, so more than one is a refusal rather than the last one winning.
+    if ((${#actions[@]} > 1)); then
+        die "More than one action given (${actions[*]}), name one"
+    fi
+    [[ ${#actions[@]} -eq 1 ]] && MODE="${actions[0]}"
+    return 0
 }
 
 main() {

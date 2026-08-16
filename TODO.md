@@ -461,10 +461,11 @@ Three findings raised while writing [`host-setup/windows/`][host-setup-windows],
 
 - **Align the Linux scripts onto "name one action" instead of "the last one given wins".** Overwriting `MODE` in the arg loop discards an intent silently, and it discards it in the dangerous direction: `--report --install` drops the safe action and keeps the one that changes the host.
   - **Blocked by** - Nothing.
-  - **Issue** - [#673][issue-673].
-  - **Checked** - `main` at `1d5b076` on 2026-08-11, where all three scripts document last-wins, no documented example passes two actions, `bootstrap.sh` passes exactly one per `run_tool` call, and no test asserts the behavior.
+  - **Issue** - [#673][issue-673], broadened by [#767][issue-767] to carry the loader as well, which is what this change ships.
+  - **Checked** - `develop` at `63d244b` on 2026-08-16, where all four scripts document last-wins, no documented example passes two actions, `bootstrap.sh` passes exactly one per `run_tool` call, and no test asserts the behavior.
   - **Settled** - The Windows tooling already refuses this way. That began as a constraint, since a PowerShell `param()` block records which switches were given and not their order, and the constraint produced the better behavior.
-  - **Open** - Nothing about the change itself, which is three `usage()` heredocs and three `parse_args()` bodies. The decision is only whether the fleet wants the stricter contract, and taking it deletes the differences-table row in [`host-setup/windows/README.md`][host-setup-windows] rather than leaving a permanent divergence.
+  - **Settled** - The change is four `usage()` heredocs and four `parse_args()` bodies now that `bootstrap.sh` carries the same contract, and taking it deletes the differences-table row in [`host-setup/windows/README.md`][host-setup-windows] rather than leaving a permanent divergence.
+  - **Open** - Nothing.
 
 ### Neither Host Bootstrap Has Run Against a Truly Fresh Host
 
@@ -626,6 +627,7 @@ Nothing is awaiting close today. [#578][issue-578] was the last entry here and c
 [issue-672]: https://github.com/ptr727/ProjectTemplate/issues/672
 [issue-673]: https://github.com/ptr727/ProjectTemplate/issues/673
 [issue-729]: https://github.com/ptr727/ProjectTemplate/issues/729
+[issue-767]: https://github.com/ptr727/ProjectTemplate/issues/767
 [issue-769]: https://github.com/ptr727/ProjectTemplate/issues/769
 
 <!-- Pull requests -->
