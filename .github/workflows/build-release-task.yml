@@ -319,24 +319,25 @@ jobs:
           project-dir: ${{ inputs.pypi_project_dir }}
 
   # The Docker core, duplicated from build-docker-task.yml rather than reached by a ./ path (see the header comment).
-  # Resolves the image matrix once: the caller's own docker-prepare hook, else the hub default built from docker_image.
-  # Skipped entirely when the caller passed docker_matrix directly.
+  # Resolves the image matrix once: the caller's docker_matrix input directly, else the caller's own docker-prepare hook, else the hub default built from docker_image.
+  # Skipped entirely when docker is disabled.
   docker-prepare:
     name: Resolve Docker build matrix job
-    if: ${{ inputs.enable_docker && inputs.docker_matrix == '' }}
+    if: ${{ inputs.enable_docker }}
     needs: [get-version, validate-release]
     runs-on: ubuntu-latest
     outputs:
-      matrix: ${{ steps.hook.outputs.matrix || steps.default.outputs.matrix }}
+      matrix: ${{ inputs.docker_matrix != '' && inputs.docker_matrix || (steps.hook.outputs.matrix || steps.default.outputs.matrix) }}
     steps:
 
       - name: Checkout code step
+        if: ${{ inputs.docker_matrix == '' }}
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           ref: ${{ needs.get-version.outputs.GitCommitId }}
 
       - name: Checkout hub for hook default step
-        if: ${{ hashFiles('.github/actions/docker-prepare/action.yml') == '' }}
+        if: ${{ inputs.docker_matrix == '' && hashFiles('.github/actions/docker-prepare/action.yml') == '' }}
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           repository: ${{ job.workflow_repository }}
@@ -344,7 +345,7 @@ jobs:
           path: .hub
 
       - name: Run caller docker-prepare hook step
-        if: ${{ hashFiles('.github/actions/docker-prepare/action.yml') != '' }}
+        if: ${{ inputs.docker_matrix == '' && hashFiles('.github/actions/docker-prepare/action.yml') != '' }}
         id: hook
         uses: ./.github/actions/docker-prepare
         with:
@@ -353,7 +354,7 @@ jobs:
           semver2: ${{ needs.get-version.outputs.SemVer2 }}
 
       - name: Run hub docker-prepare default step
-        if: ${{ hashFiles('.github/actions/docker-prepare/action.yml') == '' }}
+        if: ${{ inputs.docker_matrix == '' && hashFiles('.github/actions/docker-prepare/action.yml') == '' }}
         id: default
         uses: ./.hub/.github/actions/docker-prepare-default
         with:
@@ -361,18 +362,19 @@ jobs:
           branch: ${{ inputs.branch }}
           semver2: ${{ needs.get-version.outputs.SemVer2 }}
 
-      # Fails here with a named cause, rather than later inside fromJSON, if a caller's own docker-prepare hook forgets to set its matrix output.
-      - name: Validate docker-prepare matrix output step
+      # Fails here with a named cause, rather than later inside fromJSON, whichever path produced the matrix
+      # (the caller's docker_matrix input, a caller's own docker-prepare hook, or the hub default).
+      - name: Validate Docker build matrix step
         env:
-          MATRIX: ${{ steps.hook.outputs.matrix || steps.default.outputs.matrix }}
+          MATRIX: ${{ inputs.docker_matrix != '' && inputs.docker_matrix || (steps.hook.outputs.matrix || steps.default.outputs.matrix) }}
         run: |
           set -Eeuo pipefail
           if [[ -z "$MATRIX" ]]; then
-            echo "::error::The docker-prepare hook produced no matrix output. A caller's own .github/actions/docker-prepare hook must set outputs.matrix."
+            echo "::error::No Docker build matrix resolved. Set docker_matrix directly, or a docker-prepare hook must set outputs.matrix."
             exit 1
           fi
           if ! jq -e 'type == "array" and length > 0' <<<"$MATRIX" >/dev/null 2>&1; then
-            echo "::error::The docker-prepare hook's matrix output is not a non-empty JSON array: $MATRIX"
+            echo "::error::The Docker build matrix is not a non-empty JSON array: $MATRIX"
             exit 1
           fi
 
@@ -419,7 +421,7 @@ jobs:
     runs-on: ubuntu-latest
     strategy:
       matrix:
-        image: ${{ fromJSON(inputs.docker_matrix != '' && inputs.docker_matrix || needs.docker-prepare.outputs.matrix) }}
+        image: ${{ fromJSON(needs.docker-prepare.outputs.matrix) }}
     env:
       # Multi-arch (amd64+arm64) only on a full main publish, and smoke and develop build amd64 only.
       PLATFORMS: ${{ (!inputs.smoke && inputs.branch == 'main') && 'linux/amd64,linux/arm64' || 'linux/amd64' }}
