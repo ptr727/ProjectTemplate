@@ -254,6 +254,9 @@ One pull request per stage moving a standard workflow out of every repo and into
   - **Checked** - `develop` at `7c67328` on 2026-08-15, where 5 of 8 `get-version-task.yml` copies are identical and all 3 `publish-plan-task.yml` copies are.
   - **Open** - Nothing.
   - **Settled** - PlexCleaner carries no `plan` job, so its next scheduled run ships a Dependabot bump, and the hub-hosted plan job is the fix rather than a per-repo copy.
+  - **Settled** - Of the 3 `get-version-task.yml` copies that differ, KiCadLibrary only documents the same design the canonical already carries, and aiopurpleair and homeassistant-purpleair each add a `Prerelease` output derived from `SemVer2` with identical logic. The hub task hosts `Prerelease` as a sixth output rather than leaving it as per-repo logic, and drops homeassistant-purpleair's `Tag` alias since it is a bare copy of `SemVer2` with no derivation of its own.
+  - **Settled** - All 3 `publish-plan-task.yml` copies are a strict subset of the canonical, missing the `-E` in `set -Eeuo pipefail` and the `::warning::` branch for an unrecognized actor pushing to `main` (D8.4). The hub task carries the canonical as is.
+  - **Settled** - Neither task is nested inside the other or inside a future `build-release-task.yml`, so a caller that only needs the version, not the whole release orchestrator, reaches `get-version-task.yml` directly. `build-release-task.yml` (stage 4) inlines the get-version and validate-release jobs rather than nesting a sibling hub task, per the no-`./`-nesting rule.
 
 - **Host the release chain: `build-release-task.yml` with `build-<target>` hooks, `publish-release-task.yml`, and the Docker core.** The orchestration is generic and the target list is per repo, which the hooks express without a per-repo copy of the orchestrator.
   - **Blocked by** - The pure functions, since the release task calls both.
