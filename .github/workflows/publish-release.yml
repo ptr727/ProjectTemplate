@@ -27,10 +27,23 @@ jobs:
             exit 1
           fi
 
+  # Single source of the release-gate decision, publish or not and stable or not, reused by validate and publish below.
+  # This repo triggers on workflow_dispatch only, so plan's decision is redundant with assert-dispatch-ref in practice.
+  # The job stays the uniform shape every publish-release.yml caller stub carries.
+  plan:
+    name: Plan release job
+    needs: [ assert-dispatch-ref ]
+    uses: ./.github/workflows/publish-plan-task.yml
+    with:
+      event_name: ${{ github.event_name }}
+      actor: ${{ github.actor }}
+      ref_name: ${{ github.ref_name }}
+
   # The same reusable gate the PR runs - a dispatch cannot release a ref that fails validation.
   validate:
     name: Validate sources job
-    needs: [ assert-dispatch-ref ]
+    needs: [ plan ]
+    if: ${{ needs.plan.outputs.publish == 'true' }}
     uses: ./.github/workflows/validate-task.yml
     permissions:
       contents: read
@@ -39,7 +52,8 @@ jobs:
   # Pin to the dispatch-time commit so a push landing after dispatch does not release unvalidated.
   publish:
     name: Publish project release job
-    needs: [ assert-dispatch-ref, validate ]
+    needs: [ plan, validate ]
+    if: ${{ needs.plan.outputs.publish == 'true' }}
     uses: ./.github/workflows/build-release-task.yml
     permissions:
       contents: write
