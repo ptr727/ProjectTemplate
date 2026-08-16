@@ -119,6 +119,21 @@ jobs:
           branch: ${{ inputs.branch }}
           semver2: ${{ inputs.semver2 }}
 
+      # Fails here with a named cause, rather than later inside fromJSON, if a caller's own docker-prepare hook forgets to set its matrix output.
+      - name: Validate docker-prepare matrix output step
+        env:
+          MATRIX: ${{ steps.hook.outputs.matrix || steps.default.outputs.matrix }}
+        run: |
+          set -Eeuo pipefail
+          if [[ -z "$MATRIX" ]]; then
+            echo "::error::The docker-prepare hook produced no matrix output. A caller's own .github/actions/docker-prepare hook must set outputs.matrix."
+            exit 1
+          fi
+          if ! jq -e 'type == "array" and length > 0' <<<"$MATRIX" >/dev/null 2>&1; then
+            echo "::error::The docker-prepare hook's matrix output is not a non-empty JSON array: $MATRIX"
+            exit 1
+          fi
+
   # Required hook, no hub default.
   # A repo with a shared base layer, a multi-image manifest per docs/reusable-workflows.md "The Docker Family", must carry .github/actions/docker-build-base itself.
   # Skipped entirely when build-base is false.
