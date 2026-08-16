@@ -106,13 +106,18 @@ jobs:
           hashFiles('**/*.csproj') != '' && hashFiles('.config/dotnet-tools.json') != ''
         run: dotnet tool restore
 
+      # CSharpier is a local dotnet tool, so it needs the manifest restored above.
+      # A caller with no manifest skips rather than failing on a generic unknown-command error against a tool the runner never installed.
       - name: Check C# formatting step
-        if: hashFiles('**/*.csproj') != ''
+        if: >-
+          hashFiles('**/*.csproj') != '' && hashFiles('.config/dotnet-tools.json') != ''
         run: dotnet csharpier check .
 
+      # The dotnet SDK ships dotnet format, so it needs no tool restore.
+      # The severity and verbosity flags match the fleet's canonical invocation, per CODESTYLE.md and PhotoCleaner's own gate.
       - name: Check C# style step
         if: hashFiles('**/*.csproj') != ''
-        run: dotnet format style --verify-no-changes
+        run: dotnet format style --verify-no-changes --severity=info --verbosity=detailed
 
       # @latest rather than a version pin, since a `uvx <tool>@<ver>` pin is nothing Dependabot tracks and would silently go stale, where the action SHA above is Dependabot-tracked.
       # This is #729, decided here, the one place the fleet's uvx tools are pinned or floated.
