@@ -94,6 +94,10 @@ runs:
         VERSION_FILE: ${{ inputs.version-file }}
       run: |
         set -Eeuo pipefail
+        if [[ ! -f "$VERSION_FILE" ]]; then
+          echo "::error::version-file '$VERSION_FILE' does not exist. Set version-file to the file carrying __version__, or carry a caller's own .github/actions/build-pypi hook."
+          exit 1
+        fi
         sed -i 's/^__version__ = .*/__version__ = "'"$VERSION"'"/' "$VERSION_FILE"
 
     - name: Build sdist and wheel step
