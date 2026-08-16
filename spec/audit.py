@@ -2068,6 +2068,24 @@ def _selftest():
         "requiredJobKeys": ["check-workflow-status"],
         "requiredCheckName": "Check pull request workflow status job",
     }
+    # The validate-task.yml stub contract: a caller's validate job must reach the hub task by name.
+    # A stub still carrying an inline lint job, the shape adoption replaces, is caught rather than passed as interface.
+    pr_stub_contract = dict(pr_contract, requireTokensInJob={"validate": ["validate-task.yml"]})
+    pr_validate_head = (
+        "name: Test\non: pull_request\njobs:\n"
+        "  validate:\n"
+        "    name: Validate sources job\n"
+        "    uses: ptr727/ProjectTemplate/.github/workflows/validate-task.yml@"
+        + "a" * 40
+        + " # 2.0.1\n"
+    )
+    pr_validate_inline = (
+        "name: Test\non: pull_request\njobs:\n"
+        "  validate:\n"
+        "    name: Validate sources job\n"
+        "    runs-on: ubuntu-latest\n"
+        "    steps:\n      - run: echo inline lint\n"
+    )
     gh_rel = (
         "  github-release:\n    needs: [get-version, build-widget]\n    runs-on: ubuntu-latest\n    steps:\n"
         "      - uses: actions/download-artifact@v4\n        with:\n          pattern: release-asset-${{ inputs.branch }}-*\n          merge-multiple: true\n"
@@ -2121,6 +2139,18 @@ def _selftest():
             pr_head
             + "  check-workflow-status:\n    runs-on: ubuntu-latest\n    steps:\n      - name: Check pull request workflow status job\n        run: true\n",
             pr_contract,
+            1,
+        ),
+        (
+            "PR stub validate job reaching the hub validate-task",
+            pr_validate_head + pr_check,
+            pr_stub_contract,
+            0,
+        ),
+        (
+            "PR stub validate job still carrying an inline lint job",
+            pr_validate_inline + pr_check,
+            pr_stub_contract,
             1,
         ),
         ("conformant release task", rel_ok, rel_contract, 0),

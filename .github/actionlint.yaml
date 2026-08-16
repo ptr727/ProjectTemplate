@@ -1,0 +1,6 @@
+# The bundled context schema predates the job context's workflow_sha, workflow_ref, workflow_repository, and workflow_file_path fields, so a valid, documented reference to job.workflow_sha reads as an unknown property.
+# Scoped to the one file that reads it today, so a genuine unknown-property regression elsewhere still fails.
+paths:
+  .github/workflows/validate-task.yml:
+    ignore:
+      - 'property "workflow_sha" is not defined in object type'

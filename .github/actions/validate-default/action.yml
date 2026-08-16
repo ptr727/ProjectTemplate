@@ -1,0 +1,12 @@
+# The hub default for the validate hook, used when a caller carries no .github/actions/validate/action.yml of its own.
+# A repo with no domain checks of its own (no ESPHome compile, no Hugo build, no KiCad ERC, no codegen drift, no PowerShell tests) has nothing for this hook to run.
+# The fleet doc-lint block plus the generic unit-test job already cover everything else validate-task.yml checks.
+name: Validate repository (default)
+description: No-op default for the validate hook.
+
+runs:
+  using: composite
+  steps:
+    - name: No repository-specific validation step
+      shell: bash
+      run: echo "no repository-specific validate hook, nothing to run"
