@@ -1111,8 +1111,10 @@ configure_sudo_timestamp() {
 
     # Another file setting either option is named rather than merged into, since which one wins is the order sudo reads them in and not something this can decide.
     local elsewhere
+    # A name holding a dot or ending in a tilde is one sudo skips, this run's own staged file included, so a setting in it is an override sudo never reads.
     elsewhere=$("${SUDO[@]}" grep -rnsE '^[[:space:]]*Defaults.*timestamp_(type|timeout)' \
-        --exclude="${SUDOERS_FILE##*/}" /etc/sudoers /etc/sudoers.d 2> /dev/null) || elsewhere=""
+        --exclude='*.*' --exclude='*~' --exclude="${SUDOERS_FILE##*/}" \
+        /etc/sudoers /etc/sudoers.d 2> /dev/null) || elsewhere=""
     if [[ -n $elsewhere ]]; then
         warn "A timestamp option is already set elsewhere, and the file sudo reads last wins:"
         local line
