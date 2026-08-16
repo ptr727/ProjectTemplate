@@ -180,8 +180,12 @@ jobs:
           # The repository hosting this reusable workflow, so a fork of the hub reads its own develop rather than upstream's.
           HUB_REPO: ${{ job.workflow_repository }}
 
+      # A runner's gh is unauthenticated on its own, and gh api needs one.
+      # Without this the sha-pin check silently degrades to "GitHub did not answer" for every same-owner pin.
       - name: Check repo gates step
         run: python3 .hub/scripts/repo_gate.py
+        env:
+          GH_TOKEN: ${{ github.token }}
 
   # No job-level if: here, since GitHub Actions does not evaluate hashFiles in a job condition, only a step one.
   # Every step below carries its own tree-detection guard instead.
