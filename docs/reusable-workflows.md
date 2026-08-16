@@ -47,7 +47,7 @@ A workflow whose job graph is identical across repos of a type is reached, not c
 
 ### Layers
 
-1. **The hub reusable workflow**, at `.github/workflows/<name>-task.yml` in the hub. It follows [GOVERNANCE.md "Workflow YAML Conventions"][governance-workflow-yaml-conventions], so the file ends `-task.yml` and its `name:` ends "task". It owns the job graph, the permissions each job needs, the validate-at-entry step, the artifact seam, retention, and the ruleset-bound aggregator name. It checks out the caller's repo by default. When it needs its own defaults or scripts, it checks out the hub at `${{ github.job_workflow_sha }}` under `.hub/`, which is the commit the caller pinned.
+1. **The hub reusable workflow**, at `.github/workflows/<name>-task.yml` in the hub. It follows [GOVERNANCE.md "Workflow YAML Conventions"][governance-workflow-yaml-conventions], so the file ends `-task.yml` and its `name:` ends "task". It owns the job graph, the permissions each job needs, the validate-at-entry step, the artifact seam, retention, and the ruleset-bound aggregator name. It checks out the caller's repo by default. When it needs its own defaults or scripts, it checks out the hub at `${{ job.workflow_sha }}` under `.hub/`, the commit of the reusable workflow file itself, which is the commit the caller pinned (not `github.workflow_sha`, which names the caller's own top-level workflow file instead).
 2. **The hook**, a composite action at `.github/actions/<hook>/action.yml` in the caller's repo. A hub job resolves it in one order: the caller's path when `hashFiles('.github/actions/<hook>/action.yml')` is non-empty, else the hub default at the same name under `.hub/`. A required hook with no default fails its job with `::error::` naming the missing path.
 3. **The caller stub**, downstream, under thirty lines. The audit grades it at `interface` fidelity: the caller job key, the hub task the `uses:` names, and the secrets it maps are the contract, and the `with:` block is the repo's own.
 4. **The hub's own use.** The hub calls its own task files by `./` path, so every hub pull request exercises the reusable file at least at parse level, and fully for the workflows the hub itself runs.
@@ -349,7 +349,7 @@ A Docker repo's stub adds `schedule: - cron: '0 2 * * MON'` to the trigger block
 ```yaml
   publish-pypi:
     name: Publish PyPI library job
-    needs: [validate, build]
+    needs: [validate, publish]
     runs-on: ubuntu-latest
     environment:
       name: pypi
