@@ -121,8 +121,8 @@ Key rules for every Python task:
   false positives belong in `[tool.ruff.lint]` `ignore` or `per-file-ignores`.
 - **All public APIs are typed.** Use modern syntax (`list[int]`, `X | None`). Don't add
   `# type: ignore` without an explaining comment.
-- **Don't add backward-compat shims or error handling for impossible cases.** Just delete unused
-  code; git history is the audit trail.
+- **Don't add backward-compat shims.** Just delete unused code; git history is the audit trail.
+- **Don't add error handling for impossible cases.** Trust internal code; validate only at boundaries.
 
 For comments, docstrings, full type-hint rules, naming, imports, and all patterns to avoid, see
 `references/code-style.md`.
