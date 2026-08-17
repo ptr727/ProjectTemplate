@@ -62,7 +62,7 @@ tiers, from [issue #766][issue-766] with the measured current sizes:
 | 2 | 18 skill descriptions | 19,232 B | Every session, on providers that surface descriptions |
 | 3 | 18 skill bodies | 142,377 B | When the skill activates |
 | 4 | Skill `references/`, 6 skills | 64,322 B | When the subcase appears |
-| 5 | `GOVERNANCE.md` 66,677 B, `WORKFLOW.md` 60,713 B, `CODESTYLE.md` 7,575 B | 135,065 B | Selectively, one section at a time |
+| 5 | `GOVERNANCE.md` 66,677 B, `WORKFLOW.md` 60,713 B, `CODESTYLE.md` 7,575 B | 134,965 B | Selectively, one section at a time |
 
 Two facts shape the whole plan. First, tier 1 and tier 2 cost multiply with every session, so a
 thousand bytes removed from them outweighs ten thousand removed from tier 4. Second, which files
@@ -80,7 +80,7 @@ closes it.
 | # | Gap | Evidence | Phase |
 | --- | --- | --- | --- |
 | G1 | The Copilot Review Runbook embeds hand-run mechanics that duplicate the hub-hosted helper | The runbook section is 47,624 B of the 53,188 B file, 90%, while [`scripts/pr_review.py`][pr-review-script] already implements status, wait, reply, and resolve | [3](#phase-3-copilot-runbook-reduction) |
-| G2 | Twelve of eighteen skills carry no `references/`, and five bodies remain over 11 KB | `comment-and-doc-style` 14,726 B, `operational-vs-release-workflow` 12,340 B, `git-commit-conventions` 11,869 B, `dotnet-codestyle` 11,562 B, `pr-review-conduct` 9,801 B | [2](#phase-2-skill-body-progressive-disclosure) |
+| G2 | Twelve of eighteen skills carry no `references/`, and four bodies remain over 11 KB | `comment-and-doc-style` 14,726 B, `operational-vs-release-workflow` 12,340 B, `git-commit-conventions` 11,869 B, `dotnet-codestyle` 11,562 B, with `pr-review-conduct` next at 9,801 B | [2](#phase-2-skill-body-progressive-disclosure) |
 | G3 | Skill descriptions carry rationale, history, and mechanics instead of routing only | 19,232 B across 18 descriptions, averaging 1,068 B, with the longest at 1,375 B (`operational-vs-release-workflow`) | [5](#phase-5-skill-description-compression) |
 | G4 | `Why This Exists` narratives repeat as runtime cost on every activation | Incident history in `agent-conduct`, `repo-worktree`, `comment-and-doc-style`, and the language skills, per finding 3 of [issue #766][issue-766] | [2](#phase-2-skill-body-progressive-disclosure) |
 | G5 | No behavioral benchmark exists to veto a reduction | The evaluation set proposed in [issue #766][issue-766] is specified but not authored, and no routing record exists | [1](#phase-1-baseline-and-benchmark) |
