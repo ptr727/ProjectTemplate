@@ -263,15 +263,6 @@ jobs:
       - name: Checkout code step
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
-      # The hub default runs from this checkout, so it is fetched only when the caller carries no hook of its own.
-      - name: Checkout hub step
-        if: hashFiles('.github/actions/validate/action.yml') == ''
-        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        with:
-          repository: ${{ job.workflow_repository }}
-          ref: ${{ job.workflow_sha }}
-          path: .hub
-
       # A local composite action resolves at step time from the workspace, which is what makes this fallback expressible at all.
       # It runs the caller's own hook when it carries one, else the hub's no-op default.
       - name: Run repository validate hook step
@@ -280,4 +271,4 @@ jobs:
 
       - name: Run default validate hook step
         if: hashFiles('.github/actions/validate/action.yml') == ''
-        uses: ./.hub/.github/actions/validate-default
+        uses: $/.github/actions/validate-default

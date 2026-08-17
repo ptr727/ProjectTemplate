@@ -99,8 +99,13 @@ class TestShaPin(TreeCase):
                 files = self.workflow(f"jobs:\n  a:\n    steps:\n      - uses: {action}@master\n")
                 self.assertEqual([], repo_gate.check_sha_pin(self.tmp, files))
 
-    def test_a_local_reusable_workflow_is_not_an_action(self) -> None:
-        for ref in ("./.github/workflows/validate-task.yml", ".github/workflows/validate-task.yml"):
+    def test_a_local_or_self_repository_ref_needs_no_pin(self) -> None:
+        for ref in (
+            "./.github/workflows/validate-task.yml",
+            ".github/workflows/validate-task.yml",
+            "$/.github/workflows/validate-task.yml",
+            "$/.github/actions/validate-default",
+        ):
             with self.subTest(ref=ref):
                 files = self.workflow(f"jobs:\n  a:\n    uses: {ref}\n")
                 self.assertEqual([], repo_gate.check_sha_pin(self.tmp, files))

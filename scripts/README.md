@@ -82,7 +82,7 @@ Every rule in the default set is clean tree-wide, which is what lets the CI gate
 
 Three deterministic checks:
 
-- `sha-pin`: every workflow `uses:` naming an action is a 40-hex commit SHA that resolves, with the one documented `dotnet/nbgv@master` exception allowed. A local reusable workflow (`./.github/workflows/...`) names no action and carries no ref to pin, so it is skipped.
+- `sha-pin`: every external workflow `uses:` reference is a 40-hex commit SHA that resolves, with the documented `dotnet/nbgv@master` exception. Local (`./`) and self-repository (`$/`) references run at the workflow commit, so they need no separate pin.
 - `eol`: every path pinned LF in [`.gitattributes`][gitattributes] has the matching [`.editorconfig`][editorconfig] override the line-ending rule requires, with EditorConfig brace syntax expanded. One direction only: an `.editorconfig` LF glob with no git pin is legitimate, since `.editorconfig` governs what the editor writes where git enforces a class it must not guess at.
 - `eol-coverage`: the same pins read against the tree instead. A tracked file opening `#!` that git does not resolve to `eol=lf` is an interpreter line a CRLF checkout breaks, and a pin matching no tracked file is dead unless its block is marked `forward-declared`.
 
