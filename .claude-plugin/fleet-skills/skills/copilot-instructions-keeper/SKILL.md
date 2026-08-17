@@ -18,10 +18,10 @@ description: >-
 
 ## Why this exists
 
-`.github/copilot-instructions.md` is read directly by the GitHub Copilot review bot, which
-cannot read a `SKILL.md`. Unlike other carried governance content, its rule text is never
-pointer-ized into a skill, this file always stays fully intact in every repo that carries it.
-This skill is about maintaining that file's carried copy, not a substitute for it.
+`.github/copilot-instructions.md` is read directly by GitHub Copilot and bootstraps the shared
+`AGENTS.md` instruction set and review-focused skills. Its Copilot-specific rules stay fully
+intact in every repo that carries it. This skill maintains that carried copy, it does not replace
+the bootstrap.
 
 `spec/files.json` declares it `intent` fidelity, `whole: true`, covering three named sections
 (`Commit Messages and Pull Request Titles`, `Reviewing Carried Fleet Content`, `GitHub Copilot

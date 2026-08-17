@@ -15,7 +15,7 @@ Subcommands
            does not, 71 = there were references and none could be read, so nothing was decided.
   status   One digest line, any unresolved threads, and any suppressed findings. Read-only.
            Exit 0 = every shape in the reviewer's output is one this reads, and the round
-           covering the head read the whole diff or stated nothing about what it read.
+           covering the head read the whole diff.
            42 = that round read fewer files than the pull request changed, so part of the diff
            has no review at all. Measured over four pull requests and seven rounds here, a
            re-request never cleared one and no round ever recovered, so this is a state to
@@ -24,6 +24,8 @@ Subcommands
            be believed. The remedy is an issue on the repository hosting this script, and the
            review loop does not close until the reader is fixed. Merging regardless is the
            maintainer's decision rather than the agent's.
+           45 = the review covering the head stated no changed-file coverage. Request another
+           review only after confirming the head branch carries the current review instructions.
   reply    Answer one thread selected by its text, and resolve it on request. Exists
            because the hand-run form keeps failing the same way: a node id typed into a
            mutation, which resolves globally and so writes to a real thread somewhere
@@ -46,7 +48,7 @@ Subcommands
            40 reports the shape of that answer and reads nothing of its cause: an answer
            carrying no commit covers no head, so the wait ends and the reader decides.
            41 = the review carrying the head says it did not review, so it covers nothing.
-           42 and 43 = the review landed and `status`'s two blocking readings apply to it,
+           42, 43, and 45 = the review landed and `status`'s blocking readings apply to it,
            since a wait ending on a round that covered half the diff, or on output nothing here
            can read, has ended on something other than a review of this pull request.
            44 = the review loop closed, the merge reads BLOCKED, and a check is in a shape no
@@ -140,6 +142,12 @@ REFUSAL = re.compile(
 # That one keeps the text requirement, since the name alone does not say the line states coverage.
 COVERAGE_BULLET = re.compile(r"\s*[-*]\s*\*\*Files reviewed:", re.IGNORECASE)
 COVERAGE_SENTENCE = re.compile(r"\s*Copilot\b", re.IGNORECASE)
+# Ask the reviewer for a stable coverage shape instead of adapting only to changing prose.
+# Keep the prose readers for reviews made before the marker shipped.
+FLEET_REVIEW = re.compile(
+    r"\s*<!--\s*fleet-review:\s*reviewed=(\d+)\s+changed=(\d+)\s+findings=(\d+)\s*-->\s*",
+    re.IGNORECASE,
+)
 # The count pair itself, in the two spellings the corpus carries.
 # The comment tail one of them ends on is deliberately not part of the unit.
 # It says how many comments the round raised, which is not coverage.
@@ -639,6 +647,8 @@ def reviewed_head(pr: dict) -> bool:
 
 def is_coverage_line(line: str) -> bool:
     """Whether this line is the reviewer stating its file coverage, rather than prose about it."""
+    if FLEET_REVIEW.fullmatch(line):
+        return True
     if COVERAGE_BULLET.match(line):
         return True
     return bool(COVERAGE_SENTENCE.match(line)) and "changed file" in line.lower()
@@ -658,7 +668,11 @@ def read_coverage(line: str) -> tuple[int, int] | None:
     it is a line this script is parsing wrongly, and reading it as full coverage fails open on
     exactly the statement that says something is off.
     """
+    marker = FLEET_REVIEW.fullmatch(line)
     m = COVERAGE_COUNTS.search(line)
+    if marker:
+        reviewed, changed = marker.group(1), marker.group(2)
+        return (int(reviewed), int(changed)) if int(reviewed) <= int(changed) else None
     if not m:
         return None
     reviewed, changed = (m.group(1), m.group(2)) if m.group(1) else (m.group(3), m.group(4))
@@ -933,6 +947,15 @@ def report_verdict(pr: dict) -> int:
             f"{table_against_diff(pr, counts)}"
         )
         return 42
+    if state == UNSTATED:
+        print(
+            "status=COVERAGE_IS_UNSTATED the review covering the head states no changed-file "
+            "coverage, so the review loop cannot prove that it read the full diff. Confirm the "
+            "head branch carries the current code-review skill and Copilot instructions, then "
+            "request another review. Merging without coverage is the maintainer's decision, "
+            "not the agent's."
+        )
+        return 45
     return 0
 
 

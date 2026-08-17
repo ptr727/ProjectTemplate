@@ -43,7 +43,10 @@ OVERVIEW = "## Pull request overview\n\nThe change is narrow.\n"
 
 
 def review(
-    login: str = pr_review.REVIEWER, oid: str = HEAD, body: str = OVERVIEW, at: str = EARLY
+    login: str = pr_review.REVIEWER,
+    oid: str = HEAD,
+    body: str = OVERVIEW + "\n<!-- fleet-review: reviewed=1 changed=1 findings=0 -->",
+    at: str = EARLY,
 ) -> dict:
     return {
         "author": {"login": login},
@@ -901,7 +904,7 @@ class TestCoverage(GqlCase):
         self.assertIn("UNRECOGNIZED REVIEWER OUTPUT (1)", out)
         self.assertIn(f"coverage line: {line}", out)
 
-    def test_a_round_stating_no_coverage_at_all_is_unstated_rather_than_a_verdict(self) -> None:
+    def test_a_round_stating_no_coverage_at_all_is_unstated(self) -> None:
         """28 of the 332 bodies are an overview and a change list, and that shape is current.
 
         It interleaves with the counted one throughout rather than preceding it, and one pull
@@ -916,6 +919,18 @@ class TestCoverage(GqlCase):
         self.assertIn("coverage=unstated", out)
         self.assertNotIn("COVERAGE IS PARTIAL", out)
         self.assertIn("shapes=ok", out)
+
+    def test_machine_readable_marker_reports_full_coverage(self) -> None:
+        """The instructed marker is stable input while older prose remains supported."""
+        marker = "<!-- fleet-review: reviewed=3 changed=3 findings=0 -->"
+        self.assertEqual((3, 3), pr_review.read_coverage(marker))
+        self.assertEqual(pr_review.FULL, pr_review.coverage_of({"body": marker})[0])
+
+    def test_machine_readable_marker_reports_partial_coverage(self) -> None:
+        """The marker's measured counts use the same fail-closed comparison as prose."""
+        marker = "<!-- fleet-review: reviewed=2 changed=3 findings=1 -->"
+        self.assertEqual((2, 3), pr_review.read_coverage(marker))
+        self.assertEqual(pr_review.PARTIAL, pr_review.coverage_of({"body": marker})[0])
 
     def test_a_refusal_is_exempt_rather_than_an_unrecognized_shape(self) -> None:
         """It states no coverage by design, and `head_reviews` has already dropped it.
@@ -1126,7 +1141,7 @@ class TestUnrecognizedShapes(GqlCase):
 
 
 class TestCoverageExitCodes(GqlCase):
-    """`status` returned 0 unconditionally, so a partial round reported as a covered head."""
+    """Coverage that is partial or unstated blocks a covered-head verdict."""
 
     def setUp(self) -> None:
         self.out = self.enterContext(contextlib.redirect_stdout(io.StringIO()))
@@ -1141,6 +1156,12 @@ class TestCoverageExitCodes(GqlCase):
         self.answer(payload([self.partial()]))
         self.assertEqual(42, pr_review.main(["status", "7", "--repo", "o/r"]))
         self.assertIn("status=COVERAGE_IS_PARTIAL", self.out.getvalue())
+
+    def test_status_exits_forty_five_when_coverage_is_unstated(self) -> None:
+        """A current-head review is not proof that the reviewer read the full diff."""
+        self.answer(payload([review(body=OVERVIEW)]))
+        self.assertEqual(45, pr_review.main(["status", "7", "--repo", "o/r"]))
+        self.assertIn("status=COVERAGE_IS_UNSTATED", self.out.getvalue())
 
     def test_the_partial_message_counts_the_unread_files_rather_than_assuming_one(self) -> None:
         """Every partial on record skipped exactly one file, which is a measurement of seven
@@ -1189,9 +1210,10 @@ class TestCoverageExitCodes(GqlCase):
         self.assertIn("status=UNRECOGNIZED_REVIEWER_OUTPUT", out)
         self.assertIn("coverage=UNVETTED", out)
 
-    def test_status_still_exits_zero_on_a_full_round_and_on_a_silent_one(self) -> None:
-        """Failing the silent shape would fail roughly one review in twelve on this repository."""
-        for body in (OVERVIEW + "\n" + COVERED, nested(), OVERVIEW):
+    def test_status_still_exits_zero_on_a_full_round(self) -> None:
+        """Both the legacy coverage prose and the stable marker close the coverage gate."""
+        marker = OVERVIEW + "\n<!-- fleet-review: reviewed=1 changed=1 findings=0 -->"
+        for body in (OVERVIEW + "\n" + COVERED, nested(), marker):
             with self.subTest(body=body[:40]):
                 self.answer(payload([review(body=body)]))
                 self.assertEqual(0, pr_review.main(["status", "7", "--repo", "o/r"]))
@@ -2800,47 +2822,29 @@ class TestClaimsIsReadOnly(unittest.TestCase):
 
 
 class TestContract(unittest.TestCase):
-    def test_the_reviewer_login_matches_the_runbook_graphql_form(self) -> None:
-        """GraphQL drops the `[bot]` suffix REST carries, and this script is GraphQL-only.
-
-        The runbook is the source, so this reads it rather than restating the string.
-        """
+    def test_the_runbook_bootstraps_the_review_skill(self) -> None:
+        """Copilot reaches the provider-independent review contract from its always-on file."""
         text = RUNBOOK.read_text(encoding="utf-8")
-        self.assertIn(f"`{pr_review.REVIEWER}`, with **no `[bot]` suffix**", text)
-        self.assertFalse(pr_review.REVIEWER.endswith("[bot]"))
+        self.assertIn(".agents/skills/code-review/SKILL.md", text)
 
-    def test_the_suppressed_pattern_is_the_runbook_alternation(self) -> None:
-        """The heading wording has changed once, so the pattern tracks the runbook, not a memory."""
+    def test_the_runbook_forbids_suppressed_findings(self) -> None:
+        """A finding without a thread cannot participate in the ordinary reply loop."""
         text = RUNBOOK.read_text(encoding="utf-8")
-        self.assertIn(f'test("{pr_review.SUPPRESSED.pattern}")', text)
+        self.assertIn("Never suppress a finding", text)
 
-    def test_the_refusal_pattern_is_the_runbook_alternation(self) -> None:
-        """A refusal reworded once is a refusal read as coverage, so the pattern is not a memory."""
-        text = RUNBOOK.read_text(encoding="utf-8")
-        self.assertIn(f'test("{pr_review.REFUSAL.pattern}")', text)
-        # The published filter is single-quoted, which no spelling of the apostrophe survives.
-        self.assertNotIn("'", pr_review.REFUSAL.pattern)
+    def test_the_runbook_publishes_the_machine_readable_coverage_marker(self) -> None:
+        """The instructed shape is stable while the parser retains legacy prose readers."""
+        text = (REPO / ".agents" / "skills" / "code-review" / "SKILL.md").read_text(
+            encoding="utf-8"
+        )
+        marker = "<!-- fleet-review: reviewed=N changed=N findings=N -->"
+        self.assertIn(marker, text)
+        self.assertIsNotNone(pr_review.read_coverage(marker.replace("N", "1")))
 
-    def test_the_vetted_coverage_spellings_are_the_ones_the_runbook_publishes(self) -> None:
-        """The wording drifts, so the vetted list is read out of the runbook rather than recalled.
-
-        The two published lines are pulled out with the script's own opener and handed to its own
-        parser, which holds the pair in step in both directions: a spelling the runbook adds and
-        this cannot read fails here, and so does one this reads that the runbook never named.
-        """
-        text = RUNBOOK.read_text(encoding="utf-8")
-        published = [ln.strip() for ln in text.splitlines() if pr_review.is_coverage_line(ln)]
-        self.assertEqual(2, len(published), published)
-        for line in published:
-            with self.subTest(line=line[:44]):
-                self.assertIsNotNone(pr_review.read_coverage(line))
-        # The published filter is single-quoted in the shell, which no apostrophe survives.
-        self.assertNotIn("'", pr_review.COVERAGE_COUNTS.pattern)
-
-    def test_the_runbook_names_the_partial_round_as_a_state_that_blocks_a_merge(self) -> None:
+    def test_the_runbook_names_partial_coverage_as_a_state_that_blocks_a_merge(self) -> None:
         """A verify step reading `commit.oid` alone is what let five partial rounds merge."""
         text = RUNBOOK.read_text(encoding="utf-8")
-        self.assertIn("Coverage of the head is not coverage of the diff", text)
+        self.assertIn("partial or absent coverage statement", text)
 
     def test_the_only_writes_are_the_three_named_here(self) -> None:
         """Every write this script makes is one of three, and each arrived as a reviewed change.
@@ -2885,12 +2889,11 @@ class TestContract(unittest.TestCase):
         self.assertIn("resolveReviewThread", source)
         self.assertIn("requestReviews", source)
 
-    def test_the_mutations_are_the_ones_the_runbook_publishes(self) -> None:
-        """A helper performing a different write than the documented one is undocumented."""
+    def test_the_runbook_routes_mutations_to_the_script(self) -> None:
+        """Provider mechanics have one executable owner instead of copied query snippets."""
         text = RUNBOOK.read_text(encoding="utf-8")
-        for name in ("addPullRequestReviewThreadReply", "resolveReviewThread", "requestReviews"):
-            with self.subTest(mutation=name):
-                self.assertIn(name, text)
+        self.assertIn("scripts/pr_review.py", text)
+        self.assertNotIn("mutation(", text)
 
     def test_no_argument_accepts_a_thread_id(self) -> None:
         """The failure is an id typed into a mutation, so the fix is having nowhere to type one.

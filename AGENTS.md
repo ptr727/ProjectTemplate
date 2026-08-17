@@ -89,6 +89,7 @@ Every rule below is a level-two section of [`GOVERNANCE.md`](./GOVERNANCE.md). R
 | Any prose, comment, doc, or line-ending change | `Documentation Style Conventions`, packaged as the `comment-and-doc-style` Skill |
 | Proving work actually happened | `Verification Discipline`, surfaced at its decision moment by the `agent-conduct` Skill, and the section keeps the full rules |
 | Requesting, answering, or closing a review | `PR Review Etiquette`, packaged as the `pr-review-conduct` Skill |
+| Reviewing a pull request, patch, or change set | `code-review`, which routes to the applicable general, language, documentation, and workflow skills |
 | Reporting progress or asking the user something | `Communicating with the User`, surfaced at its decision moment by the `agent-conduct` Skill, and the section keeps the full rules |
 | Editing a workflow YAML file | `Workflow YAML Conventions`, surfaced with the full `WORKFLOW.md` contract by the `workflow-ci-contract` Skill, and this section and `WORKFLOW.md` keep the full rules |
 | Choosing an OS, runtime, or toolchain target | `Supported Development Platforms` |
