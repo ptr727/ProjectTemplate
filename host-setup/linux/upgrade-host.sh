@@ -45,7 +45,7 @@ Usage: upgrade-host.sh [options]
 Upgrades this host. Packages within the current release are routine; the release itself is a
 separate action, and is refused on Proxmox and on a distribution this script does not know.
 
-Actions, the last one given wins, default --packages:
+Actions, name one, default --packages:
   -s, --status      Report the host, what is upgradable, and what release it could move to
   -p, --packages    Upgrade the packages of the current release
   -r, --release     Upgrade the packages, then upgrade to the next release
@@ -585,11 +585,13 @@ upgrade() {
 # --- Entry ---
 
 parse_args() {
+    local -a actions=()
+
     while [[ $# -gt 0 ]]; do
         case "$1" in
-            -s | --status) MODE="status" ;;
-            -p | --packages) MODE="packages" ;;
-            -r | --release) MODE="release" ;;
+            -s | --status) actions+=(status) ;;
+            -p | --packages) actions+=(packages) ;;
+            -r | --release) actions+=(release) ;;
             -n | --dry-run) DRY_RUN=true ;;
             -y | --yes) ASSUME_YES=true ;;
             -h | --help)
@@ -600,6 +602,13 @@ parse_args() {
         esac
         shift
     done
+
+    # The order the actions were given is not a contract, so more than one is a refusal rather than the last one winning.
+    if ((${#actions[@]} > 1)); then
+        die "More than one action given (${actions[*]}), name one"
+    fi
+    [[ ${#actions[@]} -eq 1 ]] && MODE="${actions[0]}"
+    return 0
 }
 
 main() {

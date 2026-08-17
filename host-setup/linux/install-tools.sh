@@ -21,7 +21,8 @@ readonly SUDOERS_FILE="/etc/sudoers.d/90-host-setup-sudo-timestamp"
 readonly SUDO_TIMESTAMP_TIMEOUT=60
 
 # Managed tools, in dependency order: node asks jq to read the upstream release index.
-readonly TOOLS=(git gh jq git-restore-mtime node python uv docker dotnet)
+# The one optional member, powershell, joins the default selection only under --optional.
+readonly TOOLS=(git gh jq git-restore-mtime node python uv docker dotnet powershell)
 
 # Package sets.
 # The default set is what a tool needs to be useful, and the optional set is what is useful often enough to name but not always wanted, installed only with --optional.
@@ -66,9 +67,10 @@ usage() {
 Usage: install-tools.sh [options] [tool ...]
 
 Installs the host tools the fleet's repositories expect, from upstream where the distro package
-trails upstream. With no tool named, every managed tool is selected.
+trails upstream. With no tool named, every managed tool is selected, and the optional tool
+joins it under --optional.
 
-Actions, the last one given wins, default --report:
+Actions, name one, default --report:
   -r, --report      Report installed and available versions, change nothing
   -i, --install     Install what is missing, leave an installed tool at its version
   -u, --upgrade     Install what is missing and upgrade what is behind
@@ -80,7 +82,7 @@ Actions, the last one given wins, default --report:
 Options:
   -n, --dry-run     Print the commands instead of running them
   -y, --yes         Do not prompt before changing the host
-  -o, --optional    Include the optional package set, where a tool has one
+  -o, --optional    Include the optional tool and the optional package sets, where a tool has one
 
 Versions read as apt versions for an apt-managed tool and as upstream versions for a standalone
 binary, so a column compares like with like. A report reads the apt cache as it stands and does
@@ -675,6 +677,17 @@ dotnet_feed() {
         return 1
     fi
 
+    microsoft_feed
+}
+
+# Register Microsoft's apt repository, the feed powershell always needs and dotnet falls back to when the distro carries no SDK.
+# The upstream deb is the whole registration, keyring and sources file in one, so this installs it rather than reimplementing it with install_keyring and write_sources.
+microsoft_feed() {
+    # The feed already configured is the fast path, so a repeat run or a run selecting both dotnet and powershell does not re-install the deb and force the apt refresh this file reserves for a changed sources file.
+    if [[ -f "$SOURCES_DIR/microsoft-prod.sources" || -f "$SOURCES_DIR/microsoft-prod.list" ]]; then
+        return 0
+    fi
+
     local deb="$TMP_DIR/packages-microsoft-prod.deb"
     fetch -o "$deb" "https://packages.microsoft.com/config/$DISTRO_ID/$DISTRO_VERSION/packages-microsoft-prod.deb" ||
         die "Microsoft publishes no feed for $DISTRO_ID $DISTRO_VERSION"
@@ -700,6 +713,24 @@ dotnet_install() {
             apt_install "$package"
         fi
     done < <(dotnet_sdk_packages)
+}
+
+# --- powershell ---
+
+powershell_source() { printf 'packages.microsoft.com'; }
+
+powershell_version() { apt_installed_version powershell; }
+powershell_target() { apt_candidate_version powershell; }
+
+# The distro never carries a powershell package, so Microsoft's feed is the only source, and there is no dotnet-style mixing concern to decide against.
+powershell_install() {
+    if [[ $ARCH != "amd64" ]]; then
+        warn "Microsoft's feed carries amd64 only, skipping powershell on $ARCH"
+        return 0
+    fi
+
+    microsoft_feed
+    apt_install powershell
 }
 
 # --- Tool dispatch ---
@@ -812,6 +843,12 @@ tool_note() {
         docker)
             if [[ $IS_WSL == true ]]; then
                 note "docker" "this is a WSL distribution, docker here comes only from Docker Desktop's own WSL integration, never from installing docker-ce directly, so --install/--upgrade skip it"
+            fi
+            ;;
+        powershell)
+            # A host without the feed reads no candidate at all, since the distro never carries a powershell package, so the note says why rather than reading as absent.
+            if [[ ! -f "$SOURCES_DIR/microsoft-prod.sources" && ! -f "$SOURCES_DIR/microsoft-prod.list" ]]; then
+                note "powershell" "Microsoft's repository is not configured, so no package is available yet"
             fi
             ;;
         *) ;;
@@ -991,7 +1028,12 @@ list_tools() {
     log "Managed tools:"
     local tool
     for tool in "${TOOLS[@]}"; do
-        printf '  %-18s %s\n' "$tool" "$("$(tool_function "$tool" source)")"
+        # The one optional member is marked here, since --list shows the whole registry, and its line says what the default selection leaves out.
+        if [[ $tool == "powershell" ]]; then
+            printf '  %-18s %s (optional)\n' "$tool" "$("$(tool_function "$tool" source)")"
+        else
+            printf '  %-18s %s\n' "$tool" "$("$(tool_function "$tool" source)")"
+        fi
     done
     log ""
     log "Package sets:"
@@ -1257,15 +1299,15 @@ configure_sudo_timestamp() {
 # --- Entry ---
 
 parse_args() {
-    local -a requested=()
+    local -a requested=() actions=()
 
     while [[ $# -gt 0 ]]; do
         case "$1" in
-            -r | --report) MODE="report" ;;
-            -i | --install) MODE="install" ;;
-            -u | --upgrade) MODE="upgrade" ;;
-            -l | --list) MODE="list" ;;
-            --sudo-timestamp) MODE="sudo-timestamp" ;;
+            -r | --report) actions+=(report) ;;
+            -i | --install) actions+=(install) ;;
+            -u | --upgrade) actions+=(upgrade) ;;
+            -l | --list) actions+=(list) ;;
+            --sudo-timestamp) actions+=(sudo-timestamp) ;;
             -n | --dry-run) DRY_RUN=true ;;
             -y | --yes) ASSUME_YES=true ;;
             -o | --optional) WITH_OPTIONAL=true ;;
@@ -1288,7 +1330,13 @@ parse_args() {
         shift
     done
 
-    # Checked against the action that won rather than inside the loop, since the last action given is the one that runs.
+    # The order the actions were given is not a contract, so more than one is a refusal rather than the last one winning.
+    if ((${#actions[@]} > 1)); then
+        die "More than one action given (${actions[*]}), name one"
+    fi
+    [[ ${#actions[@]} -eq 1 ]] && MODE="${actions[0]}"
+
+    # The sudo-timestamp refusal needs the whole set of tool names a run asked for, so it is checked after the loop rather than inside it.
     if [[ $MODE == "sudo-timestamp" && ${#requested[@]} -gt 0 ]]; then
         die "--sudo-timestamp changes the host rather than a tool, so it takes no tool, and \"${requested[*]}\" names one"
     fi
@@ -1306,7 +1354,17 @@ parse_args() {
         done
     else
         SELECTED=("${TOOLS[@]}")
+        if [[ $WITH_OPTIONAL == false ]]; then
+            # The optional member joins the default selection only under --optional, while naming it on the command line still selects it, since an explicit request is never dropped.
+            local -a filtered=()
+            local tool
+            for tool in "${TOOLS[@]}"; do
+                [[ $tool == "powershell" ]] || filtered+=("$tool")
+            done
+            SELECTED=("${filtered[@]}")
+        fi
     fi
+    return 0
 }
 
 main() {

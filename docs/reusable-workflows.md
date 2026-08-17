@@ -114,8 +114,8 @@ A stage carries three kinds of item, plus a proof item where a claim needs a liv
 - [x] `docs/reusable-workflows.md`, `spec/workflow_reuse.py`, `reports/workflow-reuse.md`, `.github/workflows/merge-bot-task.yml`, the hub's own caller stub, and the manifest contract for `merge-bot-pull-request.yml`, on `develop` in #744 (`f33fa7e`).
 - [x] Promoted to `main` in #746 (`20616e0`) and released as `2.0.338`, the first tag carrying `merge-bot-task.yml`.
 - [x] The catalog caller snippet `catalog/snippets/workflows/merge-bot-pull-request.yml`, pinned to `20616e0a70613ad8727d567990f5d0e082f5275c # 2.0.338`, in #748, the pull request that added this section.
-- [ ] The first Dependabot pull request against hub `develop` after `f33fa7e` merges through `merge-bot-task.yml`, proving the callee reads the caller's `pull_request_target` payload, the explicit `secrets:` map, App-token minting in a callee, and `permissions: {}` at the caller. Tick with the run URL. If it fails on the token grant, the fallback is at the caller, since a callee cannot widen what its caller grants: replace `permissions: {}` with `contents: read`, the least scope, and widen only to what the failing run names.
-- [ ] The first Dependabot pull request against hub `main` after `20616e0` merges with `--merge`. Tick with the run URL.
+- [x] The first Dependabot pull request against hub `develop` after `f33fa7e` merges through `merge-bot-task.yml`, proving the callee reads the caller's `pull_request_target` payload, the explicit `secrets:` map, App-token minting in a callee, and `permissions: {}` at the caller. If it fails on the token grant, the fallback is at the caller, since a callee cannot widen what its caller grants: replace `permissions: {}` with `contents: read`, the least scope, and widen only to what the failing run names. Dependabot PR #771 merged to `develop` with `--squash` in [run-771][run-771]. The callee job `Merge dependabot pull request job` succeeded, so `permissions: {}` held and the fallback was not needed.
+- [x] The first Dependabot pull request against hub `main` after `20616e0` merges with `--merge`. Dependabot PR #770 merged to `main` with `--merge` in [run-770][run-770]. Both pull requests were merged by `app/ptr727-codegen`.
 
 ### Stage 1: Merge-Bot Adoption
 
@@ -151,10 +151,10 @@ Adoptable since `2.0.338`. Each repo replaces the whole of its `.github/workflow
 Hub: `validate-task.yml` hosts a `lint` job (the fleet doc-lint block, language lint by tree detection, the prose gate, and the repo gate), a generic `unit-test` job (a `dotnet test` or a `uv run pytest`, skipped cleanly where the caller carries no test project), and a `validate` job resolving the `validate` hook for a repo's own domain checks, which decides #729 in the one place the `uvx` tools are pinned or floated. There is no `test-pull-request-task.yml`: the ruleset-bound aggregator stays in the caller stub by design, and a task wrapping one line that calls `validate-task.yml` hosts nothing generic, so the stub shapes live in [Adopting the Gates][adopting-the-gates] instead, with the trigger shape, operational or release, settling #585. This stage is where the hook fallback is first proven live: the hub carries its own `validate` hook (its registry and spec check, its script self-tests, its fleet-skills check, and its unclassified-character report), so a hub pull request exercises the override path, and a repo with no hook of its own exercises the default.
 
 - [x] Hub pull request on `develop` with the task, the hub's own hook and default, the manifest contracts, and the catalog snippets left for the release that follows, [#760][pr-760].
-- [ ] Promoted and released, tag recorded here.
-- [ ] Catalog snippets for both stub shapes in [Adopting the Gates][adopting-the-gates] pinned to that release.
-- [x] Hook override path observed on a hub pull request run, [proof run][override-path-run] (runs `./.github/actions/validate`, no hub checkout). Default path awaits a repo with no `validate` hook of its own.
-- [ ] PhotoCleaner (pilot, release trigger shape with smoke, the same repo that piloted stage 1)
+- [x] Promoted to `main` in #774 (`0b07a59d`) and released as `2.0.352`, the first tag carrying `validate-task.yml`.
+- [ ] Catalog snippets for both stub shapes in [Adopting the Gates][adopting-the-gates] pinned to that release. The no-build shape has one, `catalog/snippets/workflows/test-pull-request.yml`. The release-with-smoke shape still calls its own repo's `build-release-task.yml` by `./` path rather than the hub's, so it carries no catalog-ready pin yet, and this item stays open until it does.
+- [x] Hook override path observed on a hub pull request run, [proof run][override-path-run] (runs `./.github/actions/validate`, no hub checkout). Default path observed on PhotoCleaner's adoption pull request, [pilot smoke run][pilot-smoke-run], where the hub's `validate-default` ran because that repo carries no `validate` hook.
+- [x] PhotoCleaner (pilot, release trigger shape with smoke, the same repo that piloted stage 1): ptr727/PhotoCleaner#55 on `develop` (`c80cb29`), promoted in ptr727/PhotoCleaner#56 (`fa91db0`), both on 2026-08-16. `test-pull-request.yml` calls the hub validate task and no repo hook was needed.
 - [ ] HomeAutomation-Config (second pilot, operational trigger shape)
 - [ ] The remaining repos, one checkbox each added when the pilots close, since the sweep list is every cataloged repo.
 - [ ] `reports/workflow-reuse.md` regenerated with `validate-task.yml` at 0 copies (a hub-only file no repo carries) and `test-pull-request.yml` showing callers equal to copies.
@@ -164,7 +164,7 @@ Hub: `validate-task.yml` hosts a `lint` job (the fleet doc-lint block, language 
 Hub: `get-version-task.yml` and `publish-plan-task.yml` hosted, and the downstream copies deleted on adoption. PlexCleaner gains the `plan` job D4.1 requires by adopting rather than by a copy.
 
 - [x] Hub pull request on `develop`, #759.
-- [ ] Promoted and released, tag recorded here.
+- [x] Promoted to `main` in #774 (`0b07a59d`) and released as `2.0.352`, the first tag carrying `get-version-task.yml` and `publish-plan-task.yml`.
 - [ ] Catalog snippet for a caller stub, after the release: a caller of either task is a job inside a repo's own `publish-release.yml` or a future `build-release-task.yml` rather than a standalone top-level workflow, so today's honest answer is no snippet, only the `with:`/`uses:` lines in [Adopting the Pure Functions](#adopting-the-pure-functions). Revisit if an adopting repo's shape argues otherwise.
 - [ ] Adoption, one checkbox per carrier added when the hub pull request merges: today `get-version-task.yml` has 8 carriers and `publish-plan-task.yml` 3, with ESPHome-NonRoot and NxWitness carrying both.
   - [ ] ESPHome-NonRoot (`get-version-task.yml` and `publish-plan-task.yml`)
@@ -185,15 +185,16 @@ Hub: `build-release-task.yml` with `build-executable`, `build-nuget`, `build-pyp
 `build-release-task.yml` inlines its own `get-version` and `validate-release` jobs (no `./` nesting of the sibling `get-version-task.yml`) and duplicates the Docker core from `build-docker-task.yml` in its own `build-docker` job for the same reason: a hub task cannot reach a sibling hub task by a `./` path, since that path resolves against the caller's repository. `build-docker-task.yml` ships as its own hub task rather than being folded away, for a caller that wants the Docker leg without the rest of the release chain. The two carry the same job body and are kept in lockstep by hand, recorded in each file's own header comment. The `build-executable`, `build-nuget`, and `build-pypi` hub defaults take a `project-file` (or `project-dir`) input beyond the fixed `ref`/`branch`/`smoke` set, since the vanilla project layout (Console/Console.csproj, NuGetLibrary/NuGetLibrary.csproj, `PyPiLibrary/`) is a convention a real repo's own project name never matches. `build-release-task.yml` forwards its own caller-facing `executable_project`, `nuget_project`, and `pypi_project_dir` inputs into that same default's `project-file`/`project-dir` input. This mirrors the Docker hook's own `image` input rather than widening the fixed contract.
 
 - [x] Hub pull request on `develop` in #762.
-- [ ] Promoted and released, tag recorded here.
-- [ ] PhotoCleaner (pilot, vanilla Docker plus executable)
+- [x] Promoted to `main` in #774 (`0b07a59d`) and released as `2.0.352`, the first tag carrying `build-release-task.yml` and `build-docker-task.yml`. The first release attempt, on `82fecef`, ended in `startup_failure` in [run-startup-failure][run-startup-failure] because `build-nuget` and `github-release` declared job-level permissions. #772 fixed it before #774 promoted.
+- [x] PhotoCleaner (pilot, vanilla Docker plus executable): ptr727/PhotoCleaner#55 on `develop` (`c80cb29`), promoted in ptr727/PhotoCleaner#56 (`fa91db0`), five carried task files deleted, every value mapped to a task input (`executable_project`, `docker_image`), no repo hook needed. Its first publish through the task, [pilot publish run][pilot-publish-run], released `1.1.11` with the executable asset attached and the Docker image pushed. That run exposed one regression the pilot exists to find: the hub executable default named the archive `Console.7z` where the repo's own leaf named it `PhotoCleaner.7z`, fixed in the pull request that ticks this item by deriving the name from the project file (an `executable_asset_name` input overrides it), so the next PhotoCleaner release is the proof of the fix.
 - [ ] PlexCleaner (second, the same shape)
 - [ ] VSCode-Server-DotNetCore (vanilla Docker only)
 - [ ] ESPHome-NonRoot (`docker-prepare` hook for the upstream pin)
 - [ ] NxWitness (matrix hook and `build-base`)
 - [ ] The NuGet, PyPI and remaining release repos, one checkbox each added when the pilots close.
-- [ ] A smoke build through `build-release-task.yml` observed on the PhotoCleaner or PlexCleaner pilot's pull request, run URL recorded here.
-- [ ] A real publish through `build-release-task.yml` observed on the PhotoCleaner or PlexCleaner pilot, run URL recorded here.
+- [x] A smoke build through `build-release-task.yml` observed on the PhotoCleaner pilot's pull request, [pilot smoke run][pilot-smoke-run]: get-version, validate-release, `build-executable`, `docker-prepare` and `build-docker` all through hub defaults, nuget, pypi and the base build skipped.
+- [x] A real publish through `build-release-task.yml` observed on the PhotoCleaner pilot, [pilot publish run][pilot-publish-run]: release `1.1.11` on `fa91db0` with `Publish GitHub release job` and `Build Docker image job` both succeeding.
+- [ ] Proof: the next PhotoCleaner release names its executable asset `PhotoCleaner.7z`, which the asset-name fix in this repository derives from the project file. Tick with the release.
 - [ ] `reports/workflow-reuse.md` regenerated with `build-release-task.yml` and `build-docker-task.yml` at 0 copies (hub-only files) and `publish-release.yml` showing callers equal to copies.
 
 ### Stage 5: The Type-Specific Tasks
@@ -201,7 +202,7 @@ Hub: `build-release-task.yml` with `build-executable`, `build-nuget`, `build-pyp
 Hub: `publish-docker-readme-task.yml` with a `docker-readme-transform` hook, `check-upstream-version-task.yml` with a `resolve-upstream` hook and an `auto-merge` input, `deploy-site-task.yml` with a `deploy` hook, and `run-codegen-pull-request-task.yml` with a `codegen` hook. `build-datebadge-task.yml` is retired rather than hosted, TODO.md already tracks deleting the retired badge from its one remaining carrier. The `operational-vs-release-workflow` skill's note that the target list stays per repo is retired here, once the release-chain stage that makes it true has shipped.
 
 - [x] Hub pull request on `develop` in #761.
-- [ ] Promoted and released, tag recorded here.
+- [x] Promoted to `main` in #774 (`0b07a59d`) and released as `2.0.352`, the first tag carrying `publish-docker-readme-task.yml`, `check-upstream-version-task.yml`, `deploy-site-task.yml`, and `run-codegen-pull-request-task.yml`.
 - [ ] Adoption, one checkbox per carrier added when the hub pull request merges.
   - [ ] VSCode-Server-DotNetCore (`publish-docker-readme-task.yml`)
   - [ ] NxWitness (`publish-docker-readme-task.yml`, moving the readme job out of `publish-release.yml`, and `run-codegen-pull-request-task.yml` with its scheduler)
@@ -209,7 +210,7 @@ Hub: `publish-docker-readme-task.yml` with a `docker-readme-transform` hook, `ch
   - [ ] Blog (`deploy-site-task.yml`, keeping `deploy-site.yml` as its own caller)
   - [ ] LanguageTags (`run-codegen-pull-request-task.yml` and its scheduler)
   - [ ] KiCadLibrary (deletes `build-datebadge-task.yml` and its caller job outright, per TODO.md's retired-badge cleanup, adopting no new stub)
-- [ ] Catalog snippets for `publish-docker-readme-task.yml`, `check-upstream-version-task.yml`, `deploy-site.yml`, `deploy-site-task.yml`, and `run-codegen-pull-request-task.yml` pinned to the release that first carries each task.
+- [ ] Catalog snippets for `publish-docker-readme-task.yml`, `check-upstream-version-task.yml`, `deploy-site.yml`, `deploy-site-task.yml`, and `run-codegen-pull-request-task.yml` pinned to the release that first carries each task. `catalog/snippets/workflows/run-periodic-codegen-pull-request.yml` now exists, since [Codegen](#adopting-the-type-specific-tasks) already states it keeps the same per-repo shape as today. The other four stay open: `publish-docker-readme-task.yml` and `check-upstream-version-task.yml` are each a job embedded in a repo's own workflow rather than a standalone top-level caller with a snippet of its own, and `deploy-site.yml` carries no manifest-wide snippet by design, since each site's own shape varies around the shared `deploy` job.
 - [ ] `reports/workflow-reuse.md` regenerated, and the fleet total's callers equal to the sum of the stubs the fleet needs.
 - [ ] The environment-secret handoff in the deploy-site adoption, the caller job's own `environment:` binding resolving `DEPLOY_SSH_PRIVATE_KEY` for an explicit `secrets:` map across a cross-repository `uses:`, observed on Blog's first live deploy run. Tick with the run URL.
 - [ ] The default `docker-readme-transform` hook's hub checkout, `job.workflow_sha` and `job.workflow_repository` resolving the exact commit a caller's `uses:` line pinned, observed on a caller that carries no override hook. Tick with the run URL.
@@ -263,7 +264,7 @@ Two copies today filter Dependabot by ecosystem and semver tier before merging. 
 
 ## Adopting the Gates
 
-Adoptable once `validate-task.yml` is released. A downstream repo replaces its own `validate-task.yml` job bodies and its `test-pull-request.yml`'s inline lint job with one of the two stub shapes below, and deletes the copy of `validate-task.yml` per the `retire` disposition in `spec/divergences.json`. The pin is the release that first carries the task, shown here as a placeholder since no release exists yet: `@<hub-main-commit-sha> # <release-tag>`. `publish-release.yml`'s own `validate` job takes the same `uses:` line.
+Adoptable once `validate-task.yml` is released. A downstream repo replaces its own `validate-task.yml` job bodies and its `test-pull-request.yml`'s inline lint job with one of the two stub shapes below, and deletes the copy of `validate-task.yml` per the `retire` disposition in `spec/divergences.json`. The pin is the release that first carries the task. The no-build stub below pins `0b07a59d7c65d07d8df275a96deaf2e06cbefd51 # 2.0.352`, the value its catalog snippet carries. The release-with-smoke stub keeps the placeholder `@<hub-main-commit-sha> # <release-tag>` until it has a catalog snippet of its own. `publish-release.yml`'s own `validate` job takes the same `uses:` line.
 
 **No-build repos** carry the operational trigger shape [WORKFLOW.md "Branch Model"][workflow] states and [#585][issue-585] settles: a direct push to `develop` runs CI advisory (no required check binds the direct-commit allowance), and a `pull_request` to `main` or `develop` runs it pre-merge and actionable. A release-model repo with no build target takes the same stub with a `pull_request: branches: [main, develop]` trigger instead, since it has no direct-commit allowance to keep advisory.
 
@@ -271,8 +272,8 @@ Adoptable once `validate-task.yml` is released. A downstream repo replaces its o
 name: Test pull request action
 
 # Thin caller: the gate is the hub's reusable validate-task.yml, which every fleet repo reaches rather than carries.
-# Operational trigger shape (WORKFLOW.md "Branch Model"): a push to develop runs CI advisory, and a pull_request
-# to main or develop runs it pre-merge and actionable, which is what makes D1.2 hold on this model too (#585).
+# Operational trigger shape (WORKFLOW.md "Branch Model"): a push to develop runs CI advisory, and a pull_request to main or develop runs it pre-merge and actionable, which is what makes D1.2 hold on this model too (#585).
+# A release-model repo with a smoke build uses the release-with-smoke variant documented alongside this stub in docs/reusable-workflows.md.
 on:
   push:
     branches: [develop]
@@ -290,7 +291,7 @@ jobs:
 
   validate:
     name: Validate sources job
-    uses: ptr727/ProjectTemplate/.github/workflows/validate-task.yml@<hub-main-commit-sha> # <release-tag>
+    uses: ptr727/ProjectTemplate/.github/workflows/validate-task.yml@0b07a59d7c65d07d8df275a96deaf2e06cbefd51 # 2.0.352
     permissions:
       contents: read
 
@@ -420,7 +421,7 @@ A repo whose publisher needs the release-gate decision reaches `publish-plan-tas
 
 ## Adopting the Release Chain
 
-A downstream repo replaces the whole of its `.github/workflows/build-release-task.yml`, and every per-target leaf task it carries (`build-executable-task.yml`, `build-nugetlibrary-task.yml`, `build-pypilibrary-task.yml`, `build-docker-task.yml`), with a caller stub in its own `publish-release.yml` reaching the hub tasks by pin. `test-pull-request.yml`'s smoke job calls `build-release-task.yml` the same way, with `smoke: true` and the paths-filter's `enable_*` outputs. Nothing here lands as a catalog snippet in this pull request, since a caller stub's pin can only name a released hub commit and no release yet carries `build-release-task.yml` ([Pinning][pinning]). The snippet follows the release that first ships it, tracked in the [Rollout][rollout] section below. The task declares no job-level `permissions:` of its own, because a called job's block is validated against the caller's grant before its `if:` runs and would fail a caller that does not grant it at startup. The caller therefore grants only what its enabled paths write with: `contents: write` and `actions: write` when it sets `github: true` on a non-smoke run (the release upload and the artifact cleanup), `id-token: write` when it sets `nuget: true` (a real push through `NuGet/login`), and nothing beyond `contents: read` on a build-only or smoke run, where a Dependabot pull request holds a read-only token.
+A downstream repo replaces the whole of its `.github/workflows/build-release-task.yml`, and every per-target leaf task it carries (`build-executable-task.yml`, `build-nugetlibrary-task.yml`, `build-pypilibrary-task.yml`, `build-docker-task.yml`), with a caller stub in its own `publish-release.yml` reaching the hub tasks by pin. `test-pull-request.yml`'s smoke job calls `build-release-task.yml` the same way, with `smoke: true` and the paths-filter's `enable_*` outputs. The full shape below is now `catalog/snippets/workflows/publish-release.yml`, pinned to `0b07a59d7c65d07d8df275a96deaf2e06cbefd51 # 2.0.352`, the release that first carries `build-release-task.yml` ([Pinning][pinning]). The task declares no job-level `permissions:` of its own, because a called job's block is validated against the caller's grant before its `if:` runs and would fail a caller that does not grant it at startup. The caller therefore grants only what its enabled paths write with: `contents: write` and `actions: write` when it sets `github: true` on a non-smoke run (the release upload and the artifact cleanup), `id-token: write` when it sets `nuget: true` (a real push through `NuGet/login`), and nothing beyond `contents: read` on a build-only or smoke run, where a Dependabot pull request holds a read-only token.
 
 The stub keeps its own trigger policy exactly as today: `workflow_dispatch` plus a main-only weekly `schedule` for a Docker repo, or `workflow_dispatch` plus a paths-filtered `push` to `main` for a NuGet or PyPI repo whose merges should auto-publish. What moves to the hub is the release-gate decision, the build/version/publish job graph, and the Docker core, never the trigger. This is the full shape, a NuGet-library repo whose merges publish:
 
@@ -441,33 +442,38 @@ concurrency:
   group: ${{ github.workflow }}
   cancel-in-progress: false
 
+# GITHUB_TOKEN gets no scope by default, and each job below grants only what its hub task writes with.
+permissions: {}
+
 jobs:
 
-  # Single source of the release-gate decision (publish? stable?), reused by every job below.
+  # Single source of the release-gate decision (publish or not, stable or not), reused by every job below.
   plan:
     name: Plan release job
-    uses: ptr727/ProjectTemplate/.github/workflows/publish-plan-task.yml@<sha> # <tag>
+    uses: ptr727/ProjectTemplate/.github/workflows/publish-plan-task.yml@0b07a59d7c65d07d8df275a96deaf2e06cbefd51 # 2.0.352
     with:
       event_name: ${{ github.event_name }}
       actor: ${{ github.actor }}
       ref_name: ${{ github.ref_name }}
 
-  # The same reusable gate the PR runs, on the branch tip; runs only when a publish will happen.
+  # The same reusable gate the PR runs, on the branch tip, running only when a publish will happen.
   validate:
     name: Validate job
     needs: [plan]
     if: ${{ needs.plan.outputs.publish == 'true' }}
-    uses: ptr727/ProjectTemplate/.github/workflows/validate-task.yml@<sha> # <tag>
+    uses: ptr727/ProjectTemplate/.github/workflows/validate-task.yml@0b07a59d7c65d07d8df275a96deaf2e06cbefd51 # 2.0.352
+    permissions:
+      contents: read
     secrets:
       CODECOV_TOKEN: ${{ secrets.CODECOV_TOKEN }}
 
-  # Build, version, validate, push, and release the triggering branch. Grants the write scopes the hub
-  # task needs (it declares none of its own except where a job genuinely writes, per its own header).
+  # Build, version, validate, push, and release the triggering branch.
+  # Grants the write scopes the hub task needs (it declares none of its own except where a job genuinely writes, per its own header).
   publish:
     name: Publish project release job
     needs: [plan, validate]
     if: ${{ needs.plan.outputs.publish == 'true' }}
-    uses: ptr727/ProjectTemplate/.github/workflows/build-release-task.yml@<sha> # <tag>
+    uses: ptr727/ProjectTemplate/.github/workflows/build-release-task.yml@0b07a59d7c65d07d8df275a96deaf2e06cbefd51 # 2.0.352
     secrets:
       NUGET_USERNAME: ${{ secrets.NUGET_USERNAME }}
     permissions:
@@ -516,7 +522,7 @@ No `publish-release-task.yml` ships alongside `build-release-task.yml`: the four
 
 ## Adopting the Type-Specific Tasks
 
-Stage 5 hosts four more tasks: `publish-docker-readme-task.yml`, `check-upstream-version-task.yml`, `deploy-site-task.yml`, and `run-codegen-pull-request-task.yml`. Each pin below is a placeholder, `<sha>` and `<tag>`, filled in from the release that first carries the task, the same way the merge-bot's pin is. None of these stub shapes lands as a catalog snippet in the pull request that ships its task, per [Pinning](#pinning), so this section is the adoption reference until the follow-on catalog change lands.
+Stage 5 hosts four more tasks: `publish-docker-readme-task.yml`, `check-upstream-version-task.yml`, `deploy-site-task.yml`, and `run-codegen-pull-request-task.yml`. The codegen pin below is filled in, `0b07a59d7c65d07d8df275a96deaf2e06cbefd51 # 2.0.352`, since `run-periodic-codegen-pull-request.yml` now has a catalog snippet, the same per-repo shape it carries today. The other three pins stay the placeholder `<sha>` and `<tag>`: `publish-docker-readme-task.yml` and `check-upstream-version-task.yml` are each a job embedded in a repo's own workflow rather than a standalone top-level caller with a snippet of its own, and `deploy-site.yml` carries no manifest-wide snippet by design, since each site's own shape varies around the shared `deploy` job. This section stays the adoption reference for those three until a follow-on catalog change lands, per [Pinning](#pinning).
 
 `build-datebadge-task.yml` is retired rather than hosted. TODO.md "Delete the retired `byob.yarr.is` last-build badge" already settles that the badge service is deprecated and the badge is deleted rather than replaced, so no repo adopts a caller stub for it and KiCadLibrary's deletion is that same cleanup, not a migration to a hub task.
 
@@ -566,12 +572,12 @@ ESPHome-NonRoot carries two trackers today. `check-upstream-version.yml` adopts 
       DEPLOY_SSH_PRIVATE_KEY: ${{ secrets.DEPLOY_SSH_PRIVATE_KEY }}
 ```
 
-**Codegen.** A repo generating checked-in files from an external source replaces `run-codegen-pull-request-task.yml`'s job body with a caller stub, and carries a required `codegen` hook, `.github/actions/codegen/action.yml`, running only the generator invocation. `run-periodic-codegen-pull-request.yml` stays a per-repo caller stub the same shape it is today, calling the hub task by its pinned `uses:` in place of `./`.
+**Codegen.** A repo generating checked-in files from an external source replaces `run-codegen-pull-request-task.yml`'s job body with a caller stub, and carries a required `codegen` hook, `.github/actions/codegen/action.yml`, running only the generator invocation. `run-periodic-codegen-pull-request.yml` stays a per-repo caller stub the same shape it is today, calling the hub task by its pinned `uses:` in place of `./`. The full file is now `catalog/snippets/workflows/run-periodic-codegen-pull-request.yml`.
 
 ```yaml
   run-codegen:
     name: Run codegen and pull request job
-    uses: ptr727/ProjectTemplate/.github/workflows/run-codegen-pull-request-task.yml@<sha> # <tag>
+    uses: ptr727/ProjectTemplate/.github/workflows/run-codegen-pull-request-task.yml@0b07a59d7c65d07d8df275a96deaf2e06cbefd51 # 2.0.352
     secrets:
       CODEGEN_APP_CLIENT_ID: ${{ secrets.CODEGEN_APP_CLIENT_ID }}
       CODEGEN_APP_PRIVATE_KEY: ${{ secrets.CODEGEN_APP_PRIVATE_KEY }}
@@ -609,7 +615,12 @@ Four things the hub cannot prove fall to the first downstream adopter. They are 
 [governance-workflow-yaml-conventions]: ../GOVERNANCE.md#workflow-yaml-conventions
 [issue-585]: https://github.com/ptr727/ProjectTemplate/issues/585
 [override-path-run]: https://github.com/ptr727/ProjectTemplate/actions/runs/31950332387/job/95172710046
+[pilot-publish-run]: https://github.com/ptr727/PhotoCleaner/actions/runs/31977092102
+[pilot-smoke-run]: https://github.com/ptr727/PhotoCleaner/actions/runs/31974932749
 [pr-760]: https://github.com/ptr727/ProjectTemplate/pull/760
+[run-770]: https://github.com/ptr727/ProjectTemplate/actions/runs/31972611554
+[run-771]: https://github.com/ptr727/ProjectTemplate/actions/runs/31972622149
+[run-startup-failure]: https://github.com/ptr727/ProjectTemplate/actions/runs/31972504539
 [secrets]: ../spec/secrets.json
 [todo]: ../TODO.md
 [workflow]: ../WORKFLOW.md
