@@ -140,27 +140,8 @@ jobs:
           SEMVER2: ${{ needs.get-version.outputs.SemVer2 }}
           BRANCH: ${{ inputs.branch }}
           SMOKE: ${{ inputs.smoke }}
-          ENABLE_EXECUTABLE: ${{ inputs.enable_executable }}
-          ENABLE_NUGET: ${{ inputs.enable_nuget }}
-          ENABLE_PYPI: ${{ inputs.enable_pypi }}
-          EXECUTABLE_PROJECT: ${{ inputs.executable_project }}
-          NUGET_PROJECT: ${{ inputs.nuget_project }}
-          PYPI_PROJECT_DIR: ${{ inputs.pypi_project_dir }}
-          PYPI_VERSION_FILE: ${{ inputs.pypi_version_file }}
         run: |
           set -Eeuo pipefail
-          if [[ "$ENABLE_EXECUTABLE" == "true" && -z "$EXECUTABLE_PROJECT" ]]; then
-            echo "::error::inputs.executable_project is required when inputs.enable_executable is true."
-            exit 1
-          fi
-          if [[ "$ENABLE_NUGET" == "true" && -z "$NUGET_PROJECT" ]]; then
-            echo "::error::inputs.nuget_project is required when inputs.enable_nuget is true."
-            exit 1
-          fi
-          if [[ "$ENABLE_PYPI" == "true" && ( -z "$PYPI_PROJECT_DIR" || -z "$PYPI_VERSION_FILE" ) ]]; then
-            echo "::error::inputs.pypi_project_dir and inputs.pypi_version_file are required when inputs.enable_pypi is true."
-            exit 1
-          fi
           # Smoke builds never publish and always version as prerelease (detached PR HEAD), which would trip the main arm.
           if [[ "$SMOKE" == "true" ]]; then
             echo "Smoke build; skipping release version validation."

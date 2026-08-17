@@ -33,6 +33,14 @@ runs:
   using: composite
   steps:
 
+    - name: Require project file step
+      if: ${{ inputs.project-file == '' }}
+      shell: bash
+      run: |
+        set -Eeuo pipefail
+        echo "::error::project-file is required when the hub NuGet default runs."
+        exit 1
+
     - name: Setup .NET SDK step
       uses: actions/setup-dotnet@a98b56852c35b8e3190ac28c8c2271da59106c68 # v6.0.0
       with:

@@ -27,6 +27,14 @@ runs:
   using: composite
   steps:
 
+    - name: Require project paths step
+      if: ${{ inputs.project-dir == '' || inputs.version-file == '' }}
+      shell: bash
+      run: |
+        set -Eeuo pipefail
+        echo "::error::project-dir and version-file are required when the hub PyPI default runs."
+        exit 1
+
     - name: Setup uv step
       uses: astral-sh/setup-uv@c771a70e6277c0a99b617c7a806ffedaca235ff9 # v9.0.0
       with:
