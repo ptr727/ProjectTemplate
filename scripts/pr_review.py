@@ -682,12 +682,9 @@ def read_coverage(line: str) -> tuple[int, int] | None:
 def coverage_of(node: dict) -> tuple[str, str]:
     """This round's coverage reading, with the line it was read from.
 
-    A round making no statement at all reads as unstated rather than a pass or a failure. 28 of
-    the 332 bodies measured carry an overview and a change list and nothing more, that shape
-    interleaves with the counted one throughout rather than preceding it, and one pull request
-    carries both across its two rounds. Failing on it would cry wolf on roughly one review in
-    twelve, and a guard an agent learns to work around is worse than no guard. Passing it as
-    coverage is the bug this whole reading exists to remove, one shape over.
+    A round making no statement at all reads as unstated rather than unvetted. 28 of the 332
+    bodies measured carry an overview and a change list and nothing more. The shape is recognized,
+    but it cannot prove full diff coverage and therefore blocks the status gate.
 
     A wording that is coverage-shaped and parses to no counts is the failure whose remedy is
     fixing this script, since a gate that allows whatever it does not recognize stops gating as
@@ -924,6 +921,10 @@ def report_verdict(pr: dict) -> int:
             f"maintainer's decision to take and not this script's, and not the agent's."
         )
         return 43
+    # A missing head review has no coverage verdict yet.
+    # The wait path owns that incomplete state.
+    if not head_reviews(pr):
+        return 0
     state, line = head_coverage(pr)
     if state == PARTIAL:
         # The unread count comes from the line that decided PARTIAL, never from past rounds.

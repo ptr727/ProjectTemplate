@@ -907,9 +907,8 @@ class TestCoverage(GqlCase):
     def test_a_round_stating_no_coverage_at_all_is_unstated(self) -> None:
         """28 of the 332 bodies are an overview and a change list, and that shape is current.
 
-        It interleaves with the counted one throughout rather than preceding it, and one pull
-        request carries both across its two rounds, so failing on it would cry wolf on about one
-        review in twelve. Reporting it as coverage is the bug this reading exists to remove.
+        It is a recognized shape rather than unvetted reviewer output, but it cannot prove that
+        the reviewer covered the full diff and therefore blocks the status gate.
         """
         body = (
             "## Pull request overview\n\nThis PR updates the backlog.\n\n"
@@ -1162,6 +1161,12 @@ class TestCoverageExitCodes(GqlCase):
         self.answer(payload([review(body=OVERVIEW)]))
         self.assertEqual(45, pr_review.main(["status", "7", "--repo", "o/r"]))
         self.assertIn("status=COVERAGE_IS_UNSTATED", self.out.getvalue())
+
+    def test_status_has_no_coverage_verdict_before_a_review_lands(self) -> None:
+        """A missing round is incomplete work, not an unstated statement by a reviewer."""
+        self.answer(payload([]))
+        self.assertEqual(0, pr_review.main(["status", "7", "--repo", "o/r"]))
+        self.assertNotIn("status=COVERAGE_IS_UNSTATED", self.out.getvalue())
 
     def test_the_partial_message_counts_the_unread_files_rather_than_assuming_one(self) -> None:
         """Every partial on record skipped exactly one file, which is a measurement of seven
