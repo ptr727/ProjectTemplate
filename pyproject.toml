@@ -11,7 +11,7 @@ extend-select = ["I"]  # isort import ordering, on top of the default rules
 python_version = "3.13"
 files = ["spec", "host-setup", "scripts"]
 mypy_path = [".github/actions/prose-gate", ".github/actions/repo-gate"]
-exclude = ["scripts/prose_lint.py", "scripts/repo_gate.py"]
+exclude = 'scripts/(prose_lint|repo_gate)\.py'
 
 [tool.pyright]
 pythonVersion = "3.13"
