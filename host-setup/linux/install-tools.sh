@@ -745,6 +745,16 @@ powershell_install() {
 # The apt package owns /usr/bin/pwsh instead.
 # Dpkg ownership distinguishes package-managed paths from copies installed by another source.
 # This applies the same ownership test as tool_unshadow to a shadowing copy.
+powershell_path_is_unowned() {
+    local path="$1" status=0
+    dpkg-query -S "$path" > /dev/null 2>&1 || status=$?
+    case "$status" in
+        0) return 1 ;;
+        1) return 0 ;;
+        *) die "Cannot determine dpkg ownership of $path" ;;
+    esac
+}
+
 powershell_non_apt_paths() {
     local -a paths=()
 
@@ -752,10 +762,10 @@ powershell_non_apt_paths() {
     # Remove the whole direct-download tree when no package owns its binary.
     # The tree check uses the binary because dpkg-query -S answers about files.
     # Removing the tree also clears files that the apt package does not carry.
-    if [[ -e /usr/local/bin/pwsh ]] && ! dpkg-query -S /usr/local/bin/pwsh > /dev/null 2>&1; then
+    if [[ -e /usr/local/bin/pwsh ]] && powershell_path_is_unowned /usr/local/bin/pwsh; then
         paths+=(/usr/local/bin/pwsh)
     fi
-    if [[ -e /opt/microsoft/powershell/7/pwsh ]] && ! dpkg-query -S /opt/microsoft/powershell/7/pwsh > /dev/null 2>&1; then
+    if [[ -e /opt/microsoft/powershell/7/pwsh ]] && powershell_path_is_unowned /opt/microsoft/powershell/7/pwsh; then
         paths+=(/opt/microsoft/powershell/7)
     fi
 
@@ -768,7 +778,7 @@ powershell_non_apt_paths() {
     # This is the same guard used by tool_shadow_path.
     local resolved
     resolved=$(type -P pwsh 2> /dev/null || true)
-    if [[ $resolved == /* ]] && ! dpkg-query -S "$resolved" > /dev/null 2>&1; then
+    if [[ $resolved == /* ]] && powershell_path_is_unowned "$resolved"; then
         paths+=("$resolved")
     fi
 
