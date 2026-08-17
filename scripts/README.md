@@ -196,9 +196,9 @@ The match is on the block's heading rather than anywhere in the body, and on the
 
 ## `build_dist.py`
 
-Regenerates [`.claude-plugin/fleet-skills/`][fleet-skills-dist] from [`.agents/skills/`][agents-skills], the hub's own hand-authored fleet Skills. Codex and opencode read `.agents/skills/` directly, project-local, with no install step. Claude Code scans neither that path nor any repo-root path by default, only `.claude/skills/` or a plugin's own `skills/`, so this script materializes a Claude-plugin-compatible copy for [`.claude-plugin/marketplace.json`][marketplace] to publish, nested under `.claude-plugin/` rather than a top-level `dist/`, since this repo's `.gitignore` already gives `dist/` a different, Python-build-artifact meaning. `.agents/skills/` stays the one place a skill is hand-edited, and `.claude-plugin/fleet-skills/` is generated and never hand-edited, the same discipline this fleet already applies to other derived trees.
+Regenerates [`.github/skills/`][github-skills-dist] and [`.claude-plugin/fleet-skills/`][fleet-skills-dist] from [`.agents/skills/`][agents-skills], the hub's own hand-authored fleet Skills. Codex and opencode read `.agents/skills/` directly, GitHub Copilot reads `.github/skills/`, and Claude Code reads the generated plugin published through [`.claude-plugin/marketplace.json`][marketplace]. `.agents/skills/` stays the one place a skill is hand-edited. Both generated trees are never hand-edited.
 
-`--check` is the read-only mode: it exits `1` when the generated plugin was built from different source bytes than `.agents/skills/` currently holds, comparing a digest over every source file rather than a file-count or a timestamp, so a same-size edit still registers. CI runs `--check` rather than trusting a contributor to have run the generator, the same reason `spec/audit.py` exists rather than trusting a hand-carried file.
+`--check` is the read-only mode: it exits `1` when either generated tree differs from `.agents/skills/`, comparing a digest over every file rather than a file count or timestamp. CI runs `--check` rather than trusting a contributor to have run the generator, the same reason `spec/audit.py` exists rather than trusting a hand-carried file.
 
 ## `skills_install.py`
 
@@ -215,6 +215,7 @@ Installs the fleet's Skills for the current machine, cross-platform and idempote
 [editorconfig]: ../.editorconfig
 [files]: ../spec/files.json
 [fleet-skills-dist]: ../.claude-plugin/fleet-skills/
+[github-skills-dist]: ../.github/skills/
 [gitattributes]: ../.gitattributes
 [governance]: ../GOVERNANCE.md
 [host-setup]: ../docs/host-setup.md

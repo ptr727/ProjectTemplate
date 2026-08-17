@@ -4,7 +4,7 @@ Repository-wide instructions for GitHub Copilot.
 
 Read [AGENTS.md](../AGENTS.md) first. It routes every standing repository rule to its canonical
 document. When performing code review, load and follow the `code-review` skill in
-`.agents/skills/code-review/SKILL.md`, then load every language, documentation, or workflow skill
+`.github/skills/code-review/SKILL.md`, then load every language, documentation, or workflow skill
 that it selects for the changed files. GitHub Copilot reads these files from the pull request's
 head branch, so review the instructions in that tree.
 
@@ -30,7 +30,7 @@ that its fidelity rejects.
 For every review:
 
 1. Read the full pull request diff and count its changed files.
-2. Follow `.agents/skills/code-review/SKILL.md` and every skill it selects.
+2. Follow `.github/skills/code-review/SKILL.md` and every skill it selects.
 3. Publish every supported finding. Never suppress a finding or place it in a low-confidence or
    hidden findings block.
 4. Use an inline comment when a changed line can anchor the finding. Use the review body only when

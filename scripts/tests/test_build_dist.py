@@ -22,23 +22,27 @@ class RegenerateCase(unittest.TestCase):
         self.tmp = Path(self.enterContext(__import__("tempfile").TemporaryDirectory()))
         self.skills_src = self.tmp / ".agents" / "skills"
         self.dist_plugin = self.tmp / ".claude-plugin" / "fleet-skills"
+        self.github_skills = self.tmp / ".github" / "skills"
         self.addCleanup(
             self._restore,
             build_dist.SKILLS_SRC,
             build_dist.DIST_PLUGIN,
             build_dist.PLUGIN_MANIFEST,
             build_dist.DIGEST_STAMP,
+            build_dist.GITHUB_SKILLS,
         )
         build_dist.SKILLS_SRC = self.skills_src
         build_dist.DIST_PLUGIN = self.dist_plugin
         build_dist.PLUGIN_MANIFEST = self.dist_plugin / ".claude-plugin" / "plugin.json"
         build_dist.DIGEST_STAMP = self.dist_plugin / ".source-digest"
+        build_dist.GITHUB_SKILLS = self.github_skills
 
-    def _restore(self, src, dist, manifest, stamp) -> None:
+    def _restore(self, src, dist, manifest, stamp, github_skills) -> None:
         build_dist.SKILLS_SRC = src
         build_dist.DIST_PLUGIN = dist
         build_dist.PLUGIN_MANIFEST = manifest
         build_dist.DIGEST_STAMP = stamp
+        build_dist.GITHUB_SKILLS = github_skills
 
     def make_skill(self, name: str, body: str = "content") -> None:
         d = self.skills_src / name
@@ -105,7 +109,33 @@ class RegenerateCase(unittest.TestCase):
             (self.dist_plugin / "skills" / "foo" / "SKILL.md").read_text(encoding="utf-8"),
             "content",
         )
+        self.assertEqual(
+            (self.github_skills / "foo" / "SKILL.md").read_text(encoding="utf-8"),
+            "content",
+        )
         self.assertFalse(build_dist.is_stale())
+
+    def test_a_deleted_github_skill_reports_stale(self) -> None:
+        self.make_skill("foo")
+        build_dist.regenerate()
+        import shutil
+
+        shutil.rmtree(self.github_skills / "foo")
+        self.assertTrue(build_dist.is_stale())
+
+    def test_a_github_skill_edited_in_place_reports_stale(self) -> None:
+        self.make_skill("foo")
+        build_dist.regenerate()
+        (self.github_skills / "foo" / "SKILL.md").write_text("tampered", encoding="utf-8")
+        self.assertTrue(build_dist.is_stale())
+
+    def test_an_orphaned_github_skill_reports_stale(self) -> None:
+        self.make_skill("foo")
+        build_dist.regenerate()
+        orphan = self.github_skills / "orphan"
+        orphan.mkdir()
+        (orphan / "SKILL.md").write_text("stray", encoding="utf-8")
+        self.assertTrue(build_dist.is_stale())
 
     def test_a_deleted_manifest_reports_stale_even_with_a_current_digest_stamp(self) -> None:
         self.make_skill("foo")

@@ -2830,7 +2830,7 @@ class TestContract(unittest.TestCase):
     def test_the_runbook_bootstraps_the_review_skill(self) -> None:
         """Copilot reaches the provider-independent review contract from its always-on file."""
         text = RUNBOOK.read_text(encoding="utf-8")
-        self.assertIn(".agents/skills/code-review/SKILL.md", text)
+        self.assertIn(".github/skills/code-review/SKILL.md", text)
 
     def test_the_runbook_forbids_suppressed_findings(self) -> None:
         """A finding without a thread cannot participate in the ordinary reply loop."""

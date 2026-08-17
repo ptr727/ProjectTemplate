@@ -37,7 +37,7 @@ runs:
         uvx coverage@latest run --source=scripts,spec,host-setup --append host-setup/agent-safety/test_install.py
         uvx coverage@latest report
 
-    # Read-only: fails if .claude-plugin/fleet-skills/ was not regenerated from .agents/skills/.
+    # Read-only: fails if a generated skill distribution differs from .agents/skills/.
     - name: Check fleet skills are current step
       shell: bash
       run: python3 scripts/build_dist.py --check
