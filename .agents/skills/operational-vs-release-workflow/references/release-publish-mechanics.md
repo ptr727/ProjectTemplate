@@ -29,15 +29,14 @@ and Dependabot are target-agnostic.
 
 The pipeline splits into two layers. The **orchestration** layer is generic and is the
 standardization baseline: `publish-release.yml` (single-branch publish plan), the `get-version`
-plus `github-release` jobs inside `build-release-task.yml`, `get-version-task.yml`, and the
+task plus `github-release` job inside `build-release-task.yml`, `get-version-task.yml`, and the
 aggregator shape of `test-pull-request.yml`. Within
 `test-pull-request.yml`, only the `changes -> smoke-build -> check-workflow-status` aggregator
 wiring and the ruleset-bound job name are verbatim orchestration, while the `unit-test` job and
-the `dorny/paths-filter` entries are owned/per-target. The **build** layer is now a hook: a composite
-action at `.github/actions/build-<target>` the hub-hosted `build-release-task.yml` reaches, with a
-hub default for the vanilla project layout (Console/Console.csproj,
-NuGetLibrary/NuGetLibrary.csproj, `PyPiLibrary/`). A project whose layout differs carries its own
-hook instead of relying on the default.
+the `dorny/paths-filter` entries are owned/per-target. The **build** layer is a hook: a composite
+action at `.github/actions/build-<target>` the hub-hosted `build-release-task.yml` reaches. The
+hub defaults require explicit project paths. A project needing more than a path override carries
+its own hook.
 
 The contract that keeps the seam clean: **a target contributes files to the GitHub release by
 uploading a workflow artifact named `release-asset-<branch>-<target>`.** The `github-release` job
@@ -64,10 +63,9 @@ Pick by where each artifact *goes*, not by language:
 
 - **Files attached to the GitHub Release** (zips, binaries, packaged libraries): a build-executable
   or build-nuget hook per output, each uploading `release-asset-<branch>-<name>`. This is where the
-  .NET `dotnet publish` of the console app or `dotnet build`/push of the library project lives, and
-  it is *not* a generic file step, so a project whose layout differs from the hub default's
-  Console/Console.csproj or NuGetLibrary/NuGetLibrary.csproj replaces the hook wholesale rather
-  than adapting the default. A data-only repo's own output (e.g. a symbol library) is not yet
+  .NET `dotnet publish` or `dotnet build` and package push lives. The hub default takes an explicit
+  project path, and a project needing different build behavior replaces the hook. A data-only
+  repo's own output (e.g. a symbol library) is not yet
   expressible as a hub hook or an `enable_*` input, so it stays a carried leaf until the hub task
   grows one.
 - **Package-registry pushes** (NuGet.org, PyPI): the target both builds **and** publishes to its

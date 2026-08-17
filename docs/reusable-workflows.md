@@ -49,8 +49,8 @@ A workflow whose job graph is identical across repos of a type is reached, not c
 
 ### Layers
 
-1. **The hub reusable workflow**, at `.github/workflows/<name>-task.yml` in the hub. It follows [GOVERNANCE.md "Workflow YAML Conventions"][governance-workflow-yaml-conventions], so the file ends `-task.yml` and its `name:` ends "task". It owns the job graph, the permissions each job needs, the validate-at-entry step, the artifact seam, retention, and the ruleset-bound aggregator name. It checks out the caller's repo by default. When it needs its own defaults or scripts, it checks out the hub at `${{ job.workflow_repository }}`, `${{ job.workflow_sha }}` under `.hub/`, the repository and exact commit the caller pinned, so a fork of the hub checks out itself rather than a hard-coded upstream. actionlint's context schema has not caught up to these job-context properties yet, so a task using them carries a scoped `.github/actionlint.yaml` ignore entry until a released actionlint recognizes both.
-2. **The hook**, a composite action at `.github/actions/<hook>/action.yml` in the caller's repo. A hub job resolves it in one order: the caller's path when `hashFiles('.github/actions/<hook>/action.yml')` is non-empty, else the hub default at the same name under `.hub/`. A required hook with no default fails its job with `::error::` naming the missing path.
+1. **The hub reusable workflow**, at `.github/workflows/<name>-task.yml` in the hub. It follows [GOVERNANCE.md "Workflow YAML Conventions"][governance-workflow-yaml-conventions], so the file ends `-task.yml` and its `name:` ends "task". It owns the job graph, the permissions each job needs, the validate-at-entry step, the artifact seam, retention, and the ruleset-bound aggregator name. It checks out the caller's repo by default. A hub-owned action or sibling workflow uses GitHub's `$/` self-repository syntax, which resolves it at the reusable workflow's commit. A task checks out the hub under `.hub/` only when it must read a hub script as a file.
+2. **The hook**, a composite action at `.github/actions/<hook>/action.yml` in the caller's repo. A hub job resolves it in one order: the caller's path when `hashFiles('.github/actions/<hook>/action.yml')` is non-empty, else the hub default through `$/.github/actions/<default>`. A required hook with no default fails its job with `::error::` naming the missing path.
 3. **The caller stub**, downstream, under thirty lines. The audit grades it at `interface` fidelity: the caller job key, the hub task the `uses:` names, and the secrets it maps are the contract, and the `with:` block is the repo's own.
 4. **The hub's own use.** The hub calls its own task files by `./` path, so every hub pull request exercises the reusable file at least at parse level, and fully for the workflows the hub itself runs.
 
@@ -85,7 +85,7 @@ The target set. A row exists once its hub task ships, and until then the row is 
 | `merge-bot-task.yml` | none, extra bot rules are a `with:` input | not applicable |
 | `validate-task.yml` | `validate` (a repo's own domain checks, beyond the fleet doc-lint block and the generic unit-test job) | no-op |
 | `get-version-task.yml`, `publish-plan-task.yml` | none | not applicable |
-| `build-release-task.yml` | `build-executable`, `build-nuget`, `build-pypi` | executable, nuget and pypi defaults from today's snippets |
+| `build-release-task.yml` | `build-executable`, `build-nuget`, `build-pypi` | `dotnet-publish-default`, `nuget-push-default`, `pypi-build-default` |
 | `build-docker-task.yml` | `docker-prepare` (extra tags, build-args, matrix), `docker-build-base` | vanilla single-target from `image`, base build required when `build-base` |
 | `publish-docker-readme-task.yml` | `docker-readme-transform` | publish `Docker/README.md` or `README.md` as-is |
 | `check-upstream-version-task.yml` | `resolve-upstream` | none, required |
@@ -182,7 +182,7 @@ Hub: `get-version-task.yml` and `publish-plan-task.yml` hosted, and the downstre
 
 Hub: `build-release-task.yml` with `build-executable`, `build-nuget`, `build-pypi` hooks, and `build-docker-task.yml` per [The Docker Family][the-docker-family]. The three no-asset release shapes collapse into `expect_release_assets`. No `publish-release-task.yml` ships: a caller stub's trigger policy and its `plan`, `validate`, `publish`, and `publish-pypi` jobs each reach one hub task directly, and none of that wiring is generic enough across the fleet's five trigger shapes (dispatch-only Docker schedule, push-gated NuGet/PyPI, KiCad's branch-matrix dispatch) to host as a further reusable workflow without becoming another set of caller-owned inputs. The `release-assets` hook (extra files beyond a target's own) stays unshipped too: no cataloged repo needs it today, and adding an unexercised hook is deferred until one does.
 
-`build-release-task.yml` inlines its own `get-version` and `validate-release` jobs (no `./` nesting of the sibling `get-version-task.yml`) and duplicates the Docker core from `build-docker-task.yml` in its own `build-docker` job for the same reason: a hub task cannot reach a sibling hub task by a `./` path, since that path resolves against the caller's repository. `build-docker-task.yml` ships as its own hub task rather than being folded away, for a caller that wants the Docker leg without the rest of the release chain. The two carry the same job body and are kept in lockstep by hand, recorded in each file's own header comment. The `build-executable`, `build-nuget`, and `build-pypi` hub defaults take a `project-file` (or `project-dir`) input beyond the fixed `ref`/`branch`/`smoke` set, since the vanilla project layout (Console/Console.csproj, NuGetLibrary/NuGetLibrary.csproj, `PyPiLibrary/`) is a convention a real repo's own project name never matches. `build-release-task.yml` forwards its own caller-facing `executable_project`, `nuget_project`, and `pypi_project_dir` inputs into that same default's `project-file`/`project-dir` input. This mirrors the Docker hook's own `image` input rather than widening the fixed contract.
+`build-release-task.yml` reaches `get-version-task.yml` and `build-docker-task.yml` through `$/`, so both sibling tasks resolve at the same hub commit the downstream caller pins. It keeps `validate-release` inline because that gate belongs to the release orchestrator. `build-docker-task.yml` also ships as a task in its own right for a caller that wants only the Docker leg. The `dotnet-publish-default`, `nuget-push-default`, and `pypi-build-default` actions require explicit project paths. `build-release-task.yml` validates those inputs when their targets are enabled and forwards them to the matching default.
 
 - [x] Hub pull request on `develop` in #762.
 - [x] Promoted to `main` in #774 (`0b07a59d`) and released as `2.0.352`, the first tag carrying `build-release-task.yml` and `build-docker-task.yml`. The first release attempt, on `82fecef`, ended in `startup_failure` in [run-startup-failure][run-startup-failure] because `build-nuget` and `github-release` declared job-level permissions. #772 fixed it before #774 promoted.
@@ -193,6 +193,7 @@ Hub: `build-release-task.yml` with `build-executable`, `build-nuget`, `build-pyp
 - [ ] NxWitness (matrix hook and `build-base`)
 - [ ] The NuGet, PyPI and remaining release repos, one checkbox each added when the pilots close.
 - [x] A smoke build through `build-release-task.yml` observed on the PhotoCleaner pilot's pull request, [pilot smoke run][pilot-smoke-run]: get-version, validate-release, `build-executable`, `docker-prepare` and `build-docker` all through hub defaults, nuget, pypi and the base build skipped.
+- [x] Cross-repository `$/` resolution observed on PhotoCleaner pull request #58 in [self-reference smoke run][self-reference-smoke-run]: nested get-version and Docker tasks, the .NET publish default, and the Docker prepare default all resolved from the pinned hub feature commit and passed.
 - [x] A real publish through `build-release-task.yml` observed on the PhotoCleaner pilot, [pilot publish run][pilot-publish-run]: release `1.1.11` on `fa91db0` with `Publish GitHub release job` and `Build Docker image job` both succeeding.
 - [ ] Proof: the next PhotoCleaner release names its executable asset `PhotoCleaner.7z`, which the asset-name fix in this repository derives from the project file. Tick with the release.
 - [ ] `reports/workflow-reuse.md` regenerated with `build-release-task.yml` and `build-docker-task.yml` at 0 copies (hub-only files) and `publish-release.yml` showing callers equal to copies.
@@ -213,8 +214,8 @@ Hub: `publish-docker-readme-task.yml` with a `docker-readme-transform` hook, `ch
 - [ ] Catalog snippets for `publish-docker-readme-task.yml`, `check-upstream-version-task.yml`, `deploy-site.yml`, `deploy-site-task.yml`, and `run-codegen-pull-request-task.yml` pinned to the release that first carries each task. `catalog/snippets/workflows/run-periodic-codegen-pull-request.yml` now exists, since [Codegen](#adopting-the-type-specific-tasks) already states it keeps the same per-repo shape as today. The other four stay open: `publish-docker-readme-task.yml` and `check-upstream-version-task.yml` are each a job embedded in a repo's own workflow rather than a standalone top-level caller with a snippet of its own, and `deploy-site.yml` carries no manifest-wide snippet by design, since each site's own shape varies around the shared `deploy` job.
 - [ ] `reports/workflow-reuse.md` regenerated, and the fleet total's callers equal to the sum of the stubs the fleet needs.
 - [ ] The environment-secret handoff in the deploy-site adoption, the caller job's own `environment:` binding resolving `DEPLOY_SSH_PRIVATE_KEY` for an explicit `secrets:` map across a cross-repository `uses:`, observed on Blog's first live deploy run. Tick with the run URL.
-- [ ] The default `docker-readme-transform` hook's hub checkout, `job.workflow_sha` and `job.workflow_repository` resolving the exact commit a caller's `uses:` line pinned, observed on a caller that carries no override hook. Tick with the run URL.
-- [ ] `job.workflow_sha` and `job.workflow_repository` recognized by a released actionlint, so the `.github/actionlint.yaml` ignore entry for `publish-docker-readme-task.yml` can drop.
+- [ ] The default `docker-readme-transform` action resolving through `$/` at the caller's pinned hub commit, observed on a caller with no override hook. Tick with the run URL.
+- [ ] `$/` recognized by a released actionlint, so the scoped `.github/actionlint.yaml` ignores can drop.
 
 ## Adopting the Merge-Bot
 
@@ -417,7 +418,7 @@ A repo whose publisher needs the release-gate decision reaches `publish-plan-tas
     # Outputs: publish, stable.
 ```
 
-`build-release-task.yml` (stage 4) does not call `get-version-task.yml` this way. It inlines the get-version and validate-release jobs rather than nesting a sibling hub task, per the design's no-`./`-nesting rule: a local `uses:` inside a called workflow would resolve against the top-level caller's repository, not the hub. Only a caller that reads the version outputs on their own, without the rest of the release orchestrator, reaches `get-version-task.yml` directly, and a downstream `publish-release.yml` stub that does exactly that is the shape shown above.
+`build-release-task.yml` also calls `get-version-task.yml` through `$/`, so the sibling resolves at the release task's pinned hub commit. A caller that needs the version outputs without the rest of the release orchestrator reaches `get-version-task.yml` directly, using the pinned owner-scoped form shown above.
 
 ## Adopting the Release Chain
 
@@ -581,11 +582,9 @@ ESPHome-NonRoot carries two trackers today. `check-upstream-version.yml` adopts 
     secrets:
       CODEGEN_APP_CLIENT_ID: ${{ secrets.CODEGEN_APP_CLIENT_ID }}
       CODEGEN_APP_PRIVATE_KEY: ${{ secrets.CODEGEN_APP_PRIVATE_KEY }}
-      # Optional, mapped only when the codegen hook's generator calls a metered upstream API.
-      NINJA_API_KEY: ${{ secrets.NINJA_API_KEY }}
 ```
 
-The hub task passes `NINJA_API_KEY` to the hook as a `NINJA_API_KEY` environment variable on the hook's own step, rather than a `with:` input, since a composite action never sees the `secrets` context directly and a `with:` input the hook does not declare in its own `inputs:` fails the step outright. An environment variable carries no such declaration requirement, so it crosses even when a hook, like LanguageTags's or NxWitness's, has no use for it and reads nothing from it. Neither calls a metered API from its generator today, so neither maps `NINJA_API_KEY`. Both add `dotnet husky install` ahead of the `dotnet csharpier format` step in their present copies, which the hub task carries verbatim, so a hook needs only the generator invocation itself (`dotnet run --project ...`).
+The task is .NET-specific orchestration. It installs the .NET SDK, runs the caller's `codegen` hook, restores the repository's .NET tools, formats with CSharpier, and opens the branch pull requests. The hook carries only the repository's generator invocation, such as `dotnet run --project ...`. It receives no legacy generator-specific secret.
 
 ## What a Pilot Proves
 
@@ -617,6 +616,7 @@ Four things the hub cannot prove fall to the first downstream adopter. They are 
 [override-path-run]: https://github.com/ptr727/ProjectTemplate/actions/runs/31950332387/job/95172710046
 [pilot-publish-run]: https://github.com/ptr727/PhotoCleaner/actions/runs/31977092102
 [pilot-smoke-run]: https://github.com/ptr727/PhotoCleaner/actions/runs/31974932749
+[self-reference-smoke-run]: https://github.com/ptr727/PhotoCleaner/actions/runs/32047594855
 [pr-760]: https://github.com/ptr727/ProjectTemplate/pull/760
 [run-770]: https://github.com/ptr727/ProjectTemplate/actions/runs/31972611554
 [run-771]: https://github.com/ptr727/ProjectTemplate/actions/runs/31972622149

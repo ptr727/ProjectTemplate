@@ -21,5 +21,3 @@ jobs:
     secrets:
       CODEGEN_APP_CLIENT_ID: ${{ secrets.CODEGEN_APP_CLIENT_ID }}
       CODEGEN_APP_PRIVATE_KEY: ${{ secrets.CODEGEN_APP_PRIVATE_KEY }}
-      # Optional, mapped only when the codegen hook's generator calls a metered upstream API.
-      NINJA_API_KEY: ${{ secrets.NINJA_API_KEY }}
