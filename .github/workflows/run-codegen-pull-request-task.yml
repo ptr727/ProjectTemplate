@@ -1,10 +1,4 @@
-name: Run codegen and pull request task
-
-# Deterministic codegen executor, hosted here once since the App-token machinery, the branch matrix, and the PR-opening steps are identical across every codegen repo.
-# A required codegen hook runs the repo's own generator against the checked-out branch.
-# Runs against main and develop in parallel via a matrix and opens a PR against each base (codegen-main -> main, codegen-develop -> develop), which the merge-bot auto-merges independently.
-# The hook's output must be deterministic from the source it reads, never a per-run timestamp or GUID.
-# A non-deterministic hook opens a PR on every run and the two branches would diverge and conflict on the next promotion.
+name: Run .NET codegen and pull request task
 
 on:
   workflow_call:
@@ -13,10 +7,6 @@ on:
         required: true
       CODEGEN_APP_PRIVATE_KEY:
         required: true
-      # Consumed by the codegen hook when its generator calls a metered upstream API, not by this task.
-      # A repo whose generator needs no key leaves it unmapped.
-      NINJA_API_KEY:
-        required: false
 
 jobs:
 
@@ -57,12 +47,9 @@ jobs:
           ref: ${{ matrix.target.ref }}
           token: ${{ steps.app-token.outputs.token }}
 
-      # Composite actions never see the secrets context directly, and a with: input the hook does not declare fails the step, so an optional key crosses as an env var instead.
       - name: Run codegen hook step
         if: ${{ hashFiles('.github/actions/codegen/action.yml') != '' }}
         uses: ./.github/actions/codegen
-        env:
-          NINJA_API_KEY: ${{ secrets.NINJA_API_KEY }}
 
       - name: Missing codegen hook step
         if: ${{ hashFiles('.github/actions/codegen/action.yml') == '' }}

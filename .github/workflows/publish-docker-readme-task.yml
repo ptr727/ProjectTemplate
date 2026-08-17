@@ -133,16 +133,6 @@ jobs:
         with:
           ref: ${{ inputs.ref || github.ref }}
 
-      # The job.workflow_repository and job.workflow_sha properties name the exact commit of this reusable workflow file, which is the commit the caller's uses: line pinned.
-      # The default hook is then the version the caller chose rather than whatever the hub's default branch holds today.
-      - name: Checkout hub step
-        if: ${{ hashFiles('.github/actions/docker-readme-transform/action.yml') == '' }}
-        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        with:
-          repository: ${{ job.workflow_repository }}
-          ref: ${{ job.workflow_sha }}
-          path: .hub
-
       # A hook lets a repo render the readme first, an m4 template with version includes, for example.
       # It always resolves which file the push step ships.
       - name: Resolve readme via caller hook step
@@ -153,7 +143,7 @@ jobs:
       - name: Resolve readme via hub default step
         id: transform-default
         if: ${{ hashFiles('.github/actions/docker-readme-transform/action.yml') == '' }}
-        uses: ./.hub/.github/actions/docker-readme-transform-default
+        uses: $/.github/actions/docker-readme-transform-default
 
       - name: Publish Docker Hub readme step
         uses: peter-evans/dockerhub-description@1b9a80c056b620d92cedb9d9b5a223409c68ddfa # v5.0.0

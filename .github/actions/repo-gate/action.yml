@@ -1,0 +1,11 @@
+name: Repository gate
+description: Check action pins and line-ending contracts.
+
+runs:
+  using: composite
+  steps:
+    - name: Check repository policy step
+      shell: bash
+      env:
+        GH_TOKEN: ${{ github.token }}
+      run: python3 "$GITHUB_ACTION_PATH/repo_gate.py"

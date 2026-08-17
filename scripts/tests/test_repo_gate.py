@@ -21,7 +21,7 @@ import unittest
 from pathlib import Path
 from unittest import mock
 
-sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
+sys.path.insert(0, str(Path(__file__).resolve().parents[2] / ".github/actions/repo-gate"))
 import repo_gate
 
 REPO = Path(__file__).resolve().parent.parent.parent
@@ -99,11 +99,19 @@ class TestShaPin(TreeCase):
                 files = self.workflow(f"jobs:\n  a:\n    steps:\n      - uses: {action}@master\n")
                 self.assertEqual([], repo_gate.check_sha_pin(self.tmp, files))
 
-    def test_a_local_reusable_workflow_is_not_an_action(self) -> None:
-        for ref in ("./.github/workflows/validate-task.yml", ".github/workflows/validate-task.yml"):
-            with self.subTest(ref=ref):
-                files = self.workflow(f"jobs:\n  a:\n    uses: {ref}\n")
+    def test_a_local_or_self_repository_ref_needs_no_pin(self) -> None:
+        for workflow in (
+            "./.github/workflows/validate-task.yml",
+            ".github/workflows/validate-task.yml",
+            "$/.github/workflows/validate-task.yml",
+        ):
+            with self.subTest(ref=workflow):
+                files = self.workflow(f"jobs:\n  a:\n    uses: {workflow}\n")
                 self.assertEqual([], repo_gate.check_sha_pin(self.tmp, files))
+        files = self.workflow(
+            "jobs:\n  a:\n    steps:\n      - uses: $/.github/actions/validate-default\n"
+        )
+        self.assertEqual([], repo_gate.check_sha_pin(self.tmp, files))
 
 
 class ResolveCase(TreeCase):

@@ -5,10 +5,6 @@ name: Build Docker image task
 # Multi-arch (amd64+arm64) applies only to a non-smoke main build, and every other build is amd64 only.
 # The cache policy and the platform selection are decided once here, per docs/reusable-workflows.md "The Docker Family", never per caller.
 #
-# This file exists both as a hub task in its own right, for a caller that wants only the Docker leg with no NBGV release/version chain, and as the source build-release-task.yml duplicates into its own build-docker job.
-# A hub task cannot call a sibling hub task by a ./ path, since that path resolves against the caller's repository, not the hub.
-# The two carry the same job body rather than one calling the other, so keep them in lockstep by hand.
-#
 # The in-job Docker Hub description push that earlier per-repo copies carried is dropped here in favor of publish-docker-readme-task.yml, per docs/reusable-workflows.md "The Docker Family" (stage 5).
 # The overview then publishes once per release rather than once per image build.
 #
@@ -100,14 +96,6 @@ jobs:
         with:
           ref: ${{ inputs.ref }}
 
-      - name: Checkout hub for hook default step
-        if: ${{ inputs.matrix == '' && hashFiles('.github/actions/docker-prepare/action.yml') == '' }}
-        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        with:
-          repository: ${{ job.workflow_repository }}
-          ref: ${{ job.workflow_sha }}
-          path: .hub
-
       - name: Run caller docker-prepare hook step
         if: ${{ inputs.matrix == '' && hashFiles('.github/actions/docker-prepare/action.yml') != '' }}
         id: hook
@@ -120,7 +108,7 @@ jobs:
       - name: Run hub docker-prepare default step
         if: ${{ inputs.matrix == '' && hashFiles('.github/actions/docker-prepare/action.yml') == '' }}
         id: default
-        uses: ./.hub/.github/actions/docker-prepare-default
+        uses: $/.github/actions/docker-prepare-default
         with:
           image: ${{ inputs.image }}
           branch: ${{ inputs.branch }}
@@ -221,6 +209,17 @@ jobs:
 
       # Always login, even for smoke, for the higher Docker rate limits on pulls and cache reads.
       # Fork PRs without the secrets cannot run the Docker smoke build, which is acceptable for same-repo PRs.
+      - name: Require Docker Hub credentials step
+        env:
+          DOCKER_HUB_USERNAME: ${{ secrets.DOCKER_HUB_USERNAME }}
+          DOCKER_HUB_ACCESS_TOKEN: ${{ secrets.DOCKER_HUB_ACCESS_TOKEN }}
+        run: |
+          set -Eeuo pipefail
+          if [[ -z "$DOCKER_HUB_USERNAME" || -z "$DOCKER_HUB_ACCESS_TOKEN" ]]; then
+            echo "::error::DOCKER_HUB_USERNAME and DOCKER_HUB_ACCESS_TOKEN must both be non-empty."
+            exit 1
+          fi
+
       - name: Login to Docker Hub step
         uses: docker/login-action@dbcb813823bdd20940b903addbd779551569679f # v4.6.0
         with:
