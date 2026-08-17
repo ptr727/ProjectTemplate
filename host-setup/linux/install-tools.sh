@@ -762,10 +762,10 @@ powershell_non_apt_paths() {
     # Remove the whole direct-download tree when no package owns its binary.
     # The tree check uses the binary because dpkg-query -S answers about files.
     # Removing the tree also clears files that the apt package does not carry.
-    if [[ -e /usr/local/bin/pwsh ]] && powershell_path_is_unowned /usr/local/bin/pwsh; then
+    if [[ -e /usr/local/bin/pwsh || -L /usr/local/bin/pwsh ]] && powershell_path_is_unowned /usr/local/bin/pwsh; then
         paths+=(/usr/local/bin/pwsh)
     fi
-    if [[ -e /opt/microsoft/powershell/7/pwsh ]] && powershell_path_is_unowned /opt/microsoft/powershell/7/pwsh; then
+    if [[ -d /opt/microsoft/powershell/7 ]] && powershell_path_is_unowned /opt/microsoft/powershell/7/pwsh; then
         paths+=(/opt/microsoft/powershell/7)
     fi
 
@@ -792,6 +792,7 @@ powershell_remove_non_apt() {
     [[ ${#paths[@]} -eq 0 ]] && return 0
 
     log "  Removing ${#paths[@]} non-apt pwsh install(s): ${paths[*]}"
+    confirm "  Remove these paths?" || die "Declined, PowerShell install left as it is"
     run_root rm -rf "${paths[@]}"
 }
 
