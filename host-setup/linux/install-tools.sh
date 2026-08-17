@@ -730,7 +730,60 @@ powershell_install() {
     fi
 
     microsoft_feed
+
+    # A pwsh the powershell package does not own is a direct-download install left over from the
+    # portable tar.gz build (PowerShell's own install.sh, or a repo's install-powershell.sh), and
+    # the apt package and that build share /opt/microsoft/powershell/7. It is removed before the
+    # apt install, on the reverse of docker_install removing conflicting apt packages before a
+    # native install: here the apt package is the one being installed and the non-apt copy is the
+    # conflict, so the copy yields to the package rather than the package yielding to it.
+    powershell_remove_non_apt
+
     apt_install powershell
+}
+
+# A pwsh that the powershell package does not own, one per line.
+# The direct-download layout installs /opt/microsoft/powershell/7 (the same tree the apt package
+# owns once installed) plus a /usr/local/bin/pwsh symlink, where the apt package instead owns
+# /usr/bin/pwsh, so dpkg ownership is the discriminator between the two, the same test
+# tool_unshadow applies to a shadowing copy: a path the powershell package owns is the apt install
+# and is never listed, and everything else is a non-apt copy to clear.
+powershell_non_apt_paths() {
+    local -a paths=()
+
+    # The direct-download symlink, and the whole direct-download tree when nothing in it is
+    # package-owned. The tree check is against its binary rather than the directory, since
+    # dpkg-query -S answers about files, and it is the tree rather than the binary that goes,
+    # so leftover files an apt install does not carry cannot survive beside the package's own.
+    if [[ -e /usr/local/bin/pwsh ]] && ! dpkg-query -S /usr/local/bin/pwsh > /dev/null 2>&1; then
+        paths+=(/usr/local/bin/pwsh)
+    fi
+    if [[ -e /opt/microsoft/powershell/7/pwsh ]] && ! dpkg-query -S /opt/microsoft/powershell/7/pwsh > /dev/null 2>&1; then
+        paths+=(/opt/microsoft/powershell/7)
+    fi
+
+    # A pwsh anywhere else on PATH that no package owns is a non-apt copy too, so a manual copy in
+    # another directory does not keep answering after the package installs. The known layout above
+    # resolves here as well when its symlink is on PATH, which the sort below deduplicates. A
+    # relative PATH entry (".", "./bin") is never trusted, since removing a relative path would
+    # act against the caller's current directory, the same guard tool_shadow_path applies.
+    local resolved
+    resolved=$(type -P pwsh 2> /dev/null || true)
+    if [[ $resolved == /* ]] && ! dpkg-query -S "$resolved" > /dev/null 2>&1; then
+        paths+=("$resolved")
+    fi
+
+    [[ ${#paths[@]} -eq 0 ]] && return 0
+    printf '%s\n' "${paths[@]}" | sort -u
+}
+
+powershell_remove_non_apt() {
+    local -a paths=()
+    readarray -t paths < <(powershell_non_apt_paths)
+    [[ ${#paths[@]} -eq 0 ]] && return 0
+
+    log "  Removing ${#paths[@]} non-apt pwsh install(s): ${paths[*]}"
+    run_root rm -rf "${paths[@]}"
 }
 
 # --- Tool dispatch ---
