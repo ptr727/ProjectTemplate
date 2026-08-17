@@ -731,30 +731,27 @@ powershell_install() {
 
     microsoft_feed
 
-    # A pwsh the powershell package does not own is a direct-download install left over from the
-    # portable tar.gz build (PowerShell's own install.sh, or a repo's install-powershell.sh), and
-    # the apt package and that build share /opt/microsoft/powershell/7. It is removed before the
-    # apt install, on the reverse of docker_install removing conflicting apt packages before a
-    # native install: here the apt package is the one being installed and the non-apt copy is the
-    # conflict, so the copy yields to the package rather than the package yielding to it.
+    # A pwsh path that no dpkg package owns is a direct-download install.
+    # The portable tar.gz build and the apt package share /opt/microsoft/powershell/7.
+    # Remove the direct-download copy before installing the apt package.
+    # This is the reverse of docker_install removing conflicting apt packages before a native install.
     powershell_remove_non_apt
 
     apt_install powershell
 }
 
-# A pwsh that the powershell package does not own, one per line.
-# The direct-download layout installs /opt/microsoft/powershell/7 (the same tree the apt package
-# owns once installed) plus a /usr/local/bin/pwsh symlink, where the apt package instead owns
-# /usr/bin/pwsh, so dpkg ownership is the discriminator between the two, the same test
-# tool_unshadow applies to a shadowing copy: a path the powershell package owns is the apt install
-# and is never listed, and everything else is a non-apt copy to clear.
+# A pwsh path that no dpkg package owns, one per line.
+# The direct-download layout installs /opt/microsoft/powershell/7 and a /usr/local/bin/pwsh symlink.
+# The apt package owns /usr/bin/pwsh instead.
+# Dpkg ownership distinguishes package-managed paths from copies installed by another source.
+# This applies the same ownership test as tool_unshadow to a shadowing copy.
 powershell_non_apt_paths() {
     local -a paths=()
 
-    # The direct-download symlink, and the whole direct-download tree when nothing in it is
-    # package-owned. The tree check is against its binary rather than the directory, since
-    # dpkg-query -S answers about files, and it is the tree rather than the binary that goes,
-    # so leftover files an apt install does not carry cannot survive beside the package's own.
+    # Remove the direct-download symlink when no package owns it.
+    # Remove the whole direct-download tree when no package owns its binary.
+    # The tree check uses the binary because dpkg-query -S answers about files.
+    # Removing the tree also clears files that the apt package does not carry.
     if [[ -e /usr/local/bin/pwsh ]] && ! dpkg-query -S /usr/local/bin/pwsh > /dev/null 2>&1; then
         paths+=(/usr/local/bin/pwsh)
     fi
@@ -762,11 +759,13 @@ powershell_non_apt_paths() {
         paths+=(/opt/microsoft/powershell/7)
     fi
 
-    # A pwsh anywhere else on PATH that no package owns is a non-apt copy too, so a manual copy in
-    # another directory does not keep answering after the package installs. The known layout above
-    # resolves here as well when its symlink is on PATH, which the sort below deduplicates. A
-    # relative PATH entry (".", "./bin") is never trusted, since removing a relative path would
-    # act against the caller's current directory, the same guard tool_shadow_path applies.
+    # A package-unowned pwsh anywhere else on PATH is also a non-apt copy.
+    # Removing it prevents a manual copy in another directory from answering after installation.
+    # The known layout resolves here when its symlink is on PATH.
+    # The sort below deduplicates that path.
+    # A relative PATH entry such as "." or "./bin" is never trusted.
+    # Removing a relative path would act against the caller's current directory.
+    # This is the same guard used by tool_shadow_path.
     local resolved
     resolved=$(type -P pwsh 2> /dev/null || true)
     if [[ $resolved == /* ]] && ! dpkg-query -S "$resolved" > /dev/null 2>&1; then
