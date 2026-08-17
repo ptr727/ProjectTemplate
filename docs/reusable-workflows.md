@@ -153,8 +153,8 @@ Hub: `validate-task.yml` hosts a `lint` job (the fleet doc-lint block, language 
 - [x] Hub pull request on `develop` with the task, the hub's own hook and default, the manifest contracts, and the catalog snippets left for the release that follows, [#760][pr-760].
 - [x] Promoted to `main` in #774 (`0b07a59d`) and released as `2.0.352`, the first tag carrying `validate-task.yml`.
 - [ ] Catalog snippets for both stub shapes in [Adopting the Gates][adopting-the-gates] pinned to that release. The no-build shape has one, `catalog/snippets/workflows/test-pull-request.yml`. The release-with-smoke shape still calls its own repo's `build-release-task.yml` by `./` path rather than the hub's, so it carries no catalog-ready pin yet, and this item stays open until it does.
-- [x] Hook override path observed on a hub pull request run, [proof run][override-path-run] (runs `./.github/actions/validate`, no hub checkout). Default path awaits a repo with no `validate` hook of its own.
-- [ ] PhotoCleaner (pilot, release trigger shape with smoke, the same repo that piloted stage 1)
+- [x] Hook override path observed on a hub pull request run, [proof run][override-path-run] (runs `./.github/actions/validate`, no hub checkout). Default path observed on PhotoCleaner's adoption pull request, [pilot smoke run][pilot-smoke-run], where the hub's `validate-default` ran because that repo carries no `validate` hook.
+- [x] PhotoCleaner (pilot, release trigger shape with smoke, the same repo that piloted stage 1): ptr727/PhotoCleaner#55 on `develop` (`c80cb29`), promoted in ptr727/PhotoCleaner#56 (`fa91db0`), both on 2026-08-16. `test-pull-request.yml` calls the hub validate task and no repo hook was needed.
 - [ ] HomeAutomation-Config (second pilot, operational trigger shape)
 - [ ] The remaining repos, one checkbox each added when the pilots close, since the sweep list is every cataloged repo.
 - [ ] `reports/workflow-reuse.md` regenerated with `validate-task.yml` at 0 copies (a hub-only file no repo carries) and `test-pull-request.yml` showing callers equal to copies.
@@ -186,14 +186,15 @@ Hub: `build-release-task.yml` with `build-executable`, `build-nuget`, `build-pyp
 
 - [x] Hub pull request on `develop` in #762.
 - [x] Promoted to `main` in #774 (`0b07a59d`) and released as `2.0.352`, the first tag carrying `build-release-task.yml` and `build-docker-task.yml`. The first release attempt, on `82fecef`, ended in `startup_failure` in [run-startup-failure][run-startup-failure] because `build-nuget` and `github-release` declared job-level permissions. #772 fixed it before #774 promoted.
-- [ ] PhotoCleaner (pilot, vanilla Docker plus executable)
+- [x] PhotoCleaner (pilot, vanilla Docker plus executable): ptr727/PhotoCleaner#55 on `develop` (`c80cb29`), promoted in ptr727/PhotoCleaner#56 (`fa91db0`), five carried task files deleted, every value mapped to a task input (`executable_project`, `docker_image`), no repo hook needed. Its first publish through the task, [pilot publish run][pilot-publish-run], released `1.1.11` with the executable asset attached and the Docker image pushed. That run exposed one regression the pilot exists to find: the hub executable default named the archive `Console.7z` where the repo's own leaf named it `PhotoCleaner.7z`, fixed in the pull request that ticks this item by deriving the name from the project file (an `executable_asset_name` input overrides it), so the next PhotoCleaner release is the proof of the fix.
 - [ ] PlexCleaner (second, the same shape)
 - [ ] VSCode-Server-DotNetCore (vanilla Docker only)
 - [ ] ESPHome-NonRoot (`docker-prepare` hook for the upstream pin)
 - [ ] NxWitness (matrix hook and `build-base`)
 - [ ] The NuGet, PyPI and remaining release repos, one checkbox each added when the pilots close.
-- [ ] A smoke build through `build-release-task.yml` observed on the PhotoCleaner or PlexCleaner pilot's pull request, run URL recorded here.
-- [ ] A real publish through `build-release-task.yml` observed on the PhotoCleaner or PlexCleaner pilot, run URL recorded here.
+- [x] A smoke build through `build-release-task.yml` observed on the PhotoCleaner pilot's pull request, [pilot smoke run][pilot-smoke-run]: get-version, validate-release, `build-executable`, `docker-prepare` and `build-docker` all through hub defaults, nuget, pypi and the base build skipped.
+- [x] A real publish through `build-release-task.yml` observed on the PhotoCleaner pilot, [pilot publish run][pilot-publish-run]: release `1.1.11` on `fa91db0` with `Publish GitHub release job` and `Build Docker image job` both succeeding.
+- [ ] Proof: the next PhotoCleaner release names its executable asset `PhotoCleaner.7z`, which the asset-name fix in this repository derives from the project file. Tick with the release.
 - [ ] `reports/workflow-reuse.md` regenerated with `build-release-task.yml` and `build-docker-task.yml` at 0 copies (hub-only files) and `publish-release.yml` showing callers equal to copies.
 
 ### Stage 5: The Type-Specific Tasks
@@ -441,6 +442,9 @@ concurrency:
   group: ${{ github.workflow }}
   cancel-in-progress: false
 
+# GITHUB_TOKEN gets no scope by default, and each job below grants only what its hub task writes with.
+permissions: {}
+
 jobs:
 
   # Single source of the release-gate decision (publish or not, stable or not), reused by every job below.
@@ -458,6 +462,8 @@ jobs:
     needs: [plan]
     if: ${{ needs.plan.outputs.publish == 'true' }}
     uses: ptr727/ProjectTemplate/.github/workflows/validate-task.yml@0b07a59d7c65d07d8df275a96deaf2e06cbefd51 # 2.0.352
+    permissions:
+      contents: read
     secrets:
       CODECOV_TOKEN: ${{ secrets.CODECOV_TOKEN }}
 
@@ -609,6 +615,8 @@ Four things the hub cannot prove fall to the first downstream adopter. They are 
 [governance-workflow-yaml-conventions]: ../GOVERNANCE.md#workflow-yaml-conventions
 [issue-585]: https://github.com/ptr727/ProjectTemplate/issues/585
 [override-path-run]: https://github.com/ptr727/ProjectTemplate/actions/runs/31950332387/job/95172710046
+[pilot-publish-run]: https://github.com/ptr727/PhotoCleaner/actions/runs/31977092102
+[pilot-smoke-run]: https://github.com/ptr727/PhotoCleaner/actions/runs/31974932749
 [pr-760]: https://github.com/ptr727/ProjectTemplate/pull/760
 [run-770]: https://github.com/ptr727/ProjectTemplate/actions/runs/31972611554
 [run-771]: https://github.com/ptr727/ProjectTemplate/actions/runs/31972622149
