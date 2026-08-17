@@ -4,7 +4,7 @@ name: Validate task
 # Three jobs: lint (the fleet doc-lint block plus language lint by tree detection, the prose gate, and the repo gate), unit-test (a generic dotnet test or uv run pytest, skipped where the caller has no test project), and validate (the validate hook, a repo's own domain checks such as an ESPHome compile, a Hugo build, a KiCad ERC, a codegen-drift check, or PowerShell tests).
 # No permissions beyond contents: read where a job needs one, since every job here only checks out and reads.
 # No required inputs, and CODECOV_TOKEN is the one optional secret, since coverage upload is best-effort.
-# The hook resolution in the validate job checks out the hub at job.workflow_sha under .hub, the exact commit the caller pinned, so a hub default or a hub script is reproducible against a released pin.
+# Hub-owned gates and default hooks resolve through $/ at the reusable workflow's commit, so each implementation is reproducible against the caller's released pin without a second checkout.
 on:
   workflow_call:
     secrets:
@@ -43,7 +43,6 @@ jobs:
             HISTORY.md
           incremental_files_only: false
 
-      # The pinned actionlint's schema has not caught up to job.workflow_sha and job.workflow_repository, two real GitHub context fields, so the false property-not-defined findings on them are ignored via .github/actionlint.yaml rather than here.
       - name: Lint workflows step
         uses: raven-actions/actionlint@3d39aea434753780c3b3d4a1a31c854b4dbf49d7 # v2.2.0
 
@@ -143,54 +142,15 @@ jobs:
             echo "no [tool.mypy] or [tool.pyright] section, skipping"
           fi
 
-      # Checked out here, right before the two steps that read it, so the doc-lint block above scans only the caller's own tree and never the hub commit copied in for the prose gate and the repo gate.
-      # The hub at the exact commit the caller pinned, for the prose gate's bundled script and the repo gate.
-      - name: Checkout hub step
-        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        with:
-          repository: ${{ job.workflow_repository }}
-          ref: ${{ job.workflow_sha }}
-          path: .hub
-
-      # The fleet prose rules, scoped to a pull request's own diff so the existing backlog blocks nothing.
-      # This mirrors .github/actions/prose-gate/action.yml's branch rule.
-      # A main-target run reads the bundled script at the exact commit the caller pinned, the .hub checkout above.
-      # Every other target reads the live hub develop copy, so an unpromoted rule change is exercised fleet-wide before it reaches main.
-      # Skipped outside a pull request, since there is no base to diff and a publish run's content was already gated when it was pushed.
-      # The event name here is always workflow_call, since that is what triggers this callee, so pull-request detection reads the inherited event payload's pull_request key instead.
+      # A publish run's content is already gated by the pull request that introduced it.
       - name: Check prose step
         if: github.event.pull_request != null
-        run: |
-          set -Eeuo pipefail
-          if [ "$BASE_REF" = "main" ]; then
-            script=.hub/scripts/prose_lint.py
-          else
-            script="$RUNNER_TEMP/prose_lint.py"
-            curl -fsSL --retry 3 --retry-delay 2 --retry-all-errors \
-              -H "Authorization: Bearer $GITHUB_TOKEN" \
-              "https://raw.githubusercontent.com/$HUB_REPO/develop/scripts/prose_lint.py" -o "$script"
-          fi
-          if ! git rev-parse --verify --quiet "$BASE_SHA^{commit}" >/dev/null; then
-            echo "::error::Diff base '$BASE_SHA' does not resolve in this checkout." >&2
-            exit 1
-          fi
-          python3 "$script" --diff "$BASE_SHA" --check charset --check semicolon --check dash --check dupword --check spelling --check comment-wrap --check comment-case --check home-path --check dead-path .
-        env:
-          # The base ref context field is unset here for the same reason, so both read from the inherited event payload instead.
-          # The exact base commit needs no remote-tracking branch ref to be present in the checkout, unlike a branch name would.
-          BASE_REF: ${{ github.event.pull_request.base.ref }}
-          BASE_SHA: ${{ github.event.pull_request.base.sha }}
-          # The repository hosting this reusable workflow, so a fork of the hub reads its own develop rather than upstream's.
-          HUB_REPO: ${{ job.workflow_repository }}
-          # A private hub fork needs this to read raw content; a public one ignores it, since the request still succeeds.
-          GITHUB_TOKEN: ${{ github.token }}
+        uses: $/.github/actions/prose-gate
+        with:
+          base: ${{ github.event.pull_request.base.sha }}
 
-      # A runner's gh is unauthenticated on its own, and gh api needs one.
-      # Without this the sha-pin check silently degrades to "GitHub did not answer" for every same-owner pin.
       - name: Check repo gates step
-        run: python3 .hub/scripts/repo_gate.py
-        env:
-          GH_TOKEN: ${{ github.token }}
+        uses: $/.github/actions/repo-gate
 
   # No job-level if: here, since GitHub Actions does not evaluate hashFiles in a job condition, only a step one.
   # Every step below carries its own tree-detection guard instead.
