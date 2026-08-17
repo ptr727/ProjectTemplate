@@ -769,17 +769,18 @@ powershell_non_apt_paths() {
         paths+=(/opt/microsoft/powershell/7)
     fi
 
-    # The resolved package-unowned pwsh path is also a non-apt copy.
-    # Removing it prevents a manual copy in another directory from answering after installation.
-    # The known layout resolves here when its symlink is on PATH.
-    # The sort below deduplicates that path.
+    # A pwsh resolved elsewhere on PATH may belong to another package manager.
+    # Dpkg ownership does not identify the manager for an unowned path.
+    # Refuse to remove an unknown path and ask the operator to remove or reprioritize it.
     # A relative PATH entry such as "." or "./bin" is never trusted.
-    # Removing a relative path would act against the caller's current directory.
     # This is the same guard used by tool_shadow_path.
     local resolved
     resolved=$(type -P pwsh 2> /dev/null || true)
     if [[ $resolved == /* ]] && powershell_path_is_unowned "$resolved"; then
-        paths+=("$resolved")
+        case "$resolved" in
+            /usr/local/bin/pwsh | /opt/microsoft/powershell/7/pwsh) ;;
+            *) die "Non-apt pwsh at $resolved is outside the known cleanup paths, remove it before installing powershell" ;;
+        esac
     fi
 
     [[ ${#paths[@]} -eq 0 ]] && return 0
