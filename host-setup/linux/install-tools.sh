@@ -740,7 +740,7 @@ powershell_install() {
     apt_install powershell
 }
 
-# A pwsh path that no dpkg package owns, one per line.
+# Return true when a pwsh path is not owned by dpkg.
 # The direct-download layout installs /opt/microsoft/powershell/7 and a /usr/local/bin/pwsh symlink.
 # The apt package owns /usr/bin/pwsh instead.
 # Dpkg ownership distinguishes package-managed paths from copies installed by another source.
@@ -769,7 +769,7 @@ powershell_non_apt_paths() {
         paths+=(/opt/microsoft/powershell/7)
     fi
 
-    # A package-unowned pwsh anywhere else on PATH is also a non-apt copy.
+    # The resolved package-unowned pwsh path is also a non-apt copy.
     # Removing it prevents a manual copy in another directory from answering after installation.
     # The known layout resolves here when its symlink is on PATH.
     # The sort below deduplicates that path.
