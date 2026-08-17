@@ -731,7 +731,7 @@ powershell_install() {
 
     microsoft_feed
 
-    # A pwsh path that no dpkg package owns is a direct-download install.
+    # A pwsh path that no dpkg package owns is a non-apt install.
     # The portable tar.gz build and the apt package share /opt/microsoft/powershell/7.
     # Remove the direct-download copy before installing the apt package.
     # This is the reverse of docker_install removing conflicting apt packages before a native install.
