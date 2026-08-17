@@ -5,7 +5,7 @@ name: Get version information task
 # Every caller reads the same five outputs plus the derived Prerelease flag.
 # The ref input defaults to the caller's own checkout ref, and each run versions the one branch it was triggered on.
 # NBGV classifies that branch from GITHUB_REF directly, with no IGNORE_GITHUB_REF override, per WORKFLOW.md D3.1.
-# A caller passing a commit rather than a branch as ref still classifies against the branch it dispatched from, which is the branch that commit belongs to.
+# Classification follows the trigger ref whatever ref the caller checks out, so a caller passing a commit or another branch as ref gets that tree's height under the trigger branch's classification, never a different branch's.
 # AssemblyVersion, AssemblyFileVersion and AssemblyInformationalVersion are exposed for a .NET build to stamp.
 # A caller with no compiled code, a PyPI or HACS package, simply leaves them unused rather than the task growing a per-ecosystem branch.
 # Prerelease is a real derivation two callers duplicated identically, a Python package and a Home Assistant integration, neither versioning a .NET assembly.
