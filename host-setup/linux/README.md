@@ -36,7 +36,7 @@ Each script is LF with a shebang, and its executable bit is tracked in git. A fr
 The Windows registry has one source because `winget` tracks upstream. Here the distro package trails upstream on `gh`, on `node`, and on `uv`, so a tool comes from whichever source keeps up:
 
 - **The distro**, for `git` and `python`, where apt's own package is current enough.
-- **An upstream apt repository**, for `gh`, `node`, and `docker`, and for `dotnet` as a fallback, where upstream publishes one.
+- **An upstream apt repository**, for `gh`, `node`, `docker`, and `powershell`, and for `dotnet` as a fallback, where upstream publishes one.
 - **A released binary into `/usr/local/bin`**, for `jq`, `uv`, and `git-restore-mtime`, where upstream publishes no repository.
 
 No version is written into the script. Each upstream is asked what it carries now, so the script does not go stale between releases. Every step is idempotent, so a keyring or sources file is written only when its content differs. A re-run repairs drift rather than assuming a clean host.
@@ -59,13 +59,15 @@ A report changes nothing and reads the apt cache as it stands. An available vers
 
 An install or upgrade collects a tool whose install fails and carries on, so one failure does not strand the rest of the run. A refusal is different and ends the run. An unverifiable keyring, a checksum mismatch, or a declined prompt stops everything, because continuing past one would install something nobody vouched for.
 
-## Docker, node, and dotnet
+## Docker, node, dotnet, and powershell
 
 **Inside a WSL distribution, docker comes only from Docker Desktop's own WSL integration, never from installing `docker-ce`.** A native install would run a second engine beside Desktop's. `--install` and `--upgrade` therefore always skip it there and point at Docker Desktop's settings instead. The skip counts as success only where `docker` already answers, so a run cannot exit clean having found nothing working. On a native host, the conflicting packages Docker's own uninstall list names are removed first. Non-root use (`usermod -aG docker`) is left to the operator, as a group choice rather than a question of presence.
 
 **Installing `node` displaces distro packages.** The upstream package carries `npm` itself and conflicts with the distro's `npm` and `nodejs-doc`. The script asks apt what it would remove and puts that list in front of the operator first. Asking apt beats naming the conflicts here, because the conflict set belongs to the upstream package and changes without notice. The major line installed is whatever upstream currently marks LTS, read from its release index at run time.
 
 **For `dotnet`, the distro feed is the default and Microsoft's feed is the fallback.** The fallback is added only where the distro carries no SDK at all, because mixing the two feeds is what breaks a host. Microsoft's feed carries amd64 only, so any other architecture without a distro SDK is a named skip. The default set is the newest SDK line the feed carries. `--optional` adds every other line, for a host that builds against more than one.
+
+**`powershell` is optional and comes from Microsoft's feed, the same one `dotnet` falls back to.** The distro never carries a package, so there is no distro version to prefer and no mixing concern to weigh. It joins the default selection only under `--optional`, and naming it on the command line selects it either way. Like `dotnet`, the feed carries amd64 only, so any other architecture is a named skip. It is not part of the fleet contract, which is why it stays optional: a repository that needs `pwsh` opts in rather than every host carrying it.
 
 ## The Sudo Credential Cache
 
