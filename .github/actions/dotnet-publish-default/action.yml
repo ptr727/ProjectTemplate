@@ -1,10 +1,6 @@
-# Hub default for the build-executable hook, run when a caller carries no .github/actions/build-executable/action.yml of its own.
-# It publishes a .NET console project across the runtime matrix and zips every runtime into one archive.
-# This matches the vanilla project layout catalog/snippets/workflows/build-executable-task.yml once carried (./Console/Console.csproj).
-# A caller whose project lives elsewhere sets project-file rather than carrying a hook.
 # A composite action runs in one job, so the matrix is a sequential bash loop here rather than a job-level strategy.
-name: Build executable default
-description: Publish the console project across the runtime matrix and upload the release asset.
+name: Publish .NET project default
+description: Publish a .NET project across the runtime matrix and upload the release asset.
 
 inputs:
   branch:
@@ -24,9 +20,8 @@ inputs:
   assembly-informational-version:
     required: true
   project-file:
-    description: Path to the console project file.
-    required: false
-    default: ./Console/Console.csproj
+    description: Path to the .NET project file.
+    required: true
   asset-name:
     description: Name of the release archive without its .7z extension, so Widget produces Widget.7z. Empty derives it from the project file's stem, so ./Widget/Widget.csproj also produces Widget.7z. Letters, digits, dot, underscore and hyphen only, given or derived, and anything else fails the step.
     required: false
@@ -36,12 +31,20 @@ runs:
   using: composite
   steps:
 
+    - name: Require project file step
+      if: ${{ inputs.project-file == '' }}
+      shell: bash
+      run: |
+        set -Eeuo pipefail
+        echo "::error::project-file is required when the hub .NET publish default runs."
+        exit 1
+
     - name: Setup .NET SDK step
       uses: actions/setup-dotnet@a98b56852c35b8e3190ac28c8c2271da59106c68 # v6.0.0
       with:
         dotnet-version: 10.x
 
-    - name: Build executable project step
+    - name: Publish .NET project step
       shell: bash
       env:
         BRANCH: ${{ inputs.branch }}
@@ -74,7 +77,7 @@ runs:
             -property:PackageVersion="$SEMVER2"
         done
 
-    # The archive is named for the project unless the caller names it, since a release asset called Console.7z tells a downloader nothing.
+    # The archive is named for the project unless the caller names it.
     - name: Zip build output step
       id: zip
       if: ${{ inputs.smoke != 'true' }}

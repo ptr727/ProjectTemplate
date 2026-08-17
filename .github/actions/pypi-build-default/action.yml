@@ -1,11 +1,5 @@
-# Hub default for the build-pypi hook, run when a caller carries no .github/actions/build-pypi/action.yml of its own.
-# It builds the wheel and sdist and uploads the build artifact.
-# Publishing is a separate publish-pypi job at the caller stub, since id-token: write belongs at one entry point.
-# This hook contributes no release-asset-*.
-# It matches the vanilla project layout catalog/snippets/workflows/build-pypilibrary-task.yml once carried
-# (./PyPiLibrary, hatchling reading src/ptr727_projecttemplate_library/_version.py).
-name: Build PyPI library default
-description: Build the PyPI wheel and sdist and upload the build artifact for the publish-pypi job.
+name: Build PyPI package default
+description: Build a wheel and source distribution for the publish-pypi job.
 
 inputs:
   branch:
@@ -20,12 +14,10 @@ inputs:
     required: true
   project-dir:
     description: Working directory of the PyPI project.
-    required: false
-    default: ./PyPiLibrary
+    required: true
   version-file:
     description: Repo-relative path of the file carrying the hardcoded __version__ hatchling reads.
-    required: false
-    default: PyPiLibrary/src/ptr727_projecttemplate_library/_version.py
+    required: true
   uv-version:
     description: uv version, pinned in lockstep with the devcontainer's UV_VERSION.
     required: false
@@ -34,6 +26,14 @@ inputs:
 runs:
   using: composite
   steps:
+
+    - name: Require project paths step
+      if: ${{ inputs.project-dir == '' || inputs.version-file == '' }}
+      shell: bash
+      run: |
+        set -Eeuo pipefail
+        echo "::error::project-dir and version-file are required when the hub PyPI default runs."
+        exit 1
 
     - name: Setup uv step
       uses: astral-sh/setup-uv@c771a70e6277c0a99b617c7a806ffedaca235ff9 # v9.0.0

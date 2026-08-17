@@ -1,11 +1,5 @@
-# Hub default for the build-nuget hook, run when a caller carries no .github/actions/build-nuget/action.yml of its own.
-# It builds a NuGet library project and publishes it to NuGet.org through OIDC trusted publishing, so there is no stored API key.
-# See spec/secrets.json "nuget-oidc" for the mechanism this matches.
-# It also uploads the release asset.
-# A caller whose project lives elsewhere sets project-file rather than carrying a hook.
-# Every live NuGet repo today carries its own hook for that reason.
-name: Build NuGet library default
-description: Build, OIDC-publish, and upload the release asset for a NuGet library project.
+name: Push NuGet package default
+description: Build, OIDC-publish, and upload the release asset for a .NET project.
 
 inputs:
   branch:
@@ -28,9 +22,8 @@ inputs:
   assembly-informational-version:
     required: true
   project-file:
-    description: Path to the library project file.
-    required: false
-    default: ./NuGetLibrary/NuGetLibrary.csproj
+    description: Path to the .NET project file.
+    required: true
   nuget-username:
     description: nuget.org profile name for OIDC trusted publishing. Empty when push is false.
     required: false
@@ -39,6 +32,14 @@ inputs:
 runs:
   using: composite
   steps:
+
+    - name: Require project file step
+      if: ${{ inputs.project-file == '' }}
+      shell: bash
+      run: |
+        set -Eeuo pipefail
+        echo "::error::project-file is required when the hub NuGet default runs."
+        exit 1
 
     - name: Setup .NET SDK step
       uses: actions/setup-dotnet@a98b56852c35b8e3190ac28c8c2271da59106c68 # v6.0.0

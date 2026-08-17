@@ -730,7 +730,71 @@ powershell_install() {
     fi
 
     microsoft_feed
+
+    # A pwsh path that no dpkg package owns is a non-apt install.
+    # The portable tar.gz build and the apt package share /opt/microsoft/powershell/7.
+    # Remove the direct-download copy before installing the apt package.
+    # This is the reverse of docker_install removing conflicting apt packages before a native install.
+    powershell_remove_non_apt
+
     apt_install powershell
+}
+
+# Return true when a pwsh path is not owned by dpkg.
+# The direct-download layout installs /opt/microsoft/powershell/7 and a /usr/local/bin/pwsh symlink.
+# The apt package owns /usr/bin/pwsh instead.
+# Dpkg ownership distinguishes package-managed paths from copies installed by another source.
+# This applies the same ownership test as tool_unshadow to a shadowing copy.
+powershell_path_is_unowned() {
+    local path="$1" status=0
+    dpkg-query -S "$path" > /dev/null 2>&1 || status=$?
+    case "$status" in
+        0) return 1 ;;
+        1) return 0 ;;
+        *) die "Cannot determine dpkg ownership of $path" ;;
+    esac
+}
+
+powershell_non_apt_paths() {
+    local -a paths=()
+
+    # Remove the direct-download symlink when no package owns it.
+    # Remove the whole direct-download tree when no package owns its binary.
+    # The tree check uses the binary because dpkg-query -S answers about files.
+    # Removing the tree also clears files that the apt package does not carry.
+    if [[ -e /usr/local/bin/pwsh || -L /usr/local/bin/pwsh ]] && powershell_path_is_unowned /usr/local/bin/pwsh; then
+        paths+=(/usr/local/bin/pwsh)
+    fi
+    if [[ -d /opt/microsoft/powershell/7 ]] && powershell_path_is_unowned /opt/microsoft/powershell/7/pwsh; then
+        paths+=(/opt/microsoft/powershell/7)
+    fi
+
+    # A pwsh resolved elsewhere on PATH may belong to another package manager.
+    # Dpkg ownership does not identify the manager for an unowned path.
+    # Refuse to remove an unknown path and ask the operator to remove or reprioritize it.
+    # A relative PATH entry such as "." or "./bin" is never trusted.
+    # This is the same guard used by tool_shadow_path.
+    local resolved
+    resolved=$(type -P pwsh 2> /dev/null || true)
+    if [[ $resolved == /* ]] && powershell_path_is_unowned "$resolved"; then
+        case "$resolved" in
+            /usr/local/bin/pwsh | /opt/microsoft/powershell/7/pwsh) ;;
+            *) die "Non-apt pwsh at $resolved is outside the known cleanup paths, remove it before installing powershell" ;;
+        esac
+    fi
+
+    [[ ${#paths[@]} -eq 0 ]] && return 0
+    printf '%s\n' "${paths[@]}" | sort -u
+}
+
+powershell_remove_non_apt() {
+    local -a paths=()
+    readarray -t paths < <(powershell_non_apt_paths)
+    [[ ${#paths[@]} -eq 0 ]] && return 0
+
+    log "  Removing ${#paths[@]} non-apt pwsh install(s): ${paths[*]}"
+    confirm "  Remove these paths?" || die "Declined, PowerShell install left as it is"
+    run_root rm -rf "${paths[@]}"
 }
 
 # --- Tool dispatch ---

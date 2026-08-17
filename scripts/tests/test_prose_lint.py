@@ -22,7 +22,7 @@ import unittest
 from pathlib import Path
 from unittest import mock
 
-sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
+sys.path.insert(0, str(Path(__file__).resolve().parents[2] / ".github/actions/prose-gate"))
 import prose_lint
 
 REPO = Path(__file__).resolve().parent.parent.parent
