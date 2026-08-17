@@ -3,10 +3,9 @@ name: Get version information task
 # The fleet's single NBGV run, hosted here once and reached by a leaf or a publisher through a pinned uses:.
 # It has no repo-specific line, since version.json and the git history it walks are the only per-repo input.
 # Every caller reads the same five outputs plus the derived Prerelease flag.
-# The ref input defaults to the caller's own checkout ref.
-# A caller may pass a different ref, for example a publisher versioning a branch other than the one it dispatched from.
-# IGNORE_GITHUB_REF below keeps NBGV honest even when inputs.ref and github.ref disagree.
-# That check costs nothing on the common path where the two already match.
+# The ref input defaults to the caller's own checkout ref, and each run versions the one branch it was triggered on.
+# NBGV classifies that branch from GITHUB_REF directly, with no IGNORE_GITHUB_REF override, per WORKFLOW.md D3.1.
+# Classification follows the trigger ref whatever ref the caller checks out, so a caller passing a commit or another branch as ref gets that tree's height under the trigger branch's classification, never a different branch's.
 # AssemblyVersion, AssemblyFileVersion and AssemblyInformationalVersion are exposed for a .NET build to stamp.
 # A caller with no compiled code, a PyPI or HACS package, simply leaves them unused rather than the task growing a per-ecosystem branch.
 # Prerelease is a real derivation two callers duplicated identically, a Python package and a Home Assistant integration, neither versioning a .NET assembly.
@@ -71,13 +70,6 @@ jobs:
       - name: Run Nerdbank.GitVersioning tool step
         id: nbgv
         uses: dotnet/nbgv@master
-        env:
-          # Version from the checked-out branch rather than the CI ref.
-          # GITHUB_REF is reserved and a step env can't reliably override it, since the runner re-injects the dispatch ref.
-          # On a publish dispatched from the default branch, NBGV would therefore classify every leg as the public ref.
-          # IGNORE_GITHUB_REF makes NBGV ignore GITHUB_REF and use the checked-out branch, which each caller already is.
-          # The validate-release gate backstops any misclassification.
-          IGNORE_GITHUB_REF: "true"
 
       # NBGV's PrereleaseVersion output only carries version.json's `-tag` segment, empty for a bare SemVer base.
       # The auto-appended -g{sha} segment lives in SemVer2 but is not exposed there.
