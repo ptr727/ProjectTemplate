@@ -222,6 +222,8 @@ CI runs the full lint set, but run the linters locally before pushing to catch i
 
 The Docker invocations below are the same ones the VS Code tasks use, for ad-hoc or headless (agent) runs.
 
+**Restricted executors keep tool state in a task-specific writable temporary directory.** Set each tool's own cache variable, such as `UV_CACHE_DIR` and `RUFF_CACHE_DIR`, instead of changing `HOME` or an agent configuration directory. A sandbox denial is not a lint result. Preserve the denial, then rerun the required command through the executor's scoped approval mechanism. Network approval covers a package or image fetch. Host approval covers access to the Docker socket. Use a narrow reusable command prefix when the executor supports one, and report the approved rerun as the evidence.
+
 - **editorconfig-checker** (line endings + charset across the tree):
 
   ```sh

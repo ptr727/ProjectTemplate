@@ -49,6 +49,8 @@ An agent session is billed on the context it carries, not the work it does. Ever
 
 - **Bound output at the source.** Write every command so its output is the answer, not the haystack: a `--jq` projection on an API call, a count or files-only flag on a search, a summary flag on a diff, an explicit cap on anything unbounded. A command whose output you then skim is a command that should have been narrower.
 - **Keep a long query in a file, not in the command.** A heredoc re-typed on every call costs its own length in context each time, often more than the answer it retrieves.
+- **Keep generated caches outside the checkout when the executor restricts writes.** Give each task a cache directory under a writable temporary root. Point tools such as uv and ruff there through their own cache variables. Never repurpose `HOME` or an agent's configuration directory to make a tool run.
+- **Report an execution boundary separately from a check finding.** A denied path, network request, or Docker socket says the check did not run. Preserve that failure, then use the executor's approval mechanism for the required rerun. Request the narrowest reusable command prefix the executor supports. Report the rerun's result as the verification evidence.
 
 ### Delegation
 
