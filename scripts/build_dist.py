@@ -88,6 +88,16 @@ def source_digest(names):
     return tree_digest(SKILLS_SRC, names)
 
 
+def has_exact_skill_directories(root, names):
+    """Whether `root` exists and contains only the expected skill directories."""
+    if not root.is_dir() or root.is_symlink():
+        return False
+    entries = list(root.iterdir())
+    return all(entry.is_dir() for entry in entries) and {entry.name for entry in entries} == set(
+        names
+    )
+
+
 def expected_manifest(names):
     """The plugin.json content `names` should produce, entirely deterministic.
 
@@ -163,20 +173,14 @@ def is_stale():
     # An extra directory under DIST_PLUGIN/skills/ (a retired skill left behind, one added by hand) would never be read and could not affect that comparison.
     # Checked by name first, deliberately not folded into the digest walk itself.
     dist_skills = DIST_PLUGIN / "skills"
-    actual_names = (
-        {p.name for p in dist_skills.iterdir() if p.is_dir()} if dist_skills.is_dir() else set()
-    )
-    if actual_names != set(names):
+    if not has_exact_skill_directories(dist_skills, names):
         return True
     current_source_digest = source_digest(names)
     if DIGEST_STAMP.read_text(encoding="utf-8").strip() != current_source_digest:
         return True
     if current_source_digest != tree_digest(dist_skills, names):
         return True
-    github_names = (
-        {p.name for p in GITHUB_SKILLS.iterdir() if p.is_dir()} if GITHUB_SKILLS.is_dir() else set()
-    )
-    if github_names != set(names):
+    if not has_exact_skill_directories(GITHUB_SKILLS, names):
         return True
     return current_source_digest != tree_digest(GITHUB_SKILLS, names)
 

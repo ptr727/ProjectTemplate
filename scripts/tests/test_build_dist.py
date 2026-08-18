@@ -137,6 +137,17 @@ class RegenerateCase(unittest.TestCase):
         (orphan / "SKILL.md").write_text("stray", encoding="utf-8")
         self.assertTrue(build_dist.is_stale())
 
+    def test_a_stray_file_in_github_skills_reports_stale(self) -> None:
+        self.make_skill("foo")
+        build_dist.regenerate()
+        (self.github_skills / "README.md").write_text("stray", encoding="utf-8")
+        self.assertTrue(build_dist.is_stale())
+
+    def test_a_missing_empty_github_skills_tree_reports_stale(self) -> None:
+        build_dist.regenerate()
+        self.github_skills.rmdir()
+        self.assertTrue(build_dist.is_stale())
+
     def test_a_deleted_manifest_reports_stale_even_with_a_current_digest_stamp(self) -> None:
         self.make_skill("foo")
         build_dist.regenerate()
@@ -192,6 +203,12 @@ class RegenerateCase(unittest.TestCase):
         build_dist.regenerate()
         (self.dist_plugin / "skills" / "orphan").mkdir()
         (self.dist_plugin / "skills" / "orphan" / "SKILL.md").write_text("stray", encoding="utf-8")
+        self.assertTrue(build_dist.is_stale())
+
+    def test_a_stray_file_in_generated_plugin_skills_reports_stale(self) -> None:
+        self.make_skill("foo")
+        build_dist.regenerate()
+        (self.dist_plugin / "skills" / "README.md").write_text("stray", encoding="utf-8")
         self.assertTrue(build_dist.is_stale())
 
     def test_editing_a_skill_after_regenerate_reports_stale(self) -> None:
