@@ -154,6 +154,25 @@ class CarryInventoryTests(unittest.TestCase):
 
         self.assertEqual(changes, ["remove owned/extra/empty", "remove owned/extra"])
 
+    def test_apply_prunes_directories_emptied_by_extra_file_removal(self) -> None:
+        with tempfile.TemporaryDirectory() as temp:
+            root = pathlib.Path(temp)
+            source_root = root / "source"
+            repository = root / "repo"
+            target_root = repository / "owned"
+            source_root.mkdir()
+            (target_root / "extra").mkdir(parents=True)
+            (target_root / "extra/file.txt").write_text("extra", encoding="utf-8")
+            source = carry.inventory(source_root, ["**/*"])
+            result = carry.compare(source, carry.inventory(target_root, ["**/*"]))
+
+            changes = carry.apply_tree(source, target_root, repository, result)
+            final = carry.compare(source, carry.inventory(target_root, ["**/*"]))
+
+        self.assertEqual(changes, ["remove owned/extra/file.txt", "remove owned/extra"])
+        self.assertEqual(final["extra"], [])
+        self.assertEqual(final["extraDirectories"], [])
+
 
 class CarryManifestTests(unittest.TestCase):
     def test_selector_excludes_inapplicable_declaration(self) -> None:

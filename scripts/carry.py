@@ -127,6 +127,21 @@ def apply_tree(
     result: dict[str, Any],
 ) -> list[str]:
     changes: list[str] = []
+    required_directories = set(source.directories)
+    for relative in [*source.files, *source.directories]:
+        required_directories.update(
+            str(parent) for parent in pathlib.PurePosixPath(relative).parents if str(parent) != "."
+        )
+
+    def remove_empty_ancestors(directory: pathlib.Path) -> None:
+        while directory != target_root and directory.exists() and not any(directory.iterdir()):
+            relative = directory.relative_to(target_root).as_posix()
+            if relative in required_directories:
+                return
+            directory.rmdir()
+            changes.append(f"remove {directory.relative_to(repository_root)}")
+            directory = directory.parent
+
     created_roots = []
     current = target_root
     while current != repository_root and not current.exists():
@@ -149,7 +164,7 @@ def apply_tree(
         destination = target_root / relative
         destination.unlink()
         changes.append(f"remove {destination.relative_to(repository_root)}")
-    removed_directories: set[pathlib.Path] = set()
+        remove_empty_ancestors(destination.parent)
     for relative in sorted(
         result["extraDirectories"],
         key=lambda value: len(pathlib.PurePosixPath(value).parts),
@@ -159,17 +174,7 @@ def apply_tree(
         if directory.exists() and not any(directory.iterdir()):
             directory.rmdir()
             changes.append(f"remove {directory.relative_to(repository_root)}")
-            removed_directories.add(directory)
-            parent = directory.parent
-            while (
-                parent != target_root
-                and parent not in removed_directories
-                and not any(parent.iterdir())
-            ):
-                parent.rmdir()
-                changes.append(f"remove {parent.relative_to(repository_root)}")
-                removed_directories.add(parent)
-                parent = parent.parent
+            remove_empty_ancestors(directory.parent)
     return changes
 
 
