@@ -61,6 +61,9 @@ Opening a pull request starts this loop by default. Creating the PR is not a ter
 Only an explicit maintainer instruction may stop, defer, or alter the loop. A draft state, silence,
 or a request that says only "open a PR" is not such an instruction.
 
+Run every `scripts/pr_review.py` command below from a hub checkout. The script is hosted there and
+is never carried into a downstream repository.
+
 1. Push changes to the PR branch and open the pull request when it does not exist.
 2. Run `scripts/pr_review.py status` once in the foreground and read its output.
 3. Re-request a review for the **current head SHA**. Auto-trigger is unreliable, so request it
