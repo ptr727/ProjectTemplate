@@ -79,7 +79,7 @@ A target contributes a file to the GitHub release by uploading a workflow artifa
 ```mermaid
 flowchart LR
   dotnet[dotnet-publish] -->|release-asset-<branch>-dotnet-publish| store[(run artifacts)]
-  nuget[build-nuget] -->|release-asset-<branch>-nuget| store
+  nuget[build-nuget] -->|release-asset-<branch>-nugetlibrary| store
   store -->|pattern + merge-multiple| rel["github-release job (D6)"]
   reg[registry leaf: nuget / pypi / docker] -->|push, no asset| registries[(registries)]
 ```
