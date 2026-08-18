@@ -500,7 +500,10 @@ def main():
                 )
         if tree.get("fidelity") != "verbatim-tree":
             errors.append(f"files.json: tree {source} fidelity must be 'verbatim-tree'")
-        check_selector(f"tree {source}", tree.get("appliesTo", "*"))
+        if "appliesTo" not in tree:
+            errors.append(f"files.json: tree {source} is missing required appliesTo")
+        else:
+            check_selector(f"tree {source}", tree["appliesTo"])
         include = tree.get("include")
         if not is_str_list(include) or not include:
             errors.append(f"files.json: tree {source} include must be a non-empty array of strings")
