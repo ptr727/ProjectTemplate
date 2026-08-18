@@ -451,7 +451,7 @@ jobs:
   # Single source of the release-gate decision (publish or not, stable or not), reused by every job below.
   plan:
     name: Plan release job
-    uses: ptr727/ProjectTemplate/.github/workflows/publish-plan-task.yml@0b07a59d7c65d07d8df275a96deaf2e06cbefd51 # 2.0.352
+    uses: ptr727/ProjectTemplate/.github/workflows/publish-plan-task.yml@<hub-main-commit-sha> # <release-tag>
     with:
       event_name: ${{ github.event_name }}
       actor: ${{ github.actor }}
@@ -462,7 +462,7 @@ jobs:
     name: Validate job
     needs: [plan]
     if: ${{ needs.plan.outputs.publish == 'true' }}
-    uses: ptr727/ProjectTemplate/.github/workflows/validate-task.yml@0b07a59d7c65d07d8df275a96deaf2e06cbefd51 # 2.0.352
+    uses: ptr727/ProjectTemplate/.github/workflows/validate-task.yml@<hub-main-commit-sha> # <release-tag>
     permissions:
       contents: read
     secrets:
