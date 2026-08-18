@@ -28,6 +28,7 @@ import pr_review
 
 REPO = Path(__file__).resolve().parent.parent.parent
 RUNBOOK = REPO / ".github" / "copilot-instructions.md"
+GOVERNANCE = REPO / "GOVERNANCE.md"
 
 HEAD = "a" * 40
 OLD = "b" * 40
@@ -2347,6 +2348,75 @@ def page(threads: list[dict], more: bool = False, cursor: str | None = None) -> 
     return {"nodes": threads, "pageInfo": {"hasNextPage": more, "endCursor": cursor}}
 
 
+COMMENT_BODY = "Disproven: the bound is checked before the write."
+COMMENT = {
+    "id": "c1",
+    "url": "https://github.com/o/r/pull/7#issuecomment-1",
+    "body": COMMENT_BODY,
+}
+
+
+class CommentCase(unittest.TestCase):
+    """Drive `comment` against a live PR target and a crafted mutation response."""
+
+    def setUp(self) -> None:
+        self.out = self.enterContext(contextlib.redirect_stdout(io.StringIO()))
+        self.enterContext(mock.patch.object(pr_review, "origin_owner", return_value="o"))
+        self.calls: list[tuple[str, dict[str, object]]] = []
+
+    def wire(self, target: dict | None = None, comment: dict | None = COMMENT) -> None:
+        def fake(query: str, **variables: object) -> dict:
+            self.calls.append((query, variables))
+            if "pullRequest(number" in query:
+                return {"repository": {"pullRequest": target}}
+            if "addComment" in query:
+                return {"addComment": {"commentEdge": {"node": comment}}}
+            raise AssertionError(f"unexpected document: {query[:60]}")
+
+        self.enterContext(mock.patch.object(pr_review, "gh_graphql", side_effect=fake))
+
+    def run_comment(self, repo: str = "o/r", body: str = COMMENT_BODY) -> int:
+        return pr_review.main(["comment", "7", "--repo", repo, "--body", body])
+
+
+class TestCommentConfirmsItsTargetAndResult(CommentCase):
+    def test_the_pr_id_is_read_live_and_the_returned_comment_is_confirmed(self) -> None:
+        self.wire({"id": "PR_from_query", "url": "https://github.com/o/r/pull/7"})
+        self.assertEqual(0, self.run_comment())
+        mutation = next((v for q, v in self.calls if "addComment" in q))
+        self.assertEqual("PR_from_query", mutation["subjectId"])
+        self.assertEqual(COMMENT["body"], mutation["body"])
+        self.assertIn(COMMENT["url"], self.out.getvalue())
+        self.assertIn("status=COMMENTED", self.out.getvalue())
+
+    def test_an_unreadable_pr_stops_before_the_mutation(self) -> None:
+        self.wire(None)
+        self.assertEqual(65, self.run_comment())
+        self.assertFalse(any("addComment" in query for query, _ in self.calls))
+        self.assertIn("TARGET_NOT_READ", self.out.getvalue())
+
+    def test_a_response_without_a_url_is_not_reported_as_posted(self) -> None:
+        self.wire(
+            {"id": "PR_from_query", "url": "https://github.com/o/r/pull/7"},
+            {"id": "c1", "url": None, "body": COMMENT["body"]},
+        )
+        self.assertEqual(66, self.run_comment())
+        self.assertIn("COMMENT_NOT_CONFIRMED", self.out.getvalue())
+
+    def test_a_response_with_a_different_body_is_not_reported_as_posted(self) -> None:
+        self.wire(
+            {"id": "PR_from_query", "url": "https://github.com/o/r/pull/7"},
+            {"id": "c1", "url": COMMENT["url"], "body": ""},
+        )
+        self.assertEqual(66, self.run_comment())
+
+    def test_a_target_under_another_owner_is_refused_before_the_pr_read(self) -> None:
+        self.wire({"id": "PR_wrong_owner", "url": "https://github.com/x/r/pull/7"})
+        self.assertEqual(64, self.run_comment(repo="x/r"))
+        self.assertEqual([], self.calls)
+        self.assertIn("OUT_OF_SCOPE", self.out.getvalue())
+
+
 LANDED = {"id": "c1", "url": "https://github.com/o/r/pull/7#discussion_r1", "body": "Fixed in abc."}
 
 
@@ -2560,6 +2630,19 @@ class TestReplyArguments(unittest.TestCase):
 
     def test_a_missing_match_is_rejected_rather_than_matching_everything(self) -> None:
         self.assertIn("--match", self.err(["reply", "7", "--repo", "o/r", "--body", "Fixed."]))
+
+    def test_a_comment_requires_a_non_empty_body(self) -> None:
+        for body in ("", "   "):
+            with self.subTest(body=body):
+                self.assertIn("--body", self.err(["comment", "7", "--repo", "o/r", "--body", body]))
+
+    def test_reply_only_options_are_rejected_on_comment(self) -> None:
+        for flag in (["--match", "x"], ["--resolve"], ["--path", "a.py"]):
+            with self.subTest(flag=flag[0]):
+                self.assertIn(
+                    flag[0],
+                    self.err(["comment", "7", "--repo", "o/r", "--body", "Fixed.", *flag]),
+                )
 
     def test_a_writing_option_on_a_reading_command_is_an_error(self) -> None:
         """Silently ignored, it reads as an option that took effect on a run that wrote nothing."""
@@ -2854,17 +2937,16 @@ class TestContract(unittest.TestCase):
         text = RUNBOOK.read_text(encoding="utf-8")
         self.assertIn("partial or absent coverage statement", text)
 
-    def test_the_only_writes_are_the_three_named_here(self) -> None:
-        """Every write this script makes is one of three, and each arrived as a reviewed change.
+    def test_the_only_writes_are_the_four_named_here(self) -> None:
+        """Every write this script makes is one of four, and each arrived as a reviewed change.
 
         The read subcommands are the bulk of it and a mutation reaching them is a digest that
         writes, so the whole-source guard stays and is narrowed to the documents the script
         actually needs rather than dropped when the first of them arrived. `requestReviews`
-        joined `addPullRequestReviewThreadReply`/`resolveReviewThread` deliberately, closing a
-        gap where `wait` only ever polled and never asked, which twice left it waiting the full
-        timeout for a review nothing had requested. `union:true` only adds to the request set
-        (see `request_copilot_review`), so it cannot drop a human reviewer requested alongside
-        Copilot, unlike the `union:false` clear-and-recover form the runbook documents by hand.
+        closes the gap where `wait` only polled and never asked. `addComment` owns body-only
+        finding responses. The reply and resolve pair owns inline threads. `union:true` only
+        adds to the request set, so it cannot drop a requested human reviewer. The runbook keeps
+        the `union:false` clear-and-recover form as a manual operation.
         """
         source = (REPO / "scripts" / "pr_review.py").read_text(encoding="utf-8")
         for verb in (
@@ -2891,8 +2973,9 @@ class TestContract(unittest.TestCase):
             "an automatic one",
         )
         # `mutation(` opens a document, so the count is the number of documents.
-        # A fourth arriving is a write nobody reviewed as one rather than a style drift.
-        self.assertEqual(3, source.count("mutation("))
+        # A fifth arriving is a write nobody reviewed as one rather than a style drift.
+        self.assertEqual(4, source.count("mutation("))
+        self.assertIn("addComment", source)
         self.assertIn("addPullRequestReviewThreadReply", source)
         self.assertIn("resolveReviewThread", source)
         self.assertIn("requestReviews", source)
@@ -2901,7 +2984,15 @@ class TestContract(unittest.TestCase):
         """Provider mechanics have one executable owner instead of copied query snippets."""
         text = RUNBOOK.read_text(encoding="utf-8")
         self.assertIn("scripts/pr_review.py", text)
+        self.assertIn("`comment`", text)
         self.assertNotIn("mutation(", text)
+
+    def test_the_fleet_routes_provider_writes_through_portable_tooling(self) -> None:
+        """A connector-first write recreates the provider-specific 403 this change removes."""
+        text = GOVERNANCE.read_text(encoding="utf-8")
+        self.assertIn("Provider connectors are read-only for fleet work", text)
+        self.assertIn("documented hub tool", text)
+        self.assertIn("authenticated `gh`", text)
 
     def test_no_argument_accepts_a_thread_id(self) -> None:
         """The failure is an id typed into a mutation, so the fix is having nowhere to type one.

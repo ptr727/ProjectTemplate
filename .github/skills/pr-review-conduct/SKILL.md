@@ -124,7 +124,8 @@ reviewer's own words to identify it), give one bold verdict per finding (`Fixed 
 `Disproven`, or `No change needed`), state the `(N)` count the block gave so answers can be
 checked against findings, and link the review round. **Read every round, not only the head.** A
 suppressed finding does not retire when a later push supersedes it, it just stops showing up in a
-head-scoped query while still unanswered.
+head-scoped query while still unanswered. Post the answer with `scripts/pr_review.py comment`
+from a hub checkout. Do not use a provider connector or reconstruct the GitHub mutation.
 
 ## Escalate to the maintainer when
 
@@ -138,7 +139,8 @@ head-scoped query while still unanswered.
 
 This skill is the provider-agnostic contract. Use `scripts/pr_review.py` from a hub checkout for
 the GitHub-specific API operations. `status` reports coverage, threads, body-only findings, and
-shapes in one call. `wait` requests and polls in-process. `reply` resolves a thread by matching
-the finding's own words instead of a line number a fix push can move. The repository's
+shapes in one call. `wait` requests and polls in-process. `comment` posts a PR-conversation
+answer after it reads the PR node ID. `reply` resolves a thread by matching the finding's own
+words instead of a line number a fix push can move. The repository's
 `.github/copilot-instructions.md` bootstraps Copilot into the `code-review` skill and its stable
 coverage marker. Do not reconstruct the API operations by hand.
