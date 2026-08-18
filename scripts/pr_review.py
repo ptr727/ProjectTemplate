@@ -14,8 +14,9 @@ Subcommands
            review findings between them. Read-only. Exit 0 = every reference resolves, 70 = one
            does not, 71 = there were references and none could be read, so nothing was decided.
   status   One digest line, any unresolved threads, and any suppressed findings. Read-only.
-           Exit 0 = every shape in the reviewer's output is one this reads, and the round
-           covering the head read the whole diff.
+           Exit 0 = no review covers the head yet, or every output shape is recognized and the
+           round covering the head read the whole diff. Use `wait` when review presence is the
+           condition, since `status` reports an absent review without treating it as a failure.
            42 = that round read fewer files than the pull request changed, so part of the diff
            has no review at all. Measured over four pull requests and seven rounds here, a
            re-request never cleared one and no round ever recovered, so this is a state to

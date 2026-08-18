@@ -2827,6 +2827,9 @@ class TestClaimsIsReadOnly(unittest.TestCase):
 
 
 class TestContract(unittest.TestCase):
+    def test_status_documents_its_no_review_success_case(self) -> None:
+        self.assertIn("Exit 0 = no review covers the head yet", pr_review.__doc__ or "")
+
     def test_the_runbook_bootstraps_the_review_skill(self) -> None:
         """Copilot reaches the provider-independent review contract from its always-on file."""
         text = RUNBOOK.read_text(encoding="utf-8")
