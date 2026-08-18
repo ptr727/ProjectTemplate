@@ -6,7 +6,7 @@ How faithfully each carried unit must survive the carry, and how that is verifie
 
 Carried content is a class with virtual functions. The **fixed** part is the interface: when a thing is invoked, what it is named, and where it is wired. The **overridable** part is the implementation body, which a repo replaces to fit its own targets. Validation must allow the override while detecting a change to the interface or to content meant to stay fixed. Integrity is by **content hash, never a version number**. A version stamp is a claim a repo can keep while editing the body, so it is never trusted for detection.
 
-## The Four Fidelity Levels
+## The Fidelity Levels
 
 Each [`spec/files.json`][files] entry declares one `fidelity`, defaulting to `presence`.
 
@@ -14,6 +14,8 @@ Each [`spec/files.json`][files] entry declares one `fidelity`, defaulting to `pr
 - **intent** - carried faithfully but judged by meaning, not bytes. A downstream copy legitimately differs (a governed divergence or a paraphrase), and equivalence is a human call via `intentRef`. The audit asserts presence, plus a last-modified staleness advisory at drift: a hub canonical changing after the copy's own last commit marks the copy as possibly trailing, a hint rather than proof, and content is never judged.
 - **verbatim** - byte-identical to the hub's canonical after line-ending, action-pin, and job-needs normalization. The audit content-hashes the downstream copy against canonical. It applies to a whole file, a workflow job region (a job selected by key), or a Markdown section region (a `## heading` block selected by name). The section granularity lets one file be **intent overall while a few of its sections are verbatim**. A universal rule block stays byte-identical fleet-wide even though the rest of the document is a repo-adapted paraphrase, so a stale section or a missing rule is caught while its heading still passes the presence check.
 - **interface** - an overridable body that must honor a named contract. The audit checks the contract by name and wiring, never the body.
+
+A declaration in `trees[]` uses **verbatim-tree**. Each included source file exists at the corresponding target path with identical bytes. A pruned target contains no extra path. The tree root exists even when the included source inventory is empty. The carry engine rejects overlapping prune boundaries because two declarations cannot own the same path safely.
 
 Fidelity is a declared field defaulting to `presence`, never inferred from `whole`/`placeholders`. `.editorconfig` and `.markdownlint-cli2.jsonc` are both whole with no placeholders yet sit at opposite fidelity, because the discriminator is governance, not field shape.
 
@@ -33,6 +35,8 @@ Once a workflow's job graph moves into the hub, the carried unit is a caller stu
 ## Normalization
 
 A verbatim check compares content by hash after **line-ending, action-pin, and job-needs normalization**. EOL variance is governed by the line-ending rules, a `uses: <action>@<sha>` pin (with its trailing `# vN` comment) is Dependabot-owned and bumped per repo, and a job's `needs:` list is pruned per repo to its vendored targets (an unvendored name fails the workflow to load), so all three are governed drift rather than a fidelity deviation. This keeps a verbatim workflow job region (the `github-release` job) from flagging on a routine action bump or a legitimate needs-prune while still catching a real structural fork. It does **not** mask placeholders: a verbatim unit carries none. The files that declare a `placeholders` list (for example `.github/copilot-instructions.md` with `<owner>`, `<repo>`, `<N>`) are fidelity `intent`, judged by hand and never hashed. Masking could not serve a hash anyway. A downstream copy holds the substituted value (`ptr727`), not the token (`<owner>`), so masking the token in the canonical alone would guarantee a mismatch. A verbatim unit that ever needed a per-repo substitution would require template-matching (the canonical as a pattern, the copy as an instance), not this content hash. None does today.
+
+`verbatim-tree` applies no normalization. It compares file bytes because a fully owned generated tree has no per-repository substitutions or Dependabot-owned regions.
 
 ## Stale Versus Modified
 

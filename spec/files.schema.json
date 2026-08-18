@@ -3,10 +3,27 @@
     "$id": "https://github.com/ptr727/ProjectTemplate/spec/files.schema.json",
     "title": "Standardization baseline files",
     "type": "object",
-    "required": ["baseline"],
+    "required": ["baseline", "trees"],
     "properties": {
         "$schema": { "type": "string" },
         "note": { "type": "string" },
+        "trees": {
+            "type": "array",
+            "items": {
+                "type": "object",
+                "required": ["source", "target", "fidelity", "appliesTo", "include", "prune"],
+                "additionalProperties": false,
+                "properties": {
+                    "source": { "type": "string", "minLength": 1 },
+                    "target": { "type": "string", "minLength": 1 },
+                    "fidelity": { "const": "verbatim-tree" },
+                    "appliesTo": { "type": ["string", "array"], "items": { "type": "string" }, "minItems": 1 },
+                    "include": { "type": "array", "items": { "type": "string", "minLength": 1 }, "minItems": 1 },
+                    "prune": { "type": "boolean" },
+                    "allowHubTarget": { "type": "boolean" }
+                }
+            }
+        },
         "baseline": {
             "type": "array",
             "items": {

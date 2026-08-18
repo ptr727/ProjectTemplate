@@ -25,6 +25,7 @@ convergence can be verified before it is promoted, without editing the registry.
 
 import argparse
 import base64
+import fnmatch
 import functools
 import hashlib
 import itertools
@@ -103,7 +104,17 @@ def hub_only_paths(spec):
     So only a `retire` disposition in spec/divergences.json asserts a deletion, and an untriaged hit asks for
     the file to be read.
     """
-    return hub_tracked() - {e["path"] for e in spec["files"]["baseline"]}
+    declared = {e["path"] for e in spec["files"]["baseline"]}
+    tree_paths = set()
+    for declaration in spec["files"].get("trees", []):
+        root = declaration["source"].rstrip("/") + "/"
+        tree_paths.update(
+            path
+            for path in hub_tracked()
+            if path.startswith(root)
+            and tree_path_included(path.removeprefix(root), declaration["include"])
+        )
+    return hub_tracked() - declared - tree_paths
 
 
 def gap_dispositions(spec):
@@ -123,8 +134,8 @@ def gap_dispositions(spec):
     return out
 
 
-def repo_tree(slug, ground_head):
-    """Every blob path on a repo's ground-truth branch, or None where it could not be read in full.
+def repo_tree_entries(slug, ground_head):
+    """Every blob path and object SHA on a repo branch, or None when it cannot be read in full.
 
     The trees endpoint takes a tree sha rather than a ref name, so the branch payload already read is
     resolved to its tree instead of passing the branch name, which 404s.
@@ -137,7 +148,26 @@ def repo_tree(slug, ground_head):
     tree = gh(f"repos/{slug}/git/trees/{sha}?recursive=1", ok404=True)
     if not tree or "tree" not in tree or tree.get("truncated"):
         return None
-    return {n["path"] for n in tree["tree"] if n.get("type") == "blob"}
+    return {n["path"]: n.get("sha") for n in tree["tree"] if n.get("type") == "blob"}
+
+
+def repo_tree(slug, ground_head):
+    entries = repo_tree_entries(slug, ground_head)
+    return None if entries is None else set(entries)
+
+
+def git_blob_sha(content):
+    header = f"blob {len(content)}\0".encode()
+    return hashlib.sha1(header + content).hexdigest()
+
+
+def tree_path_included(path, patterns):
+    return any(
+        pattern == "**/*"
+        or fnmatch.fnmatchcase(path, pattern)
+        or pathlib.PurePosixPath(path).match(pattern)
+        for pattern in patterns
+    )
 
 
 def hub_name():
@@ -1296,6 +1326,7 @@ def classify_verbatim(down_text, canon_text, past_texts):
 _HISTORY_CACHE: dict[
     str, list[str]
 ] = {}  # rel_path -> past revision contents, cached because one canonical is compared against every audited repo
+_BYTE_HISTORY_CACHE: dict[str, list[bytes]] = {}
 
 
 def git_file_history(rel_path):
@@ -1327,6 +1358,32 @@ def git_file_history(rel_path):
                 out.append(s.stdout)
     _HISTORY_CACHE[rel_path] = out
     return out
+
+
+def git_file_history_bytes(rel_path):
+    """Every readable historical byte sequence for a hub-tracked file."""
+    if rel_path in _BYTE_HISTORY_CACHE:
+        return _BYTE_HISTORY_CACHE[rel_path]
+    history = []
+    commits = subprocess.run(
+        ["git", "log", "--format=%H", "--", rel_path],
+        cwd=ROOT,
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    if commits.returncode == 0:
+        for commit in commits.stdout.split():
+            content = subprocess.run(
+                ["git", "show", f"{commit}:{rel_path}"],
+                cwd=ROOT,
+                capture_output=True,
+                check=False,
+            )
+            if content.returncode == 0:
+                history.append(content.stdout)
+    _BYTE_HISTORY_CACHE[rel_path] = history
+    return history
 
 
 @functools.cache
@@ -1860,12 +1917,89 @@ def audit_repo(entry, spec, branch=None):
                     )
                 )
 
+    # --- Manifest-owned verbatim trees ---
+    carried_entries = repo_tree_entries(slug, ground_head)
+    if carried_entries is None:
+        findings.append(
+            (
+                "DRIFT",
+                f"tree: could not read the file tree for {slug}@{ground} in full, so verbatim trees are undecided",
+            )
+        )
+    elif entry.get("name") != HUB_NAME:
+        for declaration in spec["files"].get("trees", []):
+            if not applies(declaration.get("appliesTo", "*"), sel):
+                continue
+            source_root = declaration["source"].rstrip("/")
+            target_root = declaration["target"].rstrip("/")
+            source_files = {
+                path.removeprefix(source_root + "/"): path
+                for path in hub_tracked()
+                if path.startswith(source_root + "/")
+                and tree_path_included(path.removeprefix(source_root + "/"), declaration["include"])
+            }
+            target_files = {
+                path.removeprefix(target_root + "/"): path
+                for path in carried_entries
+                if path.startswith(target_root + "/")
+            }
+            for relative in sorted(set(source_files) - set(target_files)):
+                findings.append(("LETTER", f"tree: {target_root}/{relative} is absent on {ground}"))
+            for relative in sorted(set(source_files) & set(target_files)):
+                source_path = source_files[relative]
+                try:
+                    source_bytes = (ROOT / source_path).read_bytes()
+                    source_sha = git_blob_sha(source_bytes)
+                except OSError as exc:
+                    findings.append(
+                        (
+                            "DRIFT",
+                            f"tree: canonical {source_path} is unreadable, comparison undecided: {exc}",
+                        )
+                    )
+                    continue
+                target_path = target_files[relative]
+                if source_sha == carried_entries[target_path]:
+                    continue
+                content = gh(f"repos/{slug}/contents/{target_path}?ref={ground}", ok404=True)
+                if content is None or content.get("encoding") != "base64":
+                    findings.append(
+                        (
+                            "DRIFT",
+                            f"tree: {target_path} differs but its content is unreadable, comparison undecided",
+                        )
+                    )
+                    continue
+                target_bytes = base64.b64decode(content["content"])
+                verdict = (
+                    "stale" if target_bytes in git_file_history_bytes(source_path) else "modified"
+                )
+                if verdict == "stale":
+                    findings.append(
+                        (
+                            "DRIFT",
+                            f"tree: {target_path} matches a past hub revision, not the current canonical",
+                        )
+                    )
+                else:
+                    findings.append(
+                        (
+                            "DRIFT",
+                            f"tree: {target_path} differs from the canonical and matches no past hub revision",
+                        )
+                    )
+            if declaration.get("prune"):
+                for relative in sorted(set(target_files) - set(source_files)):
+                    findings.append(
+                        ("DRIFT", f"tree: {target_root}/{relative} is extra under a pruned target")
+                    )
+
     # --- Hub-only files a repo carries and should not ---
     # The manifest declares what a repo carries, so a path the hub tracks and the manifest omits is hub-hosted content per GOVERNANCE.md "Hub-Hosted Tooling".
     # A downstream copy of one is drift whose remedy is a deletion rather than a re-vendor, which no other check reports: every check above reads a path the manifest names, so nothing looks at what a repo carries beyond the baseline.
     # Skipped for the hub, whose own tracked files are the source and are all "hub-only" by construction.
     if entry.get("name") != HUB_NAME:
-        carried = repo_tree(slug, ground_head)
+        carried = None if carried_entries is None else set(carried_entries)
         if carried is None:
             findings.append(
                 (

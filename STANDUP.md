@@ -140,6 +140,15 @@ Capture the source, verify the capture **against the source**, and hold the veri
 
 ## 2. Carry the Baseline Files
 
+After the baseline files are present, apply every applicable whole-tree declaration from the fetched hub checkout. The carry tool resolves the repository through the registry and refuses a shared or dirty target worktree.
+
+```shell
+python3 scripts/carry.py check <Repo> --target /path/to/worktree
+python3 scripts/carry.py apply <Repo> --target /path/to/worktree
+```
+
+Read every extra-path report before `apply` prunes it. Finish with another `check`. It uses the same comparison as `apply` and must report clean.
+
 Copy every [`spec/files.json`][files] entry whose `appliesTo` matches the repo's **selector set**, **adapted, not cloned**. The selector set is the repo's `types` plus its `workflowModel`, `releaseTrigger`, and `consumerModel`, so filtering on type alone silently drops the entries a non-type selector carries ([`spec/scope-model.md`][scope-model] defines the four namespaces and how they resolve). The prose files (`CODESTYLE.md`, `README.md`, and the like) describe the repo's own toolchain, so adapt them to reality rather than propagating template specifics verbatim (see the "Adapt before propagating" callout in [`CODESTYLE.md`][codestyle], since a verbatim copy that misdescribes the repo is rejected in review). The baseline covers `WORKFLOW.md`, `version.json`, the two rulesets, `.github/dependabot.yml`, `.editorconfig`, `.gitattributes`, `host-tools.json`, the linter configs, and the per-type files (`.vscode/tasks.json` from the language's snippet, `codecov.yml`, `.dockerignore`, `Docker/README.md`). **Every repo carries `repo-config/main.json`**, and only the `develop` payload varies by workflow model: `repo-config/develop.json` for a release repo, `repo-config/operational/develop.json` for an operational one.
 
 Carry `AGENTS.md`'s skill-dependency pointer paragraph, the one naming `scripts/skills_install.py` and where the fleet's Skills live, as one more verbatim unit in this same step, not a separate pass. It reads like boilerplate next to the surrounding text a new repo adapts to describe itself, and a repo that carries `AGENTS.md` without it stands up with no path to the fleet's Skills at all. `RESYNC.md` carries the identical instruction for a repo already stood up, so the two procedures agree on what belongs in every copy.

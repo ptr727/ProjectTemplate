@@ -471,6 +471,74 @@ def main():
     if not isinstance(baseline, list):
         errors.append("files.json: 'baseline' must be an array")
         baseline = []
+
+    trees = files.get("trees", [])
+    if not isinstance(trees, list):
+        errors.append("files.json: 'trees' must be an array")
+        trees = []
+    validated_trees = []
+    for tree in trees:
+        if not isinstance(tree, dict):
+            errors.append(f"files.json: tree declaration {tree!r} is not an object")
+            continue
+        source = tree.get("source")
+        target = tree.get("target")
+        if not isinstance(source, str) or not source:
+            errors.append(f"files.json: tree declaration has an invalid source: {tree!r}")
+            continue
+        if not isinstance(target, str) or not target:
+            errors.append(f"files.json: tree declaration has an invalid target: {tree!r}")
+            continue
+        for field, value in (("source", source), ("target", target)):
+            parts = pathlib.PurePosixPath(value).parts
+            if value.startswith("/") or ".." in parts:
+                errors.append(
+                    f"files.json: tree {source} {field} '{value}' must be a repo-relative path (no leading / or ..)"
+                )
+        if tree.get("fidelity") != "verbatim-tree":
+            errors.append(f"files.json: tree {source} fidelity must be 'verbatim-tree'")
+        check_selector(f"tree {source}", tree.get("appliesTo", "*"))
+        include = tree.get("include")
+        if not is_str_list(include) or not include:
+            errors.append(f"files.json: tree {source} include must be a non-empty array of strings")
+        if not isinstance(tree.get("prune"), bool):
+            errors.append(f"files.json: tree {source} prune must be a boolean")
+        if "allowHubTarget" in tree and not isinstance(tree["allowHubTarget"], bool):
+            errors.append(f"files.json: tree {source} allowHubTarget must be a boolean")
+        if not (ROOT / source).is_dir():
+            errors.append(
+                f"files.json: tree canonical source {source} is missing or not a directory"
+            )
+        validated_trees.append(tree)
+
+    for index, left in enumerate(validated_trees):
+        left_target = pathlib.PurePosixPath(left["target"])
+        for right in validated_trees[index + 1 :]:
+            right_target = pathlib.PurePosixPath(right["target"])
+            overlaps = (
+                left_target == right_target
+                or left_target in right_target.parents
+                or right_target in left_target.parents
+            )
+            if overlaps and (left.get("prune") or right.get("prune")):
+                errors.append(
+                    f"files.json: tree targets {left_target} and {right_target} overlap across a prune boundary"
+                )
+
+    copilot_instructions = (ROOT / ".github/copilot-instructions.md").read_text(encoding="utf-8")
+    named_skills = set(
+        re.findall(r"\.github/skills/[A-Za-z0-9_-]+/SKILL\.md", copilot_instructions)
+    )
+    for path in sorted(named_skills):
+        if not (ROOT / path).is_file():
+            errors.append(f"files.json: Copilot instructions name missing skill path {path}")
+        if not any(
+            pathlib.PurePosixPath(tree["source"]) in pathlib.PurePosixPath(path).parents
+            for tree in validated_trees
+        ):
+            errors.append(
+                f"files.json: Copilot instructions name skill path {path} outside every carried tree"
+            )
     for item in baseline:
         if not isinstance(item, dict):
             errors.append(f"files.json: baseline entry {item!r} is not an object")
