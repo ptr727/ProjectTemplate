@@ -85,7 +85,7 @@ The target set. A row exists once its hub task ships, and until then the row is 
 | `merge-bot-task.yml` | none, extra bot rules are a `with:` input | not applicable |
 | `validate-task.yml` | `validate` (a repo's own domain checks, beyond the fleet doc-lint block and the generic unit-test job) | no-op |
 | `get-version-task.yml`, `publish-plan-task.yml` | none | not applicable |
-| `build-release-task.yml` | `build-executable`, `build-nuget`, `build-pypi` | `dotnet-publish-default`, `nuget-push-default`, `pypi-build-default` |
+| `build-release-task.yml` | `dotnet-publish`, `build-nuget`, `build-pypi` | `dotnet-publish-default`, `nuget-push-default`, `pypi-build-default` |
 | `build-docker-task.yml` | `docker-prepare` (extra tags, build-args, matrix), `docker-build-base` | vanilla single-target from `image`, base build required when `build-base` |
 | `publish-docker-readme-task.yml` | `docker-readme-transform` | publish `Docker/README.md` or `README.md` as-is |
 | `check-upstream-version-task.yml` | `resolve-upstream` | none, required |
@@ -180,19 +180,19 @@ Hub: `get-version-task.yml` and `publish-plan-task.yml` hosted, and the downstre
 
 ### Stage 4: The Release Chain and the Docker Core
 
-Hub: `build-release-task.yml` with `build-executable`, `build-nuget`, `build-pypi` hooks, and `build-docker-task.yml` per [The Docker Family][the-docker-family]. The three no-asset release shapes collapse into `expect_release_assets`. No `publish-release-task.yml` ships: a caller stub's trigger policy and its `plan`, `validate`, `publish`, and `publish-pypi` jobs each reach one hub task directly, and none of that wiring is generic enough across the fleet's five trigger shapes (dispatch-only Docker schedule, push-gated NuGet/PyPI, KiCad's branch-matrix dispatch) to host as a further reusable workflow without becoming another set of caller-owned inputs. The `release-assets` hook (extra files beyond a target's own) stays unshipped too: no cataloged repo needs it today, and adding an unexercised hook is deferred until one does.
+Hub: `build-release-task.yml` provides the `dotnet-publish`, `build-nuget`, and `build-pypi` hooks. `build-docker-task.yml` follows [The Docker Family][the-docker-family]. The three no-asset release shapes collapse into `expect_release_assets`. No `publish-release-task.yml` ships. A caller stub's `plan`, `validate`, `publish`, and `publish-pypi` jobs each reach one hub task directly. That wiring varies across the fleet's five trigger shapes, so another reusable workflow would become caller-owned inputs. The `release-assets` hook for extra files stays unshipped because no cataloged repo needs it.
 
 `build-release-task.yml` reaches `get-version-task.yml` and `build-docker-task.yml` through `$/`, so both sibling tasks resolve at the same hub commit the downstream caller pins. It keeps `validate-release` inline because that gate belongs to the release orchestrator. `build-docker-task.yml` also ships as a task in its own right for a caller that wants only the Docker leg. The `dotnet-publish-default`, `nuget-push-default`, and `pypi-build-default` actions require explicit project paths. Each default action validates its required inputs when selected, while caller-provided hooks remain free to use different inputs.
 
 - [x] Hub pull request on `develop` in #762.
 - [x] Promoted to `main` in #774 (`0b07a59d`) and released as `2.0.352`, the first tag carrying `build-release-task.yml` and `build-docker-task.yml`. The first release attempt, on `82fecef`, ended in `startup_failure` in [run-startup-failure][run-startup-failure] because `build-nuget` and `github-release` declared job-level permissions. #772 fixed it before #774 promoted.
-- [x] PhotoCleaner (pilot, vanilla Docker plus executable): ptr727/PhotoCleaner#55 on `develop` (`c80cb29`), promoted in ptr727/PhotoCleaner#56 (`fa91db0`), five carried task files deleted, every value mapped to a task input (`executable_project`, `docker_image`), no repo hook needed. Its first publish through the task, [pilot publish run][pilot-publish-run], released `1.1.11` with the executable asset attached and the Docker image pushed. That run exposed one regression the pilot exists to find: the hub executable default named the archive `Console.7z` where the repo's own leaf named it `PhotoCleaner.7z`, fixed in the pull request that ticks this item by deriving the name from the project file (an `executable_asset_name` input overrides it), so the next PhotoCleaner release is the proof of the fix.
+- [x] PhotoCleaner (pilot, vanilla Docker plus executable): ptr727/PhotoCleaner#55 on `develop` (`c80cb29`), promoted in ptr727/PhotoCleaner#56 (`fa91db0`). The migration deleted five carried task files. It mapped every value to a task input (`dotnet_publish_project`, `docker_image`) and needed no repo hook. The [pilot publish run][pilot-publish-run] released `1.1.11` with the executable asset and Docker image. That run exposed a naming regression. The hub .NET publish default produced `Console.7z`, while the repo's leaf produced `PhotoCleaner.7z`. The fix derives the name from the project file, with `dotnet_publish_asset_name` as an override. The next PhotoCleaner release proves the fix.
 - [ ] PlexCleaner (second, the same shape)
 - [ ] VSCode-Server-DotNetCore (vanilla Docker only)
 - [ ] ESPHome-NonRoot (`docker-prepare` hook for the upstream pin)
 - [ ] NxWitness (matrix hook and `build-base`)
 - [ ] The NuGet, PyPI and remaining release repos, one checkbox each added when the pilots close.
-- [x] A smoke build through `build-release-task.yml` observed on the PhotoCleaner pilot's pull request, [pilot smoke run][pilot-smoke-run]: get-version, validate-release, `build-executable`, `docker-prepare` and `build-docker` all through hub defaults, nuget, pypi and the base build skipped.
+- [x] The [pilot smoke run][pilot-smoke-run] exercised `build-release-task.yml` on PhotoCleaner's pull request. Hub defaults ran get-version, validate-release, `dotnet-publish`, `docker-prepare`, and `build-docker`. NuGet, PyPI, and the base build skipped.
 - [x] Cross-repository `$/` resolution observed on PhotoCleaner pull request #58 in [self-reference smoke run][self-reference-smoke-run]: nested get-version and Docker tasks, the .NET publish default, and the Docker prepare default all resolved from the pinned hub feature commit and passed.
 - [x] A real publish through `build-release-task.yml` observed on the PhotoCleaner pilot, [pilot publish run][pilot-publish-run]: release `1.1.11` on `fa91db0` with `Publish GitHub release job` and `Build Docker image job` both succeeding.
 - [ ] Proof: the next PhotoCleaner release names its executable asset `PhotoCleaner.7z`, which the asset-name fix in this repository derives from the project file. Tick with the release.
@@ -489,7 +489,7 @@ jobs:
       nuget: true
       enable_docker: false
       enable_pypi: false
-      enable_executable: false
+      enable_dotnet_publish: false
       nuget_project: ./Widget/Widget.csproj
 ```
 

@@ -68,6 +68,6 @@ jobs:
       enable_docker: false
       enable_nuget: false
       enable_pypi: false
-      enable_executable: false
+      enable_dotnet_publish: false
       # This repo is source-only, so the release is just the tag + source zip + README + LICENSE.
       expect_release_assets: false
