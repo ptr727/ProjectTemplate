@@ -265,7 +265,7 @@ Two copies today filter Dependabot by ecosystem and semver tier before merging. 
 
 ## Adopting the Gates
 
-Adoptable once `validate-task.yml` is released. A downstream repo replaces its own `validate-task.yml` job bodies and its `test-pull-request.yml`'s inline lint job with one of the two stub shapes below, and deletes the copy of `validate-task.yml` per the `retire` disposition in `spec/divergences.json`. The pin is the release that first carries the task. The no-build stub below pins `0b07a59d7c65d07d8df275a96deaf2e06cbefd51 # 2.0.352`, the value its catalog snippet carries. The release-with-smoke stub keeps the placeholder `@<hub-main-commit-sha> # <release-tag>` until it has a catalog snippet of its own. `publish-release.yml`'s own `validate` job takes the same `uses:` line.
+Adoptable once `validate-task.yml` is released. A downstream repo replaces its own `validate-task.yml` job bodies and its `test-pull-request.yml`'s inline lint job with one of the two stub shapes below, and deletes the copy of `validate-task.yml` per the `retire` disposition in `spec/divergences.json`. The no-build stub below pins `537b1837fe90e2288f71034ef96cc4e949937712 # 2.0.376`, the release containing the self-contained prose gate and the value its catalog snippet carries. The release-with-smoke stub keeps the placeholder `@<hub-main-commit-sha> # <release-tag>` until it has a catalog snippet of its own. `publish-release.yml`'s own `validate` job takes the same `uses:` line.
 
 **No-build repos** carry the operational trigger shape [WORKFLOW.md "Branch Model"][workflow] states and [#585][issue-585] settles: a direct push to `develop` runs CI advisory (no required check binds the direct-commit allowance), and a `pull_request` to `main` or `develop` runs it pre-merge and actionable. A release-model repo with no build target takes the same stub with a `pull_request: branches: [main, develop]` trigger instead, since it has no direct-commit allowance to keep advisory.
 
@@ -292,7 +292,7 @@ jobs:
 
   validate:
     name: Validate sources job
-    uses: ptr727/ProjectTemplate/.github/workflows/validate-task.yml@0b07a59d7c65d07d8df275a96deaf2e06cbefd51 # 2.0.352
+    uses: ptr727/ProjectTemplate/.github/workflows/validate-task.yml@537b1837fe90e2288f71034ef96cc4e949937712 # 2.0.376
     permissions:
       contents: read
 
