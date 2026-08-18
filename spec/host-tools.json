@@ -100,6 +100,24 @@
             }
         },
         {
+            "name": "ripgrep",
+            "required": true,
+            "probes": [["rg", "--version"]],
+            "pattern": "ripgrep (\\d+(?:\\.\\d+)*)",
+            "minimum": "13.0.0",
+            "why": "Used for repository searches by the agent instructions, including file discovery through rg --files, so a host without it forces every search onto slower fallback tools. The floor is a target rather than a measured breakage. Debian 12 provides 13.0.0, so every supported current Debian and Ubuntu distribution can satisfy it from its own package. Issue #800 compared Debian 13's 14.1.1 package with upstream 15.2.0. That upstream release improves large-tree traversal, respects two Git configuration environment variables, and fixes ignore matching across multiple directory arguments. None is required for the fleet's ordinary recursive search and file discovery, so the distribution package is adequate without matching the newest upstream release. A host below the floor is unverified rather than known broken.",
+            "source": {
+                "linux": "The distribution package, which meets the floor on supported current Debian and Ubuntu releases.",
+                "macos": "Homebrew, which tracks upstream releases.",
+                "windows": "winget (BurntSushi.ripgrep.MSVC), the upstream project's documented Windows package."
+            },
+            "remedy": {
+                "linux": "host-setup/linux/install-tools.sh --upgrade ripgrep",
+                "macos": "brew upgrade ripgrep",
+                "windows": "host-setup/windows/install-tools.ps1 -Upgrade ripgrep"
+            }
+        },
+        {
             "name": "uv",
             "required": true,
             "probes": [["uv", "--version"]],

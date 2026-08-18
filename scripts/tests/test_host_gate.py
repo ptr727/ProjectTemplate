@@ -784,7 +784,10 @@ class TestShippedDeclaration(unittest.TestCase):
         one in the data, which is what caught the python3 floor being added without this line.
         """
         floors = {t["name"] for t in self.data["tools"] if t["minimum"] is not None}
-        self.assertEqual(floors, {"docker", "gh", "git-restore-mtime", "jq", "python3", "uv"})
+        self.assertEqual(
+            floors,
+            {"docker", "gh", "git-restore-mtime", "jq", "python3", "ripgrep", "uv"},
+        )
 
     def test_the_contract_table_carries_every_declared_floor(self):
         """docs/host-setup.md restates the floors, so the doc goes stale the moment the data moves.
@@ -852,7 +855,12 @@ class TestShippedDeclaration(unittest.TestCase):
         fails here instead of reading as measured. Each one is named individually, since a check
         that only counted them would pass on a wrong substitution.
         """
-        targets = {"docker": "29.6.2", "jq": "1.7", "python3": "3.13"}
+        targets = {
+            "docker": "29.6.2",
+            "jq": "1.7",
+            "python3": "3.13",
+            "ripgrep": "13.0.0",
+        }
         by_name = {t["name"]: t for t in self.data["tools"]}
         for name, floor in targets.items():
             entry = by_name[name]
