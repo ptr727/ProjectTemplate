@@ -72,7 +72,7 @@ Pick by where each artifact *goes*, not by language:
   registry. NuGet pushes from inside the build-nuget hook (OIDC trusted publishing through
   `NuGet/login`, no stored API key) *and* also uploads a `release-asset-*` (.7z) for the GitHub
   release. PyPI is split: the build-pypi hook only builds and uploads the
-  `pypilibrary-build-<branch>` artifact, and the separate `publish-pypi` job in the caller's own
+  `pypi-build-<branch>` artifact, and the separate `publish-pypi` job in the caller's own
   `publish-release.yml` does the OIDC Trusted-Publishing upload (`id-token: write` is granted only
   at that one entry point), and PyPI contributes **no** `release-asset-*`.
 - **Image-registry pushes** (Docker Hub): `build-docker-task.yml`, hub-hosted like

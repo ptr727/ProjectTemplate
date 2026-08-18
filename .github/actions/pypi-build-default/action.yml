@@ -111,7 +111,7 @@ runs:
       if: ${{ inputs.smoke != 'true' }}
       uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
       with:
-        name: pypilibrary-build-${{ inputs.branch }}
+        name: pypi-build-${{ inputs.branch }}
         path: ${{ inputs.project-dir }}/dist/*
         # Consumed within the run by the caller stub's publish-pypi job, so minimize artifact storage.
         retention-days: 1

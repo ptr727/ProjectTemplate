@@ -121,7 +121,7 @@ A stage carries three kinds of item, plus a proof item where a claim needs a liv
 
 Adoptable since `2.0.338`. Each repo replaces the whole of its `.github/workflows/merge-bot-pull-request.yml` with the stub in [Adopting the Merge-Bot][adopting-the-merge-bot], on its own feature branch, and the audit's `missing required job 'merge-bot'` finding on that file is the work list. The pilot goes first and records what the hub cannot prove, cross-repository resolution of the pin, the `rules` input where the repo has a tracker, and the first Dependabot bump of the pin, as proof items here.
 
-- [x] PhotoCleaner (pilot, chosen as a release-model repo with Dependabot, C#, executable and Docker targets and a fresh resync, so what it shows is the mechanism): adopted on `develop` in ptr727/PhotoCleaner#53 at `a3158ce` and promoted to `main`, its ground-truth branch, in ptr727/PhotoCleaner#54 at `4efcae8`, both on 2026-08-15, where `python3 spec/audit.py PhotoCleaner` reports no `interface` finding on the file. The live proofs it owes, cross-repository resolution of the pin with a Dependabot PR to `develop` merged with `--squash` through the callee, and Dependabot bumping the pin, are the two proof items directly below, ticked with their evidence when they happen.
+- [x] PhotoCleaner (pilot, chosen as a release-model repo with Dependabot, .NET publish and Docker targets and a fresh resync, so what it shows is the mechanism): adopted on `develop` in ptr727/PhotoCleaner#53 at `a3158ce` and promoted to `main`, its ground-truth branch, in ptr727/PhotoCleaner#54 at `4efcae8`, both on 2026-08-15, where `python3 spec/audit.py PhotoCleaner` reports no `interface` finding on the file. The live proofs it owes, cross-repository resolution of the pin with a Dependabot PR to `develop` merged with `--squash` through the callee, and Dependabot bumping the pin, are the two proof items directly below, ticked with their evidence when they happen.
 - [ ] Proof: the first `pull_request_target` run on PhotoCleaner `develop` after `a3158ce` resolves the owner-scoped `uses:` and merges the Dependabot PR that opened it. Tick with the run URL.
 - [ ] Proof: Dependabot opens a `Bump ptr727/ProjectTemplate` PR on PhotoCleaner after the next hub release. Tick with the PR.
 - [ ] HomeAutomation-Config (operational model, the direct-to-develop path)
@@ -186,7 +186,7 @@ Hub: `build-release-task.yml` provides the `dotnet-publish`, `build-nuget`, and 
 
 - [x] Hub pull request on `develop` in #762.
 - [x] Promoted to `main` in #774 (`0b07a59d`) and released as `2.0.352`, the first tag carrying `build-release-task.yml` and `build-docker-task.yml`. The first release attempt, on `82fecef`, ended in `startup_failure` in [run-startup-failure][run-startup-failure] because `build-nuget` and `github-release` declared job-level permissions. #772 fixed it before #774 promoted.
-- [x] PhotoCleaner (pilot, vanilla Docker plus .NET publish): ptr727/PhotoCleaner#55 on `develop` (`c80cb29`), promoted in ptr727/PhotoCleaner#56 (`fa91db0`). The migration deleted five carried task files. It mapped every value to a task input (`dotnet_publish_project`, `docker_image`) and needed no repo hook. The [pilot publish run][pilot-publish-run] released `1.1.11` with the executable asset and Docker image. That run exposed a naming regression. The hub .NET publish default produced `Console.7z`, while the repo's leaf produced `PhotoCleaner.7z`. The fix derives the name from the project file, with `dotnet_publish_asset_name` as an override. The next PhotoCleaner release proves the fix.
+- [x] PhotoCleaner (pilot, vanilla Docker plus .NET publish): ptr727/PhotoCleaner#55 on `develop` (`c80cb29`), promoted in ptr727/PhotoCleaner#56 (`fa91db0`). The migration deleted five carried task files. It mapped every value to a task input (`dotnet_publish_project`, `docker_image`) and needed no repo hook. The [pilot publish run][pilot-publish-run] released `1.1.11` with the .NET publish asset and Docker image. That run exposed an archive naming regression between the hub default and the repo leaf. The fix derives the name from the project file, with `dotnet_publish_asset_name` as an override. The next PhotoCleaner release proves the fix.
 - [ ] PlexCleaner (second, the same shape)
 - [ ] VSCode-Server-DotNetCore (vanilla Docker only)
 - [ ] ESPHome-NonRoot (`docker-prepare` hook for the upstream pin)
@@ -195,7 +195,7 @@ Hub: `build-release-task.yml` provides the `dotnet-publish`, `build-nuget`, and 
 - [x] The [pilot smoke run][pilot-smoke-run] exercised `build-release-task.yml` on PhotoCleaner's pull request. Hub defaults ran get-version, validate-release, `dotnet-publish`, `docker-prepare`, and `build-docker`. NuGet, PyPI, and the base build skipped.
 - [x] Cross-repository `$/` resolution observed on PhotoCleaner pull request #58 in [self-reference smoke run][self-reference-smoke-run]: nested get-version and Docker tasks, the .NET publish default, and the Docker prepare default all resolved from the pinned hub feature commit and passed.
 - [x] A real publish through `build-release-task.yml` observed on the PhotoCleaner pilot, [pilot publish run][pilot-publish-run]: release `1.1.11` on `fa91db0` with `Publish GitHub release job` and `Build Docker image job` both succeeding.
-- [ ] Proof: the next PhotoCleaner release names its executable asset `PhotoCleaner.7z`, which the asset-name fix in this repository derives from the project file. Tick with the release.
+- [ ] Proof: the next PhotoCleaner release names its .NET publish asset `PhotoCleaner.7z`, which the asset-name fix in this repository derives from the project file. Tick with the release.
 - [ ] `reports/workflow-reuse.md` regenerated with `build-release-task.yml` and `build-docker-task.yml` at 0 copies (hub-only files) and `publish-release.yml` showing callers equal to copies.
 
 ### Stage 5: The Type-Specific Tasks
@@ -422,7 +422,7 @@ A repo whose publisher needs the release-gate decision reaches `publish-plan-tas
 
 ## Adopting the Release Chain
 
-A downstream repo replaces the whole of its `.github/workflows/build-release-task.yml`, and every per-target leaf task it carries (`build-executable-task.yml`, `build-nugetlibrary-task.yml`, `build-pypilibrary-task.yml`, `build-docker-task.yml`), with a caller stub in its own `publish-release.yml` reaching the hub tasks by pin. `test-pull-request.yml`'s smoke job calls `build-release-task.yml` the same way, with `smoke: true` and the paths-filter's `enable_*` outputs. The full shape below is now `catalog/snippets/workflows/publish-release.yml`, pinned to `0b07a59d7c65d07d8df275a96deaf2e06cbefd51 # 2.0.352`, the release that first carries `build-release-task.yml` ([Pinning][pinning]). The task declares no job-level `permissions:` of its own, because a called job's block is validated against the caller's grant before its `if:` runs and would fail a caller that does not grant it at startup. The caller therefore grants only what its enabled paths write with: `contents: write` and `actions: write` when it sets `github: true` on a non-smoke run (the release upload and the artifact cleanup), `id-token: write` when it sets `nuget: true` (a real push through `NuGet/login`), and nothing beyond `contents: read` on a build-only or smoke run, where a Dependabot pull request holds a read-only token.
+A downstream repo replaces its carried release orchestrator and per-target leaf tasks with a caller stub in its own `publish-release.yml` reaching the hub tasks by pin. `test-pull-request.yml`'s smoke job calls `build-release-task.yml` the same way, with `smoke: true` and the paths-filter's `enable_*` outputs. The renamed .NET publish interface is not yet in a hub release, so the full shape below keeps a pin placeholder and the catalog snippet is withheld until that release exists ([Pinning][pinning]). The task declares no job-level `permissions:` of its own, because a called job's block is validated against the caller's grant before its `if:` runs and would fail a caller that does not grant it at startup. The caller therefore grants only what its enabled paths write with: `contents: write` and `actions: write` when it sets `github: true` on a non-smoke run (the release upload and the artifact cleanup), `id-token: write` when it sets `nuget: true` (a real push through `NuGet/login`), and nothing beyond `contents: read` on a build-only or smoke run, where a Dependabot pull request holds a read-only token.
 
 The stub keeps its own trigger policy exactly as today: `workflow_dispatch` plus a main-only weekly `schedule` for a Docker repo, or `workflow_dispatch` plus a paths-filtered `push` to `main` for a NuGet or PyPI repo whose merges should auto-publish. What moves to the hub is the release-gate decision, the build/version/publish job graph, and the Docker core, never the trigger. This is the full shape, a NuGet-library repo whose merges publish:
 
@@ -474,7 +474,7 @@ jobs:
     name: Publish project release job
     needs: [plan, validate]
     if: ${{ needs.plan.outputs.publish == 'true' }}
-    uses: ptr727/ProjectTemplate/.github/workflows/build-release-task.yml@0b07a59d7c65d07d8df275a96deaf2e06cbefd51 # 2.0.352
+    uses: ptr727/ProjectTemplate/.github/workflows/build-release-task.yml@<hub-main-commit-sha> # <release-tag>
     secrets:
       NUGET_USERNAME: ${{ secrets.NUGET_USERNAME }}
     permissions:
@@ -489,7 +489,7 @@ jobs:
       nuget: true
       enable_docker: false
       enable_pypi: false
-      enable_executable: false
+      enable_dotnet_publish: false
       nuget_project: ./Widget/Widget.csproj
 ```
 
@@ -510,7 +510,7 @@ A Docker repo's stub adds `schedule: - cron: '0 2 * * MON'` to the trigger block
       - name: Download build artifacts step
         uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
         with:
-          name: pypilibrary-build-${{ github.ref_name }}
+          name: pypi-build-${{ github.ref_name }}
           path: ./dist
       - name: Publish to PyPI step
         uses: pypa/gh-action-pypi-publish@dc37677b2e1c63e2034f94d8a5b11f265b73ba33 # v1.14.2

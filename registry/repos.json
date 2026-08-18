@@ -103,7 +103,7 @@
             "name": "PlexCleaner",
             "url": "https://github.com/ptr727/PlexCleaner",
             "status": "cataloged",
-            "types": ["csharp", "console", "docker", "python"],
+            "types": ["csharp", "dotnet-publish", "docker", "python"],
             "groundTruthBranch": "main",
             "hasDevelop": true,
             "publish": [
@@ -114,7 +114,7 @@
             "consumerModel": "pull",
             "releaseTrigger": "two-phase",
             "configLayout": { "rulesetsDir": "repo-config", "pythonConfig": null },
-            "driftNotes": ["Carries ARCHITECTURE.md and codecov.yml beyond the baseline.", "First csharp+python repo: a C# console app at the root plus a stdlib-only Python tooling subtree (RegressionTests/, uvx scripts profile - no uv.lock, pyproject carries only ruff+mypy config; PlexCleaner#855). python.uvlock.pinned and python.coverage.codecov are N/A for that subtree (no uv project, no tests); codecov.yml stays required for the C# side. Reference for the csharp+python shape (issue #339)."]
+            "driftNotes": ["Carries ARCHITECTURE.md and codecov.yml beyond the baseline.", "First csharp+python repo: a .NET application at the root plus a stdlib-only Python tooling subtree (RegressionTests/, uvx scripts profile - no uv.lock, pyproject carries only ruff+mypy config; PlexCleaner#855). python.uvlock.pinned and python.coverage.codecov are N/A for that subtree (no uv project, no tests); codecov.yml stays required for the C# side. Reference for the csharp+python shape (issue #339)."]
         },
         {
             "name": "ESPHome-NonRoot",
@@ -244,13 +244,13 @@
             "name": "PhotoCleaner",
             "url": "https://github.com/ptr727/PhotoCleaner",
             "status": "cataloged",
-            "types": ["csharp", "console", "docker"],
+            "types": ["csharp", "dotnet-publish", "docker"],
             "hasDevelop": true,
             "publish": [{ "target": "docker", "mechanism": "static-secret" }, { "target": "github-release", "mechanism": "none" }],
             "requiredSecrets": ["DOCKER_HUB_USERNAME", "DOCKER_HUB_ACCESS_TOKEN", "CODECOV_TOKEN"],
             "consumerModel": "pull",
             "releaseTrigger": "two-phase",
-            "driftNotes": ["Multi-arch Docker (linux/amd64,linux/arm64 on main) pushed to Docker Hub via the static DOCKER_HUB_USERNAME/DOCKER_HUB_ACCESS_TOKEN secret, plus a github-release attaching the multi-arch executables as a 7z. Release is two-phase (workflow_dispatch + weekly Mon 02:00 schedule).", "Private for now by maintainer decision, going public once the conformance work settles, since public serves prospective users and lowers the GitHub bill. Until that flip the declared github-release channel is not consumer-pullable and shields.io cannot read the repo, so the GitHub-sourced shields render broken."]
+            "driftNotes": ["Multi-arch Docker (linux/amd64,linux/arm64 on main) pushed to Docker Hub via the static DOCKER_HUB_USERNAME/DOCKER_HUB_ACCESS_TOKEN secret, plus a GitHub release attaching the multi-runtime .NET publish output as a 7z. Release is two-phase (workflow_dispatch + weekly Mon 02:00 schedule).", "Private for now by maintainer decision, going public once the conformance work settles, since public serves prospective users and lowers the GitHub bill. Until that flip the declared github-release channel is not consumer-pullable and shields.io cannot read the repo, so the GitHub-sourced shields render broken."]
         },
         {
             "name": "MediaTools",
@@ -269,7 +269,7 @@
             "name": "AudioCleaner",
             "url": "https://github.com/ptr727/AudioCleaner",
             "status": "cataloged",
-            "types": ["csharp", "console"],
+            "types": ["csharp", "dotnet-publish"],
             "groundTruthBranch": "main",
             "hasDevelop": true,
             "publish": [],

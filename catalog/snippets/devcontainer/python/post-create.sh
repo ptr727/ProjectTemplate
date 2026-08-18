@@ -39,8 +39,7 @@ if [[ "$installed_uv_version" != "$UV_VERSION" ]]; then
     export PATH="$HOME/.local/bin:$PATH"
 fi
 
-# Pre-warm uv environment for PyPiLibrary if it exists.
-# It is guarded so this script is safe before PyPiLibrary lands in the repo.
-if [[ -f PyPiLibrary/pyproject.toml ]]; then
-    (cd PyPiLibrary && uv sync)
+# Pre-warm the uv environment when this repository carries a Python project.
+if [[ -f pyproject.toml ]]; then
+    uv sync
 fi
