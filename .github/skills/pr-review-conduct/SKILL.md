@@ -69,14 +69,14 @@ is never carried into a downstream repository.
 3. Re-request a review for the **current head SHA**. Auto-trigger is unreliable, so request it
    explicitly (mechanics in the Copilot runbook). The UI is a fallback only.
 4. Run a bounded `scripts/pr_review.py wait` in a background process and read its terminal output.
-5. Wait for review activity on that head. A completed review raising **no findings** is a valid
-   terminal outcome, so don't re-trigger it or read silence as a missing review. A review whose
-   body says it declined to review is the one exception, and it is terminal the other way:
-   nothing follows it, and re-requesting the same head just repeats the decline.
-6. Triage findings (see below).
-7. Apply fixes or write a rationale for declines.
-8. Reply to each thread and resolve what was addressed.
-9. Re-run the loop after every fix push until the checks are green and no finding remains open.
+   A completed review raising **no findings** is a valid terminal outcome, so do not re-trigger it
+   or read silence as a missing review. A review whose body says it declined to review is the one
+   exception, and it is terminal the other way. Nothing follows it, and re-requesting the same
+   head only repeats the decline.
+5. Triage findings (see below).
+6. Apply fixes or write a rationale for declines.
+7. Reply to each thread and resolve what was addressed.
+8. Re-run the loop after every fix push until the checks are green and no finding remains open.
 
 Drive to green, a review confirmed on the latest head SHA and every actionable finding closed,
 then apply the Merge Gate above. **Never exit the loop early.** A round count is not a stopping
