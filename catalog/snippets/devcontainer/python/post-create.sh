@@ -42,6 +42,6 @@ if [[ "$installed_uv_version" != "$UV_VERSION" ]]; then
     export PATH="$HOME/.local/bin:$PATH"
 fi
 
-if [[ -f "$repository_dir/pyproject.toml" ]]; then
-    uv sync --project "$repository_dir"
+if [[ -f "$repository_dir/pyproject.toml" && -f "$repository_dir/uv.lock" ]]; then
+    uv sync --frozen --project "$repository_dir"
 fi

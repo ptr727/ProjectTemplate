@@ -506,6 +506,7 @@ A Docker repo's stub adds `schedule: - cron: '0 2 * * MON'` to the trigger block
     permissions:
       id-token: write
       contents: read
+      actions: write
     steps:
       - name: Download build artifacts step
         uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
@@ -517,6 +518,22 @@ A Docker repo's stub adds `schedule: - cron: '0 2 * * MON'` to the trigger block
         with:
           packages-dir: ./dist
           skip-existing: true
+      - name: Delete consumed PyPI build artifact step
+        continue-on-error: true
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -Eeuo pipefail
+          if ! ids=$(gh api "repos/$GITHUB_REPOSITORY/actions/runs/${{ github.run_id }}/artifacts" --paginate \
+            --jq ".artifacts[] | select(.name == \"pypi-build-${{ github.ref_name }}\") | .id"); then
+            echo "::warning::Could not list PyPI build artifacts; retention-days backstop will reap them."
+            ids=""
+          fi
+          for id in $ids; do
+            if ! gh api --method DELETE "repos/$GITHUB_REPOSITORY/actions/artifacts/$id"; then
+              echo "::warning::Failed to delete artifact $id; retention-days backstop will reap it."
+            fi
+          done
 ```
 
 No `publish-release-task.yml` ships alongside `build-release-task.yml`: the four jobs above are each a thin call to one hub task or a verbatim OIDC upload, and the trigger policy that ties them together genuinely differs enough across the fleet's shapes (dispatch-only Docker schedule, push-gated NuGet or PyPI, KiCadLibrary's branch-matrix dispatch) that hosting it would just move the same `with:` block one file over rather than removing it.
