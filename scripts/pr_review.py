@@ -10,8 +10,8 @@ Discipline" for the rule this implements.
 Subcommands
   comment  Post one PR-conversation answer, including a suppressed-finding disposition. The PR
            node id is read in the same run, and the returned comment URL and body confirm the
-           write. Exit 0 = done, 64 = the target is under another owner, 65 = the PR could not
-           be read, 66 = the response did not confirm the comment.
+           write. Exit 0 = done, 64 = write scope could not be established or excludes the
+           target, 65 = the PR could not be read, 66 = the response did not confirm the comment.
   claims   Check the description against the branch it describes. A body claiming a commit or
            quoting a `uses:` ref the head tree no longer carries is a silent failure caught by a
            reviewer or not at all, and three stale descriptions in one session generated six

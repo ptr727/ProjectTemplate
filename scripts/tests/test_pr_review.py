@@ -2425,6 +2425,13 @@ class TestCommentConfirmsItsTargetAndResult(CommentCase):
         self.assertEqual([], self.calls)
         self.assertIn("OUT_OF_SCOPE", self.out.getvalue())
 
+    def test_an_unreadable_origin_refuses_before_the_pr_read(self) -> None:
+        self.wire({"id": "PR_from_query", "url": "https://github.com/o/r/pull/7"})
+        with mock.patch.object(pr_review, "origin_owner", return_value=None):
+            self.assertEqual(64, self.run_comment())
+        self.assertEqual([], self.calls)
+        self.assertIn("OUT_OF_SCOPE", self.out.getvalue())
+
 
 LANDED = {"id": "c1", "url": "https://github.com/o/r/pull/7#discussion_r1", "body": "Fixed in abc."}
 
