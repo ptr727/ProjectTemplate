@@ -98,10 +98,13 @@ git -C ~/repos/<Repo> fetch origin develop
 git -C ~/repos/<Repo> worktree add ~/repos/worktrees/<Repo>-<task-slug> -b <task-branch> origin/develop
 ```
 
-Before choosing that path, inspect the executor's active write boundaries. The standard path is
-usable only when later file edits and Git index writes can both succeed. A linked worktree stores
-its index and locks under the base clone's `.git/worktrees/` directory. A writable worktree path
-does not make that administrative directory writable.
+Before choosing that path, inspect the executor's active write boundaries. A linked worktree
+requires write access to both of these locations:
+
+- the intended `~/repos/worktrees/<Repo>-<task-slug>` worktree directory
+- the base clone's `.git/worktrees/` administrative directory, which holds the index and locks
+
+A writable worktree directory does not make the administrative directory writable.
 
 Use the standard layout when both locations are writable. When either location is outside the
 write boundary, create a standalone clone under a writable temporary root. Name it
