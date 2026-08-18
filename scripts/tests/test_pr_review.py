@@ -2410,6 +2410,15 @@ class TestCommentConfirmsItsTargetAndResult(CommentCase):
         )
         self.assertEqual(66, self.run_comment())
 
+    def test_newlines_are_normalized_before_the_comment_is_sent_and_confirmed(self) -> None:
+        body = "Suppressed finding:\r\n\r\nDisproven.\rOne boundary applies."
+        normalized = "Suppressed finding:\n\nDisproven.\nOne boundary applies."
+        response = {"id": "c1", "url": COMMENT["url"], "body": normalized}
+        self.wire({"id": "PR_from_query", "url": "https://github.com/o/r/pull/7"}, response)
+        self.assertEqual(0, self.run_comment(body=body))
+        mutation = next((v for q, v in self.calls if "addComment" in q))
+        self.assertEqual(normalized, mutation["body"])
+
     def test_a_target_under_another_owner_is_refused_before_the_pr_read(self) -> None:
         self.wire({"id": "PR_wrong_owner", "url": "https://github.com/x/r/pull/7"})
         self.assertEqual(64, self.run_comment(repo="x/r"))

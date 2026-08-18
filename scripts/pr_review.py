@@ -1600,6 +1600,7 @@ def comment_on_pr(owner: str, repo: str, num: int, body: str) -> int:
         )
         return 65
 
+    body = body.replace("\r\n", "\n").replace("\r", "\n")
     edge = (gh_graphql(M_COMMENT, subjectId=target["id"], body=body).get("addComment") or {}).get(
         "commentEdge"
     ) or {}
