@@ -540,7 +540,7 @@ def main():
         if not (ROOT / path).is_file():
             errors.append(f"files.json: Copilot instructions name missing skill path {path}")
         if not any(
-            pathlib.PurePosixPath(tree["source"]) in pathlib.PurePosixPath(path).parents
+            pathlib.PurePosixPath(tree["target"]) in pathlib.PurePosixPath(path).parents
             for tree in validated_trees
         ):
             errors.append(
