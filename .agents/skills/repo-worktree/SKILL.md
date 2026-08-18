@@ -114,7 +114,8 @@ the same writable root. It therefore supports edits, explicit-path staging, comm
 updates without sharing the base clone's index.
 
 ```sh
-git clone --no-checkout <origin-url> <temporary-root>/<Repo>-<task-slug>
+TASK_ORIGIN="$(git -C <base-clone> remote get-url origin)"
+git clone --no-checkout "$TASK_ORIGIN" <temporary-root>/<Repo>-<task-slug>
 git -C <temporary-root>/<Repo>-<task-slug> fetch origin develop
 git -C <temporary-root>/<Repo>-<task-slug> switch -c <task-branch> origin/develop
 ```

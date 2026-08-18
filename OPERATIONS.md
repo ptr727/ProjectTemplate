@@ -10,7 +10,7 @@ What verifying a change here requires, including the part CI cannot perform. The
 
 CI passes explicit `--check` lists, and a bare `python3 scripts/prose_lint.py [file]` runs `DEFAULT_RULES`, which is those two lists together. What differs is the exit code rather than the coverage. CI gates on nine of the ten and reports `charset-unknown` warn-only, where a bare run exits non-zero on any of the ten. `sentence-split` and `sentence-length` are in neither, so nothing below runs them and a local run reaches them only by naming them. Run the CI invocations:
 
-```sh
+```bash
 set -Eeuo pipefail
 PROJECTTEMPLATE_TOOL_CACHE="$(mktemp -d "${TMPDIR:-/tmp}/projecttemplate-tools.XXXXXX")"
 export UV_CACHE_DIR="$PROJECTTEMPLATE_TOOL_CACHE/uv"
