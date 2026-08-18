@@ -2714,10 +2714,10 @@ def _selftest():
         )
 
     # The needs-mask case, where a verbatim job region whose `needs:` list is pruned to the repo's vendored targets must not count as drift, since the list is owned, while a structural change to the job's steps must.
-    needs_full = "  github-release:\n    needs: [get-version, validate-release, build-nugetlibrary, build-executable]\n    runs-on: x\n    steps: []\n"
-    needs_pruned = "  github-release:\n    needs: [get-version, validate-release, build-executable]\n    runs-on: x\n    steps: []\n"
-    needs_block = "  github-release:\n    needs:\n      - get-version\n      - build-executable\n    runs-on: x\n    steps: []\n"
-    needs_scalar = "  github-release:\n    needs: build-executable\n    runs-on: x\n    steps: []\n"
+    needs_full = "  github-release:\n    needs: [get-version, validate-release, build-nuget, dotnet-publish]\n    runs-on: x\n    steps: []\n"
+    needs_pruned = "  github-release:\n    needs: [get-version, validate-release, dotnet-publish]\n    runs-on: x\n    steps: []\n"
+    needs_block = "  github-release:\n    needs:\n      - get-version\n      - dotnet-publish\n    runs-on: x\n    steps: []\n"
+    needs_scalar = "  github-release:\n    needs: dotnet-publish\n    runs-on: x\n    steps: []\n"
     needs_forked = "  github-release:\n    needs: [get-version, validate-release]\n    runs-on: x\n    steps:\n      - run: fork\n"
     if (
         len(

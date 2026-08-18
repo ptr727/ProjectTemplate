@@ -58,7 +58,7 @@ on:
         required: false
         type: boolean
         default: true
-      enable_executable:
+      enable_dotnet_publish:
         required: false
         type: boolean
         default: true
@@ -84,12 +84,12 @@ on:
         type: boolean
         default: false
       # Project paths forwarded to the hub default hooks.
-      executable_project:
+      dotnet_publish_project:
         required: false
         type: string
         default: ''
       # The release archive's name without .7z, derived from the project file's stem when empty.
-      executable_asset_name:
+      dotnet_publish_asset_name:
         required: false
         type: string
         default: ''
@@ -158,9 +158,9 @@ jobs:
             exit 1
           fi
 
-  build-executable:
-    name: Build executable job
-    if: ${{ inputs.enable_executable }}
+  dotnet-publish:
+    name: Publish .NET project job
+    if: ${{ inputs.enable_dotnet_publish }}
     needs: [get-version, validate-release]
     runs-on: ubuntu-latest
     steps:
@@ -172,9 +172,9 @@ jobs:
           ref: ${{ needs.get-version.outputs.GitCommitId }}
 
       # A caller's own hook names its archive itself, so the asset name input reaches only the hub default.
-      - name: Run caller build-executable hook step
-        if: ${{ hashFiles('.github/actions/build-executable/action.yml') != '' }}
-        uses: ./.github/actions/build-executable
+      - name: Run caller dotnet-publish hook step
+        if: ${{ hashFiles('.github/actions/dotnet-publish/action.yml') != '' }}
+        uses: ./.github/actions/dotnet-publish
         with:
           branch: ${{ inputs.branch }}
           smoke: ${{ inputs.smoke }}
@@ -182,10 +182,10 @@ jobs:
           assembly-version: ${{ needs.get-version.outputs.AssemblyVersion }}
           assembly-file-version: ${{ needs.get-version.outputs.AssemblyFileVersion }}
           assembly-informational-version: ${{ needs.get-version.outputs.AssemblyInformationalVersion }}
-          project-file: ${{ inputs.executable_project }}
+          project-file: ${{ inputs.dotnet_publish_project }}
 
-      - name: Run hub build-executable default step
-        if: ${{ hashFiles('.github/actions/build-executable/action.yml') == '' }}
+      - name: Run hub dotnet-publish default step
+        if: ${{ hashFiles('.github/actions/dotnet-publish/action.yml') == '' }}
         uses: $/.github/actions/dotnet-publish-default
         with:
           branch: ${{ inputs.branch }}
@@ -194,8 +194,8 @@ jobs:
           assembly-version: ${{ needs.get-version.outputs.AssemblyVersion }}
           assembly-file-version: ${{ needs.get-version.outputs.AssemblyFileVersion }}
           assembly-informational-version: ${{ needs.get-version.outputs.AssemblyInformationalVersion }}
-          project-file: ${{ inputs.executable_project }}
-          asset-name: ${{ inputs.executable_asset_name }}
+          project-file: ${{ inputs.dotnet_publish_project }}
+          asset-name: ${{ inputs.dotnet_publish_asset_name }}
 
   build-nuget:
     name: Build NuGet library job
@@ -276,7 +276,7 @@ jobs:
 
   build-docker:
     name: Build Docker image job
-    needs: [get-version, validate-release, build-executable, build-nuget, build-pypi]
+    needs: [get-version, validate-release, dotnet-publish, build-nuget, build-pypi]
     if: ${{ inputs.enable_docker && !failure() && !cancelled() }}
     uses: $/.github/workflows/build-docker-task.yml
     secrets:
@@ -304,7 +304,7 @@ jobs:
     # The explicit functions replace that implicit success() instead, tolerating a skipped need while still failing closed on a real failure.
     if: ${{ inputs.github && !inputs.smoke && !failure() && !cancelled() }}
     runs-on: ubuntu-latest
-    needs: [get-version, validate-release, build-executable, build-nuget, build-pypi, build-docker]
+    needs: [get-version, validate-release, dotnet-publish, build-nuget, build-pypi, build-docker]
     # The release upload and the artifact-delete cleanup both write with GITHUB_TOKEN, and the caller grants contents: write and actions: write when it sets github: true on a non-smoke run.
     # A caller publishing only to a registry, or smoke building, leaves this job disabled and grants neither.
     # No job-level permissions: block here, for the reason build-nuget gives: a block is validated against the caller's grant before if: runs, and a smoke caller holds a read-only token.

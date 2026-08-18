@@ -1,6 +1,6 @@
 # ProjectTemplate
 
-Container image for the ProjectTemplate Console app.
+Container image for the ProjectTemplate .NET application.
 
 ## Image Tags
 

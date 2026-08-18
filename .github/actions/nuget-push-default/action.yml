@@ -103,14 +103,14 @@ runs:
     - name: Zip output step
       if: ${{ inputs.smoke != 'true' }}
       shell: bash
-      run: 7z a -t7z "$RUNNER_TEMP/nugetlibrary.7z" "$RUNNER_TEMP"/publish/*
+      run: 7z a -t7z "$RUNNER_TEMP/nuget.7z" "$RUNNER_TEMP"/publish/*
 
     # GitHub-release asset, uploaded under the release-asset-<branch>-<target> pattern the github-release job collects.
     - name: Upload release asset step
       if: ${{ inputs.smoke != 'true' }}
       uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
       with:
-        name: release-asset-${{ inputs.branch }}-nugetlibrary
-        path: ${{ runner.temp }}/nugetlibrary.7z
+        name: release-asset-${{ inputs.branch }}-nuget
+        path: ${{ runner.temp }}/nuget.7z
         # Consumed within the run by the github-release job, so minimize artifact storage.
         retention-days: 1
