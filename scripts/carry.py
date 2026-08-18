@@ -235,10 +235,47 @@ def applicable(selector: str | list[str], values: set[str]) -> bool:
     return bool(set(tokens) & values)
 
 
-def validate_declarations(declarations: list[dict[str, Any]], hub: pathlib.Path) -> None:
+def validate_declarations(declarations: list[Any], hub: pathlib.Path) -> None:
+    required = {"source", "target", "fidelity", "appliesTo", "include", "prune"}
+    allowed = required | {"allowHubTarget"}
     for index, left in enumerate(declarations):
+        if not isinstance(left, dict):
+            raise CarryError(f"tree declaration must be an object: {left!r}")
+        missing = required - set(left)
+        unknown = set(left) - allowed
+        if missing:
+            raise CarryError(f"tree declaration is missing: {', '.join(sorted(missing))}")
+        if unknown:
+            raise CarryError(f"tree declaration has unknown fields: {', '.join(sorted(unknown))}")
+        if not isinstance(left["source"], str) or not left["source"]:
+            raise CarryError("tree declaration source must be a non-empty string")
+        if not isinstance(left["target"], str) or not left["target"]:
+            raise CarryError("tree declaration target must be a non-empty string")
         if left.get("fidelity") != "verbatim-tree":
             raise CarryError(f"tree declaration has unsupported fidelity: {left.get('fidelity')}")
+        selector = left["appliesTo"]
+        if not (
+            isinstance(selector, str)
+            or (
+                isinstance(selector, list)
+                and selector
+                and all(isinstance(item, str) for item in selector)
+            )
+        ):
+            raise CarryError(
+                "tree declaration appliesTo must be a string or non-empty string array"
+            )
+        include = left["include"]
+        if not (
+            isinstance(include, list)
+            and include
+            and all(isinstance(pattern, str) and pattern for pattern in include)
+        ):
+            raise CarryError("tree declaration include must be a non-empty string array")
+        if not isinstance(left["prune"], bool):
+            raise CarryError("tree declaration prune must be a boolean")
+        if "allowHubTarget" in left and not isinstance(left["allowHubTarget"], bool):
+            raise CarryError("tree declaration allowHubTarget must be a boolean")
         relative_root(hub, left["source"])
         relative_root(hub, left["target"])
         for right in declarations[index + 1 :]:
@@ -304,12 +341,15 @@ def run(mode: str, name: str, target: pathlib.Path, hub: pathlib.Path = ROOT) ->
     selectors.add(entry.get("releaseTrigger") or defaults.get("releaseTrigger") or "two-phase")
     if entry.get("consumerModel"):
         selectors.add(entry["consumerModel"])
+    all_declarations = manifest.get("trees")
+    if not isinstance(all_declarations, list):
+        raise CarryError("manifest trees must be an array")
+    validate_declarations(all_declarations, hub)
     declarations = [
         declaration
-        for declaration in manifest.get("trees", [])
+        for declaration in all_declarations
         if applicable(declaration.get("appliesTo", "*"), selectors)
     ]
-    validate_declarations(declarations, hub)
     if name == "ProjectTemplate" and any(
         not item.get("allowHubTarget", False) for item in declarations
     ):

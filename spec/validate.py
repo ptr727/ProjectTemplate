@@ -7,6 +7,7 @@ spec/secrets.json. Exits non-zero on any failure. This is the classification
 dry-run the CI lint job runs; it needs no third-party packages.
 """
 
+import fnmatch
 import json
 import pathlib
 import re
@@ -539,12 +540,25 @@ def main():
     for path in sorted(named_skills):
         if not (ROOT / path).is_file():
             errors.append(f"files.json: Copilot instructions reference missing skill path {path}")
-        if not any(
-            pathlib.PurePosixPath(tree["target"]) in pathlib.PurePosixPath(path).parents
-            for tree in validated_trees
-        ):
+        skill_path = pathlib.PurePosixPath(path)
+        carried = False
+        for tree in validated_trees:
+            target_root = pathlib.PurePosixPath(tree["target"])
+            include = tree.get("include")
+            if target_root not in skill_path.parents or not is_str_list(include):
+                continue
+            relative = skill_path.relative_to(target_root).as_posix()
+            carried = any(
+                pattern == "**/*"
+                or fnmatch.fnmatchcase(relative, pattern)
+                or pathlib.PurePosixPath(relative).match(pattern)
+                for pattern in include
+            )
+            if carried:
+                break
+        if not carried:
             errors.append(
-                f"files.json: Copilot instructions reference skill path {path} outside every carried tree"
+                f"files.json: Copilot instructions reference skill path {path} outside every carried tree include"
             )
     for item in baseline:
         if not isinstance(item, dict):

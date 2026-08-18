@@ -197,12 +197,16 @@ class CarryManifestTests(unittest.TestCase):
                 "source": "source-a",
                 "target": ".github",
                 "fidelity": "verbatim-tree",
+                "appliesTo": "*",
+                "include": ["**/*"],
                 "prune": False,
             },
             {
                 "source": "source-b",
                 "target": ".github/skills",
                 "fidelity": "verbatim-tree",
+                "appliesTo": "*",
+                "include": ["**/*"],
                 "prune": False,
             },
         ]
@@ -212,6 +216,27 @@ class CarryManifestTests(unittest.TestCase):
             self.assertRaisesRegex(carry.CarryError, "overlapping tree declarations"),
         ):
             carry.validate_declarations(declarations, pathlib.Path(temp))
+
+    def test_rejects_malformed_tree_declarations(self) -> None:
+        valid = {
+            "source": "source",
+            "target": "target",
+            "fidelity": "verbatim-tree",
+            "appliesTo": "*",
+            "include": ["**/*"],
+            "prune": False,
+        }
+        malformed = [
+            None,
+            {key: value for key, value in valid.items() if key != "source"},
+            {**valid, "unknown": True},
+            {**valid, "include": []},
+            {**valid, "prune": "false"},
+        ]
+        with tempfile.TemporaryDirectory() as temp:
+            for declaration in malformed:
+                with self.subTest(declaration=declaration), self.assertRaises(carry.CarryError):
+                    carry.validate_declarations([declaration], pathlib.Path(temp))
 
     def test_rejects_target_outside_repository(self) -> None:
         with (
