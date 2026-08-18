@@ -472,6 +472,8 @@ def main():
         errors.append("files.json: 'baseline' must be an array")
         baseline = []
 
+    if "trees" not in files:
+        errors.append("files.json: missing required 'trees' array")
     trees = files.get("trees", [])
     if not isinstance(trees, list):
         errors.append("files.json: 'trees' must be an array")

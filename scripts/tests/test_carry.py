@@ -1,3 +1,8 @@
+#!/usr/bin/env python3
+"""Exercise carry.py's manifest inventory, safety checks, and apply behavior."""
+
+from __future__ import annotations
+
 import pathlib
 import subprocess
 import sys
@@ -146,9 +151,16 @@ class CarryManifestTests(unittest.TestCase):
     def test_rejects_target_outside_repository(self) -> None:
         with (
             tempfile.TemporaryDirectory() as temp,
-            self.assertRaisesRegex(carry.CarryError, "escapes repository root"),
+            self.assertRaisesRegex(carry.CarryError, "repository-relative"),
         ):
             carry.relative_root(pathlib.Path(temp), "../outside")
+
+    def test_rejects_normalized_parent_segment(self) -> None:
+        with (
+            tempfile.TemporaryDirectory() as temp,
+            self.assertRaisesRegex(carry.CarryError, "repository-relative"),
+        ):
+            carry.relative_root(pathlib.Path(temp), "inside/../target")
 
     def test_rejects_symlinked_declared_root(self) -> None:
         with tempfile.TemporaryDirectory() as temp:

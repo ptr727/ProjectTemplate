@@ -34,6 +34,9 @@ def load_json(path: pathlib.Path) -> Any:
 
 
 def relative_root(root: pathlib.Path, value: str) -> pathlib.Path:
+    declared = pathlib.PurePosixPath(value)
+    if declared.is_absolute() or ".." in declared.parts:
+        raise CarryError(f"path must be repository-relative without '..': {value}")
     resolved_root = root.resolve()
     candidate = resolved_root / value
     resolved_candidate = candidate.resolve(strict=False)
@@ -156,6 +159,19 @@ def git(root: pathlib.Path, *args: str) -> str:
     return result.stdout.strip()
 
 
+def git_is_ancestor(root: pathlib.Path, ancestor: str, descendant: str) -> bool:
+    result = subprocess.run(
+        ["git", "merge-base", "--is-ancestor", ancestor, descendant],
+        cwd=root,
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    if result.returncode not in (0, 1):
+        raise CarryError(result.stderr.strip() or "git merge-base --is-ancestor failed")
+    return result.returncode == 0
+
+
 def normalized_origin(value: str) -> str:
     value = value.strip().rstrip("/").removesuffix(".git")
     if value.startswith("git@github.com:"):
@@ -229,7 +245,8 @@ def verify_target(
     if not (target / ".git").is_file():
         raise CarryError("target must be a linked worktree, not the primary checkout")
     git(target, "fetch", "origin", "develop")
-    git(target, "merge-base", "--is-ancestor", "origin/develop", "HEAD")
+    if not git_is_ancestor(target, "origin/develop", "HEAD"):
+        raise CarryError("target branch must contain the current origin/develop head")
     worktree_rows = git(target, "worktree", "list", "--porcelain").splitlines()
     if sum(row == f"worktree {target.resolve()}" for row in worktree_rows) != 1:
         raise CarryError("target is not a registered git worktree")
