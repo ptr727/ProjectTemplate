@@ -5,13 +5,14 @@ description: >-
   profile split, the uv/ruff/pyright/mypy/pytest toolchain, src layout, formatting and linting,
   comment and docstring conventions, type hints, naming, imports, patterns to avoid, test
   conventions, and versioning. Use this whenever writing, reviewing, or editing a .py file, a
-  pyproject.toml, or a uv.lock, whenever deciding whether a Python subtree is a shippable project
-  or a lint-only scripts tree, whenever choosing pyright versus mypy for a repo's CI gate, or
-  whenever writing or reviewing a pytest test. Triggers even when the task looks like a small
-  local fix ("just add a helper function", "silence this lint warning", "add a dependency"),
-  because the profile split, the ruff-is-authoritative rule, and the ban on backward-compat
-  shims or impossible-case error handling are each easy to violate one file at a time. Applies
-  only to a repo's Python side, a repo with no Python has no use for this Skill.
+  pyproject.toml, or a uv.lock, whenever running or choosing a Python formatting, lint, type-check,
+  or test command, whenever deciding whether a Python subtree is a shippable project or a lint-only
+  scripts tree, whenever choosing pyright versus mypy for a repo's CI gate, or whenever writing or
+  reviewing a Python test. Triggers even when the task looks like a small local fix ("just add a
+  helper function", "silence this lint warning", "add a dependency") or verification step ("run
+  the tests"), because choosing pytest before reading the profile turns an intentional unittest
+  suite into a false missing-dependency diagnosis. Applies only to a repo's Python side, a repo
+  with no Python has no use for this Skill.
 ---
 
 # Python Codestyle
@@ -26,11 +27,14 @@ profiles, the toolchain, layout, and the language-level conventions.
 
 ## Two profiles
 
-Read the repo's `pyproject.toml` shape and pick the profile before applying any other rule:
+Read the repo's `OPERATIONS.md` local-verification commands before substituting a generic command.
+Then read the `pyproject.toml` shape and pick the profile before running Python tooling or tests:
 
 - **build** (Project): `[project]` + `[build-system]` + committed `uv.lock`. Uses `uv run`, pytest,
   pyright strict (or mypy where the repo requires it).
-- **lint-only** (Scripts): no `[project]`, no lockfile. Uses `uvx`, unittest, mypy as CI gate.
+- **lint-only** (Scripts): no `[project]`, no lockfile. Uses `uvx` for third-party tools, unittest
+  for tests, and mypy as the CI gate. Do not run pytest or diagnose its absence as an environment
+  defect. Use the repository's exact coverage command and unittest scope from `OPERATIONS.md`.
 
 For the full profile specification and per-repo adaptation axes (type checker, dependency
 declaration, versioning, VS Code config), see `references/profiles.md`.

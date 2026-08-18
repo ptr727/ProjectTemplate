@@ -4,10 +4,11 @@ description: >-
   Governs opening, driving, and merging a pull request review loop in a ptr727/ProjectTemplate
   fleet repo: requesting a review after a push, triaging findings (including suppressed
   low-confidence ones), replying and resolving threads, and deciding whether a PR is actually
-  mergeable. Use this whenever about to merge a PR, enable auto-merge, ask the maintainer for
-  merge permission, push a fix and move on without re-checking review state, or judge a PR
-  "green" or "clean" from CI or mergeStateStatus alone. Triggers even when the request sounds
-  routine, such as "merge this" or "it's all green, go ahead," because mergeStateStatus: CLEAN
+  mergeable. Use this whenever about to open a PR, immediately after creating one, about to merge
+  a PR, enable auto-merge, ask the maintainer for merge permission, push a fix and move on without
+  re-checking review state, or judge a PR "green" or "clean" from CI or mergeStateStatus alone.
+  Triggers even when the request sounds routine, such as "open a PR," "merge this," or "it's all
+  green, go ahead," because PR creation starts the review loop and mergeStateStatus: CLEAN
   can go clean once checks pass and every known thread is resolved, while still saying nothing
   about whether the review that resolved those threads covered the current head SHA, read the
   full diff, or left a suppressed low-confidence finding, which opens no thread at all,
@@ -56,21 +57,28 @@ full stop, whatever the merge-state field says.
 
 ## Expected review loop
 
-1. Push changes to the PR branch.
-2. Re-request a review for the **current head SHA**. Auto-trigger is unreliable, so request it
+Opening a pull request starts this loop by default. Creating the PR is not a terminal handoff.
+Only an explicit maintainer instruction may stop, defer, or alter the loop. A draft state, silence,
+or a request that says only "open a PR" is not such an instruction.
+
+1. Push changes to the PR branch and open the pull request when it does not exist.
+2. Run `scripts/pr_review.py status` once in the foreground and read its output.
+3. Re-request a review for the **current head SHA**. Auto-trigger is unreliable, so request it
    explicitly (mechanics in the Copilot runbook). The UI is a fallback only.
-3. Wait for review activity on that head. A completed review raising **no findings** is a valid
+4. Run a bounded `scripts/pr_review.py wait` in a background process and read its terminal output.
+5. Wait for review activity on that head. A completed review raising **no findings** is a valid
    terminal outcome, so don't re-trigger it or read silence as a missing review. A review whose
    body says it declined to review is the one exception, and it is terminal the other way:
    nothing follows it, and re-requesting the same head just repeats the decline.
-4. Triage findings (see below).
-5. Apply fixes or write a rationale for declines.
-6. Reply to each thread and resolve what was addressed.
-7. Re-run the loop after every fix push until no actionable finding remains.
+6. Triage findings (see below).
+7. Apply fixes or write a rationale for declines.
+8. Reply to each thread and resolve what was addressed.
+9. Re-run the loop after every fix push until the checks are green and no finding remains open.
 
 Drive to green, a review confirmed on the latest head SHA and every actionable finding closed,
 then apply the Merge Gate above. **Never exit the loop early.** A round count is not a stopping
-condition, and neither is patience running out.
+condition, and neither is patience running out. Reporting only that the PR was opened is an early
+exit unless the maintainer explicitly instructed the agent not to monitor or drive its review.
 
 ## Every finding ends in one of five outcomes
 

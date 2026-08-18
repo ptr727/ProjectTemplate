@@ -8,13 +8,14 @@ description: >-
   branch a tool defaulted to), with a standalone-clone fallback when an executor cannot write
   both the standard worktree and its Git metadata. Also wraps the mechanics:
   creating a worktree with git worktree add, the fleet layout convention, listing what is in
-  flight, and removing a worktree and its branch after merge. Use this whenever about to create
-  or edit files in a fleet repo, whenever starting or resuming a task, whenever the task's
-  branch is already checked out in a shared checkout, and whenever creating, listing, or
-  removing a worktree. Triggers even when the session was launched in the primary checkout or
-  the change looks like a one-line fix, because the primary checkout is the maintainer's own
-  surface and the incident this guards against was two sessions sharing one checkout, each
-  session's blanket add committing the other's uncommitted files.
+  flight, preparing Husky.Net or Python pre-commit hooks in the new tree, and removing a
+  worktree and its branch after merge. Use this whenever about to create or edit files in a
+  fleet repo, whenever starting or resuming a task, whenever the task's branch is already
+  checked out in a shared checkout, and whenever creating, listing, or removing a worktree.
+  Triggers even when the session was launched in the primary checkout or the change looks like
+  a one-line fix, because the primary checkout is the maintainer's own surface and the incident
+  this guards against was two sessions sharing one checkout, each session's blanket add
+  committing the other's uncommitted files.
 ---
 
 # Repo Worktree
@@ -149,6 +150,25 @@ project instructions, which is why the carried rules state this mandate in so ma
 a `name`, it creates the worktree under `.claude/worktrees/` inside the repo and bases it on the
 GitHub default branch, which is the wrong path and the wrong base here. Create the worktree with
 `git worktree add` as above, then attach with `EnterWorktree` `path:`, not `name:`.
+
+## Preparing Git Hooks
+
+A new worktree holds tracked hook configuration but not every generated hook runtime. Prepare
+the hooks immediately after creating or attaching the worktree, before the first commit. A
+shared `core.hooksPath` value does not make generated files such as `.husky/_/husky.sh` appear
+in the new tree.
+
+- **Husky.Net:** When `.husky/pre-commit` sources `.husky/_/husky.sh` and the local .NET tool
+  manifest declares Husky.Net, run `dotnet tool restore`, then `dotnet husky install` from the
+  worktree root.
+- **Python pre-commit:** When `.pre-commit-config.yaml` exists, install the repository's declared
+  Python environment, then run `pre-commit install` through that environment. A uv project runs
+  `uv sync --frozen`, then `uv run pre-commit install`.
+- **Repository override:** Follow a repository's explicit hook-setup instructions when they
+  differ from these standard cases. Do not infer a replacement command from the language alone.
+
+Treat hook preparation as worktree setup, not as recovery after a rejected commit. If setup
+fails, report that boundary and fix the setup. Never bypass the hook to make the commit succeed.
 
 ## Listing and Cleanup
 
