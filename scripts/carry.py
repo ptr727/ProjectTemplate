@@ -95,7 +95,12 @@ def inventory(root: pathlib.Path, patterns: list[str]) -> Inventory:
                 except OSError as exc:
                     raise CarryError(f"cannot read {path}: {exc}") from exc
     digest = hashlib.sha256()
+    for relative in sorted(directories):
+        digest.update(b"directory\0")
+        digest.update(relative.encode())
+        digest.update(b"\0")
     for relative, content in sorted(files.items()):
+        digest.update(b"file\0")
         digest.update(relative.encode())
         digest.update(b"\0")
         digest.update(content)

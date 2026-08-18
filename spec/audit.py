@@ -161,6 +161,11 @@ def git_blob_sha(content):
     return hashlib.sha1(header + content).hexdigest()
 
 
+@functools.cache
+def canonical_blob_sha(path):
+    return git_blob_sha((ROOT / path).read_bytes())
+
+
 def tree_path_included(path, patterns):
     return any(
         pattern == "**/*"
@@ -1934,8 +1939,7 @@ def audit_repo(entry, spec, branch=None):
             for relative in sorted(set(source_files) & set(target_files)):
                 source_path = source_files[relative]
                 try:
-                    source_bytes = (ROOT / source_path).read_bytes()
-                    source_sha = git_blob_sha(source_bytes)
+                    source_sha = canonical_blob_sha(source_path)
                 except OSError as exc:
                     findings.append(
                         (

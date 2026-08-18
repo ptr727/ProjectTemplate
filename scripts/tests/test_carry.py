@@ -61,6 +61,19 @@ class CarryInventoryTests(unittest.TestCase):
 
         self.assertEqual(result["modified"], ["value.txt"])
 
+    def test_inventory_digest_includes_empty_directories(self) -> None:
+        with tempfile.TemporaryDirectory() as temp:
+            root = pathlib.Path(temp)
+            left = root / "left"
+            right = root / "right"
+            (left / "left-empty").mkdir(parents=True)
+            (right / "right-empty").mkdir(parents=True)
+
+            left_inventory = carry.inventory(left, ["**/*"])
+            right_inventory = carry.inventory(right, ["**/*"])
+
+        self.assertNotEqual(left_inventory.digest, right_inventory.digest)
+
     def test_inventory_rejects_source_and_target_symlinks(self) -> None:
         with tempfile.TemporaryDirectory() as temp:
             root = pathlib.Path(temp)
