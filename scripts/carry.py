@@ -205,6 +205,34 @@ def git_is_ancestor(root: pathlib.Path, ancestor: str, descendant: str) -> bool:
     return result.returncode == 0
 
 
+def git_status_paths(root: pathlib.Path) -> list[str]:
+    result = subprocess.run(
+        ["git", "status", "--porcelain=v1", "-z", "--untracked-files=all"],
+        cwd=root,
+        capture_output=True,
+        check=False,
+    )
+    if result.returncode != 0:
+        raise CarryError(os.fsdecode(result.stderr).strip() or "git status failed")
+    fields = result.stdout.split(b"\0")
+    if fields and not fields[-1]:
+        fields.pop()
+    paths: list[str] = []
+    index = 0
+    while index < len(fields):
+        entry = fields[index]
+        if len(entry) < 4 or entry[2:3] != b" ":
+            raise CarryError("git status returned malformed porcelain output")
+        paths.append(os.fsdecode(entry[3:]))
+        if b"R" in entry[:2] or b"C" in entry[:2]:
+            index += 1
+            if index >= len(fields):
+                raise CarryError("git status returned an incomplete rename or copy")
+            paths.append(os.fsdecode(fields[index]))
+        index += 1
+    return paths
+
+
 def normalized_origin(value: str) -> str:
     value = value.strip().rstrip("/").removesuffix(".git")
     if value.startswith("git@github.com:"):
@@ -321,8 +349,7 @@ def verify_target(
     if sum(row == f"worktree {target.resolve()}" for row in worktree_rows) != 1:
         raise CarryError("target is not a registered git worktree")
     dirty = []
-    for row in git(target, "status", "--porcelain", "--untracked-files=all").splitlines():
-        relative = row[3:].split(" -> ")[-1]
+    for relative in git_status_paths(target):
         path = (target / relative).resolve(strict=False)
         if not any(path == root or root in path.parents for root in owned_roots):
             dirty.append(relative)

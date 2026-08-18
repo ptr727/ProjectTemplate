@@ -302,6 +302,12 @@ class CarryManifestTests(unittest.TestCase):
             (worktree / "unrelated.txt").write_text("dirty", encoding="utf-8")
             with self.assertRaisesRegex(carry.CarryError, "unrelated changes"):
                 carry.verify_target(worktree, {"url": str(remote)}, [owned])
+            (worktree / "unrelated.txt").unlink()
+
+            owned.mkdir()
+            subprocess.run(["git", "-C", worktree, "mv", "seed.txt", "owned/seed.txt"], check=True)
+            with self.assertRaisesRegex(carry.CarryError, "unrelated changes"):
+                carry.verify_target(worktree, {"url": str(remote)}, [owned])
 
 
 if __name__ == "__main__":
