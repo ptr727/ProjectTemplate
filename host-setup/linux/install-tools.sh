@@ -22,7 +22,7 @@ readonly SUDO_TIMESTAMP_TIMEOUT=60
 
 # Managed tools, in dependency order: node asks jq to read the upstream release index.
 # The one optional member, powershell, joins the default selection only under --optional.
-readonly TOOLS=(git gh jq git-restore-mtime node python uv docker dotnet powershell)
+readonly TOOLS=(git gh jq git-restore-mtime node python ripgrep uv docker dotnet powershell)
 
 # Package sets.
 # The default set is what a tool needs to be useful, and the optional set is what is useful often enough to name but not always wanted, installed only with --optional.
@@ -508,6 +508,37 @@ python_install() {
     apt_install "${packages[@]}"
 }
 
+# --- ripgrep ---
+
+ripgrep_source() { printf 'distro'; }
+ripgrep_version() { apt_installed_version ripgrep; }
+ripgrep_target() { apt_candidate_version ripgrep; }
+
+ripgrep_download_path() {
+    local resolved
+    resolved=$(type -P rg 2> /dev/null || true)
+    [[ $resolved == /* ]] || return 0
+    dpkg-query -S "$resolved" > /dev/null 2>&1 || printf '%s' "$resolved"
+}
+
+ripgrep_remove_download() {
+    local resolved
+    while true; do
+        resolved=$(ripgrep_download_path)
+        [[ -n $resolved ]] || break
+        log "ripgrep: removing downloaded copy at $resolved before the distro package install"
+        confirm "  Remove $resolved?" || die "Declined, downloaded Ripgrep left as it is"
+        run_root rm -f "$resolved"
+        [[ $DRY_RUN == true ]] && break
+        hash -r
+    done
+}
+
+ripgrep_install() {
+    ripgrep_remove_download
+    apt_install ripgrep
+}
+
 # --- uv ---
 
 uv_source() { printf 'astral-sh/uv'; }
@@ -870,6 +901,13 @@ tool_note() {
                 note "python" "optional set not selected: ${PYTHON_OPTIONAL[*]}"
             fi
             ;;
+        ripgrep)
+            local resolved
+            resolved=$(ripgrep_download_path)
+            if [[ -n $resolved ]]; then
+                note "ripgrep" "$resolved is an unowned downloaded copy and an install or upgrade removes it before apt installs Ripgrep"
+            fi
+            ;;
         dotnet)
             local -a sdks=()
             readarray -t sdks < <(dotnet_sdk_packages)
@@ -950,13 +988,17 @@ report() {
     done
 }
 
-# Remove a copy of a managed tool found earlier on PATH than $BIN_DIR, so the managed copy is what PATH resolves to afterward.
-# Only jq, uv, and git-restore-mtime install as loose binaries outside apt, and uv's companion uvx is unshadowed alongside it.
+# Remove a copy of a managed tool found earlier on PATH than its managed destination, so the managed copy is what PATH resolves to afterward.
+# Ripgrep migrates an unowned download to apt, while jq, uv, and git-restore-mtime install as loose binaries in $BIN_DIR.
 tool_unshadow() {
     local tool="$1"
     local -a names=()
     case "$tool" in
         jq | git-restore-mtime) names=("$tool") ;;
+        ripgrep)
+            ripgrep_remove_download
+            return 0
+            ;;
         uv) names=(uv uvx) ;;
         *) return 0 ;;
     esac

@@ -35,7 +35,7 @@ Each script is LF with a shebang, and its executable bit is tracked in git. A fr
 
 The Windows registry has one source because `winget` tracks upstream. Here the distro package trails upstream on `gh`, on `node`, and on `uv`, so a tool comes from whichever source keeps up:
 
-- **The distro**, for `git` and `python`, where apt's own package is current enough.
+- **The distro**, for `git`, `python`, and Ripgrep, where apt's own package is current enough.
 - **An upstream apt repository**, for `gh`, `node`, `docker`, and `powershell`, and for `dotnet` as a fallback, where upstream publishes one.
 - **A released binary into `/usr/local/bin`**, for `jq`, `uv`, and `git-restore-mtime`, where upstream publishes no repository.
 
