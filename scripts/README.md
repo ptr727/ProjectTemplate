@@ -131,12 +131,14 @@ A repository adds its own `host-tools.json` at its root and the gate layers it o
 
 ## `pr_review.py`
 
-One compact digest of a pull request's Copilot review state, replacing a sequence of one-`gh`-call-per-turn polls. `status` prints the digest, `wait` runs the backoff in-process so a long review wait costs one agent turn instead of one per poll, `reply` answers one thread and resolves it, and `claims` reads the description against the branch it describes. Re-requesting a review stays out and its runbook is in [`.github/copilot-instructions.md`][copilot-instructions].
+One compact interface to a pull request's Copilot review loop. `status` prints the digest, and `wait` runs the backoff in-process. `comment` posts a PR-conversation answer, while `reply` answers one thread and optionally resolves it. `claims` reads the description against the branch it describes. The runbook is in [`.github/copilot-instructions.md`][copilot-instructions].
 
 ```sh
 python3 scripts/pr_review.py status 452 --repo ptr727/ProjectTemplate
 python3 scripts/pr_review.py claims 452 --repo ptr727/ProjectTemplate
 python3 scripts/pr_review.py wait 452 --repo ptr727/ProjectTemplate --timeout 2700
+python3 scripts/pr_review.py comment 452 --repo ptr727/ProjectTemplate \
+  --body "Suppressed findings (1): **Disproven** - the target is checked before the write."
 python3 scripts/pr_review.py reply 452 --repo ptr727/ProjectTemplate \
   --match "retry count is off by one" --body "Fixed in abc1234: the loop now stops at n." --resolve
 ```
@@ -178,11 +180,13 @@ The timeout path prints the full digest for the same reason, as a bare `PENDING`
 
 The digest also reports the **suppressed findings** a review body collapses into a `<details>` block. Those reach no review thread, so a loop that polls threads alone reports a clean pass while they stand, and the [merge gate][governance] counts them as outstanding findings either way. `suppressed=N` counts findings rather than blocks, reading the `(N)` the heading carries, since one body holds one block per round and counting blocks reports two findings as one. It covers **every** round rather than the current head, because a suppressed finding has no resolved state for a push to retire: head-scoping read "superseded by a push" as "answered", and a finding nobody replied to left the digest the moment the branch moved, so the run reported zero. That is how four rounds went unanswered across three pull requests in one day, each found by the maintainer rather than by this script. The summary line splits the count as `suppressed=N (on_head=N earlier=N)` and each block is marked with the round that raised it, since a finding on an older round may since be moot and deciding that is the reader's call rather than one the count should make for them. Each block prints whole where a thread body truncates, because a thread can be re-read at its id and a suppressed finding cannot, and it prints under a marker naming what closing it takes: no thread exists to reply on or resolve, so the answer goes in the PR conversation.
 
+`comment` posts one answer in the pull request conversation. A suppressed finding has no thread, so this is the path that records its disposition. The command reads the pull request node ID in the same run and exposes no ID argument. It confirms the returned comment URL and exact body before it reports success. A missing target exits `65`, and an unconfirmed response exits `66`. An unconfirmed response may still have landed, so its output tells the reader to inspect the conversation before retrying.
+
 `reply` posts one answer and resolves one thread, and it exists because the hand-run form keeps failing the same way rather than because a wrapper is tidier. Three instances are on record, each an agent that had read the rule against hand-typing a node id and reached for the literal regardless, the last of them refused by the `gh-write-guard` hook an hour after quoting that same rule in a pull request body. A shape that fails while the reader knows the rule is a shape to remove rather than a rule to restate, so the selector is the finding's own words and there is deliberately no argument a `PRRT_...` id fits in: the id is read from the query in the same run and passed straight to the mutation, and a case asserts the id the mutation carries is the one that run just read. The words are matched against the thread's opening comment rather than against a line number, because a fix push moves the line and every lookup keyed to one then misses, which is how three replies posted against nothing while the resolves still succeeded and closed the threads carrying no answer. Matching is case-insensitive, since the text is quoted back out of a digest by a reader.
 
 Every failure is a stop rather than a fallback, because each alternative closes a finding while leaving it unanswered, which is the state a reviewer reads as addressed. No match exits `60` and prints the open threads, since a no-match and an already-answered thread read identically from here. Two matches exit `61` and print both candidates rather than taking the first, `head -n 1` being how a reply lands on the wrong finding. A reply whose response carries no `url`, or a body that came back empty, exits `62` **without** resolving. A resolve that does not report `isResolved` exits `63`, with the reply already posted, so the thread is open behind an answer rather than silently assumed closed. `--resolve` is opt-in rather than the default, because a decline is resolved only once its evidence is in the thread. A target under an owner other than this checkout's exits `64` before anything is read at all, and that refusal takes no environment-variable escape: a grant this process can be handed is one the caller sets on the command that runs it, and a grant the caller writes for itself is not a grant, so the cross-owner case goes through the runbook's explicit `gh` path where the hook reads the maintainer's grant from the session instead.
 
-What this trades away is stated rather than glossed. A mutation spelled as a `gh` command in a shell is read by the `gh-write-guard` hook and one this script performs is not, since the hook sees `python3 pr_review.py reply` and no `gh` write. That is a real loss of a second pair of eyes, and it is taken because what the hook guards against there is a fabricated id, which this removes at the source instead of catching after the fact. The guard's other rule is re-implemented here rather than assumed: the owner check above is the same scope rule, enforced in-process, and it is honest that it stops a mistake rather than a determined caller. The whole-source guard against every other state-changing call stays and was narrowed to these two documents rather than dropped when the first of them arrived.
+What this trades away is stated rather than glossed. A mutation spelled as a `gh` command in a shell is read by the `gh-write-guard` hook and one this script performs is not. The script removes that failure at its source instead: every node ID comes from a live query in the same run. The owner check is also enforced in-process. The whole-source test guards against every other state-changing call and counts each reviewed mutation document.
 
 `claims` checks that a description does not contradict its own branch, and it exists for the same reason `sha-pin` now resolves: a reference that points at nothing is a silent failure caught by a reviewer or not at all. Three stale descriptions in one session generated six review findings between them, each a reviewer noticing that the body named a commit or a behavior the branch no longer carried. It reads the commits a body **claims** the branch carries and the `uses:` refs it quotes, confirms the head tree still carries each, and exits `70` where one does not. Prose claims stay **out of scope**, since judging those needs a similarity heuristic, which [`spec/section-model.md`][section-model] rejects for exactly the reason it would fail here.
 
@@ -196,9 +200,20 @@ The match is on the block's heading rather than anywhere in the body, and on the
 
 ## `build_dist.py`
 
-Regenerates [`.claude-plugin/fleet-skills/`][fleet-skills-dist] from [`.agents/skills/`][agents-skills], the hub's own hand-authored fleet Skills. Codex and opencode read `.agents/skills/` directly, project-local, with no install step. Claude Code scans neither that path nor any repo-root path by default, only `.claude/skills/` or a plugin's own `skills/`, so this script materializes a Claude-plugin-compatible copy for [`.claude-plugin/marketplace.json`][marketplace] to publish, nested under `.claude-plugin/` rather than a top-level `dist/`, since this repo's `.gitignore` already gives `dist/` a different, Python-build-artifact meaning. `.agents/skills/` stays the one place a skill is hand-edited, and `.claude-plugin/fleet-skills/` is generated and never hand-edited, the same discipline this fleet already applies to other derived trees.
+Regenerates [`.github/skills/`][github-skills-dist] and [`.claude-plugin/fleet-skills/`][fleet-skills-dist] from [`.agents/skills/`][agents-skills], the hub's own hand-authored fleet Skills. Codex and opencode read `.agents/skills/` directly, GitHub Copilot reads `.github/skills/`, and Claude Code reads the generated plugin published through [`.claude-plugin/marketplace.json`][marketplace]. `.agents/skills/` stays the one place a skill is hand-edited. Both generated trees are never hand-edited.
 
-`--check` is the read-only mode: it exits `1` when the generated plugin was built from different source bytes than `.agents/skills/` currently holds, comparing a digest over every source file rather than a file-count or a timestamp, so a same-size edit still registers. CI runs `--check` rather than trusting a contributor to have run the generator, the same reason `spec/audit.py` exists rather than trusting a hand-carried file.
+`--check` is the read-only mode: it exits `1` when either generated tree differs from `.agents/skills/`, comparing a digest over every file rather than a file count or timestamp. CI runs `--check` rather than trusting a contributor to have run the generator, the same reason `spec/audit.py` exists rather than trusting a hand-carried file.
+
+## `carry.py`
+
+Copies manifest-owned trees from a freshly fetched ProjectTemplate `main` checkout into an isolated downstream feature worktree. `check` reports the canonical commit, repository identity, applicable declarations, path differences, and tree digests without changing the target. `apply` reports each write or removal and repeats the comparison before it succeeds.
+
+```shell
+python3 scripts/carry.py check PhotoCleaner --target /path/to/worktree
+python3 scripts/carry.py apply PhotoCleaner --target /path/to/worktree
+```
+
+The tool validates the registry identity, target origin, feature-branch worktree, development-branch ancestry, unrelated changes, root containment, and symlink-free trees. A pruned declaration authorizes removal only beneath its target root.
 
 ## `skills_install.py`
 
@@ -215,6 +230,7 @@ Installs the fleet's Skills for the current machine, cross-platform and idempote
 [editorconfig]: ../.editorconfig
 [files]: ../spec/files.json
 [fleet-skills-dist]: ../.claude-plugin/fleet-skills/
+[github-skills-dist]: ../.github/skills/
 [gitattributes]: ../.gitattributes
 [governance]: ../GOVERNANCE.md
 [host-setup]: ../docs/host-setup.md

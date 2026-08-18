@@ -1,15 +1,15 @@
 #!/usr/bin/env python3
-"""Generate the Claude-plugin-compatible copy of .agents/skills/ at .claude-plugin/fleet-skills/.
+"""Generate the GitHub and Claude-compatible copies of .agents/skills/.
 
 .agents/skills/ is the one hand-authored source: Codex and opencode read it directly with no
 install step. Claude Code never scans that path, only .claude/skills/ or a plugin's own skills/
 directory, so this script materializes a plugin (.claude-plugin/fleet-skills/) that
-.claude-plugin/marketplace.json publishes, keeping .agents/skills/ the single place a skill's
-content is ever hand-edited. Nested under .claude-plugin/ rather than a top-level dist/, since
-this repo's .gitignore already gives dist/ a different, Python-build-artifact meaning.
+.claude-plugin/marketplace.json publishes. GitHub Copilot discovers repository skills under
+.github/skills/, so the script also materializes that tree. .agents/skills/ stays the single
+place a skill's content is ever hand-edited.
 
-Usage: python3 scripts/build_dist.py           regenerate the plugin from .agents/skills/
-       python3 scripts/build_dist.py --check   read-only: exit 1 if the plugin is stale
+Usage: python3 scripts/build_dist.py           regenerate distributions from .agents/skills/
+       python3 scripts/build_dist.py --check   read-only: exit 1 if a distribution is stale
 """
 
 from __future__ import annotations
@@ -27,6 +27,7 @@ PLUGIN_NAME = "fleet-skills"
 DIST_PLUGIN = ROOT / ".claude-plugin" / PLUGIN_NAME
 PLUGIN_MANIFEST = DIST_PLUGIN / ".claude-plugin" / "plugin.json"
 DIGEST_STAMP = DIST_PLUGIN / ".source-digest"
+GITHUB_SKILLS = ROOT / ".github" / "skills"
 
 
 def skill_names():
@@ -87,6 +88,16 @@ def source_digest(names):
     return tree_digest(SKILLS_SRC, names)
 
 
+def has_exact_skill_directories(root, names):
+    """Whether `root` exists and contains only the expected skill directories."""
+    if not root.is_dir() or root.is_symlink():
+        return False
+    entries = list(root.iterdir())
+    return all(entry.is_dir() for entry in entries) and {entry.name for entry in entries} == set(
+        names
+    )
+
+
 def expected_manifest(names):
     """The plugin.json content `names` should produce, entirely deterministic.
 
@@ -124,6 +135,13 @@ def regenerate():
     for name in names:
         reject_symlinks(SKILLS_SRC / name)
         shutil.copytree(SKILLS_SRC / name, dist_skills / name)
+    if GITHUB_SKILLS.is_symlink() or GITHUB_SKILLS.is_file():
+        GITHUB_SKILLS.unlink()
+    elif GITHUB_SKILLS.is_dir():
+        shutil.rmtree(GITHUB_SKILLS)
+    GITHUB_SKILLS.mkdir(parents=True, exist_ok=True)
+    for name in names:
+        shutil.copytree(SKILLS_SRC / name, GITHUB_SKILLS / name)
     write_plugin_manifest(names)
     # LF, same as write_plugin_manifest, explicit for the same Windows-platform-default reason.
     DIGEST_STAMP.write_text(source_digest(names) + "\n", encoding="utf-8", newline="\n")
@@ -131,7 +149,7 @@ def regenerate():
 
 
 def is_stale():
-    """Whether the generated plugin needs regenerating: missing, corrupted, or built from
+    """Whether a generated distribution needs regenerating: missing, corrupted, or built from
     different source bytes. Checks the manifest's own content and the generated tree's actual
     bytes, not only the digest stamp, since a stamp surviving a partial deletion, a hand-edited
     manifest, or an edited-in-place generated file would otherwise report current over a plugin
@@ -155,21 +173,24 @@ def is_stale():
     # An extra directory under DIST_PLUGIN/skills/ (a retired skill left behind, one added by hand) would never be read and could not affect that comparison.
     # Checked by name first, deliberately not folded into the digest walk itself.
     dist_skills = DIST_PLUGIN / "skills"
-    actual_names = (
-        {p.name for p in dist_skills.iterdir() if p.is_dir()} if dist_skills.is_dir() else set()
-    )
-    if actual_names != set(names):
+    if not has_exact_skill_directories(dist_skills, names):
         return True
     current_source_digest = source_digest(names)
     if DIGEST_STAMP.read_text(encoding="utf-8").strip() != current_source_digest:
         return True
-    return current_source_digest != tree_digest(dist_skills, names)
+    if current_source_digest != tree_digest(dist_skills, names):
+        return True
+    if not has_exact_skill_directories(GITHUB_SKILLS, names):
+        return True
+    return current_source_digest != tree_digest(GITHUB_SKILLS, names)
 
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument(
-        "--check", action="store_true", help="read-only: exit 1 if the generated plugin is stale"
+        "--check",
+        action="store_true",
+        help="read-only: exit 1 if a generated skill distribution is stale",
     )
     args = parser.parse_args()
 
@@ -180,9 +201,12 @@ def main():
             print(exc, file=sys.stderr)
             return 1
         if stale:
-            print(f"{DIST_PLUGIN} is stale: run `python3 scripts/build_dist.py`.", file=sys.stderr)
+            print(
+                "Generated skill distributions are stale: run `python3 scripts/build_dist.py`.",
+                file=sys.stderr,
+            )
             return 1
-        print(f"{DIST_PLUGIN} is current.")
+        print("Generated skill distributions are current.")
         return 0
 
     try:

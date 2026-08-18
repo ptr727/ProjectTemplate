@@ -13,9 +13,9 @@ description: >-
   full diff, or left a suppressed low-confidence finding, which opens no thread at all,
   unanswered. Also triggers when a review loop looks stuck
   (no review landing, findings that keep reappearing) or when deciding a finding is real, false,
-  deferred, or a deliberate decline. Provider-specific mechanics (GitHub Copilot's request/poll/
-  reply API calls) live in .github/copilot-instructions.md's "GitHub Copilot Review Runbook,"
-  this skill is the contract that runbook implements, not a replacement for it.
+  deferred, or a deliberate decline. Provider-specific mechanics are implemented by
+  scripts/pr_review.py and bootstrapped by .github/copilot-instructions.md. This skill is the
+  contract those surfaces implement, not a replacement for them.
 ---
 
 # PR Review Conduct
@@ -124,7 +124,8 @@ reviewer's own words to identify it), give one bold verdict per finding (`Fixed 
 `Disproven`, or `No change needed`), state the `(N)` count the block gave so answers can be
 checked against findings, and link the review round. **Read every round, not only the head.** A
 suppressed finding does not retire when a later push supersedes it, it just stops showing up in a
-head-scoped query while still unanswered.
+head-scoped query while still unanswered. Post the answer with `scripts/pr_review.py comment`
+from a hub checkout. Do not use a provider connector or reconstruct the GitHub mutation.
 
 ## Escalate to the maintainer when
 
@@ -134,13 +135,12 @@ head-scoped query while still unanswered.
 - A finding is judged real but should not be fixed. That decision is never the agent's alone.
 - An architectural redesign is proposed rather than a bug fix.
 
-## Mechanics live elsewhere
+## Mechanics Live Elsewhere
 
-This skill is the provider-agnostic contract. For the actual GitHub API calls, requesting a
-Copilot review, polling for it, matching the suppressed-findings heading (its wording has moved
-more than once), verifying head-SHA and diff coverage, replying and resolving threads without a
-hand-typed id, see `.github/copilot-instructions.md` "GitHub Copilot Review Runbook" in the repo
-being worked in, and reach for `scripts/pr_review.py` (hub-hosted, invoked from a hub checkout)
-before hand-rolling any of it. `status` reports coverage, threads, suppressed findings, and shapes
-in one call, `wait` backs off in-process, and `reply` resolves a thread by matching the finding's
-own words rather than a line number a fix push can move.
+This skill is the provider-agnostic contract. Use `scripts/pr_review.py` from a hub checkout for
+the GitHub-specific API operations. `status` reports coverage, threads, body-only findings, and
+shapes in one call. `wait` requests and polls in-process. `comment` posts a PR-conversation
+answer after it reads the PR node ID. `reply` resolves a thread by matching the finding's own
+words instead of a line number a fix push can move. The repository's
+`.github/copilot-instructions.md` bootstraps Copilot into the `code-review` skill and its stable
+coverage marker. Do not reconstruct the API operations by hand.

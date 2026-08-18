@@ -48,6 +48,7 @@ flowchart TD
   scripts["scripts/ hub-hosted tooling"] --> audit
   skills[".agents/skills/ source"] --> build[build_dist.py]
   build --> plugin[".claude-plugin/ generated"]
+  build --> githubskills[".github/skills/ generated"]
   plugin --> install[skills_install.py]
   skills --> install
   install --> host["host: ~/.agents/skills + plugin + stamp"]
@@ -55,7 +56,7 @@ flowchart TD
   ci["CI gates + prose-gate action"] --> law
 ```
 
-The layers, one line each. The lifecycle docs route and procedure ([`AGENTS.md`][agents] routes, [`STANDUP.md`][standup] creates, [`RESYNC.md`][resync] re-lines, [`AUDIT.md`][audit] measures). The law docs hold the rules ([`GOVERNANCE.md`][governance] cross-cutting, [`CODESTYLE.md`][codestyle] per language, [`WORKFLOW.md`][workflow] the CI/CD contract). The machine ground truth is [`spec/`][files] plus [`registry/repos.json`][repos]. The hub-hosted tooling is [`scripts/`][scripts-readme], reached rather than carried. The skills source of truth is [`.agents/skills/`][skills-readme], and [`scripts/build_dist.py`][build-dist] generates the Claude Code plugin under [`.claude-plugin/`][marketplace] from it. [`scripts/skills_install.py`][skills-install] installs both forms per machine. [`host-setup/`][host-setup-doc] provisions a host from a stock OS. CI enforces the deterministic subset of the rules on every pull request.
+The layers, one line each. The lifecycle docs route and procedure ([`AGENTS.md`][agents] routes, [`STANDUP.md`][standup] creates, [`RESYNC.md`][resync] re-lines, [`AUDIT.md`][audit] measures). The law docs hold the rules ([`GOVERNANCE.md`][governance] cross-cutting, [`CODESTYLE.md`][codestyle] per language, [`WORKFLOW.md`][workflow] the CI/CD contract). The machine ground truth is [`spec/`][files] plus [`registry/repos.json`][repos]. The hub-hosted tooling is [`scripts/`][scripts-readme], reached rather than carried. The skills source of truth is [`.agents/skills/`][skills-readme], and [`scripts/build_dist.py`][build-dist] generates the GitHub Copilot tree and Claude Code plugin from it. [`scripts/skills_install.py`][skills-install] installs the host-scoped forms. [`host-setup/`][host-setup-doc] provisions a host from a stock OS. CI enforces the deterministic subset of the rules on every pull request.
 
 ## Entry Points
 
@@ -136,7 +137,7 @@ Owned by [`AUDIT.md`][audit] section 10, [`GOVERNANCE.md` "Hub-Hosted Tooling"][
 
 **Resolved: the install is global per user, and the work is closing its gaps, not adding a second model.** A per-repo pinned install was considered and rejected: it would let a repo's skills match its own state, but it forfeits coverage of ad-hoc sessions in no repo at all (which is where the incidents this fleet guards against actually happened), doubles the staleness surface, and adds a version-resolution mechanism the fleet does not need while the whole fleet tracks one hub.
 
-The lifecycle chain as built: a skill is hand-authored under [`.agents/skills/`][skills-readme], [`scripts/build_dist.py`][build-dist] generates the Claude Code plugin under [`.claude-plugin/`][marketplace], and [`scripts/skills_install.py`][skills-install] installs both forms per machine (an overlay copy into `~/.agents/skills/` for Codex and opencode, a user-scope plugin install for Claude Code), stamping the hub commit into `~/.agents/skills-install-stamp.json`. `skills_install.py --report` is the read-only staleness check and exits non-zero when the machine is behind the checkout.
+The lifecycle chain as built: a skill is hand-authored under [`.agents/skills/`][skills-readme], [`scripts/build_dist.py`][build-dist] generates `.github/skills/` and the Claude Code plugin, and [`scripts/skills_install.py`][skills-install] installs both host-scoped forms per machine. The installer stamps the hub commit into `~/.agents/skills-install-stamp.json`. `skills_install.py --report` is the read-only staleness check and exits non-zero when the machine is behind the checkout.
 
 Four wiring points close the model, and each is in place:
 
@@ -216,8 +217,8 @@ flowchart LR
 
 ### G8: Generated Plugin Can Ship Stale (Closed)
 
-- **Gap** - `.claude-plugin/` is generated from `.agents/skills/`, and a merge that edits the source without re-running [`scripts/build_dist.py`][build-dist] would ship a plugin that no longer matches it.
-- **Resolution** - [`.github/workflows/validate-task.yml`][validate-task] runs `build_dist.py --check` as its own step in the lint job, on every pull request, and the required aggregator check gates on that job. A PR desyncing the two trees therefore fails the required check, which is this row's closing test.
+- **Gap** - `.github/skills/` and `.claude-plugin/` are generated from `.agents/skills/`, and a merge that edits the source without re-running [`scripts/build_dist.py`][build-dist] would ship stale distributions.
+- **Resolution** - [`.github/workflows/validate-task.yml`][validate-task] runs `build_dist.py --check` as its own step in the lint job, on every pull request, and the required aggregator check gates on that job. A PR desyncing a generated tree therefore fails the required check, which is this row's closing test.
 - **Provenance** - The step landed in [#676][pr-676], which predates this register's merge, so this row's original `Checked` claim was stale on arrival. Recording that here rather than silently deleting the row is the maintenance rule doing its job.
 
 ### G9: WORKFLOW.md and AUDIT.md Have No Skill (Closed)
@@ -355,7 +356,6 @@ Design-doc first: this doc merges, then each unchecked item becomes an issue lin
 [host-setup-doc]: ./host-setup.md
 [host-setup-readme]: ../host-setup/README.md
 [host-tools]: ../spec/host-tools.json
-[marketplace]: ../.claude-plugin/marketplace.json
 [operations]: ../OPERATIONS.md
 [peer-messaging]: ./peer-messaging.md
 [pr-review]: ../scripts/pr_review.py

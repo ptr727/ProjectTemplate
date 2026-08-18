@@ -222,6 +222,21 @@ class TestSpecCoverage(unittest.TestCase):
         """A tool the spec requires on Windows is one the tooling can provide, or a recorded exception."""
         self._assert_coverage("windows", self.declared_windows_tools(), "install-tools.ps1")
 
+    def test_ripgrep_uses_the_platform_package_managers(self) -> None:
+        """Ripgrep uses apt on Linux and the upstream project's documented winget package."""
+        linux = (LINUX / "install-tools.sh").read_text(encoding="utf-8")
+        windows = (WINDOWS / "install-tools.ps1").read_text(encoding="utf-8")
+        install = re.search(
+            r"ripgrep_install\(\) \{(?P<body>.*?)^\}", linux, re.MULTILINE | re.DOTALL
+        )
+        self.assertIsNotNone(install)
+        body = install.group("body") if install else ""
+        self.assertLess(body.index("ripgrep_remove_download"), body.index("apt_install ripgrep"))
+        self.assertRegex(
+            windows,
+            r"Name = 'ripgrep'; Package = 'BurntSushi\.ripgrep\.MSVC'; Probe = 'rg'",
+        )
+
     def test_every_declared_floor_carries_a_total_remedy_mapping(self) -> None:
         """Each floored tool names a runnable remedy on every platform, or carries a recorded exception.
 

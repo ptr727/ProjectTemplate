@@ -33,6 +33,8 @@ host-setup\windows\setup-wsl.ps1 -Status
 
 Every tool the contract names has a winget package, so nothing here carries a fallback. That is the whole difference from the Linux script, which needs three kinds of source because the distribution's package trails upstream on `gh`, on `node` and on `uv`. Where `winget` tracks upstream, the machinery that exists to work around a stale feed has nothing to do.
 
+Ripgrep uses the upstream project's documented `BurntSushi.ripgrep.MSVC` package. It provides the `rg` command used for repository searches and `rg --files` discovery.
+
 A tool that turns out to have no winget package is a finding to raise rather than a second source to add quietly, because the moment one tool comes from somewhere else this directory stops being one program and becomes two.
 
 ## Elevation and Scope

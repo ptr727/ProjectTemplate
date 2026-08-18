@@ -8,14 +8,19 @@ invocation whose output is a few hundred bytes. See GOVERNANCE.md "Context and D
 Discipline" for the rule this implements.
 
 Subcommands
+  comment  Post one PR-conversation answer, including a suppressed-finding disposition. The PR
+           node id is read in the same run, and the returned comment URL and body confirm the
+           write. Exit 0 = done, 64 = write scope could not be established or excludes the
+           target, 65 = the PR could not be read, 66 = the response did not confirm the comment.
   claims   Check the description against the branch it describes. A body claiming a commit or
            quoting a `uses:` ref the head tree no longer carries is a silent failure caught by a
            reviewer or not at all, and three stale descriptions in one session generated six
            review findings between them. Read-only. Exit 0 = every reference resolves, 70 = one
            does not, 71 = there were references and none could be read, so nothing was decided.
   status   One digest line, any unresolved threads, and any suppressed findings. Read-only.
-           Exit 0 = every shape in the reviewer's output is one this reads, and the round
-           covering the head read the whole diff or stated nothing about what it read.
+           Exit 0 = no review covers the head yet, or every output shape is recognized and the
+           round covering the head read the whole diff. Use `wait` when review presence is the
+           condition, since `status` reports an absent review without treating it as a failure.
            42 = that round read fewer files than the pull request changed, so part of the diff
            has no review at all. Measured over four pull requests and seven rounds here, a
            re-request never cleared one and no round ever recovered, so this is a state to
@@ -24,6 +29,8 @@ Subcommands
            be believed. The remedy is an issue on the repository hosting this script, and the
            review loop does not close until the reader is fixed. Merging regardless is the
            maintainer's decision rather than the agent's.
+           45 = the review covering the head stated no changed-file coverage. Request another
+           review only after confirming the head branch carries the current review instructions.
   reply    Answer one thread selected by its text, and resolve it on request. Exists
            because the hand-run form keeps failing the same way: a node id typed into a
            mutation, which resolves globally and so writes to a real thread somewhere
@@ -46,7 +53,7 @@ Subcommands
            40 reports the shape of that answer and reads nothing of its cause: an answer
            carrying no commit covers no head, so the wait ends and the reader decides.
            41 = the review carrying the head says it did not review, so it covers nothing.
-           42 and 43 = the review landed and `status`'s two blocking readings apply to it,
+           42, 43, and 45 = the review landed and `status`'s blocking readings apply to it,
            since a wait ending on a round that covered half the diff, or on output nothing here
            can read, has ended on something other than a review of this pull request.
            44 = the review loop closed, the merge reads BLOCKED, and a check is in a shape no
@@ -58,14 +65,12 @@ Subcommands
            50 = the request is pending and nothing picked it up, which no amount of
            waiting changes. Recovery is two mutations, and they stay in the runbook.
 
-Reading is the bulk of this and `reply` is the one exception, which is a trade rather
-than a free win. A mutation spelled as a `gh` command in a shell is read by the
-gh-write-guard PreToolUse hook, and one this script performs is not, since the hook sees
-`python3 pr_review.py reply` and no gh write. What the hook guards against there is a
-fabricated id, and that is the failure this removes at the source instead: the id is
-never in the caller's hands to fabricate. Re-requesting a review stays out, having no
-such failure and no id to hide. See .github/copilot-instructions.md for the runbook, and
-GOVERNANCE.md "Repository Boundaries and Write Safety" for the rules `reply` enforces.
+Reading is the bulk of this and the writing commands are a trade rather than a free win. A
+mutation spelled as a `gh` command in a shell is read by the gh-write-guard PreToolUse hook, and
+one this script performs is not. The script removes the guarded failure at its source: every node
+id comes from a live query in the same run, and the owner boundary is enforced in-process. See
+.github/copilot-instructions.md for the runbook, and GOVERNANCE.md "Repository Boundaries and
+Write Safety" for the rules these commands enforce.
 """
 
 from __future__ import annotations
@@ -140,6 +145,12 @@ REFUSAL = re.compile(
 # That one keeps the text requirement, since the name alone does not say the line states coverage.
 COVERAGE_BULLET = re.compile(r"\s*[-*]\s*\*\*Files reviewed:", re.IGNORECASE)
 COVERAGE_SENTENCE = re.compile(r"\s*Copilot\b", re.IGNORECASE)
+# Ask the reviewer for a stable coverage shape instead of adapting only to changing prose.
+# Keep the prose readers for reviews made before the marker shipped.
+FLEET_REVIEW = re.compile(
+    r"\s*<!--\s*fleet-review:\s*reviewed=(\d+)\s+changed=(\d+)\s+findings=(\d+)\s*-->\s*",
+    re.IGNORECASE,
+)
 # The count pair itself, in the two spellings the corpus carries.
 # The comment tail one of them ends on is deliberately not part of the unit.
 # It says how many comments the round raised, which is not coverage.
@@ -362,9 +373,20 @@ query($o:String!,$r:String!,$n:Int!,$after:String){
   }}}
 """
 
-# The two mutations the runbook publishes, in the order it publishes them.
-# `url` is fetched because it is the one field that says the reply carried a body.
+# The PR id for a conversation comment is read in the same run that writes it.
+Q_COMMENT_TARGET = """
+query($o:String!,$r:String!,$n:Int!){
+  repository(owner:$o,name:$r){ pullRequest(number:$n){ id url } }}
+"""
+
+# The conversation-comment and thread mutations the runbook publishes.
+# `url` is fetched because it is the one field that confirms a comment or reply carried a body.
 # A reply that posted empty still returns a comment, and three did, each then resolved.
+M_COMMENT = """
+mutation($subjectId:ID!,$body:String!){
+  addComment(input:{subjectId:$subjectId, body:$body}){
+    commentEdge{ node{ id url body } } }}
+"""
 M_REPLY = """
 mutation($threadId:ID!,$body:String!){
   addPullRequestReviewThreadReply(input:{pullRequestReviewThreadId:$threadId, body:$body}){
@@ -639,6 +661,8 @@ def reviewed_head(pr: dict) -> bool:
 
 def is_coverage_line(line: str) -> bool:
     """Whether this line is the reviewer stating its file coverage, rather than prose about it."""
+    if FLEET_REVIEW.fullmatch(line):
+        return True
     if COVERAGE_BULLET.match(line):
         return True
     return bool(COVERAGE_SENTENCE.match(line)) and "changed file" in line.lower()
@@ -658,7 +682,11 @@ def read_coverage(line: str) -> tuple[int, int] | None:
     it is a line this script is parsing wrongly, and reading it as full coverage fails open on
     exactly the statement that says something is off.
     """
+    marker = FLEET_REVIEW.fullmatch(line)
     m = COVERAGE_COUNTS.search(line)
+    if marker:
+        reviewed, changed = marker.group(1), marker.group(2)
+        return (int(reviewed), int(changed)) if int(reviewed) <= int(changed) else None
     if not m:
         return None
     reviewed, changed = (m.group(1), m.group(2)) if m.group(1) else (m.group(3), m.group(4))
@@ -668,12 +696,9 @@ def read_coverage(line: str) -> tuple[int, int] | None:
 def coverage_of(node: dict) -> tuple[str, str]:
     """This round's coverage reading, with the line it was read from.
 
-    A round making no statement at all reads as unstated rather than a pass or a failure. 28 of
-    the 332 bodies measured carry an overview and a change list and nothing more, that shape
-    interleaves with the counted one throughout rather than preceding it, and one pull request
-    carries both across its two rounds. Failing on it would cry wolf on roughly one review in
-    twelve, and a guard an agent learns to work around is worse than no guard. Passing it as
-    coverage is the bug this whole reading exists to remove, one shape over.
+    A round making no statement at all reads as unstated rather than unvetted. 28 of the 332
+    bodies measured carry an overview and a change list and nothing more. The shape is recognized,
+    but it cannot prove full diff coverage and therefore blocks the status gate.
 
     A wording that is coverage-shaped and parses to no counts is the failure whose remedy is
     fixing this script, since a gate that allows whatever it does not recognize stops gating as
@@ -910,6 +935,10 @@ def report_verdict(pr: dict) -> int:
             f"maintainer's decision to take and not this script's, and not the agent's."
         )
         return 43
+    # A missing head review has no coverage verdict yet.
+    # The wait path owns that incomplete state.
+    if not head_reviews(pr):
+        return 0
     state, line = head_coverage(pr)
     if state == PARTIAL:
         # The unread count comes from the line that decided PARTIAL, never from past rounds.
@@ -933,6 +962,15 @@ def report_verdict(pr: dict) -> int:
             f"{table_against_diff(pr, counts)}"
         )
         return 42
+    if state == UNSTATED:
+        print(
+            "status=COVERAGE_IS_UNSTATED the review covering the head states no changed-file "
+            "coverage, so the review loop cannot prove that it read the full diff. Confirm the "
+            "head branch carries the current code-review skill and Copilot instructions, then "
+            "request another review. Merging without coverage is the maintainer's decision, "
+            "not the agent's."
+        )
+        return 45
     return 0
 
 
@@ -1547,6 +1585,38 @@ def matching_threads(threads: list[dict], match: str, path: str | None) -> list[
     ]
 
 
+def comment_on_pr(owner: str, repo: str, num: int, body: str) -> int:
+    """Post one PR conversation comment and confirm the returned comment. Returns an exit code."""
+    ok, why = in_scope(owner)
+    if not ok:
+        print(f"status=OUT_OF_SCOPE nothing was written: {why}")
+        return 64
+
+    target = gql(Q_COMMENT_TARGET, owner, repo, num)
+    if not target or not target.get("id") or not target.get("url"):
+        print(
+            f"status=TARGET_NOT_READ nothing was written: {owner}/{repo} #{num} did not "
+            "return a pull request id and URL, so the mutation has no verified target"
+        )
+        return 65
+
+    body = body.replace("\r\n", "\n").replace("\r", "\n")
+    edge = (gh_graphql(M_COMMENT, subjectId=target["id"], body=body).get("addComment") or {}).get(
+        "commentEdge"
+    ) or {}
+    comment = edge.get("node") or {}
+    if not comment.get("url") or (comment.get("body") or "") != body:
+        print(
+            "status=COMMENT_NOT_CONFIRMED the response returned no URL or a different body. "
+            "Inspect the PR conversation before retrying, since the write may have landed."
+        )
+        print(f"  response: {json.dumps(comment)[:400]}")
+        return 66
+    print(f"commented: {comment['url']}")
+    print("status=COMMENTED")
+    return 0
+
+
 def reply_to_thread(
     owner: str, repo: str, num: int, match: str, body: str, path: str | None, resolve: bool
 ) -> int:
@@ -1791,7 +1861,7 @@ def check_claims(owner: str, repo: str, num: int) -> int:
 
 def main(argv: list[str] | None = None) -> int:
     ap = argparse.ArgumentParser()
-    ap.add_argument("cmd", choices=["claims", "status", "reply", "wait"])
+    ap.add_argument("cmd", choices=["claims", "comment", "status", "reply", "wait"])
     ap.add_argument("number", type=int)
     # No default, because the wrong repository is the failure this argument has actually had.
     # A default names one repository, and every run from elsewhere silently reads that one.
@@ -1841,8 +1911,8 @@ def main(argv: list[str] | None = None) -> int:
     ap.add_argument(
         "--body",
         metavar="TEXT",
-        help="reply: the answer to post, carrying the fixing commit SHA or the "
-        "evidence that disproves the finding",
+        help="comment or reply: the answer to post, carrying the fixing commit SHA or "
+        "the evidence that disproves the finding",
     )
     ap.add_argument(
         "--resolve",
@@ -1853,22 +1923,24 @@ def main(argv: list[str] | None = None) -> int:
     # Named for the command they belong to, since one silently ignored reads as one that took effect.
     # A `status` given --body reports a clean digest and writes nothing.
     # Nothing in that output says the reply never happened.
-    writing = {
+    reply_only = {
         "--match": a.match,
         "--path": a.path,
-        "--body": a.body,
         "--resolve": a.resolve or None,
     }
     if a.cmd != "reply":
-        for flag, value in writing.items():
+        for flag, value in reply_only.items():
             if value is not None:
                 ap.error(f"{flag} belongs to `reply`, not `{a.cmd}`")
-    else:
-        for flag in ("--match", "--body"):
-            if not (writing[flag] or "").strip():
+    if a.cmd not in ("comment", "reply") and a.body is not None:
+        ap.error(f"--body belongs to `comment` or `reply`, not `{a.cmd}`")
+    required = ["--body"] + (["--match"] if a.cmd == "reply" else [])
+    if a.cmd in ("comment", "reply"):
+        values = {"--body": a.body, "--match": a.match}
+        for flag in required:
+            if not (values[flag] or "").strip():
                 ap.error(
-                    f"reply requires a non-empty {flag}, since a thread resolved on an "
-                    "empty answer reads as addressed while carrying nothing"
+                    f"{a.cmd} requires a non-empty {flag}, since an empty answer records nothing"
                 )
     # A negative grace leaves the next reading permanently behind the clock.
     # That is the per-poll REST pattern the interval exists to prevent.
@@ -1895,6 +1967,9 @@ def main(argv: list[str] | None = None) -> int:
 
     if a.cmd == "claims":
         return check_claims(owner, repo, a.number)
+
+    if a.cmd == "comment":
+        return comment_on_pr(owner, repo, a.number, a.body)
 
     if a.cmd == "status":
         # One payload renders the digest and decides the code, for the reason `wait` reads one.

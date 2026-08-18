@@ -363,6 +363,7 @@ $TOOLS = @(
     @{ Name = 'gh'; Package = 'GitHub.cli'; Probe = 'gh'; Optional = @(); Family = '' }
     @{ Name = 'jq'; Package = 'jqlang.jq'; Probe = 'jq'; Optional = @(); Family = '' }
     @{ Name = 'python'; Package = 'Python.Python.3.13'; Probe = 'py'; Optional = @(); Family = '' }
+    @{ Name = 'ripgrep'; Package = 'BurntSushi.ripgrep.MSVC'; Probe = 'rg'; Optional = @(); Family = '' }
     @{ Name = 'uv'; Package = 'astral-sh.uv'; Probe = 'uv'; Optional = @(); Family = '' }
     @{ Name = 'docker'; Package = 'Docker.DockerDesktop'; Probe = 'docker'; Optional = @(); Family = '' }
     @{ Name = 'node'; Package = 'OpenJS.NodeJS.LTS'; Probe = 'node'; Optional = @(); Family = 'OpenJS.NodeJS' }

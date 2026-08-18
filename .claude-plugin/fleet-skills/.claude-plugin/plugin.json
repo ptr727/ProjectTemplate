@@ -6,9 +6,11 @@
     "name": "ptr727"
   },
   "skills": [
+    "./skills/add-host-tool",
     "./skills/agent-conduct",
     "./skills/audit-a-repo",
     "./skills/carried-instruction-file-guard",
+    "./skills/code-review",
     "./skills/comment-and-doc-style",
     "./skills/copilot-instructions-keeper",
     "./skills/dotnet-codestyle",
