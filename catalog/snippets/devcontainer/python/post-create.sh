@@ -1,6 +1,9 @@
 #!/usr/bin/env bash
 set -Eeuo pipefail
 
+script_dir=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)
+repository_dir=$(cd -- "$script_dir/../.." && pwd)
+
 # Install uv (Astral) for the Python project.
 # It is idempotent, since re-running overwrites in place.
 # The installer drops the binary in $HOME/.local/bin.
@@ -39,7 +42,6 @@ if [[ "$installed_uv_version" != "$UV_VERSION" ]]; then
     export PATH="$HOME/.local/bin:$PATH"
 fi
 
-# Pre-warm the uv environment when this repository carries a Python project.
-if [[ -f pyproject.toml ]]; then
-    uv sync
+if [[ -f "$repository_dir/pyproject.toml" ]]; then
+    uv sync --project "$repository_dir"
 fi

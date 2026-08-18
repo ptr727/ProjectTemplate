@@ -234,7 +234,7 @@ Read the workflow files plus `version.json` and assert the structural fact behin
 
 **Per-type addenda (apply only the ones present):**
 
-- **.NET publish:** the smoke runtime set is a strict non-empty subset of the full runtime set. Both sets run sequentially inside one composite-action job. A non-smoke run uploads one `release-asset-<branch>-dotnet-publish` artifact, while a smoke run skips the archive and upload steps.
+- **.NET publish:** the smoke runtime set is a strict non-empty subset of the full runtime set. The selected set runs sequentially inside one composite-action job. A non-smoke run uploads one `release-asset-<branch>-dotnet-publish` artifact, while a smoke run skips the archive and upload steps.
 - **NuGet:** the publish step is gated `if: inputs.push` only (not on an existence check) and uses `--skip-duplicate`. `*.nupkg` push also carries the paired `.snupkg` to the symbol server where symbols are enabled. The `release-asset` zip carries the package(s).
 - **PyPI:** `publish-pypi` declares `environment: { name: pypi }`. `id-token: write` appears only on that job (absent from the build/PR path). `skip-existing: true` is set on the publish action. The build artifact is deleted after publish. The `pypi` environment has a deployment-branch rule.
 - **Docker:** a Docker-only repo's caller passes `expect_release_assets: false`. The leaf reads the external state file for the tag instead of `SemVer2` (wrapper repos only, since a plain Docker repo correctly tags off `SemVer2` and records this N/A). The readme job is gated main-only, both by the caller's branch input and inside the hub-hosted `publish-docker-readme-task.yml` itself. The docker-readme task validates `repositories` XOR `manifest`+`manifest-jq`. The buildcache follows D9.4.
