@@ -200,6 +200,17 @@ Regenerates [`.github/skills/`][github-skills-dist] and [`.claude-plugin/fleet-s
 
 `--check` is the read-only mode: it exits `1` when either generated tree differs from `.agents/skills/`, comparing a digest over every file rather than a file count or timestamp. CI runs `--check` rather than trusting a contributor to have run the generator, the same reason `spec/audit.py` exists rather than trusting a hand-carried file.
 
+## `carry.py`
+
+Copies manifest-owned trees from a freshly fetched ProjectTemplate `main` checkout into an isolated downstream feature worktree. `check` reports the canonical commit, repository identity, applicable declarations, path differences, and tree digests without changing the target. `apply` reports each write or removal and repeats the comparison before it succeeds.
+
+```shell
+python3 scripts/carry.py check PhotoCleaner --target /path/to/worktree
+python3 scripts/carry.py apply PhotoCleaner --target /path/to/worktree
+```
+
+The tool validates the registry identity, target origin, feature-branch worktree, development-branch ancestry, unrelated changes, root containment, and symlink-free trees. A pruned declaration authorizes removal only beneath its target root.
+
 ## `skills_install.py`
 
 Installs the fleet's Skills for the current machine, cross-platform and idempotent, mirroring [`host-setup/agent-safety/install.py`][agent-safety-install]'s shape: `skills_install.sh` and `skills_install.ps1` are thin wrappers that locate a Python 3 interpreter and hand off, so every OS runs one tested code path. Two independent things happen on a run, since the three tools this fleet targets discover skills differently: `.agents/skills/` is materialized (not symlinked) to `$HOME/.agents/skills/`, so Codex and opencode's global scan covers every repo on the machine rather than only the one that happens to be open, and this repo's marketplace is registered with the `claude` CLI (`claude plugin marketplace add`, `claude plugin install`) so Claude Code loads the same content the other two read directly. The marketplace/plugin registration goes through the `claude` CLI's own commands rather than writing its internal `known_marketplaces.json` by hand, because that file's shape is the CLI's state, not a documented contract, and a hand-written copy risks drifting from what the CLI expects on its next release.
