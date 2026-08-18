@@ -15,7 +15,7 @@
             ]
         },
         "nuget": {
-            "detect": [".github/actions/build-nuget/action.yml", "dotnet nuget push"],
+            "detect": [".github/actions/build-nuget/action.yml", "dotnet nuget push", "nuget_project:"],
             "forbiddenSecrets": ["NUGET_API_KEY"],
             "checks": [
                 { "id": "nuget.publish.oidc", "verdict": "intent", "assert": "NuGet publish uses OIDC Trusted Publishing (NuGet/login), not a stored API key.", "workflowRef": "WORKFLOW.md#d4---release--publish" },
@@ -23,7 +23,7 @@
             ]
         },
         "pypi": {
-            "detect": [".github/actions/build-pypi/action.yml", "pypa/gh-action-pypi-publish"],
+            "detect": [".github/actions/build-pypi/action.yml", "pypa/gh-action-pypi-publish", "pypi_project_dir:"],
             "forbiddenSecrets": ["PYPI_API_TOKEN", "TWINE_PASSWORD"],
             "checks": [
                 { "id": "pypi.publish.oidc", "verdict": "intent", "assert": "PyPI publish uses OIDC Trusted Publishing (no stored token).", "workflowRef": "WORKFLOW.md#d4---release--publish" },
@@ -55,7 +55,7 @@
             ]
         },
         "dotnet-publish": {
-            "detect": [".github/actions/dotnet-publish/action.yml", "System.CommandLine"],
+            "detect": [".github/actions/dotnet-publish/action.yml", "System.CommandLine", "dotnet_publish_project:"],
             "checks": [
                 { "id": "dotnet-publish.smoke.subset", "verdict": "letter", "assert": "The smoke runtime set is a strict non-empty subset of the full runtime set.", "workflowRef": "WORKFLOW.md#6-per-project-type-test-walkthroughs" },
                 { "id": "dotnet-publish.release.asset", "verdict": "letter", "assert": "A non-smoke run uploads one release-asset-<branch>-dotnet-publish artifact, while a smoke run skips archive creation and upload.", "workflowRef": "WORKFLOW.md#d6---seam--architecture-conformance" }
