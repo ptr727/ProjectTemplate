@@ -379,8 +379,8 @@ query($o:String!,$r:String!,$n:Int!){
   repository(owner:$o,name:$r){ pullRequest(number:$n){ id url } }}
 """
 
-# The three review-response mutations the runbook publishes.
-# `url` is fetched because it is the one field that says the reply carried a body.
+# The conversation-comment and thread mutations the runbook publishes.
+# `url` is fetched because it is the one field that confirms a comment or reply carried a body.
 # A reply that posted empty still returns a comment, and three did, each then resolved.
 M_COMMENT = """
 mutation($subjectId:ID!,$body:String!){
