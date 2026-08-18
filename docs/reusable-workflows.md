@@ -265,53 +265,9 @@ Two copies today filter Dependabot by ecosystem and semver tier before merging. 
 
 ## Adopting the Gates
 
-Adoptable once `validate-task.yml` is released. A downstream repo replaces its own `validate-task.yml` job bodies and its `test-pull-request.yml`'s inline lint job with one of the two stub shapes below, and deletes the copy of `validate-task.yml` per the `retire` disposition in `spec/divergences.json`. The pin is the release that first carries the task. The no-build stub below pins `0b07a59d7c65d07d8df275a96deaf2e06cbefd51 # 2.0.352`, the value its catalog snippet carries. The release-with-smoke stub keeps the placeholder `@<hub-main-commit-sha> # <release-tag>` until it has a catalog snippet of its own. `publish-release.yml`'s own `validate` job takes the same `uses:` line.
+A downstream repo replaces its own `validate-task.yml` job bodies and its `test-pull-request.yml`'s inline lint job with one of the two stub shapes, and deletes the copy of `validate-task.yml` per the `retire` disposition in `spec/divergences.json`. The [no-build caller snippet][no-build-caller-snippet] is the complete no-build shape and carries an adoptable released pin. The catalog snapshot stays at that bootstrap pin as later releases ship. After adoption, the first downstream Dependabot run advances the pin in `.github/workflows/test-pull-request.yml`. The release-with-smoke shape below keeps the placeholder `@<hub-main-commit-sha> # <release-tag>` until it has a catalog snippet of its own. A downstream `publish-release.yml` uses the same released pin for its `validate` job. The hub workflow uses its local task path instead.
 
 **No-build repos** carry the operational trigger shape [WORKFLOW.md "Branch Model"][workflow] states and [#585][issue-585] settles: a direct push to `develop` runs CI advisory (no required check binds the direct-commit allowance), and a `pull_request` to `main` or `develop` runs it pre-merge and actionable. A release-model repo with no build target takes the same stub with a `pull_request: branches: [main, develop]` trigger instead, since it has no direct-commit allowance to keep advisory.
-
-```yaml
-name: Test pull request action
-
-# Thin caller: the gate is the hub's reusable validate-task.yml, which every fleet repo reaches rather than carries.
-# Operational trigger shape (WORKFLOW.md "Branch Model"): a push to develop runs CI advisory, and a pull_request to main or develop runs it pre-merge and actionable, which is what makes D1.2 hold on this model too (#585).
-# A release-model repo with a smoke build uses the release-with-smoke variant documented alongside this stub in docs/reusable-workflows.md.
-on:
-  push:
-    branches: [develop]
-  pull_request:
-    branches: [main, develop]
-  workflow_dispatch:
-
-concurrency:
-  group: ${{ github.workflow }}-${{ github.ref }}
-  cancel-in-progress: true
-
-permissions: {}
-
-jobs:
-
-  validate:
-    name: Validate sources job
-    uses: ptr727/ProjectTemplate/.github/workflows/validate-task.yml@0b07a59d7c65d07d8df275a96deaf2e06cbefd51 # 2.0.352
-    permissions:
-      contents: read
-
-  # GitHub Actions does not support required status checks on conditional jobs, so a single always-run aggregator gates the merge.
-  # Its name is the ruleset-bound required status-check context: rename it and the ruleset context together.
-  check-workflow-status:
-    name: Check pull request workflow status job
-    runs-on: ubuntu-latest
-    needs: [validate]
-    if: always()
-    steps:
-      - name: Check workflow results step
-        run: |
-          set -Eeuo pipefail
-          if [[ "${{ needs.validate.result }}" != "success" ]]; then
-            echo "Job 'validate' did not succeed (${{ needs.validate.result }}); refusing to pass."
-            exit 1
-          fi
-```
 
 **Release repos with a smoke build** carry the standard `pull_request` trigger, a `changes` paths-filter job (WORKFLOW.md D1.1: each of the repo's own targets gets a filter entry, and `.github/workflows/**` is excluded per D1.4), and a `smoke-build` job. The smoke build calls the repo's own `./.github/workflows/build-release-task.yml` by local path rather than a hub task, since that orchestrator is not hosted until [Stage 4][stage-4].
 
@@ -630,6 +586,7 @@ Four things the hub cannot prove fall to the first downstream adopter. They are 
 [governance-hub-hosted-tooling]: ../GOVERNANCE.md#hub-hosted-tooling
 [governance-workflow-yaml-conventions]: ../GOVERNANCE.md#workflow-yaml-conventions
 [issue-585]: https://github.com/ptr727/ProjectTemplate/issues/585
+[no-build-caller-snippet]: ../catalog/snippets/workflows/test-pull-request.yml
 [override-path-run]: https://github.com/ptr727/ProjectTemplate/actions/runs/31950332387/job/95172710046
 [pilot-publish-run]: https://github.com/ptr727/PhotoCleaner/actions/runs/31977092102
 [pilot-smoke-run]: https://github.com/ptr727/PhotoCleaner/actions/runs/31974932749
