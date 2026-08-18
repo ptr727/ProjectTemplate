@@ -77,7 +77,12 @@ def inventory(root: pathlib.Path, patterns: list[str]) -> Inventory:
             if path.is_symlink():
                 raise CarryError(f"symlink is not allowed: {path}")
         relative_dir = current_path.relative_to(root).as_posix()
-        if relative_dir != "." and included(relative_dir + "/placeholder", patterns):
+        if (
+            relative_dir != "."
+            and not dirnames
+            and not filenames
+            and included(relative_dir + "/placeholder", patterns)
+        ):
             directories.add(relative_dir)
         for name in filenames:
             path = current_path / name
@@ -144,11 +149,27 @@ def apply_tree(
         destination = target_root / relative
         destination.unlink()
         changes.append(f"remove {destination.relative_to(repository_root)}")
-    for relative in sorted(result["extraDirectories"], reverse=True):
+    removed_directories: set[pathlib.Path] = set()
+    for relative in sorted(
+        result["extraDirectories"],
+        key=lambda value: len(pathlib.PurePosixPath(value).parts),
+        reverse=True,
+    ):
         directory = target_root / relative
         if directory.exists() and not any(directory.iterdir()):
             directory.rmdir()
             changes.append(f"remove {directory.relative_to(repository_root)}")
+            removed_directories.add(directory)
+            parent = directory.parent
+            while (
+                parent != target_root
+                and parent not in removed_directories
+                and not any(parent.iterdir())
+            ):
+                parent.rmdir()
+                changes.append(f"remove {parent.relative_to(repository_root)}")
+                removed_directories.add(parent)
+                parent = parent.parent
     return changes
 
 

@@ -121,6 +121,39 @@ class CarryInventoryTests(unittest.TestCase):
 
         self.assertEqual(changes, ["create owned"])
 
+    def test_pruned_target_with_narrow_include_keeps_structural_directories(self) -> None:
+        with tempfile.TemporaryDirectory() as temp:
+            root = pathlib.Path(temp)
+            source_root = root / "source"
+            target_root = root / "target"
+            (source_root / "nested").mkdir(parents=True)
+            (target_root / "nested").mkdir(parents=True)
+            (source_root / "nested/value.txt").write_text("same", encoding="utf-8")
+            (target_root / "nested/value.txt").write_text("same", encoding="utf-8")
+
+            result = carry.compare(
+                carry.inventory(source_root, ["*.txt"]),
+                carry.inventory(target_root, ["**/*"]),
+            )
+
+        self.assertEqual(result["extraDirectories"], [])
+        self.assertEqual(result["modified"], [])
+
+    def test_apply_prunes_empty_extra_directory_ancestors(self) -> None:
+        with tempfile.TemporaryDirectory() as temp:
+            root = pathlib.Path(temp)
+            source_root = root / "source"
+            repository = root / "repo"
+            target_root = repository / "owned"
+            source_root.mkdir()
+            (target_root / "extra/empty").mkdir(parents=True)
+            source = carry.inventory(source_root, ["**/*"])
+            result = carry.compare(source, carry.inventory(target_root, ["**/*"]))
+
+            changes = carry.apply_tree(source, target_root, repository, result)
+
+        self.assertEqual(changes, ["remove owned/extra/empty", "remove owned/extra"])
+
 
 class CarryManifestTests(unittest.TestCase):
     def test_selector_excludes_inapplicable_declaration(self) -> None:
