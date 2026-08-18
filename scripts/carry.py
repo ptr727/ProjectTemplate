@@ -118,8 +118,16 @@ def apply_tree(
     repository_root: pathlib.Path,
     result: dict[str, Any],
 ) -> list[str]:
-    changes = []
+    changes: list[str] = []
+    created_roots = []
+    current = target_root
+    while current != repository_root and not current.exists():
+        created_roots.append(current)
+        current = current.parent
     target_root.mkdir(parents=True, exist_ok=True)
+    changes.extend(
+        f"create {directory.relative_to(repository_root)}" for directory in reversed(created_roots)
+    )
     for relative in result["missingDirectories"]:
         destination = target_root / relative
         destination.mkdir(parents=True, exist_ok=True)

@@ -102,6 +102,20 @@ class CarryInventoryTests(unittest.TestCase):
         self.assertEqual(unrelated_content, "keep")
         self.assertTrue(empty_directory_exists)
 
+    def test_apply_reports_empty_target_root_creation(self) -> None:
+        with tempfile.TemporaryDirectory() as temp:
+            root = pathlib.Path(temp)
+            repository = root / "repo"
+            source_root = root / "source"
+            repository.mkdir()
+            source_root.mkdir()
+            source = carry.inventory(source_root, ["**/*"])
+            target_root = repository / "owned"
+
+            changes = carry.apply_tree(source, target_root, repository, carry.compare(source, None))
+
+        self.assertEqual(changes, ["create owned"])
+
 
 class CarryManifestTests(unittest.TestCase):
     def test_selector_excludes_inapplicable_declaration(self) -> None:
