@@ -15,7 +15,7 @@ A selector is one token from one of four **disjoint** namespaces. Because the na
 
 | Namespace | Tokens | Source of truth |
 | --- | --- | --- |
-| project type | `csharp` `nuget` `pypi` `python` `cpp` `console` `docker` `homeassistant` `eda` `codegen` `upstream-wrapper` `source-only` `hugo` `docs` | [`spec/project-types.json`][project-types] |
+| project type | `csharp` `nuget` `pypi` `python` `cpp` `dotnet-publish` `docker` `homeassistant` `eda` `codegen` `upstream-wrapper` `source-only` `hugo` `docs` | [`spec/project-types.json`][project-types] |
 | workflow model | `release` `operational` | [`registry/repos.schema.json`][repos-schema] |
 | release trigger | `two-phase` `publish-on-merge` `dispatch-only` `none` | [`registry/repos.schema.json`][repos-schema] |
 | consumer model | `push` `pull` | [`registry/repos.schema.json`][repos-schema] |
