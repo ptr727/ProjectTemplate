@@ -493,9 +493,9 @@ def main():
             continue
         for field, value in (("source", source), ("target", target)):
             parts = pathlib.PurePosixPath(value).parts
-            if value.startswith("/") or ".." in parts:
+            if value == "." or value.startswith("/") or ".." in parts:
                 errors.append(
-                    f"files.json: tree {source} {field} '{value}' must be a repo-relative path (no leading / or ..)"
+                    f"files.json: tree {source} {field} '{value}' must be below the repository root (no leading /, . or ..)"
                 )
         if tree.get("fidelity") != "verbatim-tree":
             errors.append(f"files.json: tree {source} fidelity must be 'verbatim-tree'")
@@ -538,13 +538,13 @@ def main():
     )
     for path in sorted(named_skills):
         if not (ROOT / path).is_file():
-            errors.append(f"files.json: Copilot instructions name missing skill path {path}")
+            errors.append(f"files.json: Copilot instructions reference missing skill path {path}")
         if not any(
             pathlib.PurePosixPath(tree["target"]) in pathlib.PurePosixPath(path).parents
             for tree in validated_trees
         ):
             errors.append(
-                f"files.json: Copilot instructions name skill path {path} outside every carried tree"
+                f"files.json: Copilot instructions reference skill path {path} outside every carried tree"
             )
     for item in baseline:
         if not isinstance(item, dict):

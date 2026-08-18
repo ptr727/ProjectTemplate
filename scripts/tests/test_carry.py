@@ -214,6 +214,13 @@ class CarryManifestTests(unittest.TestCase):
         ):
             carry.relative_root(pathlib.Path(temp), "inside/../target")
 
+    def test_rejects_repository_root(self) -> None:
+        with (
+            tempfile.TemporaryDirectory() as temp,
+            self.assertRaisesRegex(carry.CarryError, "below the repository root"),
+        ):
+            carry.relative_root(pathlib.Path(temp), ".")
+
     def test_rejects_symlinked_declared_root(self) -> None:
         with tempfile.TemporaryDirectory() as temp:
             root = pathlib.Path(temp)

@@ -35,8 +35,10 @@ def load_json(path: pathlib.Path) -> Any:
 
 def relative_root(root: pathlib.Path, value: str) -> pathlib.Path:
     declared = pathlib.PurePosixPath(value)
-    if declared.is_absolute() or ".." in declared.parts:
-        raise CarryError(f"path must be repository-relative without '..': {value}")
+    if declared == pathlib.PurePosixPath(".") or declared.is_absolute() or ".." in declared.parts:
+        raise CarryError(
+            f"path must be repository-relative and below the repository root without '..': {value}"
+        )
     resolved_root = root.resolve()
     candidate = resolved_root / value
     resolved_candidate = candidate.resolve(strict=False)
