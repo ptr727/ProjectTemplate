@@ -3003,6 +3003,12 @@ class TestContract(unittest.TestCase):
         self.assertIn("documented hub tool", text)
         self.assertIn("authenticated `gh`", text)
 
+    def test_outward_facing_links_require_a_live_url(self) -> None:
+        """A plausible review ID produced a valid-looking link to no review during this change."""
+        text = GOVERNANCE.read_text(encoding="utf-8")
+        self.assertIn("identifier embedded in outward-facing text", text)
+        self.assertIn("complete URL from the live object", text)
+
     def test_no_argument_accepts_a_thread_id(self) -> None:
         """The failure is an id typed into a mutation, so the fix is having nowhere to type one.
 
