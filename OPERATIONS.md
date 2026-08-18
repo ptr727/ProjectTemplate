@@ -13,6 +13,7 @@ CI passes explicit `--check` lists, and a bare `python3 scripts/prose_lint.py [f
 ```bash
 set -Eeuo pipefail
 PROJECTTEMPLATE_TOOL_CACHE="$(mktemp -d "${TMPDIR:-/tmp}/projecttemplate-tools.XXXXXX")"
+trap 'rm -rf "$PROJECTTEMPLATE_TOOL_CACHE"' EXIT
 export UV_CACHE_DIR="$PROJECTTEMPLATE_TOOL_CACHE/uv"
 export RUFF_CACHE_DIR="$PROJECTTEMPLATE_TOOL_CACHE/ruff"
 uvx ruff@latest check .
