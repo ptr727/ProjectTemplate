@@ -526,12 +526,12 @@ A Docker repo's stub adds `schedule: - cron: '0 2 * * MON'` to the trigger block
           set -Eeuo pipefail
           if ! ids=$(gh api "repos/$GITHUB_REPOSITORY/actions/runs/${{ github.run_id }}/artifacts" --paginate \
             --jq ".artifacts[] | select(.name == \"pypi-build-${{ github.ref_name }}\") | .id"); then
-            echo "::warning::Could not list PyPI build artifacts; retention-days backstop will reap them."
+            echo "::warning::Could not list PyPI build artifacts. The retention-days backstop will reap them."
             ids=""
           fi
           for id in $ids; do
             if ! gh api --method DELETE "repos/$GITHUB_REPOSITORY/actions/artifacts/$id"; then
-              echo "::warning::Failed to delete artifact $id; retention-days backstop will reap it."
+              echo "::warning::Failed to delete artifact $id. The retention-days backstop will reap it."
             fi
           done
 ```
