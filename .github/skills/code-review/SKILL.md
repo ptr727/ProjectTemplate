@@ -14,7 +14,7 @@ description: >-
 
 1. Read the root `AGENTS.md` and the sections it routes to for the changed paths.
 2. Read the complete diff and enumerate every changed file before forming findings.
-3. Load every applicable skill from `.agents/skills/`:
+3. Load every applicable sibling skill from the current skill distribution:
    - `comment-and-doc-style` for Markdown, prose, comments, commit messages, and PR titles.
    - `dotnet-codestyle` for C# and .NET changes.
    - `python-codestyle` for Python changes.

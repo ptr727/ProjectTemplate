@@ -2839,7 +2839,7 @@ class TestContract(unittest.TestCase):
 
     def test_the_runbook_publishes_the_machine_readable_coverage_marker(self) -> None:
         """The instructed shape is stable while the parser retains legacy prose readers."""
-        text = (REPO / ".agents" / "skills" / "code-review" / "SKILL.md").read_text(
+        text = (REPO / ".github" / "skills" / "code-review" / "SKILL.md").read_text(
             encoding="utf-8"
         )
         marker = "<!-- fleet-review: reviewed=N changed=N findings=N -->"
