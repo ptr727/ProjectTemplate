@@ -249,7 +249,7 @@ def validate_declarations(declarations: list[dict[str, Any]], hub: pathlib.Path)
                 or left_target in right_target.parents
                 or right_target in left_target.parents
             )
-            if overlaps and (left.get("prune") or right.get("prune")):
+            if overlaps:
                 raise CarryError(
                     f"overlapping tree declarations have conflicting ownership: {left_target} and {right_target}"
                 )

@@ -191,13 +191,13 @@ class CarryManifestTests(unittest.TestCase):
     def test_selector_excludes_inapplicable_declaration(self) -> None:
         self.assertFalse(carry.applicable(["python"], {"csharp", "release"}))
 
-    def test_rejects_overlapping_pruned_targets(self) -> None:
+    def test_rejects_overlapping_targets(self) -> None:
         declarations = [
             {
                 "source": "source-a",
                 "target": ".github",
                 "fidelity": "verbatim-tree",
-                "prune": True,
+                "prune": False,
             },
             {
                 "source": "source-b",

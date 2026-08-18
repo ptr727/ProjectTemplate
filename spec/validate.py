@@ -522,9 +522,9 @@ def main():
                 or left_target in right_target.parents
                 or right_target in left_target.parents
             )
-            if overlaps and (left.get("prune") or right.get("prune")):
+            if overlaps:
                 errors.append(
-                    f"files.json: tree targets {left_target} and {right_target} overlap across a prune boundary"
+                    f"files.json: tree targets {left_target} and {right_target} have overlapping ownership"
                 )
 
     copilot_path = ROOT / ".github/copilot-instructions.md"
