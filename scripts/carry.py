@@ -340,8 +340,6 @@ def verify_target(
     branch = git(target, "branch", "--show-current")
     if not branch or branch in {"main", "develop"}:
         raise CarryError("target must be an isolated feature-branch worktree")
-    if not (target / ".git").is_file():
-        raise CarryError("target must be a linked worktree, not the primary checkout")
     git(target, "fetch", "origin", "develop")
     if not git_is_ancestor(target, "origin/develop", "HEAD"):
         raise CarryError("target branch must contain the current origin/develop head")

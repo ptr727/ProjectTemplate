@@ -273,6 +273,7 @@ class CarryManifestTests(unittest.TestCase):
             root = pathlib.Path(temp)
             remote = root / "remote.git"
             clone = root / "clone"
+            standalone = root / "standalone"
             worktree = root / "worktree"
             subprocess.run(["git", "init", "--bare", remote], check=True, capture_output=True)
             subprocess.run(["git", "clone", remote, clone], check=True, capture_output=True)
@@ -295,6 +296,18 @@ class CarryManifestTests(unittest.TestCase):
                 capture_output=True,
             )
             owned = worktree / "owned"
+
+            subprocess.run(
+                ["git", "clone", "--branch", "develop", remote, standalone],
+                check=True,
+                capture_output=True,
+            )
+            subprocess.run(
+                ["git", "-C", standalone, "switch", "-c", "feature/standalone"],
+                check=True,
+                capture_output=True,
+            )
+            carry.verify_target(standalone, {"url": str(remote)}, [standalone / "owned"])
 
             with self.assertRaisesRegex(carry.CarryError, "origin does not match"):
                 carry.verify_target(worktree, {"url": str(root / "other.git")}, [owned])
