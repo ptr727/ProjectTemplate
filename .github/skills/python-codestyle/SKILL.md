@@ -89,11 +89,12 @@ chaining, so it runs the same on any task shell) is in the hub `vscode-tasks-pyt
 CI runs the same clean-compile commands as the authoritative backstop. Git hooks are opt-in, so
 wire `pre-commit` for `ruff` and the type checker yourself if you want local enforcement.
 
-A restricted executor gives each task a cache directory under a writable temporary root. Set
-`UV_CACHE_DIR` and `RUFF_CACHE_DIR` to children of that directory before running this loop. This
-keeps uv's downloads and ruff's generated cache outside both the home directory and the checkout.
-Do not change `HOME` or an agent configuration directory. A denied network request means the tool
-did not run, so preserve the denial and rerun through the executor's scoped approval mechanism.
+A restricted executor gives each task a cache directory under a writable temporary root. Point
+`UV_CACHE_DIR`, `RUFF_CACHE_DIR`, `MYPY_CACHE_DIR`, and `COVERAGE_FILE` into that directory before
+running the applicable tools. This keeps their generated state outside both the home directory
+and the checkout. Do not change `HOME` or an agent configuration directory. A denied network
+request means the tool did not run, so preserve the denial and rerun through the executor's scoped
+approval mechanism.
 
 ## Layout
 
