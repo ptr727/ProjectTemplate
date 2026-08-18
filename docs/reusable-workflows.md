@@ -489,7 +489,7 @@ jobs:
       nuget: true
       enable_docker: false
       enable_pypi: false
-      enable_dotnet_publish: false
+      enable_executable: false
       nuget_project: ./Widget/Widget.csproj
 ```
 
