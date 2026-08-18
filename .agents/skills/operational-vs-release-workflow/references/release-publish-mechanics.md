@@ -62,7 +62,7 @@ and project-path inputs its targets need.
 Pick by where each artifact *goes*, not by language:
 
 - **Files attached to the GitHub Release** (zips, binaries, packaged libraries): a dotnet-publish
-  or build-nuget hook per output, each uploading `release-asset-<branch>-<name>`. This is where the
+  hook or a build-nuget hook per output, each uploading `release-asset-<branch>-<name>`. This is where the
   .NET `dotnet publish` or `dotnet build` and package push lives. The hub default takes an explicit
   project path, and a project needing different build behavior replaces the hook. A data-only
   repo's own output (e.g. a symbol library) is not yet
