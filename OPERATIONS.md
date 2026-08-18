@@ -11,6 +11,10 @@ What verifying a change here requires, including the part CI cannot perform. The
 CI passes explicit `--check` lists, and a bare `python3 scripts/prose_lint.py [file]` runs `DEFAULT_RULES`, which is those two lists together. What differs is the exit code rather than the coverage. CI gates on nine of the ten and reports `charset-unknown` warn-only, where a bare run exits non-zero on any of the ten. `sentence-split` and `sentence-length` are in neither, so nothing below runs them and a local run reaches them only by naming them. Run the CI invocations:
 
 ```sh
+set -Eeuo pipefail
+PROJECTTEMPLATE_TOOL_CACHE="$(mktemp -d "${TMPDIR:-/tmp}/projecttemplate-tools.XXXXXX")"
+export UV_CACHE_DIR="$PROJECTTEMPLATE_TOOL_CACHE/uv"
+export RUFF_CACHE_DIR="$PROJECTTEMPLATE_TOOL_CACHE/ruff"
 uvx ruff@latest check .
 uvx ruff@latest format --check .
 uvx mypy@latest
@@ -29,6 +33,8 @@ docker run --rm --pull=always -v "$PWD":/check --workdir /check mstruebing/edito
 scripts=(); while IFS= read -r f; do scripts+=("$f"); done < <(git ls-files '*.sh'); docker run --rm --pull=always -v "$PWD":/mnt --workdir /mnt koalaman/shellcheck:stable "${scripts[@]}"
 docker run --rm --pull=always -e PS_SCRIPTS="$(git ls-files '*.ps1')" -v "$PWD":/mnt --workdir /mnt mcr.microsoft.com/powershell:latest pwsh -NoProfile -Command 'Set-PSRepository PSGallery -InstallationPolicy Trusted; Install-Module PSScriptAnalyzer -RequiredVersion 1.23.0 -Force -Scope AllUsers; Import-Module PSScriptAnalyzer; $files = $env:PS_SCRIPTS -split "\s+" | Where-Object { $_ }; if (-not $files) { Write-Host "no PowerShell scripts are tracked"; exit 0 }; $found = @(); foreach ($f in $files) { $found += Invoke-ScriptAnalyzer -Path $f -Settings ./PSScriptAnalyzerSettings.psd1 }; Write-Host "Checked $($files.Count) file(s)"; if ($found) { $found | Format-Table RuleName,Severity,ScriptName,Line,Message -AutoSize | Out-String -Width 200 | Write-Host; exit 1 }; Write-Host "no findings"'
 ```
+
+The cache directory is unique to this verification run and remains outside the checkout. The operating system can reap it with other temporary data. A restricted executor may deny the first `uvx` network request or the first Docker socket access. Record that denial as an execution boundary, then rerun the required command with scoped approval. Only the rerun's tool output is a lint or test verdict.
 
 The `test_install.py` line behaves differently here than in CI, stated so its failure reads as the verdict it is. Its report cases install from this checkout and assert the machine then reads as current. An install from a checkout carrying uncommitted changes records a dirty stamp that reads as stale. So on a working tree mid-change those cases fail by design where CI's clean checkout passes. The remedy is to run them again once the change is committed, not to read the failure as a regression.
 

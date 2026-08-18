@@ -5,7 +5,8 @@ description: >-
   including a continuation of a prior session's task, creates its own git worktree on its own
   feature branch before its first file edit, based on the branch work starts on (develop on both
   fleet workflow models unless the task is explicitly about main-only content, never whichever
-  branch a tool defaulted to). Also wraps the mechanics:
+  branch a tool defaulted to), with a standalone-clone fallback when an executor cannot write
+  both the standard worktree and its Git metadata. Also wraps the mechanics:
   creating a worktree with git worktree add, the fleet layout convention, listing what is in
   flight, and removing a worktree and its branch after merge. Use this whenever about to create
   or edit files in a fleet repo, whenever starting or resuming a task, whenever the task's
@@ -97,6 +98,29 @@ git -C ~/repos/<Repo> fetch origin develop
 git -C ~/repos/<Repo> worktree add ~/repos/worktrees/<Repo>-<task-slug> -b <task-branch> origin/develop
 ```
 
+Before choosing that path, inspect the executor's active write boundaries. The standard path is
+usable only when later file edits and Git index writes can both succeed. A linked worktree stores
+its index and locks under the base clone's `.git/worktrees/` directory. A writable worktree path
+does not make that administrative directory writable.
+
+Use the standard layout when both locations are writable. When either location is outside the
+write boundary, create a standalone clone under a writable temporary root. Name it
+`<temporary-root>/<Repo>-<task-slug>`, fetch immediately, and create the task branch from
+`origin/develop`. A standalone clone keeps its worktree and Git administrative directory under
+the same writable root. It therefore supports edits, explicit-path staging, commits, and branch
+updates without sharing the base clone's index.
+
+```sh
+git clone --no-checkout <origin-url> <temporary-root>/<Repo>-<task-slug>
+git -C <temporary-root>/<Repo>-<task-slug> fetch origin develop
+git -C <temporary-root>/<Repo>-<task-slug> switch -c <task-branch> origin/develop
+```
+
+Do not use a linked worktree under the temporary root when the base clone's Git metadata is
+read-only. If an existing linked worktree must be kept, index operations require the executor's
+scoped approval for that administrative path. Prefer the standalone clone so ordinary Git work
+does not require repeated approval.
+
 A continuation attaches the task's existing branch rather than forking a fresh one:
 
 ```sh
@@ -129,6 +153,9 @@ GitHub default branch, which is the wrong path and the wrong base here. Create t
   in flight across the whole fleet.
 - After the task's pull request merges, remove the worktree and its branch from the base clone:
   `git worktree remove ~/repos/worktrees/<Repo>-<task-slug>`, then `git branch -d <task-branch>`.
+- After the task's pull request merges, remove a temporary standalone clone at its exact
+  `<temporary-root>/<Repo>-<task-slug>` path. The remote branch follows the repository's normal
+  pull request cleanup policy.
 - A worktree that refuses removal is dirty, and force is not the fix: look at what is
   uncommitted in it first, since discarding uncommitted work runs only on explicit instruction,
   per the `git-commit-conventions` skill.
