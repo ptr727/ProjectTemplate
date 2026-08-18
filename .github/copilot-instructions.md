@@ -38,9 +38,10 @@ For every review:
 5. End the review body with the exact machine-readable marker required by the `code-review` skill.
 
 The review automation is `scripts/pr_review.py`, run from a hub checkout. Use its `status`, `wait`,
-and `reply --resolve` commands instead of reconstructing GraphQL queries or copying review
-identifiers by hand. Its status gate verifies the current head, diff coverage, output shape,
-inline threads, body-only findings, and required checks.
+`comment`, and `reply --resolve` commands instead of reconstructing GraphQL queries or copying
+review identifiers by hand. Use `comment` for a suppressed-finding answer in the pull request
+conversation. Its status gate verifies the current head, diff coverage, output shape, inline
+threads, body-only findings, and required checks.
 
 A formal review with no findings is complete only when it covers the current head and states full
 diff coverage. A refusal, partial or absent coverage statement, unrecognized output shape,
