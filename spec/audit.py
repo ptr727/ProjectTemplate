@@ -1326,7 +1326,6 @@ def classify_verbatim(down_text, canon_text, past_texts):
 _HISTORY_CACHE: dict[
     str, list[str]
 ] = {}  # rel_path -> past revision contents, cached because one canonical is compared against every audited repo
-_BYTE_HISTORY_CACHE: dict[str, list[bytes]] = {}
 
 
 def git_file_history(rel_path):
@@ -1360,30 +1359,17 @@ def git_file_history(rel_path):
     return out
 
 
-def git_file_history_bytes(rel_path):
-    """Every readable historical byte sequence for a hub-tracked file."""
-    if rel_path in _BYTE_HISTORY_CACHE:
-        return _BYTE_HISTORY_CACHE[rel_path]
-    history = []
-    commits = subprocess.run(
-        ["git", "log", "--format=%H", "--", rel_path],
+@functools.cache
+def git_blob_in_file_history(rel_path, blob_sha):
+    """Whether a blob occurred in a path's hub history."""
+    result = subprocess.run(
+        ["git", "log", "--format=%H", f"--find-object={blob_sha}", "--", rel_path],
         cwd=ROOT,
         capture_output=True,
         text=True,
         check=False,
     )
-    if commits.returncode == 0:
-        for commit in commits.stdout.split():
-            content = subprocess.run(
-                ["git", "show", f"{commit}:{rel_path}"],
-                cwd=ROOT,
-                capture_output=True,
-                check=False,
-            )
-            if content.returncode == 0:
-                history.append(content.stdout)
-    _BYTE_HISTORY_CACHE[rel_path] = history
-    return history
+    return result.returncode == 0 and bool(result.stdout.strip())
 
 
 @functools.cache
@@ -1959,20 +1945,19 @@ def audit_repo(entry, spec, branch=None):
                     )
                     continue
                 target_path = target_files[relative]
-                if source_sha == carried_entries[target_path]:
+                target_sha = carried_entries[target_path]
+                if source_sha == target_sha:
                     continue
-                content = gh(f"repos/{slug}/contents/{target_path}?ref={ground}", ok404=True)
-                if content is None or content.get("encoding") != "base64":
+                if not target_sha:
                     findings.append(
                         (
                             "DRIFT",
-                            f"tree: {target_path} differs but its content is unreadable, comparison undecided",
+                            f"tree: {target_path} differs but its blob identity is unreadable, comparison undecided",
                         )
                     )
                     continue
-                target_bytes = base64.b64decode(content["content"])
                 verdict = (
-                    "stale" if target_bytes in git_file_history_bytes(source_path) else "modified"
+                    "stale" if git_blob_in_file_history(source_path, target_sha) else "modified"
                 )
                 if verdict == "stale":
                     findings.append(

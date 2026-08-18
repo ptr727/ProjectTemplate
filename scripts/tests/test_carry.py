@@ -80,6 +80,7 @@ class CarryInventoryTests(unittest.TestCase):
             target_root = root / "repo" / "owned"
             unrelated = root / "repo" / "keep.txt"
             source_root.mkdir()
+            (source_root / "empty").mkdir()
             target_root.mkdir(parents=True)
             (source_root / "current.txt").write_text("current", encoding="utf-8")
             (target_root / "retired.txt").write_text("retired", encoding="utf-8")
@@ -91,10 +92,15 @@ class CarryInventoryTests(unittest.TestCase):
             final = carry.compare(source, carry.inventory(target_root, ["**/*"]))
             second_changes = carry.apply_tree(source, target_root, root / "repo", final)
             unrelated_content = unrelated.read_text(encoding="utf-8")
+            empty_directory_exists = (target_root / "empty").is_dir()
 
-        self.assertEqual(changes, ["write owned/current.txt", "remove owned/retired.txt"])
+        self.assertEqual(
+            changes,
+            ["create owned/empty", "write owned/current.txt", "remove owned/retired.txt"],
+        )
         self.assertEqual(second_changes, [])
         self.assertEqual(unrelated_content, "keep")
+        self.assertTrue(empty_directory_exists)
 
 
 class CarryManifestTests(unittest.TestCase):

@@ -40,6 +40,8 @@ scripts/tests/test_host_gate.py text eol=lf
 scripts/tests/test_bootstrap.py text eol=lf
 scripts/build_dist.py text eol=lf
 scripts/tests/test_build_dist.py text eol=lf
+scripts/carry.py text eol=lf
+scripts/tests/test_carry.py text eol=lf
 scripts/skills_install.py text eol=lf
 scripts/tests/test_skills_install.py text eol=lf
 

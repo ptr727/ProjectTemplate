@@ -133,8 +133,9 @@ def apply_tree(
         destination = target_root / relative
         destination.unlink()
         changes.append(f"remove {destination.relative_to(repository_root)}")
-    for directory in sorted(target_root.rglob("*"), reverse=True):
-        if directory.is_dir() and not any(directory.iterdir()):
+    for relative in sorted(result["extraDirectories"], reverse=True):
+        directory = target_root / relative
+        if directory.exists() and not any(directory.iterdir()):
             directory.rmdir()
             changes.append(f"remove {directory.relative_to(repository_root)}")
     return changes

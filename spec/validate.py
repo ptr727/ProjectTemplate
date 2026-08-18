@@ -525,7 +525,12 @@ def main():
                     f"files.json: tree targets {left_target} and {right_target} overlap across a prune boundary"
                 )
 
-    copilot_instructions = (ROOT / ".github/copilot-instructions.md").read_text(encoding="utf-8")
+    copilot_path = ROOT / ".github/copilot-instructions.md"
+    try:
+        copilot_instructions = copilot_path.read_text(encoding="utf-8")
+    except OSError as exc:
+        errors.append(f"files.json: cannot read {copilot_path.relative_to(ROOT)}: {exc}")
+        copilot_instructions = ""
     named_skills = set(
         re.findall(r"\.github/skills/[A-Za-z0-9_-]+/SKILL\.md", copilot_instructions)
     )
