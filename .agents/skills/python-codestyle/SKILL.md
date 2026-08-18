@@ -34,7 +34,7 @@ Then read the `pyproject.toml` shape and pick the profile before running Python 
   pyright strict (or mypy where the repo requires it).
 - **lint-only** (Scripts): no `[project]`, no lockfile. Uses `uvx` for third-party tools, unittest
   for tests, and mypy as the CI gate. Do not run pytest or diagnose its absence as an environment
-  defect. Use the exact `uvx coverage ... -m unittest` command and test scope in `OPERATIONS.md`.
+  defect. Use the repository's exact coverage command and unittest scope from `OPERATIONS.md`.
 
 For the full profile specification and per-repo adaptation axes (type checker, dependency
 declaration, versioning, VS Code config), see `references/profiles.md`.
