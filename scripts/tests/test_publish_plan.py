@@ -16,12 +16,21 @@ WORKFLOW = REPO / ".github" / "workflows" / "publish-plan-task.yml"
 def decision_script() -> str:
     """Extract the shell body Actions executes for the release decision."""
     lines = WORKFLOW.read_text(encoding="utf-8").splitlines()
-    start = lines.index("        run: |") + 1
+    decide = next(i for i, line in enumerate(lines) if line.strip() == "id: decide")
+    run = next(i for i in range(decide + 1, len(lines)) if lines[i].strip() == "run: |")
+    run_indent = len(lines[run]) - len(lines[run].lstrip())
+    start = run + 1
+    content_indent = next(
+        len(line) - len(line.lstrip()) for line in lines[start:] if line.strip()
+    )
+    if content_indent <= run_indent:
+        raise ValueError("the decide step has no indented run body")
     body = []
     for line in lines[start:]:
-        if line and not line.startswith("          "):
+        indent = len(line) - len(line.lstrip())
+        if line.strip() and indent <= run_indent:
             break
-        body.append(line[10:] if line else "")
+        body.append(line[content_indent:] if line else "")
     return "\n".join(body)
 
 

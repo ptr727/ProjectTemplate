@@ -408,11 +408,13 @@ class TestEolCoverage(GitTreeCase):
     def test_the_global_default_covers_every_representative_class(self) -> None:
         self.assertEqual([], self.coverage(self.GITATTRIBUTES, {"seed.txt": "seed\n"}))
 
+    def test_a_crlf_native_repository_uses_its_declared_global_default(self) -> None:
+        gitattributes = self.GITATTRIBUTES.replace("eol=lf", "eol=crlf", 1)
+        self.assertEqual([], self.coverage(gitattributes, {"seed.txt": "seed\n"}))
+
     def test_a_missing_global_default_is_flagged_across_representative_classes(self) -> None:
         hits = self.coverage("*.bat text eol=crlf\n*.cmd text eol=crlf\n", {"seed.txt": "seed\n"})
-        self.assertGreaterEqual(len(hits), 7)
-        self.assertTrue(any("script.py" in hit for hit in hits))
-        self.assertTrue(any("tool" in hit for hit in hits))
+        self.assertEqual([".gitattributes has no `* text=auto eol=<ending>` default"], hits)
 
     def test_missing_windows_exceptions_are_flagged(self) -> None:
         hits = self.coverage("* text=auto eol=lf\n", {"seed.txt": "seed\n"})

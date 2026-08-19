@@ -258,6 +258,11 @@ def check_eol_coverage(root: Path, files: list[str]) -> list[str]:
     ga = root / ".gitattributes"
     if not ga.exists():
         return ["missing .gitattributes"]
+    ga_text = ga.read_text(encoding="utf-8", errors="replace")
+    global_default = re.search(r"(?m)^\*\s+text=auto\s+eol=(lf|crlf)\s*$", ga_text)
+    if global_default is None:
+        return [".gitattributes has no `* text=auto eol=<ending>` default"]
+    default_ending = global_default.group(1)
     paths = [
         "README.md",
         "script.py",
@@ -273,7 +278,9 @@ def check_eol_coverage(root: Path, files: list[str]) -> list[str]:
     if attrs is None:
         NOTES.append("git did not answer `check-attr`, so no representative path was read.")
         return []
-    expected = {path: "crlf" if path.endswith((".bat", ".cmd")) else "lf" for path in paths}
+    expected = {
+        path: "crlf" if path.endswith((".bat", ".cmd")) else default_ending for path in paths
+    }
     out = [
         f"{path}: git resolves to `eol: {attrs.get(path, 'unspecified')}`, not `{ending}`"
         for path, ending in expected.items()
