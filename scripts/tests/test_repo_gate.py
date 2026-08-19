@@ -26,12 +26,8 @@ import repo_gate
 
 REPO = Path(__file__).resolve().parent.parent.parent
 GOVERNANCE = REPO / "GOVERNANCE.md"
-GITATTRIBUTES = REPO / ".gitattributes"
 
 PINNED = "9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0"
-# The pins this repo's .gitattributes marks forward-declared, named so a fourth arrives here too.
-# The mark reaches to the next blank line, so an appended pin inherits it and it fails open.
-FORWARD_DECLARED = {"uv.lock", "Dockerfile", "*.Dockerfile"}
 
 
 class TreeCase(unittest.TestCase):
@@ -353,122 +349,41 @@ class TestNotes(TreeCase):
 
 
 class TestEol(TreeCase):
-    def test_a_gitattributes_pin_with_no_editorconfig_override_is_flagged(self) -> None:
-        hits = self.eol_pair("*.sh text eol=lf\n", "[*]\nend_of_line = crlf\n")
+    GITATTRIBUTES = "* text=auto eol=lf\n*.bat text eol=crlf\n*.cmd text eol=crlf\n"
+    EDITORCONFIG = "[*]\nend_of_line = lf\n[*.{bat,cmd}]\nend_of_line = crlf\n"
+
+    def test_matching_global_defaults_and_windows_exceptions_are_accepted(self) -> None:
+        self.assertEqual([], self.eol_pair(self.GITATTRIBUTES, self.EDITORCONFIG))
+
+    def test_a_global_default_mismatch_is_flagged(self) -> None:
+        hits = self.eol_pair(self.GITATTRIBUTES.replace("eol=lf", "eol=crlf", 1), self.EDITORCONFIG)
         self.assertEqual(1, len(hits))
-        self.assertIn("*.sh", hits[0])
+        self.assertIn("global ending differs", hits[0])
 
-    def test_a_matching_override_is_accepted(self) -> None:
-        self.assertEqual([], self.eol_pair("*.sh text eol=lf\n", "[*.sh]\nend_of_line = lf\n"))
+    def test_a_missing_git_global_default_is_flagged(self) -> None:
+        hits = self.eol_pair("*.bat text eol=crlf\n*.cmd text eol=crlf\n", self.EDITORCONFIG)
+        self.assertEqual(1, len(hits))
+        self.assertIn("text=auto", hits[0])
 
-    def test_brace_syntax_is_expanded_on_both_sides(self) -> None:
-        """EditorConfig brace globs have to expand or a real override reads as missing."""
-        self.assertEqual(
-            [], self.eol_pair("*.sh text eol=lf\n", "[*.{sh,bash}]\nend_of_line = lf\n")
+    def test_missing_windows_exceptions_are_flagged(self) -> None:
+        hits = self.eol_pair("* text=auto eol=lf\n", "[*]\nend_of_line = lf\n")
+        self.assertEqual(3, len(hits))
+
+    def test_equivalent_editorconfig_windows_sections_are_accepted(self) -> None:
+        separate = (
+            "[*]\nend_of_line = lf\n[*.bat]\nend_of_line = crlf\n[*.cmd]\nend_of_line = crlf\n"
         )
+        reversed_group = "[*]\nend_of_line = lf\n[*.{cmd,bat}]\nend_of_line = crlf\n"
+        self.assertEqual([], self.eol_pair(self.GITATTRIBUTES, separate))
+        self.assertEqual([], self.eol_pair(self.GITATTRIBUTES, reversed_group))
 
-    def test_a_path_pin_matches_a_directory_glob_override(self) -> None:
-        """The three scripts are pinned by path while .editorconfig covers them with a glob."""
-        self.assertEqual(
-            [],
-            self.eol_pair(
-                "scripts/prose_lint.py text eol=lf\n", "[scripts/*.py]\nend_of_line = lf\n"
-            ),
-        )
-
-    def test_a_comment_is_not_read_as_a_pin(self) -> None:
-        self.assertEqual([], self.eol_pair("# *.sh text eol=lf\n", "[*]\nend_of_line = crlf\n"))
+    def test_a_combined_windows_section_may_include_other_extensions(self) -> None:
+        editorconfig = "[*]\nend_of_line = lf\n[*.{bat,cmd,ps1}]\nend_of_line = crlf\n"
+        self.assertEqual([], self.eol_pair(self.GITATTRIBUTES, editorconfig))
 
     def test_a_missing_config_is_named(self) -> None:
         (self.tmp / ".editorconfig").write_text("[*]\n", encoding="utf-8")
         self.assertEqual(["missing .gitattributes"], repo_gate.check_eol(self.tmp, []))
-
-    def test_a_global_lf_default_reports_that_it_read_nothing(self) -> None:
-        """The check is vacuous on such a repo, and it renders as a clean line saying otherwise.
-
-        `[*] end_of_line = lf` satisfies the lookup for any path, one that does not exist included,
-        so every pin passes whatever it names. `ptr727/Blog` is shaped that way and carried two
-        pins naming paths never tracked there while this reported zero.
-        """
-        self.assertEqual(
-            [], self.eol_pair("deploy/absent text eol=lf\n", "[*]\nend_of_line = lf\n")
-        )
-        self.assertEqual(1, len(repo_gate.NOTES))
-        self.assertIn("nothing here read pin content", repo_gate.NOTES[0])
-
-    def test_a_crlf_default_leaves_the_check_saying_nothing(self) -> None:
-        """The note is the exception rather than the every-run shape, since here the check ran."""
-        self.eol_pair("*.sh text eol=lf\n", "[*]\nend_of_line = crlf\n[*.sh]\nend_of_line = lf\n")
-        self.assertEqual([], repo_gate.NOTES)
-
-
-class TestEolPins(unittest.TestCase):
-    """The shared parser, which is where the forward-declared mark is read."""
-
-    def test_a_pin_is_read_with_its_glob(self) -> None:
-        self.assertEqual([("*.sh", False)], repo_gate.eol_pins("*.sh text eol=lf\n"))
-
-    def test_a_pin_that_is_not_an_lf_pin_is_not_read(self) -> None:
-        self.assertEqual([], repo_gate.eol_pins("* -text\n*.png binary\n"))
-
-    def test_the_mark_carries_from_the_comment_above_to_the_pins_below(self) -> None:
-        pins = repo_gate.eol_pins(
-            "# nothing yet, so forward-declared.\nDockerfile text eol=lf\n"
-            "*.Dockerfile text eol=lf\n"
-        )
-        self.assertEqual([("Dockerfile", True), ("*.Dockerfile", True)], pins)
-
-    def test_a_blank_line_closes_the_mark(self) -> None:
-        """The block is the unit, so the next block does not inherit the one above it."""
-        pins = repo_gate.eol_pins(
-            "# forward-declared.\nuv.lock text eol=lf\n"
-            "\n# and this one is not.\ndeploy/absent text eol=lf\n"
-        )
-        self.assertEqual([("uv.lock", True), ("deploy/absent", False)], pins)
-
-    def test_a_mark_earlier_in_the_same_block_still_carries(self) -> None:
-        """The token need not be the last comment line, since the rationale often follows it."""
-        pins = repo_gate.eol_pins(
-            "# forward-declared.\n# Because a consumer adds one.\nuv.lock text eol=lf\n"
-        )
-        self.assertEqual([("uv.lock", True)], pins)
-
-
-class TestAttrGlob(unittest.TestCase):
-    """Gitattributes matching, which is not the pathspec matching `git ls-files` would give."""
-
-    CASES = (
-        # An extension glob binds at any depth, because it carries no slash.
-        ("*.sh", "a.sh", True),
-        ("*.sh", "host-setup/agent-safety/install.sh", True),
-        ("*.sh", "a.bash", False),
-        # The case the pathspec reading gets wrong: `*` stops at a separator.
-        ("scripts/*.py", "scripts/repo_gate.py", True),
-        ("scripts/*.py", "scripts/sub/repo_gate.py", False),
-        # A slash anchors at the root, and a leading slash is itself a slash.
-        ("spec/audit.py", "spec/audit.py", True),
-        ("spec/audit.py", "vendor/spec/audit.py", False),
-        ("/uv.lock", "uv.lock", True),
-        ("/uv.lock", "sub/uv.lock", False),
-        ("uv.lock", "sub/uv.lock", True),
-        # A whole segment of `**` is the one form that crosses separators.
-        ("Docker/s6-overlay/**", "Docker/s6-overlay/run", True),
-        ("Docker/s6-overlay/**", "Docker/s6-overlay/svc/finish", True),
-        ("Docker/s6-overlay/**", "Docker/other/run", False),
-        ("a/**/b", "a/b", True),
-        ("a/**/b", "a/x/y/b", True),
-        ("**/pre-commit", ".husky/pre-commit", True),
-        # The remaining glob syntax a pin may carry.
-        ("*.[ch]", "main.c", True),
-        ("*.[ch]", "main.x", False),
-        ("a?.sh", "ab.sh", True),
-        ("a?.sh", "a/b.sh", False),
-    )
-
-    def test_each_pattern_binds_what_git_binds(self) -> None:
-        for pattern, path, want in self.CASES:
-            with self.subTest(pattern=pattern, path=path):
-                self.assertEqual(want, bool(repo_gate.attr_glob(pattern).match(path)))
 
 
 class GitTreeCase(unittest.TestCase):
@@ -500,80 +415,39 @@ class GitTreeCase(unittest.TestCase):
 
 
 class TestEolCoverage(GitTreeCase):
-    def test_an_unpinned_shebang_script_is_flagged(self) -> None:
-        """Blog's live defect: an extensionless script systemd runs, matched by no pin at all."""
-        hits = self.coverage("* -text\n", {"ops/vps-backup-pull": "#!/usr/bin/env bash\ntrue\n"})
-        self.assertEqual(1, len(hits))
-        self.assertIn("ops/vps-backup-pull", hits[0])
-        self.assertIn("not `lf`", hits[0])
+    GITATTRIBUTES = "* text=auto eol=lf\n*.bat text eol=crlf\n*.cmd text eol=crlf\n"
 
-    def test_a_pinned_shebang_script_is_accepted(self) -> None:
-        self.assertEqual(
-            [],
-            self.coverage(
-                "* -text\nops/vps-backup-pull text eol=lf\n",
-                {"ops/vps-backup-pull": "#!/usr/bin/env bash\ntrue\n"},
-            ),
+    def test_the_global_default_covers_every_representative_class(self) -> None:
+        self.assertEqual([], self.coverage(self.GITATTRIBUTES, {"seed.txt": "seed\n"}))
+
+    def test_a_crlf_native_repository_uses_its_declared_global_default(self) -> None:
+        gitattributes = self.GITATTRIBUTES.replace("eol=lf", "eol=crlf", 1)
+        self.assertEqual([], self.coverage(gitattributes, {"seed.txt": "seed\n"}))
+
+    def test_a_crlf_native_repository_may_pin_posix_paths_to_lf(self) -> None:
+        gitattributes = self.GITATTRIBUTES.replace("eol=lf", "eol=crlf", 1)
+        gitattributes += (
+            "*.py text eol=lf\n*.sh text eol=lf\ntool text eol=lf\nuv.lock text eol=lf\n"
         )
+        self.assertEqual([], self.coverage(gitattributes, {"seed.txt": "seed\n"}))
 
-    def test_a_glob_pin_reaching_the_script_is_accepted(self) -> None:
-        """The pin need not name the path, only resolve to LF, which is what git is asked."""
-        self.assertEqual(
-            [], self.coverage("* -text\n*.sh text eol=lf\n", {"tools/run.sh": "#!/bin/sh\ntrue\n"})
-        )
+    def test_a_tracked_shebang_path_must_resolve_to_lf(self) -> None:
+        gitattributes = self.GITATTRIBUTES.replace("eol=lf", "eol=crlf", 1)
+        hits = self.coverage(gitattributes, {"run-tool": "#!/bin/sh\nexit 0\n"})
+        self.assertTrue(any("run-tool: tracked shebang path" in hit for hit in hits))
 
-    def test_a_file_carrying_no_shebang_is_not_read_as_a_script(self) -> None:
-        """The rule is about the interpreter line, so an ordinary source file is out of scope."""
-        self.assertEqual([], self.coverage("* -text\n", {"lib.py": "x = 1\n"}))
+        gitattributes += "run-tool text eol=lf\n"
+        self.assertEqual([], self.coverage(gitattributes, {"run-tool": "#!/bin/sh\nexit 0\n"}))
 
-    def test_the_shebang_decides_rather_than_the_executable_bit(self) -> None:
-        """The two move independently, and it is the interpreter line a CRLF breaks.
+    def test_a_missing_global_default_is_flagged_across_representative_classes(self) -> None:
+        hits = self.coverage("*.bat text eol=crlf\n*.cmd text eol=crlf\n", {"seed.txt": "seed\n"})
+        self.assertEqual([".gitattributes has no `* text=auto eol=<ending>` default"], hits)
 
-        Read from the mode instead, this reports the data file and misses the script, which is
-        both directions wrong at once.
-        """
-        self.coverage("* -text\n", {"ops/run": "#!/bin/sh\ntrue\n", "ops/table.csv": "a,b\n"})
-        self.git("update-index", "--chmod=+x", "ops/table.csv")
-        self.git("update-index", "--chmod=-x", "ops/run")
-        hits = repo_gate.check_eol_coverage(self.tmp, repo_gate.tracked(self.tmp))
-        self.assertEqual(1, len(hits))
-        self.assertIn("ops/run", hits[0])
-
-    def test_a_pin_matching_no_tracked_file_is_flagged(self) -> None:
-        """Blog's quieter defect: a pin naming a host artifact the repo never carries."""
-        hits = self.coverage("* -text\ndeploy/authorized_keys text eol=lf\n", {"lib.py": "x = 1\n"})
-        self.assertEqual(1, len(hits))
-        self.assertIn("deploy/authorized_keys", hits[0])
-        self.assertIn("no tracked file matches it", hits[0])
-
-    def test_a_forward_declared_pin_matching_nothing_is_exempt(self) -> None:
-        """The carried baseline case: the pin goes live when a consumer adds the file it names."""
-        self.assertEqual(
-            [],
-            self.coverage(
-                "* -text\n# A repo with no lockfile is unaffected, so this pin is forward-declared.\n"
-                "uv.lock text eol=lf\n",
-                {"lib.py": "x = 1\n"},
-            ),
-        )
-
-    def test_the_mark_does_not_reach_past_a_blank_line(self) -> None:
-        """Or one block's exemption silently covers every pin appended below it."""
-        hits = self.coverage(
-            "* -text\n# forward-declared.\nuv.lock text eol=lf\n"
-            "\n# A host artifact.\ndeploy/authorized_keys text eol=lf\n",
-            {"lib.py": "x = 1\n"},
-        )
-        self.assertEqual(1, len(hits))
-        self.assertIn("deploy/authorized_keys", hits[0])
-
-    def test_a_pin_is_matched_the_way_git_matches_it_rather_than_as_a_pathspec(self) -> None:
-        """`git ls-files -- capture/*.py` matches the nested file and reads a dead pin as live."""
-        hits = self.coverage(
-            "* -text\ncapture/*.py text eol=lf\n", {"capture/sub/deep.py": "x = 1\n"}
-        )
-        self.assertEqual(1, len(hits))
-        self.assertIn("capture/*.py", hits[0])
+    def test_missing_windows_exceptions_are_flagged(self) -> None:
+        hits = self.coverage("* text=auto eol=lf\n", {"seed.txt": "seed\n"})
+        self.assertEqual(2, len(hits))
+        self.assertTrue(any("script.bat" in hit for hit in hits))
+        self.assertTrue(any("script.cmd" in hit for hit in hits))
 
     def test_a_missing_gitattributes_is_named(self) -> None:
         (self.tmp / "lib.py").write_text("x = 1\n", encoding="utf-8")
@@ -582,45 +456,15 @@ class TestEolCoverage(GitTreeCase):
     def test_git_not_answering_is_a_note_rather_than_a_silent_pass(self) -> None:
         """An unread attribute is nothing learned, and it renders as zero findings either way."""
         with mock.patch.object(repo_gate, "resolved_eol", return_value=None):
-            hits = self.coverage("* -text\n", {"ops/run": "#!/bin/sh\ntrue\n"})
+            hits = self.coverage(self.GITATTRIBUTES, {"seed.txt": "seed\n"})
         self.assertEqual([], hits)
-        self.assertIn("no shebang file was read at all", repo_gate.NOTES[0])
+        self.assertIn("no representative path was read", repo_gate.NOTES[0])
 
     def test_the_note_carries_every_count_including_the_zeroes(self) -> None:
-        """One fixed shape per run, so a scan that reached nothing is as visible as one that did."""
-        self.coverage("* -text\n", {"lib.py": "x = 1\n"})
-        for fragment in (
-            "read 0 LF pin(s)",
-            "0 of them forward-declared",
-            "over 0 shebang file(s)",
-            "2 tracked file(s)",
-        ):
-            with self.subTest(fragment=fragment):
-                self.assertIn(fragment, repo_gate.NOTES[-1])
-
-
-class TestGitattributesCoupling(unittest.TestCase):
-    """The live marking in this repo, read rather than restated.
-
-    The mark reaches to the next blank line, so a pin appended directly under a marked block
-    inherits an exemption nobody wrote for it. That fails open, which is the direction worth a
-    case: this one names the three pins the marking is for and fails the moment a fourth arrives.
-    """
-
-    def test_exactly_the_intended_pins_are_forward_declared(self) -> None:
-        pins = repo_gate.eol_pins(GITATTRIBUTES.read_text(encoding="utf-8"))
-        self.assertEqual(FORWARD_DECLARED, {g for g, forward in pins if forward})
-
-    def test_every_other_pin_binds_a_file_this_repo_actually_tracks(self) -> None:
-        """The exemption is for the carried baseline, so nothing else may lean on it."""
-        if shutil.which("git") is None:
-            self.skipTest("git absent, so the tracked set cannot be read")
-        files = repo_gate.tracked(REPO)
-        for glob, forward in repo_gate.eol_pins(GITATTRIBUTES.read_text(encoding="utf-8")):
-            if forward:
-                continue
-            with self.subTest(pin=glob):
-                self.assertTrue(any(repo_gate.attr_glob(glob).match(f) for f in files))
+        self.coverage(self.GITATTRIBUTES, {"seed.txt": "seed\n"})
+        self.assertTrue(
+            any("resolved 9 representative path(s)" in note for note in repo_gate.NOTES)
+        )
 
 
 class TestGovernanceCoupling(unittest.TestCase):
@@ -645,21 +489,8 @@ class TestCoverageFloors(unittest.TestCase):
         """A workflow glob that matched nothing would print `0 issue(s)` and read as clean."""
         self.assertGreaterEqual(len(repo_gate.workflow_files(repo_gate.tracked(REPO))), 4)
 
-    def test_the_shebang_scan_is_not_vacuous(self) -> None:
-        """The floor lives here rather than in the check, because a repo may honestly have none.
-
-        A source-only configuration repo shipping no scripts is clean, so a finding there would be
-        a false one. What must not go unnoticed is this repo's own scan going quiet, which is what
-        this holds: the count only ever grows as fleet tooling is added.
-        """
-        self.assertGreaterEqual(len(repo_gate.shebang_files(REPO, repo_gate.tracked(REPO))), 10)
-
-    def test_every_shebang_file_here_resolves_to_lf(self) -> None:
-        """The state the check protects, asserted directly so a regression names the file."""
-        files = repo_gate.shebang_files(REPO, repo_gate.tracked(REPO))
-        self.assertEqual(
-            {}, {f: v for f, v in (repo_gate.resolved_eol(REPO, files) or {}).items() if v != "lf"}
-        )
+    def test_the_representative_eol_check_runs_against_this_repo(self) -> None:
+        self.assertEqual([], repo_gate.check_eol_coverage(REPO, repo_gate.tracked(REPO)))
 
     def test_a_root_with_no_tracked_files_exits_two_rather_than_zero(self) -> None:
         """An empty file set is a broken invocation, not a clean repo."""
@@ -703,7 +534,7 @@ class TestCoverageFloors(unittest.TestCase):
 class TestHarness(unittest.TestCase):
     def test_this_module_collects_a_plausible_number_of_cases(self) -> None:
         loaded = unittest.defaultTestLoader.loadTestsFromModule(sys.modules[__name__])
-        self.assertGreaterEqual(loaded.countTestCases(), 68)
+        self.assertGreaterEqual(loaded.countTestCases(), 50)
 
 
 if __name__ == "__main__":

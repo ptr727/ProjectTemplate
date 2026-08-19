@@ -35,6 +35,7 @@ CONTRACT_KEYS = {
 
 MARKDOWN_INLINE_LINK = re.compile(r"\]\((?P<target>[^)\s]+)")
 MARKDOWN_REFERENCE_LINK = re.compile(r"^\[[^]]+\]:\s*(?P<target>\S+)", re.MULTILINE)
+TEMPLATE_REPOSITORY_URL = "https://github.com/ptr727/ProjectTemplate"
 
 
 def load(rel):
@@ -70,8 +71,8 @@ def markdown_section(text, name):
     return text[match.end() : end]
 
 
-def carried_relative_link_errors(root, baseline):
-    """Reject verbatim carried links whose relative target is not carried everywhere."""
+def carried_link_errors(root, baseline):
+    """Reject links that stop being truthful when their Markdown source is carried."""
     universal = {
         item["path"]
         for item in baseline
@@ -89,21 +90,41 @@ def carried_relative_link_errors(root, baseline):
             continue
         text = path.read_text(encoding="utf-8", errors="replace")
         sections = item.get("sections", [])
+        regions = []
+        if item.get("fidelity") == "intent" and (item.get("whole") is True or not sections):
+            regions.append(("whole file", text))
         for section in sections if isinstance(sections, list) else []:
-            if not isinstance(section, dict) or section.get("fidelity") != "verbatim":
-                continue
-            name = section.get("name")
-            if not isinstance(name, str):
-                continue
-            for target in markdown_targets(markdown_section(text, name)):
-                target = target.split("#", 1)[0]
-                if not target or "://" in target or target.startswith(("mailto:", "#")):
+            if isinstance(section, dict) and section.get("fidelity") == "verbatim":
+                name = section.get("name")
+                if isinstance(name, str):
+                    regions.append((f"section '{name}'", markdown_section(text, name)))
+        for region, body in regions:
+            for target in markdown_targets(body):
+                repository_target = target.split("#", 1)[0]
+                is_template_link = (
+                    repository_target == TEMPLATE_REPOSITORY_URL
+                    or repository_target.startswith(f"{TEMPLATE_REPOSITORY_URL}/")
+                )
+                if is_template_link and source != "AUDIT.md":
+                    errors.append(
+                        f"files.json: {source} {region} links to the template repository "
+                        f"at '{target}'"
+                    )
                     continue
-                resolved = posixpath.normpath(posixpath.join(posixpath.dirname(source), target))
+                relative_target = target.split("#", 1)[0]
+                if (
+                    not relative_target
+                    or "://" in relative_target
+                    or relative_target.startswith(("mailto:", "#"))
+                ):
+                    continue
+                resolved = posixpath.normpath(
+                    posixpath.join(posixpath.dirname(source), relative_target)
+                )
                 if resolved not in universal:
                     errors.append(
-                        f"files.json: {source} section '{name}' links to relative target "
-                        f"'{target}', which is not universally carried"
+                        f"files.json: {source} {region} links to relative target "
+                        f"'{relative_target}', which is not universally carried"
                     )
     return errors
 
@@ -745,7 +766,7 @@ def main():
                         f"files.json: {path} declares section '{name}' but no '## {name}' heading exists in {path}"
                     )
 
-    errors.extend(carried_relative_link_errors(ROOT, baseline))
+    errors.extend(carried_link_errors(ROOT, baseline))
 
     # Validate the divergence ledger in spec/divergences.json when present, so a mistyped repo name or disposition fails CI rather than silently dropping a burn-down row.
     dispositions = ("re-vendor", "track", "accepted", "upstream-candidate", "investigate", "retire")

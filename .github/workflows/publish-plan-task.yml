@@ -8,7 +8,7 @@ name: Publish plan task
 # Outputs:
 #   publish - 'true' when this run should publish, meaning a bot-authored push, a schedule, or a workflow_dispatch of main/develop.
 #             The codegen App merges every bot PR, so its identity, or dependabot[bot], is the gate.
-#             A human push (a merge/promotion to main) or a dispatch from any other branch is 'false'.
+#             A human push (a merge/promotion to main) is 'false'.
 #   stable  - 'true' when the target branch is main (the stable channel).
 #             Main-only jobs gate on publish && stable.
 #
@@ -65,8 +65,11 @@ jobs:
           publish=false
           case "$EVENT" in
             workflow_dispatch)
-              # A human release: only the long-lived branches publish (a stray feature-branch dispatch is a no-op).
-              [[ "$REF" == "main" || "$REF" == "develop" ]] && publish=true
+              if [[ "$REF" != "main" && "$REF" != "develop" ]]; then
+                echo "::error::Dispatch a release from main or develop, not '$REF'."
+                exit 1
+              fi
+              publish=true
               ;;
             schedule)
               # Docker weekly refresh (main-only by schedule config).

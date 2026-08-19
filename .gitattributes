@@ -1,57 +1,7 @@
-# Default: git does not normalize line endings (`* -text`), and .editorconfig end_of_line rules guide what the editor writes.
-# The exception pins below are git's own enforcement, forcing LF for execution-sensitive classes regardless of editor.
-# Configure with: git config --global core.autocrlf false
-# Renormalize with: git add --renormalize .
-# Inspect with: git ls-files --eol
-* -text
+# Normalize every detected text file to LF in the index and on checkout.
+# `text=auto` leaves binary files byte-preserved.
+* text=auto eol=lf
 
-# Exception: scripts must stay LF regardless of the `* -text` default, because a CRLF shebang breaks execution.
-# `.editorconfig` covers `*.sh`, but an extensionless executable matches no extension rule.
-# Pin those here, so git enforces LF on checkout and on `--renormalize`.
-# Any repo whose tooling ships extensionless scripts adds the matching path pin.
-# The s6-overlay init is `Docker/s6-overlay/** text eol=lf`, and a husky or git hook is `.husky/pre-commit text eol=lf`.
-*.sh text eol=lf
-# The husky pre-commit snippet is an extensionless shebang script (like a copied .husky/pre-commit).
-catalog/snippets/husky/pre-commit text eol=lf
-# This repository's own hook, which is the extensionless case the comment above names.
-.husky/pre-commit text eol=lf
-
-# Vanilla `.py` follows the `[*]` default (LF, or CRLF from an operational repo's Windows-native override), since Python's universal newlines accept either.
-# Pin LF only for a `.py` executed directly via its shebang, by path, so it still runs on a Windows-native operational repo.
-# Those are the CI validation entry point, the fleet-audit runner, the agent-safety hook and its installer with the installer's tests, and the action-owned gate implementations plus their local entry points and tests.
-# Do not re-add a blanket `*.py text eol=lf`.
-spec/validate.py text eol=lf
-scripts/tests/test_spec_validate.py text eol=lf
-spec/audit.py text eol=lf
-spec/fidelity_honesty.py text eol=lf
-spec/workflow_reuse.py text eol=lf
-host-setup/agent-safety/gh-write-guard.py text eol=lf
-host-setup/agent-safety/install.py text eol=lf
-host-setup/agent-safety/test_install.py text eol=lf
-.github/actions/prose-gate/prose_lint.py text eol=lf
-.github/actions/repo-gate/repo_gate.py text eol=lf
-scripts/prose_lint.py text eol=lf
-scripts/repo_gate.py text eol=lf
-scripts/pr_review.py text eol=lf
-scripts/tests/test_prose_lint.py text eol=lf
-scripts/tests/test_repo_gate.py text eol=lf
-scripts/tests/test_pr_review.py text eol=lf
-scripts/host_gate.py text eol=lf
-scripts/tests/test_host_gate.py text eol=lf
-scripts/tests/test_bootstrap.py text eol=lf
-scripts/build_dist.py text eol=lf
-scripts/tests/test_build_dist.py text eol=lf
-scripts/carry.py text eol=lf
-scripts/tests/test_carry.py text eol=lf
-scripts/skills_install.py text eol=lf
-scripts/tests/test_skills_install.py text eol=lf
-
-# The uv tool regenerates uv.lock with LF on every platform, so pin it here.
-# That makes git enforce LF on checkout and renormalize, so a CRLF-default operational repo does not fight the tool on every `uv lock` or `uv sync`.
-# A repo with no lockfile is unaffected, so this pin is forward-declared.
-uv.lock text eol=lf
-
-# Dockerfiles must be LF, because a CRLF breaks RUN heredocs and line continuations.
-# A repo with no Dockerfile is unaffected, so these pins are forward-declared.
-Dockerfile text eol=lf
-*.Dockerfile text eol=lf
+# Windows command scripts require CRLF.
+*.bat text eol=crlf
+*.cmd text eol=crlf
