@@ -2443,7 +2443,7 @@ def _selftest():
             "    uses: acme/hub/.github/workflows/publish-plan-task.yml@" + "a" * 40 + " # 2.0.1\n"
             "  publish:\n"
             "    name: Publish project release job\n"
-            "    needs: [plan]\n"
+            "    needs: [plan, validate]\n"
             "    if: ${{ needs.validate.result == 'success' }}\n"
             "    uses: acme/hub/.github/workflows/build-release-task.yml@"
             + "a" * 40
