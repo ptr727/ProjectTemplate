@@ -222,6 +222,17 @@ def check_sha_pin(root: Path, files: list[str]) -> list[str]:
     return bad
 
 
+def editorconfig_ending(text: str, header: str) -> str | None:
+    """Return one section's declared ending without reading into the next section."""
+    section = re.search(
+        rf"(?ms)^\[{re.escape(header)}\]\s*$\n(?P<body>.*?)(?=^\[|\Z)", text
+    )
+    if section is None:
+        return None
+    ending = re.search(r"(?m)^end_of_line\s*=\s*(lf|crlf)\s*$", section.group("body"))
+    return None if ending is None else ending.group(1)
+
+
 def check_eol(root: Path, files: list[str]) -> list[str]:
     """The EditorConfig and Git defaults declare the same global and Windows endings."""
     ec, ga = root / ".editorconfig", root / ".gitattributes"
@@ -232,19 +243,26 @@ def check_eol(root: Path, files: list[str]) -> list[str]:
         return [f"missing {name}" for name in missing]
     ec_text = ec.read_text(encoding="utf-8", errors="replace")
     ga_text = ga.read_text(encoding="utf-8", errors="replace")
-    ec_global = re.search(r"(?ms)^\[\*\]\s*$.*?^end_of_line\s*=\s*(lf|crlf)\s*$", ec_text)
+    ec_global = editorconfig_ending(ec_text, "*")
     ga_global = re.search(r"(?m)^\*\s+text=auto\s+eol=(lf|crlf)\s*$", ga_text)
     out = []
     if ec_global is None:
         out.append(".editorconfig has no `[*]` end_of_line default")
     if ga_global is None:
         out.append(".gitattributes has no `* text=auto eol=<ending>` default")
-    if ec_global and ga_global and ec_global.group(1) != ga_global.group(1):
+    if ec_global and ga_global and ec_global != ga_global.group(1):
         out.append(
-            f"global ending differs: .editorconfig is {ec_global.group(1)}, "
+            f"global ending differs: .editorconfig is {ec_global}, "
             f".gitattributes is {ga_global.group(1)}"
         )
-    if not re.search(r"(?ms)^\[\*\.\{bat,cmd\}\]\s*$.*?^end_of_line\s*=\s*crlf\s*$", ec_text):
+    combined_windows = any(
+        editorconfig_ending(ec_text, header) == "crlf"
+        for header in ("*.{bat,cmd}", "*.{cmd,bat}")
+    )
+    separate_windows = all(
+        editorconfig_ending(ec_text, header) == "crlf" for header in ("*.bat", "*.cmd")
+    )
+    if not combined_windows and not separate_windows:
         out.append(".editorconfig does not set `*.bat` and `*.cmd` to CRLF")
     for pattern in ("*.bat", "*.cmd"):
         if not re.search(rf"(?m)^{re.escape(pattern)}\s+text\s+eol=crlf\s*$", ga_text):

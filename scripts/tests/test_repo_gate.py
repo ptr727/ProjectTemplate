@@ -369,6 +369,12 @@ class TestEol(TreeCase):
         hits = self.eol_pair("* text=auto eol=lf\n", "[*]\nend_of_line = lf\n")
         self.assertEqual(3, len(hits))
 
+    def test_equivalent_editorconfig_windows_sections_are_accepted(self) -> None:
+        separate = "[*]\nend_of_line = lf\n[*.bat]\nend_of_line = crlf\n[*.cmd]\nend_of_line = crlf\n"
+        reversed_group = "[*]\nend_of_line = lf\n[*.{cmd,bat}]\nend_of_line = crlf\n"
+        self.assertEqual([], self.eol_pair(self.GITATTRIBUTES, separate))
+        self.assertEqual([], self.eol_pair(self.GITATTRIBUTES, reversed_group))
+
     def test_a_missing_config_is_named(self) -> None:
         (self.tmp / ".editorconfig").write_text("[*]\n", encoding="utf-8")
         self.assertEqual(["missing .gitattributes"], repo_gate.check_eol(self.tmp, []))
