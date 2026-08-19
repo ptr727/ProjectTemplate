@@ -103,7 +103,7 @@
         "source-only": {
             "detect": ["no package/image build leaf"],
             "checks": [
-                { "id": "sourceonly.release.tagonly", "verdict": "letter", "assert": "The publish job reaches build-release-task.yml with every enable_* input false and expect_release_assets: false, producing a release of tag + source zip + README + LICENSE.", "workflowRef": "WORKFLOW.md#6-per-project-type-test-walkthroughs" },
+                { "id": "sourceonly.release.tagonly", "verdict": "letter", "assert": "The publish job reaches build-release-task.yml with github: true, every enable_* input false, and expect_release_assets: false, producing a release of tag + source zip + README + LICENSE.", "workflowRef": "WORKFLOW.md#6-per-project-type-test-walkthroughs" },
                 { "id": "sourceonly.nbgv.retained", "verdict": "letter", "assert": "version.json is retained and the reusable release task runs NBGV to compute the tag.", "workflowRef": "WORKFLOW.md#d3---versioning-and-classification" }
             ]
         },
