@@ -1,8 +1,8 @@
 # TODO
 
-Running backlog for this repo, kept in a committed file so the research survives across environments where agent memory does not. Entries are grouped by the change that ships them, so a `###` heading under "Work Clusters" is one pull request, and selecting work is reading the cluster headings rather than re-deriving the grouping from the entries. What each cluster touches and costs is a field on the cluster, since a cluster confined to one surface and a cluster spanning two are both legitimate and only the second needs saying.
+Running backlog for new features, design ideas, measurements, and rollout chores. A reproducible defect belongs in a GitHub issue rather than this file. Completed work is deleted after its remaining rollout or decision is recorded elsewhere.
 
-An entry carries `Blocked by`, `Issue` and `Checked` exactly once each, in that order, and never omits one, because an omitted field reads as unknown rather than as none. `Open` states a decision the session doing the work makes, and `Settled` states a finding that is not re-derived, each carrying a number, a proper name, or a rejected alternative. `Checked` is the freshness anchor, naming the branch, the commit, and the date a claim was last read against the tree, so a claim older than the branch is a claim rather than a finding.
+Entries are grouped by the change that ships them. A `###` heading under "Work Clusters" is one pull request. `Open` states a decision the session doing the work makes, and `Settled` states a finding that is not re-derived. `Checked` names the branch, commit, and date a claim was last read against the tree.
 
 A cluster's `State` is one of four. `ready` means every open question is answerable by the session doing the work. `blocked` names the cluster it waits on. `decision` needs the maintainer. `measure` means the first action is a count rather than an edit.
 
@@ -12,16 +12,12 @@ Adoption gaps for the skill-based fleet system are registered in [`docs/fleet-ma
 
 The steps below are followed in order rather than sampled.
 
-1. Run `gh issue list --state open` and confirm every number it returns appears somewhere in this file. A number appearing nowhere is an entry that does not exist yet, so write it before selecting anything, because an invisible issue cannot be selected. Nothing mechanical enforces this, which is the honest limit of a hand-maintained file and the reason the step is first.
-2. Run `gh pr list --state open` and confirm every pull request it returns carries a **stated active blocker**, written where the pull request itself carries it rather than held in a session that has ended. A blocker is active only while the thing it names is still true, so a review round that has landed, a dependency that has merged, and an outage that has passed each stop being one, and what they leave behind is a forgotten pull request rather than a parked one. The remedy is to finish it, close it, or write the current blocker down, and it happens before selecting new work rather than after, because the cost is not the waiting. A bot pull request is read rather than excluded, since nobody is there to write a blocker on one, so its blocker is whichever gate holds it open and is read off the pull request itself: an unfinished or failing check, a merge state of `BEHIND` because a sibling bot pull request merged first, or auto-merge disabled by a maintainer push, the last two of which [`GOVERNANCE.md`][governance] "Branching Model" documents as expected rather than as faults. One sitting open under none of them is the merge-bot having missed it, which is the finding rather than the exemption. [#591][pr-591] was parked correctly during a GitHub Actions outage and came back three days later twenty commits behind `develop`, conflicting in six regions, and carrying an exit code that had come to mean something else in the meantime.
-3. Read the cluster headings and their `State` lines. A cluster is the unit of selection, so pick a cluster rather than an entry, and never carry two clusters in one pull request.
-4. Prefer a cluster whose state is `ready`. Select a `decision` cluster only when the maintainer is present to answer its open questions, select a `blocked` cluster only after the cluster it names has shipped, and select a `measure` cluster knowing its deliverable is a number rather than a behavior change.
-5. Re-verify every `Checked` line in the chosen cluster against current `develop` before writing anything, by reading the surface the anchor names rather than by re-reading the issue. An issue records the tree as it was on the day it was filed, so a claim in one is a starting point for a check rather than a finding to act on.
-6. Rewrite the `Checked` line with the branch, the short commit, and the date whenever a claim is confirmed, whether or not the work ships in the same session. A re-verification that leaves no anchor is a check the next session repeats.
-7. Move a claim the tree contradicts out of `Settled` and state what the tree carries instead. Where the tree answers a whole entry, move the entry to "Verified Complete, Awaiting Close" with the commit that answered it, and never delete it silently, since a deleted entry reads as work nobody recorded.
-8. Fold a new observation in under one of four dispositions, named on the pull request carrying it: `New entry`, `Amends "<entry title>"`, `Already covered`, or `Already shipped as #N`. A second observation of a surface an entry already reasons about strengthens that entry rather than opening a second one.
-9. An amendment adds a `Settled` bullet, shortens `Open`, and refreshes `Checked`. An observation that answers an open question deletes that question rather than annotating it.
-10. Delete a cluster heading when its pull request merges, and move anything the pull request did not carry into a new cluster with its own state.
+1. Check open pull requests before selecting new work. Finish, close, or state the current blocker on any pull request that is merely parked.
+2. Read the cluster headings and their `State` lines. Select one cluster per pull request.
+3. Prefer `ready`. Select `decision` only when the maintainer can answer, and select `measure` knowing the deliverable is evidence rather than an edit.
+4. Re-verify the selected cluster's `Checked` claims against current `develop` before editing.
+5. File a reproducible defect as an issue and remove its implementation details from this file. Keep only a rollout or directional decision that remains after the defect is fixed.
+6. Delete completed entries when their pull request merges. Move unfinished work into a new cluster with its own state.
 
 ## Work Clusters
 
@@ -56,30 +52,6 @@ One pull request moving the canonical short description into declared data, so e
   - **Settled** - The field is optional at first so the audit falls back to the README intro while repos adopt it, and it needs a schema entry because `registry/repos.schema.json` sets `additionalProperties: false`.
   - **Settled** - The ask on the Docker repos meanwhile is only that the parsing step is not propagated further.
 
-- **Close the README-to-About hop, which is the only one nothing writes.** The audit reports a drifted About panel, and no tool sets it.
-  - **Blocked by** - The entry above, since the field is what `repo-config/configure.sh` would set the panel from.
-  - **Issue** - [#639][issue-639], filed on 2026-08-09 because this entry had been carrying [#577][issue-577], whose body covers only the README tagline and never mentions the About panel, and whose tagline half shipped on 2026-08-08.
-  - **Checked** - `develop` on 2026-08-08, where `repo-config/configure.sh` sets every other repository setting and carries no `description` handling, and the hub-hosted [`publish-docker-readme-task.yml`][publish-docker-readme-task] pushes `github.event.repository.description` to Docker Hub.
-  - **Open** - Nothing beyond sequencing.
-  - **Settled** - The chain is README, then the About panel by hand, then Docker Hub by CI, so the unautomated hop is the first one and it is the one that drifts. PhotoCleaner is the worked case, where the About panel still matched the README and only the Docker Hub short description had diverged.
-  - **Settled** - CI keeps reading `repository.description` rather than the README. Pointing it at the README puts a Markdown parser in a publish job, which PhotoCleaner#32 measured at nine guards, every one of which fails the release rather than the tagline.
-  - **Settled** - The tagline rule itself shipped on 2026-08-08 and is no longer owed here. The extraction rule this entry was once blocked on already existed: [`spec/audit.py`][audit] measured the first line for the About and Docker Hub mirrors all along, and narrowing the `HISTORY.md` mirror to match it was one line, so the sequencing that held the rule behind the registry field was stated more strongly than the code warranted.
-
-### Content in the Wrong File
-
-One pull request teaching the audit to see content sitting in a file the section model assigns elsewhere, which is invisible today and reported as a missing file instead.
-
-**State** `decision`. **Touches** [`spec/audit.py`][audit] and possibly [`spec/files.json`][files]. **Cost** one hub edit, hub-only, and it changes what every repo's next audit reports.
-
-- **Compare an `intent` file's headings against the destinations the section model assigns.** Collect the level-two headings, subtract the ones the manifest declares for that file, and compare the remainder against the headings other destinations declare.
-  - **Blocked by** - Nothing.
-  - **Issue** - [#523][issue-523], which carries the four things to settle.
-  - **Checked** - `develop` at `1ed0cc8` on 2026-08-03, where the audit checks file presence, declared-section presence, verbatim hashes, and workflow interface conformance, and nothing that reads a heading against a destination.
-  - **Open** - Whether an undeclared heading is a finding at all, given a repo may legitimately add locally.
-  - **Open** - Whether the destination mapping becomes declared data rather than prose, and whether it reaches the advisory `ARCHITECTURE.md`.
-  - **Open** - How many repos are affected, measured before the check is designed rather than after it starts reporting.
-  - **Settled** - The case that found it is a repo whose `.github/copilot-instructions.md` carried 311 lines under nine headings assigned to `ARCHITECTURE.md` and `OPERATIONS.md`, reported as a missing-file letter while the misplacement that caused it was invisible.
-  - **Settled** - The similarity-based version is rejected by [`spec/section-model.md`][section-model], and a detector built on it produces findings whose remedy is to delete content.
 
 ### Registry Membership Coverage
 
@@ -235,50 +207,15 @@ One pull request stating that an agent never assumes a Docker image is present l
 
 ### Hub-Hosted Reusable Workflows
 
-One pull request per stage moving a standard workflow out of every repo and into the hub as a `workflow_call` task, with a downstream caller stub and a composite-action hook for what is genuinely repo-specific. The design, the hook contract, the pin policy and the staged rollout are in [`docs/reusable-workflows.md`][reusable-workflows-doc], and the burn-down is [`reports/workflow-reuse.md`][workflow-reuse-report], regenerated by `python3 spec/workflow_reuse.py --report`. The merge-bot task shipped with the design and its adoption is a sweep, so this cluster starts at the gates. The stage-by-stage completion state, one checkbox per hub change and per adopting repo with the evidence that closed it, is that doc's "Rollout" section, and a session resumes from there rather than from here.
+The hosted gates, release chain, Docker core, and type-specific tasks are implemented and promoted. Their completed design history lives in [`docs/reusable-workflows.md`][reusable-workflows-doc]. The generated adoption state lives in [`reports/workflow-reuse.md`][workflow-reuse-report].
 
-**State** `ready` for the gates, `blocked` on the gates for everything after. **Touches** the hub's `.github/workflows/`, [`spec/files.json`][files], [`catalog/snippets/workflows/`][workflows], and [`WORKFLOW.md`][workflow] where a guarantee names a copied job. **Cost** one hub edit per stage plus an adoption per repo on its next visit, and no re-vendor beyond the stub each stage introduces.
+**State** `ready`. **Touches** downstream caller stubs and repository-specific hooks. **Cost** one downstream visit at a time.
 
-- **Host the gates: `validate-task.yml` with a `validate` hook.** The hub owns the fleet doc-lint block, the language lint by tree detection, the prose gate and the repo gate in a lint job, a generic unit-test job, and the validate hook for a repo's own domain checks. There is no `test-pull-request-task.yml`: the stub shapes carrying the trigger, operational or release, live in [`docs/reusable-workflows.md`][reusable-workflows-doc] "Adopting the Gates" instead.
+- **Finish the downstream adoption checklist.** Regenerate the report before selecting a repository, then resume from the first incomplete rollout item in the design document.
   - **Blocked by** - Nothing.
-  - **Issue** - None filed. [#585][issue-585] and [#729][issue-729] are settled by design in this stage, the first by the stub's trigger shape and the second by the one place the hub validate task pins or floats its `uvx` tools.
-  - **Checked** - `develop` at `7c67328` on 2026-08-15, where the report counts 20 copies of `test-pull-request.yml` in 13 variants and 13 copies of `validate-task.yml` in 11, and the doc-lint block (markdownlint, cspell, actionlint, editorconfig-checker) repeats in every one.
-  - **Settled** - Pilots are PhotoCleaner, which piloted the merge-bot stub in ptr727/PhotoCleaner#53 on 2026-08-15 as a release-model repo with Dependabot, C#, executable and Docker targets, then HomeAutomation-Config for the operational trigger shape, so both shapes are exercised before the sweep.
-  - **Settled** - The step gated on `hashFiles('.github/actions/validate/action.yml') != ''` runs the caller's hook from its own checkout, else the default from a hub checkout under `.hub/`, and a local composite action resolves at step time from the workspace, which is what makes the fallback expressible at all.
-  - **Settled** - The per-type lint steps are selected by tree detection (`hashFiles` against a `*.csproj` or a `pyproject.toml`), a third option needing neither a per-repo input nor a network read.
-  - **Settled** - The `validate` hook is one hook, not several. A domain compile, a Hugo build, a KiCad ERC, a codegen-drift check, and PowerShell tests are each a repo's own business behind the same hook, and a repo needing more than one check composes them inside its own composite action.
-  - **Settled** - `test-pull-request-task.yml` hosts nothing generic. The ruleset-bound aggregator stays in the caller stub by design (a called job's check context would read `<caller job> / <callee job>` and break the ruleset binding), so the only job left for a second hub task to wrap is one line calling `validate-task.yml`, which a caller stub already writes for itself.
-
-- **Host the pure functions: `get-version-task.yml` and `publish-plan-task.yml`.** Neither has a repo-specific line, and the plan job is missing where D4.1 needs it.
-  - **Blocked by** - The gates, only for sequencing, since a repo adopts one stub per visit and the gates come first.
-  - **Issue** - None filed.
-  - **Checked** - `develop` at `7c67328` on 2026-08-15, where 5 of 8 `get-version-task.yml` copies are identical and all 3 `publish-plan-task.yml` copies are.
-  - **Open** - Nothing.
-  - **Settled** - PlexCleaner carries no `plan` job, so its next scheduled run ships a Dependabot bump, and the hub-hosted plan job is the fix rather than a per-repo copy.
-  - **Settled** - Of the 3 `get-version-task.yml` copies that differ, KiCadLibrary only documents the same design the canonical already carries, and aiopurpleair and homeassistant-purpleair each add a `Prerelease` output derived from `SemVer2` with identical logic. The hub task hosts `Prerelease` as a sixth output rather than leaving it as per-repo logic, and drops homeassistant-purpleair's `Tag` alias since it is a bare copy of `SemVer2` with no derivation of its own.
-  - **Settled** - All 3 `publish-plan-task.yml` copies are a strict subset of the canonical, missing the `-E` in `set -Eeuo pipefail` and the `::warning::` branch for an unrecognized actor pushing to `main` (D8.4). The hub task carries the canonical as is.
-  - **Settled** - Neither task is nested inside the other or inside a future `build-release-task.yml`, so a caller that only needs the version, not the whole release orchestrator, reaches `get-version-task.yml` directly. `build-release-task.yml` (stage 4) inlines the get-version and validate-release jobs rather than nesting a sibling hub task, per the no-`./`-nesting rule.
-
-- **Host the release chain: `build-release-task.yml` with `build-<target>` hooks, and the Docker core.** The orchestration is generic and the target list is per repo, which the hooks express without a per-repo copy of the orchestrator. No `publish-release-task.yml` ships beside it, settled below.
-  - **Blocked by** - The pure functions, since the release task calls both.
-  - **Issue** - None filed.
-  - **Checked** - `develop` at `7c67328` on 2026-08-15, where the report counts 10 copies of `build-release-task.yml` in 6 variants, 17 of `publish-release.yml` in 12, and 5 of `build-docker-task.yml` in 4, with the Docker core identical in every copy.
-  - **Open** - Nothing left for this cluster. The matrix shape and the base-image hook are settled below, and the sweep-list adoption items are their own later checkboxes.
-  - **Settled** - The hub's own `publish-release.yml` carries a `plan` job calling `publish-plan-task.yml` by `./` path, adopted once #759 (Host Get-Version and Publish-Plan as Hub Reusable Tasks) merged, satisfying the `interface` contract this stage adds to `spec/files.json` (`requiredJobKeys: ["plan", "validate", "publish"]`).
-  - **Settled** - The three no-asset release shapes the fleet runs today collapse into `expect_release_assets`, and PhotoCleaner and PlexCleaner pilot, then the NuGet, PyPI and Docker-only repos.
-  - **Settled** - Vanilla Docker repos need only `image` and build-args, ESPHome-NonRoot adds a `docker-prepare` hook for its upstream pin, and NxWitness adds the matrix hook and `build-base`, in that order.
-  - **Settled** - The `matrix` input is a JSON list of `{name, tags, build-args, context, dockerfile, cache-repo}`, resolved by a `docker-prepare` hook (the hub default emits the single vanilla entry `image` implies) unless the caller passes `matrix` directly.
-  - **Settled** - A base-image build is a required hook, `docker-build-base`, with no hub default: the cache policy and platform selection stay hub-owned, but which base images exist and how they are built is content only a multi-image repo like NxWitness has.
-  - **Settled** - `build-release-task.yml` inlines `get-version` and `validate-release` and duplicates the Docker core into its own `build-docker` job, since a hub task cannot reach a sibling hub task by a `./` path. `build-docker-task.yml` ships separately for a caller that wants the Docker leg alone.
-  - **Settled** - No `publish-release-task.yml` ships: a caller stub's `plan`, `validate`, `publish`, and `publish-pypi` jobs are each a thin call to one hub task or a verbatim OIDC upload, and the trigger policy tying them together differs enough across the fleet's shapes that hosting it would not remove the per-repo `with:` block, only move it.
-
-- **Host the type-specific tasks: Docker Hub readme, upstream-version tracking, deploy-site, and codegen.** Each with its hook, and the two string-command inputs the catalog carries today (`transform-run`, `resolver-command`) become hooks. The date badge is retired outright rather than hosted, TODO.md's own retired-badge entry already tracks its deletion.
-  - **Blocked by** - The release chain, since the readme task replaces the in-job description push.
-  - **Issue** - None filed.
-  - **Checked** - `develop` at `7c67328` on 2026-08-15, where each of these has one or two carriers.
-  - **Settled** - ESPHome-NonRoot's second tracker, whose bump waits for a human, is the same task with `auto-merge: false`, printing its apt-package snapshot as a name -> version object of one key rather than staying repo-local.
-  - **Settled** - The `operational-vs-release-workflow` skill's note that a target-agnostic target list is "intentionally not done" is retired by this stage rather than before it, since it is true until then.
-  - **Settled** - Release `2.0.352` on `main` commit `0b07a59d7c65d07d8df275a96deaf2e06cbefd51` (promoted in #774) carries every hub task from the gates through this stage, making stages 2 to 5 adoptable. The publish-release run at [run-2-0-352][run-2-0-352] proved the release chain itself: `build-release-task.yml` ran with every target disabled, and its `github-release` job succeeded while all five build jobs skipped. [#769][issue-769] (reconciling `IGNORE_GITHUB_REF` between `get-version-task.yml` and WORKFLOW.md D3.1) is the one open follow-up from the promotion review.
+  - **Issue** - None filed for the rollout. File implementation defects separately.
+  - **Checked** - `main` at `74ef727` on 2026-08-18, where the hosted workflow family is promoted.
+  - **Open** - The incomplete downstream adoption items recorded in the rollout document.
 
 - **Decide the three merge-bot inputs the design leaves open.** The `delete-branch` default, the Dependabot semver-major filter two repos carry, and a `requiredHubUses` audit contract.
   - **Blocked by** - Nothing, and each is a maintainer call rather than a finding.
@@ -583,19 +520,6 @@ Regenerate [reports/divergences.md][divergences-report] before using it as the w
   - **Detail** - The prose comment batch rewrote comments in [`gh-write-guard.py`][write-guard] and both installer wrappers, so every installed copy is now behind the hub by that much. The divergence is comment-only and changes no decision the hook takes, which the self-test confirms, so it is a re-run of the installer at the next visit rather than a correctness problem.
   - **Detail** - Honor the issue's own rule when filling a cell, that an unverified install command is worse than a blank, because a blank prompts a question while a wrong command produces a broken host and a false sense that setup succeeded.
   - **Detail** - The superseded safety section from [#364][issue-364] still sits above the canonical block in this host's rules file, so the two overlap. Removing it is a judgment call on a per-machine file, which is why it is surfaced rather than applied.
-
-## Recorded for the Maintainer
-
-Actions on issues that are the maintainer's to take, each carrying its evidence so it is one action rather than a re-derivation.
-
-- **Re-scope [#305][issue-305] to the push half, and make it the tracking issue for the fleet re-vendor sweep.** Most of what it asked for is built, since the fidelity model, the [`spec/files.json`][files] manifest, [`spec/divergences.json`][divergences] with its generated [reports/divergences.md][divergences-report], and [`AUDIT.md`][audit-doc] section 10 together give the canonical-versus-adapted split and the audit path it proposed. What is genuinely still missing is the push half, since every one of those detects drift while the sweep that fixes it is manual. Re-scoped, it carries the "Fleet Sweeps" visit manifest and Blog as the pilot. Closing it against the built machinery is the alternative, and it loses the only tracking issue the sweep would have.
-- **Decide which `install-tools.sh` failures are collected and which end the run.** [`apply_tool`][install-tools] collects a non-zero return from a tool's install function, so one failure does not strand the rest, and several install paths call `die` instead and end the whole run. Two kinds are mixed there. A refusal is deliberate and should stay fatal: an unverifiable keyring, a checksum mismatch, or a declined prompt each mean nobody vouched for what would be installed, and continuing past one is worse than stopping. An upstream lookup that cannot be answered is the case the collection exists for, and `node_install` failing to read the current long term support line, `uv_install` finding no build for the architecture, and `dotnet_install` finding no package for the distribution each end the run today, which is one unreachable upstream stranding every tool after it. Changing those three to return non-zero is a behavior change across the install path, so it wants its own verification on each supported distribution rather than riding along with a migration. Raised by review on [#667][pr-667], where the comment above `apply_tool` claimed the collecting behavior for all of them and now states the split.
-
-## Verified Complete, Awaiting Close
-
-Each was checked against the tree and has nothing left to do anywhere. Closing is the maintainer's call, and each wants the evidence quoted in the closing comment rather than a bare close.
-
-Nothing is awaiting close today. [#578][issue-578] was the last entry here and closed on 2026-08-08, and the part of it the fleet still owes is carried by the re-vendor entry under "Fleet Sweeps", which names the three sections it touches.
 
 <!-- Issues -->
 
