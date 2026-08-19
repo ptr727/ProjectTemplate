@@ -2,7 +2,7 @@
 
 Running backlog for new features, design ideas, measurements, and rollout chores. A reproducible defect belongs in a GitHub issue rather than this file. Completed work is deleted after its remaining rollout or decision is recorded elsewhere.
 
-Entries are grouped by the change that ships them. A `###` heading under "Work Clusters" is one pull request. `Open` states a decision the session doing the work makes, and `Settled` states a finding that is not re-derived. `Checked` records the measurement status. A completed measurement names its branch, commit, and date.
+Entries are grouped by the change that ships them. A `###` heading under "Work Clusters" is one pull request. `Open` states a decision the session doing the work makes, and `Settled` states a finding that is not re-derived. `Checked` records the measurement status. A verified claim names its branch, commit, and date. An unmeasured or unverified claim says so explicitly.
 
 A cluster's `State` is one of four. `ready` means every open question is answerable by the session doing the work. `blocked` names the cluster it waits on. `decision` needs the maintainer. `measure` means the first action is a count rather than an edit.
 
