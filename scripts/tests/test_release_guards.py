@@ -22,14 +22,15 @@ class ReleaseGuardCase(unittest.TestCase):
         )
         self.assertIn("\"needs.validate.result == 'success'\"", files_spec)
 
-    def test_audit_root_probe_fails_before_local_path_checks(self) -> None:
+    def test_audit_probes_fail_before_local_path_checks(self) -> None:
         audit = (REPO / "AUDIT.md").read_text(encoding="utf-8")
         lines = audit.splitlines()
-        start = next(i for i, line in enumerate(lines) if line.startswith("  root_paths="))
-        probe = "\n".join(line.removeprefix("  ") for line in lines[start : start + 3])
+        start = next(i for i, line in enumerate(lines) if line.startswith("  dependabot_content="))
+        probe = "\n".join(line.removeprefix("  ") for line in lines[start : start + 6])
         fake_api = r"""
 gh() {
   case "$2" in
+    repos/*/contents/.github/dependabot.yml\?*) printf '%s\n' '- package-ecosystem: github-actions' '- package-ecosystem: devcontainers' | base64 ;;
     repos/*/contents/.github\?*) printf '%s\n' .github/dependabot.yml .github/workflows ;;
     repos/*/contents\?*) printf '%s\n' .devcontainer .github ;;
     *) return 17 ;;
@@ -45,9 +46,14 @@ gh() {
             ["bash", "-c", f"gh() {{ return 17; }}\n{probe}\nexit 0"],
             check=False,
         )
+        decode_failure = run(
+            ["bash", "-c", f"gh() {{ printf invalid; }}\n{probe}\nexit 0"],
+            check=False,
+        )
 
         self.assertEqual(0, success.returncode)
         self.assertNotEqual(0, failure.returncode)
+        self.assertNotEqual(0, decode_failure.returncode)
         self.assertNotIn(
             'gh api "repos/<owner>/<repo>/contents/$1?ref=<ground>" >/dev/null 2>&1',
             audit,

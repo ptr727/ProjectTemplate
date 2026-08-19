@@ -137,7 +137,9 @@ Run [`WORKFLOW.md`][workflow]'s methodology against the repo's **own** Actions: 
 
   ```sh
   # Anchor to the line start (optional list dash) so a commented-out '# package-ecosystem:' is not counted.
-  decl=$(gh api "repos/<owner>/<repo>/contents/.github/dependabot.yml?ref=<ground>" --jq '.content' | base64 -d | grep -oE '^[[:space:]]*-?[[:space:]]*package-ecosystem:[[:space:]]*"?[a-z-]+' | grep -oE '[a-z-]+$' | sort -u)
+  dependabot_content=$(gh api "repos/<owner>/<repo>/contents/.github/dependabot.yml?ref=<ground>" --jq '.content') || exit 1
+  dependabot_yaml=$(base64 -d <<<"$dependabot_content") || exit 1
+  decl=$(grep -oE '^[[:space:]]*-?[[:space:]]*package-ecosystem:[[:space:]]*"?[a-z-]+' <<<"$dependabot_yaml" | grep -oE '[a-z-]+$' | sort -u)
   root_paths=$(gh api "repos/<owner>/<repo>/contents?ref=<ground>" --jq '.[].path') || exit 1
   github_paths=$(gh api "repos/<owner>/<repo>/contents/.github?ref=<ground>" --jq '.[].path') || exit 1
   has() { grep -Fxq "$1" <<<"$root_paths"$'\n'"$github_paths"; }
