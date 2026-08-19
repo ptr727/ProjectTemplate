@@ -1,6 +1,6 @@
 name: Publish project release action
 
-# The hub exercises its own build-release-task.yml on every real publish, with every target disabled and expect_release_assets set false, collapsing it to the same tag-only shape the previous inlined NBGV and action-gh-release steps produced.
+# The hub exercises its own build-release-task.yml on every real publish, with every target disabled and expect_release_assets set false, producing a tag-only release.
 # This proves the task's get-version, validate-release, and github-release jobs run cleanly end to end.
 # The hub has no build targets to prove the hook mechanism itself, which falls to the first downstream adopter per docs/reusable-workflows.md "What a Pilot Proves".
 on:
