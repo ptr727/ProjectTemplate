@@ -59,6 +59,11 @@ gh() {
             audit,
         )
 
+    def test_audit_bash_blocks_are_not_labeled_as_posix_shell(self) -> None:
+        audit_lines = (REPO / "AUDIT.md").read_text(encoding="utf-8").splitlines()
+
+        self.assertNotIn("```sh", (line.strip() for line in audit_lines))
+
 
 if __name__ == "__main__":
     unittest.main()
