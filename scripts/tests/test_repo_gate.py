@@ -431,6 +431,14 @@ class TestEolCoverage(GitTreeCase):
         )
         self.assertEqual([], self.coverage(gitattributes, {"seed.txt": "seed\n"}))
 
+    def test_a_tracked_shebang_path_must_resolve_to_lf(self) -> None:
+        gitattributes = self.GITATTRIBUTES.replace("eol=lf", "eol=crlf", 1)
+        hits = self.coverage(gitattributes, {"run-tool": "#!/bin/sh\nexit 0\n"})
+        self.assertTrue(any("run-tool: tracked shebang path" in hit for hit in hits))
+
+        gitattributes += "run-tool text eol=lf\n"
+        self.assertEqual([], self.coverage(gitattributes, {"run-tool": "#!/bin/sh\nexit 0\n"}))
+
     def test_a_missing_global_default_is_flagged_across_representative_classes(self) -> None:
         hits = self.coverage("*.bat text eol=crlf\n*.cmd text eol=crlf\n", {"seed.txt": "seed\n"})
         self.assertEqual([".gitattributes has no `* text=auto eol=<ending>` default"], hits)
@@ -454,7 +462,9 @@ class TestEolCoverage(GitTreeCase):
 
     def test_the_note_carries_every_count_including_the_zeroes(self) -> None:
         self.coverage(self.GITATTRIBUTES, {"seed.txt": "seed\n"})
-        self.assertIn("resolved 9 representative path(s)", repo_gate.NOTES[-1])
+        self.assertTrue(
+            any("resolved 9 representative path(s)" in note for note in repo_gate.NOTES)
+        )
 
 
 class TestGovernanceCoupling(unittest.TestCase):

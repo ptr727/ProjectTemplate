@@ -15,8 +15,8 @@ summary, preserve the existing ending and verify with a byte scan, covers that c
   the ending they need without a path-specific pin.
 - **`.gitattributes` mirrors the repository-wide defaults**: `* text=auto eol=lf` normalizes every
   detected text file to LF while leaving binary files byte-preserved. `*.bat` and `*.cmd` override
-  that default to CRLF. Do not add per-language or per-file LF pins. Python, shell, Dockerfiles,
-  workflow YAML, `uv.lock`, and extensionless scripts all inherit the one text default.
+  that default to CRLF. Do not add per-language or per-file LF pins where the global LF default
+  already applies. The CRLF-native exception for POSIX-executed paths is defined below.
 - **Both files are required together.** `.editorconfig` governs the editor, `.gitattributes`
   governs git (checkout, commit, `--renormalize`). A repo missing either file, or whose
   `.editorconfig` sets no global `end_of_line` default (for example declares it only under

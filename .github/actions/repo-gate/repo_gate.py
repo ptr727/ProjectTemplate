@@ -311,7 +311,26 @@ def check_eol_coverage(root: Path, files: list[str]) -> list[str]:
         for path, endings in expected.items()
         if attrs.get(path) not in endings
     ]
+    shebang_paths = []
+    for rel in files:
+        path = root / rel
+        try:
+            if path.is_file() and path.read_bytes()[:2] == b"#!":
+                shebang_paths.append(rel)
+        except OSError:
+            continue
+    shebang_attrs = resolved_eol(root, shebang_paths) if shebang_paths else {}
+    if shebang_attrs is None:
+        NOTES.append("git did not answer `check-attr`, so no tracked shebang path was read.")
+    else:
+        out.extend(
+            f"{path}: tracked shebang path resolves to "
+            f"`eol: {shebang_attrs.get(path, 'unspecified')}`, not `lf`"
+            for path in shebang_paths
+            if shebang_attrs.get(path) != "lf"
+        )
     NOTES.append(f"resolved {len(paths)} representative path(s) through git check-attr.")
+    NOTES.append(f"checked {len(shebang_paths)} tracked shebang path(s).")
     return out
 
 

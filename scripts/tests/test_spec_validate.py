@@ -68,6 +68,11 @@ class CarriedRelativeLinkCase(unittest.TestCase):
             ],
         )
 
+    def test_rejects_the_template_repository_root_with_a_fragment(self) -> None:
+        self.write_governance("https://github.com/ptr727/ProjectTemplate#readme")
+
+        self.assertEqual(1, len(validate.carried_link_errors(self.root, self.baseline)))
+
     def test_ignores_markdown_syntax_inside_inline_code(self) -> None:
         (self.root / "GOVERNANCE.md").write_text(
             "# Governance\n\n## Rule\n\nStrip the `[text](url)` syntax.\n",
