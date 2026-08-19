@@ -10,6 +10,7 @@ dry-run the CI lint job runs; it needs no third-party packages.
 import fnmatch
 import json
 import pathlib
+import posixpath
 import re
 import sys
 
@@ -32,6 +33,9 @@ CONTRACT_KEYS = {
     "verbatimJobs",
 }
 
+MARKDOWN_INLINE_LINK = re.compile(r"\]\((?P<target>[^)\s]+)")
+MARKDOWN_REFERENCE_LINK = re.compile(r"^\[[^]]+\]:\s*(?P<target>\S+)", re.MULTILINE)
+
 
 def load(rel):
     return json.loads((ROOT / rel).read_text(encoding="utf-8"))
@@ -39,6 +43,69 @@ def load(rel):
 
 def is_str_list(v):
     return isinstance(v, list) and all(isinstance(x, str) for x in v)
+
+
+def markdown_targets(text):
+    """Yield link targets outside fenced blocks."""
+    visible = []
+    in_fence = False
+    for line in text.splitlines():
+        if re.match(r"^\s*(```|~~~)", line):
+            in_fence = not in_fence
+            continue
+        if not in_fence:
+            visible.append(line)
+    body = re.sub(r"`+[^`]*`+", "", "\n".join(visible))
+    for pattern in (MARKDOWN_INLINE_LINK, MARKDOWN_REFERENCE_LINK):
+        yield from (match.group("target") for match in pattern.finditer(body))
+
+
+def markdown_section(text, name):
+    """Return one level-two Markdown section, excluding its heading."""
+    match = re.search(rf"^## {re.escape(name)}\s*$", text, re.MULTILINE)
+    if not match:
+        return ""
+    following = re.search(r"^## ", text[match.end() :], re.MULTILINE)
+    end = len(text) if following is None else match.end() + following.start()
+    return text[match.end() : end]
+
+
+def carried_relative_link_errors(root, baseline):
+    """Reject verbatim carried links whose relative target is not carried everywhere."""
+    universal = {
+        item["path"]
+        for item in baseline
+        if isinstance(item, dict)
+        and isinstance(item.get("path"), str)
+        and item.get("appliesTo", "*") == "*"
+    }
+    errors = []
+    for item in baseline:
+        if not isinstance(item, dict) or not isinstance(item.get("path"), str):
+            continue
+        source = item["path"]
+        path = root / source
+        if not source.endswith(".md") or not path.is_file():
+            continue
+        text = path.read_text(encoding="utf-8", errors="replace")
+        sections = item.get("sections", [])
+        for section in sections if isinstance(sections, list) else []:
+            if not isinstance(section, dict) or section.get("fidelity") != "verbatim":
+                continue
+            name = section.get("name")
+            if not isinstance(name, str):
+                continue
+            for target in markdown_targets(markdown_section(text, name)):
+                target = target.split("#", 1)[0]
+                if not target or "://" in target or target.startswith(("mailto:", "#")):
+                    continue
+                resolved = posixpath.normpath(posixpath.join(posixpath.dirname(source), target))
+                if resolved not in universal:
+                    errors.append(
+                        f"files.json: {source} section '{name}' links to relative target "
+                        f"'{target}', which is not universally carried"
+                    )
+    return errors
 
 
 def main():
@@ -677,6 +744,8 @@ def main():
                     errors.append(
                         f"files.json: {path} declares section '{name}' but no '## {name}' heading exists in {path}"
                     )
+
+    errors.extend(carried_relative_link_errors(ROOT, baseline))
 
     # Validate the divergence ledger in spec/divergences.json when present, so a mistyped repo name or disposition fails CI rather than silently dropping a burn-down row.
     dispositions = ("re-vendor", "track", "accepted", "upstream-candidate", "investigate", "retire")
