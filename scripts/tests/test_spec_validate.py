@@ -1,3 +1,4 @@
+#!/usr/bin/env python3
 """Exercise carried-link portability checks against a crafted manifest."""
 
 from __future__ import annotations
