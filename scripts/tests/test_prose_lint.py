@@ -2444,7 +2444,7 @@ class TestReusableGateExclusions(unittest.TestCase):
         subprocess.run(["git", "init", "-q", str(self.root)], check=True)
         (self.root / ".github").mkdir()
         (self.root / ".github" / "prose-gate-excludes").write_bytes(
-            b"# Pinned upstream file.\r\nvendor/upstream.md\r\n"
+            b"  # Pinned upstream file.  \r\n  vendor/upstream.md  \r\n"
         )
         vendor = self.root / "vendor" / "upstream.md"
         vendor.parent.mkdir()
