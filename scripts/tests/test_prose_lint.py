@@ -27,6 +27,7 @@ import prose_lint
 
 REPO = Path(__file__).resolve().parent.parent.parent
 COMMENT_AND_DOC_STYLE_SKILL = REPO / ".agents" / "skills" / "comment-and-doc-style" / "SKILL.md"
+PROSE_GATE_ACTION = REPO / ".github" / "actions" / "prose-gate" / "action.yml"
 
 # Bait assembled from two literals, so this module never holds the pattern it feeds the gate.
 # A file full of rejected input would otherwise report itself.
@@ -2433,6 +2434,78 @@ class TestDiffScopeFloor(unittest.TestCase):
         self.assertTrue(prose_lint.asked_about("anything/at/all.md", ["."]))
         self.assertFalse(prose_lint.asked_about("catalogue/x.md", ["catalog"]))
         self.assertFalse(prose_lint.asked_about("docs/x.md", ["catalog"]))
+
+
+class TestReusableGateExclusions(unittest.TestCase):
+    """The composite action keeps vendored content out without narrowing the authored scan."""
+
+    def setUp(self) -> None:
+        self.root = Path(self.enterContext(tempfile.TemporaryDirectory()))
+        subprocess.run(["git", "init", "-q", str(self.root)], check=True)
+        (self.root / ".github").mkdir()
+        (self.root / ".github" / "prose-gate-excludes").write_text(
+            "# Pinned upstream file.\nvendor/upstream.md\n", encoding="utf-8"
+        )
+        vendor = self.root / "vendor" / "upstream.md"
+        vendor.parent.mkdir()
+        vendor.write_text("Clean vendored prose.\n", encoding="utf-8")
+        (self.root / "authored.md").write_text("Clean authored prose.\n", encoding="utf-8")
+        self.git("add", "-A")
+        self.git("commit", "-qm", "base")
+
+    def git(self, *args: str) -> None:
+        subprocess.run(
+            [
+                "git",
+                "-C",
+                str(self.root),
+                "-c",
+                "user.email=gate@example.invalid",
+                "-c",
+                "user.name=gate test",
+                "-c",
+                "commit.gpgsign=false",
+                *args,
+            ],
+            check=True,
+            capture_output=True,
+        )
+
+    def run_action(self) -> subprocess.CompletedProcess[str]:
+        action = PROSE_GATE_ACTION.read_text(encoding="utf-8")
+        _, block = action.split("      run: |\n", 1)
+        script = "\n".join(line.removeprefix("        ") for line in block.splitlines())
+        env = os.environ | {
+            "BASE": "HEAD",
+            "GITHUB_ACTION_PATH": str(PROSE_GATE_ACTION.parent),
+            "PATHS": ".",
+        }
+        return subprocess.run(
+            ["bash", "-c", script],
+            cwd=self.root,
+            env=env,
+            text=True,
+            capture_output=True,
+            check=False,
+        )
+
+    def test_a_declared_vendored_path_does_not_block_the_gate(self) -> None:
+        (self.root / "vendor" / "upstream.md").write_text(
+            f"Vendored {DUP} words.\n", encoding="utf-8"
+        )
+        result = self.run_action()
+        self.assertEqual(0, result.returncode, result.stdout + result.stderr)
+        self.assertIn("Excluding 1 path(s)", result.stdout)
+
+    def test_an_ordinary_authored_file_remains_in_scope(self) -> None:
+        (self.root / "vendor" / "upstream.md").write_text(
+            f"Vendored {DUP} words.\n", encoding="utf-8"
+        )
+        (self.root / "authored.md").write_text(f"Authored {DUP} words.\n", encoding="utf-8")
+        result = self.run_action()
+        self.assertEqual(1, result.returncode, result.stdout + result.stderr)
+        self.assertIn("authored.md:1: dupword", result.stdout)
+        self.assertNotIn("vendor/upstream.md:1", result.stdout)
 
 
 class TestTheScanScopeIsTheScopeReported(unittest.TestCase):

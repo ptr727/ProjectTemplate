@@ -40,7 +40,20 @@ runs:
           exit 1
         fi
         echo "Scanning ${#scan[@]} path(s): ${scan[*]}"
+        exclude_args=()
+        excluded_paths=()
+        exclude_file=".github/prose-gate-excludes"
+        if [ -f "$exclude_file" ]; then
+          while IFS= read -r excluded || [ -n "$excluded" ]; do
+            if [[ -z "$excluded" || "$excluded" == \#* ]]; then
+              continue
+            fi
+            excluded_paths+=("$excluded")
+            exclude_args+=(--exclude "$excluded")
+          done < "$exclude_file"
+          echo "Excluding ${#excluded_paths[@]} path(s) from $exclude_file: ${excluded_paths[*]}"
+        fi
         # Options first, then `--`, so every remaining token is read as a literal path.
         # A path-shaped token beginning with a dash would otherwise parse as an option, and
         # `--list-files` in that position turns the gate into a file listing that exits 0.
-        python3 "$GITHUB_ACTION_PATH/prose_lint.py" --diff "$BASE" -- "${scan[@]}"
+        python3 "$GITHUB_ACTION_PATH/prose_lint.py" --diff "$BASE" "${exclude_args[@]}" -- "${scan[@]}"
