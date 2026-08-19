@@ -38,7 +38,7 @@ class CarriedRelativeLinkCase(unittest.TestCase):
         self.write_governance("./docs/hub-only.md")
 
         self.assertEqual(
-            validate.carried_relative_link_errors(self.root, self.baseline),
+            validate.carried_link_errors(self.root, self.baseline),
             [
                 (
                     "files.json: GOVERNANCE.md section 'Rule' links to relative target "
@@ -50,12 +50,23 @@ class CarriedRelativeLinkCase(unittest.TestCase):
     def test_accepts_a_universally_carried_relative_target(self) -> None:
         self.write_governance("./WORKFLOW.md#contract")
 
-        self.assertEqual(validate.carried_relative_link_errors(self.root, self.baseline), [])
+        self.assertEqual(validate.carried_link_errors(self.root, self.baseline), [])
 
-    def test_accepts_an_absolute_hub_tool_target(self) -> None:
-        self.write_governance("https://github.com/example/hub/blob/main/docs/reusable-workflows.md")
+    def test_rejects_an_absolute_template_repository_target(self) -> None:
+        self.write_governance(
+            "https://github.com/ptr727/ProjectTemplate/blob/main/.github/workflows/publish-release.yml"
+        )
 
-        self.assertEqual(validate.carried_relative_link_errors(self.root, self.baseline), [])
+        self.assertEqual(
+            validate.carried_link_errors(self.root, self.baseline),
+            [
+                (
+                    "files.json: GOVERNANCE.md section 'Rule' links to the template repository "
+                    "at 'https://github.com/ptr727/ProjectTemplate/blob/main/.github/workflows/"
+                    "publish-release.yml'"
+                )
+            ],
+        )
 
     def test_ignores_markdown_syntax_inside_inline_code(self) -> None:
         (self.root / "GOVERNANCE.md").write_text(
@@ -63,7 +74,7 @@ class CarriedRelativeLinkCase(unittest.TestCase):
             encoding="utf-8",
         )
 
-        self.assertEqual(validate.carried_relative_link_errors(self.root, self.baseline), [])
+        self.assertEqual(validate.carried_link_errors(self.root, self.baseline), [])
 
     def test_ignores_relative_links_inside_fenced_code(self) -> None:
         (self.root / "GOVERNANCE.md").write_text(
@@ -71,7 +82,7 @@ class CarriedRelativeLinkCase(unittest.TestCase):
             encoding="utf-8",
         )
 
-        self.assertEqual(validate.carried_relative_link_errors(self.root, self.baseline), [])
+        self.assertEqual(validate.carried_link_errors(self.root, self.baseline), [])
 
     def test_accepts_a_universally_carried_reference_target(self) -> None:
         (self.root / "GOVERNANCE.md").write_text(
@@ -80,7 +91,24 @@ class CarriedRelativeLinkCase(unittest.TestCase):
             encoding="utf-8",
         )
 
-        self.assertEqual(validate.carried_relative_link_errors(self.root, self.baseline), [])
+        self.assertEqual(validate.carried_link_errors(self.root, self.baseline), [])
+
+    def test_rejects_a_hub_only_target_in_a_whole_intent_file(self) -> None:
+        (self.root / "AUDIT.md").write_text(
+            "# Audit\n\nRead [the registry](./registry/repos.json).\n",
+            encoding="utf-8",
+        )
+        baseline = [{"path": "AUDIT.md", "fidelity": "intent", "appliesTo": "*"}]
+
+        self.assertEqual(
+            validate.carried_link_errors(self.root, baseline),
+            [
+                (
+                    "files.json: AUDIT.md whole file links to relative target "
+                    "'./registry/repos.json', which is not universally carried"
+                )
+            ],
+        )
 
 
 if __name__ == "__main__":

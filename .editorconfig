@@ -14,12 +14,8 @@
 root = true
 
 # Defaults: LF is the default, and only the CRLF exception below is declared.
-# Windows batch and command scripts need CRLF, cmd.exe's line handling is unreliable on LF.
-# Everything else is LF, including a file a tool or a Windows GUI editor writes.
-# VS Code, Visual Studio, Notepad, and WordPad all read and write LF cleanly on Windows.
-# The redundant per-type LF rules that used to sit below this default (shell, Dockerfiles, workflow YAML, `uv.lock`, shebang-executed `.py` by path, the husky hook) are intentionally omitted now that the default already gives every one of them LF.
-# `.gitattributes` still carries its own LF pins for the execution-sensitive classes (shell, Dockerfiles, `uv.lock`, the by-path `.py` list), now redundant with this default but kept there as git-level enforcement, since `.gitattributes` stays as-is (see GOVERNANCE.md "Line Endings").
-# This file and CI (editorconfig-checker) are what actually validate them.
+# `.gitattributes` mirrors these two defaults as Git's normalization fallback.
+# CI verifies the committed bytes against this file.
 [*]
 charset = utf-8
 end_of_line = lf
