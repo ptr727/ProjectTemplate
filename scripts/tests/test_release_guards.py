@@ -59,6 +59,31 @@ gh() {
             audit,
         )
 
+    def test_audit_bash_blocks_are_not_labeled_as_posix_shell(self) -> None:
+        audit_lines = (REPO / "AUDIT.md").read_text(encoding="utf-8").splitlines()
+        bash_only = ("<(", "<<<", "$'", "[[")
+        mislabeled = []
+        fence_label = ""
+        fence_start = 0
+        fence_lines: list[str] = []
+
+        for number, line in enumerate(audit_lines, start=1):
+            stripped = line.strip()
+            if not fence_label and stripped.startswith("```"):
+                fence_label = stripped.removeprefix("```").split(maxsplit=1)[0]
+                fence_start = number
+            elif fence_label and stripped == "```":
+                if fence_label in {"sh", "shell"} and any(
+                    token in "\n".join(fence_lines) for token in bash_only
+                ):
+                    mislabeled.append((fence_start, fence_label))
+                fence_label = ""
+                fence_lines = []
+            elif fence_label:
+                fence_lines.append(line)
+
+        self.assertEqual([], mislabeled)
+
 
 if __name__ == "__main__":
     unittest.main()
