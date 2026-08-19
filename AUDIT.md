@@ -1,6 +1,6 @@
 # AUDIT.md
 
-How an agent audits a repository against the fleet ground truth in this repo and reports drift. This is the procedure. The ground truth it checks against is [`registry/repos.json`][repos], the [`spec/`][spec] manifests, [`repo-config/`][repo-config], and the prose authorities ([`GOVERNANCE.md`][governance], [`CODESTYLE.md`][codestyle], [`WORKFLOW.md`][workflow]). The audit is read-only: it produces a report under [`reports/`][reports], never edits the target repo.
+How an agent audits a repository against the fleet ground truth in the hub and reports drift. This is the procedure. The ground truth it checks against is [`registry/repos.json`][repos], the [`spec/`][spec] manifests, [`repo-config/`][repo-config], and the prose authorities ([`GOVERNANCE.md`][governance], [`CODESTYLE.md`][codestyle], [`WORKFLOW.md`][workflow]). The audit is read-only: it produces a report under [`reports/`][reports], never edits the target repo.
 
 The verdict vocabulary is [`WORKFLOW.md`][workflow]'s: **operational / not operational**, **N/A**,
 **defect**, and the applicable/absent rule. Do not invent a parallel scheme.
@@ -200,30 +200,30 @@ The convergence model: the hub audits and the agent **applies** the fixes via ta
 <!-- Workflow -->
 
 <!-- Repo -->
-[audit-runner]: ./spec/audit.py
+[audit-runner]: https://github.com/ptr727/ProjectTemplate/blob/main/spec/audit.py
 [codestyle]: ./CODESTYLE.md
 [copilot-runbook]: ./.github/copilot-instructions.md
-[divergences]: ./spec/divergences.json
-[files]: ./spec/files.json
+[divergences]: https://github.com/ptr727/ProjectTemplate/blob/main/spec/divergences.json
+[files]: https://github.com/ptr727/ProjectTemplate/blob/main/spec/files.json
 [governance]: ./GOVERNANCE.md
 [governance-branching-model]: ./GOVERNANCE.md#branching-model
 [governance-documentation-style]: ./GOVERNANCE.md#documentation-style-conventions
 [governance-hub-hosted-tooling]: ./GOVERNANCE.md#hub-hosted-tooling
 [governance-pr-review-etiquette]: ./GOVERNANCE.md#pr-review-etiquette
-[host-setup]: ./docs/host-setup.md
-[project-types]: ./spec/project-types.json
-[readme-sections]: ./spec/readme-sections.json
-[readme-structure]: ./spec/readme-structure.md
-[repo-config]: ./repo-config/
+[host-setup]: https://github.com/ptr727/ProjectTemplate/blob/main/docs/host-setup.md
+[project-types]: https://github.com/ptr727/ProjectTemplate/blob/main/spec/project-types.json
+[readme-sections]: https://github.com/ptr727/ProjectTemplate/blob/main/spec/readme-sections.json
+[readme-structure]: https://github.com/ptr727/ProjectTemplate/blob/main/spec/readme-structure.md
+[repo-config]: https://github.com/ptr727/ProjectTemplate/tree/main/repo-config
 [repo-config-settings]: ./repo-config/settings.json
-[reports]: ./reports/
-[repos]: ./registry/repos.json
-[resync]: ./RESYNC.md
-[scope-model]: ./spec/scope-model.md
-[secrets]: ./spec/secrets.json
-[spec]: ./spec/
-[standup]: ./STANDUP.md
-[template]: ./reports/_template.md
-[validate]: ./spec/validate.py
+[reports]: https://github.com/ptr727/ProjectTemplate/tree/main/reports
+[repos]: https://github.com/ptr727/ProjectTemplate/blob/main/registry/repos.json
+[resync]: https://github.com/ptr727/ProjectTemplate/blob/main/RESYNC.md
+[scope-model]: https://github.com/ptr727/ProjectTemplate/blob/main/spec/scope-model.md
+[secrets]: https://github.com/ptr727/ProjectTemplate/blob/main/spec/secrets.json
+[spec]: https://github.com/ptr727/ProjectTemplate/tree/main/spec
+[standup]: https://github.com/ptr727/ProjectTemplate/blob/main/STANDUP.md
+[template]: https://github.com/ptr727/ProjectTemplate/blob/main/reports/_template.md
+[validate]: https://github.com/ptr727/ProjectTemplate/blob/main/spec/validate.py
 [workflow]: ./WORKFLOW.md
-[workflows]: ./catalog/snippets/workflows/
+[workflows]: https://github.com/ptr727/ProjectTemplate/tree/main/catalog/snippets/workflows
