@@ -21,6 +21,7 @@ catalog/snippets/husky/pre-commit text eol=lf
 # Those are the CI validation entry point, the fleet-audit runner, the agent-safety hook and its installer with the installer's tests, and the action-owned gate implementations plus their local entry points and tests.
 # Do not re-add a blanket `*.py text eol=lf`.
 spec/validate.py text eol=lf
+scripts/tests/test_spec_validate.py text eol=lf
 spec/audit.py text eol=lf
 spec/fidelity_honesty.py text eol=lf
 spec/workflow_reuse.py text eol=lf
