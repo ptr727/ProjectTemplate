@@ -138,7 +138,9 @@ Run [`WORKFLOW.md`][workflow]'s methodology against the repo's **own** Actions: 
   ```sh
   # Anchor to the line start (optional list dash) so a commented-out '# package-ecosystem:' is not counted.
   decl=$(gh api "repos/<owner>/<repo>/contents/.github/dependabot.yml?ref=<ground>" --jq '.content' | base64 -d | grep -oE '^[[:space:]]*-?[[:space:]]*package-ecosystem:[[:space:]]*"?[a-z-]+' | grep -oE '[a-z-]+$' | sort -u)
-  has() { gh api "repos/<owner>/<repo>/contents/$1?ref=<ground>" >/dev/null 2>&1; }
+  root_paths=$(gh api "repos/<owner>/<repo>/contents?ref=<ground>" --jq '.[].path') || exit 1
+  github_paths=$(gh api "repos/<owner>/<repo>/contents/.github?ref=<ground>" --jq '.[].path') || exit 1
+  has() { grep -Fxq "$1" <<<"$root_paths"$'\n'"$github_paths"; }
   has .github/workflows && { grep -qx github-actions <<<"$decl" && echo "github-actions: present" || echo "github-actions: MISSING (workflows present)"; }
   has .devcontainer     && { grep -qx devcontainers  <<<"$decl" && echo "devcontainers: present"  || echo "devcontainers: MISSING (.devcontainer present)"; }
   # then read dependabot.yml and confirm each present ecosystem has both a main and a develop target-branch entry

@@ -2267,7 +2267,7 @@ def _selftest():
         "  publish:\n"
         "    name: Publish project release job\n"
         "    needs: [plan, validate]\n"
-        "    if: ${{ needs.plan.outputs.publish == 'true' }}\n"
+        "    if: ${{ needs.plan.outputs.publish == 'true' && needs.validate.result == 'success' }}\n"
         "    uses: acme/hub/.github/workflows/build-release-task.yml@" + "a" * 40 + " # 2.0.1\n"
         "    with:\n"
         "      github: true\n"
@@ -2277,7 +2277,7 @@ def _selftest():
         "requireTokensInJob": {
             "plan": ["publish-plan-task.yml"],
             "validate": ["validate-task.yml"],
-            "publish": ["build-release-task.yml"],
+            "publish": ["build-release-task.yml", "needs.validate.result == 'success'"],
         },
     }
     cases = [
@@ -2428,6 +2428,7 @@ def _selftest():
             "  publish:\n"
             "    name: Publish project release job\n"
             "    needs: [validate]\n"
+            "    if: ${{ needs.validate.result == 'success' }}\n"
             "    uses: acme/hub/.github/workflows/build-release-task.yml@"
             + "a" * 40
             + " # 2.0.1\n",
@@ -2443,6 +2444,7 @@ def _selftest():
             "  publish:\n"
             "    name: Publish project release job\n"
             "    needs: [plan]\n"
+            "    if: ${{ needs.validate.result == 'success' }}\n"
             "    uses: acme/hub/.github/workflows/build-release-task.yml@"
             + "a" * 40
             + " # 2.0.1\n",
@@ -2464,6 +2466,12 @@ def _selftest():
                 "    uses: ./.github/workflows/validate-task.yml\n",
                 "    uses: ./.github/workflows/validate-task-renamed.yml\n",
             ),
+            publish_contract,
+            1,
+        ),
+        (
+            "publish-release.yml stub whose publish job ignores failed validation",
+            publish_stub.replace(" && needs.validate.result == 'success'", ""),
             publish_contract,
             1,
         ),
