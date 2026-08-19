@@ -12,6 +12,31 @@ REPO = Path(__file__).resolve().parents[2]
 class ReleaseGuardCase(unittest.TestCase):
     """Publishing and audit discovery require their prerequisite checks to succeed."""
 
+    def test_pypi_artifact_name_matches_contracts_and_consumers(self) -> None:
+        canonical_name = "pypi-build-"
+        legacy_name = "pypilibrary" + "-build-"
+        required_paths = (
+            "GOVERNANCE.md",
+            "WORKFLOW.md",
+            ".github/actions/pypi-build-default/action.yml",
+            "docs/reusable-workflows.md",
+        )
+
+        for relative_path in required_paths:
+            content = (REPO / relative_path).read_text(encoding="utf-8")
+            with self.subTest(path=relative_path):
+                self.assertIn(canonical_name, content)
+
+        tracked_text = run(
+            ["git", "grep", "-n", legacy_name],
+            cwd=REPO,
+            check=False,
+            capture_output=True,
+            text=True,
+        )
+        self.assertEqual("", tracked_text.stdout)
+        self.assertEqual(1, tracked_text.returncode)
+
     def test_publish_requires_successful_validation(self) -> None:
         workflow = (REPO / ".github/workflows/publish-release.yml").read_text(encoding="utf-8")
         files_spec = (REPO / "spec/files.json").read_text(encoding="utf-8")
