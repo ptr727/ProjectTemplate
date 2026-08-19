@@ -44,6 +44,7 @@ runs:
         excluded_paths=()
         exclude_file=".github/prose-gate-excludes"
         if [ -f "$exclude_file" ]; then
+          excluded=""
           while IFS= read -r excluded || [ -n "$excluded" ]; do
             excluded="${excluded#"${excluded%%[![:space:]]*}"}"
             excluded="${excluded%"${excluded##*[![:space:]]}"}"

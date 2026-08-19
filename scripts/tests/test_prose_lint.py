@@ -2505,6 +2505,12 @@ class TestReusableGateExclusions(unittest.TestCase):
         self.assertEqual(0, result.returncode, result.stdout + result.stderr)
         self.assertIn("Excluding 1 path(s)", result.stdout)
 
+    def test_an_empty_contract_is_no_exclusions(self) -> None:
+        (self.root / ".github" / "prose-gate-excludes").write_bytes(b"")
+        result = self.run_action()
+        self.assertEqual(0, result.returncode, result.stdout + result.stderr)
+        self.assertIn("Excluding 0 path(s)", result.stdout)
+
     def test_an_ordinary_authored_file_remains_in_scope(self) -> None:
         (self.root / "vendor" / "upstream.md").write_text(
             f"Vendored {DUP} words.\n", encoding="utf-8"
