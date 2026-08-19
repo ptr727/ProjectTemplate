@@ -2,7 +2,7 @@
 
 Running backlog for new features, design ideas, measurements, and rollout chores. A reproducible defect belongs in a GitHub issue rather than this file. Completed work is deleted after its remaining rollout or decision is recorded elsewhere.
 
-Entries are grouped by the change that ships them. A `###` heading under "Work Clusters" is one pull request. `Open` states a decision the session doing the work makes, and `Settled` states a finding that is not re-derived. `Checked` names the branch, commit, and date a claim was last read against the tree.
+Entries are grouped by the change that ships them. A `###` heading under "Work Clusters" is one pull request. `Open` states a decision the session doing the work makes, and `Settled` states a finding that is not re-derived. `Checked` records the measurement status. A completed measurement names its branch, commit, and date.
 
 A cluster's `State` is one of four. `ready` means every open question is answerable by the session doing the work. `blocked` names the cluster it waits on. `decision` needs the maintainer. `measure` means the first action is a count rather than an edit.
 
@@ -51,7 +51,6 @@ One pull request moving the canonical short description into declared data, so e
   - **Settled** - The 100-character cap stays, since Docker Hub's short description is the tightest surface.
   - **Settled** - The field is optional at first so the audit falls back to the README intro while repos adopt it, and it needs a schema entry because `registry/repos.schema.json` sets `additionalProperties: false`.
   - **Settled** - The ask on the Docker repos meanwhile is only that the parsing step is not propagated further.
-
 
 ### Registry Membership Coverage
 
@@ -538,7 +537,6 @@ Regenerate [reports/divergences.md][divergences-report] before using it as the w
 [issue-523]: https://github.com/ptr727/ProjectTemplate/issues/523
 [issue-550]: https://github.com/ptr727/ProjectTemplate/issues/550
 [issue-558]: https://github.com/ptr727/ProjectTemplate/issues/558
-[issue-577]: https://github.com/ptr727/ProjectTemplate/issues/577
 [issue-578]: https://github.com/ptr727/ProjectTemplate/issues/578
 [issue-580]: https://github.com/ptr727/ProjectTemplate/issues/580
 [issue-585]: https://github.com/ptr727/ProjectTemplate/issues/585
@@ -546,19 +544,14 @@ Regenerate [reports/divergences.md][divergences-report] before using it as the w
 [issue-607]: https://github.com/ptr727/ProjectTemplate/issues/607
 [issue-623]: https://github.com/ptr727/ProjectTemplate/issues/623
 [issue-633]: https://github.com/ptr727/ProjectTemplate/issues/633
-[issue-639]: https://github.com/ptr727/ProjectTemplate/issues/639
 [issue-671]: https://github.com/ptr727/ProjectTemplate/issues/671
 [issue-672]: https://github.com/ptr727/ProjectTemplate/issues/672
 [issue-673]: https://github.com/ptr727/ProjectTemplate/issues/673
-[issue-729]: https://github.com/ptr727/ProjectTemplate/issues/729
 [issue-767]: https://github.com/ptr727/ProjectTemplate/issues/767
-[issue-769]: https://github.com/ptr727/ProjectTemplate/issues/769
 
 <!-- Pull requests -->
 
-[pr-591]: https://github.com/ptr727/ProjectTemplate/pull/591
 [pr-620]: https://github.com/ptr727/ProjectTemplate/pull/620
-[pr-667]: https://github.com/ptr727/ProjectTemplate/pull/667
 
 <!-- Upstream -->
 
@@ -589,14 +582,12 @@ Regenerate [reports/divergences.md][divergences-report] before using it as the w
 [peer-messaging-doc]: ./docs/peer-messaging.md
 [project-types]: ./spec/project-types.json
 [prose-gate]: ./.github/actions/prose-gate/action.yml
-[publish-docker-readme-task]: ./.github/workflows/publish-docker-readme-task.yml
 [readme-sections]: ./spec/readme-sections.json
 [readme-structure]: ./spec/readme-structure.md
 [repo-gate]: ./scripts/repo_gate.py
 [reports]: ./reports/
 [repos]: ./registry/repos.json
 [reusable-workflows-doc]: ./docs/reusable-workflows.md
-[run-2-0-352]: https://github.com/ptr727/ProjectTemplate/actions/runs/31974067182
 [scripts]: ./scripts/README.md
 [secrets]: ./spec/secrets.json
 [secrets-schema]: ./spec/secrets.schema.json
@@ -608,5 +599,4 @@ Regenerate [reports/divergences.md][divergences-report] before using it as the w
 [validate-task]: ./.github/workflows/validate-task.yml
 [workflow]: ./WORKFLOW.md
 [workflow-reuse-report]: ./reports/workflow-reuse.md
-[workflows]: ./catalog/snippets/workflows/
 [write-guard]: ./host-setup/agent-safety/gh-write-guard.py
