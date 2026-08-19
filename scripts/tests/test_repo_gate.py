@@ -420,6 +420,13 @@ class TestEolCoverage(GitTreeCase):
         gitattributes = self.GITATTRIBUTES.replace("eol=lf", "eol=crlf", 1)
         self.assertEqual([], self.coverage(gitattributes, {"seed.txt": "seed\n"}))
 
+    def test_a_crlf_native_repository_may_pin_posix_paths_to_lf(self) -> None:
+        gitattributes = self.GITATTRIBUTES.replace("eol=lf", "eol=crlf", 1)
+        gitattributes += (
+            "*.py text eol=lf\n*.sh text eol=lf\ntool text eol=lf\nuv.lock text eol=lf\n"
+        )
+        self.assertEqual([], self.coverage(gitattributes, {"seed.txt": "seed\n"}))
+
     def test_a_missing_global_default_is_flagged_across_representative_classes(self) -> None:
         hits = self.coverage("*.bat text eol=crlf\n*.cmd text eol=crlf\n", {"seed.txt": "seed\n"})
         self.assertEqual([".gitattributes has no `* text=auto eol=<ending>` default"], hits)

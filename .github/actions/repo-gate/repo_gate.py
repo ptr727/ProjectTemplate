@@ -293,13 +293,18 @@ def check_eol_coverage(root: Path, files: list[str]) -> list[str]:
     if attrs is None:
         NOTES.append("git did not answer `check-attr`, so no representative path was read.")
         return []
+    lf_override_paths = {"script.py", "tool.sh", "tool", "uv.lock"}
     expected = {
-        path: "crlf" if path.endswith((".bat", ".cmd")) else default_ending for path in paths
+        path: ({"lf", default_ending} if path in lf_override_paths else {"crlf"})
+        if path.endswith((".bat", ".cmd")) or default_ending == "crlf"
+        else {"lf"}
+        for path in paths
     }
     out = [
-        f"{path}: git resolves to `eol: {attrs.get(path, 'unspecified')}`, not `{ending}`"
-        for path, ending in expected.items()
-        if attrs.get(path) != ending
+        f"{path}: git resolves to `eol: {attrs.get(path, 'unspecified')}`, "
+        f"not one of `{', '.join(sorted(endings))}`"
+        for path, endings in expected.items()
+        if attrs.get(path) not in endings
     ]
     NOTES.append(f"resolved {len(paths)} representative path(s) through git check-attr.")
     return out

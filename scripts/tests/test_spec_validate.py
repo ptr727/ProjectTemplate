@@ -93,6 +93,15 @@ class CarriedRelativeLinkCase(unittest.TestCase):
 
         self.assertEqual(validate.carried_link_errors(self.root, self.baseline), [])
 
+    def test_accepts_a_different_repository_with_the_template_name_as_a_prefix(self) -> None:
+        (self.root / "GOVERNANCE.md").write_text(
+            "# Governance\n\n## Rule\n\n"
+            "Read [the related repository](https://github.com/ptr727/ProjectTemplate-fork).\n",
+            encoding="utf-8",
+        )
+
+        self.assertEqual(validate.carried_link_errors(self.root, self.baseline), [])
+
     def test_rejects_a_hub_only_target_in_a_whole_intent_file(self) -> None:
         (self.root / "AUDIT.md").write_text(
             "# Audit\n\nRead [the registry](./registry/repos.json).\n",

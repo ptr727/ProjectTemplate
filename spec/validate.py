@@ -100,7 +100,10 @@ def carried_link_errors(root, baseline):
                     regions.append((f"section '{name}'", markdown_section(text, name)))
         for region, body in regions:
             for target in markdown_targets(body):
-                if target.startswith(TEMPLATE_REPOSITORY_URL) and source != "AUDIT.md":
+                is_template_link = target == TEMPLATE_REPOSITORY_URL or target.startswith(
+                    f"{TEMPLATE_REPOSITORY_URL}/"
+                )
+                if is_template_link and source != "AUDIT.md":
                     errors.append(
                         f"files.json: {source} {region} links to the template repository "
                         f"at '{target}'"
