@@ -1,3 +1,4 @@
+#!/usr/bin/env python3
 """Protect release and audit boundaries from fail-open regressions."""
 
 from __future__ import annotations
