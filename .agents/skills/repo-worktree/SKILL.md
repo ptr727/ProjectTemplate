@@ -6,8 +6,9 @@ description: >-
   feature branch before its first file edit, based on the branch work starts on (develop on both
   fleet workflow models unless the task is explicitly about main-only content, never whichever
   branch a tool defaulted to), preferring a registered worktree in the fleet layout and using a
-  standalone-clone fallback only when the executor cannot write both the standard worktree and
-  its Git metadata and no available approval route grants access. Also wraps the mechanics:
+  standalone-clone fallback only when the executor cannot write to either the standard worktree
+  location or its Git metadata, and no available approval route grants access. Also wraps the
+  mechanics:
   creating a worktree with git worktree add, the fleet layout convention, listing what is in
   flight, preparing Husky.Net or Python pre-commit hooks in the new tree, and removing a
   worktree and its branch after merge. Use this whenever about to create or edit files in a
