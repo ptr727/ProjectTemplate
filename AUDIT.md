@@ -95,7 +95,7 @@ Run [`WORKFLOW.md`][workflow]'s methodology against the repo's **own** Actions: 
 
 - **General settings** - diff the live repository settings against [`repo-config/settings.json`][repo-config-settings], and confirm the two state-dependent settings: `has_discussions` follows visibility (public on / private off) and `default_branch` is `main`.
 
-  ```sh
+  ```bash
   live=$(gh api "repos/<owner>/<repo>" --jq '{has_wiki,has_projects,allow_merge_commit,allow_squash_merge,allow_rebase_merge,allow_auto_merge,allow_update_branch,delete_branch_on_merge}')
   diff <(jq -S . repo-config/settings.json) <(jq -S . <<<"$live") \
     && echo "settings: in sync" || echo "settings: DRIFT"
@@ -103,7 +103,7 @@ Run [`WORKFLOW.md`][workflow]'s methodology against the repo's **own** Actions: 
 
 - **Rulesets** - diff each live ruleset against the committed expected payload with a normalized comparison (sort the order-insensitive `rules[]` on each rule's whole content before diffing, so a reordered but equivalent ruleset does not read as drift). The compared subset is `name`, `target`, `enforcement`, `conditions` and `rules`, and `bypass_actors` sits deliberately outside it, which is the same subset and the same sort key [`spec/audit.py`][audit-runner] uses. Who may bypass a ruleset is a per-repository human decision taken in the UI, no payload declares one, and [`repo-config/configure.sh`][repo-config] treats it that way in both modes, writing the live list back unchanged on `apply` and reporting it without asserting on `check`. Comparing it here would contradict that and report a ruleset finding against every repository that has any bypass actor, which is the field's normal state rather than a deviation:
 
-  ```sh
+  ```bash
   # bypass_actors stays outside the projection, since no payload declares one and jq cannot sort the null that leaves.
   # Rules sort on each rule's whole content, matching the key normalize_ruleset in audit.py sorts by.
   # Sorting on .type alone leaves two rules of one type in input order, so a reordered pair would read as drift.
@@ -135,10 +135,14 @@ Run [`WORKFLOW.md`][workflow]'s methodology against the repo's **own** Actions: 
 
 - **Dependabot ecosystem coverage** - for each ecosystem the repo's tree implies, `.github/dependabot.yml` must declare it: `github-actions` when `.github/workflows/` is present (its workflows reference actions, and otherwise those versions go stale and a stood-up merge-bot has no action-update PRs to auto-merge), and `devcontainers` when a `.devcontainer` is present. The mechanical check (`spec/audit.py`) asserts each implied ecosystem's **presence**. A tree-implied ecosystem declared nowhere is a **drift finding** (the file exists, so its absence would instead be a file-presence letter). Then confirm **by inspection** that each declared ecosystem **dual-targets `main` + `develop`** per the [Branching Model][governance-branching-model], since the regex below cannot pair an ecosystem with its `target-branch`. Language ecosystems (`nuget`/`uv`/`npm`) are directory-scoped and audited by inspection too.
 
-  ```sh
+  ```bash
   # Anchor to the line start (optional list dash) so a commented-out '# package-ecosystem:' is not counted.
-  decl=$(gh api "repos/<owner>/<repo>/contents/.github/dependabot.yml?ref=<ground>" --jq '.content' | base64 -d | grep -oE '^[[:space:]]*-?[[:space:]]*package-ecosystem:[[:space:]]*"?[a-z-]+' | grep -oE '[a-z-]+$' | sort -u)
-  has() { gh api "repos/<owner>/<repo>/contents/$1?ref=<ground>" >/dev/null 2>&1; }
+  dependabot_content=$(gh api "repos/<owner>/<repo>/contents/.github/dependabot.yml?ref=<ground>" --jq '.content') || exit 1
+  dependabot_yaml=$(base64 -d <<<"$dependabot_content") || exit 1
+  decl=$(grep -oE '^[[:space:]]*-?[[:space:]]*package-ecosystem:[[:space:]]*"?[a-z-]+' <<<"$dependabot_yaml" | grep -oE '[a-z-]+$' | sort -u)
+  root_paths=$(gh api "repos/<owner>/<repo>/contents?ref=<ground>" --jq '.[].path') || exit 1
+  github_paths=$(gh api "repos/<owner>/<repo>/contents/.github?ref=<ground>" --jq '.[].path') || exit 1
+  has() { grep -Fxq "$1" <<<"$root_paths"$'\n'"$github_paths"; }
   has .github/workflows && { grep -qx github-actions <<<"$decl" && echo "github-actions: present" || echo "github-actions: MISSING (workflows present)"; }
   has .devcontainer     && { grep -qx devcontainers  <<<"$decl" && echo "devcontainers: present"  || echo "devcontainers: MISSING (.devcontainer present)"; }
   # then read dependabot.yml and confirm each present ecosystem has both a main and a develop target-branch entry
