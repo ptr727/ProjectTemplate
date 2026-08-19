@@ -370,7 +370,9 @@ class TestEol(TreeCase):
         self.assertEqual(3, len(hits))
 
     def test_equivalent_editorconfig_windows_sections_are_accepted(self) -> None:
-        separate = "[*]\nend_of_line = lf\n[*.bat]\nend_of_line = crlf\n[*.cmd]\nend_of_line = crlf\n"
+        separate = (
+            "[*]\nend_of_line = lf\n[*.bat]\nend_of_line = crlf\n[*.cmd]\nend_of_line = crlf\n"
+        )
         reversed_group = "[*]\nend_of_line = lf\n[*.{cmd,bat}]\nend_of_line = crlf\n"
         self.assertEqual([], self.eol_pair(self.GITATTRIBUTES, separate))
         self.assertEqual([], self.eol_pair(self.GITATTRIBUTES, reversed_group))

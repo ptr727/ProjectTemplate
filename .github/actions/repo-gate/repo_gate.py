@@ -224,9 +224,7 @@ def check_sha_pin(root: Path, files: list[str]) -> list[str]:
 
 def editorconfig_ending(text: str, header: str) -> str | None:
     """Return one section's declared ending without reading into the next section."""
-    section = re.search(
-        rf"(?ms)^\[{re.escape(header)}\]\s*$\n(?P<body>.*?)(?=^\[|\Z)", text
-    )
+    section = re.search(rf"(?ms)^\[{re.escape(header)}\]\s*$\n(?P<body>.*?)(?=^\[|\Z)", text)
     if section is None:
         return None
     ending = re.search(r"(?m)^end_of_line\s*=\s*(lf|crlf)\s*$", section.group("body"))
@@ -256,8 +254,7 @@ def check_eol(root: Path, files: list[str]) -> list[str]:
             f".gitattributes is {ga_global.group(1)}"
         )
     combined_windows = any(
-        editorconfig_ending(ec_text, header) == "crlf"
-        for header in ("*.{bat,cmd}", "*.{cmd,bat}")
+        editorconfig_ending(ec_text, header) == "crlf" for header in ("*.{bat,cmd}", "*.{cmd,bat}")
     )
     separate_windows = all(
         editorconfig_ending(ec_text, header) == "crlf" for header in ("*.bat", "*.cmd")

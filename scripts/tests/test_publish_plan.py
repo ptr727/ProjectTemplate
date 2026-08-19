@@ -20,9 +20,7 @@ def decision_script() -> str:
     run = next(i for i in range(decide + 1, len(lines)) if lines[i].strip() == "run: |")
     run_indent = len(lines[run]) - len(lines[run].lstrip())
     start = run + 1
-    content_indent = next(
-        len(line) - len(line.lstrip()) for line in lines[start:] if line.strip()
-    )
+    content_indent = next(len(line) - len(line.lstrip()) for line in lines[start:] if line.strip())
     if content_indent <= run_indent:
         raise ValueError("the decide step has no indented run body")
     body = []
