@@ -119,6 +119,23 @@ class CarriedRelativeLinkCase(unittest.TestCase):
             ],
         )
 
+    def test_checks_an_explicit_whole_intent_file_that_also_lists_sections(self) -> None:
+        (self.root / "AUDIT.md").write_text(
+            "# Audit\n\nRead [the registry](./registry/repos.json).\n",
+            encoding="utf-8",
+        )
+        baseline = [
+            {
+                "path": "AUDIT.md",
+                "fidelity": "intent",
+                "whole": True,
+                "appliesTo": "*",
+                "sections": [{"name": "Audit", "fidelity": "intent"}],
+            }
+        ]
+
+        self.assertEqual(1, len(validate.carried_link_errors(self.root, baseline)))
+
 
 if __name__ == "__main__":
     unittest.main()

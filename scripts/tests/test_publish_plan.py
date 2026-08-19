@@ -35,7 +35,7 @@ def decision_script() -> str:
 class PublishPlanCase(unittest.TestCase):
     """A manual release accepts only the two long-lived branches."""
 
-    def run_plan(self, ref: str) -> subprocess.CompletedProcess[str]:
+    def run_plan(self, ref: str) -> tuple[subprocess.CompletedProcess[str], str]:
         output = Path(self.enterContext(tempfile.TemporaryDirectory())) / "output"
         env = os.environ.copy()
         env.update(
@@ -46,25 +46,28 @@ class PublishPlanCase(unittest.TestCase):
                 "REF": ref,
             }
         )
-        return subprocess.run(
+        result = subprocess.run(
             ["bash", "-c", decision_script()],
             check=False,
             capture_output=True,
             env=env,
             text=True,
         )
+        written_output = output.read_text(encoding="utf-8") if output.exists() else ""
+        return result, written_output
 
     def test_s8_rejects_a_dispatch_from_an_unsupported_ref(self) -> None:
-        result = self.run_plan("feature/unsupported")
+        result, output = self.run_plan("feature/unsupported")
 
         self.assertNotEqual(result.returncode, 0)
         self.assertIn("::error::Dispatch a release", result.stdout)
+        self.assertEqual("", output)
 
     def test_dispatch_from_develop_publishes(self) -> None:
-        result = self.run_plan("develop")
+        result, output = self.run_plan("develop")
 
         self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
-        self.assertIn("publish=true", result.stdout)
+        self.assertIn("publish=true", output)
 
 
 if __name__ == "__main__":

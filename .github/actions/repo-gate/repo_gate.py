@@ -253,8 +253,13 @@ def check_eol(root: Path, files: list[str]) -> list[str]:
             f"global ending differs: .editorconfig is {ec_global}, "
             f".gitattributes is {ga_global.group(1)}"
         )
+    section_headers = re.findall(r"(?m)^\[(?P<header>[^]]+)\]\s*$", ec_text)
     combined_windows = any(
-        editorconfig_ending(ec_text, header) == "crlf" for header in ("*.{bat,cmd}", "*.{cmd,bat}")
+        header.startswith("*.{")
+        and header.endswith("}")
+        and {"bat", "cmd"}.issubset(part.strip() for part in header[3:-1].split(","))
+        and editorconfig_ending(ec_text, header) == "crlf"
+        for header in section_headers
     )
     separate_windows = all(
         editorconfig_ending(ec_text, header) == "crlf" for header in ("*.bat", "*.cmd")

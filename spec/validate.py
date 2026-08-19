@@ -91,7 +91,7 @@ def carried_link_errors(root, baseline):
         text = path.read_text(encoding="utf-8", errors="replace")
         sections = item.get("sections", [])
         regions = []
-        if item.get("fidelity") == "intent" and not sections:
+        if item.get("fidelity") == "intent" and (item.get("whole") is True or not sections):
             regions.append(("whole file", text))
         for section in sections if isinstance(sections, list) else []:
             if isinstance(section, dict) and section.get("fidelity") == "verbatim":
