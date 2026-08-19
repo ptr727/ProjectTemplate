@@ -23,8 +23,8 @@ class ReleaseGuardCase(unittest.TestCase):
         )
 
         for relative_path in required_paths:
-            content = (REPO / relative_path).read_text(encoding="utf-8")
             with self.subTest(path=relative_path):
+                content = (REPO / relative_path).read_text(encoding="utf-8")
                 self.assertIn(canonical_name, content)
 
         tracked_text = run(
