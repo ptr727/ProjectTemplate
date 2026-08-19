@@ -2443,8 +2443,8 @@ class TestReusableGateExclusions(unittest.TestCase):
         self.root = Path(self.enterContext(tempfile.TemporaryDirectory()))
         subprocess.run(["git", "init", "-q", str(self.root)], check=True)
         (self.root / ".github").mkdir()
-        (self.root / ".github" / "prose-gate-excludes").write_text(
-            "# Pinned upstream file.\nvendor/upstream.md\n", encoding="utf-8"
+        (self.root / ".github" / "prose-gate-excludes").write_bytes(
+            b"# Pinned upstream file.\r\nvendor/upstream.md\r\n"
         )
         vendor = self.root / "vendor" / "upstream.md"
         vendor.parent.mkdir()
@@ -2474,7 +2474,15 @@ class TestReusableGateExclusions(unittest.TestCase):
     def run_action(self) -> subprocess.CompletedProcess[str]:
         action = PROSE_GATE_ACTION.read_text(encoding="utf-8")
         _, block = action.split("      run: |\n", 1)
-        script = "\n".join(line.removeprefix("        ") for line in block.splitlines())
+        script_lines = []
+        for line in block.splitlines():
+            if line.startswith("        "):
+                script_lines.append(line.removeprefix("        "))
+            elif not line:
+                script_lines.append(line)
+            else:
+                break
+        script = "\n".join(script_lines)
         env = os.environ | {
             "BASE": "HEAD",
             "GITHUB_ACTION_PATH": str(PROSE_GATE_ACTION.parent),

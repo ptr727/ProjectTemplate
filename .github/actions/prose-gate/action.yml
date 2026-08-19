@@ -45,6 +45,7 @@ runs:
         exclude_file=".github/prose-gate-excludes"
         if [ -f "$exclude_file" ]; then
           while IFS= read -r excluded || [ -n "$excluded" ]; do
+            excluded="${excluded%$'\r'}"
             if [[ -z "$excluded" || "$excluded" == \#* ]]; then
               continue
             fi
