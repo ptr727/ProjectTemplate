@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import unittest
 from pathlib import Path
+from subprocess import run
 
 REPO = Path(__file__).resolve().parents[2]
 
@@ -23,13 +24,30 @@ class ReleaseGuardCase(unittest.TestCase):
 
     def test_audit_root_probe_fails_before_local_path_checks(self) -> None:
         audit = (REPO / "AUDIT.md").read_text(encoding="utf-8")
-        root_probe = (
-            'root_paths=$(gh api "repos/<owner>/<repo>/contents?ref=<ground>" '
-            "--jq '.[].path') || exit 1"
+        lines = audit.splitlines()
+        start = next(i for i, line in enumerate(lines) if line.startswith("  root_paths="))
+        probe = "\n".join(line.removeprefix("  ") for line in lines[start : start + 3])
+        fake_api = r"""
+gh() {
+  case "$2" in
+    repos/*/contents/.github\?*) printf '%s\n' .github/dependabot.yml .github/workflows ;;
+    repos/*/contents\?*) printf '%s\n' .devcontainer .github ;;
+    *) return 17 ;;
+  esac
+}
+"""
+
+        success = run(
+            ["bash", "-c", f"{fake_api}\n{probe}\nhas .github/workflows && has .devcontainer"],
+            check=False,
+        )
+        failure = run(
+            ["bash", "-c", f"gh() {{ return 17; }}\n{probe}\nexit 0"],
+            check=False,
         )
 
-        self.assertIn(root_probe, audit)
-        self.assertIn('has() { grep -Fxq "$1" <<<"$root_paths"; }', audit)
+        self.assertEqual(0, success.returncode)
+        self.assertNotEqual(0, failure.returncode)
         self.assertNotIn(
             'gh api "repos/<owner>/<repo>/contents/$1?ref=<ground>" >/dev/null 2>&1',
             audit,
