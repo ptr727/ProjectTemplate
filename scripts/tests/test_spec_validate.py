@@ -64,6 +64,23 @@ class CarriedRelativeLinkCase(unittest.TestCase):
 
         self.assertEqual(validate.carried_relative_link_errors(self.root, self.baseline), [])
 
+    def test_ignores_relative_links_inside_fenced_code(self) -> None:
+        (self.root / "GOVERNANCE.md").write_text(
+            "# Governance\n\n## Rule\n\n~~~markdown\n[hub only](./docs/hub-only.md)\n~~~\n",
+            encoding="utf-8",
+        )
+
+        self.assertEqual(validate.carried_relative_link_errors(self.root, self.baseline), [])
+
+    def test_accepts_a_universally_carried_reference_target(self) -> None:
+        (self.root / "GOVERNANCE.md").write_text(
+            "# Governance\n\n## Rule\n\nRead [the contract][contract].\n\n"
+            "[contract]: ./WORKFLOW.md#contract\n",
+            encoding="utf-8",
+        )
+
+        self.assertEqual(validate.carried_relative_link_errors(self.root, self.baseline), [])
+
 
 if __name__ == "__main__":
     unittest.main()
