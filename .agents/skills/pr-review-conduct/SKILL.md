@@ -83,6 +83,8 @@ then apply the Merge Gate above. **Never exit the loop early.** A round count is
 condition, and neither is patience running out. Reporting only that the PR was opened is an early
 exit unless the maintainer explicitly instructed the agent not to monitor or drive its review.
 
+After an authorized merge, run the `repo-worktree` post-merge cleanup procedure unless the user explicitly asks to retain the checkout or branch. The pull request loop is incomplete while its finished worktree or local task branch remains. It is also incomplete until the base clone returns to fetched and fast-forwarded `develop`.
+
 ## Every finding ends in one of five outcomes
 
 1. **Real, so fix it.** Reply with the fixing commit SHA. For a finding on platform-specific code
