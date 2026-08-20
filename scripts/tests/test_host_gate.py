@@ -208,11 +208,22 @@ class TestCheck(unittest.TestCase):
     def test_windows_arguments_are_always_powershell_literals(self):
         """Metacharacters cannot turn a printed remedy into multiple PowerShell commands."""
         original = host_gate.sys.platform
+        previous_repo = host_gate.REMEDY_REPO
         try:
             host_gate.sys.platform = "win32"
             self.assertEqual(host_gate.quote_argument("tool; & 'next'"), "'tool; & ''next'''")
+            host_gate.REMEDY_REPO = Path("/tmp/repo; & 'quoted'")
+            remedy = host_gate.package_remedy(
+                tool(
+                    "tool; & 'next'",
+                    install={"windows": {"manager": "winget", "package": "Vendor.Tool"}},
+                )
+            )
+            self.assertIn("-Repo '/tmp/repo; & ''quoted'''", remedy or "")
+            self.assertTrue((remedy or "").endswith("'tool; & ''next'''"))
         finally:
             host_gate.sys.platform = original
+            host_gate.REMEDY_REPO = previous_repo
 
     def test_a_malformed_source_or_remedy_reports_rather_than_crashing(self):
         """One bad field costs its own output line, not the run and the findings already collected.
