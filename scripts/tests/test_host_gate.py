@@ -205,6 +205,15 @@ class TestCheck(unittest.TestCase):
         else:
             self.assertIn("'", resolved.partition(" --upgrade")[0])
 
+    def test_windows_arguments_are_always_powershell_literals(self):
+        """Metacharacters cannot turn a printed remedy into multiple PowerShell commands."""
+        original = host_gate.sys.platform
+        try:
+            host_gate.sys.platform = "win32"
+            self.assertEqual(host_gate.quote_argument("tool; & 'next'"), "'tool; & ''next'''")
+        finally:
+            host_gate.sys.platform = original
+
     def test_a_malformed_source_or_remedy_reports_rather_than_crashing(self):
         """One bad field costs its own output line, not the run and the findings already collected.
 

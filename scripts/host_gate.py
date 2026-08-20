@@ -360,7 +360,7 @@ def platform_field(tool: dict, field: str) -> str | None:
 def quote_argument(value: str) -> str:
     """`value` as one shell word, for a printed command a reader pastes back into their shell."""
     if platform_key() == "windows":
-        return f'"{value}"' if " " in value else value
+        return "'" + value.replace("'", "''") + "'"
     return shlex.quote(value)
 
 
