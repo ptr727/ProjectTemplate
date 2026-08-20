@@ -19,7 +19,6 @@ import subprocess
 import sys
 import unittest
 from datetime import UTC, datetime, timedelta
-from itertools import count
 from pathlib import Path
 from unittest import mock
 
@@ -92,6 +91,7 @@ def nested(
     heading: str = "### Suppressed comments (2)",
     finding: str = "**a.py:12**\n* The retry count is off by one.",
     covers: str = "- **Files reviewed:** 1/1 changed files",
+    effort: str = "Lite",
 ) -> str:
     """The section as a Markdown heading nested inside the `Review details` wrapper.
 
@@ -108,7 +108,7 @@ def nested(
         "| File | Description |\n\n</details>\n\n"
         f"<details>\n<summary>Review details</summary>\n\n{heading}\n\n{finding}\n\n"
         f"{covers}\n"
-        "- **Review effort level:** Lite\n</details>\n"
+        f"- **Review effort level:** {effort}\n</details>\n"
     )
 
 
@@ -392,39 +392,28 @@ class TestAnsweredOutsideReview(unittest.TestCase):
         self.assertFalse(pr_review.window_blind(pr, "comments"))
 
 
-class TestPickup(unittest.TestCase):
-    """A request nothing acted on and a review being worked on are one reading from the reviews."""
+class TestReviewEffort(unittest.TestCase):
+    """Review effort is observed from completed review metadata and never selected here."""
 
-    def test_a_request_with_no_pickup_after_it_is_named_by_its_timestamp(self) -> None:
-        """The shape that sat thirteen hours reading as pending: requested, never started."""
-        events = [
-            ("review_requested", "2026-08-02T22:58:15Z"),
-            ("copilot_work_started", "2026-08-02T22:58:45Z"),
-            ("review_requested", "2026-08-03T00:15:00Z"),
-        ]
-        self.assertEqual("2026-08-03T00:15:00Z", pr_review.never_picked_up(events))
+    def test_inherited_effort_reports_the_effective_level_and_default_source(self) -> None:
+        for level in ("Lite", "Balanced", "Max"):
+            with self.subTest(level=level):
+                pr = payload([review(body=nested(effort=f"Default ({level})"))])
+                self.assertEqual((level.lower(), "default"), pr_review.review_effort(pr))
 
-    def test_a_request_the_reviewer_took_up_is_not_stalled(self) -> None:
-        """Slow is not stuck, and only the pickup event tells them apart."""
-        events = [
-            ("review_requested", "2026-08-03T13:09:19Z"),
-            ("copilot_work_started", "2026-08-03T13:09:54Z"),
-        ]
-        self.assertEqual("", pr_review.never_picked_up(events))
+    def test_explicit_effort_reports_the_level_and_explicit_source(self) -> None:
+        for level in ("Lite", "Balanced", "Max"):
+            with self.subTest(level=level):
+                pr = payload([review(body=nested(effort=level))])
+                self.assertEqual((level.lower(), "explicit"), pr_review.review_effort(pr))
 
-    def test_an_earlier_pickup_does_not_cover_a_later_request(self) -> None:
-        """Answering the last request is not answering this one, and order is what says so."""
-        events = [
-            ("copilot_work_started", "2026-08-02T22:58:45Z"),
-            ("review_requested", "2026-08-02T23:31:44Z"),
-        ]
-        self.assertEqual("2026-08-02T23:31:44Z", pr_review.never_picked_up(events))
+    def test_absent_effort_metadata_is_unknown(self) -> None:
+        self.assertEqual(("unknown", "unknown"), pr_review.review_effort(payload([review()])))
 
-    def test_no_request_at_all_is_not_a_stall(self) -> None:
-        self.assertEqual(
-            "", pr_review.never_picked_up([("copilot_work_started", "2026-08-02T22:58:45Z")])
-        )
-        self.assertEqual("", pr_review.never_picked_up([]))
+    def test_newest_head_review_does_not_borrow_older_effort_metadata(self) -> None:
+        older = review(at=EARLY, body=nested(effort="Balanced"))
+        newer = review(at=LATE)
+        self.assertEqual(("unknown", "unknown"), pr_review.review_effort(payload([older, newer])))
 
     def test_the_pending_set_is_read_where_a_bot_reviewer_is_visible(self) -> None:
         """`gh pr view --json reviewRequests` omits a Bot outright and reports an empty set."""
@@ -469,6 +458,12 @@ class TestDigest(GqlCase):
         self.answer(payload([review(oid=OLD)]))
         out, _ = pr_review.digest("o", "r", 7)
         self.assertIn("review_on_head=NO", out)
+
+    def test_digest_reports_effective_effort_without_changing_the_verdict(self) -> None:
+        self.answer(payload([review(body=nested(effort="Default (Balanced)"))]))
+        out, _ = pr_review.digest("o", "r", 7)
+        self.assertIn("effort=balanced effort_source=default", out)
+        self.assertIn("coverage=full", out)
 
     def test_a_thread_from_a_deleted_account_does_not_crash_the_digest(self) -> None:
         """GraphQL sends `author` present and null, which a defaulted lookup returns as None."""
@@ -2108,82 +2103,28 @@ class TestCli(GqlCase):
         with mock.patch.object(pr_review.time, "sleep"):
             self.assertEqual(0, self.cli(["wait", "7"]))
 
-    def test_wait_stops_on_a_request_nothing_picked_up(self) -> None:
-        """Waiting on cannot start a request nothing is acting on, so the wait says so and ends.
-
-        The zero timeout is what this fails on rather than hangs on, and it also pins the order:
-        the pickup is read before the clock, so the stall reports as itself instead of as PENDING.
-        """
+    def test_a_pending_effort_labeled_request_reaches_the_timeout(self) -> None:
+        """Missing pickup telemetry cannot prove that an effort-labeled request is abandoned."""
         self.answer(payload([review(oid=OLD)], pending=True))
-        with (
-            mock.patch.object(pr_review, "timeline", return_value=[("review_requested", LATE)]),
-            mock.patch.object(pr_review.time, "sleep"),
-        ):
-            self.assertEqual(50, self.cli(["wait", "7", "--pickup-grace", "0", "--timeout", "0"]))
+        with mock.patch.object(pr_review.time, "sleep"):
+            self.assertEqual(30, self.cli(["wait", "7", "--timeout", "0"]))
         out = self.out.getvalue()
-        self.assertIn("status=REQUEST_NOT_PICKED_UP", out)
-        self.assertIn(LATE, out)
+        self.assertIn("status=PENDING", out)
+        self.assertNotIn("REQUEST NOT PICKED UP", out)
 
-    def test_a_request_being_worked_on_is_not_stopped_on(self) -> None:
-        """A slow round is the case the grace exists for, and stopping on it loses the review."""
+    def test_a_pending_request_can_complete_without_pickup_telemetry(self) -> None:
+        """The PR #873 lifecycle reaches a review without `copilot_work_started`."""
         self.answer(payload([review(oid=OLD)], pending=True), payload([review()], pending=True))
-        with (
-            mock.patch.object(
-                pr_review,
-                "timeline",
-                return_value=[("review_requested", EARLY), ("copilot_work_started", LATE)],
-            ),
-            mock.patch.object(pr_review.time, "sleep"),
-        ):
-            self.assertEqual(0, self.cli(["wait", "7", "--pickup-grace", "0", "--timeout", "600"]))
+        with mock.patch.object(pr_review.time, "sleep"):
+            self.assertEqual(0, self.cli(["wait", "7", "--timeout", "600"]))
 
-    def test_the_pickup_read_waits_out_the_grace_rather_than_running_per_poll(self) -> None:
-        """It costs a second call, and inside the grace a pending request is just work in flight."""
+    def test_a_pending_review_landing_during_the_final_read_wins_over_timeout(self) -> None:
+        """The digest and exit code come from one payload when the review lands at timeout."""
         self.answer(payload([review(oid=OLD)], pending=True), payload([review()], pending=True))
-        with (
-            mock.patch.object(pr_review, "timeline", return_value=[]) as seen,
-            mock.patch.object(pr_review.time, "sleep"),
-        ):
-            self.assertEqual(
-                0, self.cli(["wait", "7", "--pickup-grace", "9999", "--timeout", "600"])
-            )
-        seen.assert_not_called()
-
-    def test_the_pickup_read_runs_on_its_own_interval_once_the_grace_is_out(self) -> None:
-        """Every poll past the grace is what the comment ruled out and the code did anyway.
-
-        The clock advances a fixed step per reading, so the interval is counted rather than
-        waited: a long wait must not turn one REST reader into one per poll.
-        """
-        picked_up = [("review_requested", EARLY), ("copilot_work_started", LATE)]
-        self.answer(payload([review(oid=OLD)], pending=True))
-        with (
-            mock.patch.object(pr_review.time, "monotonic", side_effect=count(0, 30)),
-            mock.patch.object(pr_review, "timeline", return_value=picked_up) as seen,
-            mock.patch.object(pr_review.time, "sleep"),
-        ):
-            self.assertEqual(
-                30, self.cli(["wait", "7", "--pickup-grace", "300", "--timeout", "1200"])
-            )
-        # Roughly one read per grace interval over the wait, never one per poll.
-        self.assertGreaterEqual(seen.call_count, 1)
-        self.assertLessEqual(seen.call_count, 1200 // 300 + 1)
-
-    def test_a_review_landing_during_the_last_read_wins_over_the_stalled_code(self) -> None:
-        """The digest and the exit code come from one payload, or they describe different PRs.
-
-        An automated reader resolves a digest saying covered against a code saying stalled by
-        believing the code, so the review it just printed is the thing that gets dropped.
-        """
-        self.answer(payload([review(oid=OLD)], pending=True), payload([review()], pending=True))
-        with (
-            mock.patch.object(pr_review, "timeline", return_value=[("review_requested", LATE)]),
-            mock.patch.object(pr_review.time, "sleep"),
-        ):
-            self.assertEqual(0, self.cli(["wait", "7", "--pickup-grace", "0", "--timeout", "0"]))
+        with mock.patch.object(pr_review.time, "sleep"):
+            self.assertEqual(0, self.cli(["wait", "7", "--timeout", "0"]))
         out = self.out.getvalue()
         self.assertIn("review_on_head=yes", out)
-        self.assertNotIn("status=REQUEST_NOT_PICKED_UP", out)
 
     def test_a_review_landing_during_the_last_read_wins_over_the_timeout(self) -> None:
         """Same disagreement at the other exit: printing coverage and returning PENDING."""
@@ -2194,29 +2135,19 @@ class TestCli(GqlCase):
         self.assertIn("review_on_head=yes", out)
         self.assertNotIn("status=PENDING", out)
 
-    def test_a_request_picked_up_after_the_loop_read_it_is_not_reported_as_stalled(self) -> None:
-        """The stall is re-read at the end, or a request taken up since still reports as dead."""
+    def test_pickup_grace_remains_an_ignored_compatibility_option(self) -> None:
+        """Existing callers keep parsing while the option makes no liveness claim."""
         self.answer(payload([review(oid=OLD)], pending=True))
-        picked_up = [("review_requested", EARLY), ("copilot_work_started", LATE)]
-        with (
-            mock.patch.object(
-                pr_review, "timeline", side_effect=[[("review_requested", LATE)], picked_up]
-            ),
-            mock.patch.object(pr_review.time, "sleep"),
-        ):
+        with mock.patch.object(pr_review.time, "sleep"):
             self.assertEqual(30, self.cli(["wait", "7", "--pickup-grace", "0", "--timeout", "0"]))
         out = self.out.getvalue()
-        self.assertNotIn("status=REQUEST_NOT_PICKED_UP", out)
-        self.assertNotIn("REQUEST NOT PICKED UP", out)
+        self.assertIn("status=PENDING", out)
 
-    def test_an_answer_outranks_a_stall_when_both_are_true(self) -> None:
-        """The reviewer saying something outranks it saying nothing, and the digest shows both."""
+    def test_an_answer_ends_a_pending_request(self) -> None:
+        """An answer remains terminal regardless of absent pickup telemetry."""
         self.answer(payload([review(oid=OLD)], comments=[comment()], pending=True))
-        with (
-            mock.patch.object(pr_review, "timeline", return_value=[("review_requested", LATE)]),
-            mock.patch.object(pr_review.time, "sleep"),
-        ):
-            self.assertEqual(40, self.cli(["wait", "7", "--pickup-grace", "0", "--timeout", "0"]))
+        with mock.patch.object(pr_review.time, "sleep"):
+            self.assertEqual(40, self.cli(["wait", "7", "--timeout", "0"]))
 
     def test_the_repo_argument_splits_into_owner_and_name(self) -> None:
         self.answer(payload([review()]))
@@ -3052,63 +2983,8 @@ class TestContract(unittest.TestCase):
         self.assertEqual(4, source.count("pageInfo{ hasPreviousPage }"))
         self.assertEqual(4, len(re.findall(r"(?:comments|reviews)\(last:\d+\)", source)))
 
-    def test_the_timeline_reader_asks_for_the_largest_page(self) -> None:
-        """The page size is what pagination costs, and the default of 30 triples the requests."""
-        done = subprocess.CompletedProcess(args=[], returncode=0, stdout="", stderr="")
-        with mock.patch.object(pr_review.subprocess, "run", return_value=done) as run:
-            pr_review.timeline("o", "r", 7)
-        argv = run.call_args.args[0]
-        self.assertIn("repos/o/r/issues/7/timeline?per_page=100", argv)
-        self.assertIn("--paginate", argv)
-        # A read, and the guard against a write creeping into the one REST call here.
-        self.assertEqual(["gh", "api"], argv[:2])
-        self.assertFalse({"-X", "--method"} & set(argv))
-
-    def test_the_timeline_filter_takes_the_reviewer_s_own_requests_only(self) -> None:
-        """A human requested later is not this request, and reading it as one reports a stall.
-
-        The filter runs inside gh, so this drives the real `jq` over a crafted timeline rather
-        than asserting on the filter's text, which would pass on a filter that matches nothing.
-        The timeline spells the reviewer `Copilot` with type `Bot`, a third form after GraphQL's
-        `copilot-pull-request-reviewer` and REST's `[bot]` suffix on that, so a filter keyed to
-        either of those two selects nothing here and the whole state reads as no request at all.
-        """
-        events = [
-            {
-                "event": "review_requested",
-                "created_at": "01",
-                "requested_reviewer": {"login": "Copilot", "type": "Bot"},
-            },
-            {"event": "copilot_work_started", "created_at": "02"},
-            {
-                "event": "review_requested",
-                "created_at": "03",
-                "requested_reviewer": {"login": "ptr727", "type": "User"},
-            },
-            {
-                "event": "review_requested",
-                "created_at": "04",
-                "requested_reviewer": {"login": "some-other-bot", "type": "Bot"},
-            },
-            {"event": "commented", "created_at": "05"},
-        ]
-        run = subprocess.run(
-            ["jq", "-r", pr_review.TIMELINE_JQ],
-            input=json.dumps(events),
-            capture_output=True,
-            text=True,
-            check=False,
-        )
-        self.assertEqual(0, run.returncode, run.stderr)
-        self.assertEqual(
-            ["review_requested 01", "copilot_work_started 02"], run.stdout.split("\n")[:-1]
-        )
-        # The reading that matters: the human request must not become the newest request.
-        parsed = [(ln.split(" ", 1)[0], ln.split(" ", 1)[1]) for ln in run.stdout.splitlines()]
-        self.assertEqual("", pr_review.never_picked_up(parsed))
-
     def test_a_negative_pickup_grace_is_rejected_rather_than_read_as_every_poll(self) -> None:
-        """It leaves the next reading behind the clock, which is the per-poll pattern returning."""
+        """Compatibility accepts old callers without accepting a nonsensical negative value."""
         with contextlib.redirect_stderr(io.StringIO()) as err, self.assertRaises(SystemExit):
             pr_review.main(["wait", "7", "--repo", "o/r", "--pickup-grace", "-1"])
         # The repository is named, or this exits on the missing argument and proves nothing.
@@ -3177,17 +3053,6 @@ class TestContract(unittest.TestCase):
                         ]
                     )
                 self.assertIn("check-grace", err.getvalue())
-
-    def test_a_failed_timeline_read_raises_rather_than_reading_as_no_events(self) -> None:
-        """An empty list reads as no request pending, which is the false clean one level up."""
-        failed = subprocess.CompletedProcess(args=[], returncode=1, stdout="", stderr="boom")
-        with (
-            mock.patch.object(pr_review.subprocess, "run", return_value=failed),
-            contextlib.redirect_stderr(io.StringIO()) as err,
-            self.assertRaises(SystemExit),
-        ):
-            pr_review.timeline("o", "r", 7)
-        self.assertIn("boom", err.getvalue())
 
     def test_the_backoff_is_bounded_and_non_decreasing(self) -> None:
         """A wait that sleeps zero seconds is a busy loop, and one that shrinks polls harder later."""
