@@ -324,6 +324,11 @@ class TestSpecCoverage(unittest.TestCase):
         body = main.group("body") if main else ""
         self.assertRegex(body, r'if \[\[ \$MODE != "sudo-timestamp" \]\]; then\s+load_repo_tools')
 
+    def test_windows_installer_requires_a_repository_tools_array(self) -> None:
+        """The Windows trust-boundary reader rejects an object-shaped tool catalog."""
+        text = (WINDOWS / "install-tools.ps1").read_text(encoding="utf-8")
+        self.assertIn("$overlay.tools -isnot [System.Array]", text)
+
     def test_every_declared_floor_carries_a_total_remedy_mapping(self) -> None:
         """Each floored tool names a runnable remedy on every platform, or carries a recorded exception.
 

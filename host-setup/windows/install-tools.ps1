@@ -390,7 +390,8 @@ function Add-RepositoryToolCatalog {
     } catch {
         die "Cannot read $declaration as JSON: $_"
     }
-    if (-not $overlay.PSObject.Properties['tools'] -or $null -eq $overlay.tools) {
+    if (-not $overlay.PSObject.Properties['tools'] -or $null -eq $overlay.tools -or
+        $overlay.tools -isnot [System.Array]) {
         die "$declaration carries no tools array"
     }
     $fleetNames = @($script:TOOLS | ForEach-Object { $_.Name })
