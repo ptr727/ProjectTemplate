@@ -2033,12 +2033,8 @@ class TestHomePath(BaitCase):
                 self.assertEqual([], found)
 
 
-class TestOperationalExemption(unittest.TestCase):
-    """An operational repository's runbook carries the path an operator types.
-
-    That is the repository's own content rather than an agent quoting an environment it observed,
-    which is the distinction the rule is about.
-    """
+class TestOperationsRunbookExemption(unittest.TestCase):
+    """The operations runbook carries the literal path an operator types."""
 
     def setUp(self) -> None:
         self.tmp = Path(self.enterContext(tempfile.TemporaryDirectory()))
@@ -2050,44 +2046,31 @@ class TestOperationalExemption(unittest.TestCase):
         target.parent.mkdir(parents=True, exist_ok=True)
         target.write_text("{}\n", encoding="utf-8")
 
-    def test_an_operational_checkout_is_read_from_what_it_carries(self) -> None:
-        """`spec/files.json` declares the payload per model, so the repository states its own."""
-        self._payload("repo-config", "operational", "develop.json")
-        self.assertTrue(prose_lint.operational_checkout(self.tmp))
+    def test_a_checkout_with_the_runbook_is_detected(self) -> None:
+        """Every repository carries the runbook that owns literal operator paths."""
+        self._payload("OPERATIONS.md")
+        self.assertTrue(prose_lint.is_operations_runbook(self.tmp / "OPERATIONS.md"))
 
-    def test_a_release_checkout_is_not_operational(self) -> None:
-        self._payload("repo-config", "develop.json")
-        self.assertFalse(prose_lint.operational_checkout(self.tmp))
+    def test_a_checkout_without_the_runbook_is_not_detected(self) -> None:
+        self.assertFalse(prose_lint.is_operations_runbook(self.tmp / "README.md"))
 
-    def test_the_hub_carrying_both_payloads_is_not_operational(self) -> None:
-        """The hub is the template for each model, so carrying the release payload decides it.
-
-        Read as operational, the hub would exempt itself from a rule it authors, which is the
-        one repository where that matters most.
-        """
+    def test_configuration_payloads_do_not_select_the_exemption(self) -> None:
+        """Configuration payload names do not identify the operations runbook."""
         self._payload("repo-config", "develop.json")
         self._payload("repo-config", "operational", "develop.json")
-        self.assertFalse(prose_lint.operational_checkout(self.tmp))
+        self.assertFalse(prose_lint.is_operations_runbook(self.tmp / "repo-config/develop.json"))
 
-    def test_a_checkout_carrying_neither_payload_is_not_operational(self) -> None:
-        """An unknown model is gated rather than exempted, since exempting on doubt is the risk."""
-        self.assertFalse(prose_lint.operational_checkout(self.tmp))
+    def test_an_empty_checkout_is_not_detected(self) -> None:
+        self.assertFalse(prose_lint.is_operations_runbook(self.tmp))
 
-    def test_the_skip_is_announced_rather_than_silent(self) -> None:
-        """A rule that stops running without saying so reads as a rule that passed."""
-        self._payload("repo-config", "operational", "develop.json")
-        bait = self.tmp / "runbook.md"
+    def test_the_runbook_allows_a_literal_operator_path(self) -> None:
+        """The operations runbook owns the literal path an operator types."""
+        bait = self.tmp / "OPERATIONS.md"
         bait.write_text(f"Deploy into {NIX_HOME}/stack here.\n", encoding="utf-8")
-        with (
-            mock.patch.object(prose_lint, "repo_root", return_value=str(self.tmp)),
-            mock.patch.object(prose_lint, "discover", return_value=[bait]),
-        ):
-            self.assertEqual(0, prose_lint.main(["--check", "home-path"]))
-        self.assertIn("operational repository", self.err.getvalue())
+        self.assertEqual([], prose_lint.check_file(bait, {"home-path"}))
 
-    def test_a_release_repository_still_reports_the_finding(self) -> None:
+    def test_another_file_still_reports_the_finding(self) -> None:
         """The exemption must not be the whole rule."""
-        self._payload("repo-config", "develop.json")
         bait = self.tmp / "runbook.md"
         bait.write_text(f"Deploy into {NIX_HOME}/stack here.\n", encoding="utf-8")
         with (
@@ -2141,7 +2124,7 @@ class TestScanRootDecidesTheRuleSet(unittest.TestCase):
         self.assertNotIn("operational repository", self.err.getvalue())
 
     def test_standing_in_a_release_repo_does_not_un_exempt_an_operational_repo(self) -> None:
-        """The inverse error, which reports a finding the exemption exists to suppress."""
+        """A non-runbook file remains checked in every repository."""
         runbook = self.operational / "runbook.md"
         runbook.write_text(f"Deploy into {NIX_HOME}/stack here.\n", encoding="utf-8")
         with (
@@ -2150,8 +2133,8 @@ class TestScanRootDecidesTheRuleSet(unittest.TestCase):
             ),
             mock.patch.object(prose_lint, "discover", return_value=[runbook]),
         ):
-            self.assertEqual(0, prose_lint.main([str(self.operational), "--check", "home-path"]))
-        self.assertIn("operational repository", self.err.getvalue())
+            self.assertEqual(1, prose_lint.main([str(self.operational), "--check", "home-path"]))
+        self.assertNotIn("operational repository", self.err.getvalue())
 
     def test_paths_spanning_two_repositories_refuse_rather_than_pick_one(self) -> None:
         """Two repositories declare two models, and one rule set cannot be correct for both."""
@@ -2268,7 +2251,9 @@ class TestScanRootDecidesTheRuleSet(unittest.TestCase):
         with (
             mock.patch.object(prose_lint, "repo_root", return_value=""),
             mock.patch.object(
-                prose_lint, "operational_checkout", side_effect=lambda root: Path(root) == Path(".")
+                prose_lint,
+                "is_operations_runbook",
+                side_effect=lambda root: Path(root) == Path("."),
             ),
             mock.patch.object(prose_lint, "discover", return_value=[bait]),
         ):
@@ -2283,7 +2268,9 @@ class TestScanRootDecidesTheRuleSet(unittest.TestCase):
         with (
             mock.patch.object(prose_lint, "repo_root", return_value=""),
             mock.patch.object(
-                prose_lint, "operational_checkout", side_effect=lambda root: Path(root) == Path(".")
+                prose_lint,
+                "is_operations_runbook",
+                side_effect=lambda root: Path(root) == Path("."),
             ),
             mock.patch.object(prose_lint, "discover", return_value=[bait]),
         ):

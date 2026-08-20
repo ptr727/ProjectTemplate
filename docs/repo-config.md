@@ -1,21 +1,30 @@
-# repo-config: Carry, Apply, and Regenerate (Hub-Only)
+# Repository Configuration (Hub-Only)
 
-The **process** for carrying the `repo-config/` baseline to a fleet repo, applying it, and regenerating the canonical payloads. This doc is **hub-only** and is not carried downstream (it describes what the hub does *to* a repo, not a fact about any one repo). The carried [`repo-config/README.md`][repo-config-readme] states only the current facts about a repo's own config. This carry/apply/regen procedure lives here so it never ships into a downstream copy.
+The process for applying, checking, and regenerating the canonical repository configuration. This document and the entire `repo-config/` directory are hub-only. Every command runs from a hub checkout at `main` and names its target repository.
 
-## Downstream Carry
+## Configuration Source
 
-Every fleet repo carries the `repo-config/` directory. The hub keeps the canonical copy. Rules for the carried copy:
+The hub holds all fleet-wide repository configuration:
 
-- **The payloads carry and the script does not.** A `release` repo carries `develop.json`, an `operational` repo carries `operational/develop.json` instead, and `main.json` and `settings.json` are shared by both models. `configure.sh` stays in the hub and is run from a hub checkout against the repo named on the command line, per [GOVERNANCE.md "Hub-Hosted Tooling"][governance-hub-hosted-tooling], because it holds nothing per-repo and a copy of it is only current until the next fix. A repo still holding a copy has it deleted as it is next visited. Note the split this leaves: an apply or check run from the hub reads the hub's payloads rather than the repo's own, which is the single source the model is for, and the repo's carried payloads remain what its own `AUDIT.md` diffs the live rulesets against.
-- **Carried files name no fleet repo as an illustrative example.** A carried file adds no template-repo reference and names no sibling fleet repo as an example (any fleet repo may be private, so such a link 404s in a public carrier, and it couples the repos). A contextually relevant link a reader of *this* repo's content needs is fine. See [GOVERNANCE.md "Documentation Style Conventions"][governance-documentation-style]. To point at a current good example, name it in the onboarding/conformance issue or the hub-only [`reports/conformance-matrix.md`][conformance-matrix].
-- **Adapted self-audit carry.** A downstream repo carries **locally adapted** `AUDIT.md` and `spec/secrets.json`, scoped to self-auditing its own rulesets, settings, and secrets against the committed `repo-config/` baseline, the standard shape, so the carried tooling is self-contained. The hub's fleet-wide audit remains authoritative. The adapted `AUDIT.md` is a settings diff, a normalized ruleset diff against the carried payloads (an operational carry swaps in `operational/develop.json`), and a names-only secrets check, all targeting the current repo. Adapt this shape, don't invent. A current well-formed example is named in the onboarding/conformance issue.
+- `settings.json` declares the shared repository settings.
+- `main.json` declares the shared `main` ruleset.
+- `develop.json` declares the release-model `develop` ruleset.
+- `operational/develop.json` declares the operational-model `develop` ruleset.
+- `configure.sh` applies or checks those payloads through the GitHub API.
+
+Downstream repositories carry no `repo-config/` directory. The registry's `workflowModel` selects the `develop` payload. Commands that operate before registry enrollment pass the model explicitly.
+
+The carried `AUDIT.md` reaches the hub at `main` for its configuration check. The fleet-wide `spec/audit.py` reads the same hub payloads directly. Both paths compare live state against one source.
+
+## Per-Repository Secrets
+
 - **Adapted `spec/secrets.json` shape.** The repo-scoped adaptation carries `baseline` (the App pair, which every fleet repo needs for the merge-bot) plus a `mechanisms` entry for each publish mechanism the repo actually uses, and the `targetMechanisms` routing entries for those mechanisms. **A source-only repo whose publish targets all map to a null mechanism (nothing to route) carries just `baseline` (plus a `note`)**, omitting `targetMechanisms` and `mechanisms` entirely, because a lone `targetMechanisms` map with no `mechanisms` reads as a schema bug (the audit enumerates `baseline` + `mechanisms`, never `targetMechanisms`, so an all-null routing map is dead weight). A `release` repo that uses a real mechanism (e.g. `nuget-oidc`, `docker-hub`, `codecov`) carries that `mechanisms` entry **and** its `targetMechanisms`/`typeMechanisms` routing, which the audit then picks up.
 
 ## Applying the Config
 
 **Configure by importing the JSON payloads, never by hand-building the rules** (hand reconstruction has gone wrong on past setups). The result must be **exactly two rulesets named `develop` and `main`**, and the names are load-bearing (`AGENTS.md` and the workflows reference them). Only the `develop` *content* varies by model.
 
-First remove all legacy classic branch-protection rules and any stray rulesets, then run `configure.sh apply` from a hub checkout, naming the target repo and its model (the script applies `settings.json` and the Dependabot security features alongside the rulesets). Name the model rather than leaving it to the lookup. The script reads the registry beside it and resolves a repo it does not find through `defaults.workflowModel` to `release`, so an unregistered operational repo silently takes the release `develop` ruleset. The carried-payload inference the script also carries is for a run with no registry to consult, which a run from here never is:
+Remove all classic branch-protection rules and stray rulesets. Run `configure.sh apply` from a hub checkout at `main`, naming the target repository and its model. The script applies `settings.json`, the Dependabot security features, and both rulesets. A registered repository can omit the model and use the registry lookup. A repository outside the registry passes the model explicitly:
 
 ```sh
 repo-config/configure.sh apply owner/repo release|operational
@@ -35,7 +44,7 @@ repo="$(gh repo view --json nameWithOwner --jq '.nameWithOwner')"
 rulesets=$(gh api --paginate "repos/$repo/rulesets" --jq '.[]' | jq -s '.')
 for name in develop main; do
   out="repo-config/$name.json"
-  # An operational carry keeps its develop payload at operational/develop.json (develop.json is absent).
+  # The operational model writes its develop payload under operational/.
   [ "$name" = "develop" ] && [ ! -f "$out" ] && out="repo-config/operational/develop.json"
   # Exactly one ruleset per name: zero or duplicates is declared drift - fail loudly, never regen from a guess.
   count=$(jq --arg n "$name" '[.[] | select(.name==$n)] | length' <<<"$rulesets")
@@ -54,8 +63,4 @@ done
 
 <!-- Repo -->
 
-[conformance-matrix]: ../reports/conformance-matrix.md
-[governance-documentation-style]: ../GOVERNANCE.md#documentation-style-conventions
 [governance-git-and-commit-rules]: ../GOVERNANCE.md#git-and-commit-rules
-[governance-hub-hosted-tooling]: ../GOVERNANCE.md#hub-hosted-tooling
-[repo-config-readme]: ../repo-config/README.md

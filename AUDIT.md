@@ -93,43 +93,7 @@ Run [`WORKFLOW.md`][workflow]'s methodology against the repo's **own** Actions: 
 
 ## 6. Validate Settings, Rulesets, and Secrets
 
-- **General settings** - diff the live repository settings against [`repo-config/settings.json`][repo-config-settings], and confirm the two state-dependent settings: `has_discussions` follows visibility (public on / private off) and `default_branch` is `main`.
-
-  ```bash
-  live=$(gh api "repos/<owner>/<repo>" --jq '{has_wiki,has_projects,allow_merge_commit,allow_squash_merge,allow_rebase_merge,allow_auto_merge,allow_update_branch,delete_branch_on_merge}')
-  diff <(jq -S . repo-config/settings.json) <(jq -S . <<<"$live") \
-    && echo "settings: in sync" || echo "settings: DRIFT"
-  ```
-
-- **Rulesets** - diff each live ruleset against the committed expected payload with a normalized comparison (sort the order-insensitive `rules[]` on each rule's whole content before diffing, so a reordered but equivalent ruleset does not read as drift). The compared subset is `name`, `target`, `enforcement`, `conditions` and `rules`, and `bypass_actors` sits deliberately outside it, which is the same subset and the same sort key [`spec/audit.py`][audit-runner] uses. Who may bypass a ruleset is a per-repository human decision taken in the UI, no payload declares one, and [`repo-config/configure.sh`][repo-config] treats it that way in both modes, writing the live list back unchanged on `apply` and reporting it without asserting on `check`. Comparing it here would contradict that and report a ruleset finding against every repository that has any bypass actor, which is the field's normal state rather than a deviation:
-
-  ```bash
-  # bypass_actors stays outside the projection, since no payload declares one and jq cannot sort the null that leaves.
-  # Rules sort on each rule's whole content, matching the key normalize_ruleset in audit.py sorts by.
-  # Sorting on .type alone leaves two rules of one type in input order, so a reordered pair would read as drift.
-  # canon sorts keys at every depth before serializing, because the committed payload is written key-sorted and the API returns its own order, so a bare tojson gives the same rule two different sort keys.
-  # It recurses rather than calling walk/1, which the declared floor does make available, because the recursion costs nothing and compiles below the floor as well.
-  # A host on jq 1.5 would not degrade on walk, it would fail to compile the filter and report drift on every ruleset it never compared, which is what repo-config/configure.sh defines its own recursion to avoid.
-  canon='def canon: . as $in | if type == "object" then reduce (keys_unsorted|sort)[] as $k ({}; . + { ($k): ($in[$k]|canon) }) elif type == "array" then map(canon) else . end;'
-  norm="$canon"'{name,target,enforcement,conditions,rules} | .rules|=sort_by(canon|tojson)'
-  # Model-aware expected payload: an operational repo's develop ruleset diffs against
-  # operational/develop.json (registry workflowModel; the same selection audit.py makes).
-  model=$(jq -r --arg n "<repo>" '(.repos[] | select(.name==$n) | .workflowModel) // .defaults.workflowModel // "release"' registry/repos.json)
-  # Paginate so later-page rulesets count: --paginate with --jq '.[]' emits one JSON object per ruleset
-  # across all pages; jq -s re-assembles them into the single array the selections below expect.
-  rulesets=$(gh api --paginate "repos/<owner>/<repo>/rulesets" --jq '.[]' | jq -s '.')
-  for b in develop main; do
-    file="repo-config/$b.json"
-    [ "$b" = "develop" ] && [ "$model" = "operational" ] && file="repo-config/operational/develop.json"
-    # Exactly one ruleset per name: zero or duplicates is itself a finding - report it, never diff a guess.
-    count=$(jq --arg n "$b" '[.[] | select(.name==$n)] | length' <<<"$rulesets")
-    [ "$count" -eq 1 ] || { echo "$b: expected exactly 1 ruleset, found $count (defect/drift)"; continue; }
-    id=$(jq --arg n "$b" '.[] | select(.name==$n) | .id' <<<"$rulesets")
-    diff <(jq -S "$norm" "$file") \
-         <(gh api "repos/<owner>/<repo>/rulesets/$id" --jq '{name,target,enforcement,conditions,rules}' | jq -S "$norm") \
-      && echo "$b: in sync" || echo "$b: DRIFT"
-  done
-  ```
+- **General settings and rulesets** - fetch the hub and check out `main`. Run `repo-config/configure.sh check <owner>/<repo> release|operational` from that checkout. Pass the target repository and its registry `workflowModel` explicitly. The command checks the shared settings, state-dependent settings, Dependabot security features, and both rulesets against the hub payloads. It preserves and reports `bypass_actors` without asserting them because bypass authority is a per-repository human decision.
 
 - **Secrets** - confirm each required secret exists (name only, not the values). Check the Actions store and, where the mechanism needs it (Docker Hub, codegen App), the Dependabot store too.
 
@@ -196,7 +160,7 @@ Sections 1-9 (the audit and its report) are **read-only** and never touch the ta
 - **Merge only with explicit maintainer approval.** The agent drives to green and stops. The maintainer merges.
 - **One focused PR per drift class**, cross-referencing the audit finding. A sprawling all-drifts PR draws many review rounds and never feels done.
 - **A `hub-only:` finding converges by deleting the file, not by updating it.** It is the one class where the fix removes content, so it is easy to convert into a re-vendor by reflex and end up refreshing a copy that should not exist. Delete the repo's copy and reach the hub's per [GOVERNANCE.md "Hub-Hosted Tooling"][governance-hub-hosted-tooling]. Confirm the disposition is `retire` before deleting anything: an untriaged hit may be the repo's own content at a shared path, and deleting that destroys work the hub never owned.
-- **Any deletion sweeps the inbound references to the path, and the sweep is part of the deletion rather than follow-up.** This governs every removal and not only a `hub-only:` one, because nothing about it depends on who owned the file: the removal is one edit and finishing the job usually takes several more, so grep the path tree-wide first and read every hit. Then read the files whose job is to say what the repo holds, since a grep for the path finds uses of the file and misses descriptions of it: `GOVERNANCE.md` "Repository Layout" is the one that has gone stale this way, calling a deleted script "the apply script", which names no path and survives every search for one. A link whose target has an equivalent elsewhere is re-pointed at it, the hub's copy being that equivalent for a hub-hosted file, a **runnable command** citing the path is rewritten to the invocation that still works, and a mention with no equivalent anywhere is removed along with its reference definition, which [GOVERNANCE.md "Documentation Style Conventions"][governance-documentation-style] requires because an orphaned definition fails the no-unused-defs rule. Measured rather than hypothetical, in both directions: retiring `configure.sh` makes five lines of one repo's carried `repo-config/README.md` wrong, two of them commands a reader would run, and deleting a repo-owned nested `AGENTS.md` took three edits across two files, where removing the inline link alone tripped `MD053` on the definition it orphaned and would have failed CI rather than merely breaking prose.
+- **Any deletion sweeps the inbound references to the path, and the sweep is part of the deletion rather than follow-up.** This governs every removal and not only a `hub-only:` one. Grep the path tree-wide and read every hit. Then read the files whose job is to say what the repo holds because a path search cannot find a description that names no path. Point a link at the hub's copy when that is the equivalent. Rewrite a runnable command to the invocation that works. Remove a mention with no equivalent and remove its reference definition in the same edit, per [GOVERNANCE.md "Documentation Style Conventions"][governance-documentation-style].
 - **Fix systemic drift in the hub, not per repo.** When many repos share a drift, fix the spec/rule (or add a machine check) here and let a re-audit re-flag it, rather than hand-patching each repo for the shared cause.
 
 The convergence model: the hub audits and the agent **applies** the fixes via target PRs, and the maintainer gates every merge. It supersedes any "the hub only reports; downstream operators apply by hand" framing.
@@ -219,7 +183,6 @@ The convergence model: the hub audits and the agent **applies** the fixes via ta
 [readme-sections]: https://github.com/ptr727/ProjectTemplate/blob/main/spec/readme-sections.json
 [readme-structure]: https://github.com/ptr727/ProjectTemplate/blob/main/spec/readme-structure.md
 [repo-config]: https://github.com/ptr727/ProjectTemplate/tree/main/repo-config
-[repo-config-settings]: ./repo-config/settings.json
 [reports]: https://github.com/ptr727/ProjectTemplate/tree/main/reports
 [repos]: https://github.com/ptr727/ProjectTemplate/blob/main/registry/repos.json
 [resync]: https://github.com/ptr727/ProjectTemplate/blob/main/RESYNC.md
