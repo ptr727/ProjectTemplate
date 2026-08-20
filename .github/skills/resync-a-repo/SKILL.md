@@ -42,6 +42,10 @@ stale clone answers confidently instead of failing, and verify the host with
 RESYNC.md section 2, against the target's `main` branch, never `develop`. A finding is a snapshot,
 so quote the run stamp in anything derived from it and re-run before acting on a finding read
 earlier in the session.
+File any hub defect this work exposes against `ptr727/ProjectTemplate`.
+Examples include bugs, conflicting sources, unclear or incomplete instructions, missing capabilities, and Copilot findings about any of them.
+Search open and closed issues first, then update the matching issue or file a new one.
+Preserve the evidence RESYNC.md section 2 requires, and do not leave the finding only in chat, a review thread, the downstream repo, or agent memory.
 
 ## Apply, in this order
 
