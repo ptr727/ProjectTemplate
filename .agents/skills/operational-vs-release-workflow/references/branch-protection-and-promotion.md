@@ -23,9 +23,9 @@ Two traps, both learned the hard way:
 
 - **Never delete `develop`.** A promotion PR's head *is* `develop`, so `gh pr merge --delete-branch`
   (and a repo's "Automatically delete head branches" toggle, kept off in the hub's
-  `repo-config/settings.json` for exactly this reason) deletes `develop` itself. Merge a promotion with a plain
-  `gh pr merge --merge`, no `--delete-branch`. If `develop` is ever lost this way, restore it to
-  the merged PR's head SHA, which is still reachable as the merge commit's second parent:
+  `repo-config/settings.json` for exactly this reason) deletes `develop` itself. Merge a promotion
+  with a plain `gh pr merge --merge`, no `--delete-branch`. If `develop` is ever lost this way,
+  restore it to the merged PR's head SHA, which is still reachable as the merge commit's second parent:
   `gh api -X POST "repos/<owner>/<repo>/git/refs" -f ref=refs/heads/develop -f sha="$(gh pr view <n> --json headRefOid --jq .headRefOid)"`.
 - **Spurious EOL-only conflicts resolve by taking `develop`.** When `develop`'s `.editorconfig`
   line-ending default has changed (for example the fleet-wide CRLF-to-LF flip) while `main` hasn't

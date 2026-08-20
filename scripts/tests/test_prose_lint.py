@@ -1736,6 +1736,7 @@ class TestChangedLines(unittest.TestCase):
         """Renormalizing CRLF to LF does not make existing prose newly authored."""
         root = Path(self.enterContext(tempfile.TemporaryDirectory()))
         subprocess.run(["git", "init", "--quiet", str(root)], check=True)
+        subprocess.run(["git", "-C", str(root), "config", "core.autocrlf", "false"], check=True)
         subprocess.run(["git", "-C", str(root), "config", "user.name", "Test"], check=True)
         subprocess.run(
             ["git", "-C", str(root), "config", "user.email", "test@example.invalid"], check=True
