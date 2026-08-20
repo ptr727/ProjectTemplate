@@ -194,7 +194,7 @@ file type, operational-repo overrides, extensionless-script pins, and auditing, 
 ## Carried files reference no coordination machinery
 
 `AGENTS.md`, `GOVERNANCE.md`, `CODESTYLE.md`, `WORKFLOW.md`, `.github/copilot-instructions.md`,
-the `repo-config/` and `spec/` files, and the carried `AUDIT.md` never reference the template repo
+the `spec/` files and the carried `AUDIT.md` never reference the template repo
 (in prose or a link), and never name a sibling fleet repo as an illustrative example. State the
 behavior a carried rule needs, not the coordination flow that produced it, the maintainer supplies
 the destination out of band. A contextually relevant link to a related project (the image this

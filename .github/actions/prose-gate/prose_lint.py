@@ -333,20 +333,16 @@ def path_candidate(token: str, in_span: bool = True) -> str | None:
     return token.removeprefix("./")
 
 
-# Paths retired per a `retire` disposition in `spec/divergences.json`, per GOVERNANCE.md "Hub-Hosted Tooling".
-# Most are hub-hosted, so a mention names the hub's copy rather than a file this tree lost.
-# One is retired outright with no hub replacement (`build-datebadge-task.yml`): the mention still names a real, intentional deletion rather than a stale reference, so the same exemption applies.
-# A caller stub that persists with edited content, such as `run-periodic-codegen-pull-request.yml`, is neither of these: it stays a per-repo file, so it carries no entry here at all.
-# Carried text naming a tool is required to name it that way, so the mention is never a dead path.
-# The manifest exemption cannot reach this class, since no repository carries `spec/files.json`.
-# Downstream that set is empty, and a repository that retired its copy carries the full signature.
-# It surfaces at the promotion, whose diff base brings the retirement and its prose into scope.
-# That is the gate with the least room to fix it, and a ruleset bypass is the only local remedy.
-# Held as a literal because the prose-gate action fetches this one file with no hub tree beside it.
-# The `retire` dispositions in `spec/divergences.json` are the source, and a hub test asserts this.
+# Paths with a `retire` disposition remain valid references to a hub-hosted tool or a declared deletion.
+# The action fetches this file without the hub tree, so a test keeps this literal set equal to the ledger.
 HUB_HOSTED = frozenset(
     {
         "repo-config/configure.sh",
+        "repo-config/develop.json",
+        "repo-config/operational/develop.json",
+        "repo-config/main.json",
+        "repo-config/README.md",
+        "repo-config/settings.json",
         ".github/workflows/get-version-task.yml",
         ".github/workflows/publish-plan-task.yml",
         ".github/workflows/build-release-task.yml",
@@ -461,17 +457,9 @@ def shallow_checkout(root: Path) -> bool:
     return r.returncode == 0 and r.stdout.strip() == "true"
 
 
-def operational_checkout(root: Path) -> bool:
-    """Whether this checkout is an operational repository, read from what it carries.
-
-    `spec/files.json` declares `repo-config/operational/develop.json` for the operational model
-    and `repo-config/develop.json` for the release one, so a repository states its own model and
-    nothing has to reach the hub registry to ask. The hub itself carries both payloads, being the
-    template for each, so carrying the release payload decides it.
-    """
-    return (root / "repo-config" / "operational" / "develop.json").is_file() and not (
-        root / "repo-config" / "develop.json"
-    ).is_file()
+def is_operations_runbook(path: Path, root: Path | None) -> bool:
+    """Whether this path is the repository operations runbook."""
+    return root is not None and path.resolve() == (root / "OPERATIONS.md").resolve()
 
 
 def quoted(paths) -> str:
@@ -1528,7 +1516,7 @@ def check_file(path: Path, rules: set[str], root: Path | None = None) -> list[tu
         line = line.rstrip("\r")
         # Judged before the fence and inline-code handling below, deliberately.
         # A path pasted inside a fenced transcript is the same exposure as one in a sentence.
-        if "home-path" in rules:
+        if "home-path" in rules and not is_operations_runbook(path, root):
             out.extend(home_path_findings(i, line))
         if CODE_FENCE.match(line):
             in_fence = not in_fence
@@ -1693,18 +1681,6 @@ def main(argv: list[str] | None = None) -> int:
     else:
         first = Path(scan_paths[0])
         scan_root = first if first.is_dir() else first.parent
-
-    # An operational repository's runbook carries the literal path an operator types.
-    # That is the repository's own content, not an agent quoting an environment it observed.
-    # The skip is announced, since a rule that silently stops running reads as one that passed.
-    # That is the same failure the diff-scope floor below exists to prevent.
-    if "home-path" in rules and operational_checkout(scan_root):
-        rules.discard("home-path")
-        print(
-            "note: home-path is not checked in an operational repository, where an absolute "
-            "path is the operator instruction rather than observed data.",
-            file=sys.stderr,
-        )
 
     # Announced for the same reason the skip above is, a silent stand-down reads as a pass.
     if "dead-path" in rules and git_roots and shallow_checkout(scan_root):

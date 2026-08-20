@@ -6,7 +6,6 @@
 #
 # Both modes need admin on the repo, because the rulesets endpoints require it.
 # The command defaults to apply, the repo to the current gh repo, and the model to the registry lookup.
-# With no registry to consult, the model is inferred from the carried develop payload.
 # The model may be passed as the sole positional, as in `configure.sh check operational`.
 # The command may be omitted for the apply default, so `configure.sh owner/repo` still applies.
 #
@@ -53,19 +52,8 @@ if [ -z "$model" ]; then
             exit 1
         fi
     else
-        # With no registry to consult (a downstream carry), infer the model from which develop payload is carried.
-        # A carry holds exactly its own model's payload.
-        # An ambiguous layout (both or neither, as in a partial copy) aborts rather than guesses.
-        # A wrong guess would apply or check the wrong develop ruleset.
-        if [ -f "$script_dir/develop.json" ] && [ ! -f "$script_dir/operational/develop.json" ]; then
-            model="release"
-        elif [ -f "$script_dir/operational/develop.json" ] && [ ! -f "$script_dir/develop.json" ]; then
-            model="operational"
-        else
-            echo "Registry $registry not found and the carried develop payloads are ambiguous (expected exactly one of develop.json or operational/develop.json). Pass the model explicitly (release|operational)." >&2
-            exit 1
-        fi
-        echo "Registry $registry not found. Inferred workflow model '$model' from the carried develop payload." >&2
+        echo "Registry $registry not found. Run this script from a hub checkout at main or pass the model explicitly (release|operational)." >&2
+        exit 1
     fi
 fi
 case "$model" in

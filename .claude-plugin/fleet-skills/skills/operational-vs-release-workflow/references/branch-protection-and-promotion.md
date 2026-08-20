@@ -8,18 +8,13 @@ covers that case).
 
 ## Configuring branch protection: don't hand-build the rules
 
-Reconstructing rulesets by hand is error-prone and has gone wrong on past ports. First delete
-**all** legacy classic branch-protection rules and any stray rulesets (rulesets are the *only*
-mechanism used), then create **exactly two rulesets named `develop` and `main`** by importing the
-committed `repo-config/*.json` ruleset payloads via `gh api -X POST "repos/<owner>/<repo>/rulesets"`
-(`gh ruleset` is read-only). The names are load-bearing, other governance content and the
-workflows reference them. Operational repos import `repo-config/operational/develop.json` as their
-`develop` ruleset (the `main` ruleset is shared), and the hub's `repo-config/configure.sh`, run
-from a hub checkout against the repository named on its command line, selects the right `develop`
-payload from the registry `workflowModel` automatically. **Brownfield repos** (pre-existing
-history) need an extra step: `Require signed commits` rejects legacy unsigned commits and the
-admin bypass does not cover `git push --force`, so re-signing requires temporarily disabling the
-ruleset. See `repo-config/README.md` "Rulesets" for the configured state.
+Delete **all** classic branch-protection rules and stray rulesets because rulesets are the only
+protection mechanism. Create **exactly two rulesets named `develop` and `main`** from the hub's
+`repo-config/*.json` payloads. Run `repo-config/configure.sh apply <owner>/<repo>
+release|operational` from a hub checkout at `main`. The names are load-bearing because governance
+content and workflows reference them. The registry `workflowModel` selects the `develop` payload
+for a registered repository. Pass the model explicitly for a repository outside the registry.
+See `repo-config/README.md` "Rulesets" for the configured state.
 
 ## Executing a `develop -> main` promotion safely
 

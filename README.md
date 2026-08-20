@@ -90,7 +90,7 @@ This repo is the single home for those rules, a machine-readable spec they are c
 - **[RESYNC.md][resync]** - how an agent brings an already-stood-up repository back into line, in the order the remedies require.
 - **[spec/][spec]** - the machine-readable ground truth: project-type requirements, the file/section baseline, required/forbidden secrets, the host tool contract and its version floors, and the preferred README structure.
 - **[registry/repos.json][repos]** - the fleet registry: every project, its type(s), publish mechanism, and status (cataloged or standardization backlog).
-- **[repo-config/][repo-config]** - branch rulesets and the apply script (kept out of `.github/`, which is Actions-owned), plus the GitHub setup reference.
+- **[repo-config/][repo-config]** - hub-only branch rulesets, fleet settings, the apply script, and the GitHub setup reference (kept out of `.github/`, which is Actions-owned).
 - **[host-setup/][host-setup-dir]** - the host guardrail kit, which is per machine rather than per repository.
 - **[catalog/][catalog]** - reusable reference snippets (workflow tasks, config exemplars, devcontainers) the audit compares implementations against.
 - **[reports/][reports]** - per-repo audit output.
@@ -192,7 +192,7 @@ A repository that already exists is measured with [`AUDIT.md`][audit] instead. T
 
 A repository that is stood up already and has fallen behind is resynced with [`RESYNC.md`][resync], which is the third entry point and the one a request to sync a repository with the hub resolves to. It runs the audit for the findings and then applies them in an order that matters: the rules first, because they govern what comes after them, then the deletions, because a re-vendor would otherwise refresh a file that is about to go, then the re-vendors, the workflow contracts, and the repository configuration. It also states what the measurement cannot see, since a carried file at `intent` fidelity is checked for presence alone and a hub revision inside one raises no finding at all.
 
-The mechanical helpers that go with those procedures are documented beside them: [`docs/repo-config-carry.md`][repo-config-carry] for branch rulesets and repository settings, and [`docs/content-import.md`][content-import] for importing existing content into a new repo.
+The mechanical helpers that go with those procedures are documented beside them: [`docs/repo-config.md`][repo-config-doc] for branch rulesets and repository settings, and [`docs/content-import.md`][content-import] for importing existing content into a new repo.
 
 ### Adopting Outside This Fleet
 
@@ -364,7 +364,7 @@ Licensed under the [MIT License][license]\
 [project-types]: ./spec/project-types.json
 [readme-structure]: ./spec/readme-structure.md
 [repo-config]: ./repo-config/
-[repo-config-carry]: ./docs/repo-config-carry.md
+[repo-config-doc]: ./docs/repo-config.md
 [reports]: ./reports/
 [repos]: ./registry/repos.json
 [resync]: ./RESYNC.md
