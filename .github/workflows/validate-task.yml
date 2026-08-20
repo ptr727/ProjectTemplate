@@ -121,7 +121,7 @@ jobs:
 
       - name: Sync Python dependencies step
         if: hashFiles('pyproject.toml') != '' && hashFiles('uv.lock') != ''
-        run: uv sync --all-groups --all-extras --frozen
+        run: uv sync --all-groups --frozen
 
       - name: Lint Python step
         if: hashFiles('pyproject.toml') != ''
