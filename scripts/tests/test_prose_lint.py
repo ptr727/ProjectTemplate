@@ -1732,6 +1732,27 @@ class TestChangedLines(unittest.TestCase):
         """Reading a stray hunk against whichever file came last invents a scope."""
         self.assertEqual({}, self.run_diff("@@ -1 +1 @@\n+orphan\n"))
 
+    def test_a_line_ending_only_change_adds_no_lines(self) -> None:
+        """Renormalizing CRLF to LF does not make existing prose newly authored."""
+        root = Path(self.enterContext(tempfile.TemporaryDirectory()))
+        subprocess.run(["git", "init", "--quiet", str(root)], check=True)
+        subprocess.run(["git", "-C", str(root), "config", "user.name", "Test"], check=True)
+        subprocess.run(
+            ["git", "-C", str(root), "config", "user.email", "test@example.invalid"], check=True
+        )
+        bait = root / "bait.md"
+        bait.write_bytes(b"Existing prose.\r\n")
+        subprocess.run(["git", "-C", str(root), "add", "bait.md"], check=True)
+        subprocess.run(["git", "-C", str(root), "commit", "--quiet", "-m", "baseline"], check=True)
+
+        bait.write_bytes(b"Existing prose.\n")
+
+        self.assertEqual({}, prose_lint.changed_lines("HEAD", root))
+
+        bait.write_bytes(b"New prose.\n")
+
+        self.assertEqual({"bait.md": {1}}, prose_lint.changed_lines("HEAD", root))
+
     def test_a_git_failure_is_none_rather_than_an_empty_scope(self) -> None:
         """An empty scope filters every file out and reports a clean run, which is a false pass."""
         with mock.patch.object(
