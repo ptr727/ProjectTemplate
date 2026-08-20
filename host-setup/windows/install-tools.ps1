@@ -405,7 +405,10 @@ function Add-RepositoryToolCatalog {
             -not $entry.install.PSObject.Properties['windows']) { continue }
         $metadata = $entry.install.windows
         if ($null -eq $metadata) { continue }
-        if ($metadata.manager -ne 'winget' -or $metadata.package -notmatch '^[A-Za-z0-9][A-Za-z0-9._-]*$') {
+        if ($metadata -isnot [PSCustomObject] -or -not $metadata.PSObject.Properties['manager'] -or
+            -not $metadata.PSObject.Properties['package'] -or $metadata.manager -isnot [string] -or
+            $metadata.package -isnot [string] -or $metadata.manager -ne 'winget' -or
+            $metadata.package -notmatch '^[A-Za-z0-9][A-Za-z0-9._-]*$') {
             die "$($entry.name) has unsupported or unsafe Windows install metadata"
         }
         if ($seen.ContainsKey($entry.name)) {

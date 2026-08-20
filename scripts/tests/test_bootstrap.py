@@ -316,6 +316,27 @@ class TestSpecCoverage(unittest.TestCase):
         self.assertNotEqual(result.returncode, 0)
         self.assertIn("Cannot read constrained Linux install metadata", result.stderr)
 
+    def test_linux_installer_rejects_a_non_string_package(self) -> None:
+        """JSON scalars do not become package identifiers through jq stringification."""
+        declaration = {
+            "tools": [
+                {
+                    "name": "virt-customize",
+                    "install": {"linux": {"manager": "apt", "package": 7}},
+                }
+            ]
+        }
+        with tempfile.TemporaryDirectory() as directory:
+            Path(directory, "host-tools.json").write_text(json.dumps(declaration), encoding="utf-8")
+            result = subprocess.run(
+                [str(LINUX / "install-tools.sh"), "--list", "--repo", directory],
+                capture_output=True,
+                text=True,
+                check=False,
+            )
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("Cannot read constrained Linux install metadata", result.stderr)
+
     def test_sudo_timestamp_does_not_load_repository_tools(self) -> None:
         """The sudo-only action bypasses repository metadata before selection."""
         text = (LINUX / "install-tools.sh").read_text(encoding="utf-8")
@@ -328,6 +349,12 @@ class TestSpecCoverage(unittest.TestCase):
         """The Windows trust-boundary reader rejects an object-shaped tool catalog."""
         text = (WINDOWS / "install-tools.ps1").read_text(encoding="utf-8")
         self.assertIn("$overlay.tools -isnot [System.Array]", text)
+
+    def test_windows_installer_requires_string_package_metadata(self) -> None:
+        """PowerShell cannot stringify JSON values before package-ID validation."""
+        text = (WINDOWS / "install-tools.ps1").read_text(encoding="utf-8")
+        self.assertIn("$metadata.manager -isnot [string]", text)
+        self.assertIn("$metadata.package -isnot [string]", text)
 
     def test_every_declared_floor_carries_a_total_remedy_mapping(self) -> None:
         """Each floored tool names a runnable remedy on every platform, or carries a recorded exception.
