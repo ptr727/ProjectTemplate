@@ -28,6 +28,7 @@ import json
 import re
 import subprocess
 import sys
+import tempfile
 import unittest
 from pathlib import Path
 
@@ -236,6 +237,28 @@ class TestSpecCoverage(unittest.TestCase):
             windows,
             r"Name = 'ripgrep'; Package = 'BurntSushi\.ripgrep\.MSVC'; Probe = 'rg'",
         )
+
+    def test_linux_installer_lists_a_repository_apt_package(self) -> None:
+        """A repository package joins the managed set without becoming executable text."""
+        declaration = {
+            "tools": [
+                {
+                    "name": "virt-customize",
+                    "install": {"linux": {"manager": "apt", "package": "libguestfs-tools"}},
+                }
+            ]
+        }
+        with tempfile.TemporaryDirectory() as directory:
+            Path(directory, "host-tools.json").write_text(json.dumps(declaration), encoding="utf-8")
+            result = subprocess.run(
+                [str(LINUX / "install-tools.sh"), "--list", "--repo", directory],
+                capture_output=True,
+                text=True,
+                check=False,
+            )
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn("virt-customize", result.stdout)
+        self.assertIn("apt:libguestfs-tools (repository)", result.stdout)
 
     def test_every_declared_floor_carries_a_total_remedy_mapping(self) -> None:
         """Each floored tool names a runnable remedy on every platform, or carries a recorded exception.

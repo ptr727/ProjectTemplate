@@ -131,6 +131,8 @@ The three states a tool can be in are kept apart because their remedies differ: 
 
 A repository adds its own `host-tools.json` at its root and the gate layers it over the hub's, so a repo needing `ffmpeg`, or needing a tool the fleet calls optional, declares that where it is true. Layering is **tighten-only**: a local entry may add a tool, raise a floor, or turn an optional tool required, and may not lower a floor or turn a required tool optional, because those retire a fleet check from inside the repository it protects. A rejected relaxation is reported rather than dropped.
 
+A missing required tool prints its platform source and runnable remedy. An `install` record can derive that remedy through the host installer. The record names only an allowed package manager and package identifier, so repository-authored command text is never executed.
+
 ## `pr_review.py`
 
 One compact interface to a pull request's Copilot review loop. `status` prints the digest, and `wait` runs the backoff in-process. `comment` posts a PR-conversation answer, while `reply` answers one thread and optionally resolves it. `claims` reads the description against the branch it describes. The runbook is in [`.github/copilot-instructions.md`][copilot-instructions].

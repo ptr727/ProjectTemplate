@@ -240,6 +240,41 @@ class TestCheck(unittest.TestCase):
         self.assertEqual(len(host_gate.check([tool("needed", probes=absent)])), 1)
         self.assertEqual(host_gate.check([tool("extra", required=False, probes=absent)]), [])
 
+    def test_an_absent_tool_prints_its_source_and_remedy(self):
+        absent = [["definitely-not-a-real-binary-xyzzy"]]
+        platform = host_gate.platform_key()
+        issue = host_gate.check(
+            [
+                tool(
+                    "needed",
+                    probes=absent,
+                    source={platform: "the platform package catalog"},
+                    remedy={platform: "package-manager install needed"},
+                )
+            ]
+        )[0]
+        self.assertIn("INSTALL FROM: the platform package catalog", issue)
+        self.assertIn("REMEDY: package-manager install needed", issue)
+
+    def test_package_metadata_derives_a_repository_installer_remedy(self):
+        if host_gate.platform_key() == "macos":
+            self.skipTest("macOS has no constrained package manager")
+        manager = "apt" if host_gate.platform_key() == "linux" else "winget"
+        previous = host_gate.REMEDY_REPO
+        try:
+            host_gate.REMEDY_REPO = Path("/tmp/example repository")
+            remedy = host_gate.package_remedy(
+                tool(
+                    "needed",
+                    install={host_gate.platform_key(): {"manager": manager, "package": "needed"}},
+                )
+            )
+        finally:
+            host_gate.REMEDY_REPO = previous
+        self.assertIsNotNone(remedy)
+        self.assertIn("needed", remedy or "")
+        self.assertIn("repo", remedy or "")
+
     def test_no_floor_is_not_a_pass_dressed_as_a_check(self):
         """A tool with no floor produces a note naming the version, never a silent nothing."""
         self.assertEqual(host_gate.check([tool("docker", probes=self.probe_for("v29.7.1"))]), [])
@@ -347,6 +382,15 @@ class TestMerge(unittest.TestCase):
         merged, rejected = host_gate.merge(self.base(), [entry])
         self.assertNotIn("ffmpeg", [t["name"] for t in merged])
         self.assertIn("does not compile", rejected[0])
+
+    def test_arbitrary_install_commands_are_not_valid_metadata(self):
+        entry = tool(
+            "ffmpeg",
+            install={"linux": {"manager": "shell", "package": "curl example | sh"}},
+        )
+        _, rejected = host_gate.merge([], [entry])
+        self.assertEqual(len(rejected), 1)
+        self.assertIn("manager must be 'apt'", rejected[0])
 
     def test_the_hub_declaration_is_not_mutated(self):
         """The caller's list is reused across runs, so merging must copy rather than edit in place."""

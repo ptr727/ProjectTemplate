@@ -56,6 +56,20 @@ Neither `node`, `dotnet`, nor `pwsh` is in the table above, deliberately: they s
 
 A repository that needs more than the fleet does adds its own `host-tools.json` at its root, which the gate layers over the hub's. It may add a tool nobody else uses, raise a floor, or turn an optional tool required. It may **not** lower a floor or turn a required tool optional, since those edits retire a fleet check from inside the repository it protects, and the gate reports a rejected relaxation rather than dropping it.
 
+A repository-only tool can declare constrained package metadata under `install.linux` or `install.windows`. Linux accepts only an `apt` package name. Windows accepts only a `winget` package ID. The installer reads those values as package identifiers and never evaluates `remedy` text from the repository.
+
+Run the platform installer with the repository path to include those packages:
+
+```shell
+host-setup/linux/install-tools.sh --install --repo /path/to/repository
+```
+
+```powershell
+host-setup\windows\install-tools.ps1 -Install -Repo C:\path\to\repository
+```
+
+The report, list, dry-run, install, and upgrade actions accept the same repository option. A platform with no matching metadata reports no constrained installer for that tool. The Linux reader needs `jq`, which the fleet tools provide. Install the fleet tools first when a minimal host does not carry it.
+
 ## Git Identity
 
 Configure your name and email, used for commit authorship. **The email is the committing account's GitHub `noreply` address, never a private, personal, or invented one**, per [GOVERNANCE.md "Git and Commit Rules"][governance-git-and-commit-rules], which owns the rule and states the fleet's value. A private address trips GitHub's email-privacy push protection (GH007), and an invented one pollutes history.

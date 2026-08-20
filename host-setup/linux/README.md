@@ -150,6 +150,7 @@ Then the dry runs, which print what each action would run:
 
 ```shell
 host-setup/linux/install-tools.sh --upgrade --dry-run
+host-setup/linux/install-tools.sh --install --repo /path/to/repository --dry-run
 host-setup/linux/install-tools.sh --sudo-timestamp --dry-run
 host-setup/linux/upgrade-host.sh --release --dry-run
 host-setup/linux/setup-github.sh --configure --dry-run
@@ -158,6 +159,8 @@ host-setup/linux/setup-github.sh --configure --dry-run
 Two of those are guards rather than previews. `--release --dry-run` on a Proxmox host prints the refusal, not the commands. A docker `--upgrade --dry-run` inside a WSL distribution prints the skip. A `[dry run]` line from either means the guard sits in the wrong place.
 
 `--sudo-timestamp --dry-run` is the one dry run that can ask for a password. Only root reads `/etc/sudoers`, and what is already set there is what the run reports on.
+
+`--repo` adds the repository's `install.linux` entries to the report or action. Only `apt` package names are accepted. The script does not execute the declaration's `remedy` text. Reading the JSON needs `jq`, which the ordinary fleet install provides.
 
 The scripts are checked by `shellcheck`, which runs in CI over every `.sh` file `git ls-files` returns. A local run uses the same `koalaman/shellcheck:stable` container. [`scripts/tests/test_bootstrap.py`][test-bootstrap] asserts that every tool the spec requires on Linux is one `install-tools.sh` can provide, or a recorded exception. It also asserts each script here is tracked executable, so a fresh checkout can run it.
 

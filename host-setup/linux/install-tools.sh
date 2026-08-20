@@ -23,6 +23,7 @@ readonly SUDO_TIMESTAMP_TIMEOUT=60
 # Managed tools, in dependency order: node asks jq to read the upstream release index.
 # The one optional member, powershell, joins the default selection only under --optional.
 readonly TOOLS=(git gh jq git-restore-mtime node python ripgrep uv docker dotnet powershell)
+MANAGED_TOOLS=("${TOOLS[@]}")
 
 # Package sets.
 # The default set is what a tool needs to be useful, and the optional set is what is useful often enough to name but not always wanted, installed only with --optional.
@@ -42,6 +43,9 @@ IS_WSL=false
 ARCH=""
 SUDO=()
 SELECTED=()
+REQUESTED=()
+REPO=""
+declare -A REPO_PACKAGES=()
 NOTES=()
 FAILED=()
 CHANGED=()
@@ -83,6 +87,7 @@ Options:
   -n, --dry-run     Print the commands instead of running them
   -y, --yes         Do not prompt before changing the host
   -o, --optional    Include the optional tool and the optional package sets, where a tool has one
+      --repo PATH   Include apt packages declared by PATH/host-tools.json
 
 Versions read as apt versions for an apt-managed tool and as upstream versions for a standalone
 binary, so a column compares like with like. A report reads the apt cache as it stands and does
@@ -100,6 +105,7 @@ Examples:
   install-tools.sh --upgrade node jq     Bring two tools current
   install-tools.sh --install --optional python dotnet
   install-tools.sh --upgrade --dry-run   Show what an upgrade would run
+  install-tools.sh --install --repo ../my-repo
   install-tools.sh --sudo-timestamp      Share one sudo credential cache across terminals
 EOF
 }
@@ -971,6 +977,13 @@ report() {
 
     local tool installed target
     for tool in "${SELECTED[@]}"; do
+        if [[ -n ${REPO_PACKAGES[$tool]:-} ]]; then
+            installed=$(apt_installed_version "${REPO_PACKAGES[$tool]}")
+            target=$(apt_candidate_version "${REPO_PACKAGES[$tool]}")
+            # shellcheck disable=SC2059  # Format string is a constant defined above.
+            printf "$format" "$tool" "${installed:--}" "${target:--}" "apt:${REPO_PACKAGES[$tool]}" "$(tool_status "$installed" "$target")"
+            continue
+        fi
         installed=$("$(tool_function "$tool" version)" 2> /dev/null || true)
         target=$("$(tool_function "$tool" target)" 2> /dev/null || true)
         # shellcheck disable=SC2059  # Format string is a constant defined above.
@@ -1041,6 +1054,23 @@ tool_unshadow() {
 # Some upstream lookups also end the run today where collecting them would match the intent above, which TODO.md records rather than changes here.
 apply_tool() {
     local tool="$1" installed target status
+
+    if [[ -n ${REPO_PACKAGES[$tool]:-} ]]; then
+        local package="${REPO_PACKAGES[$tool]}"
+        installed=$(apt_installed_version "$package")
+        target=$(apt_candidate_version "$package")
+        status=$(tool_status "$installed" "$target")
+        if [[ $status == "current" || ( $MODE == "install" && $status == "outdated" ) ]]; then
+            log "$tool: $status at ${installed}, leaving it alone"
+            return 0
+        fi
+        log "$tool: $status${target:+, apt carries $target}"
+        apt_install "$package"
+        local now
+        now=$(apt_installed_version "$package")
+        [[ $now == "$installed" ]] || CHANGED+=("$tool ${installed:--} -> ${now:--}")
+        return 0
+    fi
 
     # Unshadowing first is safe only when nothing at $BIN_DIR could be made worse by it.
     # --upgrade brings $BIN_DIR current regardless, and --install with nothing there yet has nothing to protect.
@@ -1133,7 +1163,11 @@ apply() {
 list_tools() {
     log "Managed tools:"
     local tool
-    for tool in "${TOOLS[@]}"; do
+    for tool in "${MANAGED_TOOLS[@]}"; do
+        if [[ -n ${REPO_PACKAGES[$tool]:-} ]]; then
+            printf '  %-18s apt:%s (repository)\n' "$tool" "${REPO_PACKAGES[$tool]}"
+            continue
+        fi
         # The one optional member is marked here, since --list shows the whole registry, and its line says what the default selection leaves out.
         if [[ $tool == "powershell" ]]; then
             printf '  %-18s %s (optional)\n' "$tool" "$("$(tool_function "$tool" source)")"
@@ -1147,6 +1181,58 @@ list_tools() {
     info "python optional : ${PYTHON_OPTIONAL[*]}"
     info "dotnet default  : the newest SDK line the feed carries"
     info "dotnet optional : every other SDK line the feed carries"
+}
+
+load_repo_tools() {
+    [[ -n $REPO ]] || return 0
+    local declaration="$REPO/host-tools.json"
+    [[ -f $declaration ]] || die "$REPO carries no host-tools.json"
+    command -v jq > /dev/null || die "--repo needs jq to read constrained package metadata. Install the fleet tools first, then run this command again."
+
+    local name package manager rows
+    rows=$(jq -r '.tools[] | select(.install.linux != null) | [.name, .install.linux.manager, .install.linux.package] | @tsv' "$declaration") ||
+        die "Cannot read constrained Linux install metadata from $declaration"
+    while IFS=$'\t' read -r name manager package; do
+        [[ -n $name ]] || continue
+        if [[ $manager != "apt" || ! $package =~ ^[a-z0-9][a-z0-9+.-]*$ ]]; then
+            die "$name has unsupported or unsafe Linux install metadata"
+        fi
+        REPO_PACKAGES["$name"]="$package"
+        local known=false tool
+        for tool in "${MANAGED_TOOLS[@]}"; do
+            [[ $tool == "$name" ]] && known=true
+        done
+        [[ $known == true ]] || MANAGED_TOOLS+=("$name")
+    done <<< "$rows"
+}
+
+resolve_selection() {
+    if [[ ${#REQUESTED[@]} -eq 0 ]]; then
+        SELECTED=("${MANAGED_TOOLS[@]}")
+        if [[ $WITH_OPTIONAL == false ]]; then
+            local -a filtered=()
+            local tool
+            for tool in "${SELECTED[@]}"; do
+                [[ $tool == "powershell" ]] || filtered+=("$tool")
+            done
+            SELECTED=("${filtered[@]}")
+        fi
+        return 0
+    fi
+
+    local tool requested known
+    for requested in "${REQUESTED[@]}"; do
+        known=false
+        for tool in "${MANAGED_TOOLS[@]}"; do
+            [[ $tool == "$requested" ]] && known=true
+        done
+        [[ $known == true ]] || die "Unknown tool \"$requested\", --list names the managed tools"
+    done
+    for tool in "${MANAGED_TOOLS[@]}"; do
+        for requested in "${REQUESTED[@]}"; do
+            [[ $tool == "$requested" ]] && SELECTED+=("$tool")
+        done
+    done
 }
 
 # --- sudo timestamp ---
@@ -1405,7 +1491,7 @@ configure_sudo_timestamp() {
 # --- Entry ---
 
 parse_args() {
-    local -a requested=() actions=()
+    local -a actions=()
 
     while [[ $# -gt 0 ]]; do
         case "$1" in
@@ -1417,20 +1503,18 @@ parse_args() {
             -n | --dry-run) DRY_RUN=true ;;
             -y | --yes) ASSUME_YES=true ;;
             -o | --optional) WITH_OPTIONAL=true ;;
+            --repo)
+                [[ $# -gt 1 ]] || die "--repo needs a path"
+                REPO="$2"
+                shift
+                ;;
             -h | --help)
                 usage
                 exit 0
                 ;;
             -*) die "Unknown option \"$1\", --help lists the options" ;;
             *)
-                local known=false tool
-                for tool in "${TOOLS[@]}"; do
-                    if [[ $tool == "$1" ]]; then
-                        known=true
-                    fi
-                done
-                [[ $known == true ]] || die "Unknown tool \"$1\", --list names the managed tools"
-                requested+=("$1")
+                REQUESTED+=("$1")
                 ;;
         esac
         shift
@@ -1443,38 +1527,17 @@ parse_args() {
     [[ ${#actions[@]} -eq 1 ]] && MODE="${actions[0]}"
 
     # The sudo-timestamp refusal needs the whole set of tool names a run asked for, so it is checked after the loop rather than inside it.
-    if [[ $MODE == "sudo-timestamp" && ${#requested[@]} -gt 0 ]]; then
-        die "--sudo-timestamp changes the host rather than a tool, so it takes no tool, and \"${requested[*]}\" names one"
+    if [[ $MODE == "sudo-timestamp" && ${#REQUESTED[@]} -gt 0 ]]; then
+        die "--sudo-timestamp changes the host rather than a tool, so it takes no tool, and \"${REQUESTED[*]}\" names one"
     fi
 
-    if [[ ${#requested[@]} -gt 0 ]]; then
-        # Keep the registry's dependency order rather than the order given on the command line.
-        local tool requested_tool
-        for tool in "${TOOLS[@]}"; do
-            for requested_tool in "${requested[@]}"; do
-                if [[ $tool == "$requested_tool" ]]; then
-                    SELECTED+=("$tool")
-                    break
-                fi
-            done
-        done
-    else
-        SELECTED=("${TOOLS[@]}")
-        if [[ $WITH_OPTIONAL == false ]]; then
-            # The optional member joins the default selection only under --optional, while naming it on the command line still selects it, since an explicit request is never dropped.
-            local -a filtered=()
-            local tool
-            for tool in "${TOOLS[@]}"; do
-                [[ $tool == "powershell" ]] || filtered+=("$tool")
-            done
-            SELECTED=("${filtered[@]}")
-        fi
-    fi
     return 0
 }
 
 main() {
     parse_args "$@"
+    load_repo_tools
+    resolve_selection
 
     if [[ $MODE == "list" ]]; then
         list_tools

@@ -21,6 +21,7 @@ param(
     [Alias('n')][switch]$DryRun,
     [Alias('y')][switch]$Yes,
     [Alias('o')][switch]$Optional,
+    [string]$Repo,
     [ValidateSet('user', 'machine')][string]$Scope,
     [Alias('h')][switch]$Help,
     [Parameter(Position = 0, ValueFromRemainingArguments)][string[]]$Name
@@ -53,6 +54,7 @@ $DRY_RUN = [bool]$DryRun
 $ASSUME_YES = [bool]$Yes
 $WITH_OPTIONAL = [bool]$Optional
 $WANT_SCOPE = $Scope
+$REPO = $Repo
 $ELEVATED = $false
 $SELECTED = @()
 $NOTES = @()
@@ -103,6 +105,7 @@ Options:
   -y, -Yes          Do not prompt before changing the host
   -o, -Optional     Include the optional package set, where a tool has one
       -Scope        Name a scope, either user or machine, for the copy to act on
+      -Repo PATH    Include winget packages declared by PATH\host-tools.json
 
 Run this without elevation. No scope is passed unless -Scope names one, so winget acts on the copy
 it finds and an installer that needs administrator asks for it itself. Naming a scope that
@@ -122,6 +125,7 @@ Examples:
   install-tools.ps1 -Upgrade uv jq        Bring two tools current
   install-tools.ps1 -Install -Optional dotnet
   install-tools.ps1 -Upgrade -DryRun      Show what an upgrade would run
+  install-tools.ps1 -Install -Repo ..\my-repo
   install-tools.ps1 -Reinstall jq -Scope machine
 '@
 }
@@ -373,6 +377,34 @@ $TOOLS = @(
 function Get-Tool {
     param([Parameter(Mandatory)][string]$ToolName)
     return ($script:TOOLS | Where-Object { $_.Name -eq $ToolName } | Select-Object -First 1)
+}
+
+function Add-RepositoryToolCatalog {
+    if (-not $script:REPO) { return }
+    $declaration = Join-Path $script:REPO 'host-tools.json'
+    if (-not (Test-Path -LiteralPath $declaration -PathType Leaf)) {
+        die "$($script:REPO) carries no host-tools.json"
+    }
+    try {
+        $overlay = Get-Content -LiteralPath $declaration -Raw | ConvertFrom-Json
+    } catch {
+        die "Cannot read $declaration as JSON: $_"
+    }
+    foreach ($entry in @($overlay.tools)) {
+        if (-not $entry.PSObject.Properties['install'] -or -not $entry.install.PSObject.Properties['windows']) { continue }
+        $metadata = $entry.install.windows
+        if ($null -eq $metadata) { continue }
+        if ($metadata.manager -ne 'winget' -or $metadata.package -notmatch '^[A-Za-z0-9][A-Za-z0-9._-]*$') {
+            die "$($entry.name) has unsupported or unsafe Windows install metadata"
+        }
+        $existing = Get-Tool -ToolName $entry.name
+        $record = @{ Name = $entry.name; Package = $metadata.package; Probe = $entry.name; Optional = @(); Family = '' }
+        if ($existing) {
+            $script:TOOLS = @($script:TOOLS | Where-Object { $_.Name -ne $entry.name }) + $record
+        } else {
+            $script:TOOLS += $record
+        }
+    }
 }
 
 # --- Status ---
@@ -885,6 +917,7 @@ function main {
     if ($script:WANT_HELP) { usage; exit 0 }
     $script:MODE = Resolve-Mode
     Test-HostSupported
+    Add-RepositoryToolCatalog
     $script:SELECTED = Resolve-Selection
 
     switch ($script:MODE) {
