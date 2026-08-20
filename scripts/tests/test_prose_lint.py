@@ -2049,25 +2049,34 @@ class TestOperationsRunbookExemption(unittest.TestCase):
     def test_a_checkout_with_the_runbook_is_detected(self) -> None:
         """Every repository carries the runbook that owns literal operator paths."""
         self._payload("OPERATIONS.md")
-        self.assertTrue(prose_lint.is_operations_runbook(self.tmp / "OPERATIONS.md"))
+        self.assertTrue(prose_lint.is_operations_runbook(self.tmp / "OPERATIONS.md", self.tmp))
 
     def test_a_checkout_without_the_runbook_is_not_detected(self) -> None:
-        self.assertFalse(prose_lint.is_operations_runbook(self.tmp / "README.md"))
+        self.assertFalse(prose_lint.is_operations_runbook(self.tmp / "README.md", self.tmp))
 
     def test_configuration_payloads_do_not_select_the_exemption(self) -> None:
         """Configuration payload names do not identify the operations runbook."""
         self._payload("repo-config", "develop.json")
         self._payload("repo-config", "operational", "develop.json")
-        self.assertFalse(prose_lint.is_operations_runbook(self.tmp / "repo-config/develop.json"))
+        self.assertFalse(
+            prose_lint.is_operations_runbook(self.tmp / "repo-config/develop.json", self.tmp)
+        )
 
     def test_an_empty_checkout_is_not_detected(self) -> None:
-        self.assertFalse(prose_lint.is_operations_runbook(self.tmp))
+        self.assertFalse(prose_lint.is_operations_runbook(self.tmp, self.tmp))
 
     def test_the_runbook_allows_a_literal_operator_path(self) -> None:
         """The operations runbook owns the literal path an operator types."""
         bait = self.tmp / "OPERATIONS.md"
         bait.write_text(f"Deploy into {NIX_HOME}/stack here.\n", encoding="utf-8")
-        self.assertEqual([], prose_lint.check_file(bait, {"home-path"}))
+        self.assertEqual([], prose_lint.check_file(bait, {"home-path"}, self.tmp))
+
+    def test_a_nested_runbook_does_not_receive_the_exemption(self) -> None:
+        """Only the repository-root runbook owns literal operator paths."""
+        bait = self.tmp / "docs" / "OPERATIONS.md"
+        bait.parent.mkdir()
+        bait.write_text(f"Deploy into {NIX_HOME}/stack here.\n", encoding="utf-8")
+        self.assertEqual(1, len(prose_lint.check_file(bait, {"home-path"}, self.tmp)))
 
     def test_another_file_still_reports_the_finding(self) -> None:
         """The exemption must not be the whole rule."""

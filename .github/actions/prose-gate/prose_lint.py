@@ -457,9 +457,9 @@ def shallow_checkout(root: Path) -> bool:
     return r.returncode == 0 and r.stdout.strip() == "true"
 
 
-def is_operations_runbook(path: Path) -> bool:
+def is_operations_runbook(path: Path, root: Path | None) -> bool:
     """Whether this path is the repository operations runbook."""
-    return path.name == "OPERATIONS.md"
+    return root is not None and path.resolve() == (root / "OPERATIONS.md").resolve()
 
 
 def quoted(paths) -> str:
@@ -1516,7 +1516,7 @@ def check_file(path: Path, rules: set[str], root: Path | None = None) -> list[tu
         line = line.rstrip("\r")
         # Judged before the fence and inline-code handling below, deliberately.
         # A path pasted inside a fenced transcript is the same exposure as one in a sentence.
-        if "home-path" in rules and not is_operations_runbook(path):
+        if "home-path" in rules and not is_operations_runbook(path, root):
             out.extend(home_path_findings(i, line))
         if CODE_FENCE.match(line):
             in_fence = not in_fence
