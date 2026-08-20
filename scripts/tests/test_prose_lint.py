@@ -2250,11 +2250,6 @@ class TestScanRootDecidesTheRuleSet(unittest.TestCase):
         # The caller stands somewhere operational; the scanned file's own directory does not.
         with (
             mock.patch.object(prose_lint, "repo_root", return_value=""),
-            mock.patch.object(
-                prose_lint,
-                "is_operations_runbook",
-                side_effect=lambda root: Path(root) == Path("."),
-            ),
             mock.patch.object(prose_lint, "discover", return_value=[bait]),
         ):
             self.assertEqual(1, prose_lint.main([str(bait), "--check", "home-path"]))
@@ -2267,11 +2262,6 @@ class TestScanRootDecidesTheRuleSet(unittest.TestCase):
         bait.write_text(f"Deploy into {NIX_HOME}/stack here.\n", encoding="utf-8")
         with (
             mock.patch.object(prose_lint, "repo_root", return_value=""),
-            mock.patch.object(
-                prose_lint,
-                "is_operations_runbook",
-                side_effect=lambda root: Path(root) == Path("."),
-            ),
             mock.patch.object(prose_lint, "discover", return_value=[bait]),
         ):
             self.assertEqual(1, prose_lint.main([str(loose), "--check", "home-path"]))

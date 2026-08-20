@@ -73,12 +73,14 @@ Findings are a point-in-time snapshot read live over the API. Re-run before acti
 
 ### Apply or verify repository configuration
 
+Run these commands from a hub checkout at `main`. The payloads, registry, and script are hub-hosted.
+
 ```sh
 repo-config/configure.sh check owner/repo release|operational
 repo-config/configure.sh apply owner/repo release|operational
 ```
 
-**Always pass the command, the repository, and the model.** A bare `repo-config/configure.sh` with no arguments defaults to `apply` against the current repo, so an invocation meant to test whether the script runs performs a live write instead. Never run it without a command. An omitted target resolves to the hub repository, and applying fleet configuration there while meaning to configure a downstream repo is a well-formed write to the wrong place. This checkout has the registry beside the script, so a repo the registry does not name resolves through `defaults.workflowModel` to `release`. An operational repo outside the registry therefore requires the explicit model argument.
+**Always pass the command, the repository, and the model.** A bare `repo-config/configure.sh` with no arguments defaults to `apply` against the current repo, so an invocation meant to test whether the script runs performs a live write instead. Never run it without a command. An omitted target resolves to the hub repository, and applying fleet configuration there while meaning to configure a downstream repo is a well-formed write to the wrong place. The hub checkout has the registry beside the script, so a repo the registry does not name resolves through `defaults.workflowModel` to `release`. An operational repo outside the registry therefore requires the explicit model argument.
 
 `check` is read-only and exits non-zero on drift. `apply` is idempotent and drives entirely from the committed payloads, so it is a no-op on a conformant repo.
 

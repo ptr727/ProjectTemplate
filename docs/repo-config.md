@@ -37,6 +37,7 @@ Then validate the result with `repo-config/configure.sh check owner/repo release
 To change the canonical rulesets, edit the live rulesets (fleet-wide changes happen at the hub), then regenerate the committed files from the current repo:
 
 ```sh
+model=release # Set to release or operational for the payload set being regenerated.
 repo="$(gh repo view --json nameWithOwner --jq '.nameWithOwner')"
 # Paginate so a name match on a later page is never missed - the same trap configure.sh guards against.
 # --paginate with --jq '.[]' emits one JSON object per ruleset across all pages; jq -s re-assembles them
@@ -44,8 +45,8 @@ repo="$(gh repo view --json nameWithOwner --jq '.nameWithOwner')"
 rulesets=$(gh api --paginate "repos/$repo/rulesets" --jq '.[]' | jq -s '.')
 for name in develop main; do
   out="repo-config/$name.json"
-  # The operational model writes its develop payload under operational/.
-  [ "$name" = "develop" ] && [ ! -f "$out" ] && out="repo-config/operational/develop.json"
+  # The operational model writes its develop payload under operational/; both files exist in the hub.
+  [ "$name" = "develop" ] && [ "$model" = "operational" ] && out="repo-config/operational/develop.json"
   # Exactly one ruleset per name: zero or duplicates is declared drift - fail loudly, never regen from a guess.
   count=$(jq --arg n "$name" '[.[] | select(.name==$n)] | length' <<<"$rulesets")
   [ "$count" -eq 1 ] || { echo "expected exactly 1 ruleset named $name, found $count (drift)" >&2; exit 1; }
