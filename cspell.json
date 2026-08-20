@@ -87,6 +87,7 @@
     "noqa",
     "nuget",
     "onCreateCommand",
+    "opencode",
     "opencontainers",
     "Optix",
     "othercommand",

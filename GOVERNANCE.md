@@ -221,20 +221,30 @@ CI runs the full lint set, but run the linters locally before pushing to catch i
 - **The `.husky/pre-commit` hook** runs **language formatting** and the **diff-scoped doc gates**, never Docker and never a network call, so it stays fast. The formatting half is whatever the repo's own language needs, CSharpier and `dotnet format` for .NET or ruff for Python, via native tooling. A repo adds each half once its tree passes that half, since a gate that fails on the corpus it guards blocks every commit from the moment it lands, so a hook running one half is a repo mid-convergence rather than a repo out of conformance. The doc half runs each gate at the scope that fits it. The prose gate is scoped to what the commit changes rather than swept over the tree, which is the difference between about 2.2 seconds and about 0.13 and is what makes it affordable in a hook at all. A whole-repo check belongs there too when it is already fast and takes no file list, which the line-ending consistency check is, so scope is a property of the gate rather than a rule the hook applies to all of them. `repo_gate.py --check sha-pin` stays out, since it resolves a same-owner pin against the GitHub API and a hook that needs a network fails offline. A repo enables the hook per clone with `git config core.hooksPath .husky`, and CI remains the authoritative run either way.
 - **The VS Code Lint tasks** run the full doc-lint set via Docker `:latest` on demand, the local surface for Markdown, spelling, workflow, and EditorConfig checks.
 
-The Docker invocations below are the same ones the VS Code tasks use, for ad-hoc or headless (agent) runs.
+The Docker invocations below run the same tools and configs as the VS Code tasks. Their headless form separates the image pull and minimizes repository exposure for an agent executor.
 
-**Restricted executors keep tool state in a task-specific writable temporary directory.** Set each tool's own cache variable, such as `UV_CACHE_DIR` and `RUFF_CACHE_DIR`, instead of changing `HOME` or an agent configuration directory. A sandbox denial is not a lint result. Preserve the denial, then rerun the required command through the executor's scoped approval mechanism. Network approval covers a package or image fetch. Host approval covers access to the Docker socket. Use a narrow reusable command prefix when the executor supports one, and report the approved rerun as the evidence.
+**Restricted executors keep tool state in a task-specific writable temporary directory.** Set each tool's own cache variable, such as `UV_CACHE_DIR` and `RUFF_CACHE_DIR`, instead of changing `HOME` or an agent configuration directory. A sandbox denial is not a lint result. Preserve the denial, then rerun the required command through the executor's scoped approval mechanism. Network approval covers any required fetch, including an image or package download. Host approval covers access to the Docker socket. Repository-exposure approval covers letting third-party image code read the checkout, even through a read-only mount. Persist approval only when the executor constrains the read-only mount, disabled networking, and resolved digest together. Never allow an unconstrained `docker run` prefix. PSScriptAnalyzer's separate module-install phase gets network approval without any repository mount. Report the approved rerun as the evidence.
+
+Agent-specific authorization stays separate from the executor-neutral contract above:
+
+- **Codex:** execution rules match exact argument prefixes, so they cannot safely cover changing worktree paths and digests. Smart Approvals can therefore request repository-exposure approval per task. The no-prompt alternative combines `sandbox_mode = "danger-full-access"` with `approval_policy = "never"`. Use that pair only when an external sandbox contains the Codex process. It removes protection from every command rather than only lint.
+
+Pull each image before analysis, then resolve and run the pulled repository digest. A digest prevents the tag from changing between the pull and the run. It does not make third-party code trusted. Keep the resolved digest in a tool-specific variable when several commands run in one shell.
 
 - **editorconfig-checker** (line endings + charset across the tree):
 
   ```sh
-  docker run --rm --pull=always -v "$PWD":/check --workdir /check mstruebing/editorconfig-checker:latest
+  docker pull mstruebing/editorconfig-checker:latest
+  EDITORCONFIG_IMAGE="$(docker image inspect --format '{{index .RepoDigests 0}}' mstruebing/editorconfig-checker:latest)"
+  docker run --rm --network=none --mount type=bind,src="$PWD",dst=/check,readonly --workdir /check "$EDITORCONFIG_IMAGE"
   ```
 
 - **actionlint** (GitHub Actions workflow YAML, run after any `.github/workflows/` edit, since workflow-only changes are not smoke-built):
 
   ```sh
-  docker run --rm --pull=always -v "$PWD":/repo --workdir /repo rhysd/actionlint:latest -color
+  docker pull rhysd/actionlint:latest
+  ACTIONLINT_IMAGE="$(docker image inspect --format '{{index .RepoDigests 0}}' rhysd/actionlint:latest)"
+  docker run --rm --network=none --mount type=bind,src="$PWD",dst=/repo,readonly --workdir /repo "$ACTIONLINT_IMAGE" -color
   ```
 
   The `rhysd/actionlint` image bundles `shellcheck`, so it also validates `run:` shell blocks. The direct-binary/curl-installer path is often sandbox-blocked, so use Docker.
@@ -242,22 +252,32 @@ The Docker invocations below are the same ones the VS Code tasks use, for ad-hoc
 - **markdownlint-cli2** (Markdown, mirroring the davidanson VS Code extension via the shared [`.markdownlint-cli2.jsonc`](./.markdownlint-cli2.jsonc), so the CLI and IDE agree):
 
   ```sh
-  docker run --rm --pull=always -v "$PWD":/workdir --workdir /workdir davidanson/markdownlint-cli2:latest "**/*.md"
+  docker pull davidanson/markdownlint-cli2:latest
+  MARKDOWNLINT_IMAGE="$(docker image inspect --format '{{index .RepoDigests 0}}' davidanson/markdownlint-cli2:latest)"
+  docker run --rm --network=none --mount type=bind,src="$PWD",dst=/workdir,readonly --workdir /workdir "$MARKDOWNLINT_IMAGE" "**/*.md"
   ```
 
 - **cspell** (spelling in user-facing docs, with the word list and exclusions in [`cspell.json`](./cspell.json)):
 
   ```sh
-  docker run --rm --pull=always -v "$PWD":/workdir --workdir /workdir ghcr.io/streetsidesoftware/cspell:latest --no-progress README.md HISTORY.md
+  docker pull ghcr.io/streetsidesoftware/cspell:latest
+  CSPELL_IMAGE="$(docker image inspect --format '{{index .RepoDigests 0}}' ghcr.io/streetsidesoftware/cspell:latest)"
+  docker run --rm --network=none --mount type=bind,src="$PWD",dst=/workdir,readonly --workdir /workdir "$CSPELL_IMAGE" --no-progress README.md HISTORY.md
   ```
 
 - **PSScriptAnalyzer** (PowerShell, the peer of the shellcheck step, **only applies to a repo that carries `.ps1` files**, which carries `PSScriptAnalyzerSettings.psd1` alongside them with the excluded rules and their reasons):
 
   ```sh
-  docker run --rm --pull=always -e PS_SCRIPTS="$(git ls-files '*.ps1')" -v "$PWD":/mnt --workdir /mnt mcr.microsoft.com/powershell:latest \
+  docker pull mcr.microsoft.com/powershell:latest
+  POWERSHELL_IMAGE="$(docker image inspect --format '{{index .RepoDigests 0}}' mcr.microsoft.com/powershell:latest)"
+  docker volume create projecttemplate-psscriptanalyzer-1.23.0
+  docker run --rm --mount source=projecttemplate-psscriptanalyzer-1.23.0,target=/root/.local/share/powershell/Modules "$POWERSHELL_IMAGE" \
+    pwsh -NoProfile -Command 'Set-PSRepository PSGallery -InstallationPolicy Trusted; Install-Module PSScriptAnalyzer -RequiredVersion 1.23.0 -Force -Scope CurrentUser'
+  docker run --rm --network=none -e PS_SCRIPTS="$(git ls-files '*.ps1')" \
+    --mount type=bind,src="$PWD",dst=/mnt,readonly \
+    --mount source=projecttemplate-psscriptanalyzer-1.23.0,target=/root/.local/share/powershell/Modules,readonly \
+    --workdir /mnt "$POWERSHELL_IMAGE" \
     pwsh -NoProfile -Command '
-      Set-PSRepository PSGallery -InstallationPolicy Trusted
-      Install-Module PSScriptAnalyzer -RequiredVersion 1.23.0 -Force -Scope AllUsers
       Import-Module PSScriptAnalyzer
       $files = $env:PS_SCRIPTS -split "\s+" | Where-Object { $_ }
       if (-not $files) { Write-Host "no PowerShell scripts are tracked"; exit 0 }
@@ -269,7 +289,7 @@ The Docker invocations below are the same ones the VS Code tasks use, for ad-hoc
     '
   ```
 
-  The module version is pinned beside the image, because the image alone does not fix it and a floating install makes a local run a different check from CI. 1.23.0 rather than the newest, since 1.24.0 needs a newer `System.Management.Automation` than the image carries and fails to import after installing cleanly. The file list comes from `git ls-files` for the same reason the shellcheck step uses it, and the count is printed because a run that read no files reports the same clean as one that read them all.
+  The module-install container has network access and no repository mount. The analyzer container uses read-only mounts and has networking disabled. The module version is pinned because the image alone does not fix it. A floating install makes a local run differ from CI. Use 1.23.0 because 1.24.0 needs a newer `System.Management.Automation` than the image carries. The newer module fails to import after installing cleanly. The file list comes from `git ls-files`, for the same reason the shellcheck step uses it. The count distinguishes a complete clean run from one that read no files.
 
   **The list splits on whitespace rather than on a newline, and the regex is double-quoted.** A shell joins the file list with newlines and PowerShell joins it with spaces, so a newline-only split hands the analyzer one path holding every file, which it reports as one file it cannot find followed by a clean run over nothing. The double quotes are what let the whole invocation stay inside the single-quoted `-Command` a shell passes, since PowerShell escapes with a backtick and leaves the backslash alone. Run verbatim it reports `Checked 5 file(s)` from either shell.
 

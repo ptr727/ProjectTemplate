@@ -1,6 +1,6 @@
-# Agent Write-Safety Kit
+# Claude Code Write-Safety Kit
 
-Per-machine, user-account-scoped guards against an agent making a mis-targeted GitHub **write** under the maintainer's identity, or a **git operation that bypasses a branch rule or overrides a required check**, meaning a push, force-push, or delete that an active branch rule forbids, or an override flag (`--admin` past the server-side merge gate, `--no-verify` past the local git hooks). Deploy it as the **first thing on any new system** where Claude Code runs with the `gh` credentials logged in (Linux, WSL, macOS, Windows).
+These per-machine, user-account-scoped Claude Code guards cover two action classes. The first is a mis-targeted GitHub **write** under the maintainer's identity. The second is a **git operation that bypasses a branch rule or required check**. That class includes a forbidden push, force-push, or delete. It also includes an override flag such as `--admin` or `--no-verify`. Deploy the kit first on any system where Claude Code uses the maintainer's `gh` credentials. Linux, WSL, macOS, and Windows are supported. This kit does not configure Codex or opencode. Their host-specific controls live in [`docs/host-setup.md` "Agent Write-Safety"][host-setup-write-safety], and [issue #781][issue-781] tracks their missing hooks.
 
 ## What It Installs
 
@@ -100,4 +100,6 @@ Every other key in the file is left as it stands, `permissions.allow` included, 
 <!-- Repo -->
 [governance]: ../../GOVERNANCE.md
 [host-setup-grant]: ../../docs/host-setup.md#granting-a-write-the-guard-denies
+[host-setup-write-safety]: ../../docs/host-setup.md#agent-write-safety
 [issue-365]: https://github.com/ptr727/ProjectTemplate/issues/365
+[issue-781]: https://github.com/ptr727/ProjectTemplate/issues/781
