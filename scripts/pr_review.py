@@ -62,8 +62,9 @@ Subcommands
            not this and exits 0, and neither is a stuck check on a merge that is not BLOCKED,
            since the rollup carries checks no ruleset requires. The digest reports the check
            in both cases, so a shape outside 44 is still named rather than lost.
-           50 = the request is pending and nothing picked it up, which no amount of
-           waiting changes. Recovery is two mutations, and they stay in the runbook.
+           A pending request remains pending until a review, an answer, or the timeout. GitHub's
+           effort-labeled review lifecycle does not always emit `copilot_work_started`, so that
+           event is not evidence that distinguishes queued work from abandoned work.
 
 Reading is the bulk of this and the writing commands are a trade rather than a free win. A
 mutation spelled as a `gh` command in a shell is read by the gh-write-guard PreToolUse hook, and
@@ -220,6 +221,11 @@ VETTED_LABELS = {"Files reviewed", "Comments generated", "Review effort level"}
 MARKDOWN_HEADING = re.compile(r"\s*#{1,6}\s")
 # The `Review details` metadata bullets, of which the coverage line is one.
 LABEL_LINE = re.compile(r"\s*[-*]\s+\*\*([^*]+):\*\*")
+EFFORT_LINE = re.compile(
+    r"\s*[-*]\s+\*\*Review effort level:\*\*\s*"
+    r"(?:(Default)\s*\(\s*(Lite|Balanced|Max)\s*\)|(Lite|Balanced|Max))\s*$",
+    re.IGNORECASE,
+)
 # A login that reads as this reviewer without being the spelling every query here filters on.
 # A rename leaves every filter matching nothing, so a review that landed reads as none at all.
 # A wait then polls out its whole timeout against a review sitting in plain sight.
@@ -255,18 +261,6 @@ FILES_WINDOW = 100
 # Naming it beside a hard-coded literal only documented the literal, which a case then held.
 # A case is not the guarantee though, since it holds only where someone runs it.
 CHECKS_WINDOW = 100
-
-# The timeline spells the reviewer a third way, as login `Copilot` with type `Bot`.
-# GraphQL says `copilot-pull-request-reviewer`, and REST user objects add a `[bot]` suffix.
-# The predicate is the type plus a loose login match rather than any one spelling.
-# Requests are the reviewer's own, since a human requested later is a different request.
-# Reading one as the newest reports a picked-up review as never picked up.
-TIMELINE_JQ = (
-    '.[] | select(.event == "copilot_work_started" or (.event == "review_requested"'
-    ' and .requested_reviewer.type == "Bot"'
-    ' and ((.requested_reviewer.login // "") | ascii_downcase | test("copilot"))))'
-    ' | "\\(.event) \\(.created_at)"'
-)
 
 # Liveness query: timestamps and ids only, no comment or review bodies.
 # A liveness check does not need the finding text, and re-fetching bodies was 76% of polls.
@@ -429,52 +423,6 @@ def gql(query: str, owner: str, repo: str, num: int) -> dict:
     return gh_graphql(query, o=owner, r=repo, n=num)["repository"]["pullRequest"]
 
 
-def timeline(owner: str, repo: str, num: int) -> list[tuple[str, str]]:
-    """The request and pickup events, oldest first, as (event, timestamp).
-
-    GraphQL carries no `copilot_work_started`, so this is the one REST reader here.
-    `--jq` projects inside gh rather than after it, since `--paginate` without one emits a
-    concatenated array per page that is not valid JSON on every gh a fleet machine may carry.
-    `per_page` is the page size the pagination actually costs, and the default of 30 turns a
-    long-running pull request into six requests a reading where the maximum makes it two.
-    """
-    r = subprocess.run(
-        [
-            "gh",
-            "api",
-            "--paginate",
-            f"repos/{owner}/{repo}/issues/{num}/timeline?per_page=100",
-            "--jq",
-            TIMELINE_JQ,
-        ],
-        capture_output=True,
-        text=True,
-        encoding="utf-8",
-        check=False,
-    )
-    if r.returncode != 0:
-        sys.stderr.write(r.stderr[:800])
-        raise SystemExit(f"gh timeline failed rc={r.returncode}")
-    return [(ln.split(" ", 1)[0], ln.split(" ", 1)[1]) for ln in r.stdout.splitlines() if " " in ln]
-
-
-def never_picked_up(events: list[tuple[str, str]]) -> str:
-    """The newest request's timestamp where no pickup followed it, otherwise the empty string.
-
-    A request the reviewer accepts raises `copilot_work_started` within about half a minute, so
-    a request with no pickup after it is not a slow review, it is a request nothing is acting on.
-    The two states look identical from the reviews alone, which is how one sat for thirteen hours
-    reading as pending. Elapsed time cannot separate them either, since a genuinely slow round
-    also produces no review, and only the pickup event says whether anything is working.
-    """
-    requested = [t for e, t in events if e == "review_requested"]
-    started = [t for e, t in events if e == "copilot_work_started"]
-    if not requested:
-        return ""
-    newest = max(requested)
-    return "" if any(t >= newest for t in started) else newest
-
-
 def reviewer_requested(pr: dict) -> bool:
     """True where the reviewer sits in the pending request set.
 
@@ -575,18 +523,6 @@ def window_blind(pr: dict, field: str) -> bool:
     return bool(older) and not reviewer_nodes(pr, field)
 
 
-def stall_of(owner: str, repo: str, num: int, pr: dict) -> str:
-    """The stalled request's timestamp for this payload, or the empty string where none.
-
-    Derived from the payload it is reported beside, since a stall read earlier describes a
-    pull request that has since moved: a request picked up after the reading still reports as
-    picked up by nothing. A covered head or no pending request settles it without a REST call.
-    """
-    if reviewed_head(pr) or not reviewer_requested(pr):
-        return ""
-    return never_picked_up(timeline(owner, repo, num))
-
-
 def refusal_of(node: dict) -> str:
     """The review's body where its opening line says the reviewer did not review, otherwise empty.
 
@@ -657,6 +593,26 @@ def reviewed_head(pr: dict) -> bool:
     merge decision is taken from the liveness reading.
     """
     return bool(head_reviews(pr))
+
+
+def review_effort(pr: dict) -> tuple[str, str]:
+    """The newest head review's effective effort and selection source.
+
+    GitHub can render an inherited choice as `Default (Lite)`, `Default (Balanced)`, or
+    `Default (Max)`. A bare level is explicit. The setting remains user-controlled, and this
+    reader only reports metadata that the completed review body exposes.
+    """
+    reviews = head_reviews(pr)
+    if not reviews:
+        return "unknown", "unknown"
+    newest = max(reviews, key=lambda n: n.get("submittedAt") or "")
+    plain = FENCE.sub("", newest.get("body") or "")
+    for line in plain.splitlines():
+        match = EFFORT_LINE.fullmatch(line)
+        if match:
+            source = "default" if match.group(1) else "explicit"
+            return (match.group(2) or match.group(3)).lower(), source
+    return "unknown", "unknown"
 
 
 def is_coverage_line(line: str) -> bool:
@@ -1247,24 +1203,26 @@ def digest(
     stall: float = CHECK_STALL,
     checks: list[dict] | None = None,
 ) -> tuple[str, int]:
-    """Render the digest, from a caller's payload and stall reading where those are given.
+    """Render the digest from a caller's payload and normalized checks when supplied.
 
     The caller passes its own readings when the exit code has to agree with what was printed,
     since a review landing between two reads makes a fresh fetch describe a different pull
-    request than the one the code was decided from. Passing the stall also spends one REST
-    call between the caller and the digest rather than one each, and `checks` spends the rollup
-    parse the same way, since the wait decides an exit code from the reading it just printed.
+    request than the one the code was decided from. `checks` spends the rollup parse once,
+    since the wait decides an exit code from the reading it just printed.
     `now` is a parameter for the same reason, so a case can hold a check at a known age rather
     than at whatever the clock says when the suite runs.
+
+    `stalled` remains as an ignored compatibility parameter for callers that supplied the old
+    pickup reading. GitHub's effort-labeled lifecycle makes that reading inconclusive.
     """
     pr = gql(Q_FULL, owner, repo, num) if pr is None else pr
-    stalled = stall_of(owner, repo, num, pr) if stalled is None else stalled
     now = datetime.now(UTC) if now is None else now
     head = pr["headRefOid"]
     revs = reviewer_nodes(pr, "reviews")
     # `revs` is every round and `on_head` is the ones that reviewed this commit.
     # A refusal sits in the first and not the second, being a round that covered nothing.
     on_head = head_reviews(pr)
+    effort, effort_source = review_effort(pr)
     cover, cover_line = head_coverage(pr)
     unknown = unrecognized_shapes(pr)
     threads = pr["reviewThreads"]["nodes"]
@@ -1308,6 +1266,7 @@ def digest(
         # A digest of the wrong pull request is well-formed, so naming it is what shows the miss.
         f"repo={owner}/{repo} pr={num} head={head[:8]} rounds={len(revs)} "
         f"review_on_head={'yes' if on_head else 'NO'} "
+        f"effort={effort} effort_source={effort_source} "
         # A field of its own beside that one, since a round can cover the head and read part.
         # Those two readings are what `review_on_head=yes` alone conflates.
         f"coverage={COVERAGE_FIELD[cover]} "
@@ -1426,11 +1385,6 @@ def digest(
             "  CHECKS UNREADABLE: the payload carries commits and none of them is the "
             "head, so no rollup here describes this head and `checks=0/0` is this "
             "reading failing rather than a pull request with no checks"
-        )
-    if stalled:
-        lines.append(
-            f"  REQUEST NOT PICKED UP (requested {stalled}, no copilot_work_started "
-            "since): clear the request and re-request, per the runbook"
         )
     if blind:
         lines.append(
@@ -1879,7 +1833,7 @@ def main(argv: list[str] | None = None) -> int:
         "--pickup-grace",
         type=int,
         default=300,
-        help="seconds before the first pickup read, and between reads (default 5m)",
+        help="deprecated compatibility option, accepted but ignored",
     )
     ap.add_argument(
         "--check-grace",
@@ -1942,8 +1896,6 @@ def main(argv: list[str] | None = None) -> int:
                 ap.error(
                     f"{a.cmd} requires a non-empty {flag}, since an empty answer records nothing"
                 )
-    # A negative grace leaves the next reading permanently behind the clock.
-    # That is the per-poll REST pattern the interval exists to prevent.
     if a.pickup_grace < 0:
         ap.error("--pickup-grace cannot be negative")
     # A negative threshold reports every check in that state, on every run, from the first read.
@@ -1998,20 +1950,9 @@ def main(argv: list[str] | None = None) -> int:
         print(f"auto-request: {request_copilot_review(owner, repo, pr['id'])}")
         # No re-read here: Copilot never resolves within the round trip that just issued the request.
         # The loop below picks up fresh state on its own first iteration instead of this spending a second call to learn nothing new.
-    stalled = ""
     i = 0
-    next_pickup = a.pickup_grace
     while not done and not answer and not drift:
         elapsed = time.monotonic() - start
-        # Read the pickup before the clock, so a request nothing acted on reports as itself.
-        # Running the clock out instead would report it exactly as a slow reviewer.
-        # The read costs a second call over REST, so it runs on its own interval, not per poll.
-        # One reading settles the current request, and the next covers a request a push raises.
-        if elapsed > next_pickup and reviewer_requested(pr):
-            next_pickup = elapsed + a.pickup_grace
-            stalled = never_picked_up(timeline(owner, repo, a.number))
-            if stalled:
-                break
         if elapsed > a.timeout:
             break
         time.sleep(delays[min(i, len(delays) - 1)])
@@ -2022,14 +1963,11 @@ def main(argv: list[str] | None = None) -> int:
         drift = reviewer_login_drift(pr)
 
     # One payload decides the digest and the exit code together.
-    # Read separately, a review landing between them prints coverage and returns a stalled code.
+    # Read separately, a review landing between them prints coverage and returns a timeout code.
     # A reader resolves that by believing the code, dropping the review it was just shown.
     # The digest also earns its call at the timeout.
     # A bare PENDING line reports a broken wait and a slow reviewer identically.
     final = gql(Q_FULL, owner, repo, a.number)
-    # The stall is re-read here rather than carried out of the loop.
-    # A request picked up since that reading would still report as picked up by nothing.
-    stalled = stall_of(owner, repo, a.number, final)
     now = datetime.now(UTC)
     # Parsed here and handed down, so the digest and the exit code share one read of the rollup.
     # Deriving the stuck shapes from that list costs no parse, which is what was doubled.
@@ -2040,7 +1978,6 @@ def main(argv: list[str] | None = None) -> int:
         repo,
         a.number,
         pr=final,
-        stalled=stalled,
         now=now,
         grace=a.check_grace,
         stall=a.check_stall,
@@ -2108,13 +2045,6 @@ def main(argv: list[str] | None = None) -> int:
             "no review follows and re-requesting does not clear it"
         )
         return 40
-    if stalled:
-        print(
-            f"status=REQUEST_NOT_PICKED_UP requested {stalled} and no copilot_work_started "
-            "followed it, so nothing is working on this and waiting on will not start it: "
-            "clear the request and re-request, per the runbook"
-        )
-        return 50
     print("status=PENDING")
     return 30
 
