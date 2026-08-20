@@ -260,6 +260,35 @@ class TestSpecCoverage(unittest.TestCase):
         self.assertIn("virt-customize", result.stdout)
         self.assertIn("apt:libguestfs-tools (repository)", result.stdout)
 
+    def test_linux_installer_rejects_a_repository_collision(self) -> None:
+        """Repository metadata cannot replace a fleet tool's specialized installer."""
+        declaration = {
+            "tools": [
+                {
+                    "name": "node",
+                    "install": {"linux": {"manager": "apt", "package": "nodejs"}},
+                }
+            ]
+        }
+        with tempfile.TemporaryDirectory() as directory:
+            Path(directory, "host-tools.json").write_text(json.dumps(declaration), encoding="utf-8")
+            result = subprocess.run(
+                [str(LINUX / "install-tools.sh"), "--list", "--repo", directory],
+                capture_output=True,
+                text=True,
+                check=False,
+            )
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("cannot replace it", result.stderr)
+
+    def test_sudo_timestamp_does_not_load_repository_tools(self) -> None:
+        """The sudo-only action bypasses repository metadata before selection."""
+        text = (LINUX / "install-tools.sh").read_text(encoding="utf-8")
+        main = re.search(r"main\(\) \{(?P<body>.*?)^\}", text, re.MULTILINE | re.DOTALL)
+        self.assertIsNotNone(main)
+        body = main.group("body") if main else ""
+        self.assertRegex(body, r'if \[\[ \$MODE != "sudo-timestamp" \]\]; then\s+load_repo_tools')
+
     def test_every_declared_floor_carries_a_total_remedy_mapping(self) -> None:
         """Each floored tool names a runnable remedy on every platform, or carries a recorded exception.
 

@@ -392,6 +392,23 @@ class TestMerge(unittest.TestCase):
         self.assertEqual(len(rejected), 1)
         self.assertIn("manager must be 'apt'", rejected[0])
 
+    def test_package_identifiers_are_validated_at_runtime(self):
+        entry = tool(
+            "ffmpeg",
+            install={"linux": {"manager": "apt", "package": "ffmpeg; run-something"}},
+        )
+        _, rejected = host_gate.merge([], [entry])
+        self.assertEqual(len(rejected), 1)
+        self.assertIn("unsupported characters", rejected[0])
+
+    def test_a_repo_cannot_replace_fleet_installer_metadata(self):
+        base = [tool("gh", install={"linux": {"manager": "apt", "package": "gh"}})]
+        merged, rejected = host_gate.merge(
+            base, [{"name": "gh", "install": {"linux": {"manager": "apt", "package": "git"}}}]
+        )
+        self.assertEqual(len(rejected), 1)
+        self.assertEqual(merged[0]["install"]["linux"]["package"], "gh")
+
     def test_the_hub_declaration_is_not_mutated(self):
         """The caller's list is reused across runs, so merging must copy rather than edit in place."""
         base = self.base()
@@ -512,6 +529,24 @@ class TestBareRunOverlayWarning(unittest.TestCase):
             out = self.run_from(root, ["--spec", self.spec_with_one_passing_tool(d)])
             self.assertIn("layered", out)
             self.assertNotIn("warning:", out)
+
+    def test_a_bare_root_run_derives_a_remedy_for_its_overlay(self):
+        import tempfile
+
+        if host_gate.platform_key() == "macos":
+            self.skipTest("macOS has no constrained package manager")
+        manager = "apt" if host_gate.platform_key() == "linux" else "winget"
+        with tempfile.TemporaryDirectory() as d:
+            root = Path(d)
+            local = tool(
+                "definitely-not-a-real-binary-xyzzy",
+                probes=[["definitely-not-a-real-binary-xyzzy"]],
+                install={host_gate.platform_key(): {"manager": manager, "package": "needed"}},
+            )
+            (root / "host-tools.json").write_text(json.dumps({"tools": [local]}), encoding="utf-8")
+            out = self.run_from(root, ["--spec", self.spec_with_one_passing_tool(d), "--quiet"])
+            self.assertIn("REMEDY:", out)
+            self.assertIn(f"--repo {host_gate.quote_argument(str(root.resolve()))}", out)
 
     def test_an_explicit_repo_does_not_warn(self):
         import tempfile

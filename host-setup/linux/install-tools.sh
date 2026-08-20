@@ -1202,7 +1202,8 @@ load_repo_tools() {
         for tool in "${MANAGED_TOOLS[@]}"; do
             [[ $tool == "$name" ]] && known=true
         done
-        [[ $known == true ]] || MANAGED_TOOLS+=("$name")
+        [[ $known == false ]] || die "$name is already managed by the fleet installer and repository metadata cannot replace it"
+        MANAGED_TOOLS+=("$name")
     done <<< "$rows"
 }
 
@@ -1536,8 +1537,10 @@ parse_args() {
 
 main() {
     parse_args "$@"
-    load_repo_tools
-    resolve_selection
+    if [[ $MODE != "sudo-timestamp" ]]; then
+        load_repo_tools
+        resolve_selection
+    fi
 
     if [[ $MODE == "list" ]]; then
         list_tools

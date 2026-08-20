@@ -160,6 +160,8 @@ def field_problems(entry: dict) -> list[str]:
                     )
                 elif not isinstance(value.get("package"), str) or not value["package"]:
                     problems.append(f"install.{platform}.package must be a non-empty string")
+                elif not PACKAGE_PATTERNS[platform].fullmatch(value["package"]):
+                    problems.append(f"install.{platform}.package contains unsupported characters")
     if "probes" in entry:
         probes = entry["probes"]
         if (
@@ -204,6 +206,10 @@ def read_declaration(path: Path, what: str) -> list[dict] | str:
 
 
 PLATFORM_KEYS = ("linux", "macos", "windows")
+PACKAGE_PATTERNS = {
+    "linux": re.compile(r"^[a-z0-9][a-z0-9+.-]*$"),
+    "windows": re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]*$"),
+}
 
 
 def contract_problems(tools: list[dict]) -> list[str]:
@@ -305,6 +311,11 @@ def merge(base: list[dict], local: list[dict]) -> tuple[list[dict], list[str]]:
         for field, value in entry.items():
             # The hub's spelling of the name stands, since the gate reports under it and a local case variant is an override rather than a rename.
             if field == "name":
+                continue
+            if field == "install":
+                rejected.append(
+                    f"local tool {name} tried to replace fleet installer metadata, so the hub value stands"
+                )
                 continue
             if field == "required" and merged.get("required", True) and value is False:
                 rejected.append(
@@ -499,7 +510,7 @@ def main(argv: list[str] | None = None) -> int:
         "--quiet", action="store_true", help="print failures only, dropping the per-tool notes"
     )
     a = ap.parse_args(argv)
-    REMEDY_REPO = Path(a.repo).resolve() if a.repo else None
+    REMEDY_REPO = Path(a.repo or ".").resolve()
 
     # One reader for both declarations, so a shape guard added to one cannot go missing from the other.
     # Checking only the local file was exactly that asymmetry, and the hub file is no better validated at the point it is read.

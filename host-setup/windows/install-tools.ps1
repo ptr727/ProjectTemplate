@@ -400,10 +400,9 @@ function Add-RepositoryToolCatalog {
         $existing = Get-Tool -ToolName $entry.name
         $record = @{ Name = $entry.name; Package = $metadata.package; Probe = $entry.name; Optional = @(); Family = '' }
         if ($existing) {
-            $script:TOOLS = @($script:TOOLS | Where-Object { $_.Name -ne $entry.name }) + $record
-        } else {
-            $script:TOOLS += $record
+            die "$($entry.name) is already managed by the fleet installer and repository metadata cannot replace it"
         }
+        $script:TOOLS += $record
     }
 }
 
