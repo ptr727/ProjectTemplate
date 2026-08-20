@@ -48,7 +48,34 @@
                         "macos": { "type": "string", "minLength": 1 },
                         "windows": { "type": "string", "minLength": 1 }
                     }
+                },
+                "install": {
+                    "type": "object",
+                    "description": "Constrained package-manager metadata consumed by host setup. Values are data, never commands.",
+                    "additionalProperties": false,
+                    "properties": {
+                        "linux": { "$ref": "#/$defs/apt" },
+                        "windows": { "$ref": "#/$defs/winget" }
+                    }
                 }
+            }
+        },
+        "apt": {
+            "type": "object",
+            "required": ["manager", "package"],
+            "additionalProperties": false,
+            "properties": {
+                "manager": { "const": "apt" },
+                "package": { "type": "string", "minLength": 1, "pattern": "^[a-z0-9][a-z0-9+.-]*$" }
+            }
+        },
+        "winget": {
+            "type": "object",
+            "required": ["manager", "package"],
+            "additionalProperties": false,
+            "properties": {
+                "manager": { "const": "winget" },
+                "package": { "type": "string", "minLength": 1, "pattern": "^[A-Za-z0-9][A-Za-z0-9._-]*$" }
             }
         }
     }

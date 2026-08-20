@@ -35,6 +35,7 @@ from pathlib import Path
 
 SPEC = Path(__file__).resolve().parent.parent / "spec" / "host-tools.json"
 NOTES: list[str] = []
+REMEDY_REPO: Path | None = None
 
 
 def parse_version(text: str) -> tuple[int, ...] | None:
@@ -139,6 +140,30 @@ def field_problems(entry: dict) -> list[str]:
         problems.append("source must be an object")
     if "remedy" in entry and not isinstance(entry["remedy"], dict):
         problems.append("remedy must be an object")
+    if "install" in entry:
+        installs = entry["install"]
+        if not isinstance(installs, dict):
+            problems.append("install must be an object")
+        else:
+            managers = {"linux": "apt", "windows": "winget"}
+            for platform, value in installs.items():
+                if platform not in managers:
+                    problems.append(f"install names unsupported platform {platform}")
+                elif not isinstance(value, dict):
+                    problems.append(f"install.{platform} must be an object")
+                elif set(value) != {"manager", "package"}:
+                    problems.append(f"install.{platform} must contain only manager and package")
+                elif value.get("manager") != managers.get(platform):
+                    expected = managers.get(platform)
+                    problems.append(
+                        f"install.{platform}.manager must be {expected!r}"
+                        if expected
+                        else f"install.{platform} has no supported package manager"
+                    )
+                elif not isinstance(value.get("package"), str) or not value["package"]:
+                    problems.append(f"install.{platform}.package must be a non-empty string")
+                elif not PACKAGE_PATTERNS[platform].fullmatch(value["package"]):
+                    problems.append(f"install.{platform}.package contains unsupported characters")
     if "probes" in entry:
         probes = entry["probes"]
         if (
@@ -183,6 +208,10 @@ def read_declaration(path: Path, what: str) -> list[dict] | str:
 
 
 PLATFORM_KEYS = ("linux", "macos", "windows")
+PACKAGE_PATTERNS = {
+    "linux": re.compile(r"^[a-z0-9][a-z0-9+.-]*$"),
+    "windows": re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]*$"),
+}
 
 
 def contract_problems(tools: list[dict]) -> list[str]:
@@ -285,6 +314,11 @@ def merge(base: list[dict], local: list[dict]) -> tuple[list[dict], list[str]]:
             # The hub's spelling of the name stands, since the gate reports under it and a local case variant is an override rather than a rename.
             if field == "name":
                 continue
+            if field == "install":
+                rejected.append(
+                    f"local tool {name} tried to replace fleet installer metadata, so the hub value stands"
+                )
+                continue
             if field == "required" and merged.get("required", True) and value is False:
                 rejected.append(
                     f"local tool {name} tried to turn a required tool optional, which is a relaxation, so the hub value stands"
@@ -350,6 +384,34 @@ def resolve_remedy(command: str, root: Path | None = None) -> str:
     return f"{quoted} {rest}" if rest else quoted
 
 
+def package_remedy(tool: dict) -> str | None:
+    """The constrained installer command for this platform, or None where unsupported."""
+    install = tool.get("install")
+    if not isinstance(install, dict) or platform_key() not in install or REMEDY_REPO is None:
+        return None
+    script = (
+        "host-setup/windows/install-tools.ps1"
+        if platform_key() == "windows"
+        else "host-setup/linux/install-tools.sh"
+    )
+    repo = quote_argument(str(REMEDY_REPO.resolve()))
+    if platform_key() == "windows":
+        return f"{resolve_remedy(script)} -Install -Repo {repo} {quote_argument(tool['name'])}"
+    return f"{resolve_remedy(script)} --install --repo {repo} {shlex.quote(tool['name'])}"
+
+
+def package_source(tool: dict) -> str | None:
+    """The constrained package source for this platform, or None where unsupported."""
+    installs = tool.get("install")
+    metadata = installs.get(platform_key()) if isinstance(installs, dict) else None
+    if not isinstance(metadata, dict):
+        return None
+    manager, package = metadata.get("manager"), metadata.get("package")
+    if not isinstance(manager, str) or not isinstance(package, str):
+        return None
+    return f"{manager} package {package}"
+
+
 def overlay_above(start: Path) -> Path | None:
     """The nearest ancestor of `start` carrying a host-tools.json, or None where none does.
 
@@ -373,7 +435,20 @@ def check(tools: list[dict]) -> list[str]:
 
         if status == "absent":
             if required:
-                issues.append(f"{name} is not installed, and it is required")
+                src = platform_field(tool, "source") or package_source(tool)
+                rem = platform_field(tool, "remedy")
+                generated = package_remedy(tool)
+                issues.append(
+                    f"{name} is not installed, and it is required"
+                    + (f"\nINSTALL FROM: {src}" if src else "")
+                    + (f"\nREMEDY: {resolve_remedy(rem)}" if rem else "")
+                    + (f"\nREMEDY: {generated}" if not rem and generated else "")
+                    + (
+                        f"\nUNSUPPORTED: no constrained installer is declared for {platform_key()}"
+                        if not rem and not generated
+                        else ""
+                    )
+                )
             else:
                 NOTES.append(f"{name} is absent and optional, so nothing was read for it")
             continue
@@ -418,6 +493,7 @@ def check(tools: list[dict]) -> list[str]:
 
 
 def main(argv: list[str] | None = None) -> int:
+    global REMEDY_REPO
     ap = argparse.ArgumentParser(
         description="Check host tool versions against the hub declaration plus a repository's own."
     )
@@ -436,6 +512,7 @@ def main(argv: list[str] | None = None) -> int:
         "--quiet", action="store_true", help="print failures only, dropping the per-tool notes"
     )
     a = ap.parse_args(argv)
+    REMEDY_REPO = Path(a.repo or ".").resolve()
 
     # One reader for both declarations, so a shape guard added to one cannot go missing from the other.
     # Checking only the local file was exactly that asymmetry, and the hub file is no better validated at the point it is read.
