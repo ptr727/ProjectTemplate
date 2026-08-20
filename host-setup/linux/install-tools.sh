@@ -1194,6 +1194,7 @@ load_repo_tools() {
     rows=$(jq -r '
         if (.tools | type) != "array" then error("tools must be an array")
         elif any(.tools[]; .install.linux != null and ((.name | type) != "string" or .name == "")) then error("Linux install metadata needs a non-empty tool name")
+        elif any(.tools[]; .install.linux != null and ((.install.linux | type) != "object" or (((.install.linux | keys_unsorted) - ["manager", "package"]) | length) != 0 or ((["manager", "package"] - (.install.linux | keys_unsorted)) | length) != 0)) then error("Linux install metadata accepts only manager and package")
         elif any(.tools[]; .install.linux != null and ((.install.linux.manager | type) != "string" or (.install.linux.package | type) != "string")) then error("Linux install metadata needs string manager and package values")
         else .tools[] | select(.install.linux != null) | [.name, .install.linux.manager, .install.linux.package] | @tsv
         end

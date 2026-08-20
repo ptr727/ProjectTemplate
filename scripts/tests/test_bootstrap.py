@@ -337,6 +337,33 @@ class TestSpecCoverage(unittest.TestCase):
         self.assertNotEqual(result.returncode, 0)
         self.assertIn("Cannot read constrained Linux install metadata", result.stderr)
 
+    def test_linux_installer_rejects_extra_install_metadata(self) -> None:
+        """The runtime trust boundary matches the schema's closed package object."""
+        declaration = {
+            "tools": [
+                {
+                    "name": "virt-customize",
+                    "install": {
+                        "linux": {
+                            "manager": "apt",
+                            "package": "libguestfs-tools",
+                            "command": "do something",
+                        }
+                    },
+                }
+            ]
+        }
+        with tempfile.TemporaryDirectory() as directory:
+            Path(directory, "host-tools.json").write_text(json.dumps(declaration), encoding="utf-8")
+            result = subprocess.run(
+                [str(LINUX / "install-tools.sh"), "--list", "--repo", directory],
+                capture_output=True,
+                text=True,
+                check=False,
+            )
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("Cannot read constrained Linux install metadata", result.stderr)
+
     def test_sudo_timestamp_does_not_load_repository_tools(self) -> None:
         """The sudo-only action bypasses repository metadata before selection."""
         text = (LINUX / "install-tools.sh").read_text(encoding="utf-8")
@@ -355,6 +382,7 @@ class TestSpecCoverage(unittest.TestCase):
         text = (WINDOWS / "install-tools.ps1").read_text(encoding="utf-8")
         self.assertIn("$metadata.manager -isnot [string]", text)
         self.assertIn("$metadata.package -isnot [string]", text)
+        self.assertIn("$metadataKeys.Count -ne 2", text)
 
     def test_every_declared_floor_carries_a_total_remedy_mapping(self) -> None:
         """Each floored tool names a runnable remedy on every platform, or carries a recorded exception.

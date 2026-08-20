@@ -410,6 +410,15 @@ class TestMerge(unittest.TestCase):
         self.assertEqual(len(rejected), 1)
         self.assertIn("unsupported platform macos", rejected[0])
 
+    def test_install_metadata_rejects_additional_properties(self):
+        entry = tool(
+            "ffmpeg",
+            install={"linux": {"manager": "apt", "package": "ffmpeg", "command": "do something"}},
+        )
+        _, rejected = host_gate.merge([], [entry])
+        self.assertEqual(len(rejected), 1)
+        self.assertIn("only manager and package", rejected[0])
+
     def test_a_repo_cannot_replace_fleet_installer_metadata(self):
         base = [tool("gh", install={"linux": {"manager": "apt", "package": "gh"}})]
         merged, rejected = host_gate.merge(

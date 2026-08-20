@@ -151,6 +151,8 @@ def field_problems(entry: dict) -> list[str]:
                     problems.append(f"install names unsupported platform {platform}")
                 elif not isinstance(value, dict):
                     problems.append(f"install.{platform} must be an object")
+                elif set(value) != {"manager", "package"}:
+                    problems.append(f"install.{platform} must contain only manager and package")
                 elif value.get("manager") != managers.get(platform):
                     expected = managers.get(platform)
                     problems.append(
