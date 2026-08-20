@@ -602,14 +602,16 @@ def review_effort(pr: dict) -> tuple[str, str]:
     `Default (Max)`. A bare level is explicit. The setting remains user-controlled, and this
     reader only reports metadata that the completed review body exposes.
     """
-    reviews = sorted(head_reviews(pr), key=lambda n: n.get("submittedAt") or "", reverse=True)
-    for node in reviews:
-        plain = FENCE.sub("", node.get("body") or "")
-        for line in plain.splitlines():
-            match = EFFORT_LINE.fullmatch(line)
-            if match:
-                source = "default" if match.group(1) else "explicit"
-                return (match.group(2) or match.group(3)).lower(), source
+    reviews = head_reviews(pr)
+    if not reviews:
+        return "unknown", "unknown"
+    newest = max(reviews, key=lambda n: n.get("submittedAt") or "")
+    plain = FENCE.sub("", newest.get("body") or "")
+    for line in plain.splitlines():
+        match = EFFORT_LINE.fullmatch(line)
+        if match:
+            source = "default" if match.group(1) else "explicit"
+            return (match.group(2) or match.group(3)).lower(), source
     return "unknown", "unknown"
 
 
@@ -1201,7 +1203,7 @@ def digest(
     stall: float = CHECK_STALL,
     checks: list[dict] | None = None,
 ) -> tuple[str, int]:
-    """Render the digest, from a caller's payload and stall reading where those are given.
+    """Render the digest from a caller's payload and normalized checks when supplied.
 
     The caller passes its own readings when the exit code has to agree with what was printed,
     since a review landing between two reads makes a fresh fetch describe a different pull

@@ -410,6 +410,11 @@ class TestReviewEffort(unittest.TestCase):
     def test_absent_effort_metadata_is_unknown(self) -> None:
         self.assertEqual(("unknown", "unknown"), pr_review.review_effort(payload([review()])))
 
+    def test_newest_head_review_does_not_borrow_older_effort_metadata(self) -> None:
+        older = review(at=EARLY, body=nested(effort="Balanced"))
+        newer = review(at=LATE)
+        self.assertEqual(("unknown", "unknown"), pr_review.review_effort(payload([older, newer])))
+
     def test_the_pending_set_is_read_where_a_bot_reviewer_is_visible(self) -> None:
         """`gh pr view --json reviewRequests` omits a Bot outright and reports an empty set."""
         pending = {
