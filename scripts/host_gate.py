@@ -147,7 +147,7 @@ def field_problems(entry: dict) -> list[str]:
         else:
             managers = {"linux": "apt", "windows": "winget"}
             for platform, value in installs.items():
-                if platform not in PLATFORM_KEYS:
+                if platform not in managers:
                     problems.append(f"install names unsupported platform {platform}")
                 elif not isinstance(value, dict):
                     problems.append(f"install.{platform} must be an object")

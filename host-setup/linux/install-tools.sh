@@ -46,6 +46,7 @@ SELECTED=()
 REQUESTED=()
 REPO=""
 declare -A REPO_PACKAGES=()
+declare -A REPO_KEYS=()
 NOTES=()
 FAILED=()
 CHANGED=()
@@ -1189,18 +1190,26 @@ load_repo_tools() {
     [[ -f $declaration ]] || die "$REPO carries no host-tools.json"
     command -v jq > /dev/null || die "--repo needs jq to read constrained package metadata. Install the fleet tools first, then run this command again."
 
-    local name package manager rows
-    rows=$(jq -r '.tools[] | select(.install.linux != null) | [.name, .install.linux.manager, .install.linux.package] | @tsv' "$declaration") ||
+    local name package manager rows key
+    rows=$(jq -r '
+        if (.tools | type) != "array" then error("tools must be an array")
+        elif any(.tools[]; .install.linux != null and ((.name | type) != "string" or .name == "")) then error("Linux install metadata needs a non-empty tool name")
+        else .tools[] | select(.install.linux != null) | [.name, .install.linux.manager, .install.linux.package] | @tsv
+        end
+    ' "$declaration") ||
         die "Cannot read constrained Linux install metadata from $declaration"
     while IFS=$'\t' read -r name manager package; do
-        [[ -n $name ]] || continue
+        [[ -n $name ]] || die "$declaration carries Linux install metadata without a non-empty tool name"
         if [[ $manager != "apt" || ! $package =~ ^[a-z0-9][a-z0-9+.-]*$ ]]; then
             die "$name has unsupported or unsafe Linux install metadata"
         fi
+        key=${name,,}
+        [[ -z ${REPO_KEYS[$key]+x} ]] || die "$declaration declares repository tool $name more than once"
+        REPO_KEYS["$key"]="$name"
         REPO_PACKAGES["$name"]="$package"
         local known=false tool
-        for tool in "${MANAGED_TOOLS[@]}"; do
-            [[ $tool == "$name" ]] && known=true
+        for tool in "${TOOLS[@]}"; do
+            [[ ${tool,,} == "$key" ]] && known=true
         done
         [[ $known == false ]] || die "$name is already managed by the fleet installer and repository metadata cannot replace it"
         MANAGED_TOOLS+=("$name")

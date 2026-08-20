@@ -390,16 +390,29 @@ function Add-RepositoryToolCatalog {
     } catch {
         die "Cannot read $declaration as JSON: $_"
     }
+    if (-not $overlay.PSObject.Properties['tools'] -or $null -eq $overlay.tools) {
+        die "$declaration carries no tools array"
+    }
+    $fleetNames = @($script:TOOLS | ForEach-Object { $_.Name })
+    $seen = @{}
     foreach ($entry in @($overlay.tools)) {
-        if (-not $entry.PSObject.Properties['install'] -or -not $entry.install.PSObject.Properties['windows']) { continue }
+        if ($null -eq $entry -or -not $entry.PSObject.Properties['name'] -or
+            $entry.name -isnot [string] -or -not $entry.name) {
+            die "$declaration carries an entry without a non-empty tool name"
+        }
+        if (-not $entry.PSObject.Properties['install'] -or $null -eq $entry.install -or
+            -not $entry.install.PSObject.Properties['windows']) { continue }
         $metadata = $entry.install.windows
         if ($null -eq $metadata) { continue }
         if ($metadata.manager -ne 'winget' -or $metadata.package -notmatch '^[A-Za-z0-9][A-Za-z0-9._-]*$') {
             die "$($entry.name) has unsupported or unsafe Windows install metadata"
         }
-        $existing = Get-Tool -ToolName $entry.name
+        if ($seen.ContainsKey($entry.name)) {
+            die "$declaration declares repository tool $($entry.name) more than once"
+        }
+        $seen[$entry.name] = $true
         $record = @{ Name = $entry.name; Package = $metadata.package; Probe = $entry.name; Optional = @(); Family = '' }
-        if ($existing) {
+        if ($fleetNames -contains $entry.name) {
             die "$($entry.name) is already managed by the fleet installer and repository metadata cannot replace it"
         }
         $script:TOOLS += $record

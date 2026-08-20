@@ -281,6 +281,41 @@ class TestSpecCoverage(unittest.TestCase):
         self.assertNotEqual(result.returncode, 0)
         self.assertIn("cannot replace it", result.stderr)
 
+    def test_linux_installer_rejects_duplicate_repository_names(self) -> None:
+        """Duplicate overlay names are ambiguous and fail before selection."""
+        entry = {
+            "name": "virt-customize",
+            "install": {"linux": {"manager": "apt", "package": "libguestfs-tools"}},
+        }
+        with tempfile.TemporaryDirectory() as directory:
+            Path(directory, "host-tools.json").write_text(
+                json.dumps({"tools": [entry, entry]}), encoding="utf-8"
+            )
+            result = subprocess.run(
+                [str(LINUX / "install-tools.sh"), "--list", "--repo", directory],
+                capture_output=True,
+                text=True,
+                check=False,
+            )
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("more than once", result.stderr)
+
+    def test_linux_installer_rejects_an_unnamed_repository_tool(self) -> None:
+        """Malformed applicable metadata fails instead of disappearing from the catalog."""
+        declaration = {
+            "tools": [{"install": {"linux": {"manager": "apt", "package": "libguestfs-tools"}}}]
+        }
+        with tempfile.TemporaryDirectory() as directory:
+            Path(directory, "host-tools.json").write_text(json.dumps(declaration), encoding="utf-8")
+            result = subprocess.run(
+                [str(LINUX / "install-tools.sh"), "--list", "--repo", directory],
+                capture_output=True,
+                text=True,
+                check=False,
+            )
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("Cannot read constrained Linux install metadata", result.stderr)
+
     def test_sudo_timestamp_does_not_load_repository_tools(self) -> None:
         """The sudo-only action bypasses repository metadata before selection."""
         text = (LINUX / "install-tools.sh").read_text(encoding="utf-8")

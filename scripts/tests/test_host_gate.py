@@ -401,6 +401,15 @@ class TestMerge(unittest.TestCase):
         self.assertEqual(len(rejected), 1)
         self.assertIn("unsupported characters", rejected[0])
 
+    def test_macos_has_no_constrained_package_manager(self):
+        entry = tool(
+            "ffmpeg",
+            install={"macos": {"manager": "brew", "package": "ffmpeg"}},
+        )
+        _, rejected = host_gate.merge([], [entry])
+        self.assertEqual(len(rejected), 1)
+        self.assertIn("unsupported platform macos", rejected[0])
+
     def test_a_repo_cannot_replace_fleet_installer_metadata(self):
         base = [tool("gh", install={"linux": {"manager": "apt", "package": "gh"}})]
         merged, rejected = host_gate.merge(
