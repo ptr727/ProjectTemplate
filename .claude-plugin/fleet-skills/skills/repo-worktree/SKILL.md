@@ -161,11 +161,19 @@ A machine not yet migrated to this layout still isolates exactly the same way, s
 is the isolation rather than the path: create the worktree beside whatever layout the machine
 has, and note that the base clone may live elsewhere than `~/repos/<Repo>`.
 
-Claude Code's own `EnterWorktree` tool acts only on an explicit instruction from the user or the
-project instructions, which is why the carried rules state this mandate in so many words. Given
-a `name`, it creates the worktree under `.claude/worktrees/` inside the repo and bases it on the
-GitHub default branch, which is the wrong path and the wrong base here. Create the worktree with
-`git worktree add` as above, then attach with `EnterWorktree` `path:`, not `name:`.
+## Agent-Specific Worktree Tools
+
+Provider-specific mechanics stay separate from the general creation procedure above:
+
+- **Claude Code:** its `EnterWorktree` tool acts only on an explicit instruction from the user or
+  project instructions. Given a `name`, it creates the worktree under `.claude/worktrees/` and
+  bases it on the GitHub default branch. Both differ from the fleet path and base. Create the
+  worktree with `git worktree add`, then attach with `EnterWorktree` `path:`, not `name:`.
+- **Codex:** no provider-specific creation override applies. Use the general `git worktree add`
+  procedure above. Its host-specific writable-root setting lives in `docs/host-setup.md` "Agent
+  Worktree Access".
+- **opencode:** no provider-specific creation override applies. Use the general
+  `git worktree add` procedure above.
 
 ## Preparing Git Hooks
 

@@ -167,9 +167,13 @@ gh auth login --hostname github.com --git-protocol ssh
 
 Choose the SSH key generated above when prompted.
 
-## Agent Write-Safety Kit
+## Agent Write-Safety
 
-Required on any host where an agent runs with the `gh` credentials logged in, and its own README calls it the first thing to deploy on a new system. Install it from this repo, since the installer is idempotent and safe to re-run to update:
+Host-level write safety is required where an agent runs with the maintainer's `gh` credentials. Each provider's implementation stays in its own subsection.
+
+### Claude Code Write Safety
+
+The Claude Code safety kit is the first agent-specific control to deploy on a new system. Install it from this repo. The installer is idempotent and safe to re-run:
 
 ```shell
 host-setup/agent-safety/install.sh        # Linux, WSL, macOS
@@ -183,7 +187,7 @@ Both wrap one `install.py`, so every platform runs the same tested path. Restart
 
 This is a **host** control, not a repo one. The carried `GOVERNANCE.md` rules reach fleet repos only, while the hook and the `CLAUDE.md` block cover every session on the machine, including ad-hoc work in no project at all, which is where the incident behind the kit happened.
 
-### Granting a Write the Guard Denies
+#### Granting a Write the Guard Denies
 
 The guard denies a `gh` write whose explicit target sits under an owner other than the checkout's `origin` owner, and the denial names `GH_WRITE_GUARD_ALLOW` as the way past it. That grant is the maintainer's to make, and making it is a deliberate act taken outside the session rather than something an agent does for itself once blocked.
 
@@ -218,6 +222,49 @@ printenv GH_WRITE_GUARD_ALLOW
 Run it bare, with no `VAR=value` prefix of its own, which would report a value the hook never sees. An empty result means the grant did not load, and the fix is the file location or the restart rather than the token. Feeding the hook a synthetic payload is not a usable probe from inside a session, because the payload text carries the very write shape the guard matches and the guard denies the probe command itself.
 
 Withdraw a grant by deleting the `env` entry and restarting. Nothing expires it, so a grant left in place stays live for every later session in that checkout, which is the reason to remove it once the work that needed it is done.
+
+### Codex Write Safety
+
+No equivalent host write hook ships yet for Codex. Keep Codex's sandbox and execution policies enabled. The carried repository rules remain the behavioral layer in a fleet checkout. [Issue #781][issue-781] tracks the missing hook.
+
+### opencode Write Safety
+
+No equivalent host write hook ships yet for opencode. Keep opencode's own permission model enabled. The carried repository rules remain the behavioral layer in a fleet checkout. [Issue #781][issue-781] tracks the missing hook.
+
+## Agent Worktree Access
+
+Fleet tasks create registered worktrees beside the primary checkout, under the host's standard worktree directory. That path is host-specific, and permission configuration is agent-specific. Configure each agent on every host rather than carrying one repository setting that assumes a username or home directory.
+
+The shared requirement is access to the same worktree parent. Each agent's configuration stays in its own subsection below.
+
+### Codex Worktree Access
+
+Codex reads its user configuration from `~/.codex/config.toml`, including sessions started by the VS Code extension. Keep the workspace sandbox and add the absolute worktree parent as an extra writable root:
+
+```toml
+sandbox_mode = "workspace-write"
+
+[sandbox_workspace_write]
+writable_roots = ["/absolute/path/to/repos/worktrees"]
+```
+
+Use the real host path. A Linux, macOS, or WSL host using the fleet layout normally resolves it to `/home/<user>/repos/worktrees` or `/Users/<user>/repos/worktrees`. Native Windows uses a form such as `C:/Users/<user>/repos/worktrees`. Use forward slashes in the TOML value. Reload the VS Code window or restart the Codex session after changing the file, since a running session keeps the permissions it started with.
+
+Validate the file before relying on it:
+
+```shell
+codex --strict-config --version
+```
+
+This setting grants filesystem writes only under the worktree parent. It does not grant Docker socket access or authorize a third-party container to read a checkout. Codex treats those as separate approval boundaries, per [the official configuration reference][codex-config]. Do not replace this setting with `danger-full-access`, and do not add an unconstrained `docker run` execution rule.
+
+### Claude Code Worktree Access
+
+Claude Code does not read Codex's `config.toml`. Keep its permission mode in Claude Code's user-level configuration. Its sessions must be allowed to create and edit the same host-specific worktree parent.
+
+### opencode Worktree Access
+
+opencode does not read Codex's `config.toml`. Keep its permission mode in opencode's user-level configuration. Its sessions must be allowed to create and edit the same host-specific worktree parent.
 
 ## Fleet Skills Install
 
@@ -311,6 +358,7 @@ A host that fails any row is not ready for the procedure that row names, and the
 [host-setup-windows]: ../host-setup/windows/
 [host-tools]: ../spec/host-tools.json
 [issue-483]: https://github.com/ptr727/ProjectTemplate/issues/483
+[issue-781]: https://github.com/ptr727/ProjectTemplate/issues/781
 [operations]: ../OPERATIONS.md
 [scripts-dir]: ../scripts/
 [skills-install]: ../scripts/skills_install.py
@@ -321,6 +369,7 @@ A host that fails any row is not ready for the procedure that row names, and the
 
 <!-- External -->
 
+[codex-config]: https://developers.openai.com/codex/config-reference/
 [cli-install-link]: https://github.com/cli/cli/blob/trunk/docs/install_linux.md
 [cli-link]: https://cli.github.com/
 [docker-install-link]: https://docs.docker.com/engine/install/

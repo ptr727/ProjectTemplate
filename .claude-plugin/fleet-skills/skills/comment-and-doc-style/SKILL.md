@@ -55,6 +55,24 @@ Use each tool's official casing in task labels, docs, and prose: `.NET` (not `.N
   for what a machine reads: a tool or package name (`markdownlint`), a settings key, a heading
   anchor, a file extension.
 
+## Docker lint authorization
+
+A restricted executor treats Docker socket access, image fetching, and repository exposure as
+separate permissions. Repository exposure needs explicit maintainer approval even when the mount
+is read-only. Request approval for the repository-standard lint shape: pull the image first,
+resolve the pulled digest, mount the checkout read-only, and disable container networking. Persist
+it only when the executor constrains that whole shape. Never allow an unconstrained `docker run`
+prefix. PSScriptAnalyzer downloads its pinned module in a separate container that has network
+access and no repository mount. `GOVERNANCE.md` "Running the Linters Locally (Known-Working
+Invocations)" owns the exact commands and full authorization model.
+
+Agent-specific authorization stays in provider-labeled bullets so one agent's configuration does
+not read as a shared requirement:
+
+- **Codex:** rules cannot safely cover changing worktree paths and digests. Smart Approvals can
+  prompt per task. No-prompt operation is supported only inside an external sandbox because it
+  removes command-wide protection.
+
 ## Markdown formatting
 
 - **Reference-style links everywhere**, except the four files read one section at a time rather

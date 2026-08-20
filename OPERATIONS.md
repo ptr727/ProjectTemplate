@@ -32,12 +32,20 @@ python3 scripts/prose_lint.py . --check charset --check semicolon --check dash -
 python3 scripts/prose_lint.py . --check charset-unknown --summary
 for f in registry/*.json spec/*.json repo-config/*.json; do jq empty "$f"; done
 python3 spec/validate.py
-docker run --rm --pull=always -v "$PWD":/check --workdir /check mstruebing/editorconfig-checker:latest
-scripts=(); while IFS= read -r f; do scripts+=("$f"); done < <(git ls-files '*.sh'); docker run --rm --pull=always -v "$PWD":/mnt --workdir /mnt koalaman/shellcheck:stable "${scripts[@]}"
-docker run --rm --pull=always -e PS_SCRIPTS="$(git ls-files '*.ps1')" -v "$PWD":/mnt --workdir /mnt mcr.microsoft.com/powershell:latest pwsh -NoProfile -Command 'Set-PSRepository PSGallery -InstallationPolicy Trusted; Install-Module PSScriptAnalyzer -RequiredVersion 1.23.0 -Force -Scope AllUsers; Import-Module PSScriptAnalyzer; $files = $env:PS_SCRIPTS -split "\s+" | Where-Object { $_ }; if (-not $files) { Write-Host "no PowerShell scripts are tracked"; exit 0 }; $found = @(); foreach ($f in $files) { $found += Invoke-ScriptAnalyzer -Path $f -Settings ./PSScriptAnalyzerSettings.psd1 }; Write-Host "Checked $($files.Count) file(s)"; if ($found) { $found | Format-Table RuleName,Severity,ScriptName,Line,Message -AutoSize | Out-String -Width 200 | Write-Host; exit 1 }; Write-Host "no findings"'
+docker pull mstruebing/editorconfig-checker:latest
+EDITORCONFIG_IMAGE="$(docker image inspect --format '{{index .RepoDigests 0}}' mstruebing/editorconfig-checker:latest)"
+docker run --rm --network=none --mount type=bind,src="$PWD",dst=/check,readonly --workdir /check "$EDITORCONFIG_IMAGE"
+docker pull koalaman/shellcheck:stable
+SHELLCHECK_IMAGE="$(docker image inspect --format '{{index .RepoDigests 0}}' koalaman/shellcheck:stable)"
+scripts=(); while IFS= read -r f; do scripts+=("$f"); done < <(git ls-files '*.sh'); docker run --rm --network=none --mount type=bind,src="$PWD",dst=/mnt,readonly --workdir /mnt "$SHELLCHECK_IMAGE" "${scripts[@]}"
+docker pull mcr.microsoft.com/powershell:latest
+POWERSHELL_IMAGE="$(docker image inspect --format '{{index .RepoDigests 0}}' mcr.microsoft.com/powershell:latest)"
+docker volume create projecttemplate-psscriptanalyzer-1.23.0
+docker run --rm --mount source=projecttemplate-psscriptanalyzer-1.23.0,target=/root/.local/share/powershell/Modules "$POWERSHELL_IMAGE" pwsh -NoProfile -Command 'Set-PSRepository PSGallery -InstallationPolicy Trusted; Install-Module PSScriptAnalyzer -RequiredVersion 1.23.0 -Force -Scope CurrentUser'
+docker run --rm --network=none -e PS_SCRIPTS="$(git ls-files '*.ps1')" --mount type=bind,src="$PWD",dst=/mnt,readonly --mount source=projecttemplate-psscriptanalyzer-1.23.0,target=/root/.local/share/powershell/Modules,readonly --workdir /mnt "$POWERSHELL_IMAGE" pwsh -NoProfile -Command 'Import-Module PSScriptAnalyzer; $files = $env:PS_SCRIPTS -split "\s+" | Where-Object { $_ }; if (-not $files) { Write-Host "no PowerShell scripts are tracked"; exit 0 }; $found = @(); foreach ($f in $files) { $found += Invoke-ScriptAnalyzer -Path $f -Settings ./PSScriptAnalyzerSettings.psd1 }; Write-Host "Checked $($files.Count) file(s)"; if ($found) { $found | Format-Table RuleName,Severity,ScriptName,Line,Message -AutoSize | Out-String -Width 200 | Write-Host; exit 1 }; Write-Host "no findings"'
 ```
 
-The cache directory is unique to this verification run and remains outside the checkout. The operating system can reap it with other temporary data. A restricted executor may deny the first `uvx` network request or the first Docker socket access. Record that denial as an execution boundary, then rerun the required command with scoped approval. Only the rerun's tool output is a lint or test verdict.
+The cache directory is unique to this verification run and remains outside the checkout. The operating system can reap it with other temporary data. A restricted executor may deny the first `uvx` network request, Docker socket access, or third-party image access to the repository. Record that denial as an execution boundary, then rerun the required command with scoped approval. Persist repository-exposure approval only when the executor constrains the read-only mount, disabled networking, and digest together. Only the rerun's tool output is a lint or test verdict. Provider-specific host configuration lives in [`docs/host-setup.md`](./docs/host-setup.md) "Agent Worktree Access".
 
 The `test_install.py` line behaves differently here than in CI, stated so its failure reads as the verdict it is. Its report cases install from this checkout and assert the machine then reads as current. An install from a checkout carrying uncommitted changes records a dirty stamp that reads as stale. So on a working tree mid-change those cases fail by design where CI's clean checkout passes. The remedy is to run them again once the change is committed, not to read the failure as a regression.
 
@@ -111,8 +119,12 @@ A local gate reproduces a CI failure exactly, because CI runs the same commands 
 The Docker linters pull `:latest` deliberately, so a local run matches whatever CI resolved:
 
 ```sh
-docker run --rm --pull=always -v "$PWD":/workdir --workdir /workdir davidanson/markdownlint-cli2:latest "**/*.md"
-docker run --rm --pull=always -v "$PWD":/workdir --workdir /workdir ghcr.io/streetsidesoftware/cspell:latest --no-progress README.md HISTORY.md
+docker pull davidanson/markdownlint-cli2:latest
+MARKDOWNLINT_IMAGE="$(docker image inspect --format '{{index .RepoDigests 0}}' davidanson/markdownlint-cli2:latest)"
+docker run --rm --network=none --mount type=bind,src="$PWD",dst=/workdir,readonly --workdir /workdir "$MARKDOWNLINT_IMAGE" "**/*.md"
+docker pull ghcr.io/streetsidesoftware/cspell:latest
+CSPELL_IMAGE="$(docker image inspect --format '{{index .RepoDigests 0}}' ghcr.io/streetsidesoftware/cspell:latest)"
+docker run --rm --network=none --mount type=bind,src="$PWD",dst=/workdir,readonly --workdir /workdir "$CSPELL_IMAGE" --no-progress README.md HISTORY.md
 ```
 
 Both commands are the canonical invocations from [GOVERNANCE.md](./GOVERNANCE.md). markdownlint reads every Markdown file, while cspell reads `README.md` and `HISTORY.md` only. That narrower spelling scope is deliberate, since gating every Markdown file would mean padding `cspell.json` with technical terms without end, and broad live spell-check is the editor extension's job. Widening it here produces noise that no gate acts on.

@@ -6,7 +6,7 @@ How every governance rule is scoped, so the carried docs are granular single-sco
 
 A rule has a physical home, and a repo rule has a reach as well.
 
-- **Axis A, home.** A rule lives on the **host** (per-machine, `~/.claude`, `host-setup/`, loading in every session regardless of repo and covering ad-hoc work outside any project) or in the **repo** (it travels with a repo and can assume repo context). A rule that must hold in both places is stated in both and kept in sync deliberately, because the populations differ. The write-safety rules are the worked example, living in the host `~/.claude/CLAUDE.md` and the carried `AGENTS.md` at once.
+- **Axis A, home.** A rule lives on the **host** or in the **repo**. A host rule is per-machine and lives in an agent's own user configuration. It loads regardless of repo and covers ad-hoc work outside any project. A repo rule travels with a repo and can assume repo context. A rule that must hold in both places is stated in both and kept in sync deliberately, because the populations differ. The write-safety rules are the worked example, living in provider-specific host configuration and the carried `AGENTS.md` at once. `host-setup/` owns each supported provider's host form.
 - **Axis B, reach** (repo rules only). A repo rule is **hub-only** (meaningful only in this coordinator repo: the registry, the spec, the audit, fleet coordination), **all-downstream** (every derived repo), or **type-specific** (only repos matching a selector). Hub-only rules are simply absent from the carried baseline. All-downstream and type-specific rules are carried, gated by an `appliesTo` selector.
 
 ## Selectors
