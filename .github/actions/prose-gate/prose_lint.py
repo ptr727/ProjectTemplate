@@ -185,7 +185,17 @@ def changed_lines(base: str, root: Path) -> dict[str, set[int]] | None:
     """
     try:
         d = subprocess.run(
-            ["git", "-C", str(root), "diff", "--unified=0", "--no-color", base, "--"],
+            [
+                "git",
+                "-C",
+                str(root),
+                "diff",
+                "--unified=0",
+                "--no-color",
+                "--ignore-cr-at-eol",
+                base,
+                "--",
+            ],
             capture_output=True,
             text=True,
             check=True,
