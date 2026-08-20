@@ -73,12 +73,14 @@ Findings are a point-in-time snapshot read live over the API. Re-run before acti
 
 ### Apply or verify repository configuration
 
+Run these commands from a hub checkout at `main`. The payloads, registry, and script are hub-hosted.
+
 ```sh
 repo-config/configure.sh check owner/repo release|operational
 repo-config/configure.sh apply owner/repo release|operational
 ```
 
-**Always pass the command, the repository, and the model.** A bare `repo-config/configure.sh` with no arguments defaults to `apply` against the current repo, so an invocation meant to test whether the script runs performs a live write instead. Never run it without a command. The repository argument matters for the same reason now that the fleet runs this copy rather than its own: an omitted target resolves to this repository, and applying the fleet configuration to the hub while meaning to configure a downstream repo is a well-formed write to the wrong place. The model is the third argument for the same reason. This checkout has the registry beside the script, so a repo the registry does not yet name resolves through `defaults.workflowModel` to `release` rather than aborting, and an operational repo then takes the release `develop` ruleset.
+**Always pass the command, the repository, and the model.** A bare `repo-config/configure.sh` with no arguments defaults to `apply` against the current repo, so an invocation meant to test whether the script runs performs a live write instead. Never run it without a command. An omitted target resolves to the hub repository, and applying fleet configuration there while meaning to configure a downstream repo is a well-formed write to the wrong place. The hub checkout has the registry beside the script, so a repo the registry does not name resolves through `defaults.workflowModel` to `release`. An operational repo outside the registry therefore requires the explicit model argument.
 
 `check` is read-only and exits non-zero on drift. `apply` is idempotent and drives entirely from the committed payloads, so it is a no-op on a conformant repo.
 
@@ -128,7 +130,7 @@ The `gh api --method PATCH repos/[owner/repo]/pulls/[number]` form still works a
 
 - [spec/](./spec/) is the machine-readable ground truth, holding project types, the file and section baseline, and required or forbidden secrets.
 - [registry/repos.json](./registry/repos.json) is the fleet registry, naming every project with its types, publish mechanism, and status.
-- [repo-config/](./repo-config/) holds the branch rulesets, the fleet settings, and the apply script. The payloads carry to the fleet and the script is reached here. It sits outside `.github/`, which is Actions-owned.
+- [repo-config/](./repo-config/) holds the hub-only branch rulesets, fleet settings, documentation, and apply script. It sits outside `.github/`, which is Actions-owned.
 - [catalog/](./catalog/) holds reference snippets the audit compares implementations against.
 - [reports/](./reports/) holds per-repo audit output.
 - [scripts/](./scripts/) holds the gates that run in CI and locally, and that every fleet repository reaches rather than carries.

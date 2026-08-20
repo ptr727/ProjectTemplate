@@ -119,13 +119,29 @@ jobs:
         with:
           python-version: "3.13"
 
+      - name: Sync Python dependencies step
+        if: hashFiles('pyproject.toml') != '' && hashFiles('uv.lock') != ''
+        run: uv sync --all-groups --frozen
+
       - name: Lint Python step
         if: hashFiles('pyproject.toml') != ''
-        run: uvx ruff@latest check .
+        run: |
+          set -Eeuo pipefail
+          if [ -f uv.lock ]; then
+            uv run ruff check .
+          else
+            uvx ruff@latest check .
+          fi
 
       - name: Check Python formatting step
         if: hashFiles('pyproject.toml') != ''
-        run: uvx ruff@latest format --check .
+        run: |
+          set -Eeuo pipefail
+          if [ -f uv.lock ]; then
+            uv run ruff format --check .
+          else
+            uvx ruff@latest format --check .
+          fi
 
       # Mypy takes precedence where a pyproject declares both sections, matching every repo that runs mypy in CI today.
       # A pyright-only pyproject, with no [tool.mypy] section, falls back to pyright instead.
@@ -135,9 +151,17 @@ jobs:
         run: |
           set -Eeuo pipefail
           if grep -Eq '^[[:space:]]*\[tool\.mypy\]' pyproject.toml; then
-            uvx mypy@latest
+            if [ -f uv.lock ]; then
+              uv run mypy
+            else
+              uvx mypy@latest
+            fi
           elif grep -Eq '^[[:space:]]*\[tool\.pyright\]' pyproject.toml; then
-            uvx pyright@latest
+            if [ -f uv.lock ]; then
+              uv run pyright
+            else
+              uvx pyright@latest
+            fi
           else
             echo "no [tool.mypy] or [tool.pyright] section, skipping"
           fi
