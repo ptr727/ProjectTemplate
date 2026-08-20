@@ -161,7 +161,13 @@ Four things are deployed from here, and they land in different places. The host 
 
 ### Deploy the Host Guardrails
 
-The guardrails are the one component that is installed rather than read, and they are **host state rather than repository content**, because they have to cover ad-hoc sessions in no project at all. They deny a mis-targeted GitHub write under your identity, and a git operation that would only land by bypassing a branch rule.
+The guardrails are **host state rather than repository content**, because they have to cover ad-hoc sessions in no project at all. Each provider's implementation stays separate:
+
+- **Claude Code:** the installable safety kit denies a mis-targeted GitHub write under your identity. It also denies a git operation that would bypass a branch rule.
+- **Codex:** no equivalent host hook ships yet. The carried repository rules and Codex's own sandbox and execution policies remain active. [Issue #781][issue-781] tracks the missing hook.
+- **opencode:** no equivalent host hook ships yet. The carried repository rules and opencode's own permission model remain active. [Issue #781][issue-781] tracks the missing hook.
+
+#### Claude Code
 
 ```shell
 host-setup/agent-safety/install.sh        # Linux, WSL, macOS
@@ -171,7 +177,7 @@ host-setup/agent-safety/install.sh        # Linux, WSL, macOS
 .\host-setup\agent-safety\install.ps1     # Windows, and the .\ prefix is required
 ```
 
-Restart Claude Code sessions on the machine afterward so the hook and the `CLAUDE.md` blocks load. The installer is idempotent, so re-running it is also how a machine picks up an upstream change to the guard. What it installs, how to verify it, and what it deliberately does not catch are in [`host-setup/agent-safety/README.md`][agent-safety], and the surrounding host prerequisites (git identity, SSH signing, `gh`, `docker`, `uv`) are in [`docs/host-setup.md`][host-setup].
+Restart Claude Code sessions on the machine afterward so the hook and the `CLAUDE.md` blocks load. The installer is idempotent, so re-running it is also how a machine picks up an upstream change to the guard. What it installs, how to verify it, and what it deliberately does not catch are in [`host-setup/agent-safety/README.md`][agent-safety]. The surrounding host prerequisites are in [`docs/host-setup.md`][host-setup].
 
 ### Install the Fleet Skills
 
@@ -359,6 +365,7 @@ Licensed under the [MIT License][license]\
 [host-setup]: ./docs/host-setup.md
 [host-setup-dir]: ./host-setup/
 [host-setup-granting-a-write-the-guard-denies]: ./docs/host-setup.md#granting-a-write-the-guard-denies
+[issue-781]: https://github.com/ptr727/ProjectTemplate/issues/781
 [license]: ./LICENSE
 [matrix]: ./reports/conformance-matrix.md
 [project-types]: ./spec/project-types.json
