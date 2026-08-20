@@ -78,6 +78,8 @@ is never carried into a downstream repository.
 7. Reply to each thread and resolve what was addressed.
 8. Re-run the loop after every fix push until the checks are green and no finding remains open.
 
+The review effort setting is user-controlled. The workflow never selects or changes it. `status` reports `Lite`, `Balanced`, or `Max` when the completed review exposes that metadata, and distinguishes an inherited `Default (<level>)` from an explicit choice. Missing effort metadata reports `unknown` and does not change coverage or completion. A pending effort-labeled request can complete without a `copilot_work_started` timeline event, so absence of that event never proves the request is abandoned. The bounded timeout reports `PENDING` when no review or terminal answer arrives.
+
 Drive to green, a review confirmed on the latest head SHA and every actionable finding closed,
 then apply the Merge Gate above. **Never exit the loop early.** A round count is not a stopping
 condition, and neither is patience running out. Reporting only that the PR was opened is an early
