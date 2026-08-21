@@ -2,6 +2,24 @@
 
 This document tracks the design and rollout for [issue #889][issue-889]. It is a consultation artifact, not an approved implementation contract.
 
+- [Status](#status)
+- [Decision Outcome](#decision-outcome)
+- [Objective](#objective)
+- [Non-Goals](#non-goals)
+- [Primary Constraint: Copilot Code Review](#primary-constraint-copilot-code-review)
+- [Configuration Contract](#configuration-contract)
+- [Selection Architecture](#selection-architecture)
+- [Trust Contract](#trust-contract)
+- [Public Repository Boundary](#public-repository-boundary)
+- [First Canary](#first-canary)
+- [Copilot Acceptance Evidence](#copilot-acceptance-evidence)
+- [Structural Verification](#structural-verification)
+- [Planned Repository Surfaces](#planned-repository-surfaces)
+- [Risks and Controls](#risks-and-controls)
+- [Rollback](#rollback)
+- [Consultation Decisions](#consultation-decisions)
+- [Implementation Checkpoints](#implementation-checkpoints)
+
 ## Status
 
 **State:** Postponed\
