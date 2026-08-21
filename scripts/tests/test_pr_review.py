@@ -112,6 +112,19 @@ def nested(
     )
 
 
+def closer_look() -> str:
+    """The findings verdict with stable coverage and nested review details."""
+    return (
+        "### \U0001f535 Needs a closer look\n\nThe change needs attention.\n"
+        "<!-- fleet-review: reviewed=3 changed=3 findings=1 -->\n\n"
+        "<details>\n<summary>Review details</summary>\n\n"
+        "### Suppressed comments (1)\n\n**a.py:12**\n* Validate the input.\n\n"
+        "- **Files reviewed:** 3/3 changed files\n"
+        "- **Comments generated:** 0 new\n"
+        "- **Review effort level:** Lite\n</details>\n"
+    )
+
+
 def summarized(paths: list[str], covers: str = COVERED) -> str:
     """A round carrying its coverage line and the file table naming `paths`.
 
@@ -1017,7 +1030,7 @@ class TestUnrecognizedShapes(GqlCase):
     coverage line nothing parsed. Each was caught after it had already reported a clean pass.
 
     The inventory is measured rather than imagined. Over the same 333 review bodies, with fenced
-    blocks removed and text reduced to ASCII, the whole corpus is 8 headings, 6 summaries and 3
+    blocks removed and text reduced to ASCII, the whole corpus is 9 headings, 6 summaries and 3
     metadata labels, and every body carries at least one of them.
     """
 
@@ -1042,6 +1055,14 @@ class TestUnrecognizedShapes(GqlCase):
         """The no-findings verdict introduced by the current Copilot review stays readable."""
         body = "### \U0001f7e2 Approval recommended\n\nDocumentation updates are consistent.\n"
         self.assertEqual([], pr_review.unrecognized_in(body))
+
+    def test_needs_a_closer_look_heading_is_vetted(self) -> None:
+        """The findings verdict stays readable with its marker and nested details."""
+        body = closer_look()
+        self.assertEqual([], pr_review.unrecognized_in(body))
+        out = self.digest_for(review(body=body))
+        self.assertIn("coverage=full", out)
+        self.assertIn("shapes=ok", out)
 
     def test_a_details_summary_that_is_not_in_the_inventory_blocks(self) -> None:
         """The suppressed section has already moved between wrappers once."""
@@ -1219,7 +1240,7 @@ class TestCoverageExitCodes(GqlCase):
     def test_status_still_exits_zero_on_a_full_round(self) -> None:
         """Both the legacy coverage prose and the stable marker close the coverage gate."""
         marker = OVERVIEW + "\n<!-- fleet-review: reviewed=1 changed=1 findings=0 -->"
-        for body in (OVERVIEW + "\n" + COVERED, nested(), marker):
+        for body in (OVERVIEW + "\n" + COVERED, nested(), closer_look(), marker):
             with self.subTest(body=body[:40]):
                 self.answer(payload([review(body=body)]))
                 self.assertEqual(0, pr_review.main(["status", "7", "--repo", "o/r"]))
