@@ -240,8 +240,7 @@ def container_command(root: Path, linter: Linter, digest: str, files: Sequence[s
     else:
         command.extend([digest, *linter.arguments])
         if linter.name in {"markdownlint", "cspell", "shellcheck"}:
-            if linter.name in {"markdownlint", "shellcheck"}:
-                command.append("--")
+            command.append("--")
             command.extend(files)
     return command
 

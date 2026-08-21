@@ -19,7 +19,7 @@ This document measures whether additional automated reviewers improve the fleet'
 **State:** Active evaluation\
 **Incumbent:** GitHub Copilot\
 **Candidates:** CodeRabbit and Qodo\
-**Samples:** [ProjectTemplate pull request #891][pr-891] and [pull request #892][pr-892]
+**Samples:** [ProjectTemplate pull request #891][pr-891], [pull request #892][pr-892], and [pull request #893][pr-893]
 
 No candidate is a required reviewer. A candidate remains advisory until it meets the first-class support criteria below.
 
@@ -54,8 +54,8 @@ The first sample is too small for an adoption decision. It does show that both c
 | Reviewer | True Positive | Mixed | False Positive | Duplicate Roots | Initial Reading |
 | --- | ---: | ---: | ---: | ---: | --- |
 | GitHub Copilot | Not scored | Not scored | Not scored | Not scored | At least seven review attempts across two pull requests ended in an error, so no review covered any reviewed head |
-| CodeRabbit | 16 | 2 | 0 | 3 | Strong issue discovery, with occasional remedies that overstate configuration scope or contradict another valid control |
-| Qodo | 3 | 1 | 4 | 2 | Finds additional reliability issues, but repeatedly misreads repository title rules and documented tool behavior |
+| CodeRabbit | 25 | 2 | 0 | 3 | Strong issue discovery, with occasional remedies that overstate configuration scope or contradict another valid control |
+| Qodo | 4 | 0 | 4 | 2 | Finds additional reliability issues, but repeatedly misreads repository title rules and documented tool behavior |
 
 The duplicate roots were target-discovery failure, markdownlint filename handling, and process-failure classification. Qodo alone raised command-line length limits. CodeRabbit alone covered the postponed runner design, Docker mount quoting, and the editor-extension identifier.
 
@@ -73,12 +73,13 @@ CodeRabbit posted nine actionable findings:
 
 Qodo posted five findings:
 
-- Two true positives: target-discovery failure and command-line length limits.
-- One mixed finding: markdownlint needs literal filename handling, but the comment did not establish its broader claim for every linter.
+- Three true positives: target-discovery failure, command-line length limits, and option termination for every file-argument linter.
 - Two false positives: `to` is an allowed lowercase title bind word, and the Docker-lint documentation follows the intended skill and runbook ownership model.
 - Two findings duplicated roots CodeRabbit also reported.
 
 Copilot posted three terminal error responses and no findings. This sample therefore measures candidate value during an incumbent outage, not comparative recall over the same completed review.
+
+After `develop` advanced, CodeRabbit added two true positives: the organization Copilot runner policy also governs the cloud agent, and homelab labels must not overlap the hosted selector. Qodo added no finding.
 
 ### 2026-08-21: Pull Request #892
 
@@ -101,7 +102,17 @@ After the corrective push, CodeRabbit completed an explicitly triggered incremen
 
 Successive documentation-only follow-ups found two true positives: a compound-modifier error and inconsistent reviewer-attempt counts. The later comment that identified the resulting log-total mismatch repeated the count-reconciliation root. Qodo added no finding.
 
+Later follow-ups found six more true positives: upstream draft handoff, live runner authorization evidence, duplicate-root bookkeeping, the active workflow-restriction flag, the exact repository set, and the exact workflow set.
+
 Copilot posted terminal error responses on at least four successive pull request heads and supplied no review coverage.
+
+### 2026-08-21: Pull Request #893
+
+All three reviewers reported no findings. Qodo completed in 7 seconds, Copilot completed in 1 minute 55 seconds, and an explicitly triggered CodeRabbit review completed in 4 minutes 36 seconds.
+
+Copilot reviewed 2/2 changed files at Lite effort. Its new `Approval recommended` heading was not recognized by `pr_review.py`, so the otherwise clean review remained blocked. [Issue #894][issue-894] records the shape, and the pull request adds a regression fixture for it.
+
+On the parser-fix head, Copilot reviewed 4/4 files with no findings and the updated script recognized its output. CodeRabbit found one true-positive stale corpus count. Qodo did not reprocess the second push automatically. Its documented `/review` command updated the existing review through the final head in 3 minutes 10 seconds and added no finding.
 
 ## Interaction and Operations
 
@@ -191,6 +202,11 @@ The existing Copilot adapter remains behaviorally unchanged during extraction. P
 
 [pr-891]: https://github.com/ptr727/ProjectTemplate/pull/891
 [pr-892]: https://github.com/ptr727/ProjectTemplate/pull/892
+[pr-893]: https://github.com/ptr727/ProjectTemplate/pull/893
+
+<!-- Issues -->
+
+[issue-894]: https://github.com/ptr727/ProjectTemplate/issues/894
 
 <!-- External -->
 
