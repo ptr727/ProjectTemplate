@@ -54,7 +54,7 @@ The first sample is too small for an adoption decision. It does show that both c
 | Reviewer | True Positive | Mixed | False Positive | Duplicate Roots | Initial Reading |
 | --- | ---: | ---: | ---: | ---: | --- |
 | GitHub Copilot | Not scored | Not scored | Not scored | Not scored | At least seven review attempts across two pull requests ended in an error, so no review covered any reviewed head |
-| CodeRabbit | 24 | 2 | 0 | 3 | Strong issue discovery, with occasional remedies that overstate configuration scope or contradict another valid control |
+| CodeRabbit | 25 | 2 | 0 | 3 | Strong issue discovery, with occasional remedies that overstate configuration scope or contradict another valid control |
 | Qodo | 3 | 1 | 4 | 2 | Finds additional reliability issues, but repeatedly misreads repository title rules and documented tool behavior |
 
 The duplicate roots were target-discovery failure, markdownlint filename handling, and process-failure classification. Qodo alone raised command-line length limits. CodeRabbit alone covered the postponed runner design, Docker mount quoting, and the editor-extension identifier.
@@ -112,6 +112,8 @@ Copilot posted terminal error responses on at least four successive pull request
 All three reviewers reported no findings. Qodo completed in 7 seconds, Copilot completed in 1 minute 55 seconds, and an explicitly triggered CodeRabbit review completed in 4 minutes 36 seconds.
 
 Copilot reviewed 2/2 changed files at Lite effort. Its new `Approval recommended` heading was not recognized by `pr_review.py`, so the otherwise clean review remained blocked. [Issue #894][issue-894] records the shape, and the pull request adds a regression fixture for it.
+
+On the parser-fix head, Copilot reviewed 4/4 files with no findings and the updated script recognized its output. CodeRabbit found one true-positive stale corpus count. Qodo did not reprocess the second push automatically.
 
 ## Interaction and Operations
 

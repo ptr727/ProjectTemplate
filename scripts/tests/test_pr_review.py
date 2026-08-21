@@ -37,7 +37,7 @@ EARLY = "2026-08-02T10:00:00Z"
 LATE = "2026-08-02T11:00:00Z"
 
 
-# The shape 28 of the 332 measured bodies carry: an overview, and no count of what was read.
+# The shape 28 of the 333 measured bodies carry: an overview, and no count of what was read.
 # A body of no text at all is not one of the shapes, and the reader now says so, correctly.
 OVERVIEW = "## Pull request overview\n\nThe change is narrow.\n"
 
@@ -777,7 +777,7 @@ class TestRefusal(GqlCase):
 class TestCoverage(GqlCase):
     """The round that covered the head and read part of the diff, which is a clean pass elsewhere.
 
-    Measured over 332 Copilot review bodies on this repository: five rounds across three pull
+    Measured over 333 Copilot review bodies on this repository: five rounds across three pull
     requests reported reading fewer files than the pull request changed, and all three merged.
     One of them changed three files, left one unread across both its rounds, and reported
     "generated no comments" each time.
@@ -901,7 +901,7 @@ class TestCoverage(GqlCase):
         self.assertIn(f"coverage line: {line}", out)
 
     def test_a_round_stating_no_coverage_at_all_is_unstated(self) -> None:
-        """28 of the 332 bodies are an overview and a change list, and that shape is current.
+        """28 of the 333 bodies are an overview and a change list, and that shape is current.
 
         It is a recognized shape rather than unvetted reviewer output, but it cannot prove that
         the reviewer covered the full diff and therefore blocks the status gate.
@@ -986,7 +986,7 @@ class TestCoverage(GqlCase):
         self.assertIn("coverage=unstated", out)
 
     def test_a_quoted_line_in_a_fenced_block_is_not_this_round_stating_its_coverage(self) -> None:
-        """131 of the 332 bodies carry a fence, and this change puts both spellings in the diff."""
+        """131 of the 333 bodies carry a fence, and this change puts both spellings in the diff."""
         body = (
             "### Ready to approve\n\nThe vetted spellings read:\n\n```\n"
             "Copilot reviewed 2 out of 3 changed files in this pull request and generated "

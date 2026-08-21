@@ -133,7 +133,7 @@ REFUSAL = re.compile(
 # This is the third instance of the shape the two patterns above answer.
 # It is also the only one nothing was reading.
 # The line is anchored at its start rather than matched body-wide, both spellings being structural.
-# Over 332 review bodies every coverage statement opens its line and not one sits mid-sentence.
+# Over 333 review bodies every coverage statement opens its line and not one sits mid-sentence.
 # 272 of them open with the reviewer's own name and 32 are the `Review details` bullet.
 # A body-wide match reports the pull request adding this check as a partial round.
 # That is the false positive the suppressed matcher and the refusal matcher have each had once.
@@ -653,7 +653,7 @@ def read_coverage(line: str) -> tuple[int, int] | None:
 def coverage_of(node: dict) -> tuple[str, str]:
     """This round's coverage reading, with the line it was read from.
 
-    A round making no statement at all reads as unstated rather than unvetted. 28 of the 332
+    A round making no statement at all reads as unstated rather than unvetted. 28 of the 333
     bodies measured carry an overview and a change list and nothing more. The shape is recognized,
     but it cannot prove full diff coverage and therefore blocks the status gate.
 
@@ -813,7 +813,7 @@ def unrecognized_in(body: str) -> list[str]:
     quoting a heading is not a review carrying one, and this script's own pull requests quote
     these lists in full.
 
-    A body carrying no heading at all is reported rather than passed, since every one of the 332
+    A body carrying no heading at all is reported rather than passed, since every one of the 333
     measured opens on a heading and a body with none is a format nothing here has seen. A refusal
     is the exemption, being a bare paragraph by design and already classified as one.
     """
