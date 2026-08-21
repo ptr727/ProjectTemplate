@@ -2,6 +2,8 @@
 
 This document tracks the design and rollout for [issue #889][issue-889]. It is a consultation artifact, not an approved implementation contract.
 
+## Table of Contents <!-- omit from toc -->
+
 - [Status](#status)
 - [Decision Outcome](#decision-outcome)
 - [Objective](#objective)
