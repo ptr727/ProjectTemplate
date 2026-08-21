@@ -53,7 +53,7 @@ The first sample is too small for an adoption decision. It does show that both c
 
 | Reviewer | True Positive | Mixed | False Positive | Duplicate Roots | Initial Reading |
 | --- | ---: | ---: | ---: | ---: | --- |
-| GitHub Copilot | Not scored | Not scored | Not scored | Not scored | Seven review attempts across two pull requests ended in an error, so no review covered any reviewed head |
+| GitHub Copilot | Not scored | Not scored | Not scored | Not scored | At least seven review attempts across two pull requests ended in an error, so no review covered any reviewed head |
 | CodeRabbit | 16 | 2 | 0 | 3 | Strong issue discovery, with occasional remedies that overstate configuration scope or contradict another valid control |
 | Qodo | 3 | 1 | 4 | 2 | Finds additional reliability issues, but repeatedly misreads repository title rules and documented tool behavior |
 
@@ -101,7 +101,7 @@ After the corrective push, CodeRabbit completed an explicitly triggered incremen
 
 A final documentation-only follow-up took 3 minutes 5 seconds. CodeRabbit found one true-positive compound-modifier error in this assessment. Qodo added no finding.
 
-Copilot posted four terminal error responses across four successive pull request heads and supplied no review coverage.
+Copilot posted terminal error responses on at least four successive pull request heads and supplied no review coverage.
 
 ## Interaction and Operations
 
