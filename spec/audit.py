@@ -450,8 +450,10 @@ def strip_sections(text, names):
 
 
 def undeclared_h2_headings(text, declared):
-    """Level-two headings in `text` that lowercased `declared` does not name, sorted.
+    """Level-two headings in `text` that `declared` does not name, sorted.
 
+    `declared` is normalized here (stripped, case-folded) rather than trusted pre-normalized, so the
+    contract holds for any caller regardless of how its own section names are cased or spaced.
     Scoped to `## ` only: the section model's unit is the H2, and an H1 title or a nested H3 is not itself a
     section this check judges. Fence-aware via unfenced_text, so a `## ` line inside a fenced code sample -
     documenting the heading syntax itself, or a `##`-prefixed shell comment - is not misread as a real
@@ -462,7 +464,7 @@ def undeclared_h2_headings(text, declared):
         for ln in unfenced_text(text).split("\n")
         if ln.startswith("## ")
     }
-    return sorted(h2s - declared)
+    return sorted(h2s - {d.strip().lower() for d in declared})
 
 
 def template_ref_outside_verbatim(text, verbatim_names, hub_name):
@@ -2905,6 +2907,12 @@ def _selftest():
             [],
         ),
         (
+            "an un-normalized declared set (mixed case, untrimmed) is normalized here, not trusted",
+            "# AGENTS\n\n## Fleet Bootstrap\n\nText.\n",
+            {" Fleet Bootstrap "},
+            [],
+        ),
+        (
             "an H1 title and a nested H3 are not judged, only H2",
             "# Local Notes\n\n## Fleet Bootstrap\n\n### Local Notes\n\nText.\n",
             {"fleet bootstrap"},
@@ -2918,9 +2926,11 @@ def _selftest():
         ),
         (
             "a repo's own local content, undeclared, is flagged - the copilot-instructions.md case #523 added",
-            "# Copilot Instructions\n\n## GitHub Copilot Review Runbook\n\nText.\n\n"
-            "## Development Workflow\n\nLocal build and test steps.\n\n"
-            "## Command Line Usage\n\nLocal CLI reference.\n",
+            (
+                "# Copilot Instructions\n\n## GitHub Copilot Review Runbook\n\nText.\n\n"
+                "## Development Workflow\n\nLocal build and test steps.\n\n"
+                "## Command Line Usage\n\nLocal CLI reference.\n"
+            ),
             {"github copilot review runbook"},
             ["command line usage", "development workflow"],
         ),
