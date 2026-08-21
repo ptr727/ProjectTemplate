@@ -459,11 +459,7 @@ def undeclared_h2_headings(text, declared):
     documenting the heading syntax itself, or a `##`-prefixed shell comment - is not misread as a real
     heading; per unfenced_text's own docstring, a checker left fence-blind is a document read two ways.
     """
-    h2s = {
-        ln[3:].strip().lower()
-        for ln in unfenced_text(text).split("\n")
-        if ln.startswith("## ")
-    }
+    h2s = {ln[3:].strip().lower() for ln in unfenced_text(text).split("\n") if ln.startswith("## ")}
     return sorted(h2s - {d.strip().lower() for d in declared})
 
 
