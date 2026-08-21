@@ -32,28 +32,18 @@ python3 scripts/prose_lint.py . --check charset --check semicolon --check dash -
 python3 scripts/prose_lint.py . --check charset-unknown --summary
 for f in registry/*.json spec/*.json repo-config/*.json; do jq empty "$f"; done
 python3 spec/validate.py
-docker pull mstruebing/editorconfig-checker:latest
-EDITORCONFIG_IMAGE="$(docker image inspect --format '{{index .RepoDigests 0}}' mstruebing/editorconfig-checker:latest)"
-docker run --rm --network=none --mount type=bind,src="$PWD",dst=/check,readonly --workdir /check "$EDITORCONFIG_IMAGE"
-docker pull koalaman/shellcheck:stable
-SHELLCHECK_IMAGE="$(docker image inspect --format '{{index .RepoDigests 0}}' koalaman/shellcheck:stable)"
-scripts=(); while IFS= read -r f; do scripts+=("$f"); done < <(git ls-files '*.sh'); docker run --rm --network=none --mount type=bind,src="$PWD",dst=/mnt,readonly --workdir /mnt "$SHELLCHECK_IMAGE" "${scripts[@]}"
-docker pull mcr.microsoft.com/powershell:latest
-POWERSHELL_IMAGE="$(docker image inspect --format '{{index .RepoDigests 0}}' mcr.microsoft.com/powershell:latest)"
-docker volume create projecttemplate-psscriptanalyzer-1.23.0
-docker run --rm --mount source=projecttemplate-psscriptanalyzer-1.23.0,target=/root/.local/share/powershell/Modules "$POWERSHELL_IMAGE" pwsh -NoProfile -Command 'Set-PSRepository PSGallery -InstallationPolicy Trusted; Install-Module PSScriptAnalyzer -RequiredVersion 1.23.0 -Force -Scope CurrentUser'
-docker run --rm --network=none -e PS_SCRIPTS="$(git ls-files '*.ps1')" --mount type=bind,src="$PWD",dst=/mnt,readonly --mount source=projecttemplate-psscriptanalyzer-1.23.0,target=/root/.local/share/powershell/Modules,readonly --workdir /mnt "$POWERSHELL_IMAGE" pwsh -NoProfile -Command 'Import-Module PSScriptAnalyzer; $files = $env:PS_SCRIPTS -split "\s+" | Where-Object { $_ }; if (-not $files) { Write-Host "no PowerShell scripts are tracked"; exit 0 }; $found = @(); foreach ($f in $files) { $found += Invoke-ScriptAnalyzer -Path $f -Settings ./PSScriptAnalyzerSettings.psd1 }; Write-Host "Checked $($files.Count) file(s)"; if ($found) { $found | Format-Table RuleName,Severity,ScriptName,Line,Message -AutoSize | Out-String -Width 200 | Write-Host; exit 1 }; Write-Host "no findings"'
+python3 scripts/docker_lint.py
 ```
 
 The cache directory is unique to this verification run and remains outside the checkout. The operating system can reap it with other temporary data. A restricted executor may deny the first `uvx` network request, Docker socket access, or third-party image access to the repository. Record that denial as an execution boundary, then rerun the required command with scoped approval. Persist repository-exposure approval only when the executor constrains the read-only mount, disabled networking, and digest together. Only the rerun's tool output is a lint or test verdict. Provider-specific host configuration lives in [`docs/host-setup.md`](./docs/host-setup.md) "Agent Worktree Access".
 
 The `test_install.py` line behaves differently here than in CI, stated so its failure reads as the verdict it is. Its report cases install from this checkout and assert the machine then reads as current. An install from a checkout carrying uncommitted changes records a dirty stamp that reads as stale. So on a working tree mid-change those cases fail by design where CI's clean checkout passes. The remedy is to run them again once the change is committed, not to read the failure as a regression.
 
-The two container lines that take a file list differ from the workflow in **form** and not in what they check, and both differences exist because this runbook runs on a developer's machine where the workflow runs on `ubuntu-latest`. The shell list is collected with a `while read` loop rather than the workflow's `mapfile`, since `mapfile` arrives in bash 4 and macOS ships 3.2, and it stays an array so a path carrying whitespace is still passed as one argument. The PowerShell list splits on whitespace rather than on a newline, since a shell joins `git ls-files` output with newlines and PowerShell joins it with spaces, and splitting on the newline alone hands the analyzer one argument holding every path, which it reports as one file it cannot find and a clean run over nothing.
+The Docker runner discovers tracked and unignored targets with `git ls-files`. It passes each path as one argument, so a path that contains whitespace remains one target.
 
 Two gaps in that list are CI's rather than this runbook's, reproduced here so a local run matches CI rather than quietly exceeding it. The `jq` glob covers `repo-config/*.json` and does not reach `repo-config/operational/develop.json`, so a malformed operational payload passes. The second is that `sentence-split` and `sentence-length` are implemented and tested but named by no invocation, so nothing runs them.
 
-Run the `editorconfig-checker` line before pushing a new file, and before pushing an existing file that a script rewrote rather than an editor. This repository defaults to LF, which most tooling already writes, but a Windows-habituated editor that writes CRLF regardless of file type, or a new `.bat`/`.cmd` file, still fails that check on its first CI run rather than locally. A scripted rewrite is the same hazard on a file that was already correct, since reading and rewriting a whole file in text mode converts every line ending in it, which no prose or Markdown gate reports.
+Run `python3 scripts/docker_lint.py --linter editorconfig-checker` before pushing a new or programmatically rewritten file. This repository defaults to LF, which most tooling already writes. An editor that writes CRLF regardless of file type still fails this check. A text-mode script can cause the same failure by converting every line ending.
 
 The first prose invocation gates. The second reports a character that no tier covers, and it exits non-zero locally whenever findings exist. It is warn-only in CI because the workflow step sets `continue-on-error: true`, not because the command is lenient, so a non-zero exit locally is the expected result rather than a problem.
 
@@ -119,15 +109,12 @@ A local gate reproduces a CI failure exactly, because CI runs the same commands 
 The Docker linters pull `:latest` deliberately, so a local run matches whatever CI resolved:
 
 ```sh
-docker pull davidanson/markdownlint-cli2:latest
-MARKDOWNLINT_IMAGE="$(docker image inspect --format '{{index .RepoDigests 0}}' davidanson/markdownlint-cli2:latest)"
-docker run --rm --network=none --mount type=bind,src="$PWD",dst=/workdir,readonly --workdir /workdir "$MARKDOWNLINT_IMAGE" "**/*.md"
-docker pull ghcr.io/streetsidesoftware/cspell:latest
-CSPELL_IMAGE="$(docker image inspect --format '{{index .RepoDigests 0}}' ghcr.io/streetsidesoftware/cspell:latest)"
-docker run --rm --network=none --mount type=bind,src="$PWD",dst=/workdir,readonly --workdir /workdir "$CSPELL_IMAGE" --no-progress README.md HISTORY.md
+python3 scripts/docker_lint.py
 ```
 
-Both commands are the canonical invocations from [GOVERNANCE.md](./GOVERNANCE.md). markdownlint reads every Markdown file, while cspell reads `README.md` and `HISTORY.md` only. That narrower spelling scope is deliberate, since gating every Markdown file would mean padding `cspell.json` with technical terms without end, and broad live spell-check is the editor extension's job. Widening it here produces noise that no gate acts on.
+The runner prints target counts before pulling images. It then prints a phase boundary before any repository mount. Every Docker command has a five-minute default timeout, which `--timeout` can change. Each linter emits start and completion markers even when the tool succeeds quietly. A timeout, container failure, zero-target skip, and successful completion each have distinct output.
+
+Use repeated `--linter` options to run a subset. markdownlint reads every tracked or unignored Markdown file. CSpell reads only `README.md` and `HISTORY.md`, matching CI's deliberate scope.
 
 The `editorconfig-checker` action is setup-only. Using it alone silently skips the check, so CI invokes the checker itself rather than relying on the action.
 

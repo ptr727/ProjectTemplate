@@ -59,12 +59,14 @@ Use each tool's official casing in task labels, docs, and prose: `.NET` (not `.N
 
 A restricted executor treats Docker socket access, image fetching, and repository exposure as
 separate permissions. Repository exposure needs explicit maintainer approval even when the mount
-is read-only. Request approval for the repository-standard lint shape: pull the image first,
-resolve the pulled digest, mount the checkout read-only, and disable container networking. Persist
-it only when the executor constrains that whole shape. Never allow an unconstrained `docker run`
-prefix. PSScriptAnalyzer downloads its pinned module in a separate container that has network
-access and no repository mount. `GOVERNANCE.md` "Running the Linters Locally (Known-Working
-Invocations)" owns the exact commands and full authorization model.
+is read-only. Use the hub's `scripts/docker_lint.py` wrapper for the standard lint shape. It
+discovers targets, pulls images in a separate phase, resolves each digest, and announces the
+boundary before repository mounts begin. Each Docker command has a timeout and visible result.
+Lint containers disable networking and mount the checkout read-only. Persist approval only when
+the executor constrains that whole shape. Never allow an unconstrained `docker run` prefix.
+PSScriptAnalyzer downloads its pinned module in a separate container that has network access and
+no repository mount. `GOVERNANCE.md` "Running the Linters Locally (Known-Working Invocations)"
+owns the exact invocation and full authorization model.
 
 Agent-specific authorization stays in provider-labeled bullets so one agent's configuration does
 not read as a shared requirement:
