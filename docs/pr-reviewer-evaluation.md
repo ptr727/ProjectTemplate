@@ -53,7 +53,7 @@ The first sample is too small for an adoption decision. It does show that both c
 
 | Reviewer | True Positive | Mixed | False Positive | Duplicate Roots | Initial Reading |
 | --- | ---: | ---: | ---: | ---: | --- |
-| GitHub Copilot | Not scored | Not scored | Not scored | Not scored | Four review attempts across two pull requests ended in an error, so no review covered either head |
+| GitHub Copilot | Not scored | Not scored | Not scored | Not scored | Five review attempts across two pull requests ended in an error, so no review covered either head |
 | CodeRabbit | 14 | 2 | 0 | 3 | Strong issue discovery, with occasional remedies that overstate configuration scope or contradict another valid control |
 | Qodo | 3 | 1 | 4 | 2 | Finds additional reliability issues, but repeatedly misreads repository title rules and documented tool behavior |
 
@@ -97,7 +97,9 @@ CodeRabbit skipped the draft, then skipped the ready pull request because its ba
 
 Qodo completed 2 minutes 42 seconds after the pull request became ready.
 
-Copilot posted one terminal error response on the current head and supplied no review coverage.
+After the corrective push, CodeRabbit completed an explicitly triggered incremental review in exactly 8 minutes and added no findings. Qodo updated its existing review comment in place, marked the corrected process-failure finding resolved, and added no findings. Neither follow-up created a new formal review object, so provider-aware automation must also recognize updated comments and command completion replies.
+
+Copilot posted two terminal error responses on the current head and supplied no review coverage.
 
 ## Interaction and Operations
 
@@ -113,6 +115,8 @@ The review body provides an actionable summary and links each finding to an inli
 
 Automatic review skipped a feature-to-`develop` pull request because `develop` is not the repository default. The review loop must explicitly trigger CodeRabbit unless its configuration changes.
 
+Incremental follow-up also requires an explicit command on this pull request. Completion is reported by updating the command reply rather than by creating a new formal review.
+
 The collapsed analysis is verbose and can dominate API output. Machine support should read normalized summaries and thread metadata without loading the analysis transcript.
 
 Its status context reported success while nine actionable comments remained. A future gate must derive finding state from review threads, not from that status alone.
@@ -122,6 +126,8 @@ Its status context reported success while nine actionable comments remained. A f
 The findings are individually anchored and usually concise after HTML presentation is removed.
 
 The formal review body was empty. All useful state lived in inline comments, so a body-only reader would report no findings.
+
+After a corrective push, Qodo updated the existing review comment and its resolved state rather than creating another review. A future adapter must compare comment updates and finding dispositions, not only review creation events.
 
 The first sample shows more policy false positives than CodeRabbit. It also supplied the only command-line length finding, which gives it measurable incremental value.
 
