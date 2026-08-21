@@ -247,7 +247,7 @@ Automated tests cover:
 Static workflow verification also covers action pinning, actionlint custom labels, job dependencies, and workflow syntax.
 
 Live verification covers both selection branches. Only a live run can prove runner registration and Copilot integration.
-Before the runner-group checkpoint is complete, capture live API evidence for the effective repository allowlist, `restricted_to_workflows: true`, the exact selected-workflow path and protected ref, and `allows_public_repositories`. Assert the restriction flag and selected-workflow value together because GitHub ignores the value when the flag is false. Run negative canaries that prove direct-label and unapproved-ref requests cannot reach the group. Link provisioning evidence from the owning CloudInit repository rather than inferring it from this plan.
+Before the runner-group checkpoint is complete, capture live API evidence for the exact runner group, `visibility: selected`, a selected repository set exactly equal to `ptr727/ProjectTemplate`, `restricted_to_workflows: true`, the exact selected-workflow path and protected ref, and `allows_public_repositories` equal to the documented opt-in. Reject extra or missing selected repositories. Assert the restriction flag and selected-workflow value together because GitHub ignores the value when the flag is false. Run negative canaries that prove direct-label and unapproved-ref requests cannot reach the group. Link provisioning evidence from the owning CloudInit repository rather than inferring it from this plan.
 
 ## Planned Repository Surfaces
 
@@ -320,7 +320,7 @@ Implementation waits for an explicit decision on each item.
 - [ ] GitHub-hosted default branch exercised.
 - [ ] CloudInit public opt-in reviewed in its owning repository.
 - [ ] Restricted organization runner group and runner registered.
-- [ ] Live runner-group API evidence records the repository allowlist, `restricted_to_workflows: true`, exact selected-workflow path and protected ref, and public-repository setting.
+- [ ] Live runner-group API evidence asserts `visibility: selected`, a repository set containing only `ptr727/ProjectTemplate`, `restricted_to_workflows: true`, the exact selected-workflow path and protected ref, and the documented public-repository setting.
 - [ ] Direct-label and unapproved-ref negative canaries are rejected.
 - [ ] CloudInit provisioning evidence is linked from its owning repository.
 - [ ] Protected-ref homelab canary succeeds.
