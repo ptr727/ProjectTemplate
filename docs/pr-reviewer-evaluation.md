@@ -55,7 +55,7 @@ The first sample is too small for an adoption decision. It does show that both c
 | --- | ---: | ---: | ---: | ---: | --- |
 | GitHub Copilot | Not scored | Not scored | Not scored | Not scored | At least seven review attempts across two pull requests ended in an error, so no review covered any reviewed head |
 | CodeRabbit | 25 | 2 | 0 | 3 | Strong issue discovery, with occasional remedies that overstate configuration scope or contradict another valid control |
-| Qodo | 3 | 1 | 4 | 2 | Finds additional reliability issues, but repeatedly misreads repository title rules and documented tool behavior |
+| Qodo | 4 | 0 | 4 | 2 | Finds additional reliability issues, but repeatedly misreads repository title rules and documented tool behavior |
 
 The duplicate roots were target-discovery failure, markdownlint filename handling, and process-failure classification. Qodo alone raised command-line length limits. CodeRabbit alone covered the postponed runner design, Docker mount quoting, and the editor-extension identifier.
 
@@ -73,8 +73,7 @@ CodeRabbit posted nine actionable findings:
 
 Qodo posted five findings:
 
-- Two true positives: target-discovery failure and command-line length limits.
-- One mixed finding: markdownlint needs literal filename handling, but the comment did not establish its broader claim for every linter.
+- Three true positives: target-discovery failure, command-line length limits, and option termination for every file-argument linter.
 - Two false positives: `to` is an allowed lowercase title bind word, and the Docker-lint documentation follows the intended skill and runbook ownership model.
 - Two findings duplicated roots CodeRabbit also reported.
 

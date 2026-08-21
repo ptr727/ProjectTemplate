@@ -129,6 +129,13 @@ class DockerLintCase(unittest.TestCase):
         )
         self.assertEqual(["--", "-release.sh"], command[-2:])
 
+    def test_cspell_literal_marker_precedes_option_shaped_filename(self) -> None:
+        linter = next(linter for linter in docker_lint.LINTERS if linter.name == "cspell")
+        command = docker_lint.container_command(
+            self.root, linter, "example@sha256:123", ["-release.md"]
+        )
+        self.assertEqual(["--", "-release.md"], command[-2:])
+
     def test_invalid_git_root_reports_failed_result(self) -> None:
         root = Path(self.enterContext(tempfile.TemporaryDirectory()))
         output = io.StringIO()
