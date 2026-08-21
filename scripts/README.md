@@ -18,6 +18,19 @@ python3 -m unittest discover -s scripts/tests    # all of them, and exits 5 if t
 uvx coverage@latest run --source=scripts,spec,host-setup -m unittest discover -s scripts/tests && uvx coverage@latest report
 ```
 
+## `docker_lint.py`
+
+Runs the fleet Docker lint set with one bounded and observable procedure:
+
+```sh
+python3 scripts/docker_lint.py
+python3 scripts/docker_lint.py --timeout 120 --linter markdownlint --linter cspell
+```
+
+The runner discovers tracked and unignored targets before pulling applicable images. It resolves each pull to a repository digest before execution. Lint containers use disabled networking and a read-only checkout mount. Long target lists run in bounded batches. PSScriptAnalyzer installs its pinned module without mounting the checkout.
+
+Every Docker command has a timeout. The output identifies target counts, phase boundaries, starts, completions, skips, timeouts, and failures. A timed-out named container is removed before the command reports failure.
+
 ## `prose_lint.py`
 
 Enforces the [`GOVERNANCE.md`][governance] "Documentation Style Conventions" rules that no linter checks: non-ASCII judged against the charset rule's three tiers, a semicolon in prose, a spaced hyphen joining or interrupting a sentence, a duplicated consecutive word, a British spelling, and the shape of a comment's prose. It carries one rule from elsewhere in that document, `home-path`, which comes from "Representative Data in Agent-Authored Text" and catches an absolute home path naming a real account. That rule closes the pattern-detectable sliver of its section and nothing beyond it, since the exposure the section exists for was name-shaped and no pattern finds a name. `OPERATIONS.md` is exempt because its runbooks carry the literal path an operator types.

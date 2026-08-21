@@ -152,7 +152,7 @@ Within this repo, day-to-day development follows the same branching, CI, review,
 
 - **Branching.** Persistent `main` and `develop`, each with its own ruleset. This repo uses the default `release` workflow model: commit on feature branches only, feature branch to `develop` is squash-merged, `develop` to `main` is a merge commit, and `develop` is forward-only (no `main -> develop` back-merges). Live-service config repos instead use the `operational` model (registry `workflowModel`), with direct signed commits to `develop`, promoted to `main` by an occasional PR. See [GOVERNANCE.md "Branching Model"][governance-branching-model].
 - **CI is lint-only.** There is no build or unit test. The PR gate runs markdownlint, cspell, JSON validation (`jq` parses `registry/`, `spec/`, and `repo-config/`, plus the `spec/validate.py` cross-reference and shape checks), and actionlint, and exposes the ruleset-bound `Check pull request workflow status job` aggregator. The same lint configs (`.markdownlint-cli2.jsonc`, `cspell.json`) drive the editor extensions, the CLI, and CI.
-- **Review loop.** Every PR is reviewed by GitHub Copilot, and the agent drives the review loop to green and merges only with explicit maintainer permission. See [GOVERNANCE.md "PR Review Etiquette"][governance-pr-review-etiquette].
+- **Review loop.** Every PR enters the GitHub Copilot review loop and must reach a green review result before merging. The agent drives that loop and merges only with explicit maintainer permission. CodeRabbit and Qodo remain advisory candidates under the measured [pull request reviewer evaluation][pr-reviewer-evaluation]. See [GOVERNANCE.md "PR Review Etiquette"][governance-pr-review-etiquette].
 - **Release.** A `develop -> main` merge is promoted through a GitHub release (tag plus a source zip, README, and LICENSE). Versioning is NBGV-driven from [version.json][version]. See [WORKFLOW.md][workflow].
 
 ## Using This Repo
@@ -369,6 +369,7 @@ Licensed under the [MIT License][license]\
 [license]: ./LICENSE
 [matrix]: ./reports/conformance-matrix.md
 [project-types]: ./spec/project-types.json
+[pr-reviewer-evaluation]: ./docs/pr-reviewer-evaluation.md
 [readme-structure]: ./spec/readme-structure.md
 [repo-config]: ./repo-config/
 [repo-config-doc]: ./docs/repo-config.md

@@ -176,7 +176,7 @@ This section keeps the full rules and is surfaced at its decision moment by the 
 
 ## PR Review Etiquette
 
-The provider-agnostic review-loop contract every fleet repo follows starts when a pull request opens. Creating the pull request is not a terminal handoff. Run the review status once in the foreground. Then start the bounded review wait in a background process. Request a review on every push. Confirm it covers the current head SHA and the full diff rather than only part of it. Triage every finding, including low-confidence findings collapsed into the review body rather than threads. Reply to and resolve every addressed finding. Repeat after every fix until the checks are green and the current-head review leaves no finding open. Only an explicit maintainer instruction may stop, defer, or alter this default. A draft state, silence, or a request that says only "open a PR" is not such an instruction. Never merge on a green or CLEAN merge state alone. That state does not prove the review covered the current head SHA and full diff. It also does not expose unanswered low-confidence findings that opened no thread.
+The provider-agnostic review-loop contract every fleet repo follows starts when a pull request opens. Open every fleet-owned pull request ready for review. Draft state is reserved for the separately documented upstream contribution workflow while a third-party contribution is still being prepared. Creating the pull request is not a terminal handoff. Run the review status once in the foreground. Then start the bounded review wait in a background process. Request a review on every push. Confirm it covers the current head SHA and the full diff rather than only part of it. Triage every finding, including low-confidence findings collapsed into the review body rather than threads. Reply to and resolve every addressed finding. Repeat after every fix until the checks are green and the current-head review leaves no finding open. Only an explicit maintainer instruction may stop, defer, or alter this default. Silence or a request that says only "open a PR" is not such an instruction. Never merge on a green or CLEAN merge state alone. That state does not prove the review covered the current head SHA and full diff. It also does not expose unanswered low-confidence findings that opened no thread.
 
 This is packaged as the `pr-review-conduct` Skill at `.agents/skills/pr-review-conduct/SKILL.md` in the hub, not a repo-relative link since that path is hub-local and not carried into every fleet repo. The summary above sketches the contract. Read the skill for the merge gate, the expected loop, and how a finding is closed.
 
@@ -229,71 +229,21 @@ Agent-specific authorization stays separate from the executor-neutral contract a
 
 - **Codex:** execution rules match exact argument prefixes, so they cannot safely cover changing worktree paths and digests. Smart Approvals can therefore request repository-exposure approval per task. The no-prompt alternative combines `sandbox_mode = "danger-full-access"` with `approval_policy = "never"`. Use that pair only when an external sandbox contains the Codex process. It removes protection from every command rather than only lint.
 
-Pull each image before analysis, then resolve and run the pulled repository digest. A digest prevents the tag from changing between the pull and the run. It does not make third-party code trusted. Keep the resolved digest in a tool-specific variable when several commands run in one shell.
+Run the hub-hosted wrapper from the repository it checks:
 
-- **editorconfig-checker** (line endings + charset across the tree):
+```sh
+python3 /path/to/ProjectTemplate/scripts/docker_lint.py --root "$PWD"
+```
 
-  ```sh
-  docker pull mstruebing/editorconfig-checker:latest
-  EDITORCONFIG_IMAGE="$(docker image inspect --format '{{index .RepoDigests 0}}' mstruebing/editorconfig-checker:latest)"
-  docker run --rm --network=none --mount type=bind,src="$PWD",dst=/check,readonly --workdir /check "$EDITORCONFIG_IMAGE"
-  ```
+The wrapper discovers tracked and unignored targets before it pulls applicable images. It reports a zero-target skip without pulling or mounting the repository. It pulls each applicable image in a distinct pull phase, then resolves the pulled repository digest. A digest prevents the tag from changing between the pull and execution. It does not make third-party code trusted.
 
-- **actionlint** (GitHub Actions workflow YAML, run after any `.github/workflows/` edit, since workflow-only changes are not smoke-built):
+After all pulls, the wrapper reports that repository mounts are about to begin. Each execution uses the resolved digest, disabled networking, and a read-only checkout mount. PSScriptAnalyzer installs its pinned module in a separate container without the checkout mount. File-argument linters receive each tracked path as a distinct argument, split across bounded batches before host command-line limits become relevant.
 
-  ```sh
-  docker pull rhysd/actionlint:latest
-  ACTIONLINT_IMAGE="$(docker image inspect --format '{{index .RepoDigests 0}}' rhysd/actionlint:latest)"
-  docker run --rm --network=none --mount type=bind,src="$PWD",dst=/repo,readonly --workdir /repo "$ACTIONLINT_IMAGE" -color
-  ```
+Every primary Docker command has a five-minute timeout by default. Use `--timeout` to select another positive bound. The wrapper emits a start and completion line for each primary command. Timeout cleanup has a separate maximum of 30 seconds and emits its result through the failed lint step. The wrapper reports the checked-file count for every linter, including tools that produce no success output. Timeout, container failure, zero-target execution, and successful quiet completion have distinct result lines. The wrapper names each lint container and removes it after a timeout.
 
-  The `rhysd/actionlint` image bundles `shellcheck`, so it also validates `run:` shell blocks. The direct-binary/curl-installer path is often sandbox-blocked, so use Docker.
+Use repeated `--linter` options for a subset. The supported names are `editorconfig-checker`, `actionlint`, `markdownlint`, `cspell`, `shellcheck`, and `PSScriptAnalyzer`. editorconfig-checker reads the mounted tree. actionlint reads eligible workflows and includes shellcheck for `run:` blocks. markdownlint reads tracked and unignored Markdown files. CSpell reads `README.md` and `HISTORY.md` only. shellcheck and PSScriptAnalyzer run only when matching scripts are tracked or unignored.
 
-- **markdownlint-cli2** (Markdown, mirroring the davidanson VS Code extension via the shared [`.markdownlint-cli2.jsonc`](./.markdownlint-cli2.jsonc), so the CLI and IDE agree):
-
-  ```sh
-  docker pull davidanson/markdownlint-cli2:latest
-  MARKDOWNLINT_IMAGE="$(docker image inspect --format '{{index .RepoDigests 0}}' davidanson/markdownlint-cli2:latest)"
-  docker run --rm --network=none --mount type=bind,src="$PWD",dst=/workdir,readonly --workdir /workdir "$MARKDOWNLINT_IMAGE" "**/*.md"
-  ```
-
-- **cspell** (spelling in user-facing docs, with the word list and exclusions in [`cspell.json`](./cspell.json)):
-
-  ```sh
-  docker pull ghcr.io/streetsidesoftware/cspell:latest
-  CSPELL_IMAGE="$(docker image inspect --format '{{index .RepoDigests 0}}' ghcr.io/streetsidesoftware/cspell:latest)"
-  docker run --rm --network=none --mount type=bind,src="$PWD",dst=/workdir,readonly --workdir /workdir "$CSPELL_IMAGE" --no-progress README.md HISTORY.md
-  ```
-
-- **PSScriptAnalyzer** (PowerShell, the peer of the shellcheck step, **only applies to a repo that carries `.ps1` files**, which carries `PSScriptAnalyzerSettings.psd1` alongside them with the excluded rules and their reasons):
-
-  ```sh
-  docker pull mcr.microsoft.com/powershell:latest
-  POWERSHELL_IMAGE="$(docker image inspect --format '{{index .RepoDigests 0}}' mcr.microsoft.com/powershell:latest)"
-  docker volume create projecttemplate-psscriptanalyzer-1.23.0
-  docker run --rm --mount source=projecttemplate-psscriptanalyzer-1.23.0,target=/root/.local/share/powershell/Modules "$POWERSHELL_IMAGE" \
-    pwsh -NoProfile -Command 'Set-PSRepository PSGallery -InstallationPolicy Trusted; Install-Module PSScriptAnalyzer -RequiredVersion 1.23.0 -Force -Scope CurrentUser'
-  docker run --rm --network=none -e PS_SCRIPTS="$(git ls-files '*.ps1')" \
-    --mount type=bind,src="$PWD",dst=/mnt,readonly \
-    --mount source=projecttemplate-psscriptanalyzer-1.23.0,target=/root/.local/share/powershell/Modules,readonly \
-    --workdir /mnt "$POWERSHELL_IMAGE" \
-    pwsh -NoProfile -Command '
-      Import-Module PSScriptAnalyzer
-      $files = $env:PS_SCRIPTS -split "\s+" | Where-Object { $_ }
-      if (-not $files) { Write-Host "no PowerShell scripts are tracked"; exit 0 }
-      $found = @()
-      foreach ($file in $files) { $found += Invoke-ScriptAnalyzer -Path $file -Settings ./PSScriptAnalyzerSettings.psd1 }
-      Write-Host "Checked $($files.Count) file(s)"
-      if ($found) { $found | Format-Table RuleName,Severity,ScriptName,Line,Message -AutoSize | Out-String -Width 200 | Write-Host; exit 1 }
-      Write-Host "no findings"
-    '
-  ```
-
-  The module-install container has network access and no repository mount. The analyzer container uses read-only mounts and has networking disabled. The module version is pinned because the image alone does not fix it. A floating install makes a local run differ from CI. Use 1.23.0 because 1.24.0 needs a newer `System.Management.Automation` than the image carries. The newer module fails to import after installing cleanly. The file list comes from `git ls-files`, for the same reason the shellcheck step uses it. The count distinguishes a complete clean run from one that read no files.
-
-  **The list splits on whitespace rather than on a newline, and the regex is double-quoted.** A shell joins the file list with newlines and PowerShell joins it with spaces, so a newline-only split hands the analyzer one path holding every file, which it reports as one file it cannot find followed by a clean run over nothing. The double quotes are what let the whole invocation stay inside the single-quoted `-Command` a shell passes, since PowerShell escapes with a backtick and leaves the backslash alone. Run verbatim it reports `Checked 5 file(s)` from either shell.
-
-  In a configured editor the davidanson extension is enough. Use the Docker CLI when there's no IDE (agent/headless) or to confirm a clean run before pushing.
+In a configured editor the `DavidAnson.vscode-markdownlint` extension is enough for Markdown. Use the wrapper for a headless run or before pushing.
 
 When pulling a public image fails on a Docker-Desktop/WSL credential-helper error (`docker-credential-desktop.exe: exec format error`), retry with an empty Docker config: `DOCKER_CONFIG=$(mktemp -d) docker run ...` after writing `{}` to `$DOCKER_CONFIG/config.json`.
 
