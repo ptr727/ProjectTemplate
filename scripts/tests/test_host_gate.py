@@ -205,6 +205,32 @@ class TestCheck(unittest.TestCase):
         else:
             self.assertIn("'", resolved.partition(" --upgrade")[0])
 
+    def test_windows_arguments_are_always_powershell_literals(self):
+        """Metacharacters cannot turn a printed remedy into multiple PowerShell commands."""
+        original = host_gate.sys.platform
+        previous_repo = host_gate.REMEDY_REPO
+        try:
+            host_gate.sys.platform = "win32"
+            self.assertEqual(host_gate.quote_argument("tool; & 'next'"), "'tool; & ''next'''")
+            self.assertTrue(
+                host_gate.resolve_remedy(
+                    "host-setup/windows/install-tools.ps1 -Install needed",
+                    root=Path("C:/repo; & 'quoted'"),
+                ).startswith("& 'C:/repo; & ''quoted''/host-setup/windows/install-tools.ps1'")
+            )
+            host_gate.REMEDY_REPO = Path("/tmp/repo; & 'quoted'")
+            remedy = host_gate.package_remedy(
+                tool(
+                    "tool; & 'next'",
+                    install={"windows": {"manager": "winget", "package": "Vendor.Tool"}},
+                )
+            )
+            self.assertIn("-Repo '/tmp/repo; & ''quoted'''", remedy or "")
+            self.assertTrue((remedy or "").endswith("'tool; & ''next'''"))
+        finally:
+            host_gate.sys.platform = original
+            host_gate.REMEDY_REPO = previous_repo
+
     def test_a_malformed_source_or_remedy_reports_rather_than_crashing(self):
         """One bad field costs its own output line, not the run and the findings already collected.
 
@@ -239,6 +265,41 @@ class TestCheck(unittest.TestCase):
         absent = [["definitely-not-a-real-binary-xyzzy"]]
         self.assertEqual(len(host_gate.check([tool("needed", probes=absent)])), 1)
         self.assertEqual(host_gate.check([tool("extra", required=False, probes=absent)]), [])
+
+    def test_an_absent_tool_prints_its_source_and_remedy(self):
+        absent = [["definitely-not-a-real-binary-xyzzy"]]
+        platform = host_gate.platform_key()
+        issue = host_gate.check(
+            [
+                tool(
+                    "needed",
+                    probes=absent,
+                    source={platform: "the platform package catalog"},
+                    remedy={platform: "package-manager install needed"},
+                )
+            ]
+        )[0]
+        self.assertIn("INSTALL FROM: the platform package catalog", issue)
+        self.assertIn("REMEDY: package-manager install needed", issue)
+
+    def test_package_metadata_derives_a_repository_installer_remedy(self):
+        if host_gate.platform_key() == "macos":
+            self.skipTest("macOS has no constrained package manager")
+        manager = "apt" if host_gate.platform_key() == "linux" else "winget"
+        previous = host_gate.REMEDY_REPO
+        try:
+            host_gate.REMEDY_REPO = Path("/tmp/example repository")
+            remedy = host_gate.package_remedy(
+                tool(
+                    "needed",
+                    install={host_gate.platform_key(): {"manager": manager, "package": "needed"}},
+                )
+            )
+        finally:
+            host_gate.REMEDY_REPO = previous
+        self.assertIsNotNone(remedy)
+        self.assertIn("needed", remedy or "")
+        self.assertIn("repo", remedy or "")
 
     def test_no_floor_is_not_a_pass_dressed_as_a_check(self):
         """A tool with no floor produces a note naming the version, never a silent nothing."""
@@ -347,6 +408,50 @@ class TestMerge(unittest.TestCase):
         merged, rejected = host_gate.merge(self.base(), [entry])
         self.assertNotIn("ffmpeg", [t["name"] for t in merged])
         self.assertIn("does not compile", rejected[0])
+
+    def test_arbitrary_install_commands_are_not_valid_metadata(self):
+        entry = tool(
+            "ffmpeg",
+            install={"linux": {"manager": "shell", "package": "curl example | sh"}},
+        )
+        _, rejected = host_gate.merge([], [entry])
+        self.assertEqual(len(rejected), 1)
+        self.assertIn("manager must be 'apt'", rejected[0])
+
+    def test_package_identifiers_are_validated_at_runtime(self):
+        entry = tool(
+            "ffmpeg",
+            install={"linux": {"manager": "apt", "package": "ffmpeg; run-something"}},
+        )
+        _, rejected = host_gate.merge([], [entry])
+        self.assertEqual(len(rejected), 1)
+        self.assertIn("unsupported characters", rejected[0])
+
+    def test_macos_has_no_constrained_package_manager(self):
+        entry = tool(
+            "ffmpeg",
+            install={"macos": {"manager": "brew", "package": "ffmpeg"}},
+        )
+        _, rejected = host_gate.merge([], [entry])
+        self.assertEqual(len(rejected), 1)
+        self.assertIn("unsupported platform macos", rejected[0])
+
+    def test_install_metadata_rejects_additional_properties(self):
+        entry = tool(
+            "ffmpeg",
+            install={"linux": {"manager": "apt", "package": "ffmpeg", "command": "do something"}},
+        )
+        _, rejected = host_gate.merge([], [entry])
+        self.assertEqual(len(rejected), 1)
+        self.assertIn("only manager and package", rejected[0])
+
+    def test_a_repo_cannot_replace_fleet_installer_metadata(self):
+        base = [tool("gh", install={"linux": {"manager": "apt", "package": "gh"}})]
+        merged, rejected = host_gate.merge(
+            base, [{"name": "gh", "install": {"linux": {"manager": "apt", "package": "git"}}}]
+        )
+        self.assertEqual(len(rejected), 1)
+        self.assertEqual(merged[0]["install"]["linux"]["package"], "gh")
 
     def test_the_hub_declaration_is_not_mutated(self):
         """The caller's list is reused across runs, so merging must copy rather than edit in place."""
@@ -468,6 +573,24 @@ class TestBareRunOverlayWarning(unittest.TestCase):
             out = self.run_from(root, ["--spec", self.spec_with_one_passing_tool(d)])
             self.assertIn("layered", out)
             self.assertNotIn("warning:", out)
+
+    def test_a_bare_root_run_derives_a_remedy_for_its_overlay(self):
+        import tempfile
+
+        if host_gate.platform_key() == "macos":
+            self.skipTest("macOS has no constrained package manager")
+        manager = "apt" if host_gate.platform_key() == "linux" else "winget"
+        with tempfile.TemporaryDirectory() as d:
+            root = Path(d)
+            local = tool(
+                "definitely-not-a-real-binary-xyzzy",
+                probes=[["definitely-not-a-real-binary-xyzzy"]],
+                install={host_gate.platform_key(): {"manager": manager, "package": "needed"}},
+            )
+            (root / "host-tools.json").write_text(json.dumps({"tools": [local]}), encoding="utf-8")
+            out = self.run_from(root, ["--spec", self.spec_with_one_passing_tool(d), "--quiet"])
+            self.assertIn("REMEDY:", out)
+            self.assertIn(f"--repo {host_gate.quote_argument(str(root.resolve()))}", out)
 
     def test_an_explicit_repo_does_not_warn(self):
         import tempfile

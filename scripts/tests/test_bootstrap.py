@@ -28,6 +28,7 @@ import json
 import re
 import subprocess
 import sys
+import tempfile
 import unittest
 from pathlib import Path
 
@@ -236,6 +237,152 @@ class TestSpecCoverage(unittest.TestCase):
             windows,
             r"Name = 'ripgrep'; Package = 'BurntSushi\.ripgrep\.MSVC'; Probe = 'rg'",
         )
+
+    def test_linux_installer_lists_a_repository_apt_package(self) -> None:
+        """A repository package joins the managed set without becoming executable text."""
+        declaration = {
+            "tools": [
+                {
+                    "name": "virt-customize",
+                    "install": {"linux": {"manager": "apt", "package": "libguestfs-tools"}},
+                }
+            ]
+        }
+        with tempfile.TemporaryDirectory() as directory:
+            Path(directory, "host-tools.json").write_text(json.dumps(declaration), encoding="utf-8")
+            result = subprocess.run(
+                [str(LINUX / "install-tools.sh"), "--list", "--repo", directory],
+                capture_output=True,
+                text=True,
+                check=False,
+            )
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn("virt-customize", result.stdout)
+        self.assertIn("apt:libguestfs-tools (repository)", result.stdout)
+
+    def test_linux_installer_rejects_a_repository_collision(self) -> None:
+        """Repository metadata cannot replace a fleet tool's specialized installer."""
+        declaration = {
+            "tools": [
+                {
+                    "name": "node",
+                    "install": {"linux": {"manager": "apt", "package": "nodejs"}},
+                }
+            ]
+        }
+        with tempfile.TemporaryDirectory() as directory:
+            Path(directory, "host-tools.json").write_text(json.dumps(declaration), encoding="utf-8")
+            result = subprocess.run(
+                [str(LINUX / "install-tools.sh"), "--list", "--repo", directory],
+                capture_output=True,
+                text=True,
+                check=False,
+            )
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("cannot replace it", result.stderr)
+
+    def test_linux_installer_rejects_duplicate_repository_names(self) -> None:
+        """Duplicate overlay names are ambiguous and fail before selection."""
+        entry = {
+            "name": "virt-customize",
+            "install": {"linux": {"manager": "apt", "package": "libguestfs-tools"}},
+        }
+        with tempfile.TemporaryDirectory() as directory:
+            Path(directory, "host-tools.json").write_text(
+                json.dumps({"tools": [entry, entry]}), encoding="utf-8"
+            )
+            result = subprocess.run(
+                [str(LINUX / "install-tools.sh"), "--list", "--repo", directory],
+                capture_output=True,
+                text=True,
+                check=False,
+            )
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("more than once", result.stderr)
+
+    def test_linux_installer_rejects_an_unnamed_repository_tool(self) -> None:
+        """Malformed applicable metadata fails instead of disappearing from the catalog."""
+        declaration = {
+            "tools": [{"install": {"linux": {"manager": "apt", "package": "libguestfs-tools"}}}]
+        }
+        with tempfile.TemporaryDirectory() as directory:
+            Path(directory, "host-tools.json").write_text(json.dumps(declaration), encoding="utf-8")
+            result = subprocess.run(
+                [str(LINUX / "install-tools.sh"), "--list", "--repo", directory],
+                capture_output=True,
+                text=True,
+                check=False,
+            )
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("Cannot read constrained Linux install metadata", result.stderr)
+
+    def test_linux_installer_rejects_a_non_string_package(self) -> None:
+        """JSON scalars do not become package identifiers through jq stringification."""
+        declaration = {
+            "tools": [
+                {
+                    "name": "virt-customize",
+                    "install": {"linux": {"manager": "apt", "package": 7}},
+                }
+            ]
+        }
+        with tempfile.TemporaryDirectory() as directory:
+            Path(directory, "host-tools.json").write_text(json.dumps(declaration), encoding="utf-8")
+            result = subprocess.run(
+                [str(LINUX / "install-tools.sh"), "--list", "--repo", directory],
+                capture_output=True,
+                text=True,
+                check=False,
+            )
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("Cannot read constrained Linux install metadata", result.stderr)
+
+    def test_linux_installer_rejects_extra_install_metadata(self) -> None:
+        """The runtime trust boundary matches the schema's closed package object."""
+        declaration = {
+            "tools": [
+                {
+                    "name": "virt-customize",
+                    "install": {
+                        "linux": {
+                            "manager": "apt",
+                            "package": "libguestfs-tools",
+                            "command": "do something",
+                        }
+                    },
+                }
+            ]
+        }
+        with tempfile.TemporaryDirectory() as directory:
+            Path(directory, "host-tools.json").write_text(json.dumps(declaration), encoding="utf-8")
+            result = subprocess.run(
+                [str(LINUX / "install-tools.sh"), "--list", "--repo", directory],
+                capture_output=True,
+                text=True,
+                check=False,
+            )
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("Cannot read constrained Linux install metadata", result.stderr)
+
+    def test_sudo_timestamp_does_not_load_repository_tools(self) -> None:
+        """The sudo-only action bypasses repository metadata before selection."""
+        text = (LINUX / "install-tools.sh").read_text(encoding="utf-8")
+        main = re.search(r"main\(\) \{(?P<body>.*?)^\}", text, re.MULTILINE | re.DOTALL)
+        self.assertIsNotNone(main)
+        body = main.group("body") if main else ""
+        self.assertRegex(body, r'if \[\[ \$MODE != "sudo-timestamp" \]\]; then\s+load_repo_tools')
+
+    def test_windows_installer_requires_a_repository_tools_array(self) -> None:
+        """The Windows trust-boundary reader rejects an object-shaped tool catalog."""
+        text = (WINDOWS / "install-tools.ps1").read_text(encoding="utf-8")
+        self.assertIn("$overlay.tools -isnot [System.Array]", text)
+
+    def test_windows_installer_requires_string_package_metadata(self) -> None:
+        """PowerShell cannot stringify JSON values before package-ID validation."""
+        text = (WINDOWS / "install-tools.ps1").read_text(encoding="utf-8")
+        self.assertIn("$metadata.manager -isnot [string]", text)
+        self.assertIn("$metadata.package -isnot [string]", text)
+        self.assertIn("$metadataKeys.Count -ne 2", text)
 
     def test_every_declared_floor_carries_a_total_remedy_mapping(self) -> None:
         """Each floored tool names a runnable remedy on every platform, or carries a recorded exception.

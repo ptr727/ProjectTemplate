@@ -125,10 +125,13 @@ Then the dry runs, which print what each action would do:
 
 ```powershell
 host-setup\windows\install-tools.ps1 -Upgrade -DryRun
+host-setup\windows\install-tools.ps1 -Install -Repo C:\path\to\repository -DryRun
 host-setup\windows\upgrade-host.ps1 -Packages -DryRun
 host-setup\windows\setup-github.ps1 -Configure -DryRun
 host-setup\windows\setup-wsl.ps1 -Install Debian -DryRun
 ```
+
+`-Repo` adds the repository's `install.windows` entries to the report or action. Only `winget` package IDs are accepted. The script does not execute the declaration's `remedy` text.
 
 Two of those are guards rather than previews, and each prints a refusal rather than a command: `upgrade-host.ps1 -Wsl -DryRun` on a host running Docker Desktop, and an `-Upgrade` whose `-Scope` disagrees with the installed copy. A `[dry run]` line from either means the guard sits in the wrong place.
 
