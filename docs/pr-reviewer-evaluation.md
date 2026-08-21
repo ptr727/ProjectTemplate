@@ -54,7 +54,7 @@ The first sample is too small for an adoption decision. It does show that both c
 | Reviewer | True Positive | Mixed | False Positive | Duplicate Roots | Initial Reading |
 | --- | ---: | ---: | ---: | ---: | --- |
 | GitHub Copilot | Not scored | Not scored | Not scored | Not scored | At least seven review attempts across two pull requests ended in an error, so no review covered any reviewed head |
-| CodeRabbit | 16 | 2 | 0 | 3 | Strong issue discovery, with occasional remedies that overstate configuration scope or contradict another valid control |
+| CodeRabbit | 24 | 2 | 0 | 3 | Strong issue discovery, with occasional remedies that overstate configuration scope or contradict another valid control |
 | Qodo | 3 | 1 | 4 | 2 | Finds additional reliability issues, but repeatedly misreads repository title rules and documented tool behavior |
 
 The duplicate roots were target-discovery failure, markdownlint filename handling, and process-failure classification. Qodo alone raised command-line length limits. CodeRabbit alone covered the postponed runner design, Docker mount quoting, and the editor-extension identifier.
@@ -80,6 +80,8 @@ Qodo posted five findings:
 
 Copilot posted three terminal error responses and no findings. This sample therefore measures candidate value during an incumbent outage, not comparative recall over the same completed review.
 
+After `develop` advanced, CodeRabbit added two true positives: the organization Copilot runner policy also governs the cloud agent, and homelab labels must not overlap the hosted selector. Qodo added no finding.
+
 ### 2026-08-21: Pull Request #892
 
 Qodo posted three findings:
@@ -100,6 +102,8 @@ Qodo completed 2 minutes 42 seconds after the pull request became ready.
 After the corrective push, CodeRabbit completed an explicitly triggered incremental review in exactly 8 minutes and added no findings. Qodo updated its existing review comment in place, marked the corrected process-failure finding resolved, and added no findings. Neither follow-up created a new formal review object, so provider-aware automation must also recognize updated comments and replies that report command completion.
 
 Successive documentation-only follow-ups found two true positives: a compound-modifier error and inconsistent reviewer-attempt counts. The later comment that identified the resulting log-total mismatch repeated the count-reconciliation root. Qodo added no finding.
+
+Later follow-ups found six more true positives: upstream draft handoff, live runner authorization evidence, duplicate-root bookkeeping, the active workflow-restriction flag, the exact repository set, and the exact workflow set.
 
 Copilot posted terminal error responses on at least four successive pull request heads and supplied no review coverage.
 
