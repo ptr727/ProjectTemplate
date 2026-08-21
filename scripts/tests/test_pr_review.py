@@ -1016,8 +1016,8 @@ class TestUnrecognizedShapes(GqlCase):
     a suppressed heading reworded, a suppressed section moved inside another wrapper, and a
     coverage line nothing parsed. Each was caught after it had already reported a clean pass.
 
-    The inventory is measured rather than imagined. Over the same 332 review bodies, with fenced
-    blocks removed and text reduced to ASCII, the whole corpus is 7 headings, 6 summaries and 3
+    The inventory is measured rather than imagined. Over the same 333 review bodies, with fenced
+    blocks removed and text reduced to ASCII, the whole corpus is 8 headings, 6 summaries and 3
     metadata labels, and every body carries at least one of them.
     """
 
@@ -1037,6 +1037,11 @@ class TestUnrecognizedShapes(GqlCase):
         out = self.digest_for(review(body=OVERVIEW + "\n### Confidence assessment\n\nHigh.\n"))
         self.assertIn("shapes=UNRECOGNIZED", out)
         self.assertIn("heading: ### Confidence assessment", out)
+
+    def test_approval_recommended_heading_is_vetted(self) -> None:
+        """The no-findings verdict introduced by the current Copilot review stays readable."""
+        body = "### \U0001f7e2 Approval recommended\n\nDocumentation updates are consistent.\n"
+        self.assertEqual([], pr_review.unrecognized_in(body))
 
     def test_a_details_summary_that_is_not_in_the_inventory_blocks(self) -> None:
         """The suppressed section has already moved between wrappers once."""

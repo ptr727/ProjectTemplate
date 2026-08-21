@@ -192,17 +192,18 @@ SEVERITY = (UNVETTED, PARTIAL, FULL, UNSTATED)
 # The constant carries that name too, so no reader has to map a name here onto another word.
 COVERAGE_FIELD = {UNVETTED: "UNVETTED", PARTIAL: "PARTIAL", FULL: "full", UNSTATED: "unstated"}
 
-# Every structural marker the reviewer's own bodies carry, measured over the same 332.
+# Every structural marker the reviewer's own bodies carry, measured over the same 333.
 # A body is read for these rather than trusted, because every reader below keys on one of them.
 # A heading this script has no spelling for is a section it will not find, reported as absent.
 # That is the shape of all three failures already on record here, each caught after it landed.
-# The lists are small because the output is regular: 7 headings, 6 summaries and 3 labels.
+# The lists are small because the output is regular: 8 headings, 6 summaries and 3 labels.
 # Counts are normalized to `(N)` and non-ASCII is dropped before comparing.
 # The verdict headings carry a colored circle, so the emoji is what would drift most cheaply.
 # Dropping it also keeps this file inside the charset rule that governs the repository.
 VETTED_HEADINGS = {
     "## Pull request overview",
     "### Reviewed changes",
+    "### Approval recommended",
     "### Ready to approve",
     "### Changes recommended",
     "### Not ready to approve",

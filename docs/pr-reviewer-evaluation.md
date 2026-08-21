@@ -19,7 +19,7 @@ This document measures whether additional automated reviewers improve the fleet'
 **State:** Active evaluation\
 **Incumbent:** GitHub Copilot\
 **Candidates:** CodeRabbit and Qodo\
-**Samples:** [ProjectTemplate pull request #891][pr-891] and [pull request #892][pr-892]
+**Samples:** [ProjectTemplate pull request #891][pr-891], [pull request #892][pr-892], and [pull request #893][pr-893]
 
 No candidate is a required reviewer. A candidate remains advisory until it meets the first-class support criteria below.
 
@@ -106,6 +106,12 @@ Successive documentation-only follow-ups found two true positives: a compound-mo
 Later follow-ups found six more true positives: upstream draft handoff, live runner authorization evidence, duplicate-root bookkeeping, the active workflow-restriction flag, the exact repository set, and the exact workflow set.
 
 Copilot posted terminal error responses on at least four successive pull request heads and supplied no review coverage.
+
+### 2026-08-21: Pull Request #893
+
+All three reviewers reported no findings. Qodo completed in 7 seconds, Copilot completed in 1 minute 55 seconds, and an explicitly triggered CodeRabbit review completed in 4 minutes 36 seconds.
+
+Copilot reviewed 2/2 changed files at Lite effort. Its new `Approval recommended` heading was not recognized by `pr_review.py`, so the otherwise clean review remained blocked. [Issue #894][issue-894] records the shape, and the pull request adds a regression fixture for it.
 
 ## Interaction and Operations
 
@@ -195,6 +201,11 @@ The existing Copilot adapter remains behaviorally unchanged during extraction. P
 
 [pr-891]: https://github.com/ptr727/ProjectTemplate/pull/891
 [pr-892]: https://github.com/ptr727/ProjectTemplate/pull/892
+[pr-893]: https://github.com/ptr727/ProjectTemplate/pull/893
+
+<!-- Issues -->
+
+[issue-894]: https://github.com/ptr727/ProjectTemplate/issues/894
 
 <!-- External -->
 
