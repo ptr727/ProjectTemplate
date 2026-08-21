@@ -99,7 +99,7 @@ Qodo completed 2 minutes 42 seconds after the pull request became ready.
 
 After the corrective push, CodeRabbit completed an explicitly triggered incremental review in exactly 8 minutes and added no findings. Qodo updated its existing review comment in place, marked the corrected process-failure finding resolved, and added no findings. Neither follow-up created a new formal review object, so provider-aware automation must also recognize updated comments and replies that report command completion.
 
-A final documentation-only follow-up took 3 minutes 5 seconds. CodeRabbit found one true-positive compound-modifier error in this assessment. Qodo added no finding.
+Successive documentation-only follow-ups found two true positives: a compound-modifier error and inconsistent reviewer-attempt counts. The later comment that identified the resulting log-total mismatch repeated the count-reconciliation root. Qodo added no finding.
 
 Copilot posted terminal error responses on at least four successive pull request heads and supplied no review coverage.
 
