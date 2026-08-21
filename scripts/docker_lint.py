@@ -13,6 +13,7 @@ from pathlib import Path
 
 PSSCRIPTANALYZER_VERSION = "1.23.0"
 PSSCRIPTANALYZER_VOLUME = f"projecttemplate-psscriptanalyzer-{PSSCRIPTANALYZER_VERSION}"
+MAX_FILE_ARGUMENT_BYTES = 16 * 1024
 
 
 @dataclass(frozen=True)
@@ -84,6 +85,8 @@ def run_command(
                     f"(exit {cleanup.returncode})"
                 ) from error
         raise CommandFailed(f"timed out after {timeout}s") from error
+    except OSError as error:
+        raise CommandFailed(f"could not start command: {error}") from error
 
 
 def tracked_files(root: Path, linter: Linter) -> list[str]:
@@ -100,13 +103,44 @@ def tracked_files(root: Path, linter: Linter) -> list[str]:
     ]
     if linter.patterns:
         command.extend(["--", *linter.patterns])
-    result = subprocess.run(command, check=True, capture_output=True)
+    try:
+        result = subprocess.run(command, check=True, capture_output=True)
+    except FileNotFoundError as error:
+        raise CommandFailed("target discovery failed: git was not found") from error
+    except subprocess.CalledProcessError as error:
+        detail = os.fsdecode(error.stderr).strip() if error.stderr else f"exit {error.returncode}"
+        raise CommandFailed(f"target discovery failed: {detail}") from error
+    except OSError as error:
+        raise CommandFailed(f"target discovery failed: {error}") from error
     return [os.fsdecode(entry) for entry in result.stdout.split(b"\0") if entry]
 
 
 def docker_mount(root: Path, destination: str) -> str:
     """Build the read-only repository mount argument."""
-    return f"type=bind,src={root},dst={destination},readonly"
+    source = str(root).replace('"', '""')
+    return f'type=bind,"src={source}",dst={destination},readonly'
+
+
+def file_batches(linter: Linter, files: Sequence[str]) -> list[list[str]]:
+    """Split file arguments before the host command-line limit becomes relevant."""
+    if linter.name not in {"markdownlint", "cspell", "shellcheck", "PSScriptAnalyzer"}:
+        return [list(files)]
+
+    batches: list[list[str]] = []
+    batch: list[str] = []
+    batch_bytes = 0
+    for file in files:
+        multiplier = 2 if linter.name == "PSScriptAnalyzer" else 1
+        file_bytes = len(os.fsencode(file)) * multiplier + 4
+        if batch and batch_bytes + file_bytes > MAX_FILE_ARGUMENT_BYTES:
+            batches.append(batch)
+            batch = []
+            batch_bytes = 0
+        batch.append(file)
+        batch_bytes += file_bytes
+    if batch:
+        batches.append(batch)
+    return batches
 
 
 def resolve_digest(
@@ -194,6 +228,8 @@ def container_command(root: Path, linter: Linter, digest: str, files: Sequence[s
     else:
         command.extend([digest, *linter.arguments])
         if linter.name in {"markdownlint", "cspell", "shellcheck"}:
+            if linter.name == "markdownlint":
+                command.append("--")
             command.extend(files)
     return command
 
@@ -242,24 +278,24 @@ def lint(
     runner: Callable[..., subprocess.CompletedProcess[str]] = run_command,
 ) -> int:
     """Pull applicable images, then run every selected linter."""
-    applicable: list[tuple[Linter, list[str]]] = []
-    for linter in LINTERS:
-        if linter.name not in selected:
-            continue
-        files = tracked_files(root, linter)
-        if not files:
-            print(f"SKIP {linter.name}: zero targets", flush=True)
-            continue
-        print(f"TARGETS {linter.name}: {len(files)} file(s)", flush=True)
-        applicable.append((linter, files))
-
-    if not applicable:
-        print("COMPLETE lint: zero applicable linters", flush=True)
-        return 0
-
-    print("PHASE pull", flush=True)
-    digests: dict[str, str] = {}
     try:
+        applicable: list[tuple[Linter, list[str]]] = []
+        for linter in LINTERS:
+            if linter.name not in selected:
+                continue
+            files = tracked_files(root, linter)
+            if not files:
+                print(f"SKIP {linter.name}: zero targets", flush=True)
+                continue
+            print(f"TARGETS {linter.name}: {len(files)} file(s)", flush=True)
+            applicable.append((linter, files))
+
+        if not applicable:
+            print("COMPLETE lint: zero applicable linters", flush=True)
+            return 0
+
+        print("PHASE pull", flush=True)
+        digests: dict[str, str] = {}
         for linter, _ in applicable:
             run_step(f"pull {linter.name}", ["docker", "pull", linter.image], timeout, runner)
             digests[linter.name] = resolve_digest(linter.name, linter.image, timeout, runner)
@@ -268,12 +304,20 @@ def lint(
         for linter, files in applicable:
             if linter.name == "PSScriptAnalyzer":
                 install_psscriptanalyzer(digests[linter.name], timeout, runner)
-            run_step(
-                f"lint {linter.name} ({len(files)} file(s))",
-                container_command(root, linter, digests[linter.name], files),
-                timeout,
-                runner,
-            )
+            batches = file_batches(linter, files)
+            for index, batch in enumerate(batches, start=1):
+                label = f"lint {linter.name} ({len(files)} file(s))"
+                if len(batches) > 1:
+                    label = (
+                        f"lint {linter.name} batch {index}/{len(batches)} "
+                        f"({len(batch)} of {len(files)} file(s))"
+                    )
+                run_step(
+                    label,
+                    container_command(root, linter, digests[linter.name], batch),
+                    timeout,
+                    runner,
+                )
     except CommandFailed as error:
         print(f"RESULT failed: {error}", flush=True)
         return 1

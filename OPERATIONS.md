@@ -39,7 +39,7 @@ The cache directory is unique to this verification run and remains outside the c
 
 The `test_install.py` line behaves differently here than in CI, stated so its failure reads as the verdict it is. Its report cases install from this checkout and assert the machine then reads as current. An install from a checkout carrying uncommitted changes records a dirty stamp that reads as stale. So on a working tree mid-change those cases fail by design where CI's clean checkout passes. The remedy is to run them again once the change is committed, not to read the failure as a regression.
 
-The Docker runner discovers tracked and unignored targets with `git ls-files`. It passes each path as one argument, so a path that contains whitespace remains one target.
+The Docker runner discovers tracked and unignored targets with `git ls-files`. It passes each path as one argument, so a path that contains whitespace remains one target. It splits long target lists into bounded batches before host command-line limits become relevant.
 
 Two gaps in that list are CI's rather than this runbook's, reproduced here so a local run matches CI rather than quietly exceeding it. The `jq` glob covers `repo-config/*.json` and does not reach `repo-config/operational/develop.json`, so a malformed operational payload passes. The second is that `sentence-split` and `sentence-length` are implemented and tested but named by no invocation, so nothing runs them.
 
@@ -112,7 +112,7 @@ The Docker linters pull `:latest` deliberately, so a local run matches whatever 
 python3 scripts/docker_lint.py
 ```
 
-The runner prints target counts before pulling images. It then prints a phase boundary before any repository mount. Every Docker command has a five-minute default timeout, which `--timeout` can change. Each linter emits start and completion markers even when the tool succeeds quietly. A timeout, container failure, zero-target skip, and successful completion each have distinct output.
+The runner prints target counts before pulling images. It then prints a phase boundary before any repository mount. Every Docker command has a five-minute default timeout, which `--timeout` can change. Each linter emits start and completion markers even when the tool succeeds quietly. Long target lists run in bounded batches. A timeout, container failure, zero-target skip, and successful completion each have distinct output.
 
 Use repeated `--linter` options to run a subset. markdownlint reads every tracked or unignored Markdown file. CSpell reads only `README.md` and `HISTORY.md`, matching CI's deliberate scope.
 

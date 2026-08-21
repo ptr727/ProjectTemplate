@@ -72,8 +72,10 @@ class DockerLintCase(unittest.TestCase):
         self.assertIn("RESULT success: 1 linter(s) completed", output)
         run = next(command for command, _ in runner.commands if command[:2] == ["docker", "run"])
         self.assertIn("--network=none", run)
-        self.assertIn(f"type=bind,src={self.root},dst=/workdir,readonly", run)
+        self.assertIn(f'type=bind,"src={self.root}",dst=/workdir,readonly', run)
         self.assertIn("example@sha256:123", run)
+        self.assertEqual("--", run[-2])
+        self.assertEqual("README.md", run[-1])
         self.assertTrue(all(timeout == 17 for _, timeout in runner.commands))
 
     def test_zero_targets_skips_pull_and_execution(self) -> None:
@@ -106,6 +108,49 @@ class DockerLintCase(unittest.TestCase):
         self.assertEqual(0, result)
         run = next(command for command, _ in runner.commands if command[:2] == ["docker", "run"])
         self.assertEqual("scripts/a shell.sh", run[-1])
+
+    def test_invalid_git_root_reports_failed_result(self) -> None:
+        root = Path(self.enterContext(tempfile.TemporaryDirectory()))
+        output = io.StringIO()
+        with contextlib.redirect_stdout(output):
+            result = docker_lint.lint(root, 17, {"markdownlint"}, FakeRunner())
+        self.assertEqual(1, result)
+        self.assertIn("RESULT failed: target discovery failed:", output.getvalue())
+
+    def test_mount_quotes_commas_and_embedded_quotes(self) -> None:
+        root = Path('/tmp/docker-lint,"root')
+        self.assertEqual(
+            'type=bind,"src=/tmp/docker-lint,""root",dst=/workdir,readonly',
+            docker_lint.docker_mount(root, "/workdir"),
+        )
+
+    def test_markdown_literal_marker_precedes_negated_filename(self) -> None:
+        linter = next(linter for linter in docker_lint.LINTERS if linter.name == "markdownlint")
+        command = docker_lint.container_command(
+            self.root, linter, "example@sha256:123", ["!release.md"]
+        )
+        self.assertEqual(["--", "!release.md"], command[-2:])
+
+    def test_long_file_lists_are_split_into_multiple_commands(self) -> None:
+        linter = next(linter for linter in docker_lint.LINTERS if linter.name == "shellcheck")
+        files = [f"scripts/{index}-{'x' * 200}.sh" for index in range(400)]
+        batches = docker_lint.file_batches(linter, files)
+        self.assertGreater(len(batches), 1)
+        self.assertEqual(files, [file for batch in batches for file in batch])
+        self.assertTrue(
+            all(
+                sum(len(file.encode()) + 4 for file in batch) <= docker_lint.MAX_FILE_ARGUMENT_BYTES
+                for batch in batches
+            )
+        )
+
+        runner = FakeRunner()
+        with mock.patch.object(docker_lint, "tracked_files", return_value=files):
+            result, output = self.invoke({"shellcheck"}, runner)
+        self.assertEqual(0, result)
+        runs = [command for command, _ in runner.commands if command[:2] == ["docker", "run"]]
+        self.assertEqual(len(batches), len(runs))
+        self.assertIn(f"batch 1/{len(batches)}", output)
 
     def test_timed_out_container_is_removed_with_a_shorter_bound(self) -> None:
         command = ["docker", "run", "--name", "bounded-lint", "image"]

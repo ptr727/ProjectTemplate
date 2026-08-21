@@ -105,6 +105,7 @@
     "pyright",
     "pyrightconfig",
     "pytest",
+    "Qodo",
     "quoteoftheday",
     "regen",
     "resharper",

@@ -237,13 +237,13 @@ python3 /path/to/ProjectTemplate/scripts/docker_lint.py --root "$PWD"
 
 The wrapper discovers tracked and unignored targets before it pulls applicable images. It reports a zero-target skip without pulling or mounting the repository. It pulls each applicable image in a distinct pull phase, then resolves the pulled repository digest. A digest prevents the tag from changing between the pull and execution. It does not make third-party code trusted.
 
-After all pulls, the wrapper reports that repository mounts are about to begin. Each execution uses the resolved digest, disabled networking, and a read-only checkout mount. PSScriptAnalyzer installs its pinned module in a separate container without the checkout mount. Its lint container receives each tracked PowerShell path as a distinct argument.
+After all pulls, the wrapper reports that repository mounts are about to begin. Each execution uses the resolved digest, disabled networking, and a read-only checkout mount. PSScriptAnalyzer installs its pinned module in a separate container without the checkout mount. Linters receive each tracked path as a distinct argument, split across bounded batches before host command-line limits become relevant.
 
 Every Docker command has a five-minute timeout by default. Use `--timeout` to select another positive bound. The wrapper emits a start and completion line for each command. It reports the checked-file count for every linter, including tools that produce no success output. Timeout, container failure, zero-target execution, and successful quiet completion have distinct result lines. The wrapper names each lint container and removes it after a timeout.
 
 Use repeated `--linter` options for a subset. The supported names are `editorconfig-checker`, `actionlint`, `markdownlint`, `cspell`, `shellcheck`, and `PSScriptAnalyzer`. editorconfig-checker reads the mounted tree. actionlint reads eligible workflows and includes shellcheck for `run:` blocks. markdownlint reads tracked and unignored Markdown files. CSpell reads `README.md` and `HISTORY.md` only. shellcheck and PSScriptAnalyzer run only when matching scripts are tracked or unignored.
 
-In a configured editor the davidanson extension is enough for Markdown. Use the wrapper for a headless run or before pushing.
+In a configured editor the `DavidAnson.vscode-markdownlint` extension is enough for Markdown. Use the wrapper for a headless run or before pushing.
 
 When pulling a public image fails on a Docker-Desktop/WSL credential-helper error (`docker-credential-desktop.exe: exec format error`), retry with an empty Docker config: `DOCKER_CONFIG=$(mktemp -d) docker run ...` after writing `{}` to `$DOCKER_CONFIG/config.json`.
 
