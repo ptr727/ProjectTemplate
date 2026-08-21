@@ -57,7 +57,7 @@ The first sample is too small for an adoption decision. It does show that both c
 | CodeRabbit | 16 | 2 | 0 | 3 | Strong issue discovery, with occasional remedies that overstate configuration scope or contradict another valid control |
 | Qodo | 3 | 1 | 4 | 2 | Finds additional reliability issues, but repeatedly misreads repository title rules and documented tool behavior |
 
-The duplicate roots were target-discovery failure and markdownlint filename handling. Qodo alone raised command-line length limits. CodeRabbit alone covered the postponed runner design, Docker mount quoting, and the editor-extension identifier.
+The duplicate roots were target-discovery failure, markdownlint filename handling, and process-failure classification. Qodo alone raised command-line length limits. CodeRabbit alone covered the postponed runner design, Docker mount quoting, and the editor-extension identifier.
 
 These counts judge central claims, not every sentence in a comment. The detailed finding log preserves qualifications that the table cannot express.
 

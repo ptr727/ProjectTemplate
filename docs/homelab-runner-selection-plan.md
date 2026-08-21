@@ -247,6 +247,7 @@ Automated tests cover:
 Static workflow verification also covers action pinning, actionlint custom labels, job dependencies, and workflow syntax.
 
 Live verification covers both selection branches. Only a live run can prove runner registration and Copilot integration.
+Before the runner-group checkpoint is complete, capture live API evidence for the effective repository allowlist, the selected-workflow path and protected ref, and `allows_public_repositories`. Run negative canaries that prove direct-label and unapproved-ref requests cannot reach the group. Link provisioning evidence from the owning CloudInit repository rather than inferring it from this plan.
 
 ## Planned Repository Surfaces
 
@@ -319,6 +320,9 @@ Implementation waits for an explicit decision on each item.
 - [ ] GitHub-hosted default branch exercised.
 - [ ] CloudInit public opt-in reviewed in its owning repository.
 - [ ] Restricted organization runner group and runner registered.
+- [ ] Live runner-group API evidence records the repository allowlist, selected-workflow path and protected ref, and public-repository setting.
+- [ ] Direct-label and unapproved-ref negative canaries are rejected.
+- [ ] CloudInit provisioning evidence is linked from its owning repository.
 - [ ] Protected-ref homelab canary succeeds.
 - [ ] Fork or external path stays GitHub-hosted.
 - [ ] Copilot agentic review succeeds on GitHub-hosted infrastructure.
