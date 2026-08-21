@@ -452,7 +452,7 @@ def strip_sections(text, names):
 def undeclared_h2_headings(text, declared):
     """Level-two headings in `text` that `declared` does not name, sorted.
 
-    `declared` is normalized here (stripped, case-folded) rather than trusted pre-normalized, so the
+    `declared` is normalized here (stripped, lowercased) rather than trusted pre-normalized, so the
     contract holds for any caller regardless of how its own section names are cased or spaced.
     Scoped to `## ` only: the section model's unit is the H2, and an H1 title or a nested H3 is not itself a
     section this check judges. Fence-aware via unfenced_text, so a `## ` line inside a fenced code sample -
