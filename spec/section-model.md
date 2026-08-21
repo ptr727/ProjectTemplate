@@ -91,6 +91,8 @@ A repo that carried its governance inside `AGENTS.md` before the router split ho
 
 `files.json` declares each section's fidelity. [validate.py][validate] proves every declared section resolves to a real level-two heading in the hub's own copy of the file that declares it, so a renamed or mistyped section cannot silently stop being checked. [audit.py][audit] checks each repo's copy (presence for `intent`, byte-match for `verbatim`) and classifies a mismatch as stale (re-vendor) or modified (review).
 
+The undeclared-heading advisory above also runs against `.github/copilot-instructions.md`, not only `AGENTS.md` and `GOVERNANCE.md`, since that file has its own declared sections in `files.json` and is where repo-specific content has accumulated undetected before. It names the heading as undeclared and points at this doc's destinations, and it does not attempt to name which destination a given heading belongs in, since neither `OPERATIONS.md`'s six headings nor `ARCHITECTURE.md`'s are declared anywhere as data, and matching by heading name would miss content filed under a differently worded heading regardless.
+
 <!-- Internal -->
 
 [agents]: ../AGENTS.md

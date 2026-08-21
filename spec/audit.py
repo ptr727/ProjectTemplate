@@ -419,6 +419,11 @@ def extract_section(text, heading):
 # Carried files scanned for a coordination reference (GOVERNANCE.md "Documentation Style Conventions").
 TEMPLATE_REF_SCANNED = ("AGENTS.md", "GOVERNANCE.md", ".github/copilot-instructions.md")
 
+# Carried files scanned for an undeclared H2 heading (spec/section-model.md).
+# Started as AGENTS.md and GOVERNANCE.md, the two files section-model.md's split governs.
+# #523 added .github/copilot-instructions.md, after a repo's local content sat there undetected, duplicating a later OPERATIONS.md.
+UNDECLARED_HEADING_SCANNED = ("AGENTS.md", "GOVERNANCE.md", ".github/copilot-instructions.md")
+
 
 def strip_sections(text, names):
     """`text` with each named `## <heading>` region removed, located by position rather than by content.
@@ -442,6 +447,22 @@ def strip_sections(text, names):
         if not dropping:
             out.append(ln)
     return "\n".join(out)
+
+
+def undeclared_h2_headings(text, declared):
+    """Level-two headings in `text` that lowercased `declared` does not name, sorted.
+
+    Scoped to `## ` only: the section model's unit is the H2, and an H1 title or a nested H3 is not itself a
+    section this check judges. Fence-aware via unfenced_text, so a `## ` line inside a fenced code sample -
+    documenting the heading syntax itself, or a `##`-prefixed shell comment - is not misread as a real
+    heading; per unfenced_text's own docstring, a checker left fence-blind is a document read two ways.
+    """
+    h2s = {
+        ln[3:].strip().lower()
+        for ln in unfenced_text(text).split("\n")
+        if ln.startswith("## ")
+    }
+    return sorted(h2s - declared)
 
 
 def template_ref_outside_verbatim(text, verbatim_names, hub_name):
@@ -1869,15 +1890,13 @@ def audit_repo(entry, spec, branch=None):
                     )
                 # The undeclared-section advisory, per spec/section-model.md, treats an H2 the manifest does not declare as a candidate duplicate of a verbatim section, or as repo-specific content to relocate.
                 # It is advisory only, since a repo may legitimately carry its own project-specific sections, which the AGENTS.md preamble allows, so it points at the reconciliation and never fails.
-                # It covers AGENTS.md and GOVERNANCE.md only, the two files whose section structure is governed by section-model.md.
+                # It covers UNDECLARED_HEADING_SCANNED: AGENTS.md and GOVERNANCE.md, whose section structure section-model.md governs directly, plus .github/copilot-instructions.md, which carries its own declared sections in files.json and is where repo-specific content has actually accumulated undetected (#523).
+                # It does not name a destination file, only that the heading is undeclared: neither OPERATIONS.md's six headings nor ARCHITECTURE.md's are declared as data anywhere, and the repo that motivated this used headings that matched neither, so a name-match would have missed the case it exists to catch.
                 # Skip the hub itself, since its copies are the source and legitimately hold hub-only sections, Repository Onboarding and Conformance being one, that are deliberately not carried.
                 # A downstream repo carrying such a section is still flagged, which is the point.
-                if path in ("AGENTS.md", "GOVERNANCE.md") and entry.get("name") != HUB_NAME:
+                if path in UNDECLARED_HEADING_SCANNED and entry.get("name") != HUB_NAME:
                     declared = {n.strip().lower() for n in (needed | verbatim_needed)}
-                    h2s = {
-                        ln[3:].strip().lower() for ln in text.splitlines() if ln.startswith("## ")
-                    }
-                    for h in sorted(h2s - declared):
+                    for h in undeclared_h2_headings(text, declared):
                         findings.append(
                             (
                                 "DRIFT",
@@ -2864,6 +2883,56 @@ def _selftest():
         print(
             f"  ok   template-ref: {len(tref)} cases, verbatim regions excised before the hub-name scan"
         )
+
+    # Undeclared-heading advisory: an H2 the manifest does not declare, scoped to AGENTS.md, GOVERNANCE.md, and .github/copilot-instructions.md (#523), fence-aware so a documented heading syntax or a shell comment inside a code sample is not misread as a real section.
+    uh = [
+        (
+            "a declared H2 is not flagged",
+            "# AGENTS\n\n## Fleet Bootstrap\n\nText.\n",
+            {"fleet bootstrap"},
+            [],
+        ),
+        (
+            "an undeclared H2 is flagged",
+            "# AGENTS\n\n## Fleet Bootstrap\n\nText.\n\n## Local Notes\n\nRepo-specific.\n",
+            {"fleet bootstrap"},
+            ["local notes"],
+        ),
+        (
+            "declared-name match is case-insensitive",
+            "# AGENTS\n\n## fleet BOOTSTRAP\n\nText.\n",
+            {"fleet bootstrap"},
+            [],
+        ),
+        (
+            "an H1 title and a nested H3 are not judged, only H2",
+            "# Local Notes\n\n## Fleet Bootstrap\n\n### Local Notes\n\nText.\n",
+            {"fleet bootstrap"},
+            [],
+        ),
+        (
+            "a fenced sample showing heading syntax is not a real heading",
+            "# AGENTS\n\n## Fleet Bootstrap\n\n```\n## Local Notes\n```\n",
+            {"fleet bootstrap"},
+            [],
+        ),
+        (
+            "a repo's own local content, undeclared, is flagged - the copilot-instructions.md case #523 added",
+            "# Copilot Instructions\n\n## GitHub Copilot Review Runbook\n\nText.\n\n"
+            "## Development Workflow\n\nLocal build and test steps.\n\n"
+            "## Command Line Usage\n\nLocal CLI reference.\n",
+            {"github copilot review runbook"},
+            ["command line usage", "development workflow"],
+        ),
+    ]
+    uh_ok = True
+    for label, doc, declared, want in uh:
+        got = undeclared_h2_headings(doc, declared)
+        if got != want:
+            ok = uh_ok = False
+            print(f"  FAIL undeclared-heading: {label} (expected {want}, got {got})")
+    if uh_ok:
+        print(f"  ok   undeclared-heading: {len(uh)} cases, H2-only, case-insensitive, fence-aware")
 
     # Issue generator: findings land in the right buckets and the title carries the count.
     fe = {"name": "Widget", "types": ["python"]}
