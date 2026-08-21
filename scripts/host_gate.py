@@ -378,7 +378,7 @@ def resolve_remedy(command: str, root: Path | None = None) -> str:
     if platform_key() == "windows":
         # PowerShell runs a quoted path only through the call operator, and a single-quoted literal doubles its own quote character.
         escaped = resolved.replace("'", "''")
-        quoted = f"& '{escaped}'" if resolved != escaped or " " in resolved else resolved
+        quoted = f"& '{escaped}'"
     else:
         quoted = shlex.quote(resolved)
     return f"{quoted} {rest}" if rest else quoted
