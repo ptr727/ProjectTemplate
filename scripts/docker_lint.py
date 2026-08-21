@@ -101,7 +101,7 @@ def tracked_files(root: Path, linter: Linter) -> list[str]:
     if linter.patterns:
         command.extend(["--", *linter.patterns])
     result = subprocess.run(command, check=True, capture_output=True)
-    return [entry.decode() for entry in result.stdout.split(b"\0") if entry]
+    return [os.fsdecode(entry) for entry in result.stdout.split(b"\0") if entry]
 
 
 def docker_mount(root: Path, destination: str) -> str:
@@ -110,16 +110,19 @@ def docker_mount(root: Path, destination: str) -> str:
 
 
 def resolve_digest(
-    image: str, timeout: int, runner: Callable[..., subprocess.CompletedProcess[str]]
+    name: str,
+    image: str,
+    timeout: int,
+    runner: Callable[..., subprocess.CompletedProcess[str]],
 ) -> str:
     """Resolve the pulled image to its immutable repository digest."""
-    result = runner(
+    result = run_step(
+        f"inspect {name}",
         ["docker", "image", "inspect", "--format", "{{index .RepoDigests 0}}", image],
         timeout,
+        runner,
         capture_output=True,
     )
-    if result.returncode != 0:
-        raise CommandFailed(f"container failure (exit {result.returncode})")
     digest = (result.stdout or "").strip()
     if not digest:
         raise CommandFailed("container failure (image has no repository digest)")
@@ -131,11 +134,13 @@ def run_step(
     command: Sequence[str],
     timeout: int,
     runner: Callable[..., subprocess.CompletedProcess[str]],
-) -> None:
+    *,
+    capture_output: bool = False,
+) -> subprocess.CompletedProcess[str]:
     """Run one visible bounded step and classify its result."""
     print(f"START {label} (timeout {timeout}s)", flush=True)
     try:
-        result = runner(command, timeout)
+        result = runner(command, timeout, capture_output=capture_output)
     except CommandFailed as error:
         print(f"TIMEOUT {label}: {error}", flush=True)
         raise
@@ -143,6 +148,7 @@ def run_step(
         print(f"FAILED {label} (exit {result.returncode})", flush=True)
         raise CommandFailed(f"container failure (exit {result.returncode})")
     print(f"COMPLETE {label}", flush=True)
+    return result
 
 
 def powershell_command(files: Sequence[str]) -> str:
@@ -256,7 +262,7 @@ def lint(
     try:
         for linter, _ in applicable:
             run_step(f"pull {linter.name}", ["docker", "pull", linter.image], timeout, runner)
-            digests[linter.name] = resolve_digest(linter.image, timeout, runner)
+            digests[linter.name] = resolve_digest(linter.name, linter.image, timeout, runner)
 
         print("PHASE execution: pulls complete, repository mounts begin", flush=True)
         for linter, files in applicable:

@@ -64,6 +64,8 @@ class DockerLintCase(unittest.TestCase):
         self.assertEqual(0, result)
         self.assertIn("TARGETS markdownlint: 1 file(s)", output)
         self.assertIn("PHASE pull", output)
+        self.assertIn("START inspect markdownlint (timeout 17s)", output)
+        self.assertIn("COMPLETE inspect markdownlint", output)
         self.assertIn("PHASE execution: pulls complete, repository mounts begin", output)
         self.assertIn("START lint markdownlint (1 file(s)) (timeout 17s)", output)
         self.assertIn("COMPLETE lint markdownlint (1 file(s))", output)
