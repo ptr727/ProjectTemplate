@@ -212,6 +212,12 @@ class TestCheck(unittest.TestCase):
         try:
             host_gate.sys.platform = "win32"
             self.assertEqual(host_gate.quote_argument("tool; & 'next'"), "'tool; & ''next'''")
+            self.assertTrue(
+                host_gate.resolve_remedy(
+                    "host-setup/windows/install-tools.ps1 -Install needed",
+                    root=Path("C:/repo; & 'quoted'"),
+                ).startswith("& 'C:/repo; & ''quoted''/host-setup/windows/install-tools.ps1'")
+            )
             host_gate.REMEDY_REPO = Path("/tmp/repo; & 'quoted'")
             remedy = host_gate.package_remedy(
                 tool(
