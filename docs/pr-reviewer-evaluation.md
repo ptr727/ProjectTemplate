@@ -113,7 +113,7 @@ All three reviewers reported no findings. Qodo completed in 7 seconds, Copilot c
 
 Copilot reviewed 2/2 changed files at Lite effort. Its new `Approval recommended` heading was not recognized by `pr_review.py`, so the otherwise clean review remained blocked. [Issue #894][issue-894] records the shape, and the pull request adds a regression fixture for it.
 
-On the parser-fix head, Copilot reviewed 4/4 files with no findings and the updated script recognized its output. CodeRabbit found one true-positive stale corpus count. Qodo did not reprocess the second push automatically.
+On the parser-fix head, Copilot reviewed 4/4 files with no findings and the updated script recognized its output. CodeRabbit found one true-positive stale corpus count. Qodo did not reprocess the second push automatically. Its documented `/review` command updated the existing review through the final head in 3 minutes 10 seconds and added no finding.
 
 ## Interaction and Operations
 
