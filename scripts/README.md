@@ -27,7 +27,7 @@ python3 scripts/docker_lint.py
 python3 scripts/docker_lint.py --timeout 120 --linter markdownlint --linter cspell
 ```
 
-The runner discovers tracked and unignored targets before pulling applicable images. It resolves each pull to a repository digest before execution. Lint containers use disabled networking and a read-only checkout mount. PSScriptAnalyzer installs its pinned module without mounting the checkout.
+The runner discovers tracked and unignored targets before pulling applicable images. It resolves each pull to a repository digest before execution. Lint containers use disabled networking and a read-only checkout mount. Long target lists run in bounded batches. PSScriptAnalyzer installs its pinned module without mounting the checkout.
 
 Every Docker command has a timeout. The output identifies target counts, phase boundaries, starts, completions, skips, timeouts, and failures. A timed-out named container is removed before the command reports failure.
 

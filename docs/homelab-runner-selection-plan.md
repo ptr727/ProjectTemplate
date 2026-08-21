@@ -6,6 +6,7 @@ This document tracks the design and rollout for [issue #889][issue-889]. It is a
 
 - [Status](#status)
 - [Decision Outcome](#decision-outcome)
+- [Requirements Before Resuming](#requirements-before-resuming)
 - [Objective](#objective)
 - [Non-Goals](#non-goals)
 - [Primary Constraint: Copilot Code Review](#primary-constraint-copilot-code-review)
@@ -39,13 +40,21 @@ Actions minutes savings do not justify the added runner, security, and operating
 
 Ordinary CI savings alone do not justify separating CI onto a persistent runner while Copilot remains GitHub-hosted. This document preserves the design for reconsideration.
 
+## Requirements Before Resuming
+
+Implementation remains blocked until the maintainer approves the consultation decisions in this document.
+
+Before implementation resumes, verify the current GitHub runner controls against GitHub's documentation and organization settings. The design depends on organization-level Copilot controls and runner-group workflow restrictions that can change independently of this repository.
+
+The implementation must establish infrastructure authorization before it enables homelab selection. A selector, labels, actor checks, and static workflow tests are routing controls. They do not prevent another workflow from requesting the same labels directly.
+
 ## Objective
 
 One workflow definition selects either GitHub-hosted Ubuntu or a trusted homelab runner. Missing or invalid configuration selects GitHub-hosted Ubuntu.
 
 The design does not attempt an automatic availability fallback. GitHub chooses one target when it queues a job.
 
-The first canary proves ordinary hub CI on a repository-scoped homelab runner. Copilot code review remains on GitHub-hosted infrastructure.
+The first canary proves ordinary hub CI on a homelab runner in a restricted organization runner group. Copilot code review remains on GitHub-hosted infrastructure.
 
 ## Non-Goals
 
@@ -77,9 +86,11 @@ Ordinary fleet CI and Copilot code review therefore have separate runner policie
 
 The fleet runner variable never reaches Copilot configuration. Homelab labels never appear in the Copilot workflow.
 
-The proposed implementation adds a dedicated `.github/workflows/copilot-code-review.yml`. It pins `copilot-setup-steps` to `ubuntu-24.04`.
+The organization-level Copilot runner type selects a standard GitHub-hosted runner. Repository customization of the Copilot runner type is disabled.
 
-That file prevents a future `copilot-setup-steps.yml` from unintentionally changing the code-review runner. GitHub gives the dedicated code-review file precedence.
+The proposed implementation adds a dedicated `.github/workflows/copilot-code-review.yml`. It pins `copilot-setup-steps` to `ubuntu-24.04` and begins with a step that fails unless `runner.environment` is `github-hosted`.
+
+The organization policy is the authorization boundary. The workflow pin and runtime assertion detect configuration drift. The assertion does not make a job safe after GitHub has assigned it to the wrong runner.
 
 ## Configuration Contract
 
@@ -101,7 +112,7 @@ The explicit target leaves room for future values such as `arc`. A boolean would
 
 A small selector job runs on `ubuntu-24.04` before any selectable validation job.
 
-The selector validates the requested target, event, actor, and pull request origin. It emits one JSON runner-label array.
+The selector validates the requested target, event, actor, and ref. It emits one JSON `runs-on` value.
 
 GitHub-hosted output:
 
@@ -112,14 +123,14 @@ GitHub-hosted output:
 Homelab output:
 
 ```json
-["self-hosted","linux","x64","homelab","ubuntu-24.04"]
+{"group":"homelab","labels":["self-hosted","linux","x64","homelab","ubuntu-24.04"]}
 ```
 
 Dependent jobs pass the output through `fromJSON` in `runs-on`. No caller copies the authorization expression.
 
-The selector job adds a small GitHub-hosted job to each validation run. This cost buys one auditable security decision for the fleet.
+The selector job adds a small GitHub-hosted job to each validation run. This cost buys one auditable routing decision for the fleet.
 
-[GitHub treats runner labels as cumulative requirements][github-runner-selection]. The homelab array therefore selects only a runner carrying every listed label.
+[GitHub treats runner labels as cumulative requirements][github-runner-selection]. The homelab object therefore selects only a runner in the restricted group carrying every listed label.
 
 ## Trust Contract
 
@@ -128,17 +139,16 @@ The selector permits homelab execution only when every applicable condition pass
 Allowed actors are exactly:
 
 - `ptr727`
-- `dependabot[bot]`
 - `ptr727-codegen[bot]`
 
-Allowed events are exactly:
+Dependabot-triggered work always selects GitHub-hosted Ubuntu. A dependency update can introduce untrusted executable code even when its pull request originates in this repository.
+
+Homelab events are exactly:
 
 - `push`
-- `pull_request`
 - `workflow_dispatch`
-- `schedule`
 
-A pull request also requires its head repository to equal the workflow repository. A fork pull request always selects GitHub-hosted Ubuntu.
+The homelab ref must equal the protected branch named by the runner group's selected-workflow restriction. Pull requests, schedules, and every other event select GitHub-hosted Ubuntu.
 
 An unknown event always selects GitHub-hosted Ubuntu. In particular, `pull_request_target` receives no implicit homelab authorization.
 
@@ -146,17 +156,21 @@ Every rejected homelab request emits a visible warning. The warning names the fa
 
 Runner labels provide routing, not authorization. Existing workflow trigger, permission, environment, and actor checks remain in force.
 
+The homelab runner belongs to a dedicated organization runner group. The group allows this repository and the approved validation workflow only. Its selected-workflow restriction names the protected workflow ref. The job selects both the group and its labels. Direct label requests from any other workflow cannot reach the runner.
+
 ## Public Repository Boundary
 
-The first runner is scoped specifically to `ptr727/ProjectTemplate`. It is not an organization-wide runner.
+The first runner is registered at the organization scope so runner-group restrictions can enforce repository and workflow access. It is not available organization-wide.
 
 The CloudInit implementation retains its private-repository default. Public-repository support requires a separate, explicit opt-in.
 
 The proposed provisioning contract requires:
 
 - An explicit public-repository opt-in with a false default.
+- `allows_public_repositories` equals the explicit opt-in and is false otherwise.
 - An exact repository owner and name.
-- Repository-scoped runner registration.
+- A dedicated organization runner group restricted to `ptr727/ProjectTemplate`.
+- A selected-workflow restriction for the approved validation workflow at its protected ref.
 - The dedicated `homelab` label.
 - A visible provisioning warning for a public repository.
 - Documentation that workflow authorization remains mandatory.
@@ -173,17 +187,19 @@ The rollout proceeds in these stages:
 
 1. Add the selector while `FLEET_RUNNER_TARGET` is absent.
 2. Confirm every selectable job remains GitHub-hosted.
-3. Provision the repository-scoped homelab runner.
+3. Provision the homelab runner in its restricted organization runner group.
 4. Confirm the runner carries every required label.
 5. Set `FLEET_RUNNER_TARGET` to `homelab`.
-6. Open a same-repository pull request as `ptr727`.
-7. Confirm the canary job runs on the homelab runner.
+6. Dispatch the approved validation workflow from its protected ref as `ptr727`.
+7. Confirm the canary job selects the restricted group and runs on the homelab runner.
 8. Confirm Copilot's agentic job runs on GitHub-hosted Ubuntu.
 9. Exercise the external pull request path.
 10. Confirm the external path selects GitHub-hosted Ubuntu.
-11. Take the homelab runner offline for a bounded observation.
+11. Take the homelab runner offline for a maximum of ten minutes.
 12. Confirm the trusted job remains visibly queued without fallback.
-13. Restore the runner and finish the canary.
+13. Cancel the queued workflow when the observation bound expires.
+14. Confirm the cancellation reaches a terminal state.
+15. Restore the runner and finish the canary with a new workflow run.
 
 The rollout stops after any unexpected target selection. It also stops if Copilot delivers only a reduced review.
 
@@ -211,15 +227,19 @@ Automated tests cover:
 - Explicit GitHub-hosted target.
 - Invalid target.
 - Every trusted actor.
+- A Dependabot pull request selects GitHub-hosted Ubuntu.
 - An untrusted actor.
-- Internal pull request.
-- Fork pull request.
+- Internal pull request selects GitHub-hosted Ubuntu.
+- Fork pull request selects GitHub-hosted Ubuntu.
 - Push event.
 - Manual dispatch event.
-- Scheduled event.
+- Scheduled event selects GitHub-hosted Ubuntu.
 - Unsupported event.
 - Exact GitHub-hosted label output.
-- Exact homelab label output.
+- Exact homelab group-and-label output.
+- A direct-label workflow cannot use the homelab runner group.
+- An unapproved workflow ref cannot use the homelab runner group.
+- Public-repository access follows the explicit opt-in exactly.
 - A fixed GitHub-hosted Copilot runner.
 - Absence of the fleet variable from Copilot configuration.
 - Absence of homelab labels from Copilot configuration.
@@ -227,6 +247,7 @@ Automated tests cover:
 Static workflow verification also covers action pinning, actionlint custom labels, job dependencies, and workflow syntax.
 
 Live verification covers both selection branches. Only a live run can prove runner registration and Copilot integration.
+Before the runner-group checkpoint is complete, capture live API evidence for the exact runner group, `visibility: selected`, a selected repository set exactly equal to `ptr727/ProjectTemplate`, `restricted_to_workflows: true`, a `selected_workflows` set containing only the approved workflow path pinned to the protected ref, and `allows_public_repositories` equal to the documented opt-in. Reject extra or missing selected repositories and workflows. Assert the restriction flag and selected-workflow value together because GitHub ignores the value when the flag is false. Run negative canaries that prove direct-label and unapproved-ref requests cannot reach the group. Link provisioning evidence from the owning CloudInit repository rather than inferring it from this plan.
 
 ## Planned Repository Surfaces
 
@@ -247,21 +268,25 @@ The CloudInit repository carries its public opt-in, provisioning tests, and oper
 
 | Risk | Control |
 | --- | --- |
-| Fork code reaches a persistent runner | Fork identity check forces GitHub-hosted execution |
+| Pull request code reaches a persistent runner | Every pull request selects GitHub-hosted execution, and runner-group restrictions reject unapproved workflows |
 | An unexpected actor reaches homelab | Exact actor allowlist fails closed |
+| A dependency update executes on a persistent runner | Dependabot always selects GitHub-hosted Ubuntu |
+| A workflow bypasses the selector with direct labels | Runner-group selected-workflow restrictions reject it |
 | A new event bypasses assumptions | Exact event allowlist fails closed |
 | Invalid configuration widens access | Unknown values select GitHub-hosted Ubuntu |
 | An offline runner stalls CI | Queued state is documented and observed during canary |
-| Copilot is routed to a persistent VM | Dedicated Copilot workflow pins GitHub-hosted Ubuntu |
+| Copilot is routed to a persistent VM | Organization policy requires standard GitHub-hosted runners and disables repository overrides |
 | Copilot review silently loses agentic context | Acceptance requires review-session evidence |
-| A public runner becomes fleet-wide | Repository-scoped registration is mandatory |
+| A public runner becomes fleet-wide | Its organization runner group allows only the named repository and workflow |
 | Provisioning weakens the private default | Public support requires an explicit false-by-default opt-in |
 
 ## Rollback
 
-Unset `FLEET_RUNNER_TARGET` to return selectable jobs to GitHub-hosted Ubuntu. No workflow source rollback is required for this operational response.
+Set `FLEET_RUNNER_TARGET` to `github-hosted` at its authoritative repository scope. Do not unset it, because an inherited value could become effective. No workflow source rollback is required for this operational response.
 
-Disable or remove the repository-scoped runner registration if routing remains unexpected. Preserve its diagnostic logs before removal.
+Cancel every queued or in-progress homelab workflow. Confirm each cancellation reaches a terminal state before restoring service.
+
+Disable or remove the runner from its restricted group if routing remains unexpected. Preserve its diagnostic logs before removal.
 
 The Copilot workflow remains GitHub-hosted throughout rollback.
 
@@ -271,15 +296,19 @@ Implementation waits for an explicit decision on each item.
 
 - [ ] Use `FLEET_RUNNER_TARGET` as the configuration variable.
 - [ ] Accept only `github-hosted` and `homelab` in phase 1.
-- [ ] Use a GitHub-hosted selector job as the single authorization point.
+- [ ] Use a GitHub-hosted selector job as the single routing decision point.
+- [ ] Use a restricted organization runner group as the infrastructure authorization point.
+- [ ] Select the homelab runner by both group and labels.
 - [ ] Route the reusable validation lint job as the first canary.
 - [ ] Decide whether unit-test and repository-validation join the first canary.
 - [ ] Add a dedicated GitHub-hosted `copilot-code-review.yml`.
+- [ ] Select standard GitHub-hosted Copilot runners at the organization level and disable repository overrides.
 - [ ] Keep standalone self-hosted Copilot review out of phase 1.
 - [ ] Reserve ARC evaluation for phase 2.
-- [ ] Require repository-scoped registration for the public hub.
+- [ ] Restrict the organization runner group to the public hub and approved workflow ref.
+- [ ] Run the first homelab canary by dispatch from the protected workflow ref.
 - [ ] Add a false-by-default public-repository opt-in to CloudInit.
-- [ ] Approve the trusted actor and event allowlists.
+- [ ] Approve the trusted actor and event allowlists, with Dependabot excluded.
 - [ ] Approve the offline-runner observation test.
 
 ## Implementation Checkpoints
@@ -290,8 +319,11 @@ Implementation waits for an explicit decision on each item.
 - [ ] Structural tests pass.
 - [ ] GitHub-hosted default branch exercised.
 - [ ] CloudInit public opt-in reviewed in its owning repository.
-- [ ] Repository-scoped runner registered.
-- [ ] Trusted homelab canary succeeds.
+- [ ] Restricted organization runner group and runner registered.
+- [ ] Live runner-group API evidence asserts `visibility: selected`, a repository set containing only `ptr727/ProjectTemplate`, `restricted_to_workflows: true`, a `selected_workflows` set containing only the approved workflow path pinned to the protected ref, and the documented public-repository setting.
+- [ ] Direct-label and unapproved-ref negative canaries are rejected.
+- [ ] CloudInit provisioning evidence is linked from its owning repository.
+- [ ] Protected-ref homelab canary succeeds.
 - [ ] Fork or external path stays GitHub-hosted.
 - [ ] Copilot agentic review succeeds on GitHub-hosted infrastructure.
 - [ ] Offline queued behavior is observed and documented.
