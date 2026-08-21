@@ -53,8 +53,8 @@ The first sample is too small for an adoption decision. It does show that both c
 
 | Reviewer | True Positive | Mixed | False Positive | Duplicate Roots | Initial Reading |
 | --- | ---: | ---: | ---: | ---: | --- |
-| GitHub Copilot | Not scored | Not scored | Not scored | Not scored | Five review attempts across two pull requests ended in an error, so no review covered either head |
-| CodeRabbit | 14 | 2 | 0 | 3 | Strong issue discovery, with occasional remedies that overstate configuration scope or contradict another valid control |
+| GitHub Copilot | Not scored | Not scored | Not scored | Not scored | Six review attempts across two pull requests ended in an error, so no review covered either head |
+| CodeRabbit | 15 | 2 | 0 | 3 | Strong issue discovery, with occasional remedies that overstate configuration scope or contradict another valid control |
 | Qodo | 3 | 1 | 4 | 2 | Finds additional reliability issues, but repeatedly misreads repository title rules and documented tool behavior |
 
 The duplicate roots were target-discovery failure and markdownlint filename handling. Qodo alone raised command-line length limits. CodeRabbit alone covered the postponed runner design, Docker mount quoting, and the editor-extension identifier.
@@ -97,7 +97,9 @@ CodeRabbit skipped the draft, then skipped the ready pull request because its ba
 
 Qodo completed 2 minutes 42 seconds after the pull request became ready.
 
-After the corrective push, CodeRabbit completed an explicitly triggered incremental review in exactly 8 minutes and added no findings. Qodo updated its existing review comment in place, marked the corrected process-failure finding resolved, and added no findings. Neither follow-up created a new formal review object, so provider-aware automation must also recognize updated comments and command completion replies.
+After the corrective push, CodeRabbit completed an explicitly triggered incremental review in exactly 8 minutes and added no findings. Qodo updated its existing review comment in place, marked the corrected process-failure finding resolved, and added no findings. Neither follow-up created a new formal review object, so provider-aware automation must also recognize updated comments and replies that report command completion.
+
+A final documentation-only follow-up took 3 minutes 5 seconds. CodeRabbit found one true-positive compound-modifier error in this assessment. Qodo added no finding.
 
 Copilot posted two terminal error responses on the current head and supplied no review coverage.
 
