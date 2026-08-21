@@ -57,9 +57,14 @@ full stop, whatever the merge-state field says.
 
 ## Expected review loop
 
+Open every fleet-owned pull request ready for review. Draft state delays the loop and causes
+reviewers to skip, so it has no place in the internal feature-to-develop or develop-to-main
+workflow. The separately documented `upstream-contribution-workflow` may use a draft while a
+third-party contribution is still being prepared for upstream review.
+
 Opening a pull request starts this loop by default. Creating the PR is not a terminal handoff.
-Only an explicit maintainer instruction may stop, defer, or alter the loop. A draft state, silence,
-or a request that says only "open a PR" is not such an instruction.
+Only an explicit maintainer instruction may stop, defer, or alter the loop. Silence or a request
+that says only "open a PR" is not such an instruction.
 
 Run every `scripts/pr_review.py` command below from a hub checkout. The script is hosted there and
 is never carried into a downstream repository.

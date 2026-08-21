@@ -29,7 +29,7 @@ class FakeRunner:
     ) -> subprocess.CompletedProcess[str]:
         self.commands.append((command, timeout))
         if self.timeout and command[:2] == ["docker", "run"]:
-            raise docker_lint.CommandFailed(f"timed out after {timeout}s")
+            raise docker_lint.CommandTimedOut(f"timed out after {timeout}s")
         if command[:3] == ["docker", "image", "inspect"]:
             return subprocess.CompletedProcess(command, 0, "example@sha256:123\n", "")
         returncode = (
@@ -101,6 +101,19 @@ class DockerLintCase(unittest.TestCase):
         self.assertIn("FAILED lint markdownlint (1 file(s)) (exit 9)", output)
         self.assertIn("RESULT failed: container failure (exit 9)", output)
 
+    def test_process_start_failure_is_not_reported_as_timeout(self) -> None:
+        output = io.StringIO()
+        with (
+            mock.patch.object(subprocess, "run", side_effect=FileNotFoundError("docker")),
+            contextlib.redirect_stdout(output),
+            self.assertRaisesRegex(docker_lint.CommandFailed, "could not start command"),
+        ):
+            docker_lint.run_step(
+                "missing Docker", ["docker", "pull", "image"], 17, docker_lint.run_command
+            )
+        self.assertIn("FAILED missing Docker: could not start command:", output.getvalue())
+        self.assertNotIn("TIMEOUT", output.getvalue())
+
     def test_shellcheck_receives_each_tracked_file_as_one_argument(self) -> None:
         self.track("scripts/a shell.sh")
         runner = FakeRunner()
@@ -108,6 +121,13 @@ class DockerLintCase(unittest.TestCase):
         self.assertEqual(0, result)
         run = next(command for command, _ in runner.commands if command[:2] == ["docker", "run"])
         self.assertEqual("scripts/a shell.sh", run[-1])
+
+    def test_shellcheck_literal_marker_precedes_option_shaped_filename(self) -> None:
+        linter = next(linter for linter in docker_lint.LINTERS if linter.name == "shellcheck")
+        command = docker_lint.container_command(
+            self.root, linter, "example@sha256:123", ["-release.sh"]
+        )
+        self.assertEqual(["--", "-release.sh"], command[-2:])
 
     def test_invalid_git_root_reports_failed_result(self) -> None:
         root = Path(self.enterContext(tempfile.TemporaryDirectory()))
@@ -164,6 +184,17 @@ class DockerLintCase(unittest.TestCase):
         self.assertEqual(90, run.call_args_list[0].kwargs["timeout"])
         self.assertEqual(["docker", "rm", "--force", "bounded-lint"], run.call_args_list[1].args[0])
         self.assertEqual(30, run.call_args_list[1].kwargs["timeout"])
+
+    def test_cleanup_start_failure_remains_a_timeout_result(self) -> None:
+        command = ["docker", "run", "--name", "bounded-lint", "image"]
+        timed_out = subprocess.TimeoutExpired(command, 90)
+        with (
+            mock.patch.object(subprocess, "run", side_effect=[timed_out, OSError("no docker")]),
+            self.assertRaisesRegex(
+                docker_lint.CommandTimedOut, "cleanup could not start for bounded-lint"
+            ),
+        ):
+            docker_lint.run_command(command, 90)
 
 
 if __name__ == "__main__":

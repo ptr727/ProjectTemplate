@@ -58,6 +58,10 @@ class CommandFailed(RuntimeError):
     """Report a Docker command that failed or exceeded its bound."""
 
 
+class CommandTimedOut(CommandFailed):
+    """Report a Docker command that exceeded its bound."""
+
+
 def run_command(
     command: Sequence[str], timeout: int, *, capture_output: bool = False
 ) -> subprocess.CompletedProcess[str]:
@@ -76,15 +80,20 @@ def run_command(
                     timeout=min(timeout, 30),
                 )
             except subprocess.TimeoutExpired as cleanup_error:
-                raise CommandFailed(
+                raise CommandTimedOut(
                     f"timed out after {timeout}s; cleanup timed out for {name}"
                 ) from cleanup_error
+            except OSError as cleanup_error:
+                raise CommandTimedOut(
+                    f"timed out after {timeout}s; cleanup could not start for {name}: "
+                    f"{cleanup_error}"
+                ) from cleanup_error
             if cleanup.returncode != 0:
-                raise CommandFailed(
+                raise CommandTimedOut(
                     f"timed out after {timeout}s; cleanup failed for {name} "
                     f"(exit {cleanup.returncode})"
                 ) from error
-        raise CommandFailed(f"timed out after {timeout}s") from error
+        raise CommandTimedOut(f"timed out after {timeout}s") from error
     except OSError as error:
         raise CommandFailed(f"could not start command: {error}") from error
 
@@ -175,8 +184,11 @@ def run_step(
     print(f"START {label} (timeout {timeout}s)", flush=True)
     try:
         result = runner(command, timeout, capture_output=capture_output)
-    except CommandFailed as error:
+    except CommandTimedOut as error:
         print(f"TIMEOUT {label}: {error}", flush=True)
+        raise
+    except CommandFailed as error:
+        print(f"FAILED {label}: {error}", flush=True)
         raise
     if result.returncode != 0:
         print(f"FAILED {label} (exit {result.returncode})", flush=True)
@@ -228,7 +240,7 @@ def container_command(root: Path, linter: Linter, digest: str, files: Sequence[s
     else:
         command.extend([digest, *linter.arguments])
         if linter.name in {"markdownlint", "cspell", "shellcheck"}:
-            if linter.name == "markdownlint":
+            if linter.name in {"markdownlint", "shellcheck"}:
                 command.append("--")
             command.extend(files)
     return command

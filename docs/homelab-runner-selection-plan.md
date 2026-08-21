@@ -112,7 +112,7 @@ The explicit target leaves room for future values such as `arc`. A boolean would
 
 A small selector job runs on `ubuntu-24.04` before any selectable validation job.
 
-The selector validates the requested target, event, actor, and pull request origin. It emits one JSON runner-label array.
+The selector validates the requested target, event, actor, and ref. It emits one JSON `runs-on` value.
 
 GitHub-hosted output:
 
@@ -123,14 +123,14 @@ GitHub-hosted output:
 Homelab output:
 
 ```json
-["self-hosted","linux","x64","homelab","ubuntu-24.04"]
+{"group":"homelab","labels":["self-hosted","linux","x64","homelab","ubuntu-24.04"]}
 ```
 
 Dependent jobs pass the output through `fromJSON` in `runs-on`. No caller copies the authorization expression.
 
 The selector job adds a small GitHub-hosted job to each validation run. This cost buys one auditable routing decision for the fleet.
 
-[GitHub treats runner labels as cumulative requirements][github-runner-selection]. The homelab array therefore selects only a runner carrying every listed label.
+[GitHub treats runner labels as cumulative requirements][github-runner-selection]. The homelab object therefore selects only a runner in the restricted group carrying every listed label.
 
 ## Trust Contract
 
@@ -143,14 +143,12 @@ Allowed actors are exactly:
 
 Dependabot-triggered work always selects GitHub-hosted Ubuntu. A dependency update can introduce untrusted executable code even when its pull request originates in this repository.
 
-Allowed events are exactly:
+Homelab events are exactly:
 
 - `push`
-- `pull_request`
 - `workflow_dispatch`
-- `schedule`
 
-A pull request also requires its head repository to equal the workflow repository. A fork pull request always selects GitHub-hosted Ubuntu.
+The homelab ref must equal the protected branch named by the runner group's selected-workflow restriction. Pull requests, schedules, and every other event select GitHub-hosted Ubuntu.
 
 An unknown event always selects GitHub-hosted Ubuntu. In particular, `pull_request_target` receives no implicit homelab authorization.
 
@@ -158,7 +156,7 @@ Every rejected homelab request emits a visible warning. The warning names the fa
 
 Runner labels provide routing, not authorization. Existing workflow trigger, permission, environment, and actor checks remain in force.
 
-The homelab runner belongs to a dedicated organization runner group. The group allows this repository and the approved validation workflow only. Its selected-workflow restriction names the protected workflow ref. Direct label requests from any other workflow cannot reach the runner.
+The homelab runner belongs to a dedicated organization runner group. The group allows this repository and the approved validation workflow only. Its selected-workflow restriction names the protected workflow ref. The job selects both the group and its labels. Direct label requests from any other workflow cannot reach the runner.
 
 ## Public Repository Boundary
 
@@ -169,6 +167,7 @@ The CloudInit implementation retains its private-repository default. Public-repo
 The proposed provisioning contract requires:
 
 - An explicit public-repository opt-in with a false default.
+- `allows_public_repositories` equals the explicit opt-in and is false otherwise.
 - An exact repository owner and name.
 - A dedicated organization runner group restricted to `ptr727/ProjectTemplate`.
 - A selected-workflow restriction for the approved validation workflow at its protected ref.
@@ -191,8 +190,8 @@ The rollout proceeds in these stages:
 3. Provision the homelab runner in its restricted organization runner group.
 4. Confirm the runner carries every required label.
 5. Set `FLEET_RUNNER_TARGET` to `homelab`.
-6. Open a same-repository pull request as `ptr727`.
-7. Confirm the canary job runs on the homelab runner.
+6. Dispatch the approved validation workflow from its protected ref as `ptr727`.
+7. Confirm the canary job selects the restricted group and runs on the homelab runner.
 8. Confirm Copilot's agentic job runs on GitHub-hosted Ubuntu.
 9. Exercise the external pull request path.
 10. Confirm the external path selects GitHub-hosted Ubuntu.
@@ -230,16 +229,17 @@ Automated tests cover:
 - Every trusted actor.
 - A Dependabot pull request selects GitHub-hosted Ubuntu.
 - An untrusted actor.
-- Internal pull request.
-- Fork pull request.
+- Internal pull request selects GitHub-hosted Ubuntu.
+- Fork pull request selects GitHub-hosted Ubuntu.
 - Push event.
 - Manual dispatch event.
-- Scheduled event.
+- Scheduled event selects GitHub-hosted Ubuntu.
 - Unsupported event.
 - Exact GitHub-hosted label output.
-- Exact homelab label output.
+- Exact homelab group-and-label output.
 - A direct-label workflow cannot use the homelab runner group.
 - An unapproved workflow ref cannot use the homelab runner group.
+- Public-repository access follows the explicit opt-in exactly.
 - A fixed GitHub-hosted Copilot runner.
 - Absence of the fleet variable from Copilot configuration.
 - Absence of homelab labels from Copilot configuration.
@@ -267,7 +267,7 @@ The CloudInit repository carries its public opt-in, provisioning tests, and oper
 
 | Risk | Control |
 | --- | --- |
-| Fork code reaches a persistent runner | Fork identity check forces GitHub-hosted execution, and runner-group restrictions reject unapproved workflows |
+| Pull request code reaches a persistent runner | Every pull request selects GitHub-hosted execution, and runner-group restrictions reject unapproved workflows |
 | An unexpected actor reaches homelab | Exact actor allowlist fails closed |
 | A dependency update executes on a persistent runner | Dependabot always selects GitHub-hosted Ubuntu |
 | A workflow bypasses the selector with direct labels | Runner-group selected-workflow restrictions reject it |
@@ -297,6 +297,7 @@ Implementation waits for an explicit decision on each item.
 - [ ] Accept only `github-hosted` and `homelab` in phase 1.
 - [ ] Use a GitHub-hosted selector job as the single routing decision point.
 - [ ] Use a restricted organization runner group as the infrastructure authorization point.
+- [ ] Select the homelab runner by both group and labels.
 - [ ] Route the reusable validation lint job as the first canary.
 - [ ] Decide whether unit-test and repository-validation join the first canary.
 - [ ] Add a dedicated GitHub-hosted `copilot-code-review.yml`.
@@ -304,6 +305,7 @@ Implementation waits for an explicit decision on each item.
 - [ ] Keep standalone self-hosted Copilot review out of phase 1.
 - [ ] Reserve ARC evaluation for phase 2.
 - [ ] Restrict the organization runner group to the public hub and approved workflow ref.
+- [ ] Run the first homelab canary by dispatch from the protected workflow ref.
 - [ ] Add a false-by-default public-repository opt-in to CloudInit.
 - [ ] Approve the trusted actor and event allowlists, with Dependabot excluded.
 - [ ] Approve the offline-runner observation test.
@@ -317,7 +319,7 @@ Implementation waits for an explicit decision on each item.
 - [ ] GitHub-hosted default branch exercised.
 - [ ] CloudInit public opt-in reviewed in its owning repository.
 - [ ] Restricted organization runner group and runner registered.
-- [ ] Trusted homelab canary succeeds.
+- [ ] Protected-ref homelab canary succeeds.
 - [ ] Fork or external path stays GitHub-hosted.
 - [ ] Copilot agentic review succeeds on GitHub-hosted infrastructure.
 - [ ] Offline queued behavior is observed and documented.

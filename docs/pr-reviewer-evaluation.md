@@ -19,7 +19,7 @@ This document measures whether additional automated reviewers improve the fleet'
 **State:** Active evaluation\
 **Incumbent:** GitHub Copilot\
 **Candidates:** CodeRabbit and Qodo\
-**Initial sample:** [ProjectTemplate pull request #891][pr-891] at commit `0f2edcd88ddd33710de67a8574112f271ad9fc5c`
+**Samples:** [ProjectTemplate pull request #891][pr-891] and [pull request #892][pr-892]
 
 No candidate is a required reviewer. A candidate remains advisory until it meets the first-class support criteria below.
 
@@ -53,9 +53,9 @@ The first sample is too small for an adoption decision. It does show that both c
 
 | Reviewer | True Positive | Mixed | False Positive | Duplicate Roots | Initial Reading |
 | --- | ---: | ---: | ---: | ---: | --- |
-| GitHub Copilot | Not scored | Not scored | Not scored | Not scored | Three review attempts ended in an error, so no review covered the head |
-| CodeRabbit | 8 | 1 | 0 | 2 | Strong issue discovery, with one remediation that mixed a valid rollback gap with an unsupported configuration scope |
-| Qodo | 2 | 1 | 2 | 2 | Found one additional reliability issue, but misread the repository's title and documentation-authority rules |
+| GitHub Copilot | Not scored | Not scored | Not scored | Not scored | Four review attempts across two pull requests ended in an error, so no review covered either head |
+| CodeRabbit | 14 | 2 | 0 | 3 | Strong issue discovery, with occasional remedies that overstate configuration scope or contradict another valid control |
+| Qodo | 3 | 1 | 4 | 2 | Finds additional reliability issues, but repeatedly misreads repository title rules and documented tool behavior |
 
 The duplicate roots were target-discovery failure and markdownlint filename handling. Qodo alone raised command-line length limits. CodeRabbit alone covered the postponed runner design, Docker mount quoting, and the editor-extension identifier.
 
@@ -80,6 +80,25 @@ Qodo posted five findings:
 
 Copilot posted three terminal error responses and no findings. This sample therefore measures candidate value during an incumbent outage, not comparative recall over the same completed review.
 
+### 2026-08-21: Pull Request #892
+
+Qodo posted three findings:
+
+- One true positive: a generic process-start failure was labeled as a timeout.
+- Two false positives: `PR` uses the correct acronym casing, and markdownlint-cli2 documents `--` as making the remaining arguments literal.
+
+CodeRabbit posted seven findings:
+
+- Six true positives: public-runner opt-in enforcement, a protected-ref canary, precise Docker-runner documentation, accurate Copilot-loop wording, timeout-cleanup failure handling, and ShellCheck option termination.
+- One mixed finding: jobs must select the restricted runner group explicitly, but removing the selected-workflow restriction would weaken the valid protected-ref design.
+- One finding duplicated Qodo's process-failure classification root and extended it to timeout cleanup.
+
+CodeRabbit skipped the draft, then skipped the ready pull request because its base was `develop` rather than the default branch. The review required an explicit `@coderabbitai review` command and completed in 7 minutes 37 seconds.
+
+Qodo completed 2 minutes 42 seconds after the pull request became ready.
+
+Copilot posted one terminal error response on the current head and supplied no review coverage.
+
 ## Interaction and Operations
 
 ### GitHub Copilot
@@ -91,6 +110,8 @@ The current weakness is availability. A terminal error can leave the required re
 ### CodeRabbit
 
 The review body provides an actionable summary and links each finding to an inline thread. This makes manual triage straightforward.
+
+Automatic review skipped a feature-to-`develop` pull request because `develop` is not the repository default. The review loop must explicitly trigger CodeRabbit unless its configuration changes.
 
 The collapsed analysis is verbose and can dominate API output. Machine support should read normalized summaries and thread metadata without loading the analysis transcript.
 
@@ -161,6 +182,7 @@ The existing Copilot adapter remains behaviorally unchanged during extraction. P
 <!-- GitHub -->
 
 [pr-891]: https://github.com/ptr727/ProjectTemplate/pull/891
+[pr-892]: https://github.com/ptr727/ProjectTemplate/pull/892
 
 <!-- External -->
 
