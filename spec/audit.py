@@ -388,6 +388,31 @@ def verbatim_sections(item, sel):
     return out
 
 
+def _fence_step(line, marker, marker_len):
+    """One line's effect on fence state `(marker, marker_len)`: returns the state after the line, and
+    whether the line itself is a fence boundary (opens or closes one) rather than fenced or plain content.
+
+    Fence matching follows CommonMark. A fence marker needs at most 3 leading spaces, more reads as
+    content, not a boundary. A closing fence needs the same character, a run at least as long as the
+    opener's, and nothing but whitespace after that run.
+    A mismatched or shorter marker does not close it, such as a ~~~ example inside a ``` block, or a
+    ``` inside a longer ````. Trailing text does not close it either, since an opening fence's language
+    tag has no closing counterpart. A backtick fence's info string may not itself contain a backtick,
+    per CommonMark, so such an opener is not a boundary either.
+    """
+    stripped = line.lstrip(" ")
+    indent = len(line) - len(stripped)
+    char = stripped[:1]
+    run = len(stripped) - len(stripped.lstrip(char)) if indent <= 3 and char in ("`", "~") else 0
+    if marker is None:
+        if run >= 3 and not (char == "`" and "`" in stripped[run:]):
+            return char, run, True
+        return None, 0, False
+    if char == marker and run >= marker_len and not stripped[run:].strip():
+        return None, 0, True
+    return marker, marker_len, False
+
+
 def extract_section(text, heading):
     """The `## <heading>` H2 section including its heading line, up to the next sibling H2 or EOF, or None if absent.
 
@@ -395,16 +420,16 @@ def extract_section(text, heading):
     marker, case-folded and stripped of surrounding whitespace), so a re-cased heading or one with extra
     marker-gap whitespace is still found rather than read as a missing section - internal heading-text
     whitespace must match exactly. The heading line's exact bytes are then part of the hashed region, so that
-    re-casing or re-spacing surfaces as drift. A nested `###` stays inside the body. A `## ` line inside a fenced code block
-    (``` or ~~~) is not a boundary, so a code sample cannot truncate the region and hide drift after it.
+    re-casing or re-spacing surfaces as drift. A nested `###` stays inside the body. A `## ` line inside a
+    fenced code block, per `_fence_step`, is not a boundary. So a code sample cannot truncate the region and
+    hide drift after it.
     """
     want = heading.strip().lower()
-    out, capturing, fenced = [], False, False
+    out, capturing, marker, marker_len = [], False, None, 0
     for ln in normalize(text).split("\n"):
         stripped = ln.strip()
-        if stripped.startswith(("```", "~~~")):
-            fenced = not fenced
-        elif not fenced and stripped.startswith("## "):
+        marker, marker_len, boundary = _fence_step(ln, marker, marker_len)
+        if not boundary and marker is None and stripped.startswith("## "):
             if capturing:
                 break  # a sibling H2 ends the section
             if stripped[2:].strip().lower() == want:  # parsed heading text after the "## " marker
@@ -419,6 +444,9 @@ def extract_section(text, heading):
 # Carried files scanned for a coordination reference (GOVERNANCE.md "Documentation Style Conventions").
 TEMPLATE_REF_SCANNED = ("AGENTS.md", "GOVERNANCE.md", ".github/copilot-instructions.md")
 
+# The undeclared-H2 scan reads the same set.
+UNDECLARED_HEADING_SCANNED = TEMPLATE_REF_SCANNED
+
 
 def strip_sections(text, names):
     """`text` with each named `## <heading>` region removed, located by position rather than by content.
@@ -430,18 +458,31 @@ def strip_sections(text, names):
     That failure is silent and it fails open, since the removed duplicate takes its content out of the scan.
     """
     want = {n.strip().lower() for n in names}
-    out, dropping, fenced = [], False, False
+    out, dropping, marker, marker_len = [], False, None, 0
     for ln in normalize(text).split("\n"):
         stripped = ln.strip()
-        if stripped.startswith(("```", "~~~")):
-            fenced = not fenced
-        elif not fenced and stripped.startswith("## "):
+        marker, marker_len, boundary = _fence_step(ln, marker, marker_len)
+        if not boundary and marker is None and stripped.startswith("## "):
             dropping = (
                 stripped[2:].strip().lower() in want
             )  # a sibling H2 always ends the previous region
         if not dropping:
             out.append(ln)
     return "\n".join(out)
+
+
+def undeclared_h2_headings(text, declared):
+    """Level-two headings in `text` that `declared` does not name, sorted.
+
+    `declared` is normalized here (stripped, lowercased), not trusted pre-normalized. The contract
+    then holds for any caller, regardless of how its own names are cased or spaced.
+    Scoped to `## ` only, the section model's unit. An H1 title or a nested H3 is not itself a
+    section this check judges.
+    Fence-aware via unfenced_text. Either a heading-syntax line or a `##`-prefixed shell comment, shown
+    inside a fenced code sample, is not misread as a real heading.
+    """
+    h2s = {ln[3:].strip().lower() for ln in unfenced_text(text).split("\n") if ln.startswith("## ")}
+    return sorted(h2s - {d.strip().lower() for d in declared})
 
 
 def template_ref_outside_verbatim(text, verbatim_names, hub_name):
@@ -536,14 +577,12 @@ def unfenced_text(text):
     `<!-- Shields -->` or an `![alt][ref]` in one is not a definition, a group, or a rendered badge. Kept as
     one helper because the checkers were fence-aware in some places and blind in others, which is the state
     that lets a document be read two ways by one audit.
+    Fence matching, including boundary lines themselves, is `_fence_step`'s contract.
     """
-    out, fenced = [], False
+    out, marker, marker_len = [], None, 0
     for ln in normalize(text).split("\n"):
-        s = ln.strip()
-        if s.startswith(("```", "~~~")):
-            fenced = not fenced
-            continue
-        if not fenced:
+        marker, marker_len, boundary = _fence_step(ln, marker, marker_len)
+        if not boundary and marker is None:
             out.append(ln)
     return "\n".join(out)
 
@@ -1869,15 +1908,12 @@ def audit_repo(entry, spec, branch=None):
                     )
                 # The undeclared-section advisory, per spec/section-model.md, treats an H2 the manifest does not declare as a candidate duplicate of a verbatim section, or as repo-specific content to relocate.
                 # It is advisory only, since a repo may legitimately carry its own project-specific sections, which the AGENTS.md preamble allows, so it points at the reconciliation and never fails.
-                # It covers AGENTS.md and GOVERNANCE.md only, the two files whose section structure is governed by section-model.md.
+                # It covers UNDECLARED_HEADING_SCANNED, not only AGENTS.md and GOVERNANCE.md, and never names which destination file an undeclared heading belongs in.
                 # Skip the hub itself, since its copies are the source and legitimately hold hub-only sections, Repository Onboarding and Conformance being one, that are deliberately not carried.
                 # A downstream repo carrying such a section is still flagged, which is the point.
-                if path in ("AGENTS.md", "GOVERNANCE.md") and entry.get("name") != HUB_NAME:
+                if path in UNDECLARED_HEADING_SCANNED and entry.get("name") != HUB_NAME:
                     declared = {n.strip().lower() for n in (needed | verbatim_needed)}
-                    h2s = {
-                        ln[3:].strip().lower() for ln in text.splitlines() if ln.startswith("## ")
-                    }
-                    for h in sorted(h2s - declared):
+                    for h in undeclared_h2_headings(text, declared):
                         findings.append(
                             (
                                 "DRIFT",
@@ -2803,6 +2839,26 @@ def _selftest():
         print(
             "  ok   section: heading in region, fenced ## kept, sibling H2 ends, None if absent, whitespace-tolerant locate, re-cased heading rehashes"
         )
+    # A mismatched marker nested inside a fence (a ~~~ line inside a ``` block) must not end the fence early.
+    # _fence_step carries this contract, and extract_section and strip_sections each consume it.
+    nested = "## Alpha\n```md\n~~~\n## Fake\n```\nreal content\n"
+    nested_extract = extract_section(nested, "Alpha")
+    nested_strip = strip_sections(
+        "## Keep\ntext\n```md\n~~~\n## Fake Drop\n```\nmore text\n## Drop\nreal drop content\n",
+        ["Drop"],
+    )
+    if (
+        nested_extract is None
+        or "## Fake" not in nested_extract
+        or "real content" not in nested_extract
+        or "## Fake Drop" not in nested_strip
+        or "real drop content" in nested_strip
+        or "more text" not in nested_strip
+    ):
+        ok = False
+        print("  FAIL section: a mismatched marker nested in a fence ends the region early")
+    else:
+        print("  ok   section: a mismatched marker nested in a fence is not a boundary")
 
     # Coordination-reference scan: the hub name inside a verbatim section is exempt, outside one is not.
     # The first case is the real AGENTS.md shape, where the byte-locked Fleet Bootstrap block must name the hub and a repo therefore cannot clear a finding against it.
@@ -2863,6 +2919,137 @@ def _selftest():
     if tref_ok:
         print(
             f"  ok   template-ref: {len(tref)} cases, verbatim regions excised before the hub-name scan"
+        )
+
+    # An H2 the manifest does not declare, in AGENTS.md, GOVERNANCE.md, or .github/copilot-instructions.md.
+    # Fence-aware, so a heading syntax example or a shell comment inside a code sample is not misread as a real section.
+    uh = [
+        (
+            "a declared H2 is not flagged",
+            "# AGENTS\n\n## Fleet Bootstrap\n\nText.\n",
+            {"fleet bootstrap"},
+            [],
+        ),
+        (
+            "an undeclared H2 is flagged",
+            "# AGENTS\n\n## Fleet Bootstrap\n\nText.\n\n## Local Notes\n\nRepo-specific.\n",
+            {"fleet bootstrap"},
+            ["local notes"],
+        ),
+        (
+            "declared-name match is case-insensitive",
+            "# AGENTS\n\n## fleet BOOTSTRAP\n\nText.\n",
+            {"fleet bootstrap"},
+            [],
+        ),
+        (
+            "an un-normalized declared set (mixed case, untrimmed) is normalized here, not trusted",
+            "# AGENTS\n\n## Fleet Bootstrap\n\nText.\n",
+            {" Fleet Bootstrap "},
+            [],
+        ),
+        (
+            "an H1 title and a nested H3 are not judged, only H2",
+            "# Local Notes\n\n## Fleet Bootstrap\n\n### Local Notes\n\nText.\n",
+            {"fleet bootstrap"},
+            [],
+        ),
+        (
+            "a fenced sample showing heading syntax is not a real heading",
+            "# AGENTS\n\n## Fleet Bootstrap\n\n```\n## Local Notes\n```\n",
+            {"fleet bootstrap"},
+            [],
+        ),
+        (
+            "a backtick in a backtick-fence info string is not a valid opener, so the heading after it is real",
+            "# AGENTS\n\n## Fleet Bootstrap\n\n```md`\n## Local Notes\n",
+            {"fleet bootstrap"},
+            ["local notes"],
+        ),
+        (
+            "a repo's own local content, undeclared, is flagged even in a file with its own declared sections",
+            (
+                "# Copilot Instructions\n\n## GitHub Copilot Review Runbook\n\nText.\n\n"
+                "## Development Workflow\n\nLocal build and test steps.\n\n"
+                "## Command Line Usage\n\nLocal CLI reference.\n"
+            ),
+            {"github copilot review runbook"},
+            ["command line usage", "development workflow"],
+        ),
+    ]
+    uh_ok = True
+    for label, doc, declared, want in uh:
+        got = undeclared_h2_headings(doc, declared)
+        if got != want:
+            ok = uh_ok = False
+            print(f"  FAIL undeclared-heading: {label} (expected {want}, got {got})")
+    if uh_ok:
+        print(f"  ok   undeclared-heading: {len(uh)} cases, H2-only, case-insensitive, fence-aware")
+
+    # A fence closes only on a same-family marker at least as long as the opener.
+    uf = [
+        ("a simple ``` fence excludes its content", "```\n## Phantom\n```\n## Real\n", "## Real\n"),
+        ("a simple ~~~ fence excludes its content", "~~~\n## Phantom\n~~~\n## Real\n", "## Real\n"),
+        (
+            "a ~~~ line nested inside a ``` fence does not close it",
+            "```md\n~~~\n## Phantom\n```\n## Real\n",
+            "## Real\n",
+        ),
+        (
+            "a shorter ``` cannot close a longer ```` fence",
+            "````md\n## Phantom\n```\n## Real\n````\n",
+            "",
+        ),
+        (
+            "a longer closing fence than the opener still closes",
+            "```\n## Phantom\n````\n## Real\n",
+            "## Real\n",
+        ),
+        (
+            "a marker run followed by trailing text does not close",
+            "```\n## Phantom\n```not-a-fence\n## Real\n```\n## Real2\n",
+            "## Real2\n",
+        ),
+        (
+            "trailing whitespace after the marker run still closes",
+            "```\n## Phantom\n```   \n## Real\n",
+            "## Real\n",
+        ),
+        (
+            "a 3-space-indented closing fence still closes",
+            "```\n## Phantom\n   ```\n## Real\n",
+            "## Real\n",
+        ),
+        (
+            "a 4-space-indented closing fence remains content, not a boundary",
+            "```\n## Phantom\n    ```\n## Still Phantom\n```\n## Real\n",
+            "## Real\n",
+        ),
+        (
+            "a 4-space-indented opener never opens a fence",
+            "    ```\n## Real\n",
+            "    ```\n## Real\n",
+        ),
+        (
+            "a backtick in a backtick-fence info string is not a valid opener",
+            "```md`\n## Real\n",
+            "```md`\n## Real\n",
+        ),
+        (
+            "a backtick in a tilde-fence info string does not disqualify it",
+            "~~~md`\n## Phantom\n~~~\n## Real\n",
+            "## Real\n",
+        ),
+    ]
+    uf_ok = True
+    for label, doc, want in uf:
+        got = unfenced_text(doc)
+        if got != want:
+            ok = uf_ok = False
+            print(f"  FAIL unfenced-text: {label} (expected {want!r}, got {got!r})")
+    if uf_ok:
+        print(
+            f"  ok   unfenced-text: {len(uf)} cases, closing fence matches the opener's marker and length"
         )
 
     # Issue generator: findings land in the right buckets and the title carries the count.
