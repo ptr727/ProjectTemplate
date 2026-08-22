@@ -77,6 +77,14 @@ if [ -f "$registry" ]; then
         echo "Failed to read description from $registry (invalid JSON?)." >&2
         exit 1
     fi
+    # The trim above only strips leading/trailing whitespace, so an embedded newline or carriage return survives it.
+    # Caught here rather than left to reach `gh api` as a multi-line value.
+    case "$description" in
+        *$'\n'* | *$'\r'*)
+            echo "The declared description for $name in $registry carries an embedded newline. Fix it there (spec/validate.py rejects this once run)." >&2
+            exit 1
+            ;;
+    esac
 fi
 
 # ----- Ruleset id lookup (shared by apply and check) -----
