@@ -68,13 +68,19 @@ skill covers all of it, scoped down by what the maintainer actually asks for.
    reads current, always, not only when separately asked. This refreshes only the machine running
    this session, per skill-lifecycle, every other machine still refreshes on its own next run or
    `docs/host-setup.md` "Fleet Skills Install" cadence.
-6. When the chosen scope includes a release, `gh workflow run publish-release.yml --ref main
+6. When the chosen scope includes a release, first check the registry's `releaseTrigger` for this
+   repo in `registry/repos.json`. Report that no release is configured and stop without
+   dispatching when it reads `none`. Otherwise `gh workflow run publish-release.yml --ref main
    --repo owner/repo`, or `--ref develop` only when the maintainer explicitly asked for a
    prerelease dispatch instead.
-7. Poll the dispatched run to completion (`gh run list --repo owner/repo`, `gh run view --repo
-   owner/repo`), report its conclusion
-   and the tag or version it produced. A run that fails, or never starts, is reported, never
-   silently retried.
+7. Capture the dispatched run's identity right after dispatching it, `gh run list --repo
+   owner/repo --workflow publish-release.yml --branch main --limit 1 --json databaseId,createdAt`
+   (or `--branch develop` for a prerelease dispatch), matched against the dispatch time so a
+   concurrent unrelated run is never mistaken for this one. Poll that specific run id to
+   completion in one bounded background wait, `timeout <seconds> gh run watch <run-id> --repo
+   owner/repo --exit-status`, and report a timeout separately from a completed run's own
+   conclusion, the tag or version it produced. A run that fails, times out, or never starts is
+   reported, never silently retried.
 8. Run the repo-worktree post-merge cleanup, fetch and prune, fast-forward the base clone to
    `develop`, remove any worktree the completed task leaves behind.
 
