@@ -4301,7 +4301,7 @@ def _selftest():
         print(f"  FAIL description: null-declared-field DEFECT contract -> {null_declared}")
     else:
         print("  ok   description: a null declared field is a DEFECT via validate.py's contract")
-    # The DEFECT names the actual repo, not a generic "registry" label - actionable across a fleet-wide run.
+    # The DEFECT names the actual repo, not a generic "registry" label, so it stays actionable in a fleet-wide run.
     if not any(k == "DEFECT" and t.startswith("owner/Fixture:") for k, t in null_declared):
         ok = False
         print(f"  FAIL description: DEFECT does not name the repo -> {null_declared}")

@@ -485,7 +485,8 @@ def main():
             errors.append(f"repo #{i}: missing or empty 'name'")
             continue
         if name != name.strip():
-            # Both configure.sh and audit.py key their per-repo lookup off an exact match on name, so a padded value would make the entry unresolvable there rather than merely cosmetic here.
+            # Both configure.sh and audit.py key their per-repo lookup off an exact match on name.
+            # A padded value would therefore make the entry unresolvable there, not merely cosmetic here.
             errors.append(f"repo #{i}: name '{name}' carries leading/trailing whitespace")
             continue
         if name in seen_names:
