@@ -89,7 +89,7 @@ This repo is the single home for those rules, a machine-readable spec they are c
 - **[AUDIT.md][audit]** - how an agent audits a repository against the spec and reports drift.
 - **[RESYNC.md][resync]** - how an agent brings an already-stood-up repository back into line, in the order the remedies require.
 - **[spec/][spec]** - the machine-readable ground truth: project-type requirements, the file/section baseline, required/forbidden secrets, the host tool contract and its version floors, and the preferred README structure.
-- **[registry/repos.json][repos]** - the fleet registry: every project, its type(s), publish mechanism, and status (cataloged or standardization backlog).
+- **[registry/repos.json][repos]** - the fleet registry: every project, its type(s), publish mechanism, and status (cataloged, standardization backlog, archived, or excluded). `spec/audit.py` checks the registry against the owner's actual GitHub repos, not just against itself, so a repo can't go missing from it unnoticed.
 - **[repo-config/][repo-config]** - hub-only branch rulesets, fleet settings, the apply script, and the GitHub setup reference (kept out of `.github/`, which is Actions-owned).
 - **[host-setup/][host-setup-dir]** - the host guardrail kit, which is per machine rather than per repository.
 - **[catalog/][catalog]** - reusable reference snippets (workflow tasks, config exemplars, devcontainers) the audit compares implementations against.

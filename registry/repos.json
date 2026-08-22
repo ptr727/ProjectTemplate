@@ -320,6 +320,24 @@
             "releaseTrigger": "dispatch-only",
             "configLayout": { "rulesetsDir": "repo-config", "pythonConfig": null },
             "driftNotes": ["Hugo static site migrated off WordPress.com, stood up 2026-08-01; release model with a dispatch-only publisher that cuts the tag and a source archive.", "lineEndings lf on a release repo, where the rule grants the native-platform default to operational repos only: every consumer is Linux (the Hugo build, the Caddy container, and the rsync deploy).", "content/ is an imported WordPress archive, so the prose, spelling, and style gates are scoped to exclude it.", "Deploy credentials are per-environment GitHub Environment secrets and variables, which spec/secrets.json has no vocabulary for, so requiredSecrets stays empty and the names are declared in this repo's own secrets.json environments block; listing them here would make the audit demand them in the repository actions store."]
+        },
+        {
+            "name": "DiskSpeedTest",
+            "url": "https://github.com/ptr727/DiskSpeedTest",
+            "status": "archived",
+            "driftNotes": ["Archived on GitHub. Found missing from the registry by the fleet membership check (ptr727/ProjectTemplate#550). No further conformance work is expected while archived."]
+        },
+        {
+            "name": "GEM-Echo-Server",
+            "url": "https://github.com/ptr727/GEM-Echo-Server",
+            "status": "archived",
+            "driftNotes": ["Archived on GitHub. Found missing from the registry by the fleet membership check (ptr727/ProjectTemplate#550). No further conformance work is expected while archived."]
+        },
+        {
+            "name": "GoogleTo1Password",
+            "url": "https://github.com/ptr727/GoogleTo1Password",
+            "status": "archived",
+            "driftNotes": ["Archived on GitHub. Found missing from the registry by the fleet membership check (ptr727/ProjectTemplate#550). No further conformance work is expected while archived."]
         }
     ]
 }

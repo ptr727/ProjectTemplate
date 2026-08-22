@@ -21,6 +21,12 @@ ROOT = pathlib.Path(__file__).resolve().parent.parent
 WORKFLOW_MODELS = ("release", "operational")
 RELEASE_TRIGGERS = ("two-phase", "publish-on-merge", "dispatch-only", "none")
 CONSUMER_MODELS = ("push", "pull")
+# Parses owner/repo, lowercased, from a repo's url.
+# A trailing .git is stripped so it still matches GitHub's own full_name.
+# A query character or a fragment character is excluded from both groups too.
+# Otherwise a query string or fragment folds into the repo name instead of failing to match.
+# A duplicate identity here would let spec/audit.py's fleet membership check silently shadow one entry with the other.
+GITHUB_URL_RE = re.compile(r"^https://github\.com/([^/\s?#]+)/([^/\s?#]+?)(?:\.git)?/?$")
 # How faithfully a carried unit is checked, per spec/fidelity-model.md, defaulting to presence.
 FIDELITIES = ("presence", "intent", "verbatim", "interface")
 # The keys an interface unit's `contract` may carry (kept in sync with files.schema.json).
@@ -423,11 +429,49 @@ def main():
             f"defaults.releaseTrigger '{default_trigger}' invalid (expected one of {', '.join(RELEASE_TRIGGERS)})"
         )
 
+    seen_identities = set()
     for i, repo in enumerate(repos["repos"]):
         if not isinstance(repo, dict):
             errors.append(f"repo #{i} is not an object")
             continue
         name = repo.get("name", f"#{i}")
+        # This name only labels every error message below.
+        # The membership check (spec/audit.py's membership_findings()) keys by owner/repo instead, parsed from url the same way this loop does.
+        if not isinstance(repo.get("name"), str) or not repo["name"].strip():
+            errors.append(f"repo #{i}: missing or empty 'name'")
+            continue
+        if not isinstance(repo.get("url"), str) or not repo["url"].strip():
+            errors.append(f"{name}: missing or empty 'url'")
+            continue
+        m = GITHUB_URL_RE.match(repo["url"].strip())
+        if m is None:
+            # A url that is a well-formed URI but not this exact shape (http://, a path suffix) would otherwise pass here.
+            # It would only surface later as a false DEFECT, since membership_findings() can never resolve it to an identity.
+            errors.append(f"{name}: url is not a github.com/<owner>/<repo> URL")
+            continue
+        identity = f"{m.group(1)}/{m.group(2)}".lower()
+        if identity in seen_identities:
+            errors.append(f"{name}: duplicate registry entry for '{identity}'")
+        seen_identities.add(identity)
+
+        # These fields are facts about the repo itself, not about its audit scope.
+        # The schema's operational-needs-lineEndings rule (registry/repos.schema.json) binds regardless of status.
+        # Checked here, before the status branch, so every status shares one check rather than each non-cataloged branch needing its own copy.
+        model = repo.get("workflowModel")
+        if model is not None and model not in WORKFLOW_MODELS:
+            errors.append(
+                f"{name}: workflowModel '{model}' invalid (expected {' or '.join(WORKFLOW_MODELS)})"
+            )
+        eol = repo.get("lineEndings")
+        if eol is not None and eol not in ("lf", "crlf"):
+            errors.append(f"{name}: lineEndings '{eol}' invalid (expected lf or crlf)")
+        # An operational repo's endings follow the consuming app's platform, so they must be declared, where a release repo omits the field and takes the fleet LF default.
+        # Resolve the effective model the way configure.sh does, from the repo, then the defaults, then release.
+        # The requirement then holds even where a repo relies on an operational defaults.workflowModel rather than setting its own.
+        effective_model = model or default_model or "release"
+        if effective_model == "operational" and eol is None:
+            errors.append(f"{name}: operational repo must declare lineEndings (lf or crlf)")
+
         status = repo.get("status")
         if status is None:
             errors.append(f"{name}: missing 'status'")
@@ -435,6 +479,15 @@ def main():
         if status == "backlog":
             if not repo.get("classificationPending"):
                 errors.append(f"{name}: backlog repo without classificationPending")
+            continue
+        if status == "archived":
+            # GitHub's own archived flag is the fact.
+            # The entry only needs to exist, so spec/audit.py's fleet membership check has something to match it against.
+            continue
+        if status == "excluded":
+            reason = repo.get("exclusionReason")
+            if not isinstance(reason, str) or not reason.strip():
+                errors.append(f"{name}: excluded repo without a non-empty exclusionReason")
             continue
         if status != "cataloged":
             errors.append(f"{name}: unknown status '{status}'")
@@ -463,12 +516,6 @@ def main():
                     f"{name}: type '{tname}' profile '{prof}' not in its allowed profiles {allowed or '[]'}"
                 )
 
-        model = repo.get("workflowModel")
-        if model is not None and model not in WORKFLOW_MODELS:
-            errors.append(
-                f"{name}: workflowModel '{model}' invalid (expected {' or '.join(WORKFLOW_MODELS)})"
-            )
-
         # The releaseTrigger field is a scope selector, per spec/scope-model.md, so an invalid value would silently fail to match any releaseTrigger-scoped section rather than error.
         trigger = repo.get("releaseTrigger")
         if trigger is not None and trigger not in RELEASE_TRIGGERS:
@@ -483,16 +530,6 @@ def main():
             errors.append(
                 f"{name}: consumerModel '{cm}' invalid or missing (expected {' or '.join(CONSUMER_MODELS)})"
             )
-
-        eol = repo.get("lineEndings")
-        if eol is not None and eol not in ("lf", "crlf"):
-            errors.append(f"{name}: lineEndings '{eol}' invalid (expected lf or crlf)")
-        # An operational repo's endings follow the consuming app's platform, so they must be declared, where a release repo omits the field and takes the fleet LF default.
-        # Resolve the effective model the way configure.sh does, from the repo, then the defaults, then release.
-        # The requirement then holds even where a repo relies on an operational defaults.workflowModel rather than setting its own.
-        effective_model = model or default_model or "release"
-        if effective_model == "operational" and eol is None:
-            errors.append(f"{name}: operational repo must declare lineEndings (lf or crlf)")
 
         required = set(repo.get("requiredSecrets", []))
         for pub in repo.get("publish", []):
@@ -857,7 +894,17 @@ def main():
         1 for r in repos["repos"] if isinstance(r, dict) and r.get("status") == "cataloged"
     )
     backlog = sum(1 for r in repos["repos"] if isinstance(r, dict) and r.get("status") == "backlog")
-    print(f"Spec validation OK: {cataloged} cataloged, {backlog} backlog repos classify cleanly.")
+    archived = sum(
+        1 for r in repos["repos"] if isinstance(r, dict) and r.get("status") == "archived"
+    )
+    excluded = sum(
+        1 for r in repos["repos"] if isinstance(r, dict) and r.get("status") == "excluded"
+    )
+    print(
+        f"Spec validation OK: {cataloged} cataloged repos classify cleanly. "
+        f"{backlog} backlog repos await classification. "
+        f"{archived} archived, {excluded} excluded repos carry a valid entry."
+    )
     return 0
 
 
