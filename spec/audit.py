@@ -553,21 +553,25 @@ def unfenced_text(text):
     `<!-- Shields -->` or an `![alt][ref]` in one is not a definition, a group, or a rendered badge. Kept as
     one helper because the checkers were fence-aware in some places and blind in others, which is the state
     that lets a document be read two ways by one audit.
-    A fence closes only on the same marker character at least as long as the one that opened it, with
-    nothing but whitespace after the marker run, per CommonMark. A mismatched or shorter marker nested
-    inside (a ~~~ example inside a ``` block, or a ``` inside a longer ````) is content, not a boundary,
-    and so is a marker run followed by trailing text (an opening fence's language tag has no closing
-    counterpart).
+    Fence matching follows CommonMark. A fence marker needs at most 3 leading spaces, more reads as
+    content, not a boundary. A closing fence needs the same character, a run at least as long as the
+    opener's, and nothing but whitespace after that run - a mismatched or shorter marker (a ~~~ example
+    inside a ``` block, a ``` inside a longer ````) or trailing text (an opening fence's language tag has
+    no closing counterpart) does not close it.
     """
     out, marker, marker_len = [], None, 0
     for ln in normalize(text).split("\n"):
-        s = ln.strip()
-        run = len(s) - len(s.lstrip(s[0])) if s[:1] in ("`", "~") else 0
+        stripped = ln.lstrip(" ")
+        indent = len(ln) - len(stripped)
+        char = stripped[:1]
+        run = (
+            len(stripped) - len(stripped.lstrip(char)) if indent <= 3 and char in ("`", "~") else 0
+        )
         if marker is None:
             if run >= 3:
-                marker, marker_len = s[0], run
+                marker, marker_len = char, run
                 continue
-        elif s[:1] == marker and run >= marker_len and not s[run:].strip():
+        elif char == marker and run >= marker_len and not stripped[run:].strip():
             marker = None
             continue
         if marker is None:
@@ -2976,6 +2980,21 @@ def _selftest():
             "trailing whitespace after the marker run still closes",
             "```\n## Phantom\n```   \n## Real\n",
             "## Real\n",
+        ),
+        (
+            "a 3-space-indented closing fence still closes",
+            "```\n## Phantom\n   ```\n## Real\n",
+            "## Real\n",
+        ),
+        (
+            "a 4-space-indented closing fence remains content, not a boundary",
+            "```\n## Phantom\n    ```\n## Still Phantom\n```\n## Real\n",
+            "## Real\n",
+        ),
+        (
+            "a 4-space-indented opener never opens a fence",
+            "    ```\n## Real\n",
+            "    ```\n## Real\n",
         ),
     ]
     uf_ok = True
