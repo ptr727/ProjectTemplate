@@ -83,20 +83,22 @@ if [ -f "$registry" ]; then
     fi
     if [ "$declared" = "true" ]; then
         # Exactly one match is already established above, so select() itself yields exactly one value here.
-        # Trims only space/tab, so an edge newline survives to trip the guard below rather than being silently dropped.
-        # A non-string value (including an explicit null) resolves to empty here, caught by the same guard as a malformed one.
-        # -j plus the trailing sentinel keeps command substitution from stripping a genuine trailing newline in the value.
+        # No trim: this only ever validates the value against spec/validate.py's contract, never normalizes it.
+        # A non-string value (including an explicit null) resolves to empty here, caught by the same guard.
+        # -j plus the trailing sentinel keeps command substitution from stripping a genuine trailing newline.
         if ! description="$(jq -j --arg n "$name" \
-            '(.repos[] | select(.name==$n) | .description) | if type == "string" then gsub("^[ \\t]+|[ \\t]+$"; "") else empty end' \
+            '(.repos[] | select(.name==$n) | .description) | if type == "string" then . else empty end' \
             "$registry" && printf x)"; then
             echo "Failed to read description from $registry (invalid JSON?)." >&2
             exit 1
         fi
         description="${description%x}"
-        if [ -z "$description" ]; then
-            echo "The declared description for $name in $registry is not a non-empty string. Fix it there (spec/validate.py rejects this once run)." >&2
-            exit 1
-        fi
+        case "$description" in
+            "" | [[:space:]]* | *[[:space:]])
+                echo "The declared description for $name in $registry is not a non-empty string with no leading or trailing whitespace. Fix it there (spec/validate.py rejects this once run)." >&2
+                exit 1
+                ;;
+        esac
         case "$description" in
             *$'\n'* | *$'\r'*)
                 echo "The declared description for $name in $registry carries an embedded newline. Fix it there (spec/validate.py rejects this once run)." >&2
