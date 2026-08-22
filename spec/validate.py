@@ -21,6 +21,9 @@ ROOT = pathlib.Path(__file__).resolve().parent.parent
 WORKFLOW_MODELS = ("release", "operational")
 RELEASE_TRIGGERS = ("two-phase", "publish-on-merge", "dispatch-only", "none")
 CONSUMER_MODELS = ("push", "pull")
+# Parses owner/repo, lowercased, from a repo's url.
+# A duplicate identity here would let spec/audit.py's fleet membership check silently shadow one entry with the other.
+GITHUB_URL_RE = re.compile(r"^https://github\.com/([^/\s]+)/([^/\s]+?)/?$")
 # How faithfully a carried unit is checked, per spec/fidelity-model.md, defaulting to presence.
 FIDELITIES = ("presence", "intent", "verbatim", "interface")
 # The keys an interface unit's `contract` may carry (kept in sync with files.schema.json).
@@ -423,20 +426,25 @@ def main():
             f"defaults.releaseTrigger '{default_trigger}' invalid (expected one of {', '.join(RELEASE_TRIGGERS)})"
         )
 
+    seen_identities = set()
     for i, repo in enumerate(repos["repos"]):
         if not isinstance(repo, dict):
             errors.append(f"repo #{i} is not an object")
             continue
         name = repo.get("name", f"#{i}")
-        # No status, cataloged included, ever validated name or url beyond this fallback.
-        # A missing or blank one passed cleanly here and only broke a downstream consumer later.
-        # One such consumer, spec/audit.py's membership_findings(), indexes the registry by repo["name"] and needs every entry to actually have one.
+        # Validated up front because spec/audit.py's membership_findings() indexes the registry by name and needs every entry to actually have one.
         if not isinstance(repo.get("name"), str) or not repo["name"].strip():
             errors.append(f"repo #{i}: missing or empty 'name'")
             continue
         if not isinstance(repo.get("url"), str) or not repo["url"].strip():
             errors.append(f"{name}: missing or empty 'url'")
             continue
+        m = GITHUB_URL_RE.match(repo["url"].strip())
+        identity = f"{m.group(1)}/{m.group(2)}".lower() if m else None
+        if identity is not None:
+            if identity in seen_identities:
+                errors.append(f"{name}: duplicate registry entry for '{identity}'")
+            seen_identities.add(identity)
 
         # These fields are facts about the repo itself, not about its audit scope.
         # The schema's operational-needs-lineEndings rule (registry/repos.schema.json) binds regardless of status.

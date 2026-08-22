@@ -45,8 +45,8 @@
             ],
             "additionalProperties": false,
             "properties": {
-                "name": { "type": "string" },
-                "url": { "type": "string", "format": "uri" },
+                "name": { "type": "string", "minLength": 1 },
+                "url": { "type": "string", "format": "uri", "minLength": 1 },
                 "status": { "enum": ["cataloged", "backlog", "archived", "excluded"] },
                 "exclusionReason": { "type": "string", "minLength": 1, "pattern": "\\S" },
                 "types": { "type": "array", "items": { "type": "string" } },

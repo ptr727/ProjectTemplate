@@ -223,6 +223,12 @@ def owner_repos(owner):
     way a missing registry entry does. Confirm the authenticated login matches owner first, so a
     mismatch is a loud error rather than a quietly wrong (and possibly cross-account) result.
     No --paginate, per the gh() docstring above; page by hand until a page comes back short.
+
+    This still assumes the credential gh runs as can see every repo the owner has: an ordinary
+    `gh auth login` session does, but a fine-grained PAT scoped to "selected repositories" would
+    return an incomplete list with no error and no signal in the response to detect that from, so
+    the sweep would read as clean while some repos were never inspected. Run this as the owner's
+    own account, not a repository-scoped credential.
     """
     me = gh("user")
     login = me.get("login") if isinstance(me, dict) else None
@@ -249,6 +255,21 @@ def owner_repos(owner):
         page += 1
 
 
+GITHUB_URL_RE = re.compile(r"^https://github\.com/([^/\s]+)/([^/\s]+?)/?$")
+
+
+def repo_identity(url):
+    """owner/repo, lowercased, parsed from a github.com URL, or None if it does not parse.
+
+    The canonical identity two repos are compared by, since a bare repo name collides across
+    owners and GitHub's own full_name field is already this exact shape (case-preserved).
+    """
+    if not isinstance(url, str):
+        return None
+    m = GITHUB_URL_RE.match(url.strip())
+    return f"{m.group(1)}/{m.group(2)}".lower() if m else None
+
+
 def membership_findings(spec):
     """Fleet-wide: every non-fork repo the owner has on GitHub must have a registry entry.
 
@@ -266,15 +287,16 @@ def membership_findings(spec):
     visible in the catalog instead of the repo just disappearing from it.
     """
     findings = []
-    # A name with incidental leading/trailing whitespace passes spec/validate.py, which rejects only a blank one.
-    # .strip() before .lower() on both sides here, or that whitespace makes a real match miss and reports a false DEFECT for a repo the registry actually carries.
-    registry_by_name = {
-        r["name"].strip().lower(): r
-        for r in spec["registry"]["repos"]
-        if isinstance(r, dict) and isinstance(r.get("name"), str) and r["name"].strip()
-    }
+    # A bare-name match would treat a same-named repo under a different owner as this one's entry.
+    # Keyed by owner/repo instead, the shape GitHub's own full_name field already carries.
+    # Two entries resolving to the same identity are a separate, validate.py-level defect.
+    registry_by_identity = {}
+    for r in spec["registry"]["repos"]:
+        identity = repo_identity(r.get("url")) if isinstance(r, dict) else None
+        if identity is not None:
+            registry_by_identity[identity] = r
     for gh_repo in owner_repos(spec["registry"]["owner"]):
-        entry = registry_by_name.get(str(gh_repo.get("name", "")).strip().lower())
+        entry = registry_by_identity.get(str(gh_repo.get("full_name", "")).strip().lower())
         if entry is None:
             findings.append(
                 (
@@ -4182,6 +4204,25 @@ def _selftest():
             "  ok   repo_tree: a truncated tree and a missing tree sha both return None, and a whole one drops non-blobs"
         )
 
+    id_cases = [
+        ("https://github.com/owner/Repo", "owner/repo"),
+        ("https://github.com/owner/Repo/", "owner/repo"),
+        ("  https://github.com/owner/Repo  ", "owner/repo"),
+        ("https://gitlab.com/owner/Repo", None),
+        ("not a url", None),
+        (None, None),
+        (42, None),
+    ]
+    id_ok = all(repo_identity(url) == want for url, want in id_cases)
+    if id_ok:
+        print(
+            "  ok   repo_identity: parses owner/repo from a github.com URL, lowercased and trimmed"
+        )
+    else:
+        ok = False
+        got_ids = [(url, repo_identity(url)) for url, _ in id_cases]
+        print(f"  FAIL repo_identity -> {got_ids}")
+
     # owner_repos: forks are dropped, and pagination stops the moment a page comes back short of 100.
     real_gh = globals()["gh"]
     try:
@@ -4214,8 +4255,14 @@ def _selftest():
     except AttributeError:
         ok = False
         print("  FAIL owner_repos: a None gh('user') response crashed with AttributeError")
-    except RuntimeError:
-        print("  ok   owner_repos: a None gh('user') response raises the clear mismatch error")
+    except RuntimeError as exc:
+        # Any RuntimeError would pass a bare except clause, including an unrelated one this test
+        # was never meant to exercise. Assert the actual ownership-mismatch text.
+        if "not registry owner 'owner'" not in str(exc):
+            ok = False
+            print(f"  FAIL owner_repos: a None gh('user') response raised the wrong error -> {exc}")
+        else:
+            print("  ok   owner_repos: a None gh('user') response raises the clear mismatch error")
     finally:
         globals()["gh"] = real_gh
 
@@ -4255,7 +4302,16 @@ def _selftest():
             (
                 "archived on GitHub but not in the registry is DRIFT",
                 [{"name": "Old", "full_name": "owner/Old", "archived": True}],
-                {"owner": "owner", "repos": [{"name": "Old", "status": "cataloged"}]},
+                {
+                    "owner": "owner",
+                    "repos": [
+                        {
+                            "name": "Old",
+                            "url": "https://github.com/owner/Old",
+                            "status": "cataloged",
+                        }
+                    ],
+                },
                 [
                     (
                         "DRIFT",
@@ -4266,7 +4322,16 @@ def _selftest():
             (
                 "registry says archived but GitHub disagrees is DRIFT",
                 [{"name": "Back", "full_name": "owner/Back", "archived": False}],
-                {"owner": "owner", "repos": [{"name": "Back", "status": "archived"}]},
+                {
+                    "owner": "owner",
+                    "repos": [
+                        {
+                            "name": "Back",
+                            "url": "https://github.com/owner/Back",
+                            "status": "archived",
+                        }
+                    ],
+                },
                 [
                     (
                         "DRIFT",
@@ -4278,20 +4343,62 @@ def _selftest():
             (
                 "matched, not archived either side, is clean",
                 [{"name": "Fine", "full_name": "owner/Fine", "archived": False}],
-                {"owner": "owner", "repos": [{"name": "Fine", "status": "cataloged"}]},
+                {
+                    "owner": "owner",
+                    "repos": [
+                        {
+                            "name": "Fine",
+                            "url": "https://github.com/owner/Fine",
+                            "status": "cataloged",
+                        }
+                    ],
+                },
                 [],
             ),
             (
-                "name matching is case-insensitive",
-                [{"name": "MixedCase", "full_name": "owner/MixedCase", "archived": False}],
-                {"owner": "owner", "repos": [{"name": "mixedcase", "status": "cataloged"}]},
+                "identity matching is case-insensitive",
+                [{"name": "MixedCase", "full_name": "Owner/MixedCase", "archived": False}],
+                {
+                    "owner": "owner",
+                    "repos": [
+                        {
+                            "name": "mixedcase",
+                            "url": "https://github.com/owner/mixedcase",
+                            "status": "cataloged",
+                        }
+                    ],
+                },
                 [],
             ),
             (
-                "an incidental whitespace difference does not miss a real match",
+                "an incidental URL whitespace difference does not miss a real match",
                 [{"name": "Spacey", "full_name": "owner/Spacey", "archived": False}],
-                {"owner": "owner", "repos": [{"name": " Spacey ", "status": "cataloged"}]},
+                {
+                    "owner": "owner",
+                    "repos": [
+                        {
+                            "name": "Spacey",
+                            "url": "  https://github.com/owner/Spacey  ",
+                            "status": "cataloged",
+                        }
+                    ],
+                },
                 [],
+            ),
+            (
+                "a same-named repo under a different owner is not treated as a match",
+                [{"name": "Shared", "full_name": "owner/Shared", "archived": False}],
+                {
+                    "owner": "owner",
+                    "repos": [
+                        {
+                            "name": "Shared",
+                            "url": "https://github.com/someone-else/Shared",
+                            "status": "cataloged",
+                        }
+                    ],
+                },
+                [("DEFECT", "owner/Shared: exists on GitHub with no registry/repos.json entry")],
             ),
         ]
         for label, gh_repos, spec_registry, want in cases:
