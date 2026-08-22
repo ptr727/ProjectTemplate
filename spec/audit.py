@@ -1297,58 +1297,65 @@ def description_findings(doc_texts, entry, live, slug):
     "Repository Details"). repo-config/configure.sh then writes the About panel from that same field. A repo that
     has not adopted it yet still has the README as its source of truth, so the checks below fall back to the
     tagline exactly as before.
+
+    A declared field's mirrors (About, Docker Hub) are measured against it even where the README itself could
+    not be read (missing, oversized, or fetched with no inline content) or carries no usable tagline, since the
+    declared value is canonical on its own and does not need the README to establish it.
     """
     findings = []
-    if "README.md" not in doc_texts:
-        return findings
-    title, intro = title_and_intro(doc_texts["README.md"])
-    intro_line = tagline(intro)
-    # The H1 is the repository name, and a hyphenated name may render its hyphens as spaces.
-    # Use the GitHub API's canonical name, since the registry-URL slug can carry a different case.
-    repo_name = live.get("name") or slug.split("/")[-1]
     declared = (entry.get("description") or "").strip() or None
-    if not title:
-        findings.append(
-            (
-                "LETTER",
-                "readme: no `# ` H1 title - the README opens with `# <repo name>` then the tagline (spec/readme-structure.md)",
+    readme_want = None
+    if "README.md" in doc_texts:
+        title, intro = title_and_intro(doc_texts["README.md"])
+        intro_line = tagline(intro)
+        # The H1 is the repository name, and a hyphenated name may render its hyphens as spaces.
+        # Use the GitHub API's canonical name, since the registry-URL slug can carry a different case.
+        repo_name = live.get("name") or slug.split("/")[-1]
+        if not title:
+            findings.append(
+                (
+                    "LETTER",
+                    "readme: no `# ` H1 title - the README opens with `# <repo name>` then the tagline (spec/readme-structure.md)",
+                )
             )
-        )
-    elif title.replace("-", " ") != repo_name.replace("-", " "):
-        findings.append(
-            (
-                "LETTER",
-                f"readme: the H1 title '{title}' is not the repo name '{repo_name}' (a hyphenated name may render its hyphens as spaces) - the H1 is the repository name (spec/readme-structure.md)",
+        elif title.replace("-", " ") != repo_name.replace("-", " "):
+            findings.append(
+                (
+                    "LETTER",
+                    f"readme: the H1 title '{title}' is not the repo name '{repo_name}' (a hyphenated name may render its hyphens as spaces) - the H1 is the repository name (spec/readme-structure.md)",
+                )
             )
-        )
-    if not intro_line:
-        findings.append(
-            (
-                "LETTER",
-                "readme: no tagline after the H1 - the README opens with the title then a one-line description, which doubles as the About description (spec/readme-structure.md)",
+        if not intro_line:
+            findings.append(
+                (
+                    "LETTER",
+                    "readme: no tagline after the H1 - the README opens with the title then a one-line description, which doubles as the About description (spec/readme-structure.md)",
+                )
             )
-        )
-        return findings
-    if strip_md_links(intro_line) != intro_line:
-        findings.append(
-            (
-                "LETTER",
-                "readme: the tagline carries Markdown links - keep it link-free plain text, it doubles as the repo About description (spec/readme-structure.md)",
-            )
-        )
-    readme_want = strip_md_links(intro_line).strip()
-    if len(readme_want) > 100:
-        findings.append(
-            (
-                "LETTER",
-                f"readme: the tagline is {len(readme_want)} characters, over the 100-char limit (Docker Hub's short-description cap, the tightest surface it feeds) - tighten it to one short sentence (spec/readme-structure.md)",
-            )
-        )
+        else:
+            if strip_md_links(intro_line) != intro_line:
+                findings.append(
+                    (
+                        "LETTER",
+                        "readme: the tagline carries Markdown links - keep it link-free plain text, it doubles as the repo About description (spec/readme-structure.md)",
+                    )
+                )
+            readme_want = strip_md_links(intro_line).strip()
+            if len(readme_want) > 100:
+                findings.append(
+                    (
+                        "LETTER",
+                        f"readme: the tagline is {len(readme_want)} characters, over the 100-char limit (Docker Hub's short-description cap, the tightest surface it feeds) - tighten it to one short sentence (spec/readme-structure.md)",
+                    )
+                )
     # The declared field wins once a repo has one; every mirror (README, About, Docker Hub) is then measured against it.
-    # A repo with no declared field keeps the README as the source, exactly as before.
+    # A repo with no declared field keeps the README as the source, exactly as before, so with no readable tagline
+    # there is nothing yet to measure the other mirrors against.
     want = declared or readme_want
+    if want is None:
+        return findings
     source = "registry/repos.json" if declared else "the README"
-    if declared and readme_want != declared:
+    if declared and readme_want is not None and readme_want != declared:
         findings.append(
             (
                 "LETTER",
@@ -4185,6 +4192,27 @@ def _selftest():
             {"description": "A short tagline."},
             {"description": "Something else."},
             1,
+        ),
+        (
+            "declared field present, no README at all, About diverges from it",
+            {},
+            {"description": "The declared description."},
+            {"description": "Something else."},
+            1,
+        ),
+        (
+            "declared field present, no README at all, About already matches it",
+            {},
+            {"description": "The declared description."},
+            {"description": "The declared description."},
+            0,
+        ),
+        (
+            "no declared field and no README, nothing to measure against",
+            {},
+            {},
+            {"description": "Anything."},
+            0,
         ),
     ]
     for label, doc_texts_fx, entry_fx, live_fx, wantn in desc_cases:

@@ -142,5 +142,57 @@ class CarriedRelativeLinkCase(unittest.TestCase):
         self.assertEqual(1, len(validate.carried_link_errors(self.root, baseline)))
 
 
+class DescriptionErrorsCase(unittest.TestCase):
+    """registry/repos.json's optional `description` (GOVERNANCE.md "Repository Details")."""
+
+    def test_a_plain_short_sentence_is_clean(self) -> None:
+        self.assertEqual(validate.description_errors("Fixture", "A short tagline."), [])
+
+    def test_whitespace_only_is_rejected(self) -> None:
+        self.assertEqual(
+            validate.description_errors("Fixture", "   "),
+            ["Fixture: description must be a non-empty string"],
+        )
+
+    def test_an_inline_markdown_link_is_rejected(self) -> None:
+        self.assertEqual(
+            validate.description_errors("Fixture", "See [docs](https://example.test) for more."),
+            ["Fixture: description carries Markdown links - keep it link-free plain text"],
+        )
+
+    def test_a_reference_style_markdown_link_is_rejected(self) -> None:
+        self.assertEqual(
+            validate.description_errors("Fixture", "See [docs][ref] for more."),
+            ["Fixture: description carries Markdown links - keep it link-free plain text"],
+        )
+
+    def test_leading_or_trailing_whitespace_is_rejected(self) -> None:
+        # Not silently trimmed: configure.sh reads and writes the field raw, with no trimming of its own.
+        # An untrimmed value would read as a permanent mismatch on every mirror rather than a one-time fix.
+        self.assertEqual(
+            validate.description_errors("Fixture", "  A short tagline.  "),
+            [
+                "Fixture: description must be plain single-line text with no leading or trailing whitespace"
+            ],
+        )
+
+    def test_an_embedded_newline_is_rejected(self) -> None:
+        self.assertEqual(
+            validate.description_errors("Fixture", "A tagline.\nA second line."),
+            [
+                "Fixture: description must be plain single-line text with no leading or trailing whitespace"
+            ],
+        )
+
+    def test_exactly_the_cap_is_clean(self) -> None:
+        self.assertEqual(validate.description_errors("Fixture", "a" * 100), [])
+
+    def test_over_the_cap_is_rejected(self) -> None:
+        self.assertEqual(
+            validate.description_errors("Fixture", "a" * 101),
+            ["Fixture: description is 101 characters, over the 100-char limit"],
+        )
+
+
 if __name__ == "__main__":
     unittest.main()

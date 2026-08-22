@@ -42,6 +42,10 @@ CONTRACT_KEYS = {
 MARKDOWN_INLINE_LINK = re.compile(r"\]\((?P<target>[^)\s]+)")
 MARKDOWN_REFERENCE_LINK = re.compile(r"^\[[^]]+\]:\s*(?P<target>\S+)", re.MULTILINE)
 TEMPLATE_REPOSITORY_URL = "https://github.com/ptr727/ProjectTemplate"
+# A description-shaped link use, `[text](url)` or `[text][ref]`, kept in sync with spec/audit.py's strip_md_links().
+# The carried-link regexes above find a definition's target inside a whole document, not a use inside one short string.
+DESCRIPTION_LINK_INLINE = re.compile(r"\[([^\]]*)\]\((?:[^()]|\([^()]*\))*\)")
+DESCRIPTION_LINK_REF = re.compile(r"\[([^\]]*)\]\[[^\]]*\]")
 
 
 def load(rel):
@@ -50,6 +54,29 @@ def load(rel):
 
 def is_str_list(v):
     return isinstance(v, list) and all(isinstance(x, str) for x in v)
+
+
+def description_errors(name, desc):
+    """Shape errors for a registry entry's optional `description` (GOVERNANCE.md "Repository Details").
+
+    Absence is not checked here, since the field is optional. `desc` is only passed in once a repo declares it.
+    The value must already be in the exact form every mirror carries: a repo carries no way to strip it again.
+    repo-config/configure.sh reads and writes it raw, with no trimming of its own, and spec/audit.py's
+    description_findings() strips only the declared field itself, never the README/About/Docker Hub values it
+    is compared against. A value that were not already trimmed, single-line, and link-free would therefore
+    read as a permanent mismatch on every mirror rather than as a one-time fix here.
+    """
+    if not isinstance(desc, str) or not desc.strip():
+        return [f"{name}: description must be a non-empty string"]
+    if desc != desc.strip() or "\n" in desc or "\r" in desc:
+        return [
+            f"{name}: description must be plain single-line text with no leading or trailing whitespace"
+        ]
+    if DESCRIPTION_LINK_INLINE.search(desc) or DESCRIPTION_LINK_REF.search(desc):
+        return [f"{name}: description carries Markdown links - keep it link-free plain text"]
+    if len(desc) > 100:
+        return [f"{name}: description is {len(desc)} characters, over the 100-char limit"]
+    return []
 
 
 def markdown_targets(text):
@@ -472,17 +499,9 @@ def main():
         if effective_model == "operational" and eol is None:
             errors.append(f"{name}: operational repo must declare lineEndings (lf or crlf)")
         # Optional per GOVERNANCE.md "Repository Details": a repo that has not adopted the field yet is unaffected, since spec/audit.py's description_findings() falls back to the README tagline for it.
-        # The cap matches Docker Hub's short-description limit, the tightest surface the field feeds.
-        # Measured after stripping, the same value spec/audit.py's description_findings() treats as canonical, so a description padded with whitespace is not judged by a length that value never carries.
         desc = repo.get("description")
         if desc is not None:
-            desc_stripped = desc.strip() if isinstance(desc, str) else ""
-            if not isinstance(desc, str) or not desc_stripped:
-                errors.append(f"{name}: description must be a non-empty string")
-            elif len(desc_stripped) > 100:
-                errors.append(
-                    f"{name}: description is {len(desc_stripped)} characters, over the 100-char limit"
-                )
+            errors.extend(description_errors(name, desc))
 
         status = repo.get("status")
         if status is None:

@@ -67,7 +67,7 @@ settings_file="$script_dir/settings.json"
 # ----- Resolve the declared description (optional, shared by apply and check) -----
 # Per GOVERNANCE.md "Repository Details", once a repo declares registry/repos.json's `description` field, that field becomes the About panel's source rather than the README.
 # The audit's description_findings() (spec/audit.py) measures the README, About, and Docker Hub mirror set against that same field.
-# A repo with no declared field is left untouched here, so it keeps the README-is-the-source-of-truth behavior it had before.
+# A repo with no declared field is left untouched here, so the README stays its source of truth.
 description=""
 if [ -f "$registry" ]; then
     if ! description="$(jq -r --arg n "$name" '(.repos[] | select(.name==$n) | .description) // ""' "$registry")"; then
@@ -294,8 +294,11 @@ check_settings() {
     fi
     # The About description, only where the registry declares one (see the resolution above).
     # A repo that has not adopted the field is a manual-verify note, exactly as secrets are: nothing declared here to check against.
+    # The two reasons `$description` can be empty are told apart, since "no registry" and "no field for this repo" call for different follow-up.
     if [ -n "$description" ]; then
         assert "description = '$description'" test "$(jq -r '.description' <<<"$live")" = "$description"
+    elif [ ! -f "$registry" ]; then
+        note "description: no $registry to read (pass a plain repo argument or run from a hub checkout) - verify manually"
     else
         note "description: no registry/repos.json description declared for $name - verify manually (falls back to the README tagline, see GOVERNANCE.md 'Repository Details')"
     fi
