@@ -70,7 +70,10 @@ settings_file="$script_dir/settings.json"
 # A repo with no declared field is left untouched here, so the README stays its source of truth.
 description=""
 if [ -f "$registry" ]; then
-    if ! description="$(jq -r --arg n "$name" '(.repos[] | select(.name==$n) | .description) // ""' "$registry")"; then
+    # Trimmed defensively even though spec/validate.py already rejects an untrimmed value.
+    # A registry edited ahead of its next validate.py run still resolves to the same canonical value spec/audit.py compares against.
+    if ! description="$(jq -r --arg n "$name" \
+        '(.repos[] | select(.name==$n) | .description) // "" | gsub("^\\s+|\\s+$"; "")' "$registry")"; then
         echo "Failed to read description from $registry (invalid JSON?)." >&2
         exit 1
     fi
