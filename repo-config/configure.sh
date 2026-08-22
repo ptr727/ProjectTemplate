@@ -68,43 +68,21 @@ settings_file="$script_dir/settings.json"
 # Absence keeps the About panel following the README.
 description=""
 if [ -f "$registry" ]; then
-    # Fails loud on a duplicate name (already a validate.py DEFECT) rather than picking one entry over the other.
-    if ! match_count="$(jq -r --arg n "$name" '[.repos[] | select(.name==$n)] | length' "$registry")"; then
-        echo "Failed to read $registry (invalid JSON?)." >&2
+    # Resolved here, not near the top, so a run with no registry (an explicit model, no hub checkout) never needs Python at all.
+    # The name python3 is not universal: native Windows can register a Microsoft Store stub under that name that resolves on PATH but fails when actually run, so this runs it rather than just checking PATH (docs/host-setup.md).
+    # The probe itself is spec/resolve_description.py's actual floor (PEP 563, Python 3.7+) rather than an arbitrary version number, so a too-old interpreter fails here with a clear message instead of a bare SyntaxError from the script.
+    if python3 -c "from __future__ import annotations" >/dev/null 2>&1; then
+        py_cmd=(python3)
+    elif py -3 -c "from __future__ import annotations" >/dev/null 2>&1; then
+        py_cmd=(py -3)
+    else
+        echo "No Python 3.7+ interpreter found (python3 or py -3). See docs/host-setup.md." >&2
         exit 1
     fi
-    if [ "$match_count" -gt 1 ]; then
-        echo "$match_count registry entries named $name in $registry. Resolve the duplicate before its description can be read (spec/validate.py rejects this once run)." >&2
+    # Delegates to spec/resolve_description.py rather than a third hand-rolled copy of description_errors().
+    # A description that passes that check can never contain a newline, so command substitution has nothing to strip.
+    if ! description="$("${py_cmd[@]}" "$script_dir/../spec/resolve_description.py" "$registry" "$name")"; then
         exit 1
-    fi
-    if ! declared="$(jq -r --arg n "$name" '.repos[] | select(.name==$n) | has("description")' "$registry")"; then
-        echo "Failed to read $registry (invalid JSON?)." >&2
-        exit 1
-    fi
-    if [ "$declared" = "true" ]; then
-        # Exactly one match is already established above, so select() itself yields exactly one value here.
-        # No trim: this only ever validates the value against spec/validate.py's contract, never normalizes it.
-        # A non-string value (including an explicit null) resolves to empty here, caught by the same guard.
-        # -j plus the trailing sentinel keeps command substitution from stripping a genuine trailing newline.
-        if ! description="$(jq -j --arg n "$name" \
-            '(.repos[] | select(.name==$n) | .description) | if type == "string" then . else empty end' \
-            "$registry" && printf x)"; then
-            echo "Failed to read description from $registry (invalid JSON?)." >&2
-            exit 1
-        fi
-        description="${description%x}"
-        case "$description" in
-            "" | [[:space:]]* | *[[:space:]])
-                echo "The declared description for $name in $registry is not a non-empty string with no leading or trailing whitespace. Fix it there (spec/validate.py rejects this once run)." >&2
-                exit 1
-                ;;
-        esac
-        case "$description" in
-            *$'\n'* | *$'\r'*)
-                echo "The declared description for $name in $registry carries an embedded newline. Fix it there (spec/validate.py rejects this once run)." >&2
-                exit 1
-                ;;
-        esac
     fi
 fi
 
