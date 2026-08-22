@@ -74,11 +74,12 @@ if [ -f "$registry" ]; then
         exit 1
     fi
     if [ "$declared" = "true" ]; then
+        # Picks one entry deterministically, since -j joins multiple matches with no separator at all.
         # Trims only space/tab, so an edge newline survives to trip the guard below rather than being silently dropped.
         # A non-string value (including an explicit null) resolves to empty here, caught by the same guard as a malformed one.
         # -j plus the trailing sentinel keeps command substitution from stripping a genuine trailing newline in the value.
         if ! description="$(jq -j --arg n "$name" \
-            '(.repos[] | select(.name==$n) | .description) | if type == "string" then gsub("^[ \\t]+|[ \\t]+$"; "") else empty end' \
+            'first(.repos[] | select(.name==$n) | .description) | if type == "string" then gsub("^[ \\t]+|[ \\t]+$"; "") else empty end' \
             "$registry" && printf x)"; then
             echo "Failed to read description from $registry (invalid JSON?)." >&2
             exit 1

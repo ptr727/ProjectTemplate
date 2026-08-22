@@ -1306,16 +1306,21 @@ def description_findings(doc_texts, entry, live, slug):
     declared = None
     if "description" in entry:
         raw_declared = entry["description"]
-        if not isinstance(raw_declared, str):
-            kind = "null" if raw_declared is None else type(raw_declared).__name__
+        if isinstance(raw_declared, str) and raw_declared.strip():
+            declared = raw_declared.strip()
+        else:
+            if raw_declared is None:
+                problem = "is null"
+            elif isinstance(raw_declared, str):
+                problem = "is an empty or whitespace-only string"
+            else:
+                problem = f"is {type(raw_declared).__name__}, not a string"
             findings.append(
                 (
                     "DEFECT",
-                    f"registry: description is {kind}, not a string. spec/validate.py rejects this once run, so this is treated as undeclared.",
+                    f"registry: description {problem}. spec/validate.py rejects this once run, so this is treated as undeclared.",
                 )
             )
-        else:
-            declared = raw_declared.strip() or None
     readme_want = None
     if "README.md" in doc_texts:
         title, intro = title_and_intro(doc_texts["README.md"])
@@ -4240,6 +4245,13 @@ def _selftest():
             {"description": "A short tagline."},
             1,
         ),
+        (
+            "a whitespace-only declared field is reported rather than read as absent",
+            desc_readme,
+            {"description": "   "},
+            {"description": "A short tagline."},
+            1,
+        ),
     ]
     for label, doc_texts_fx, entry_fx, live_fx, wantn in desc_cases:
         got = description_findings(doc_texts_fx, entry_fx, live_fx, "owner/Fixture")
@@ -4255,9 +4267,7 @@ def _selftest():
     null_declared = description_findings(
         desc_readme, {"description": None}, {"description": "A short tagline."}, "owner/Fixture"
     )
-    if not any(
-        k == "DEFECT" and "description is null, not a string" in t for k, t in null_declared
-    ):
+    if not any(k == "DEFECT" and "description is null" in t for k, t in null_declared):
         ok = False
         print(f"  FAIL description: null-declared-field DEFECT contract -> {null_declared}")
     else:
