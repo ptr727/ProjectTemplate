@@ -71,7 +71,7 @@ if [ -f "$registry" ]; then
     # Resolved here, not near the top, so a run with no registry (an explicit model, no hub checkout) never needs Python at all.
     # The name python3 is not universal: native Windows can register a Microsoft Store stub under that name that resolves on PATH but fails when actually run, so this runs it rather than just checking PATH (docs/host-setup.md).
     # The probe checks 3.7+ (PEP 563, from __future__ import annotations) because that is the oldest interpreter resolve_description.py happens to parse and run on, not because 3.7 is this repo's supported floor.
-    # That floor is 3.13 (spec/host-tools.json's python3 target, enforced on the host by scripts/host_gate.py), and spec/ code is written to it without hedging for anything older.
+    # That floor is 3.13 (spec/host-tools.json's python3 target, enforced on the host by scripts/host_gate.py); resolve_description.py's own from __future__ import annotations is what lets it stay parseable that low, not a license for spec/ code in general to hedge for anything older.
     # A too-old interpreter fails here with a clear message instead of a bare traceback from the script.
     if python3 -c "from __future__ import annotations" >/dev/null 2>&1; then
         py_cmd=(python3)
