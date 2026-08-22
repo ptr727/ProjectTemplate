@@ -388,6 +388,29 @@ def verbatim_sections(item, sel):
     return out
 
 
+def _fence_step(line, marker, marker_len):
+    """One line's effect on fence state `(marker, marker_len)`: returns the state after the line, and
+    whether the line itself is a fence boundary (opens or closes one) rather than fenced or plain content.
+
+    Fence matching follows CommonMark. A fence marker needs at most 3 leading spaces, more reads as
+    content, not a boundary. A closing fence needs the same character, a run at least as long as the
+    opener's, and nothing but whitespace after that run - a mismatched or shorter marker (a ~~~ example
+    inside a ``` block, a ``` inside a longer ````) or trailing text (an opening fence's language tag has
+    no closing counterpart) does not close it.
+    """
+    stripped = line.lstrip(" ")
+    indent = len(line) - len(stripped)
+    char = stripped[:1]
+    run = len(stripped) - len(stripped.lstrip(char)) if indent <= 3 and char in ("`", "~") else 0
+    if marker is None:
+        if run >= 3:
+            return char, run, True
+        return None, 0, False
+    if char == marker and run >= marker_len and not stripped[run:].strip():
+        return None, 0, True
+    return marker, marker_len, False
+
+
 def extract_section(text, heading):
     """The `## <heading>` H2 section including its heading line, up to the next sibling H2 or EOF, or None if absent.
 
@@ -395,16 +418,16 @@ def extract_section(text, heading):
     marker, case-folded and stripped of surrounding whitespace), so a re-cased heading or one with extra
     marker-gap whitespace is still found rather than read as a missing section - internal heading-text
     whitespace must match exactly. The heading line's exact bytes are then part of the hashed region, so that
-    re-casing or re-spacing surfaces as drift. A nested `###` stays inside the body. A `## ` line inside a fenced code block
-    (``` or ~~~) is not a boundary, so a code sample cannot truncate the region and hide drift after it.
+    re-casing or re-spacing surfaces as drift. A nested `###` stays inside the body. A `## ` line inside a
+    fenced code block, per `_fence_step`, is not a boundary, so a code sample cannot truncate the region and
+    hide drift after it.
     """
     want = heading.strip().lower()
-    out, capturing, fenced = [], False, False
+    out, capturing, marker, marker_len = [], False, None, 0
     for ln in normalize(text).split("\n"):
         stripped = ln.strip()
-        if stripped.startswith(("```", "~~~")):
-            fenced = not fenced
-        elif not fenced and stripped.startswith("## "):
+        marker, marker_len, boundary = _fence_step(ln, marker, marker_len)
+        if not boundary and marker is None and stripped.startswith("## "):
             if capturing:
                 break  # a sibling H2 ends the section
             if stripped[2:].strip().lower() == want:  # parsed heading text after the "## " marker
@@ -433,12 +456,11 @@ def strip_sections(text, names):
     That failure is silent and it fails open, since the removed duplicate takes its content out of the scan.
     """
     want = {n.strip().lower() for n in names}
-    out, dropping, fenced = [], False, False
+    out, dropping, marker, marker_len = [], False, None, 0
     for ln in normalize(text).split("\n"):
         stripped = ln.strip()
-        if stripped.startswith(("```", "~~~")):
-            fenced = not fenced
-        elif not fenced and stripped.startswith("## "):
+        marker, marker_len, boundary = _fence_step(ln, marker, marker_len)
+        if not boundary and marker is None and stripped.startswith("## "):
             dropping = (
                 stripped[2:].strip().lower() in want
             )  # a sibling H2 always ends the previous region
@@ -553,28 +575,12 @@ def unfenced_text(text):
     `<!-- Shields -->` or an `![alt][ref]` in one is not a definition, a group, or a rendered badge. Kept as
     one helper because the checkers were fence-aware in some places and blind in others, which is the state
     that lets a document be read two ways by one audit.
-    Fence matching follows CommonMark. A fence marker needs at most 3 leading spaces, more reads as
-    content, not a boundary. A closing fence needs the same character, a run at least as long as the
-    opener's, and nothing but whitespace after that run - a mismatched or shorter marker (a ~~~ example
-    inside a ``` block, a ``` inside a longer ````) or trailing text (an opening fence's language tag has
-    no closing counterpart) does not close it.
+    Fence matching, including boundary lines themselves, is `_fence_step`'s contract.
     """
     out, marker, marker_len = [], None, 0
     for ln in normalize(text).split("\n"):
-        stripped = ln.lstrip(" ")
-        indent = len(ln) - len(stripped)
-        char = stripped[:1]
-        run = (
-            len(stripped) - len(stripped.lstrip(char)) if indent <= 3 and char in ("`", "~") else 0
-        )
-        if marker is None:
-            if run >= 3:
-                marker, marker_len = char, run
-                continue
-        elif char == marker and run >= marker_len and not stripped[run:].strip():
-            marker = None
-            continue
-        if marker is None:
+        marker, marker_len, boundary = _fence_step(ln, marker, marker_len)
+        if not boundary and marker is None:
             out.append(ln)
     return "\n".join(out)
 
@@ -2831,6 +2837,26 @@ def _selftest():
         print(
             "  ok   section: heading in region, fenced ## kept, sibling H2 ends, None if absent, whitespace-tolerant locate, re-cased heading rehashes"
         )
+    # A mismatched marker nested inside a fence (a ~~~ line inside a ``` block) must not end the fence early.
+    # _fence_step carries this contract; extract_section and strip_sections each consume it.
+    nested = "## Alpha\n```md\n~~~\n## Fake\n```\nreal content\n"
+    nested_extract = extract_section(nested, "Alpha")
+    nested_strip = strip_sections(
+        "## Keep\ntext\n```md\n~~~\n## Fake Drop\n```\nmore text\n## Drop\nreal drop content\n",
+        ["Drop"],
+    )
+    if (
+        nested_extract is None
+        or "## Fake" not in nested_extract
+        or "real content" not in nested_extract
+        or "## Fake Drop" not in nested_strip
+        or "real drop content" in nested_strip
+        or "more text" not in nested_strip
+    ):
+        ok = False
+        print("  FAIL section: a mismatched marker nested in a fence ends the region early")
+    else:
+        print("  ok   section: a mismatched marker nested in a fence is not a boundary")
 
     # Coordination-reference scan: the hub name inside a verbatim section is exempt, outside one is not.
     # The first case is the real AGENTS.md shape, where the byte-locked Fleet Bootstrap block must name the hub and a repo therefore cannot clear a finding against it.
