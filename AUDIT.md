@@ -9,7 +9,8 @@ The verdict vocabulary is [`WORKFLOW.md`][workflow]'s: **operational / not opera
 
 ```mermaid
 flowchart TD
-  s0["0: has the repo been stood up? if not, STANDUP.md"] --> s1["1: scope, ground-truth branch (main)"]
+  s0m["0m: fleet membership - every owned non-fork repo has a registry entry"] --> s0["0: has the repo been stood up? if not, STANDUP.md"]
+  s0 --> s1["1: scope, ground-truth branch (main)"]
   s1 --> s2["2: resolve the repo's type(s)"]
   s2 --> s3["3: applicability gate, per check"]
   s3 --> s4["4: per-dimension checks, letter and intent"]
@@ -28,6 +29,7 @@ flowchart TD
 
 This audit is not occasional. Run it whenever you **create, adopt, or materially change** a fleet repo, and on demand for any known repo:
 
+- **A full sweep opens with a fleet membership check, not a per-repo one.** `spec/audit.py`, run with no repo names, first lists every non-fork repository the registry `owner` actually owns on GitHub and diffs it against `registry/repos.json`. A repo that exists but carries no entry is invisible to every other check in this file, since all of them iterate the registry and never look past it, so this is the only place that gap is caught (ptr727/ProjectTemplate#550). The check also reconciles one field: a registry `status: "archived"` must agree with GitHub's own archived flag, in either direction. A name-filtered run or `--issue` skips it, since those are scoped to repos already known to the registry.
 - **Onboarding a repo is complete only when it either passes this audit** (operational on every applicable check) **or carries a committed `reports/<repo>/audit.md` plus a tracking issue** enumerating every residual delta. A repo that is partially set up but never audited is itself a **defect**, the exact state this process prevents. The create-to-conformance counterpart is [`STANDUP.md`][standup]. Because both read the same manifests, a repo stood up by that file passes this audit by construction.
 - **Touching a repo** (any conformance-affecting change) ends by re-running the applicable checks and **reconciling the registry entry to reality**: `status`, `types`, `releaseTrigger`, `workflowModel`, `driftNotes`. The registry records reality, not intent. [`spec/validate.py`][validate] proves the catalog is self-consistent, not that it matches the live repo. Closing that gap is this audit's job. The deterministic subset (settings, rulesets, secret names, file presence, per-scope Markdown section presence, workflow interface conformance, verbatim content, hub-hosted files a repo carries, branch facts) is mechanized in [`spec/audit.py`][audit-runner]: owner-initiated, run on demand when onboarding a repo, on suspected drift, or before fleet-wide changes. A required section missing from a carried Markdown file is a **drift finding**, not a letter, because a heading rename reads as missing and equivalence is judged by hand. A carried `interface` workflow (spec/fidelity-model.md) is checked by name and wiring (required jobs, the ruleset-bound check name, the artifact-name handoff, and the forbidden `artifact-ids:` fork), all at **drift**, since the body is owned and a rename is a hint to verify. A carried `verbatim` unit, whether a whole file (`.markdownlint-cli2.jsonc`) or a canonical workflow job region (the `github-release` job), is content-hashed against the hub's canonical after line-ending normalization. A mismatch is classified **stale** (matches a past hub revision, re-vendor) or **modified** (matches none, the repo changed fixed content), both at **drift**, since equivalence is intent-governed and a byte diff is a hint to review. A carried `intent` unit gets one advisory beyond presence, a last-modified comparison: a hub canonical changing after the copy's own last commit marks the copy as possibly trailing, at **drift**, a hint rather than proof, since a copy touched without reconciling reads current and content is never judged.
 
@@ -47,7 +49,9 @@ This holds for **both workflow models**. An `operational` repo commits directly 
 
 ## 2. Resolve the Repo's Type(s)
 
-Look up the repo in [`registry/repos.json`][repos] and read its `types[]`. If the entry is `classificationPending` (a backlog repo), classify it from the tree and propose a registry update:
+Look up the repo in [`registry/repos.json`][repos]. An entry with status `archived` or `excluded` is out of scope for the rest of this procedure, so stop here rather than proceeding to section 3. `archived` means GitHub itself reports the repo archived, so no further conformance work applies. `excluded` means a maintainer decision took it out of audit scope, recorded in the entry's `exclusionReason`. Both still carry a registry entry precisely so the decision stays visible, per section 0's membership check, rather than the repo reading as an oversight.
+
+Otherwise read its `types[]`. If the entry is `classificationPending` (a backlog repo), classify it from the tree and propose a registry update:
 
 - `*.csproj` / `*.slnx` -> `csharp`, a `dotnet nuget push` workflow -> `nuget`, a `System.CommandLine` console -> `console`.
 - `pyproject.toml` / `setup.py` -> `python`, a `pypa/gh-action-pypi-publish` workflow -> `pypi`.

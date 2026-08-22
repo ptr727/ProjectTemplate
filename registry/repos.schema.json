@@ -36,13 +36,19 @@
                     "$comment": "An operational repo must declare its line endings (release repos use the fleet LF default).",
                     "if": { "properties": { "workflowModel": { "const": "operational" } }, "required": ["workflowModel"] },
                     "then": { "required": ["lineEndings"] }
+                },
+                {
+                    "$comment": "An excluded repo records the deliberate decision that put it out of audit scope, not just the fact.",
+                    "if": { "properties": { "status": { "const": "excluded" } }, "required": ["status"] },
+                    "then": { "required": ["exclusionReason"] }
                 }
             ],
             "additionalProperties": false,
             "properties": {
                 "name": { "type": "string" },
                 "url": { "type": "string", "format": "uri" },
-                "status": { "enum": ["cataloged", "backlog"] },
+                "status": { "enum": ["cataloged", "backlog", "archived", "excluded"] },
+                "exclusionReason": { "type": "string", "minLength": 1 },
                 "types": { "type": "array", "items": { "type": "string" } },
                 "profiles": { "type": "object", "additionalProperties": { "enum": ["lint-only", "build"] } },
                 "classificationPending": { "type": "boolean" },

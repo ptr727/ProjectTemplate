@@ -436,6 +436,15 @@ def main():
             if not repo.get("classificationPending"):
                 errors.append(f"{name}: backlog repo without classificationPending")
             continue
+        if status == "archived":
+            # GitHub's own archived flag is the fact.
+            # The entry only needs to exist, so spec/audit.py's fleet membership check has something to match it against.
+            continue
+        if status == "excluded":
+            reason = repo.get("exclusionReason")
+            if not isinstance(reason, str) or not reason.strip():
+                errors.append(f"{name}: excluded repo without a non-empty exclusionReason")
+            continue
         if status != "cataloged":
             errors.append(f"{name}: unknown status '{status}'")
             continue
@@ -857,7 +866,16 @@ def main():
         1 for r in repos["repos"] if isinstance(r, dict) and r.get("status") == "cataloged"
     )
     backlog = sum(1 for r in repos["repos"] if isinstance(r, dict) and r.get("status") == "backlog")
-    print(f"Spec validation OK: {cataloged} cataloged, {backlog} backlog repos classify cleanly.")
+    archived = sum(
+        1 for r in repos["repos"] if isinstance(r, dict) and r.get("status") == "archived"
+    )
+    excluded = sum(
+        1 for r in repos["repos"] if isinstance(r, dict) and r.get("status") == "excluded"
+    )
+    print(
+        f"Spec validation OK: {cataloged} cataloged, {backlog} backlog, {archived} archived, "
+        f"{excluded} excluded repos classify cleanly."
+    )
     return 0
 
 

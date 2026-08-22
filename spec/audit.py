@@ -8,7 +8,9 @@ Markdown section presence on the ground-truth branch (spec/files.json, spec/scop
 hub-hosted files a repo carries and should delete (git-tracked here and undeclared in the manifest,
 triaged by spec/divergences.json), intent-staleness advisories (a carried intent file whose hub
 canonical changed after the copy last did), and branch-model facts (main/develop existence, develop
-behind main). Owner-initiated: run it when
+behind main), and a fleet-wide membership check (every non-fork repo the registry owner has on
+GitHub carries a registry/repos.json entry, and an 'archived' entry's status agrees with GitHub's
+own archived flag - ptr727/ProjectTemplate#550). Owner-initiated: run it when
 onboarding a repo, when drift is suspected, or before fleet-wide changes. Read-only - it never
 modifies a target.
 
@@ -211,6 +213,77 @@ def gh(path, ok404=False) -> Any:
             f"gh api {path}: {r.stderr.strip().splitlines()[-1] if r.stderr else 'failed'}"
         )
     return json.loads(r.stdout) if r.stdout.strip() else None
+
+
+def owner_repos(owner):
+    """Every non-fork repository the registry owner actually owns on GitHub, paginated by hand.
+
+    /user/repos rather than /users/{owner}/repos: the latter returns only public repos unless gh
+    is authenticated as that exact user, which would silently under-count a private repo the same
+    way a missing registry entry does. Confirm the authenticated login matches owner first, so a
+    mismatch is a loud error rather than a quietly wrong (and possibly cross-account) result.
+    No --paginate, per the gh() docstring above; page by hand until a page comes back short.
+    """
+    login = gh("user").get("login")
+    if login != owner:
+        raise RuntimeError(
+            f"gh is authenticated as '{login}', not registry owner '{owner}'; "
+            "membership check would query the wrong account's repos"
+        )
+    repos, page = [], 1
+    while True:
+        batch = gh(f"user/repos?affiliation=owner&per_page=100&page={page}") or []
+        repos.extend(r for r in batch if not r.get("fork"))
+        if len(batch) < 100:
+            return repos
+        page += 1
+
+
+def membership_findings(spec):
+    """Fleet-wide: every non-fork repo the owner has on GitHub must have a registry entry.
+
+    This is the check ptr727/ProjectTemplate#550 asked for: nothing else in this file, or in
+    spec/validate.py, ever looks past the registry to what actually exists, so a repo that never
+    got an entry is invisible to every tool that reads it - the registry was treated as ground
+    truth about existence, not just about conformance. Ownership only: a fork, or a repo the
+    owner merely collaborates on, was never meant to carry a registry entry.
+
+    A registry entry's status then says what, if anything, the rest of the audit owes the repo:
+    'cataloged' is audited normally, 'backlog' awaits classification (existing behavior), and
+    'archived'/'excluded' are known and out of scope by design - archived because GitHub itself
+    says the repo takes no further work, excluded because exclusionReason records a human
+    decision that it should not be audited. Both still require an entry, so the decision stays
+    visible in the catalog instead of the repo just disappearing from it.
+    """
+    findings = []
+    registry_by_name = {
+        r["name"].lower(): r for r in spec["registry"]["repos"] if isinstance(r, dict)
+    }
+    for gh_repo in owner_repos(spec["registry"]["owner"]):
+        entry = registry_by_name.get(gh_repo["name"].lower())
+        if entry is None:
+            findings.append(
+                (
+                    "DEFECT",
+                    f"{gh_repo['full_name']}: exists on GitHub with no registry/repos.json entry",
+                )
+            )
+            continue
+        gh_archived = bool(gh_repo.get("archived"))
+        reg_archived = entry.get("status") == "archived"
+        if gh_archived and not reg_archived:
+            msg = (
+                f"{entry['name']}: archived on GitHub but registry status is "
+                f"'{entry.get('status')}' (reconcile to 'archived')"
+            )
+            findings.append(("DRIFT", msg))
+        elif reg_archived and not gh_archived:
+            msg = (
+                f"{entry['name']}: registry status is 'archived' but GitHub reports it "
+                "unarchived (reconcile status, or verify it was not unarchived by mistake)"
+            )
+            findings.append(("DRIFT", msg))
+    return findings
 
 
 def docker_hub_description(slug):
@@ -4095,6 +4168,84 @@ def _selftest():
             "  ok   repo_tree: a truncated tree and a missing tree sha both return None, and a whole one drops non-blobs"
         )
 
+    # owner_repos: forks are dropped, and pagination stops the moment a page comes back short of 100.
+    real_gh = globals()["gh"]
+    try:
+        pages = {
+            1: [{"name": f"r{i}", "fork": False} for i in range(100)],
+            2: [{"name": "kept", "fork": False}, {"name": "dropped-fork", "fork": True}],
+        }
+        globals()["gh"] = lambda path, ok404=False: (
+            {"login": "owner"} if path == "user" else pages[int(path.rsplit("page=", 1)[1])]
+        )
+        got = {r["name"] for r in owner_repos("owner")}
+    finally:
+        globals()["gh"] = real_gh
+    want = {f"r{i}" for i in range(100)} | {"kept"}
+    if got != want:
+        ok = False
+        print(
+            f"  FAIL owner_repos -> {len(got)} repos, expected {len(want)}; forks/pagination wrong"
+        )
+    else:
+        print("  ok   owner_repos: forks dropped, pagination stops on a short page")
+
+    real_owner_repos = globals()["owner_repos"]
+    try:
+        cases = [
+            (
+                "a repo missing from the registry is a DEFECT",
+                [{"name": "New", "full_name": "owner/New", "archived": False}],
+                {"owner": "owner", "repos": []},
+                [("DEFECT", "owner/New: exists on GitHub with no registry/repos.json entry")],
+            ),
+            (
+                "archived on GitHub but not in the registry is DRIFT",
+                [{"name": "Old", "full_name": "owner/Old", "archived": True}],
+                {"owner": "owner", "repos": [{"name": "Old", "status": "cataloged"}]},
+                [
+                    (
+                        "DRIFT",
+                        "Old: archived on GitHub but registry status is 'cataloged' (reconcile to 'archived')",
+                    )
+                ],
+            ),
+            (
+                "registry says archived but GitHub disagrees is DRIFT",
+                [{"name": "Back", "full_name": "owner/Back", "archived": False}],
+                {"owner": "owner", "repos": [{"name": "Back", "status": "archived"}]},
+                [
+                    (
+                        "DRIFT",
+                        "Back: registry status is 'archived' but GitHub reports it unarchived "
+                        + "(reconcile status, or verify it was not unarchived by mistake)",
+                    )
+                ],
+            ),
+            (
+                "matched, not archived either side, is clean",
+                [{"name": "Fine", "full_name": "owner/Fine", "archived": False}],
+                {"owner": "owner", "repos": [{"name": "Fine", "status": "cataloged"}]},
+                [],
+            ),
+            (
+                "name matching is case-insensitive",
+                [{"name": "MixedCase", "full_name": "owner/MixedCase", "archived": False}],
+                {"owner": "owner", "repos": [{"name": "mixedcase", "status": "cataloged"}]},
+                [],
+            ),
+        ]
+        for label, gh_repos, spec_registry, want in cases:
+            globals()["owner_repos"] = lambda owner, r=gh_repos: r
+            got = membership_findings({"registry": spec_registry})
+            if got != want:
+                ok = False
+                print(f"  FAIL membership: {label} -> {got}")
+            else:
+                print(f"  ok   membership: {label}")
+    finally:
+        globals()["owner_repos"] = real_owner_repos
+
     print("SELFTEST PASS" if ok else "SELFTEST FAIL")
     return 0 if ok else 1
 
@@ -4247,6 +4398,27 @@ def main(argv=None):
     print()
 
     hard = 0
+
+    # Fleet-wide, not per-repo, so it runs once and only on a full sweep: a name-filtered or
+    # --issue run is scoped to specific repos already in the registry and has nothing to gain
+    # from re-listing every repo the owner has.
+    if not wanted:
+        try:
+            membership = membership_findings(spec)
+        # A gh failure here (auth mismatch, rate limit, network) must not abort the per-repo sweep below.
+        except Exception as e:  # noqa: BLE001
+            membership = [("ERROR", str(e))]
+        print("== Fleet membership (registry/repos.json vs GitHub) ==")
+        if not membership:
+            print(
+                "  clean (every non-fork owned repo has a registry entry, and archived status matches GitHub)"
+            )
+        for kind, text in membership:
+            print(f"  {kind:6} {text}")
+            if kind in ("DEFECT", "LETTER", "ERROR"):
+                hard += 1
+        print()
+
     for entry in repos:
         model = (
             entry.get("workflowModel")

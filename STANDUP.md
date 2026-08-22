@@ -115,6 +115,8 @@ The rename runs unconditionally rather than behind a test of `init.defaultBranch
 
 ## 1. Classify and Catalog
 
+A repo lacking any entry is exactly what [`AUDIT.md`][audit] section 0's fleet membership check surfaces on a full sweep, a `DEFECT` naming the repo by its GitHub `full_name`. That finding is what should send an agent here in the first place for a repo nobody has stood up yet, rather than the omission sitting unnoticed (ptr727/ProjectTemplate#550).
+
 Resolve the repo's type(s) with the [`AUDIT.md`][audit] section 2 detection rules, then write or repair its [`registry/repos.json`][repos] entry: `status`, `types[]`, `groundTruthBranch`, `hasDevelop`, `publish[]`, `requiredSecrets[]`, `consumerModel`, `releaseTrigger`, `workflowModel` (omit to take the `release` default), `configLayout`, and `driftNotes` that describe what the repo **actually is**. Run [`spec/validate.py`][validate] to confirm it classifies cleanly. The registry is ground truth about reality, not intent, and a `validate.py`-clean entry is still false if it disagrees with the live repo.
 
 ## 1A. Carry the Instruction Set, Before Authoring Anything
