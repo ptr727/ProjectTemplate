@@ -1306,15 +1306,24 @@ def description_findings(doc_texts, entry, live, slug):
     declared = None
     if "description" in entry:
         raw_declared = entry["description"]
-        if isinstance(raw_declared, str) and raw_declared.strip():
-            declared = raw_declared.strip()
+        is_clean_string = (
+            isinstance(raw_declared, str)
+            and raw_declared.strip()
+            and raw_declared == raw_declared.strip()
+            and "\n" not in raw_declared
+            and "\r" not in raw_declared
+        )
+        if is_clean_string:
+            declared = raw_declared
         else:
             if raw_declared is None:
                 problem = "is null"
-            elif isinstance(raw_declared, str):
+            elif not isinstance(raw_declared, str):
+                problem = f"is {type(raw_declared).__name__}, not a string"
+            elif not raw_declared.strip():
                 problem = "is an empty or whitespace-only string"
             else:
-                problem = f"is {type(raw_declared).__name__}, not a string"
+                problem = "carries leading/trailing whitespace or an embedded newline"
             findings.append(
                 (
                     "DEFECT",
@@ -4249,6 +4258,20 @@ def _selftest():
             "a whitespace-only declared field is reported rather than read as absent",
             desc_readme,
             {"description": "   "},
+            {"description": "A short tagline."},
+            1,
+        ),
+        (
+            "a padded declared field is a DEFECT rather than silently trimmed",
+            desc_readme,
+            {"description": "  A short tagline.  "},
+            {"description": "A short tagline."},
+            1,
+        ),
+        (
+            "a declared field with an embedded newline is a DEFECT rather than silently accepted",
+            desc_readme,
+            {"description": "A short tagline.\nA second line."},
             {"description": "A short tagline."},
             1,
         ),

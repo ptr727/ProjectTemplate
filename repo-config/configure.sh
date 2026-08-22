@@ -327,7 +327,7 @@ check_settings() {
     elif [ ! -f "$registry" ]; then
         note "description: no $registry to read (it resolves relative to this script, not from the repo argument). Run from a hub checkout for it to exist, and verify manually."
     else
-        note "description: no registry/repos.json description declared for $name (falls back to the README tagline, see GOVERNANCE.md 'Repository Details'). Verify manually."
+        note "description: no matching registry entry or no declared description key for $name (falls back to the README tagline, see GOVERNANCE.md 'Repository Details'). Verify manually."
     fi
 }
 
