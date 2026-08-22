@@ -226,7 +226,9 @@ def owner_repos(owner):
     """
     me = gh("user")
     login = me.get("login") if isinstance(me, dict) else None
-    if login != owner:
+    # GitHub logins are case-insensitive.
+    # Compare lowered, or a registry owner spelled with different casing than gh's own login reads as a mismatch when it is the same account.
+    if (login or "").lower() != owner.lower():
         raise RuntimeError(
             f"gh is authenticated as '{login}', not registry owner '{owner}'. "
             "The membership check would query the wrong account's repos."
@@ -4207,6 +4209,18 @@ def _selftest():
         print("  FAIL owner_repos: a None gh('user') response crashed with AttributeError")
     except RuntimeError:
         print("  ok   owner_repos: a None gh('user') response raises the clear mismatch error")
+    finally:
+        globals()["gh"] = real_gh
+
+    # GitHub logins are case-insensitive, so a registry owner spelled with different casing than
+    # gh's own login must still be accepted as the same account.
+    try:
+        globals()["gh"] = lambda path, ok404=False: {"login": "Owner"} if path == "user" else []
+        owner_repos("owner")
+        print("  ok   owner_repos: a differently-cased login still matches the registry owner")
+    except RuntimeError as e:
+        ok = False
+        print(f"  FAIL owner_repos: a differently-cased login was wrongly rejected -> {e}")
     finally:
         globals()["gh"] = real_gh
 
