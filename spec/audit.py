@@ -1309,7 +1309,7 @@ def description_findings(doc_texts, entry, live, slug):
     if "description" in entry:
         # Delegates to validate.py's own contract instead of re-checking a second, easily-incomplete copy of it
         # (an earlier version here missed the link and length rules, accepting either as canonical).
-        shape_errors = validate.description_errors("registry", entry["description"])
+        shape_errors = validate.description_errors(slug, entry["description"])
         if shape_errors:
             findings += [
                 (
@@ -4301,6 +4301,12 @@ def _selftest():
         print(f"  FAIL description: null-declared-field DEFECT contract -> {null_declared}")
     else:
         print("  ok   description: a null declared field is a DEFECT via validate.py's contract")
+    # The DEFECT names the actual repo, not a generic "registry" label - actionable across a fleet-wide run.
+    if not any(k == "DEFECT" and t.startswith("owner/Fixture:") for k, t in null_declared):
+        ok = False
+        print(f"  FAIL description: DEFECT does not name the repo -> {null_declared}")
+    else:
+        print("  ok   description: a declared-field DEFECT names the repo, not a generic label")
     # The declared field, once present, is what the wording names as the source - not "the README".
     declared_mismatch = description_findings(
         desc_readme,
