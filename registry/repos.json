@@ -325,19 +325,19 @@
             "name": "DiskSpeedTest",
             "url": "https://github.com/ptr727/DiskSpeedTest",
             "status": "archived",
-            "driftNotes": ["Archived on GitHub; found missing from the registry by the fleet membership check (ptr727/ProjectTemplate#550). No further conformance work is expected while archived."]
+            "driftNotes": ["Archived on GitHub. Found missing from the registry by the fleet membership check (ptr727/ProjectTemplate#550). No further conformance work is expected while archived."]
         },
         {
             "name": "GEM-Echo-Server",
             "url": "https://github.com/ptr727/GEM-Echo-Server",
             "status": "archived",
-            "driftNotes": ["Archived on GitHub; found missing from the registry by the fleet membership check (ptr727/ProjectTemplate#550). No further conformance work is expected while archived."]
+            "driftNotes": ["Archived on GitHub. Found missing from the registry by the fleet membership check (ptr727/ProjectTemplate#550). No further conformance work is expected while archived."]
         },
         {
             "name": "GoogleTo1Password",
             "url": "https://github.com/ptr727/GoogleTo1Password",
             "status": "archived",
-            "driftNotes": ["Archived on GitHub; found missing from the registry by the fleet membership check (ptr727/ProjectTemplate#550). No further conformance work is expected while archived."]
+            "driftNotes": ["Archived on GitHub. Found missing from the registry by the fleet membership check (ptr727/ProjectTemplate#550). No further conformance work is expected while archived."]
         }
     ]
 }
