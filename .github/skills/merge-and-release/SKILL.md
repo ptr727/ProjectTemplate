@@ -31,8 +31,11 @@ skill covers all of it, scoped down by what the maintainer actually asks for.
   the merge. "Merge and release", "ship it", or "cut a release" means also dispatch, and in this
   hub also refresh Skills as part of that same step. Act on either without asking.
 - When the request names no scope ("merge main"), ask once, before merging: merge only, or merge
-  and release. Recommend "merge and release" as the default, a promotion merged without its
-  release is the more common regret.
+  and release. Recommend "merge and release" as the default on a release-model repo, a promotion
+  merged without its release is the more common regret there. Recommend "merge only" as the
+  default on an operational repo (registry `workflowModel: operational`), where a release is a
+  separate, deliberate dispatch rather than an automatic follow-on to a promotion, per
+  operational-vs-release-workflow's "Operational repositories" delta.
 - Detect the hub automatically, `git remote get-url origin` or `gh repo view --json
   nameWithOwner` naming `ptr727/ProjectTemplate`. There the release scope silently includes the
   Skills refresh, a downstream repo never sees it, it has no `.agents/skills` of its own to
@@ -56,10 +59,11 @@ skill covers all of it, scoped down by what the maintainer actually asks for.
    head is `develop`.
 4. Confirm the merge landed, `mergedAt` set, `main`'s tip matching the merge commit.
 5. In the hub, when the chosen scope includes a release, first bring this checkout to the merged
-   content, `git fetch origin main` then `git checkout main` (or `git merge --ff-only origin/main`
-   from a branch that can fast-forward to it). `skills_install.py` stamps and installs from
-   whatever this checkout's HEAD already is, so skipping the fetch and checkout refreshes Skills
-   from stale pre-merge content instead. Only then run `python3 scripts/skills_install.py
+   content: `git fetch origin main`, then `git checkout main`. `skills_install.py` stamps and
+   installs from whatever this checkout's HEAD already is, so skipping the fetch and checkout
+   refreshes Skills from stale pre-merge content instead, and a fast-forward attempted from
+   whatever branch happens to be checked out risks failing or updating the wrong branch, checking
+   out `main` directly has neither risk. Only then run `python3 scripts/skills_install.py
    --report`, then `python3 scripts/skills_install.py` to install, and confirm `--report` now
    reads current, always, not only when separately asked. This refreshes only the machine running
    this session, per skill-lifecycle, every other machine still refreshes on its own next run or
