@@ -52,23 +52,6 @@ One pull request moving the canonical short description into declared data, so e
   - **Settled** - The field is optional at first so the audit falls back to the README intro while repos adopt it, and it needs a schema entry because `registry/repos.schema.json` sets `additionalProperties: false`.
   - **Settled** - The ask on the Docker repos meanwhile is only that the parsing step is not propagated further.
 
-### Registry Membership Coverage
-
-One pull request asking the inverse question the fleet tools never ask, whether a repository that exists has a registry entry, since every tool iterates the registry and an omission at standup is permanent and silent.
-
-**State** `decision`. **Touches** [`spec/audit.py`][audit], [`registry/repos.json`][repos] and its schema, and [`STANDUP.md`][standup]. **Cost** one hub edit, hub-only.
-
-- **Report a non-fork repository under the owner that has no registry entry.** The reports read as complete while under-counting today.
-  - **Blocked by** - Nothing.
-  - **Issue** - [#550][issue-550], which carries the four repos the comparison found.
-  - **Checked** - `develop` at `362aec8`, per the issue, and unverified since.
-  - **Open** - How a deliberate exclusion is recorded, since without one the check becomes a permanent four-line complaint people learn to scroll past, and the candidates are a third `status` value or a separate list carrying a reason per entry.
-  - **Open** - Where the check runs, since neither `validate.py` in CI nor an owner-initiated audit catches an omission at the moment it is made, which is the standup itself and the moment the fix costs one line.
-  - **Settled** - The consequence is worse than a gap, because the reports are confidently wrong rather than silent: [reports/divergences.md][divergences-report] counted 19 repos owing `AGENTS.md` "Fleet Bootstrap" when the real number was 20.
-  - **Settled** - The procedure is not the gap, since [`STANDUP.md`][standup] section 1A already says to write the entry and names every field, and nothing verifies it happened.
-  - **Settled** - The reason matters more than the mechanism, since an unexplained exclusion is the same silent omission in a different file.
-  - **Settled** - Private repositories are outside the public listing the issue used, so the true count is a floor rather than a total.
-
 ### Reducing the Carried Surface Further
 
 One pull request measuring the remaining carried surface against the carry-versus-reach test and moving whatever qualifies, now that the model is settled rather than open.
@@ -535,7 +518,6 @@ Regenerate [reports/divergences.md][divergences-report] before using it as the w
 [issue-509]: https://github.com/ptr727/ProjectTemplate/issues/509
 [issue-521]: https://github.com/ptr727/ProjectTemplate/issues/521
 [issue-523]: https://github.com/ptr727/ProjectTemplate/issues/523
-[issue-550]: https://github.com/ptr727/ProjectTemplate/issues/550
 [issue-558]: https://github.com/ptr727/ProjectTemplate/issues/558
 [issue-578]: https://github.com/ptr727/ProjectTemplate/issues/578
 [issue-580]: https://github.com/ptr727/ProjectTemplate/issues/580
