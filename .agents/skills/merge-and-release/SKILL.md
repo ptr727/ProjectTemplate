@@ -49,10 +49,10 @@ skill covers all of it, scoped down by what the maintainer actually asks for.
 ## The Procedure
 
 1. Identify the open develop -> main promotion PR for this repo, stop and report if none is open.
-2. Run `scripts/pr_review.py status <n> --repo <owner>/<repo>` on it and confirm the
+2. Run `scripts/pr_review.py status [number] --repo owner/repo` on it and confirm the
    pr-review-conduct Merge Gate. Stop and report exactly what is missing rather than merging on a
    partial gate.
-3. `gh pr merge <n> --merge --repo <owner>/<repo>`. Never `--delete-branch`, the promotion PR's
+3. `gh pr merge [number] --merge --repo owner/repo`. Never `--delete-branch`, the promotion PR's
    head is `develop`.
 4. Confirm the merge landed, `mergedAt` set, `main`'s tip matching the merge commit.
 5. In the hub, when the chosen scope includes a release, run `python3 scripts/skills_install.py
@@ -62,7 +62,7 @@ skill covers all of it, scoped down by what the maintainer actually asks for.
    skill-lifecycle, every other machine still refreshes on its own next run or
    `docs/host-setup.md` "Fleet Skills Install" cadence.
 6. When the chosen scope includes a release, `gh workflow run publish-release.yml --ref main
-   --repo <owner>/<repo>`, or `--ref develop` only when the maintainer explicitly asked for a
+   --repo owner/repo`, or `--ref develop` only when the maintainer explicitly asked for a
    prerelease dispatch instead.
 7. Poll the dispatched run to completion (`gh run list`, `gh run view`), report its conclusion
    and the tag or version it produced. A run that fails, or never starts, is reported, never
