@@ -1303,16 +1303,19 @@ def description_findings(doc_texts, entry, live, slug):
     declared value is canonical on its own and does not need the README to establish it.
     """
     findings = []
-    raw_declared = entry.get("description")
-    if raw_declared is not None and not isinstance(raw_declared, str):
-        findings.append(
-            (
-                "DEFECT",
-                f"registry: description is a {type(raw_declared).__name__}, not a string (spec/validate.py rejects this once run) - treating it as undeclared",
+    declared = None
+    if "description" in entry:
+        raw_declared = entry["description"]
+        if not isinstance(raw_declared, str):
+            kind = "null" if raw_declared is None else f"a {type(raw_declared).__name__}"
+            findings.append(
+                (
+                    "DEFECT",
+                    f"registry: description is {kind}, not a string. spec/validate.py rejects this once run, so this is treated as undeclared.",
+                )
             )
-        )
-        raw_declared = None
-    declared = (raw_declared or "").strip() or None
+        else:
+            declared = raw_declared.strip() or None
     readme_want = None
     if "README.md" in doc_texts:
         title, intro = title_and_intro(doc_texts["README.md"])
@@ -4227,6 +4230,13 @@ def _selftest():
             "a non-string declared field is reported rather than crashing",
             desc_readme,
             {"description": 42},
+            {"description": "A short tagline."},
+            1,
+        ),
+        (
+            "an explicit null declared field is reported rather than read as absent",
+            desc_readme,
+            {"description": None},
             {"description": "A short tagline."},
             1,
         ),

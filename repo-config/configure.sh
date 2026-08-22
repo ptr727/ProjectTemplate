@@ -65,22 +65,33 @@ main_ruleset="$script_dir/main.json"
 settings_file="$script_dir/settings.json"
 
 # ----- Resolve the declared description (optional, shared by apply and check) -----
-# Undeclared means unchanged: the About panel keeps following the README, as before this field existed.
+# Absence keeps the About panel following the README.
 description=""
 if [ -f "$registry" ]; then
-    # Trims only space/tab, so an edge newline survives to trip the guard below rather than being silently dropped.
-    if ! description="$(jq -r --arg n "$name" \
-        '(.repos[] | select(.name==$n) | .description) // "" | gsub("^[ \\t]+|[ \\t]+$"; "")' "$registry")"; then
-        echo "Failed to read description from $registry (invalid JSON?)." >&2
+    if ! declared="$(jq -r --arg n "$name" '(.repos[] | select(.name==$n) | has("description")) // false' "$registry")"; then
+        echo "Failed to read $registry (invalid JSON?)." >&2
         exit 1
     fi
-    # Caught here rather than left to reach `gh api` as a multi-line value.
-    case "$description" in
-        *$'\n'* | *$'\r'*)
-            echo "The declared description for $name in $registry carries an embedded newline. Fix it there (spec/validate.py rejects this once run)." >&2
+    if [ "$declared" = "true" ]; then
+        # Trims only space/tab, so an edge newline survives to trip the guard below rather than being silently dropped.
+        # A non-string value (including an explicit null) resolves to empty here, caught by the same guard as a malformed one.
+        if ! description="$(jq -r --arg n "$name" \
+            '(.repos[] | select(.name==$n) | .description) | if type == "string" then gsub("^[ \\t]+|[ \\t]+$"; "") else empty end' \
+            "$registry")"; then
+            echo "Failed to read description from $registry (invalid JSON?)." >&2
             exit 1
-            ;;
-    esac
+        fi
+        if [ -z "$description" ]; then
+            echo "The declared description for $name in $registry is not a non-empty string. Fix it there (spec/validate.py rejects this once run)." >&2
+            exit 1
+        fi
+        case "$description" in
+            *$'\n'* | *$'\r'*)
+                echo "The declared description for $name in $registry carries an embedded newline. Fix it there (spec/validate.py rejects this once run)." >&2
+                exit 1
+                ;;
+        esac
+    fi
 fi
 
 # ----- Ruleset id lookup (shared by apply and check) -----
@@ -302,9 +313,9 @@ check_settings() {
     if [ -n "$description" ]; then
         assert "description = '$description'" test "$(jq -r '.description' <<<"$live")" = "$description"
     elif [ ! -f "$registry" ]; then
-        note "description: no $registry to read, resolved relative to this script rather than from the repo argument - run from a hub checkout for it to exist - verify manually"
+        note "description: no $registry to read (it resolves relative to this script, not from the repo argument). Run from a hub checkout for it to exist, and verify manually."
     else
-        note "description: no registry/repos.json description declared for $name - verify manually (falls back to the README tagline, see GOVERNANCE.md 'Repository Details')"
+        note "description: no registry/repos.json description declared for $name (falls back to the README tagline, see GOVERNANCE.md 'Repository Details'). Verify manually."
     fi
 }
 
