@@ -80,8 +80,9 @@ pr-review-conduct's five outcomes are the actual rule, this is the mapping to us
   on its own (outcome 2).
 - Real and worth doing, but later, so file the issue first, then reply with its link (outcome 4).
 - Real, fixable, but a value call rather than a scope boundary, or the agent genuinely does not
-  know which of the above applies, so ask the maintainer. Use AskUserQuestion and get an explicit
-  answer in the same turn, a plan to ask later is resolution by silence (outcome 3).
+  know which of the above applies, so ask the maintainer directly, whatever the runtime's own
+  interactive-question mechanism is, and get an explicit answer in the same turn, a plan to ask
+  later is resolution by silence (outcome 3).
 - The same finding keeps recurring against correct code, fix the class, sharpen a name, add a
   comment, or take the rule itself to the maintainer, rather than re-arguing the instance every
   round (outcome 5).

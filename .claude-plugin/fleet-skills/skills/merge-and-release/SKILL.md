@@ -49,8 +49,9 @@ skill covers all of it, scoped down by what the maintainer actually asks for.
 ## The Procedure
 
 1. Identify the open develop -> main promotion PR for this repo, stop and report if none is open.
-2. Run `scripts/pr_review.py status` on it and confirm the pr-review-conduct Merge Gate. Stop and
-   report exactly what is missing rather than merging on a partial gate.
+2. Run `scripts/pr_review.py status <n> --repo <owner>/<repo>` on it and confirm the
+   pr-review-conduct Merge Gate. Stop and report exactly what is missing rather than merging on a
+   partial gate.
 3. `gh pr merge <n> --merge --repo <owner>/<repo>`. Never `--delete-branch`, the promotion PR's
    head is `develop`.
 4. Confirm the merge landed, `mergedAt` set, `main`'s tip matching the merge commit.
