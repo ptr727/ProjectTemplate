@@ -58,6 +58,11 @@ class ResolveDescriptionCase(unittest.TestCase):
         with self.assertRaises(resolve_description.ResolveError):
             resolve_description.resolve_description(registry, "Fixture")
 
+    def test_a_case_only_name_mismatch_raises_rather_than_reading_as_absent(self) -> None:
+        registry = {"repos": [{"name": "fixture", "description": "A short tagline."}]}
+        with self.assertRaises(resolve_description.ResolveError):
+            resolve_description.resolve_description(registry, "Fixture")
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -31,13 +31,16 @@ def resolve_description(registry: dict, name: str) -> str | None:
 
     Raises ResolveError for anything the caller should fail loud on rather than silently read as
     absent: a registry that is not an object carrying a `repos` array, an entry whose own name
-    would match NAME but for leading/trailing whitespace (spec/validate.py rejects that shape too,
-    so it is never the intended way to spell a mismatch), more than one entry named NAME, or a
-    declared description description_errors() rejects.
+    would match NAME once whitespace and case differences are normalized away but not otherwise
+    (spec/validate.py rejects a padded name outright, and a GitHub repo name is compared
+    case-insensitively by GitHub itself, so a same-name-different-case entry is a data-entry
+    mistake rather than a different repo), more than one entry named NAME, or a declared
+    description description_errors() rejects.
     """
     if not isinstance(registry, dict) or not isinstance(registry.get("repos"), list):
         raise ResolveError("registry is not an object with a 'repos' array")
     repos = registry["repos"]
+    normalized_name = name.strip().casefold()
     near_miss = next(
         (
             r["name"]
@@ -45,13 +48,13 @@ def resolve_description(registry: dict, name: str) -> str | None:
             if isinstance(r, dict)
             and isinstance(r.get("name"), str)
             and r["name"] != name
-            and r["name"].strip() == name
+            and r["name"].strip().casefold() == normalized_name
         ),
         None,
     )
     if near_miss is not None:
         raise ResolveError(
-            f"a registry entry's name {near_miss!r} carries leading/trailing whitespace"
+            f"a registry entry's name {near_miss!r} differs from {name!r} only by whitespace or letter case"
         )
     matches = [r for r in repos if isinstance(r, dict) and r.get("name") == name]
     if len(matches) > 1:
