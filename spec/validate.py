@@ -471,15 +471,17 @@ def main():
         effective_model = model or default_model or "release"
         if effective_model == "operational" and eol is None:
             errors.append(f"{name}: operational repo must declare lineEndings (lf or crlf)")
-        # Optional per TODO.md "The Declared Repository Description": a repo that has not adopted the field yet is unaffected, since spec/audit.py's description_findings() falls back to the README tagline for it.
+        # Optional per GOVERNANCE.md "Repository Details": a repo that has not adopted the field yet is unaffected, since spec/audit.py's description_findings() falls back to the README tagline for it.
         # The cap matches Docker Hub's short-description limit, the tightest surface the field feeds.
+        # Measured after stripping, the same value spec/audit.py's description_findings() treats as canonical, so a description padded with whitespace is not judged by a length that value never carries.
         desc = repo.get("description")
         if desc is not None:
-            if not isinstance(desc, str) or not desc.strip():
+            desc_stripped = desc.strip() if isinstance(desc, str) else ""
+            if not isinstance(desc, str) or not desc_stripped:
                 errors.append(f"{name}: description must be a non-empty string")
-            elif len(desc) > 100:
+            elif len(desc_stripped) > 100:
                 errors.append(
-                    f"{name}: description is {len(desc)} characters, over the 100-char limit"
+                    f"{name}: description is {len(desc_stripped)} characters, over the 100-char limit"
                 )
 
         status = repo.get("status")

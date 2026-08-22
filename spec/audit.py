@@ -1293,10 +1293,10 @@ def description_findings(doc_texts, entry, live, slug):
     carries verbatim to the GitHub About description, and on a docker repo to the Docker Hub short description. Any
     further paragraph is free prose no mirror reads, which is why only the first line is measured.
 
-    registry/repos.json's optional `description` is the canonical value once a repo declares it (TODO.md "The
-    Declared Repository Description"); repo-config/configure.sh then writes the About panel from that same field.
-    A repo that has not adopted it yet still has the README as its source of truth, so the checks below fall back
-    to the tagline exactly as before.
+    registry/repos.json's optional `description` is the canonical value once a repo declares it (GOVERNANCE.md
+    "Repository Details"). repo-config/configure.sh then writes the About panel from that same field. A repo that
+    has not adopted it yet still has the README as its source of truth, so the checks below fall back to the
+    tagline exactly as before.
     """
     findings = []
     if "README.md" not in doc_texts:

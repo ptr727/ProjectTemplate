@@ -65,7 +65,7 @@ main_ruleset="$script_dir/main.json"
 settings_file="$script_dir/settings.json"
 
 # ----- Resolve the declared description (optional, shared by apply and check) -----
-# Per TODO.md "The Declared Repository Description", once a repo declares registry/repos.json's `description` field, that field becomes the About panel's source rather than the README.
+# Per GOVERNANCE.md "Repository Details", once a repo declares registry/repos.json's `description` field, that field becomes the About panel's source rather than the README.
 # The audit's description_findings() (spec/audit.py) measures the README, About, and Docker Hub mirror set against that same field.
 # A repo with no declared field is left untouched here, so it keeps the README-is-the-source-of-truth behavior it had before.
 description=""
