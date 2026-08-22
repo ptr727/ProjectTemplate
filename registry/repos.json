@@ -10,6 +10,7 @@
         {
             "name": "ProjectTemplate",
             "url": "https://github.com/ptr727/ProjectTemplate",
+            "description": "Agent enablement for a fleet of repositories: autonomy and repeatable quality inside guardrails.",
             "status": "cataloged",
             "types": ["source-only", "docs"],
             "groundTruthBranch": "main",

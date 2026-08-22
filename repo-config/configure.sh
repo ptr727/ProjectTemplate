@@ -64,6 +64,29 @@ esac
 main_ruleset="$script_dir/main.json"
 settings_file="$script_dir/settings.json"
 
+# ----- Resolve the declared description (optional, shared by apply and check) -----
+# Per GOVERNANCE.md "Repository Details", once a repo declares registry/repos.json's `description` field, that field becomes the About panel's source rather than the README.
+# The audit's description_findings() (spec/audit.py) measures the README, About, and Docker Hub mirror set against that same field.
+# A repo with no declared field is left untouched here, so the README stays its source of truth.
+description=""
+if [ -f "$registry" ]; then
+    # Trimmed defensively even though spec/validate.py already rejects an untrimmed value.
+    # A registry edited ahead of its next validate.py run still resolves to the same canonical value spec/audit.py compares against.
+    if ! description="$(jq -r --arg n "$name" \
+        '(.repos[] | select(.name==$n) | .description) // "" | gsub("^\\s+|\\s+$"; "")' "$registry")"; then
+        echo "Failed to read description from $registry (invalid JSON?)." >&2
+        exit 1
+    fi
+    # The trim above only strips leading/trailing whitespace, so an embedded newline or carriage return survives it.
+    # Caught here rather than left to reach `gh api` as a multi-line value.
+    case "$description" in
+        *$'\n'* | *$'\r'*)
+            echo "The declared description for $name in $registry carries an embedded newline. Fix it there (spec/validate.py rejects this once run)." >&2
+            exit 1
+            ;;
+    esac
+fi
+
 # ----- Ruleset id lookup (shared by apply and check) -----
 # Map a ruleset name to the id of the first match, leaving it empty when nothing matches.
 # It warns on duplicates, and aborts on an API error or at the per_page cap, where a single-fetch lookup is unreliable.
@@ -158,7 +181,12 @@ cmd_apply() {
         payload="$(jq --argjson d "$disc" '. + {has_discussions: $d}' "$settings_file")"
         echo "Warning: $repo has no 'main' branch. Leaving default_branch unchanged." >&2
     fi
-    echo "Applying general settings (has_discussions=$disc)"
+    # The About description, only once a repo declares registry/repos.json's `description` (see the resolution above).
+    # Left untouched otherwise, so a repo that has not adopted the field yet keeps its hand-set (or README-derived) description.
+    if [ -n "$description" ]; then
+        payload="$(jq --arg desc "$description" '. + {description: $desc}' <<<"$payload")"
+    fi
+    echo "Applying general settings (has_discussions=$disc$([ -n "$description" ] && echo ", description from registry/repos.json"))"
     printf '%s' "$payload" | gh api --method PATCH "repos/$repo" --input - >/dev/null
     # ----- Dependabot alerts + automated security updates -----
     gh api --method PUT "repos/$repo/vulnerability-alerts" >/dev/null
@@ -274,6 +302,16 @@ check_settings() {
     assert "has_discussions = $wantdisc" test "$(jq -r '.has_discussions' <<<"$live")" = "$wantdisc"
     if gh api "repos/$repo/branches/main" --jq '.name' >/dev/null 2>&1; then
         assert "default_branch = main" test "$(jq -r '.default_branch' <<<"$live")" = main
+    fi
+    # The About description, only where the registry declares one (see the resolution above).
+    # A repo that has not adopted the field is a manual-verify note, exactly as secrets are: nothing declared here to check against.
+    # The two reasons `$description` can be empty are told apart, since "no registry" and "no field for this repo" call for different follow-up.
+    if [ -n "$description" ]; then
+        assert "description = '$description'" test "$(jq -r '.description' <<<"$live")" = "$description"
+    elif [ ! -f "$registry" ]; then
+        note "description: no $registry to read (pass a plain repo argument or run from a hub checkout) - verify manually"
+    else
+        note "description: no registry/repos.json description declared for $name - verify manually (falls back to the README tagline, see GOVERNANCE.md 'Repository Details')"
     fi
 }
 
