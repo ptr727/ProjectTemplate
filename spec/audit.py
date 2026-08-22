@@ -41,6 +41,8 @@ import urllib.request
 from datetime import UTC, datetime
 from typing import Any
 
+import validate  # sibling, import-safe (its main is guarded)
+
 ROOT = pathlib.Path(__file__).resolve().parent.parent
 
 SETTINGS_KEYS = [
@@ -1305,31 +1307,19 @@ def description_findings(doc_texts, entry, live, slug):
     findings = []
     declared = None
     if "description" in entry:
-        raw_declared = entry["description"]
-        is_clean_string = (
-            isinstance(raw_declared, str)
-            and raw_declared.strip()
-            and raw_declared == raw_declared.strip()
-            and "\n" not in raw_declared
-            and "\r" not in raw_declared
-        )
-        if is_clean_string:
-            declared = raw_declared
-        else:
-            if raw_declared is None:
-                problem = "is null"
-            elif not isinstance(raw_declared, str):
-                problem = f"is {type(raw_declared).__name__}, not a string"
-            elif not raw_declared.strip():
-                problem = "is an empty or whitespace-only string"
-            else:
-                problem = "carries leading/trailing whitespace or an embedded newline"
-            findings.append(
+        # Delegates to validate.py's own contract instead of re-checking a second, easily-incomplete copy of it
+        # (an earlier version here missed the link and length rules, accepting either as canonical).
+        shape_errors = validate.description_errors("registry", entry["description"])
+        if shape_errors:
+            findings += [
                 (
                     "DEFECT",
-                    f"registry: description {problem}. spec/validate.py rejects this once run, so this is treated as undeclared.",
+                    f"{msg}. Treated as undeclared here, since it fails spec/validate.py's contract.",
                 )
-            )
+                for msg in shape_errors
+            ]
+        else:
+            declared = entry["description"]
     readme_want = None
     if "README.md" in doc_texts:
         title, intro = title_and_intro(doc_texts["README.md"])
@@ -4275,6 +4265,20 @@ def _selftest():
             {"description": "A short tagline."},
             1,
         ),
+        (
+            "a declared field carrying a Markdown link is a DEFECT rather than silently canonical",
+            desc_readme,
+            {"description": "See [docs](https://example.test) for more."},
+            {"description": "A short tagline."},
+            1,
+        ),
+        (
+            "a declared field over the 100-char cap is a DEFECT rather than silently canonical",
+            desc_readme,
+            {"description": "a" * 101},
+            {"description": "A short tagline."},
+            1,
+        ),
     ]
     for label, doc_texts_fx, entry_fx, live_fx, wantn in desc_cases:
         got = description_findings(doc_texts_fx, entry_fx, live_fx, "owner/Fixture")
@@ -4286,15 +4290,17 @@ def _selftest():
         if len(got) != wantn:
             for _, t in got:
                 print(f"         {t}")
-    # A null declared field is a DEFECT naming its actual type, not a silent LETTER-only "About mismatch".
+    # A null declared field is a DEFECT via validate.py's own contract, not a silent LETTER-only "About mismatch".
     null_declared = description_findings(
         desc_readme, {"description": None}, {"description": "A short tagline."}, "owner/Fixture"
     )
-    if not any(k == "DEFECT" and "description is null" in t for k, t in null_declared):
+    if not any(
+        k == "DEFECT" and "description must be a non-empty string" in t for k, t in null_declared
+    ):
         ok = False
         print(f"  FAIL description: null-declared-field DEFECT contract -> {null_declared}")
     else:
-        print("  ok   description: a null declared field is a DEFECT naming its actual type")
+        print("  ok   description: a null declared field is a DEFECT via validate.py's contract")
     # The declared field, once present, is what the wording names as the source - not "the README".
     declared_mismatch = description_findings(
         desc_readme,

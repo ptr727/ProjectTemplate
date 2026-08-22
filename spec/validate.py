@@ -472,6 +472,7 @@ def main():
         )
 
     seen_identities = set()
+    seen_names = set()
     for i, repo in enumerate(repos["repos"]):
         if not isinstance(repo, dict):
             errors.append(f"repo #{i} is not an object")
@@ -479,9 +480,13 @@ def main():
         name = repo.get("name", f"#{i}")
         # This name only labels every error message below.
         # The membership check (spec/audit.py's membership_findings()) keys by owner/repo instead, parsed from url the same way this loop does.
+        # A duplicate is still an error, though, since repo-config/configure.sh and spec/audit.py's own per-repo entry lookup both key off it.
         if not isinstance(repo.get("name"), str) or not repo["name"].strip():
             errors.append(f"repo #{i}: missing or empty 'name'")
             continue
+        if name in seen_names:
+            errors.append(f"{name}: duplicate registry entry for name '{name}'")
+        seen_names.add(name)
         if not isinstance(repo.get("url"), str) or not repo["url"].strip():
             errors.append(f"{name}: missing or empty 'url'")
             continue
