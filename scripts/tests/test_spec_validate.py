@@ -154,6 +154,28 @@ class DescriptionErrorsCase(unittest.TestCase):
             ["Fixture: description must be a non-empty string"],
         )
 
+    def test_an_explicit_null_is_rejected_rather_than_read_as_absent(self) -> None:
+        self.assertEqual(
+            validate.description_errors("Fixture", None),
+            ["Fixture: description must be a non-empty string"],
+        )
+
+    def test_for_repo_an_absent_key_produces_no_errors(self) -> None:
+        self.assertEqual(validate.description_errors_for_repo({}, "Fixture"), [])
+
+    def test_for_repo_an_explicit_null_is_rejected_rather_than_read_as_absent(self) -> None:
+        # Locks in the presence-vs-None guard: this regresses to `[]` if it is ever weakened back to `is not None`.
+        self.assertEqual(
+            validate.description_errors_for_repo({"description": None}, "Fixture"),
+            ["Fixture: description must be a non-empty string"],
+        )
+
+    def test_a_non_string_is_rejected(self) -> None:
+        self.assertEqual(
+            validate.description_errors("Fixture", 42),
+            ["Fixture: description must be a non-empty string"],
+        )
+
     def test_an_inline_markdown_link_is_rejected(self) -> None:
         self.assertEqual(
             validate.description_errors("Fixture", "See [docs](https://example.test) for more."),

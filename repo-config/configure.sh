@@ -65,26 +65,47 @@ main_ruleset="$script_dir/main.json"
 settings_file="$script_dir/settings.json"
 
 # ----- Resolve the declared description (optional, shared by apply and check) -----
-# Per GOVERNANCE.md "Repository Details", once a repo declares registry/repos.json's `description` field, that field becomes the About panel's source rather than the README.
-# The audit's description_findings() (spec/audit.py) measures the README, About, and Docker Hub mirror set against that same field.
-# A repo with no declared field is left untouched here, so the README stays its source of truth.
+# Absence keeps the About panel following the README.
 description=""
 if [ -f "$registry" ]; then
-    # Trimmed defensively even though spec/validate.py already rejects an untrimmed value.
-    # A registry edited ahead of its next validate.py run still resolves to the same canonical value spec/audit.py compares against.
-    if ! description="$(jq -r --arg n "$name" \
-        '(.repos[] | select(.name==$n) | .description) // "" | gsub("^\\s+|\\s+$"; "")' "$registry")"; then
-        echo "Failed to read description from $registry (invalid JSON?)." >&2
+    # Fails loud on a duplicate name (already a validate.py DEFECT) rather than picking one entry over the other.
+    if ! match_count="$(jq -r --arg n "$name" '[.repos[] | select(.name==$n)] | length' "$registry")"; then
+        echo "Failed to read $registry (invalid JSON?)." >&2
         exit 1
     fi
-    # The trim above only strips leading/trailing whitespace, so an embedded newline or carriage return survives it.
-    # Caught here rather than left to reach `gh api` as a multi-line value.
-    case "$description" in
-        *$'\n'* | *$'\r'*)
-            echo "The declared description for $name in $registry carries an embedded newline. Fix it there (spec/validate.py rejects this once run)." >&2
+    if [ "$match_count" -gt 1 ]; then
+        echo "$match_count registry entries named $name in $registry. Resolve the duplicate before its description can be read (spec/validate.py rejects this once run)." >&2
+        exit 1
+    fi
+    if ! declared="$(jq -r --arg n "$name" '.repos[] | select(.name==$n) | has("description")' "$registry")"; then
+        echo "Failed to read $registry (invalid JSON?)." >&2
+        exit 1
+    fi
+    if [ "$declared" = "true" ]; then
+        # Exactly one match is already established above, so select() itself yields exactly one value here.
+        # No trim: this only ever validates the value against spec/validate.py's contract, never normalizes it.
+        # A non-string value (including an explicit null) resolves to empty here, caught by the same guard.
+        # -j plus the trailing sentinel keeps command substitution from stripping a genuine trailing newline.
+        if ! description="$(jq -j --arg n "$name" \
+            '(.repos[] | select(.name==$n) | .description) | if type == "string" then . else empty end' \
+            "$registry" && printf x)"; then
+            echo "Failed to read description from $registry (invalid JSON?)." >&2
             exit 1
-            ;;
-    esac
+        fi
+        description="${description%x}"
+        case "$description" in
+            "" | [[:space:]]* | *[[:space:]])
+                echo "The declared description for $name in $registry is not a non-empty string with no leading or trailing whitespace. Fix it there (spec/validate.py rejects this once run)." >&2
+                exit 1
+                ;;
+        esac
+        case "$description" in
+            *$'\n'* | *$'\r'*)
+                echo "The declared description for $name in $registry carries an embedded newline. Fix it there (spec/validate.py rejects this once run)." >&2
+                exit 1
+                ;;
+        esac
+    fi
 fi
 
 # ----- Ruleset id lookup (shared by apply and check) -----
@@ -181,8 +202,7 @@ cmd_apply() {
         payload="$(jq --argjson d "$disc" '. + {has_discussions: $d}' "$settings_file")"
         echo "Warning: $repo has no 'main' branch. Leaving default_branch unchanged." >&2
     fi
-    # The About description, only once a repo declares registry/repos.json's `description` (see the resolution above).
-    # Left untouched otherwise, so a repo that has not adopted the field yet keeps its hand-set (or README-derived) description.
+    # Applies only once a repo declares the field (see the resolution above).
     if [ -n "$description" ]; then
         payload="$(jq --arg desc "$description" '. + {description: $desc}' <<<"$payload")"
     fi
@@ -303,15 +323,13 @@ check_settings() {
     if gh api "repos/$repo/branches/main" --jq '.name' >/dev/null 2>&1; then
         assert "default_branch = main" test "$(jq -r '.default_branch' <<<"$live")" = main
     fi
-    # The About description, only where the registry declares one (see the resolution above).
-    # A repo that has not adopted the field is a manual-verify note, exactly as secrets are: nothing declared here to check against.
-    # The two reasons `$description` can be empty are told apart, since "no registry" and "no field for this repo" call for different follow-up.
+    # $description is empty for two different reasons, told apart below since each needs different follow-up.
     if [ -n "$description" ]; then
         assert "description = '$description'" test "$(jq -r '.description' <<<"$live")" = "$description"
     elif [ ! -f "$registry" ]; then
-        note "description: no $registry to read (pass a plain repo argument or run from a hub checkout) - verify manually"
+        note "description: no $registry to read (it resolves relative to this script, not from the repo argument). Run from a hub checkout for it to exist, and verify manually."
     else
-        note "description: no registry/repos.json description declared for $name - verify manually (falls back to the README tagline, see GOVERNANCE.md 'Repository Details')"
+        note "description: no matching registry entry or no declared description key for $name (falls back to the README tagline, see GOVERNANCE.md 'Repository Details'). Verify manually."
     fi
 }
 

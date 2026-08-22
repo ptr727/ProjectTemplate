@@ -41,6 +41,8 @@ import urllib.request
 from datetime import UTC, datetime
 from typing import Any
 
+import validate  # sibling, import-safe (its main is guarded)
+
 ROOT = pathlib.Path(__file__).resolve().parent.parent
 
 SETTINGS_KEYS = [
@@ -1303,7 +1305,21 @@ def description_findings(doc_texts, entry, live, slug):
     declared value is canonical on its own and does not need the README to establish it.
     """
     findings = []
-    declared = (entry.get("description") or "").strip() or None
+    declared = None
+    if "description" in entry:
+        # Delegates to validate.py's own contract instead of re-checking a second, easily-incomplete copy of it
+        # (an earlier version here missed the link and length rules, accepting either as canonical).
+        shape_errors = validate.description_errors("registry", entry["description"])
+        if shape_errors:
+            findings += [
+                (
+                    "DEFECT",
+                    f"{msg}. Treated as undeclared here, since it fails spec/validate.py's contract.",
+                )
+                for msg in shape_errors
+            ]
+        else:
+            declared = entry["description"]
     readme_want = None
     if "README.md" in doc_texts:
         title, intro = title_and_intro(doc_texts["README.md"])
@@ -4214,6 +4230,55 @@ def _selftest():
             {"description": "Anything."},
             0,
         ),
+        (
+            "a non-string declared field is reported rather than crashing",
+            desc_readme,
+            {"description": 42},
+            {"description": "A short tagline."},
+            1,
+        ),
+        (
+            "an explicit null declared field is reported rather than read as absent",
+            desc_readme,
+            {"description": None},
+            {"description": "A short tagline."},
+            1,
+        ),
+        (
+            "a whitespace-only declared field is reported rather than read as absent",
+            desc_readme,
+            {"description": "   "},
+            {"description": "A short tagline."},
+            1,
+        ),
+        (
+            "a padded declared field is a DEFECT rather than silently trimmed",
+            desc_readme,
+            {"description": "  A short tagline.  "},
+            {"description": "A short tagline."},
+            1,
+        ),
+        (
+            "a declared field with an embedded newline is a DEFECT rather than silently accepted",
+            desc_readme,
+            {"description": "A short tagline.\nA second line."},
+            {"description": "A short tagline."},
+            1,
+        ),
+        (
+            "a declared field carrying a Markdown link is a DEFECT rather than silently canonical",
+            desc_readme,
+            {"description": "See [docs](https://example.test) for more."},
+            {"description": "A short tagline."},
+            1,
+        ),
+        (
+            "a declared field over the 100-char cap is a DEFECT rather than silently canonical",
+            desc_readme,
+            {"description": "a" * 101},
+            {"description": "A short tagline."},
+            1,
+        ),
     ]
     for label, doc_texts_fx, entry_fx, live_fx, wantn in desc_cases:
         got = description_findings(doc_texts_fx, entry_fx, live_fx, "owner/Fixture")
@@ -4225,6 +4290,17 @@ def _selftest():
         if len(got) != wantn:
             for _, t in got:
                 print(f"         {t}")
+    # A null declared field is a DEFECT via validate.py's own contract, not a silent LETTER-only "About mismatch".
+    null_declared = description_findings(
+        desc_readme, {"description": None}, {"description": "A short tagline."}, "owner/Fixture"
+    )
+    if not any(
+        k == "DEFECT" and "description must be a non-empty string" in t for k, t in null_declared
+    ):
+        ok = False
+        print(f"  FAIL description: null-declared-field DEFECT contract -> {null_declared}")
+    else:
+        print("  ok   description: a null declared field is a DEFECT via validate.py's contract")
     # The declared field, once present, is what the wording names as the source - not "the README".
     declared_mismatch = description_findings(
         desc_readme,
