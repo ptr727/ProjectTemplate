@@ -257,11 +257,15 @@ def membership_findings(spec):
     visible in the catalog instead of the repo just disappearing from it.
     """
     findings = []
+    # A name with incidental leading/trailing whitespace passes spec/validate.py, which rejects only a blank one.
+    # .strip() before .lower() on both sides here, or that whitespace makes a real match miss and reports a false DEFECT for a repo the registry actually carries.
     registry_by_name = {
-        r["name"].lower(): r for r in spec["registry"]["repos"] if isinstance(r, dict)
+        r["name"].strip().lower(): r
+        for r in spec["registry"]["repos"]
+        if isinstance(r, dict) and isinstance(r.get("name"), str) and r["name"].strip()
     }
     for gh_repo in owner_repos(spec["registry"]["owner"]):
-        entry = registry_by_name.get(gh_repo["name"].lower())
+        entry = registry_by_name.get(str(gh_repo.get("name", "")).strip().lower())
         if entry is None:
             findings.append(
                 (
@@ -4248,6 +4252,12 @@ def _selftest():
                 "name matching is case-insensitive",
                 [{"name": "MixedCase", "full_name": "owner/MixedCase", "archived": False}],
                 {"owner": "owner", "repos": [{"name": "mixedcase", "status": "cataloged"}]},
+                [],
+            ),
+            (
+                "an incidental whitespace difference does not miss a real match",
+                [{"name": "Spacey", "full_name": "owner/Spacey", "archived": False}],
+                {"owner": "owner", "repos": [{"name": " Spacey ", "status": "cataloged"}]},
                 [],
             ),
         ]
