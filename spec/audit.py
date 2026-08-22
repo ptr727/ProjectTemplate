@@ -419,8 +419,8 @@ def extract_section(text, heading):
 # Carried files scanned for a coordination reference (GOVERNANCE.md "Documentation Style Conventions").
 TEMPLATE_REF_SCANNED = ("AGENTS.md", "GOVERNANCE.md", ".github/copilot-instructions.md")
 
-# Carried files scanned for an undeclared H2 heading (spec/section-model.md).
-UNDECLARED_HEADING_SCANNED = ("AGENTS.md", "GOVERNANCE.md", ".github/copilot-instructions.md")
+# The undeclared-H2 scan reads the same set.
+UNDECLARED_HEADING_SCANNED = TEMPLATE_REF_SCANNED
 
 
 def strip_sections(text, names):
@@ -450,12 +450,12 @@ def strip_sections(text, names):
 def undeclared_h2_headings(text, declared):
     """Level-two headings in `text` that `declared` does not name, sorted.
 
-    `declared` is normalized here (stripped, lowercased) rather than trusted pre-normalized, so the
-    contract holds for any caller regardless of how its own section names are cased or spaced.
-    Scoped to `## ` only: the section model's unit is the H2, and an H1 title or a nested H3 is not itself a
-    section this check judges. Fence-aware via unfenced_text, so a `## ` line inside a fenced code sample
-    (documenting the heading syntax itself) or a `##`-prefixed shell comment is not misread as a real
-    heading. Per unfenced_text's own docstring, a checker left fence-blind is a document read two ways.
+    `declared` is normalized here (stripped, lowercased), not trusted pre-normalized. The contract
+    then holds for any caller, regardless of how its own names are cased or spaced.
+    Scoped to `## ` only, the section model's unit. An H1 title or a nested H3 is not itself a
+    section this check judges.
+    Fence-aware via unfenced_text. A `## ` line inside a fenced code sample, or a `##`-prefixed
+    shell comment, is not misread as a real heading.
     """
     h2s = {ln[3:].strip().lower() for ln in unfenced_text(text).split("\n") if ln.startswith("## ")}
     return sorted(h2s - {d.strip().lower() for d in declared})
@@ -553,14 +553,22 @@ def unfenced_text(text):
     `<!-- Shields -->` or an `![alt][ref]` in one is not a definition, a group, or a rendered badge. Kept as
     one helper because the checkers were fence-aware in some places and blind in others, which is the state
     that lets a document be read two ways by one audit.
+    A fence closes only on the same marker character at least as long as the one that opened it, per
+    CommonMark, so a mismatched or shorter marker nested inside (a ~~~ example inside a ``` block, or a
+    ``` inside a longer ````) is content, not a boundary.
     """
-    out, fenced = [], False
+    out, marker, marker_len = [], None, 0
     for ln in normalize(text).split("\n"):
         s = ln.strip()
-        if s.startswith(("```", "~~~")):
-            fenced = not fenced
+        run = len(s) - len(s.lstrip(s[0])) if s[:1] in ("`", "~") else 0
+        if marker is None:
+            if run >= 3:
+                marker, marker_len = s[0], run
+                continue
+        elif s[:1] == marker and run >= marker_len:
+            marker = None
             continue
-        if not fenced:
+        if marker is None:
             out.append(ln)
     return "\n".join(out)
 
@@ -2879,7 +2887,8 @@ def _selftest():
             f"  ok   template-ref: {len(tref)} cases, verbatim regions excised before the hub-name scan"
         )
 
-    # Undeclared-heading advisory: an H2 the manifest does not declare, scoped to AGENTS.md, GOVERNANCE.md, and .github/copilot-instructions.md, fence-aware so a documented heading syntax or a shell comment inside a code sample is not misread as a real section.
+    # An H2 the manifest does not declare, in AGENTS.md, GOVERNANCE.md, or .github/copilot-instructions.md.
+    # Fence-aware, so a heading syntax example or a shell comment inside a code sample is not misread as a real section.
     uh = [
         (
             "a declared H2 is not flagged",
@@ -2936,6 +2945,37 @@ def _selftest():
             print(f"  FAIL undeclared-heading: {label} (expected {want}, got {got})")
     if uh_ok:
         print(f"  ok   undeclared-heading: {len(uh)} cases, H2-only, case-insensitive, fence-aware")
+
+    # unfenced_text: a fence closes only on a same-family marker at least as long as the opener.
+    uf = [
+        ("a simple ``` fence excludes its content", "```\n## Phantom\n```\n## Real\n", "## Real\n"),
+        ("a simple ~~~ fence excludes its content", "~~~\n## Phantom\n~~~\n## Real\n", "## Real\n"),
+        (
+            "a ~~~ line nested inside a ``` fence does not close it",
+            "```md\n~~~\n## Phantom\n```\n## Real\n",
+            "## Real\n",
+        ),
+        (
+            "a shorter ``` cannot close a longer ```` fence",
+            "````md\n## Phantom\n```\n## Real\n````\n",
+            "",
+        ),
+        (
+            "a longer closing fence than the opener still closes",
+            "```\n## Phantom\n````\n## Real\n",
+            "## Real\n",
+        ),
+    ]
+    uf_ok = True
+    for label, doc, want in uf:
+        got = unfenced_text(doc)
+        if got != want:
+            ok = uf_ok = False
+            print(f"  FAIL unfenced-text: {label} (expected {want!r}, got {got!r})")
+    if uf_ok:
+        print(
+            f"  ok   unfenced-text: {len(uf)} cases, closing fence matches the opener's marker and length"
+        )
 
     # Issue generator: findings land in the right buckets and the title carries the count.
     fe = {"name": "Widget", "types": ["python"]}
