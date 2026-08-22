@@ -478,7 +478,7 @@ def undeclared_h2_headings(text, declared):
     then holds for any caller, regardless of how its own names are cased or spaced.
     Scoped to `## ` only, the section model's unit. An H1 title or a nested H3 is not itself a
     section this check judges.
-    Fence-aware via unfenced_text. A heading-syntax line or a `##`-prefixed shell comment, each shown
+    Fence-aware via unfenced_text. Either a heading-syntax line or a `##`-prefixed shell comment, shown
     inside a fenced code sample, is not misread as a real heading.
     """
     h2s = {ln[3:].strip().lower() for ln in unfenced_text(text).split("\n") if ln.startswith("## ")}
