@@ -235,7 +235,14 @@ def owner_repos(owner):
         )
     repos, page = [], 1
     while True:
-        batch = gh(f"user/repos?affiliation=owner&per_page=100&page={page}") or []
+        batch = gh(f"user/repos?affiliation=owner&per_page=100&page={page}")
+        # An empty response body reads as None here, per the gh() docstring above.
+        # `or []` would silently take that for a short page and stop the sweep, reporting the fleet clean while the rest of the repos were never actually inspected.
+        # Fail loud instead, matching the ownership guard above.
+        if batch is None:
+            raise RuntimeError(f"GitHub returned an empty repository-list response (page {page})")
+        if not isinstance(batch, list) or not all(isinstance(r, dict) for r in batch):
+            raise RuntimeError(f"GitHub returned an unexpected repository-list shape (page {page})")
         repos.extend(r for r in batch if not r.get("fork"))
         if len(batch) < 100:
             return repos
@@ -4221,6 +4228,18 @@ def _selftest():
     except RuntimeError as e:
         ok = False
         print(f"  FAIL owner_repos: a differently-cased login was wrongly rejected -> {e}")
+    finally:
+        globals()["gh"] = real_gh
+
+    # A None page mid-pagination (an empty response body) must fail loud rather than being read
+    # as a short page: `or []` there would silently truncate the sweep and report clean.
+    try:
+        globals()["gh"] = lambda path, ok404=False: {"login": "owner"} if path == "user" else None
+        owner_repos("owner")
+        ok = False
+        print("  FAIL owner_repos: a None page did not raise")
+    except RuntimeError:
+        print("  ok   owner_repos: a None page fails loud instead of reading as an empty page")
     finally:
         globals()["gh"] = real_gh
 

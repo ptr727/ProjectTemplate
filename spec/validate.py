@@ -437,6 +437,25 @@ def main():
         if not isinstance(repo.get("url"), str) or not repo["url"].strip():
             errors.append(f"{name}: missing or empty 'url'")
             continue
+
+        # These fields are facts about the repo itself, not about its audit scope.
+        # The schema's operational-needs-lineEndings rule (registry/repos.schema.json) binds regardless of status.
+        # Checked here, before the status branch, so every status shares one check rather than each non-cataloged branch needing its own copy.
+        model = repo.get("workflowModel")
+        if model is not None and model not in WORKFLOW_MODELS:
+            errors.append(
+                f"{name}: workflowModel '{model}' invalid (expected {' or '.join(WORKFLOW_MODELS)})"
+            )
+        eol = repo.get("lineEndings")
+        if eol is not None and eol not in ("lf", "crlf"):
+            errors.append(f"{name}: lineEndings '{eol}' invalid (expected lf or crlf)")
+        # An operational repo's endings follow the consuming app's platform, so they must be declared, where a release repo omits the field and takes the fleet LF default.
+        # Resolve the effective model the way configure.sh does, from the repo, then the defaults, then release.
+        # The requirement then holds even where a repo relies on an operational defaults.workflowModel rather than setting its own.
+        effective_model = model or default_model or "release"
+        if effective_model == "operational" and eol is None:
+            errors.append(f"{name}: operational repo must declare lineEndings (lf or crlf)")
+
         status = repo.get("status")
         if status is None:
             errors.append(f"{name}: missing 'status'")
@@ -481,12 +500,6 @@ def main():
                     f"{name}: type '{tname}' profile '{prof}' not in its allowed profiles {allowed or '[]'}"
                 )
 
-        model = repo.get("workflowModel")
-        if model is not None and model not in WORKFLOW_MODELS:
-            errors.append(
-                f"{name}: workflowModel '{model}' invalid (expected {' or '.join(WORKFLOW_MODELS)})"
-            )
-
         # The releaseTrigger field is a scope selector, per spec/scope-model.md, so an invalid value would silently fail to match any releaseTrigger-scoped section rather than error.
         trigger = repo.get("releaseTrigger")
         if trigger is not None and trigger not in RELEASE_TRIGGERS:
@@ -501,16 +514,6 @@ def main():
             errors.append(
                 f"{name}: consumerModel '{cm}' invalid or missing (expected {' or '.join(CONSUMER_MODELS)})"
             )
-
-        eol = repo.get("lineEndings")
-        if eol is not None and eol not in ("lf", "crlf"):
-            errors.append(f"{name}: lineEndings '{eol}' invalid (expected lf or crlf)")
-        # An operational repo's endings follow the consuming app's platform, so they must be declared, where a release repo omits the field and takes the fleet LF default.
-        # Resolve the effective model the way configure.sh does, from the repo, then the defaults, then release.
-        # The requirement then holds even where a repo relies on an operational defaults.workflowModel rather than setting its own.
-        effective_model = model or default_model or "release"
-        if effective_model == "operational" and eol is None:
-            errors.append(f"{name}: operational repo must declare lineEndings (lf or crlf)")
 
         required = set(repo.get("requiredSecrets", []))
         for pub in repo.get("publish", []):
