@@ -64,6 +64,28 @@ esac
 main_ruleset="$script_dir/main.json"
 settings_file="$script_dir/settings.json"
 
+# ----- Resolve the declared description (optional, shared by apply and check) -----
+# Absence keeps the About panel following the README.
+description=""
+if [ -f "$registry" ]; then
+    # Resolved here, not near the top, so a run with no registry (an explicit model, no hub checkout) never needs Python at all.
+    # The name python3 is not universal: native Windows can register a Microsoft Store stub under that name that resolves on PATH but fails when actually run, so this runs it rather than just checking PATH (docs/host-setup.md).
+    # The probe itself is spec/resolve_description.py's actual floor (PEP 563, Python 3.7+) rather than an arbitrary version number, so a too-old interpreter fails here with a clear message instead of a bare SyntaxError from the script.
+    if python3 -c "from __future__ import annotations" >/dev/null 2>&1; then
+        py_cmd=(python3)
+    elif py -3 -c "from __future__ import annotations" >/dev/null 2>&1; then
+        py_cmd=(py -3)
+    else
+        echo "No Python 3.7+ interpreter found (python3 or py -3). See docs/host-setup.md." >&2
+        exit 1
+    fi
+    # Delegates to spec/resolve_description.py rather than a third hand-rolled copy of description_errors().
+    # A description that passes that check can never contain a newline, so command substitution has nothing to strip.
+    if ! description="$("${py_cmd[@]}" "$script_dir/../spec/resolve_description.py" "$registry" "$name")"; then
+        exit 1
+    fi
+fi
+
 # ----- Ruleset id lookup (shared by apply and check) -----
 # Map a ruleset name to the id of the first match, leaving it empty when nothing matches.
 # It warns on duplicates, and aborts on an API error or at the per_page cap, where a single-fetch lookup is unreliable.
@@ -158,7 +180,11 @@ cmd_apply() {
         payload="$(jq --argjson d "$disc" '. + {has_discussions: $d}' "$settings_file")"
         echo "Warning: $repo has no 'main' branch. Leaving default_branch unchanged." >&2
     fi
-    echo "Applying general settings (has_discussions=$disc)"
+    # Applies only once a repo declares the field (see the resolution above).
+    if [ -n "$description" ]; then
+        payload="$(jq --arg desc "$description" '. + {description: $desc}' <<<"$payload")"
+    fi
+    echo "Applying general settings (has_discussions=$disc$([ -n "$description" ] && echo ", description from registry/repos.json"))"
     printf '%s' "$payload" | gh api --method PATCH "repos/$repo" --input - >/dev/null
     # ----- Dependabot alerts + automated security updates -----
     gh api --method PUT "repos/$repo/vulnerability-alerts" >/dev/null
@@ -274,6 +300,14 @@ check_settings() {
     assert "has_discussions = $wantdisc" test "$(jq -r '.has_discussions' <<<"$live")" = "$wantdisc"
     if gh api "repos/$repo/branches/main" --jq '.name' >/dev/null 2>&1; then
         assert "default_branch = main" test "$(jq -r '.default_branch' <<<"$live")" = main
+    fi
+    # $description is empty for two different reasons, told apart below since each needs different follow-up.
+    if [ -n "$description" ]; then
+        assert "description = '$description'" test "$(jq -r '.description' <<<"$live")" = "$description"
+    elif [ ! -f "$registry" ]; then
+        note "description: no $registry to read (it resolves relative to this script, not from the repo argument). Run from a hub checkout for it to exist, and verify manually."
+    else
+        note "description: no matching registry entry or no declared description key for $name (falls back to the README tagline, see GOVERNANCE.md 'Repository Details'). Verify manually."
     fi
 }
 

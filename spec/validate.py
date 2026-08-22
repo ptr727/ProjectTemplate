@@ -42,6 +42,10 @@ CONTRACT_KEYS = {
 MARKDOWN_INLINE_LINK = re.compile(r"\]\((?P<target>[^)\s]+)")
 MARKDOWN_REFERENCE_LINK = re.compile(r"^\[[^]]+\]:\s*(?P<target>\S+)", re.MULTILINE)
 TEMPLATE_REPOSITORY_URL = "https://github.com/ptr727/ProjectTemplate"
+# A description-shaped link use, `[text](url)` or `[text][ref]`, kept in sync with spec/audit.py's strip_md_links().
+# The carried-link regexes above find a definition's target inside a whole document, not a use inside one short string.
+DESCRIPTION_LINK_INLINE = re.compile(r"\[([^\]]*)\]\((?:[^()]|\([^()]*\))*\)")
+DESCRIPTION_LINK_REF = re.compile(r"\[([^\]]*)\]\[[^\]]*\]")
 
 
 def load(rel):
@@ -50,6 +54,44 @@ def load(rel):
 
 def is_str_list(v):
     return isinstance(v, list) and all(isinstance(x, str) for x in v)
+
+
+def description_errors_for_repo(repo, name):
+    """The per-repo optional-field guard: an explicit `"description": null` is declared-but-invalid, not absent.
+
+    Presence (`"description" in repo`) is the test, not `repo.get("description") is not None`, so a `null` reaches
+    description_errors() rather than being read as though the field were never declared.
+    """
+    if "description" not in repo:
+        return []
+    return description_errors(name, repo["description"])
+
+
+def description_errors(name, desc):
+    """Shape errors for a registry entry's optional `description` (GOVERNANCE.md "Repository Details").
+
+    Absence is not checked here, since the field is optional. `desc` is only passed in once a repo declares it.
+
+    Link-free is enforced because spec/audit.py's description_findings() strips Markdown links from the README's
+    own tagline before comparing, but never re-strips the declared field it compares that tagline against. A
+    declared value carrying a link would therefore report as a permanent readme mismatch, and repo-config/
+    configure.sh would push the literal Markdown source to GitHub's About panel, which does not render it.
+
+    Already trimmed and single-line is enforced so the registry's own text already reads as exactly what every
+    mirror carries, rather than relying on the whitespace-stripping spec/audit.py and repo-config/configure.sh
+    each do defensively to keep agreeing with each other.
+    """
+    if not isinstance(desc, str) or not desc.strip():
+        return [f"{name}: description must be a non-empty string"]
+    if desc != desc.strip() or "\n" in desc or "\r" in desc:
+        return [
+            f"{name}: description must be plain single-line text with no leading or trailing whitespace"
+        ]
+    if DESCRIPTION_LINK_INLINE.search(desc) or DESCRIPTION_LINK_REF.search(desc):
+        return [f"{name}: description carries Markdown links - keep it link-free plain text"]
+    if len(desc) > 100:
+        return [f"{name}: description is {len(desc)} characters, over the 100-char limit"]
+    return []
 
 
 def markdown_targets(text):
@@ -430,6 +472,7 @@ def main():
         )
 
     seen_identities = set()
+    seen_names = set()
     for i, repo in enumerate(repos["repos"]):
         if not isinstance(repo, dict):
             errors.append(f"repo #{i} is not an object")
@@ -437,9 +480,18 @@ def main():
         name = repo.get("name", f"#{i}")
         # This name only labels every error message below.
         # The membership check (spec/audit.py's membership_findings()) keys by owner/repo instead, parsed from url the same way this loop does.
+        # A duplicate is still an error, though, since repo-config/configure.sh and spec/audit.py's own per-repo entry lookup both key off it.
         if not isinstance(repo.get("name"), str) or not repo["name"].strip():
             errors.append(f"repo #{i}: missing or empty 'name'")
             continue
+        if name != name.strip():
+            # Both configure.sh and audit.py key their per-repo lookup off an exact match on name.
+            # A padded value would therefore make the entry unresolvable there, not merely cosmetic here.
+            errors.append(f"repo #{i}: name '{name}' carries leading/trailing whitespace")
+            continue
+        if name in seen_names:
+            errors.append(f"{name}: duplicate registry entry for name '{name}'")
+        seen_names.add(name)
         if not isinstance(repo.get("url"), str) or not repo["url"].strip():
             errors.append(f"{name}: missing or empty 'url'")
             continue
@@ -471,6 +523,8 @@ def main():
         effective_model = model or default_model or "release"
         if effective_model == "operational" and eol is None:
             errors.append(f"{name}: operational repo must declare lineEndings (lf or crlf)")
+        # Optional per GOVERNANCE.md "Repository Details": a repo that has not adopted the field yet is unaffected, since spec/audit.py's description_findings() falls back to the README tagline for it.
+        errors.extend(description_errors_for_repo(repo, name))
 
         status = repo.get("status")
         if status is None:

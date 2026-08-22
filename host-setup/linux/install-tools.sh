@@ -1200,6 +1200,7 @@ load_repo_tools() {
         end
     ' "$declaration") ||
         die "Cannot read constrained Linux install metadata from $declaration"
+    [[ -n $rows ]] || return 0
     while IFS=$'\t' read -r name manager package; do
         [[ -n $name ]] || die "$declaration carries Linux install metadata without a non-empty tool name"
         if [[ $manager != "apt" || ! $package =~ ^[a-z0-9][a-z0-9+.-]*$ ]]; then
