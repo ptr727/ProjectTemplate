@@ -224,11 +224,12 @@ def owner_repos(owner):
     mismatch is a loud error rather than a quietly wrong (and possibly cross-account) result.
     No --paginate, per the gh() docstring above; page by hand until a page comes back short.
     """
-    login = gh("user").get("login")
+    me = gh("user")
+    login = me.get("login") if isinstance(me, dict) else None
     if login != owner:
         raise RuntimeError(
-            f"gh is authenticated as '{login}', not registry owner '{owner}'; "
-            "membership check would query the wrong account's repos"
+            f"gh is authenticated as '{login}', not registry owner '{owner}'. "
+            "The membership check would query the wrong account's repos."
         )
     repos, page = [], 1
     while True:
@@ -4185,10 +4186,25 @@ def _selftest():
     if got != want:
         ok = False
         print(
-            f"  FAIL owner_repos -> {len(got)} repos, expected {len(want)}; forks/pagination wrong"
+            f"  FAIL owner_repos -> {len(got)} repos, expected {len(want)}, forks/pagination wrong"
         )
     else:
         print("  ok   owner_repos: forks dropped, pagination stops on a short page")
+
+    # A gh("user") call that returns None (an empty response body, per its own docstring) must
+    # raise the clear ownership-mismatch error, not crash with AttributeError on .get().
+    try:
+        globals()["gh"] = lambda path, ok404=False: None if path == "user" else []
+        owner_repos("owner")
+        ok = False
+        print("  FAIL owner_repos: a None gh('user') response did not raise")
+    except AttributeError:
+        ok = False
+        print("  FAIL owner_repos: a None gh('user') response crashed with AttributeError")
+    except RuntimeError:
+        print("  ok   owner_repos: a None gh('user') response raises the clear mismatch error")
+    finally:
+        globals()["gh"] = real_gh
 
     real_owner_repos = globals()["owner_repos"]
     try:

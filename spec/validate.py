@@ -873,8 +873,8 @@ def main():
         1 for r in repos["repos"] if isinstance(r, dict) and r.get("status") == "excluded"
     )
     print(
-        f"Spec validation OK: {cataloged} cataloged, {backlog} backlog, {archived} archived, "
-        f"{excluded} excluded repos classify cleanly."
+        f"Spec validation OK: {cataloged} cataloged, {backlog} backlog repos classify cleanly. "
+        f"{archived} archived, {excluded} excluded repos carry a valid entry."
     )
     return 0
 
