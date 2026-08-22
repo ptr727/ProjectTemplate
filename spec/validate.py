@@ -60,11 +60,15 @@ def description_errors(name, desc):
     """Shape errors for a registry entry's optional `description` (GOVERNANCE.md "Repository Details").
 
     Absence is not checked here, since the field is optional. `desc` is only passed in once a repo declares it.
-    The value must already be in the exact form every mirror carries: a repo carries no way to strip it again.
-    repo-config/configure.sh reads and writes it raw, with no trimming of its own, and spec/audit.py's
-    description_findings() strips only the declared field itself, never the README/About/Docker Hub values it
-    is compared against. A value that were not already trimmed, single-line, and link-free would therefore
-    read as a permanent mismatch on every mirror rather than as a one-time fix here.
+
+    Link-free is enforced because spec/audit.py's description_findings() strips Markdown links from the README's
+    own tagline before comparing, but never re-strips the declared field it compares that tagline against. A
+    declared value carrying a link would therefore report as a permanent readme mismatch, and repo-config/
+    configure.sh would push the literal Markdown source to GitHub's About panel, which does not render it.
+
+    Already trimmed and single-line is enforced so the registry's own text already reads as exactly what every
+    mirror carries, rather than relying on the whitespace-stripping spec/audit.py and repo-config/configure.sh
+    each do defensively to keep agreeing with each other.
     """
     if not isinstance(desc, str) or not desc.strip():
         return [f"{name}: description must be a non-empty string"]

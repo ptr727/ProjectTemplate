@@ -167,8 +167,8 @@ class DescriptionErrorsCase(unittest.TestCase):
         )
 
     def test_leading_or_trailing_whitespace_is_rejected(self) -> None:
-        # Not silently trimmed: configure.sh reads and writes the field raw, with no trimming of its own.
-        # An untrimmed value would read as a permanent mismatch on every mirror rather than a one-time fix.
+        # Not silently trimmed here, even though spec/audit.py and configure.sh both strip it defensively.
+        # Rejecting it at the source keeps the registry's own text the exact canonical form every mirror carries.
         self.assertEqual(
             validate.description_errors("Fixture", "  A short tagline.  "),
             [
