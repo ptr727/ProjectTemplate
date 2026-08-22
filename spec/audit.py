@@ -553,9 +553,11 @@ def unfenced_text(text):
     `<!-- Shields -->` or an `![alt][ref]` in one is not a definition, a group, or a rendered badge. Kept as
     one helper because the checkers were fence-aware in some places and blind in others, which is the state
     that lets a document be read two ways by one audit.
-    A fence closes only on the same marker character at least as long as the one that opened it, per
-    CommonMark, so a mismatched or shorter marker nested inside (a ~~~ example inside a ``` block, or a
-    ``` inside a longer ````) is content, not a boundary.
+    A fence closes only on the same marker character at least as long as the one that opened it, with
+    nothing but whitespace after the marker run, per CommonMark. A mismatched or shorter marker nested
+    inside (a ~~~ example inside a ``` block, or a ``` inside a longer ````) is content, not a boundary,
+    and so is a marker run followed by trailing text (an opening fence's language tag has no closing
+    counterpart).
     """
     out, marker, marker_len = [], None, 0
     for ln in normalize(text).split("\n"):
@@ -565,7 +567,7 @@ def unfenced_text(text):
             if run >= 3:
                 marker, marker_len = s[0], run
                 continue
-        elif s[:1] == marker and run >= marker_len:
+        elif s[:1] == marker and run >= marker_len and not s[run:].strip():
             marker = None
             continue
         if marker is None:
@@ -2946,7 +2948,7 @@ def _selftest():
     if uh_ok:
         print(f"  ok   undeclared-heading: {len(uh)} cases, H2-only, case-insensitive, fence-aware")
 
-    # unfenced_text: a fence closes only on a same-family marker at least as long as the opener.
+    # A fence closes only on a same-family marker at least as long as the opener.
     uf = [
         ("a simple ``` fence excludes its content", "```\n## Phantom\n```\n## Real\n", "## Real\n"),
         ("a simple ~~~ fence excludes its content", "~~~\n## Phantom\n~~~\n## Real\n", "## Real\n"),
@@ -2963,6 +2965,16 @@ def _selftest():
         (
             "a longer closing fence than the opener still closes",
             "```\n## Phantom\n````\n## Real\n",
+            "## Real\n",
+        ),
+        (
+            "a marker run followed by trailing text does not close",
+            "```\n## Phantom\n```not-a-fence\n## Real\n```\n## Real2\n",
+            "## Real2\n",
+        ),
+        (
+            "trailing whitespace after the marker run still closes",
+            "```\n## Phantom\n```   \n## Real\n",
             "## Real\n",
         ),
     ]
