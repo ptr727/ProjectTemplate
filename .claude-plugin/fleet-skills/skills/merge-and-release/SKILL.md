@@ -2,42 +2,41 @@
 name: merge-and-release
 description: >-
   Merges a ready develop -> main promotion PR for any ptr727/ProjectTemplate fleet repo and, when
-  asked, dispatches the release, in this hub also refreshing this machine's installed Skills from
-  the newly promoted content before dispatching. Use this whenever asked to merge main, ship a
-  release, cut a release, or finish a promotion once its PR is already green and fully resolved
-  (produced by drive-pr or by hand). When the request does not say how far ("merge main", "ship
-  it"), ask once whether to merge only, merge and dispatch a release, or, in this hub, merge,
-  refresh Skills, and dispatch, rather than guessing which the maintainer wants this time.
-  Triggers even when the phrasing is as short as "merge main and release", because that already
-  states the scope and is itself the explicit, current go-ahead this skill acts on without asking
-  again, though it never substitutes for the pr-review-conduct Merge Gate, a promotion PR that is
-  not actually green and fully resolved gets reported and stopped on, not merged.
+  asked, dispatches the release, in this hub always refreshing this machine's installed Skills
+  from the newly promoted content as part of that release step, never as a separate ask. Use this
+  whenever asked to merge main, ship a release, cut a release, or finish a promotion once its PR
+  is already green and fully resolved (produced by drive-pr or by hand). When the request does
+  not say how far ("merge main", "ship it"), ask once whether to merge only or merge and release,
+  rather than guessing which the maintainer wants this time. Triggers even when the phrasing is
+  as short as "merge main and release", because that already states the scope and is itself the
+  explicit, current go-ahead this skill acts on without asking again, though it never substitutes
+  for the pr-review-conduct Merge Gate, a promotion PR that is not actually green and fully
+  resolved gets reported and stopped on, not merged.
 ---
 
 # Merge and Release
 
 ## Why This Exists
 
-Once drive-pr (or a maintainer by hand) leaves a promotion PR ready, the same two or three steps
-follow every time: merge it, and usually dispatch the release it unblocks. In this hub a
-promotion can also change `.agents/skills` content this very session depends on, so the same
-moment additionally wants this machine's installed Skills refreshed before the release ships. One
+Once drive-pr (or a maintainer by hand) leaves a promotion PR ready, the same two steps follow
+every time: merge it, and usually dispatch the release it unblocks. In this hub a promotion can
+also change `.agents/skills` content this very session depends on, so the release step always
+carries a Skills refresh with it there, never a separate branch to ask about, an ambiguous "merge
+and release" on the hub must not leave the maintainer unsure whether Skills got refreshed. One
 skill covers all of it, scoped down by what the maintainer actually asks for.
 
 ## How Far to Go
 
 - Read the invocation for an explicit scope first. "Just merge" or "merge only" means stop after
-  the merge. "Merge and release", "ship it", or "cut a release" means also dispatch. Act on
-  either without asking.
-- When the request names no scope ("merge main"), ask once, before merging: merge only, merge and
-  dispatch a release, or, when this checkout's origin is `ptr727/ProjectTemplate`, a third option,
-  merge, refresh this machine's Skills, then dispatch. Recommend "merge and dispatch" (plus the
-  Skills refresh in the hub) as the default, a promotion merged without its release is the more
-  common regret, and a hub promotion left unrefreshed serves this very session stale Skill
-  content it may depend on next.
+  the merge. "Merge and release", "ship it", or "cut a release" means also dispatch, and in this
+  hub also refresh Skills as part of that same step. Act on either without asking.
+- When the request names no scope ("merge main"), ask once, before merging: merge only, or merge
+  and release. Recommend "merge and release" as the default, a promotion merged without its
+  release is the more common regret.
 - Detect the hub automatically, `git remote get-url origin` or `gh repo view --json
-  nameWithOwner` naming `ptr727/ProjectTemplate`, and offer the third option only there. A
-  downstream repo never sees it, it has no `.agents/skills` of its own to refresh.
+  nameWithOwner` naming `ptr727/ProjectTemplate`. There the release scope silently includes the
+  Skills refresh, a downstream repo never sees it, it has no `.agents/skills` of its own to
+  refresh.
 
 ## What Invoking This Skill Authorizes
 
@@ -55,11 +54,12 @@ skill covers all of it, scoped down by what the maintainer actually asks for.
 3. `gh pr merge <n> --merge --repo <owner>/<repo>`. Never `--delete-branch`, the promotion PR's
    head is `develop`.
 4. Confirm the merge landed, `mergedAt` set, `main`'s tip matching the merge commit.
-5. In the hub, when the chosen scope includes it, run `python3 scripts/skills_install.py
+5. In the hub, when the chosen scope includes a release, run `python3 scripts/skills_install.py
    --report` from this checkout now fetched past the merge, then `python3
-   scripts/skills_install.py` to install, and confirm `--report` now reads current. This
-   refreshes only the machine running this session, per skill-lifecycle, every other machine
-   still refreshes on its own next run or `docs/host-setup.md` "Fleet Skills Install" cadence.
+   scripts/skills_install.py` to install, and confirm `--report` now reads current, always, not
+   only when separately asked. This refreshes only the machine running this session, per
+   skill-lifecycle, every other machine still refreshes on its own next run or
+   `docs/host-setup.md` "Fleet Skills Install" cadence.
 6. When the chosen scope includes a release, `gh workflow run publish-release.yml --ref main
    --repo <owner>/<repo>`, or `--ref develop` only when the maintainer explicitly asked for a
    prerelease dispatch instead.
