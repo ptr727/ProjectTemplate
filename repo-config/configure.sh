@@ -70,13 +70,15 @@ description=""
 if [ -f "$registry" ]; then
     # Resolved here, not near the top, so a run with no registry (an explicit model, no hub checkout) never needs Python at all.
     # The name python3 is not universal: native Windows can register a Microsoft Store stub under that name that resolves on PATH but fails when actually run, so this runs it rather than just checking PATH (docs/host-setup.md).
-    # The probe itself is spec/resolve_description.py's actual floor (PEP 563, Python 3.7+) rather than an arbitrary version number, so a too-old interpreter fails here with a clear message instead of a bare SyntaxError from the script.
+    # The probe checks 3.7+ (PEP 563, from __future__ import annotations) because that is the oldest interpreter resolve_description.py happens to parse and run on, not because 3.7 is this repo's supported floor.
+    # That floor is 3.13 (spec/host-tools.json's python3 target, enforced on the host by scripts/host_gate.py), and spec/ code is written to it without hedging for anything older.
+    # A too-old interpreter fails here with a clear message instead of a bare traceback from the script.
     if python3 -c "from __future__ import annotations" >/dev/null 2>&1; then
         py_cmd=(python3)
     elif py -3 -c "from __future__ import annotations" >/dev/null 2>&1; then
         py_cmd=(py -3)
     else
-        echo "No Python 3.7+ interpreter found (python3 or py -3). See docs/host-setup.md." >&2
+        echo "No Python interpreter found (python3 or py -3) able to run resolve_description.py. This repo targets Python 3.13; see docs/host-setup.md." >&2
         exit 1
     fi
     # Delegates to spec/resolve_description.py rather than a third hand-rolled copy of description_errors().

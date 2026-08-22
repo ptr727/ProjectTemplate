@@ -44,6 +44,15 @@
 - **Use modern syntax**: `list[int]` not `List[int]`, `dict[str, X]` not `Dict[str, X]`,
   `X | None` not `Optional[X]`, `from __future__ import annotations` only when needed for forward
   references.
+- **Don't hedge that syntax for an older interpreter.** `pyproject.toml` pins `target-version` /
+  `python_version` to 3.13 for every Python profile in this repo, and `spec/host-tools.json`
+  carries that as the host floor `scripts/host_gate.py` enforces, so 3.10+-only syntax (`X | None`,
+  `match`, etc.) needs no quoting, no `typing.Union` fallback, and no `from __future__ import
+  annotations` guard on that account alone. Add that import only when a real forward reference
+  needs it, per the bullet above. The floor is repo-wide with two named exceptions that say so
+  themselves: `scripts/skills_install.sh` and the `install-skills.*` bootstrap scripts, which must
+  run on whatever interpreter a host already has before this floor's toolchain exists to install
+  one, and stay compatible back to 3.7 for exactly that reason.
 - **Don't add `# type: ignore` to silence pyright errors without a comment** explaining the
   constraint. If a recurring false positive needs suppression, configure it project-wide in
   `[tool.pyright]`. A new port doesn't change this, fix freshly surfaced type errors rather than
