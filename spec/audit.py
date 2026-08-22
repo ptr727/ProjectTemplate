@@ -10,7 +10,7 @@ triaged by spec/divergences.json), intent-staleness advisories (a carried intent
 canonical changed after the copy last did), and branch-model facts (main/develop existence, develop
 behind main), and a fleet-wide membership check (every non-fork repo the registry owner has on
 GitHub carries a registry/repos.json entry, and an 'archived' entry's status agrees with GitHub's
-own archived flag - ptr727/ProjectTemplate#550). Owner-initiated: run it when
+own archived flag (ptr727/ProjectTemplate#550). Owner-initiated: run it when
 onboarding a repo, when drift is suspected, or before fleet-wide changes. Read-only - it never
 modifies a target.
 
@@ -222,7 +222,7 @@ def owner_repos(owner):
     is authenticated as that exact user, which would silently under-count a private repo the same
     way a missing registry entry does. Confirm the authenticated login matches owner first, so a
     mismatch is a loud error rather than a quietly wrong (and possibly cross-account) result.
-    No --paginate, per the gh() docstring above; page by hand until a page comes back short.
+    No --paginate, per the gh() docstring above. Page by hand until a page comes back short.
 
     This still assumes the credential gh runs as can see every repo the owner has: an ordinary
     `gh auth login` session does, but a fine-grained PAT scoped to "selected repositories" would
@@ -275,13 +275,13 @@ def membership_findings(spec):
 
     This is the check ptr727/ProjectTemplate#550 asked for: nothing else in this file, or in
     spec/validate.py, ever looks past the registry to what actually exists, so a repo that never
-    got an entry is invisible to every tool that reads it - the registry was treated as ground
+    got an entry is invisible to every tool that reads it. The registry was treated as ground
     truth about existence, not just about conformance. Ownership only: a fork, or a repo the
     owner merely collaborates on, was never meant to carry a registry entry.
 
     A registry entry's status then says what, if anything, the rest of the audit owes the repo:
     'cataloged' is audited normally, 'backlog' awaits classification (existing behavior), and
-    'archived'/'excluded' are known and out of scope by design - archived because GitHub itself
+    'archived'/'excluded' are known and out of scope by design: archived because GitHub itself
     says the repo takes no further work, excluded because exclusionReason records a human
     decision that it should not be audited. Both still require an entry, so the decision stays
     visible in the catalog instead of the repo just disappearing from it.

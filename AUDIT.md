@@ -9,7 +9,7 @@ The verdict vocabulary is [`WORKFLOW.md`][workflow]'s: **operational / not opera
 
 ```mermaid
 flowchart TD
-  s0m["0m: fleet membership - every owned non-fork repo has a registry entry"] --> s0["0: has the repo been stood up? if not, STANDUP.md"]
+  s0m["0m: fleet membership, every owned non-fork repo has a registry entry"] --> s0["0: has the repo been stood up? if not, STANDUP.md"]
   s0 --> s1["1: scope, ground-truth branch (main)"]
   s1 --> s2["2: resolve the repo's type(s)"]
   s2 --> s3["3: applicability gate, per check"]
