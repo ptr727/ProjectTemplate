@@ -51,6 +51,13 @@ class ResolveDescriptionCase(unittest.TestCase):
         with self.assertRaises(resolve_description.ResolveError):
             resolve_description.resolve_description({"repos": "not-a-list"}, "Fixture")
 
+    def test_a_padded_name_that_would_otherwise_match_raises_rather_than_reading_as_absent(
+        self,
+    ) -> None:
+        registry = {"repos": [{"name": " Fixture ", "description": "A short tagline."}]}
+        with self.assertRaises(resolve_description.ResolveError):
+            resolve_description.resolve_description(registry, "Fixture")
+
 
 if __name__ == "__main__":
     unittest.main()

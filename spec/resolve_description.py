@@ -26,16 +26,34 @@ class ResolveError(Exception):
     """A condition resolve_description() must fail loud on."""
 
 
-def resolve_description(registry, name):
+def resolve_description(registry: dict, name: str) -> str | None:
     """The declared description for NAME in REGISTRY, or None if the repo has none declared.
 
     Raises ResolveError for anything the caller should fail loud on rather than silently read as
-    absent: a registry that is not an object carrying a `repos` array, more than one entry named
-    NAME, or a declared description description_errors() rejects.
+    absent: a registry that is not an object carrying a `repos` array, an entry whose own name
+    would match NAME but for leading/trailing whitespace (spec/validate.py rejects that shape too,
+    so it is never the intended way to spell a mismatch), more than one entry named NAME, or a
+    declared description description_errors() rejects.
     """
     if not isinstance(registry, dict) or not isinstance(registry.get("repos"), list):
         raise ResolveError("registry is not an object with a 'repos' array")
-    matches = [r for r in registry["repos"] if isinstance(r, dict) and r.get("name") == name]
+    repos = registry["repos"]
+    near_miss = next(
+        (
+            r["name"]
+            for r in repos
+            if isinstance(r, dict)
+            and isinstance(r.get("name"), str)
+            and r["name"] != name
+            and r["name"].strip() == name
+        ),
+        None,
+    )
+    if near_miss is not None:
+        raise ResolveError(
+            f"a registry entry's name {near_miss!r} carries leading/trailing whitespace"
+        )
+    matches = [r for r in repos if isinstance(r, dict) and r.get("name") == name]
     if len(matches) > 1:
         raise ResolveError(
             f"{len(matches)} registry entries named {name}. "
