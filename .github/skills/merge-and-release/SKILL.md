@@ -71,7 +71,8 @@ skill covers all of it, scoped down by what the maintainer actually asks for.
 6. When the chosen scope includes a release, `gh workflow run publish-release.yml --ref main
    --repo owner/repo`, or `--ref develop` only when the maintainer explicitly asked for a
    prerelease dispatch instead.
-7. Poll the dispatched run to completion (`gh run list`, `gh run view`), report its conclusion
+7. Poll the dispatched run to completion (`gh run list --repo owner/repo`, `gh run view --repo
+   owner/repo`), report its conclusion
    and the tag or version it produced. A run that fails, or never starts, is reported, never
    silently retried.
 8. Run the repo-worktree post-merge cleanup, fetch and prune, fast-forward the base clone to
