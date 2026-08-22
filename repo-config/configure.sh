@@ -38,17 +38,6 @@ case "$repo_arg" in release|operational) model="$repo_arg"; repo_arg="" ;; esac
 repo="${repo_arg:-$(gh repo view --json nameWithOwner --jq '.nameWithOwner')}"
 script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
-# ----- Resolve a working Python 3 interpreter -----
-# The name python3 is not universal, and on native Windows it can resolve to a Microsoft Store stub that exists on PATH but fails when actually run, so this runs it rather than just checking PATH (docs/host-setup.md).
-if python3 -c "" >/dev/null 2>&1; then
-    py_cmd=(python3)
-elif py -3 -c "" >/dev/null 2>&1; then
-    py_cmd=(py -3)
-else
-    echo "No working Python 3 interpreter found (python3 or py -3). See docs/host-setup.md." >&2
-    exit 1
-fi
-
 # ----- Resolve the workflow model (selects the develop ruleset), shared by apply and check -----
 registry="$script_dir/../registry/repos.json"
 name="${repo##*/}"
@@ -79,6 +68,16 @@ settings_file="$script_dir/settings.json"
 # Absence keeps the About panel following the README.
 description=""
 if [ -f "$registry" ]; then
+    # Resolved here, not near the top, so a run with no registry (an explicit model, no hub checkout) never needs Python at all.
+    # The name python3 is not universal: native Windows can register a Microsoft Store stub under that name that resolves on PATH but fails when actually run, so this runs it rather than just checking PATH (docs/host-setup.md).
+    if python3 -c "" >/dev/null 2>&1; then
+        py_cmd=(python3)
+    elif py -3 -c "" >/dev/null 2>&1; then
+        py_cmd=(py -3)
+    else
+        echo "No working Python 3 interpreter found (python3 or py -3). See docs/host-setup.md." >&2
+        exit 1
+    fi
     # Delegates to spec/resolve_description.py rather than a third hand-rolled copy of description_errors().
     # A description that passes that check can never contain a newline, so command substitution has nothing to strip.
     if ! description="$("${py_cmd[@]}" "$script_dir/../spec/resolve_description.py" "$registry" "$name")"; then
