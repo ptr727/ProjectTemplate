@@ -428,6 +428,15 @@ def main():
             errors.append(f"repo #{i} is not an object")
             continue
         name = repo.get("name", f"#{i}")
+        # No status, cataloged included, ever validated name or url beyond this fallback.
+        # A missing or blank one passed cleanly here and only broke a downstream consumer later.
+        # One such consumer, spec/audit.py's membership_findings(), indexes the registry by repo["name"] and needs every entry to actually have one.
+        if not isinstance(repo.get("name"), str) or not repo["name"].strip():
+            errors.append(f"repo #{i}: missing or empty 'name'")
+            continue
+        if not isinstance(repo.get("url"), str) or not repo["url"].strip():
+            errors.append(f"{name}: missing or empty 'url'")
+            continue
         status = repo.get("status")
         if status is None:
             errors.append(f"{name}: missing 'status'")
