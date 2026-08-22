@@ -2838,7 +2838,7 @@ def _selftest():
             "  ok   section: heading in region, fenced ## kept, sibling H2 ends, None if absent, whitespace-tolerant locate, re-cased heading rehashes"
         )
     # A mismatched marker nested inside a fence (a ~~~ line inside a ``` block) must not end the fence early.
-    # _fence_step carries this contract; extract_section and strip_sections each consume it.
+    # _fence_step carries this contract, and extract_section and strip_sections each consume it.
     nested = "## Alpha\n```md\n~~~\n## Fake\n```\nreal content\n"
     nested_extract = extract_section(nested, "Alpha")
     nested_strip = strip_sections(
