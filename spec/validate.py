@@ -21,7 +21,8 @@ ROOT = pathlib.Path(__file__).resolve().parent.parent
 WORKFLOW_MODELS = ("release", "operational")
 RELEASE_TRIGGERS = ("two-phase", "publish-on-merge", "dispatch-only", "none")
 CONSUMER_MODELS = ("push", "pull")
-# Parses owner/repo, lowercased, from a repo's url; a trailing .git is stripped so it still matches GitHub's own full_name.
+# Parses owner/repo, lowercased, from a repo's url.
+# A trailing .git is stripped so it still matches GitHub's own full_name.
 # A duplicate identity here would let spec/audit.py's fleet membership check silently shadow one entry with the other.
 GITHUB_URL_RE = re.compile(r"^https://github\.com/([^/\s]+)/([^/\s]+?)(?:\.git)?/?$")
 # How faithfully a carried unit is checked, per spec/fidelity-model.md, defaulting to presence.
