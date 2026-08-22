@@ -65,19 +65,15 @@ main_ruleset="$script_dir/main.json"
 settings_file="$script_dir/settings.json"
 
 # ----- Resolve the declared description (optional, shared by apply and check) -----
-# Per GOVERNANCE.md "Repository Details", once a repo declares registry/repos.json's `description` field, that field becomes the About panel's source rather than the README.
-# The audit's description_findings() (spec/audit.py) measures the README, About, and Docker Hub mirror set against that same field.
-# A repo with no declared field is left untouched here, so the README stays its source of truth.
+# Undeclared means unchanged: the About panel keeps following the README, as before this field existed.
 description=""
 if [ -f "$registry" ]; then
-    # Trimmed defensively even though spec/validate.py already rejects an untrimmed value.
-    # A registry edited ahead of its next validate.py run still resolves to the same canonical value spec/audit.py compares against.
+    # Trims only space/tab, so an edge newline survives to trip the guard below rather than being silently dropped.
     if ! description="$(jq -r --arg n "$name" \
-        '(.repos[] | select(.name==$n) | .description) // "" | gsub("^\\s+|\\s+$"; "")' "$registry")"; then
+        '(.repos[] | select(.name==$n) | .description) // "" | gsub("^[ \\t]+|[ \\t]+$"; "")' "$registry")"; then
         echo "Failed to read description from $registry (invalid JSON?)." >&2
         exit 1
     fi
-    # The trim above only strips leading/trailing whitespace, so an embedded newline or carriage return survives it.
     # Caught here rather than left to reach `gh api` as a multi-line value.
     case "$description" in
         *$'\n'* | *$'\r'*)
@@ -181,8 +177,7 @@ cmd_apply() {
         payload="$(jq --argjson d "$disc" '. + {has_discussions: $d}' "$settings_file")"
         echo "Warning: $repo has no 'main' branch. Leaving default_branch unchanged." >&2
     fi
-    # The About description, only once a repo declares registry/repos.json's `description` (see the resolution above).
-    # Left untouched otherwise, so a repo that has not adopted the field yet keeps its hand-set (or README-derived) description.
+    # Applies only once a repo declares the field (see the resolution above).
     if [ -n "$description" ]; then
         payload="$(jq --arg desc "$description" '. + {description: $desc}' <<<"$payload")"
     fi
@@ -303,13 +298,11 @@ check_settings() {
     if gh api "repos/$repo/branches/main" --jq '.name' >/dev/null 2>&1; then
         assert "default_branch = main" test "$(jq -r '.default_branch' <<<"$live")" = main
     fi
-    # The About description, only where the registry declares one (see the resolution above).
-    # A repo that has not adopted the field is a manual-verify note, exactly as secrets are: nothing declared here to check against.
-    # The two reasons `$description` can be empty are told apart, since "no registry" and "no field for this repo" call for different follow-up.
+    # $description is empty for two different reasons, told apart below since each needs different follow-up.
     if [ -n "$description" ]; then
         assert "description = '$description'" test "$(jq -r '.description' <<<"$live")" = "$description"
     elif [ ! -f "$registry" ]; then
-        note "description: no $registry to read (pass a plain repo argument or run from a hub checkout) - verify manually"
+        note "description: no $registry to read, resolved relative to this script rather than from the repo argument - run from a hub checkout for it to exist - verify manually"
     else
         note "description: no registry/repos.json description declared for $name - verify manually (falls back to the README tagline, see GOVERNANCE.md 'Repository Details')"
     fi

@@ -154,6 +154,20 @@ class DescriptionErrorsCase(unittest.TestCase):
             ["Fixture: description must be a non-empty string"],
         )
 
+    def test_an_explicit_null_is_rejected_rather_than_read_as_absent(self) -> None:
+        # The per-repo loop tests "description" in repo rather than is not None.
+        # An explicit "description": null therefore reaches here as `None` instead of being skipped as absent.
+        self.assertEqual(
+            validate.description_errors("Fixture", None),
+            ["Fixture: description must be a non-empty string"],
+        )
+
+    def test_a_non_string_is_rejected(self) -> None:
+        self.assertEqual(
+            validate.description_errors("Fixture", 42),
+            ["Fixture: description must be a non-empty string"],
+        )
+
     def test_an_inline_markdown_link_is_rejected(self) -> None:
         self.assertEqual(
             validate.description_errors("Fixture", "See [docs](https://example.test) for more."),

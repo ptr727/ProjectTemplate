@@ -503,9 +503,9 @@ def main():
         if effective_model == "operational" and eol is None:
             errors.append(f"{name}: operational repo must declare lineEndings (lf or crlf)")
         # Optional per GOVERNANCE.md "Repository Details": a repo that has not adopted the field yet is unaffected, since spec/audit.py's description_findings() falls back to the README tagline for it.
-        desc = repo.get("description")
-        if desc is not None:
-            errors.extend(description_errors(name, desc))
+        # Presence is the test, not `is not None`, so an explicit `"description": null` reaches description_errors() as invalid rather than reading as absent.
+        if "description" in repo:
+            errors.extend(description_errors(name, repo["description"]))
 
         status = repo.get("status")
         if status is None:
