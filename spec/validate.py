@@ -56,6 +56,17 @@ def is_str_list(v):
     return isinstance(v, list) and all(isinstance(x, str) for x in v)
 
 
+def description_errors_for_repo(repo, name):
+    """The per-repo optional-field guard: an explicit `"description": null` is declared-but-invalid, not absent.
+
+    Presence (`"description" in repo`) is the test, not `repo.get("description") is not None`, so a `null` reaches
+    description_errors() rather than being read as though the field were never declared.
+    """
+    if "description" not in repo:
+        return []
+    return description_errors(name, repo["description"])
+
+
 def description_errors(name, desc):
     """Shape errors for a registry entry's optional `description` (GOVERNANCE.md "Repository Details").
 
@@ -503,9 +514,7 @@ def main():
         if effective_model == "operational" and eol is None:
             errors.append(f"{name}: operational repo must declare lineEndings (lf or crlf)")
         # Optional per GOVERNANCE.md "Repository Details": a repo that has not adopted the field yet is unaffected, since spec/audit.py's description_findings() falls back to the README tagline for it.
-        # Presence is the test, not `is not None`, so an explicit `"description": null` reaches description_errors() as invalid rather than reading as absent.
-        if "description" in repo:
-            errors.extend(description_errors(name, repo["description"]))
+        errors.extend(description_errors_for_repo(repo, name))
 
         status = repo.get("status")
         if status is None:

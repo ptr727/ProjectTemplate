@@ -1307,7 +1307,7 @@ def description_findings(doc_texts, entry, live, slug):
     if "description" in entry:
         raw_declared = entry["description"]
         if not isinstance(raw_declared, str):
-            kind = "null" if raw_declared is None else f"a {type(raw_declared).__name__}"
+            kind = "null" if raw_declared is None else type(raw_declared).__name__
             findings.append(
                 (
                     "DEFECT",
@@ -4251,6 +4251,17 @@ def _selftest():
         if len(got) != wantn:
             for _, t in got:
                 print(f"         {t}")
+    # A null declared field is a DEFECT naming its actual type, not a silent LETTER-only "About mismatch".
+    null_declared = description_findings(
+        desc_readme, {"description": None}, {"description": "A short tagline."}, "owner/Fixture"
+    )
+    if not any(
+        k == "DEFECT" and "description is null, not a string" in t for k, t in null_declared
+    ):
+        ok = False
+        print(f"  FAIL description: null-declared-field DEFECT contract -> {null_declared}")
+    else:
+        print("  ok   description: a null declared field is a DEFECT naming its actual type")
     # The declared field, once present, is what the wording names as the source - not "the README".
     declared_mismatch = description_findings(
         desc_readme,

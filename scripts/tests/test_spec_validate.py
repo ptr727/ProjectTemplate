@@ -155,10 +155,18 @@ class DescriptionErrorsCase(unittest.TestCase):
         )
 
     def test_an_explicit_null_is_rejected_rather_than_read_as_absent(self) -> None:
-        # The per-repo loop tests "description" in repo rather than is not None.
-        # An explicit "description": null therefore reaches here as `None` instead of being skipped as absent.
         self.assertEqual(
             validate.description_errors("Fixture", None),
+            ["Fixture: description must be a non-empty string"],
+        )
+
+    def test_for_repo_an_absent_key_produces_no_errors(self) -> None:
+        self.assertEqual(validate.description_errors_for_repo({}, "Fixture"), [])
+
+    def test_for_repo_an_explicit_null_is_rejected_rather_than_read_as_absent(self) -> None:
+        # Locks in the presence-vs-None guard: this regresses to `[]` if it is ever weakened back to `is not None`.
+        self.assertEqual(
+            validate.description_errors_for_repo({"description": None}, "Fixture"),
             ["Fixture: description must be a non-empty string"],
         )
 
