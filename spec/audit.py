@@ -394,16 +394,18 @@ def _fence_step(line, marker, marker_len):
 
     Fence matching follows CommonMark. A fence marker needs at most 3 leading spaces, more reads as
     content, not a boundary. A closing fence needs the same character, a run at least as long as the
-    opener's, and nothing but whitespace after that run. A mismatched or shorter marker (a ~~~ example
-    inside a ``` block, a ``` inside a longer ````), or trailing text (an opening fence's language tag has
-    no closing counterpart), does not close it.
+    opener's, and nothing but whitespace after that run.
+    A mismatched or shorter marker does not close it, such as a ~~~ example inside a ``` block, or a
+    ``` inside a longer ````. Trailing text does not close it either, since an opening fence's language
+    tag has no closing counterpart. A backtick fence's info string may not itself contain a backtick,
+    per CommonMark, so such an opener is not a boundary either.
     """
     stripped = line.lstrip(" ")
     indent = len(line) - len(stripped)
     char = stripped[:1]
     run = len(stripped) - len(stripped.lstrip(char)) if indent <= 3 and char in ("`", "~") else 0
     if marker is None:
-        if run >= 3:
+        if run >= 3 and not (char == "`" and "`" in stripped[run:]):
             return char, run, True
         return None, 0, False
     if char == marker and run >= marker_len and not stripped[run:].strip():
@@ -419,7 +421,7 @@ def extract_section(text, heading):
     marker-gap whitespace is still found rather than read as a missing section - internal heading-text
     whitespace must match exactly. The heading line's exact bytes are then part of the hashed region, so that
     re-casing or re-spacing surfaces as drift. A nested `###` stays inside the body. A `## ` line inside a
-    fenced code block, per `_fence_step`, is not a boundary, so a code sample cannot truncate the region and
+    fenced code block, per `_fence_step`, is not a boundary. So a code sample cannot truncate the region and
     hide drift after it.
     """
     want = heading.strip().lower()
@@ -2959,6 +2961,12 @@ def _selftest():
             [],
         ),
         (
+            "a backtick in a backtick-fence info string is not a valid opener, so the heading after it is real",
+            "# AGENTS\n\n## Fleet Bootstrap\n\n```md`\n## Local Notes\n",
+            {"fleet bootstrap"},
+            ["local notes"],
+        ),
+        (
             "a repo's own local content, undeclared, is flagged even in a file with its own declared sections",
             (
                 "# Copilot Instructions\n\n## GitHub Copilot Review Runbook\n\nText.\n\n"
@@ -3021,6 +3029,16 @@ def _selftest():
             "a 4-space-indented opener never opens a fence",
             "    ```\n## Real\n",
             "    ```\n## Real\n",
+        ),
+        (
+            "a backtick in a backtick-fence info string is not a valid opener",
+            "```md`\n## Real\n",
+            "```md`\n## Real\n",
+        ),
+        (
+            "a backtick in a tilde-fence info string does not disqualify it",
+            "~~~md`\n## Phantom\n~~~\n## Real\n",
+            "## Real\n",
         ),
     ]
     uf_ok = True
