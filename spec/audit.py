@@ -394,9 +394,9 @@ def _fence_step(line, marker, marker_len):
 
     Fence matching follows CommonMark. A fence marker needs at most 3 leading spaces, more reads as
     content, not a boundary. A closing fence needs the same character, a run at least as long as the
-    opener's, and nothing but whitespace after that run - a mismatched or shorter marker (a ~~~ example
-    inside a ``` block, a ``` inside a longer ````) or trailing text (an opening fence's language tag has
-    no closing counterpart) does not close it.
+    opener's, and nothing but whitespace after that run. A mismatched or shorter marker (a ~~~ example
+    inside a ``` block, a ``` inside a longer ````), or trailing text (an opening fence's language tag has
+    no closing counterpart), does not close it.
     """
     stripped = line.lstrip(" ")
     indent = len(line) - len(stripped)
