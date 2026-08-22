@@ -47,7 +47,13 @@
             "properties": {
                 "name": { "type": "string", "minLength": 1 },
                 "url": { "type": "string", "format": "uri", "minLength": 1 },
-                "description": { "type": "string", "minLength": 1, "maxLength": 100, "pattern": "\\S" },
+                "description": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 100,
+                    "pattern": "^\\S(?:[^\\n\\r]*\\S)?$",
+                    "$comment": "Single line, no leading/trailing whitespace - kept in sync with spec/validate.py's description_errors(). That function also rejects Markdown links, which this pattern does not attempt to express."
+                },
                 "status": { "enum": ["cataloged", "backlog", "archived", "excluded"] },
                 "exclusionReason": { "type": "string", "minLength": 1, "pattern": "\\S" },
                 "types": { "type": "array", "items": { "type": "string" } },
