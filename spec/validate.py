@@ -21,9 +21,9 @@ ROOT = pathlib.Path(__file__).resolve().parent.parent
 WORKFLOW_MODELS = ("release", "operational")
 RELEASE_TRIGGERS = ("two-phase", "publish-on-merge", "dispatch-only", "none")
 CONSUMER_MODELS = ("push", "pull")
-# Parses owner/repo, lowercased, from a repo's url.
+# Parses owner/repo, lowercased, from a repo's url; a trailing .git is stripped so it still matches GitHub's own full_name.
 # A duplicate identity here would let spec/audit.py's fleet membership check silently shadow one entry with the other.
-GITHUB_URL_RE = re.compile(r"^https://github\.com/([^/\s]+)/([^/\s]+?)/?$")
+GITHUB_URL_RE = re.compile(r"^https://github\.com/([^/\s]+)/([^/\s]+?)(?:\.git)?/?$")
 # How faithfully a carried unit is checked, per spec/fidelity-model.md, defaulting to presence.
 FIDELITIES = ("presence", "intent", "verbatim", "interface")
 # The keys an interface unit's `contract` may carry (kept in sync with files.schema.json).
@@ -432,7 +432,8 @@ def main():
             errors.append(f"repo #{i} is not an object")
             continue
         name = repo.get("name", f"#{i}")
-        # Validated up front because spec/audit.py's membership_findings() indexes the registry by name and needs every entry to actually have one.
+        # This name only labels every error message below.
+        # The membership check (spec/audit.py's membership_findings()) keys by owner/repo instead, parsed from url the same way this loop does.
         if not isinstance(repo.get("name"), str) or not repo["name"].strip():
             errors.append(f"repo #{i}: missing or empty 'name'")
             continue
@@ -440,11 +441,15 @@ def main():
             errors.append(f"{name}: missing or empty 'url'")
             continue
         m = GITHUB_URL_RE.match(repo["url"].strip())
-        identity = f"{m.group(1)}/{m.group(2)}".lower() if m else None
-        if identity is not None:
-            if identity in seen_identities:
-                errors.append(f"{name}: duplicate registry entry for '{identity}'")
-            seen_identities.add(identity)
+        if m is None:
+            # A url that is a well-formed URI but not this exact shape (http://, a path suffix) would otherwise pass here.
+            # It would only surface later as a false DEFECT, since membership_findings() can never resolve it to an identity.
+            errors.append(f"{name}: url is not a github.com/<owner>/<repo> URL")
+            continue
+        identity = f"{m.group(1)}/{m.group(2)}".lower()
+        if identity in seen_identities:
+            errors.append(f"{name}: duplicate registry entry for '{identity}'")
+        seen_identities.add(identity)
 
         # These fields are facts about the repo itself, not about its audit scope.
         # The schema's operational-needs-lineEndings rule (registry/repos.schema.json) binds regardless of status.
