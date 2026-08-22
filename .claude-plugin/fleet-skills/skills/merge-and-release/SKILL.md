@@ -55,11 +55,14 @@ skill covers all of it, scoped down by what the maintainer actually asks for.
 3. `gh pr merge [number] --merge --repo owner/repo`. Never `--delete-branch`, the promotion PR's
    head is `develop`.
 4. Confirm the merge landed, `mergedAt` set, `main`'s tip matching the merge commit.
-5. In the hub, when the chosen scope includes a release, run `python3 scripts/skills_install.py
-   --report` from this checkout now fetched past the merge, then `python3
-   scripts/skills_install.py` to install, and confirm `--report` now reads current, always, not
-   only when separately asked. This refreshes only the machine running this session, per
-   skill-lifecycle, every other machine still refreshes on its own next run or
+5. In the hub, when the chosen scope includes a release, first bring this checkout to the merged
+   content, `git fetch origin main` then `git checkout main` (or `git merge --ff-only origin/main`
+   from a branch that can fast-forward to it). `skills_install.py` stamps and installs from
+   whatever this checkout's HEAD already is, so skipping the fetch and checkout refreshes Skills
+   from stale pre-merge content instead. Only then run `python3 scripts/skills_install.py
+   --report`, then `python3 scripts/skills_install.py` to install, and confirm `--report` now
+   reads current, always, not only when separately asked. This refreshes only the machine running
+   this session, per skill-lifecycle, every other machine still refreshes on its own next run or
    `docs/host-setup.md` "Fleet Skills Install" cadence.
 6. When the chosen scope includes a release, `gh workflow run publish-release.yml --ref main
    --repo owner/repo`, or `--ref develop` only when the maintainer explicitly asked for a
