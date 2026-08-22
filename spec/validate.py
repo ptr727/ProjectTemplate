@@ -23,8 +23,9 @@ RELEASE_TRIGGERS = ("two-phase", "publish-on-merge", "dispatch-only", "none")
 CONSUMER_MODELS = ("push", "pull")
 # Parses owner/repo, lowercased, from a repo's url.
 # A trailing .git is stripped so it still matches GitHub's own full_name.
+# A query character or a fragment character is excluded from both groups too, or a query string or fragment would fold into the repo name instead of failing to match.
 # A duplicate identity here would let spec/audit.py's fleet membership check silently shadow one entry with the other.
-GITHUB_URL_RE = re.compile(r"^https://github\.com/([^/\s]+)/([^/\s]+?)(?:\.git)?/?$")
+GITHUB_URL_RE = re.compile(r"^https://github\.com/([^/\s?#]+)/([^/\s?#]+?)(?:\.git)?/?$")
 # How faithfully a carried unit is checked, per spec/fidelity-model.md, defaulting to presence.
 FIDELITIES = ("presence", "intent", "verbatim", "interface")
 # The keys an interface unit's `contract` may carry (kept in sync with files.schema.json).

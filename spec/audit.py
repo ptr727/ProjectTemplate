@@ -255,7 +255,7 @@ def owner_repos(owner):
         page += 1
 
 
-GITHUB_URL_RE = re.compile(r"^https://github\.com/([^/\s]+)/([^/\s]+?)(?:\.git)?/?$")
+GITHUB_URL_RE = re.compile(r"^https://github\.com/([^/\s?#]+)/([^/\s?#]+?)(?:\.git)?/?$")
 
 
 def repo_identity(url):
@@ -263,7 +263,8 @@ def repo_identity(url):
 
     The canonical identity two repos are compared by, since a bare repo name collides across
     owners and GitHub's own full_name field is already this exact shape (case-preserved). A
-    trailing .git is stripped so it still resolves to the same identity full_name would.
+    trailing .git is stripped so it still resolves to the same identity full_name would, and a
+    query string or fragment is rejected outright rather than folded into the repo name.
     spec/validate.py rejects a url that fails to parse here at all, kept in sync with this regex.
     """
     if not isinstance(url, str):
@@ -4212,6 +4213,9 @@ def _selftest():
         ("  https://github.com/owner/Repo  ", "owner/repo"),
         ("https://github.com/owner/Repo.git", "owner/repo"),
         ("https://github.com/owner/Repo.github", "owner/repo.github"),
+        ("https://github.com/owner/Repo?tab=readme", None),
+        ("https://github.com/owner/Repo#readme", None),
+        ("https://github.com/owner/Repo.git?tab=readme", None),
         ("http://github.com/owner/Repo", None),
         ("https://gitlab.com/owner/Repo", None),
         ("not a url", None),
