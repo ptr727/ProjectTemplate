@@ -68,18 +68,26 @@ settings_file="$script_dir/settings.json"
 # Absence keeps the About panel following the README.
 description=""
 if [ -f "$registry" ]; then
-    # A single boolean even for a duplicate name (already a validate.py DEFECT), unlike select() alone.
-    if ! declared="$(jq -r --arg n "$name" 'any(.repos[]; .name==$n and has("description"))' "$registry")"; then
+    # Fails loud on a duplicate name (already a validate.py DEFECT) rather than picking one entry over the other.
+    if ! match_count="$(jq -r --arg n "$name" '[.repos[] | select(.name==$n)] | length' "$registry")"; then
+        echo "Failed to read $registry (invalid JSON?)." >&2
+        exit 1
+    fi
+    if [ "$match_count" -gt 1 ]; then
+        echo "$match_count registry entries named $name in $registry. Resolve the duplicate before its description can be read (spec/validate.py rejects this once run)." >&2
+        exit 1
+    fi
+    if ! declared="$(jq -r --arg n "$name" '.repos[] | select(.name==$n) | has("description")' "$registry")"; then
         echo "Failed to read $registry (invalid JSON?)." >&2
         exit 1
     fi
     if [ "$declared" = "true" ]; then
-        # Picks one entry deterministically, since -j joins multiple matches with no separator at all.
+        # Exactly one match is already established above, so select() itself yields exactly one value here.
         # Trims only space/tab, so an edge newline survives to trip the guard below rather than being silently dropped.
         # A non-string value (including an explicit null) resolves to empty here, caught by the same guard as a malformed one.
         # -j plus the trailing sentinel keeps command substitution from stripping a genuine trailing newline in the value.
         if ! description="$(jq -j --arg n "$name" \
-            'first(.repos[] | select(.name==$n) | .description) | if type == "string" then gsub("^[ \\t]+|[ \\t]+$"; "") else empty end' \
+            '(.repos[] | select(.name==$n) | .description) | if type == "string" then gsub("^[ \\t]+|[ \\t]+$"; "") else empty end' \
             "$registry" && printf x)"; then
             echo "Failed to read description from $registry (invalid JSON?)." >&2
             exit 1
