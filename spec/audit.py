@@ -1285,6 +1285,111 @@ def readme_shield_findings(text, model, entry):
     return findings
 
 
+def description_findings(doc_texts, entry, live, slug):
+    """The README title/tagline, the GitHub About description, and the Docker Hub short description, checked as one mirror set.
+
+    Per spec/readme-structure.md item 1 and GOVERNANCE.md "Repository Details", the H1 is the repo name. The tagline
+    after it, the first line of the intro region, is a link-free plain sentence of at most 100 characters that
+    carries verbatim to the GitHub About description, and on a docker repo to the Docker Hub short description. Any
+    further paragraph is free prose no mirror reads, which is why only the first line is measured.
+
+    registry/repos.json's optional `description` is the canonical value once a repo declares it (TODO.md "The
+    Declared Repository Description"); repo-config/configure.sh then writes the About panel from that same field.
+    A repo that has not adopted it yet still has the README as its source of truth, so the checks below fall back
+    to the tagline exactly as before.
+    """
+    findings = []
+    if "README.md" not in doc_texts:
+        return findings
+    title, intro = title_and_intro(doc_texts["README.md"])
+    intro_line = tagline(intro)
+    # The H1 is the repository name, and a hyphenated name may render its hyphens as spaces.
+    # Use the GitHub API's canonical name, since the registry-URL slug can carry a different case.
+    repo_name = live.get("name") or slug.split("/")[-1]
+    declared = (entry.get("description") or "").strip() or None
+    if not title:
+        findings.append(
+            (
+                "LETTER",
+                "readme: no `# ` H1 title - the README opens with `# <repo name>` then the tagline (spec/readme-structure.md)",
+            )
+        )
+    elif title.replace("-", " ") != repo_name.replace("-", " "):
+        findings.append(
+            (
+                "LETTER",
+                f"readme: the H1 title '{title}' is not the repo name '{repo_name}' (a hyphenated name may render its hyphens as spaces) - the H1 is the repository name (spec/readme-structure.md)",
+            )
+        )
+    if not intro_line:
+        findings.append(
+            (
+                "LETTER",
+                "readme: no tagline after the H1 - the README opens with the title then a one-line description, which doubles as the About description (spec/readme-structure.md)",
+            )
+        )
+        return findings
+    if strip_md_links(intro_line) != intro_line:
+        findings.append(
+            (
+                "LETTER",
+                "readme: the tagline carries Markdown links - keep it link-free plain text, it doubles as the repo About description (spec/readme-structure.md)",
+            )
+        )
+    readme_want = strip_md_links(intro_line).strip()
+    if len(readme_want) > 100:
+        findings.append(
+            (
+                "LETTER",
+                f"readme: the tagline is {len(readme_want)} characters, over the 100-char limit (Docker Hub's short-description cap, the tightest surface it feeds) - tighten it to one short sentence (spec/readme-structure.md)",
+            )
+        )
+    # The declared field wins once a repo has one; every mirror (README, About, Docker Hub) is then measured against it.
+    # A repo with no declared field keeps the README as the source, exactly as before.
+    want = declared or readme_want
+    source = "registry/repos.json" if declared else "the README"
+    if declared and readme_want != declared:
+        findings.append(
+            (
+                "LETTER",
+                f"readme: the tagline ('{readme_want}') does not match the declared description ('{declared}') - registry/repos.json's description is canonical once declared, so the README follows it (GOVERNANCE.md Repository Details)",
+            )
+        )
+    desc = (live.get("description") or "").strip()
+    if desc != want:
+        findings.append(
+            (
+                "LETTER",
+                f"description: the About description does not match the {'declared description' if declared else 'README tagline'} (description '{desc}' vs '{want}') - set it from {source}, or sharpen {source} first if the description carries real detail (GOVERNANCE.md Repository Details)",
+            )
+        )
+    # Docker Hub short description mirrors the same canonical value, for a repo that publishes a docker image.
+    # A transient lookup failure surfaces as a DRIFT ("could not verify"), never aborting or silently passing.
+    # A 404 (image not at the derived name) returns None and is skipped.
+    if any(
+        (pt.get("target") if isinstance(pt, dict) else pt) == "docker"
+        for pt in entry.get("publish", [])
+    ):
+        try:
+            dh = docker_hub_description(slug)
+        except Exception as e:  # noqa: BLE001
+            dh = None
+            findings.append(
+                (
+                    "DRIFT",
+                    f"description: could not read the Docker Hub short description to verify it mirrors {source} ({e}) - verify by hand",
+                )
+            )
+        if dh is not None and dh.strip() != want:
+            findings.append(
+                (
+                    "LETTER",
+                    f"description: the Docker Hub short description ('{dh.strip()}') does not match '{want}' - set it from {source} (spec/readme-structure.md)",
+                )
+            )
+    return findings
+
+
 def workspace_cspell_words(text):
     """True if workspace/settings JSON carries its own cSpell word list - the block cspell.json canonicalizes.
 
@@ -2197,85 +2302,8 @@ def audit_repo(entry, spec, branch=None):
             )
 
     # --- README title and intro are the one canonical short description ---
-    # Per spec/readme-structure.md item 1 and GOVERNANCE.md "Repository Details", the H1 is the repo name.
-    # The tagline after it, the first line of the intro region, is a link-free plain sentence of at most 100 characters that carries verbatim to the GitHub About description, and on a docker repo to the Docker Hub short description.
-    # Any further paragraph is free prose no mirror reads, which is why only the first line is measured.
-    # The README is the source of truth.
-    if "README.md" in doc_texts:
-        title, intro = title_and_intro(doc_texts["README.md"])
-        intro_line = tagline(intro)
-        # The H1 is the repository name, and a hyphenated name may render its hyphens as spaces.
-        # Use the GitHub API's canonical name, since the registry-URL slug can carry a different case.
-        repo_name = live.get("name") or slug.split("/")[-1]
-        if not title:
-            findings.append(
-                (
-                    "LETTER",
-                    "readme: no `# ` H1 title - the README opens with `# <repo name>` then the tagline (spec/readme-structure.md)",
-                )
-            )
-        elif title.replace("-", " ") != repo_name.replace("-", " "):
-            findings.append(
-                (
-                    "LETTER",
-                    f"readme: the H1 title '{title}' is not the repo name '{repo_name}' (a hyphenated name may render its hyphens as spaces) - the H1 is the repository name (spec/readme-structure.md)",
-                )
-            )
-        if not intro_line:
-            findings.append(
-                (
-                    "LETTER",
-                    "readme: no tagline after the H1 - the README opens with the title then a one-line description, which doubles as the About description (spec/readme-structure.md)",
-                )
-            )
-        else:
-            if strip_md_links(intro_line) != intro_line:
-                findings.append(
-                    (
-                        "LETTER",
-                        "readme: the tagline carries Markdown links - keep it link-free plain text, it doubles as the repo About description (spec/readme-structure.md)",
-                    )
-                )
-            want = strip_md_links(intro_line).strip()
-            if len(want) > 100:
-                findings.append(
-                    (
-                        "LETTER",
-                        f"readme: the tagline is {len(want)} characters, over the 100-char limit (Docker Hub's short-description cap, the tightest surface it feeds) - tighten it to one short sentence (spec/readme-structure.md)",
-                    )
-                )
-            desc = (live.get("description") or "").strip()
-            if desc != want:
-                findings.append(
-                    (
-                        "LETTER",
-                        f"description: the About description does not match the README tagline (description '{desc}' vs readme '{want}') - set it from the README, or sharpen the README first if the description carries real detail (GOVERNANCE.md Repository Details)",
-                    )
-                )
-            # Docker Hub short description mirrors the same intro, for a repo that publishes a docker image.
-            # A transient lookup failure surfaces as a DRIFT ("could not verify"), never aborting or silently passing.
-            # A 404 (image not at the derived name) returns None and is skipped.
-            if any(
-                (pt.get("target") if isinstance(pt, dict) else pt) == "docker"
-                for pt in entry.get("publish", [])
-            ):
-                try:
-                    dh = docker_hub_description(slug)
-                except Exception as e:  # noqa: BLE001
-                    dh = None
-                    findings.append(
-                        (
-                            "DRIFT",
-                            f"description: could not read the Docker Hub short description to verify it mirrors the README ({e}) - verify by hand",
-                        )
-                    )
-                if dh is not None and dh.strip() != want:
-                    findings.append(
-                        (
-                            "LETTER",
-                            f"description: the Docker Hub short description ('{dh.strip()}') does not match the README tagline ('{want}') - set it from the README (spec/readme-structure.md)",
-                        )
-                    )
+    # See description_findings() for the mirror set (README, GitHub About, Docker Hub) and the declared-field precedence.
+    findings += description_findings(doc_texts, entry, live, slug)
 
     # --- README section order, shield classes, and license-shield placement ---
     # The readme-structure dimension, driven by the declared model in spec/readme-sections.json rather than by prose.
@@ -4119,6 +4147,89 @@ def _selftest():
         print(f"  FAIL tagline extraction -> {tagline(two_para)!r}")
     else:
         print("  ok   tagline: the first line of the intro region, further paragraphs excluded")
+
+    # description_findings(): the README/About/Docker Hub mirror set, with and without a declared registry field.
+    desc_readme = {"README.md": "# Fixture\n\nA short tagline.\n"}
+    desc_cases = [
+        (
+            "no declared field, About matches the README tagline",
+            desc_readme,
+            {},
+            {"description": "A short tagline."},
+            0,
+        ),
+        (
+            "no declared field, About mismatches the README tagline",
+            desc_readme,
+            {},
+            {"description": "Something else."},
+            1,
+        ),
+        (
+            "declared field matches both README and About",
+            desc_readme,
+            {"description": "A short tagline."},
+            {"description": "A short tagline."},
+            0,
+        ),
+        (
+            "declared field present, README tagline diverges from it",
+            desc_readme,
+            {"description": "The declared description."},
+            {"description": "The declared description."},
+            1,
+        ),
+        (
+            "declared field present, About diverges from it",
+            desc_readme,
+            {"description": "A short tagline."},
+            {"description": "Something else."},
+            1,
+        ),
+    ]
+    for label, doc_texts_fx, entry_fx, live_fx, wantn in desc_cases:
+        got = description_findings(doc_texts_fx, entry_fx, live_fx, "owner/Fixture")
+        if len(got) != wantn:
+            ok = False
+        print(
+            f"  {'ok  ' if len(got) == wantn else 'FAIL'} want={wantn} got={len(got)}  description: {label}"
+        )
+        if len(got) != wantn:
+            for _, t in got:
+                print(f"         {t}")
+    # The declared field, once present, is what the wording names as the source - not "the README".
+    declared_mismatch = description_findings(
+        desc_readme,
+        {"description": "The declared description."},
+        {"description": "Something else."},
+        "owner/Fixture",
+    )
+    if not any(
+        "declared description" in t and "registry/repos.json" in t for _, t in declared_mismatch
+    ):
+        ok = False
+        print(f"  FAIL description: declared-field wording -> {declared_mismatch}")
+    else:
+        print(
+            "  ok   description: a declared field names registry/repos.json as the source, not the README"
+        )
+    # A docker-publishing repo's Docker Hub short description is checked against the same canonical value.
+    real_dhd = globals()["docker_hub_description"]
+    globals()["docker_hub_description"] = lambda slug: "A stale Docker Hub blurb."
+    try:
+        docker_mismatch = description_findings(
+            desc_readme,
+            {"description": "A short tagline.", "publish": [{"target": "docker"}]},
+            {"description": "A short tagline."},
+            "owner/Fixture",
+        )
+    finally:
+        globals()["docker_hub_description"] = real_dhd
+    if not any("Docker Hub short description" in t for _, t in docker_mismatch):
+        ok = False
+        print(f"  FAIL description: Docker Hub mismatch not reported -> {docker_mismatch}")
+    else:
+        print("  ok   description: a docker repo's stale Docker Hub short description is reported")
 
     # A ground-truth branch that does not resolve is one error, not a baseline's worth of letters.
     # Every `?ref=` read would 404 and report each carried file absent, describing the ref, not the repo.

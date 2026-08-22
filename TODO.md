@@ -35,23 +35,6 @@ One pull request pointing a hub `uses:` at a hub-owned action, so that the resol
   - **Settled** - The resolvability pass reports what it covered on every run, so the hub's zero is visible rather than silent, which is why this is a separate decision rather than a defect in that pass.
   - **Settled** - The fleet's `ptr727` pins are live in the downstream repos that consume the action, and `repo_gate.py --root <repo>` from a hub checkout reads them there, so the pass is not idle fleet-wide.
 
-### The Declared Repository Description
-
-One pull request moving the canonical short description into declared data, so every check and every push reads a field rather than parsing a document, and the About panel gets something that writes it.
-
-**State** `decision`. **Touches** [`registry/repos.json`][repos] and its schema, [`spec/audit.py`][audit], and `repo-config/configure.sh`. **Cost** one hub edit, and repos adopt the field one at a time. The tagline rule this cluster once carried shipped on 2026-08-08.
-
-- **Declare the description in [`registry/repos.json`][repos] instead of deriving it by parsing the README.** Every check and every push then reads a field.
-  - **Blocked by** - Nothing.
-  - **Issue** - None filed, and the disposition is recorded on [#509][issue-509].
-  - **Checked** - `develop` at `3d1a0b1` on 2026-08-06, where neither `registry/repos.json` nor `registry/repos.schema.json` carries a `description` key.
-  - **Open** - Nothing beyond sequencing, which is that this leads and the README shape follows.
-  - **Settled** - PhotoCleaner#32 measures the cost of parsing, since a workflow step reading the intro at publish time needs nine guards against headings, block quotes, all four list markers, ordered lists, HTML, tables, code, links and the length cap, and every one of them fails the release rather than the tagline.
-  - **Settled** - The field makes the README intro a third mirror rather than the source, so the audit compares all three against one declared value and `repo-config/configure.sh` sets the About panel from the same field it already sets every other setting from.
-  - **Settled** - The 100-character cap stays, since Docker Hub's short description is the tightest surface.
-  - **Settled** - The field is optional at first so the audit falls back to the README intro while repos adopt it, and it needs a schema entry because `registry/repos.schema.json` sets `additionalProperties: false`.
-  - **Settled** - The ask on the Docker repos meanwhile is only that the parsing step is not propagated further.
-
 ### Reducing the Carried Surface Further
 
 One pull request measuring the remaining carried surface against the carry-versus-reach test and moving whatever qualifies, now that the model is settled rather than open.
@@ -515,7 +498,6 @@ Regenerate [reports/divergences.md][divergences-report] before using it as the w
 [issue-456]: https://github.com/ptr727/ProjectTemplate/issues/456
 [issue-483]: https://github.com/ptr727/ProjectTemplate/issues/483
 [issue-489]: https://github.com/ptr727/ProjectTemplate/issues/489
-[issue-509]: https://github.com/ptr727/ProjectTemplate/issues/509
 [issue-521]: https://github.com/ptr727/ProjectTemplate/issues/521
 [issue-523]: https://github.com/ptr727/ProjectTemplate/issues/523
 [issue-558]: https://github.com/ptr727/ProjectTemplate/issues/558
