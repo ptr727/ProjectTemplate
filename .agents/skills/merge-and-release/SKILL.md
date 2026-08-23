@@ -59,10 +59,15 @@ skill covers all of it, scoped down by what the maintainer actually asks for.
    head is `develop`.
 4. Confirm the merge landed, `mergedAt` set, `main`'s tip matching the merge commit.
 5. When the chosen scope includes a release, first bring the hub checkout used for this procedure
-   current, `git fetch origin main`, and read this repo's `releaseTrigger` from that fetched tip,
-   `git show origin/main:registry/repos.json`, rather than a possibly-stale working tree copy,
-   relevant when the target repo is the hub itself and this exact promotion changed its own
-   registry entry. Two cases, `none` versus anything else. When it reads `none`, report that no
+   current, `git fetch origin main`, and read this repo's `releaseTrigger` from that fetched tip
+   rather than a possibly-stale working tree copy, relevant when the target repo is the hub itself
+   and this exact promotion changed its own registry entry. Select the one matching entry
+   explicitly, falling back to the registry's own default when that entry sets no
+   `releaseTrigger` of its own, and stop and report rather than guessing when selection is not
+   exactly one match: `git show origin/main:registry/repos.json | jq --arg name '<repo-name>'
+   '(.repos | map(select(.name == $name))) as $m | if ($m | length) == 1 then ($m[0].releaseTrigger
+   // .defaults.releaseTrigger) else empty end'`. Two cases, `none` versus anything else. When it
+   reads `none`, report that no
    release is configured, dispatch and run-correlation (step 6) do not apply. Otherwise (`two-phase`,
    `dispatch-only`, or `publish-on-merge` alike), dispatch explicitly, `gh workflow run
    publish-release.yml --ref main --repo owner/repo`, or `--ref develop` only when the maintainer
@@ -115,11 +120,13 @@ skill covers all of it, scoped down by what the maintainer actually asks for.
      merge in the GitHub UI. `git worktree list` for any worktree still registered under this
      task's feature branches, `git branch -vv` for any local feature branch, `git ls-remote
      --heads origin` for any matching remote feature branch. For each, verify it finished by
-     reading GitHub's own state, `gh pr list --head <branch> --state merged --repo owner/repo`
-     (or `gh pr view <branch> --repo owner/repo`), confirming `baseRefName` is `develop` (a
+     reading GitHub's own state with the exact fields this check needs, not a bare listing, and
+     stop and report rather than guessing when selection is not exactly one match: `gh pr list
+     --head <branch> --state merged --repo owner/repo --json number,baseRefName,mergedAt,headRefOid
+     --jq 'if length == 1 then .[0] else empty end'`. Confirm `baseRefName` is `develop` (a
      different merged pull request can share the same head branch name against a different base,
      and that is never this sweep's target), `mergedAt` is set, and the branch's current remote
-     tip matches that exact pull request's head SHA, proving nothing landed on it since.
+     tip matches that exact pull request's `headRefOid`, proving nothing landed on it since.
      `git merge-base --is-ancestor <branch> develop` must never be used for this, a squash merge
      (drive-pr's own merge method) never makes the feature tip a literal ancestor of `develop`, so
      the check reports every already-finished branch as unmerged. Only once GitHub confirms it,
@@ -129,9 +136,9 @@ skill covers all of it, scoped down by what the maintainer actually asks for.
      `git branch -D <exact-branch>` here, safe only because the GitHub-state check just proved
      that exact branch finished, the narrow post-squash exception git-commit-conventions
      describes, never applied to an unverified branch. Then delete the remote side the same
-     compare-and-swap way drive-pr's own cleanup does, gated on the head SHA just confirmed so a
-     stray push landing on it in the gap is never silently discarded, `git push
-     --force-with-lease=refs/heads/<branch>:<merged-head-sha> origin :refs/heads/<branch>`, a ref
+     compare-and-swap way drive-pr's own cleanup does, gated on the `headRefOid` just confirmed so
+     a stray push landing on it in the gap is never silently discarded, `git push
+     --force-with-lease=refs/heads/<branch>:<headRefOid> origin :refs/heads/<branch>`, a ref
      deletion gated on its current tip, not a history rewrite, so it is not the case
      git-commit-conventions' no-force-push rule targets. Never apply this sweep to `develop` or
      `main` themselves, only to feature branches a drive-pr loop created.
