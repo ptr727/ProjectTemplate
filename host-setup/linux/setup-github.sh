@@ -108,14 +108,14 @@ confirm() {
 }
 
 fetch() {
-    command -v curl > /dev/null || return 1
+    command -v curl >/dev/null || return 1
     curl -fsSL --retry 2 --connect-timeout 10 "$@"
 }
 
 # --- Prerequisites ---
 
 package_installed() {
-    dpkg-query -W -f='${Status}' "$1" 2> /dev/null | grep -q "^install ok installed"
+    dpkg-query -W -f='${Status}' "$1" 2>/dev/null | grep -q "^install ok installed"
 }
 
 prerequisites_missing() {
@@ -132,7 +132,7 @@ ensure_prerequisites() {
     [[ ${#packages[@]} -eq 0 ]] && return 0
 
     # Everything above this point works anywhere, and installing is the first step that does not, so a host without apt is told that rather than meeting a missing command part way through.
-    command -v apt-get > /dev/null ||
+    command -v apt-get >/dev/null ||
         die "apt-get not found, and installing ${packages[*]} needs it. Install them with this host's package manager, then run this again."
 
     step "Installing ${packages[*]}"
@@ -164,7 +164,7 @@ ensure_key() {
             info "[dry run] ssh-keygen -y -f $KEY > $KEY.pub"
             return 0
         fi
-        ssh-keygen -y -f "$KEY" > "$KEY.pub"
+        ssh-keygen -y -f "$KEY" >"$KEY.pub"
         chmod 644 "$KEY.pub"
         return 0
     fi
@@ -179,24 +179,24 @@ ensure_key() {
 # The first enrollment is the one moment a substituted host key would be accepted for good, and every later connection trusts whatever was recorded here.
 # So what github.com offers is checked against the fingerprints GitHub publishes before it is written down, and a check that cannot run is a refusal rather than a warning, since recording an unchecked key is what this prevents.
 ensure_known_host() {
-    ssh-keygen -F github.com > /dev/null 2>&1 && return 0
+    ssh-keygen -F github.com >/dev/null 2>&1 && return 0
 
     step "Trusting the github.com host key"
 
     local scanned offered published fingerprint
-    scanned=$(ssh-keyscan github.com 2> /dev/null) || die "github.com did not answer a host key scan"
+    scanned=$(ssh-keyscan github.com 2>/dev/null) || die "github.com did not answer a host key scan"
     [[ -n $scanned ]] || die "github.com offered no host key"
 
-    offered=$(ssh-keygen -lf - <<< "$scanned" | awk '{ print $2 }' | sed 's/^SHA256://' | sort -u)
+    offered=$(ssh-keygen -lf - <<<"$scanned" | awk '{ print $2 }' | sed 's/^SHA256://' | sort -u)
     published=$(fetch "https://api.github.com/meta" |
         tr ',' '\n' | sed -n 's/.*"SHA256_[A-Z0-9]*": *"\([^"]*\)".*/\1/p' | sort -u) || published=""
     [[ -n $published ]] ||
         die "Cannot read the host key fingerprints GitHub publishes, so the key it offered cannot be checked. Compare it by hand against https://docs.github.com/authentication/keeping-your-account-secure/githubs-ssh-key-fingerprints and record it with ssh-keyscan."
 
     while read -r fingerprint; do
-        grep -qxF "$fingerprint" <<< "$published" ||
+        grep -qxF "$fingerprint" <<<"$published" ||
             die "github.com offered a host key GitHub does not publish (SHA256:$fingerprint), so it is not being recorded"
-    done <<< "$offered"
+    done <<<"$offered"
     info "The offered host key matches what GitHub publishes"
 
     run mkdir -p "$HOME/.ssh"
@@ -205,7 +205,7 @@ ensure_known_host() {
         info "[dry run] record the checked host key in $HOME/.ssh/known_hosts"
         return 0
     fi
-    printf '%s\n' "$scanned" >> "$HOME/.ssh/known_hosts"
+    printf '%s\n' "$scanned" >>"$HOME/.ssh/known_hosts"
 }
 
 # --- GitHub, read only ---
@@ -274,7 +274,7 @@ github_auth_key_registered() {
     local body keys
     body=$(key_body) || return 2
     keys=$(fetch "https://github.com/$GITHUB_USER.keys") || return 2
-    grep -qxF "$body" <<< "$keys"
+    grep -qxF "$body" <<<"$keys"
 }
 
 github_signing_key_registered() {
@@ -286,11 +286,11 @@ github_signing_key_registered() {
     # Under pipefail that became the pipeline's status and mapped to "could not be read", which reported a definite no as a network problem and skipped the registration prompt.
     # An account with no signing key is exactly the account this function exists to prompt.
     # Grep's 1 is therefore an empty list and only a higher status is a failure to read.
-    matches=$(grep -oE '"key": *"[^"]*"' <<< "$payload") || rc=$?
+    matches=$(grep -oE '"key": *"[^"]*"' <<<"$payload") || rc=$?
     ((rc <= 1)) || return 2
-    keys=$(sed 's/"key": *"//; s/"$//' <<< "$matches")
+    keys=$(sed 's/"key": *"//; s/"$//' <<<"$matches")
 
-    grep -qxF "$body" <<< "$keys"
+    grep -qxF "$body" <<<"$keys"
 }
 
 # A registration is a browser step, so this prints what to paste and where, then stops.
@@ -316,7 +316,7 @@ registration_needed() {
 
 # --- git configuration ---
 
-git_config_get() { git config --global --get "$1" 2> /dev/null || true; }
+git_config_get() { git config --global --get "$1" 2>/dev/null || true; }
 
 # Set a value only where it differs, so a re-run is silent rather than rewriting the same file.
 git_config_set() {
@@ -331,7 +331,7 @@ git_config_set() {
 # The safe.directory setting is multi valued, so setting it again appends a duplicate rather than replacing it.
 git_config_add_once() {
     local key="$1" value="$2"
-    git config --global --get-all "$key" 2> /dev/null | grep -qxF "$value" && return 1
+    git config --global --get-all "$key" 2>/dev/null | grep -qxF "$value" && return 1
 
     run git config --global --add "$key" "$value"
     return 0
@@ -409,13 +409,13 @@ configure_signing() {
 
     # The allowed signers file is what verifies a signature locally, and it is appended to rather than rewritten, since it can carry other identities.
     local entry
-    entry="$EMAIL namespaces=\"git\" $(cat "$KEY.pub" 2> /dev/null || true)"
-    if ! grep -qxF "$entry" "$ALLOWED_SIGNERS" 2> /dev/null; then
+    entry="$EMAIL namespaces=\"git\" $(cat "$KEY.pub" 2>/dev/null || true)"
+    if ! grep -qxF "$entry" "$ALLOWED_SIGNERS" 2>/dev/null; then
         run mkdir -p "$(dirname "$ALLOWED_SIGNERS")"
         if [[ $DRY_RUN == true ]]; then
             info "[dry run] append this host's key to $ALLOWED_SIGNERS"
         else
-            printf '%s\n' "$entry" >> "$ALLOWED_SIGNERS"
+            printf '%s\n' "$entry" >>"$ALLOWED_SIGNERS"
         fi
         changed=$((changed + 1))
     fi
@@ -434,16 +434,16 @@ signing_works() {
     local repo="$TMP_DIR/signing-check"
     rm -rf "$repo"
     mkdir -p "$repo"
-    git init -q "$repo" 2> /dev/null || return 1
-    git -C "$repo" commit -q --allow-empty -m "signing check" > /dev/null 2>&1 || return 1
-    git -C "$repo" verify-commit HEAD > /dev/null 2>&1
+    git init -q "$repo" 2>/dev/null || return 1
+    git -C "$repo" commit -q --allow-empty -m "signing check" >/dev/null 2>&1 || return 1
+    git -C "$repo" verify-commit HEAD >/dev/null 2>&1
 }
 
 # --- Actions ---
 
 status() {
     log "Host identity"
-    if command -v git > /dev/null; then
+    if command -v git >/dev/null; then
         ok "git installed"
     else
         missing "git installed, --configure installs it, so the settings below read as unset"
@@ -455,7 +455,7 @@ status() {
     fi
 
     local known=true
-    ssh-keygen -F github.com > /dev/null 2>&1 || known=false
+    ssh-keygen -F github.com >/dev/null 2>&1 || known=false
 
     resolve_github_user
     if [[ -n $GITHUB_USER ]]; then
@@ -482,17 +482,17 @@ status() {
         local rc=0
         github_auth_key_registered || rc=$?
         case "$rc" in
-            0) ok "Authentication key registered" ;;
-            2) missing "Authentication key registered, GitHub could not be reached to check" ;;
-            *) missing "Authentication key registered" ;;
+        0) ok "Authentication key registered" ;;
+        2) missing "Authentication key registered, GitHub could not be reached to check" ;;
+        *) missing "Authentication key registered" ;;
         esac
 
         rc=0
         github_signing_key_registered || rc=$?
         case "$rc" in
-            0) ok "Signing key registered" ;;
-            2) missing "Signing key registered, GitHub could not be reached to check" ;;
-            *) missing "Signing key registered, commits show as unverified on GitHub" ;;
+        0) ok "Signing key registered" ;;
+        2) missing "Signing key registered, GitHub could not be reached to check" ;;
+        *) missing "Signing key registered, commits show as unverified on GitHub" ;;
         esac
     fi
 
@@ -511,7 +511,7 @@ status() {
 
     # The shared checkout settings are reported apart, because absent is the right state for a host one account uses and listing them as missing would read as two gaps to close.
     local -a shared=()
-    readarray -t shared < <(git config --global --get-all safe.directory 2> /dev/null || true)
+    readarray -t shared < <(git config --global --get-all safe.directory 2>/dev/null || true)
     if [[ ${#shared[@]} -gt 0 ]]; then
         local -a unique=()
         readarray -t unique < <(printf '%s\n' "${shared[@]}" | sort -u)
@@ -580,12 +580,12 @@ configure() {
     local signing_rc=0
     github_signing_key_registered || signing_rc=$?
     case "$signing_rc" in
-        0) info "Registered as a signing key" ;;
-        2) warn "GitHub could not be reached, so whether the signing key is registered is unknown" ;;
-        *)
-            registration_needed "signing" "Signing"
-            warn "Commits sign locally but show as unverified on GitHub until the key is registered"
-            ;;
+    0) info "Registered as a signing key" ;;
+    2) warn "GitHub could not be reached, so whether the signing key is registered is unknown" ;;
+    *)
+        registration_needed "signing" "Signing"
+        warn "Commits sign locally but show as unverified on GitHub until the key is registered"
+        ;;
     esac
 
     step "Done"
@@ -598,30 +598,30 @@ parse_args() {
 
     while [[ $# -gt 0 ]]; do
         case "$1" in
-            -s | --status) actions+=(status) ;;
-            -c | --configure) actions+=(configure) ;;
-            -n | --dry-run) DRY_RUN=true ;;
-            -y | --yes) ASSUME_YES=true ;;
-            --name)
-                [[ $# -ge 2 ]] || die "--name takes a value"
-                NAME="$2"
-                shift
-                ;;
-            --email)
-                [[ $# -ge 2 ]] || die "--email takes a value"
-                EMAIL="$2"
-                shift
-                ;;
-            --shared-checkout)
-                [[ $# -ge 2 ]] || die "--shared-checkout takes the path of the shared checkout"
-                SHARED_CHECKOUT="$2"
-                shift
-                ;;
-            -h | --help)
-                usage
-                exit 0
-                ;;
-            *) die "Unknown option \"$1\", --help lists the options" ;;
+        -s | --status) actions+=(status) ;;
+        -c | --configure) actions+=(configure) ;;
+        -n | --dry-run) DRY_RUN=true ;;
+        -y | --yes) ASSUME_YES=true ;;
+        --name)
+            [[ $# -ge 2 ]] || die "--name takes a value"
+            NAME="$2"
+            shift
+            ;;
+        --email)
+            [[ $# -ge 2 ]] || die "--email takes a value"
+            EMAIL="$2"
+            shift
+            ;;
+        --shared-checkout)
+            [[ $# -ge 2 ]] || die "--shared-checkout takes the path of the shared checkout"
+            SHARED_CHECKOUT="$2"
+            shift
+            ;;
+        -h | --help)
+            usage
+            exit 0
+            ;;
+        *) die "Unknown option \"$1\", --help lists the options" ;;
         esac
         shift
     done
@@ -638,16 +638,16 @@ main() {
     parse_args "$@"
 
     if [[ $EUID -ne 0 ]]; then
-        command -v sudo > /dev/null || die "Not running as root and sudo is not installed"
+        command -v sudo >/dev/null || die "Not running as root and sudo is not installed"
         SUDO=(sudo)
     fi
 
     case "$MODE" in
-        status) status ;;
-        configure)
-            confirm "Configure git and GitHub on this host?" || die "Declined"
-            configure
-            ;;
+    status) status ;;
+    configure)
+        confirm "Configure git and GitHub on this host?" || die "Declined"
+        configure
+        ;;
     esac
 }
 

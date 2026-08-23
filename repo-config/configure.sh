@@ -30,11 +30,19 @@ set -Eeuo pipefail
 
 # ----- Command + target + model -----
 cmd=apply
-case "${1:-}" in apply|check) cmd="$1"; shift ;; esac
+case "${1:-}" in apply | check)
+    cmd="$1"
+    shift
+    ;;
+esac
 repo_arg="${1:-}"
 model="${2:-}"
 # Allow the model as the sole positional (`configure.sh check operational`): a model name is not a repo.
-case "$repo_arg" in release|operational) model="$repo_arg"; repo_arg="" ;; esac
+case "$repo_arg" in release | operational)
+    model="$repo_arg"
+    repo_arg=""
+    ;;
+esac
 repo="${repo_arg:-$(gh repo view --json nameWithOwner --jq '.nameWithOwner')}"
 script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
@@ -57,9 +65,12 @@ if [ -z "$model" ]; then
     fi
 fi
 case "$model" in
-    release) develop_ruleset="$script_dir/develop.json" ;;
-    operational) develop_ruleset="$script_dir/operational/develop.json" ;;
-    *) echo "Unknown workflow model '$model' (expected release or operational)." >&2; exit 1 ;;
+release) develop_ruleset="$script_dir/develop.json" ;;
+operational) develop_ruleset="$script_dir/operational/develop.json" ;;
+*)
+    echo "Unknown workflow model '$model' (expected release or operational)." >&2
+    exit 1
+    ;;
 esac
 main_ruleset="$script_dir/main.json"
 settings_file="$script_dir/settings.json"
@@ -174,7 +185,8 @@ cmd_apply() {
     # ----- General repository settings -----
     # Discussions are enabled on public repos only by fleet policy, and never on a private one.
     private="$(gh api "repos/$repo" --jq '.private')"
-    disc=false; [ "$private" = "false" ] && disc=true
+    disc=false
+    [ "$private" = "false" ] && disc=true
     # The default branch is main, but only point it there once main exists.
     # Never set the default to a missing branch, as on a repo still living on a rework branch.
     if gh api "repos/$repo/branches/main" --jq '.name' >/dev/null 2>&1; then
@@ -203,13 +215,20 @@ cmd_apply() {
 FAILED=0
 note() { printf '  %s\n' "$*"; }
 pass() { printf '  ok   %s\n' "$*"; }
-fail() { printf '  FAIL %s\n' "$*"; FAILED=1; }
+fail() {
+    printf '  FAIL %s\n' "$*"
+    FAILED=1
+}
 
 # Run a test command with `assert MESSAGE TEST...`, passing on success and failing on non-zero.
 # It is a proper if/else rather than the `A && B || C` footgun.
 # Do not redirect the assert call's own stdout, which would swallow the pass or fail line.
 # A command that prints, such as jq, goes through jq_has, which silences only itself.
-assert() { local msg="$1"; shift; if "$@"; then pass "$msg"; else fail "$msg"; fi; }
+assert() {
+    local msg="$1"
+    shift
+    if "$@"; then pass "$msg"; else fail "$msg"; fi
+}
 
 # Test with `jq_has FILTER...`, which is true only when the filter selects a truthy value.
 # The jq output is discarded, not the caller's.
@@ -223,12 +242,27 @@ gh_ok() { gh api "$@" >/dev/null 2>&1; }
 
 check_ruleset() { # payload-file - the live ruleset must match the committed policy, driven by the payload
     local file="$1" rname id live t want got want_enf
-    if [ ! -e "$file" ]; then fail "ruleset payload $file missing"; return; fi
+    if [ ! -e "$file" ]; then
+        fail "ruleset payload $file missing"
+        return
+    fi
     rname="$(jq -r '.name // empty' "$file")"
-    if [ -z "$rname" ]; then fail "ruleset payload $file has no name"; return; fi
-    if ! id="$(ruleset_id "$rname")"; then fail "ruleset '$rname' - could not resolve id"; return; fi
-    if [ -z "$id" ]; then fail "ruleset '$rname' missing"; return; fi
-    if ! live="$(gh api "repos/$repo/rulesets/$id")"; then fail "ruleset '$rname' - could not read live state"; return; fi
+    if [ -z "$rname" ]; then
+        fail "ruleset payload $file has no name"
+        return
+    fi
+    if ! id="$(ruleset_id "$rname")"; then
+        fail "ruleset '$rname' - could not resolve id"
+        return
+    fi
+    if [ -z "$id" ]; then
+        fail "ruleset '$rname' missing"
+        return
+    fi
+    if ! live="$(gh api "repos/$repo/rulesets/$id")"; then
+        fail "ruleset '$rname' - could not read live state"
+        return
+    fi
     want_enf="$(jq -r '.enforcement' "$file")"
     assert "ruleset '$rname' enforcement = $want_enf" test "$(jq -r '.enforcement' <<<"$live")" = "$want_enf"
     # The live rule-type set must equal the payload's, compared in both directions.
@@ -236,9 +270,13 @@ check_ruleset() { # payload-file - the live ruleset must match the committed pol
     # That is drift this script exists to catch, and it passed as clean before.
     local want_types got_types
     if ! want_types="$(jq -r '[.rules[].type] | sort | join(",")' "$file")"; then
-        fail "ruleset payload $file did not parse"; return
+        fail "ruleset payload $file did not parse"
+        return
     fi
-    if [ -z "$want_types" ]; then fail "ruleset payload $file declares no rules"; return; fi
+    if [ -z "$want_types" ]; then
+        fail "ruleset payload $file declares no rules"
+        return
+    fi
     got_types="$(jq -r '[.rules[].type] | sort | join(",")' <<<"$live")"
     assert "'$rname' rule set = $want_types" test "$got_types" = "$want_types"
     # The bypass list is reported and never asserted, because no payload declares one.
@@ -279,8 +317,14 @@ check_ruleset() { # payload-file - the live ruleset must match the committed pol
 
 check_settings() {
     local live key want got private wantdisc
-    if [ ! -e "$settings_file" ]; then fail "settings payload $settings_file missing"; return; fi
-    if ! live="$(gh api "repos/$repo")"; then fail "could not read repository settings"; return; fi
+    if [ ! -e "$settings_file" ]; then
+        fail "settings payload $settings_file missing"
+        return
+    fi
+    if ! live="$(gh api "repos/$repo")"; then
+        fail "could not read repository settings"
+        return
+    fi
     # Static settings are driven from settings.json, so the check never drifts from the file.
     # Add a key there and it is audited here automatically.
     # The payload is parsed into a variable before the loop rather than streamed from a process substitution.
@@ -288,10 +332,14 @@ check_settings() {
     # Every static setting would then report as checked and passing while nothing was compared, a false clean.
     local pairs
     if ! pairs="$(jq -r 'to_entries[] | "\(.key)\t\(.value)"' "$settings_file")"; then
-        fail "settings payload $settings_file did not parse"; return
+        fail "settings payload $settings_file did not parse"
+        return
     fi
     # A payload that parses to nothing is a floor failure rather than a clean run, so it is asserted.
-    if [ -z "$pairs" ]; then fail "settings payload $settings_file declares no keys"; return; fi
+    if [ -z "$pairs" ]; then
+        fail "settings payload $settings_file declares no keys"
+        return
+    fi
     while IFS=$'\t' read -r key want; do
         # shellcheck disable=SC2016  # $k is a jq --arg variable, not a shell expansion
         got="$(jq -r --arg k "$key" '.[$k]' <<<"$live")"
@@ -299,7 +347,8 @@ check_settings() {
     done <<<"$pairs"
     # Dynamic settings apply sets: has_discussions (public repos only), default_branch (main, if it exists).
     private="$(jq -r '.private' <<<"$live")"
-    wantdisc=true; [ "$private" = "true" ] && wantdisc=false
+    wantdisc=true
+    [ "$private" = "true" ] && wantdisc=false
     assert "has_discussions = $wantdisc" test "$(jq -r '.has_discussions' <<<"$live")" = "$wantdisc"
     if gh api "repos/$repo/branches/main" --jq '.name' >/dev/null 2>&1; then
         assert "default_branch = main" test "$(jq -r '.default_branch' <<<"$live")" = main
@@ -336,11 +385,14 @@ cmd_check() {
     # Secrets are per-repo (spec/secrets.json) and not readable by value.
     # A standalone carry has no registry to derive the required set from, so they are verified by hand rather than asserted here.
     note "verify manually: the repo's required secrets (see spec/secrets.json) are present with valid values"
-    if [ "$FAILED" -ne 0 ]; then echo "Configuration drift detected on $repo."; exit 1; fi
+    if [ "$FAILED" -ne 0 ]; then
+        echo "Configuration drift detected on $repo."
+        exit 1
+    fi
     echo "Configuration matches on $repo."
 }
 
 case "$cmd" in
-    apply) cmd_apply ;;
-    check) cmd_check ;;
+apply) cmd_apply ;;
+check) cmd_check ;;
 esac

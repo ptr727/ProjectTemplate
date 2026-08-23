@@ -81,20 +81,20 @@ detect_host() {
     DISTRO_VERSION="${VERSION_ID:-unknown}"
     CODENAME="${VERSION_CODENAME:-}"
 
-    command -v apt-get > /dev/null || die "apt-get not found, this script upgrades apt based hosts"
+    command -v apt-get >/dev/null || die "apt-get not found, this script upgrades apt based hosts"
 
     # Proxmox reports itself as its Debian base, so the marker is its own tooling.
-    if command -v pveversion > /dev/null; then
+    if command -v pveversion >/dev/null; then
         IS_PROXMOX=true
     fi
 
     # WSL has no kernel of its own to reboot into, and the shutdown is driven from Windows.
-    if grep -qi microsoft /proc/version 2> /dev/null || [[ -n ${WSL_DISTRO_NAME:-} ]]; then
+    if grep -qi microsoft /proc/version 2>/dev/null || [[ -n ${WSL_DISTRO_NAME:-} ]]; then
         IS_WSL=true
     fi
 
     if [[ $EUID -ne 0 ]]; then
-        command -v sudo > /dev/null || die "Not running as root and sudo is not installed"
+        command -v sudo >/dev/null || die "Not running as root and sudo is not installed"
         SUDO=(sudo)
     fi
 
@@ -139,7 +139,7 @@ confirm() {
 
 # A minimal install carries no curl, and without this guard the caller sees "command not found" from inside a command substitution, which reads as an answer rather than as a failure.
 fetch() {
-    command -v curl > /dev/null || return 1
+    command -v curl >/dev/null || return 1
     curl -fsSL --retry 2 --connect-timeout 10 "$@"
 }
 
@@ -166,15 +166,15 @@ upgrade_packages() {
 
 # Snap runs on an Ubuntu host with snapd active, which a container and a WSL distribution usually are not.
 refresh_snaps() {
-    command -v snap > /dev/null || return 0
-    systemctl is-active --quiet snapd 2> /dev/null || return 0
+    command -v snap >/dev/null || return 0
+    systemctl is-active --quiet snapd 2>/dev/null || return 0
 
     step "Refreshing snaps"
     run_root snap refresh
 }
 
 upgradable_count() {
-    apt list --upgradable 2> /dev/null | grep -c '/' || true
+    apt list --upgradable 2>/dev/null | grep -c '/' || true
 }
 
 # --- Reboot ---
@@ -189,7 +189,7 @@ reboot_required() {
     # Debian does not always write the marker, so compare what is installed against what is running.
     local running latest
     running=$(uname -r)
-    latest=$(find /boot -maxdepth 1 -name 'vmlinuz-*' -printf '%f\n' 2> /dev/null |
+    latest=$(find /boot -maxdepth 1 -name 'vmlinuz-*' -printf '%f\n' 2>/dev/null |
         sed 's/^vmlinuz-//' | sort -V | tail -1) || return 1
     [[ -n $latest && $latest != "$running" ]]
 }
@@ -209,7 +209,7 @@ report_reboot() {
 
     if reboot_required; then
         info "Restart needed, running $(uname -r)"
-        [[ -f /var/run/reboot-required.pkgs ]] && info "Asked for by: $(tr '\n' ' ' < /var/run/reboot-required.pkgs)"
+        [[ -f /var/run/reboot-required.pkgs ]] && info "Asked for by: $(tr '\n' ' ' </var/run/reboot-required.pkgs)"
         info "Run \"sudo reboot\" when convenient"
     else
         info "No restart needed"
@@ -236,13 +236,13 @@ release_guard() {
 # A release upgrade on a host with held or half-configured packages fails partway through, which is the worst place to find out.
 release_preconditions() {
     local held
-    held=$(apt-mark showhold 2> /dev/null | tr '\n' ' ')
+    held=$(apt-mark showhold 2>/dev/null | tr '\n' ' ')
     if [[ -n ${held// /} ]]; then
         die "Held packages block a release upgrade, unhold them first: $held"
     fi
 
     local audit
-    audit=$("${SUDO[@]}" dpkg --audit 2> /dev/null || true)
+    audit=$("${SUDO[@]}" dpkg --audit 2>/dev/null || true)
     if [[ -n $audit ]]; then
         die "dpkg reports half-configured packages, fix them first: $audit"
     fi
@@ -260,7 +260,7 @@ release_preconditions() {
 # A status report says so rather than installing anything, and a release run is already changing the host, so it installs.
 ensure_release_prerequisites() {
     [[ $DISTRO_ID == "debian" ]] || return 0
-    command -v curl > /dev/null && return 0
+    command -v curl >/dev/null && return 0
 
     step "Installing curl, which the release index is read with"
     apt_get update
@@ -291,8 +291,8 @@ backup_sources() {
 # Under pipefail a reader that stops early, as a parser looking for one line does, leaves the fetch writing to a closed pipe, and a successful download then reports itself as a failure.
 debian_suite_codename() {
     local release
-    release=$(fetch "https://deb.debian.org/debian/dists/$1/Release" 2> /dev/null) || return 1
-    awk '/^Codename:/ { print $2; exit }' <<< "$release"
+    release=$(fetch "https://deb.debian.org/debian/dists/$1/Release" 2>/dev/null) || return 1
+    awk '/^Codename:/ { print $2; exit }' <<<"$release"
 }
 
 # The release after the one this host is on.
@@ -408,11 +408,11 @@ debian_rewrite_sources() {
                 }
                 /^[[:space:]]*$/ { flush(); print ""; next }
                 { buf[++n] = $0 }
-                END { flush() }' "$file" > "$staged"
+                END { flush() }' "$file" >"$staged"
         else
             # shellcheck disable=SC2016  # $0 belongs to awk, not to the shell.
             awk -v from="$from" -v to="$to" \
-                '{ if ($0 ~ /\.debian\.org/) gsub(from, to); print }' "$file" > "$staged"
+                '{ if ($0 ~ /\.debian\.org/) gsub(from, to); print }' "$file" >"$staged"
         fi
 
         run_root install -m 0644 "$staged" "$file"
@@ -475,7 +475,7 @@ debian_release_upgrade() {
 ubuntu_release_upgrade() {
     step "Checking for a new Ubuntu release"
 
-    if ! command -v do-release-upgrade > /dev/null; then
+    if ! command -v do-release-upgrade >/dev/null; then
         apt_get install update-manager-core
     fi
 
@@ -510,38 +510,38 @@ release_summary() {
     fi
 
     case "$DISTRO_ID" in
-        debian)
-            local next status=0
-            next=$(debian_next_codename "$CODENAME") || status=$?
-            case "$status" in
-                0) printf '%s to %s' "$CODENAME" "$next" ;;
-                2)
-                    # The two reasons have different remedies, so they are reported apart.
-                    if command -v curl > /dev/null; then
-                        printf 'unknown, the Debian release index at deb.debian.org could not be reached'
-                    else
-                        printf 'unknown, curl is not installed and the Debian release index is read with it'
-                    fi
-                    ;;
-                *) printf '%s is the current stable release, nothing to move to' "$CODENAME" ;;
-            esac
-            ;;
-        ubuntu)
-            if ! command -v do-release-upgrade > /dev/null; then
-                printf 'unknown until update-manager-core is installed'
-                return 0
-            fi
-            # The check exits non-zero when nothing is offered, and prints its progress either way, so the exit code decides and the output only names the release.
-            # It reads the same as any user, so it runs without sudo and a status report never asks for a password.
-            local check summary
-            if check=$(do-release-upgrade -c 2>&1); then
-                summary=$(grep -i -m 1 "new release" <<< "$check" || true)
-                printf '%s' "${summary:-a new release is offered}"
+    debian)
+        local next status=0
+        next=$(debian_next_codename "$CODENAME") || status=$?
+        case "$status" in
+        0) printf '%s to %s' "$CODENAME" "$next" ;;
+        2)
+            # The two reasons have different remedies, so they are reported apart.
+            if command -v curl >/dev/null; then
+                printf 'unknown, the Debian release index at deb.debian.org could not be reached'
             else
-                printf "none offered under this host's upgrade policy (/etc/update-manager/release-upgrades)"
+                printf 'unknown, curl is not installed and the Debian release index is read with it'
             fi
             ;;
-        *) printf 'not supported on this host' ;;
+        *) printf '%s is the current stable release, nothing to move to' "$CODENAME" ;;
+        esac
+        ;;
+    ubuntu)
+        if ! command -v do-release-upgrade >/dev/null; then
+            printf 'unknown until update-manager-core is installed'
+            return 0
+        fi
+        # The check exits non-zero when nothing is offered, and prints its progress either way, so the exit code decides and the output only names the release.
+        # It reads the same as any user, so it runs without sudo and a status report never asks for a password.
+        local check summary
+        if check=$(do-release-upgrade -c 2>&1); then
+            summary=$(grep -i -m 1 "new release" <<<"$check" || true)
+            printf '%s' "${summary:-a new release is offered}"
+        else
+            printf "none offered under this host's upgrade policy (/etc/update-manager/release-upgrades)"
+        fi
+        ;;
+    *) printf 'not supported on this host' ;;
     esac
 }
 
@@ -573,8 +573,8 @@ upgrade() {
 
     if [[ $MODE == "release" ]]; then
         case "$DISTRO_ID" in
-            debian) debian_release_upgrade ;;
-            ubuntu) ubuntu_release_upgrade ;;
+        debian) debian_release_upgrade ;;
+        ubuntu) ubuntu_release_upgrade ;;
         esac
     fi
 
@@ -589,16 +589,16 @@ parse_args() {
 
     while [[ $# -gt 0 ]]; do
         case "$1" in
-            -s | --status) actions+=(status) ;;
-            -p | --packages) actions+=(packages) ;;
-            -r | --release) actions+=(release) ;;
-            -n | --dry-run) DRY_RUN=true ;;
-            -y | --yes) ASSUME_YES=true ;;
-            -h | --help)
-                usage
-                exit 0
-                ;;
-            *) die "Unknown option \"$1\", --help lists the options" ;;
+        -s | --status) actions+=(status) ;;
+        -p | --packages) actions+=(packages) ;;
+        -r | --release) actions+=(release) ;;
+        -n | --dry-run) DRY_RUN=true ;;
+        -y | --yes) ASSUME_YES=true ;;
+        -h | --help)
+            usage
+            exit 0
+            ;;
+        *) die "Unknown option \"$1\", --help lists the options" ;;
         esac
         shift
     done
@@ -616,8 +616,8 @@ main() {
     detect_host
 
     case "$MODE" in
-        status) status ;;
-        packages | release) upgrade ;;
+    status) status ;;
+    packages | release) upgrade ;;
     esac
 }
 

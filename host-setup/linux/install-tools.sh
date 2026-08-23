@@ -131,16 +131,16 @@ detect_host() {
         DISTRO_ID="debian"
     fi
 
-    command -v apt-get > /dev/null || die "apt-get not found, this script installs apt packages"
+    command -v apt-get >/dev/null || die "apt-get not found, this script installs apt packages"
     ARCH=$(dpkg --print-architecture)
 
     # WSL has no kernel of its own, and docker there comes only from Docker Desktop's own WSL integration, never a native install.
-    if grep -qi microsoft /proc/version 2> /dev/null || [[ -n ${WSL_DISTRO_NAME:-} ]]; then
+    if grep -qi microsoft /proc/version 2>/dev/null || [[ -n ${WSL_DISTRO_NAME:-} ]]; then
         IS_WSL=true
     fi
 
     if [[ $EUID -ne 0 ]]; then
-        command -v sudo > /dev/null || die "Not running as root and sudo is not installed"
+        command -v sudo >/dev/null || die "Not running as root and sudo is not installed"
         SUDO=(sudo)
     fi
 }
@@ -169,7 +169,7 @@ confirm() {
 
 # A minimal install carries no curl, and without this guard the caller sees "command not found" from inside a command substitution, which reads as an answer rather than as a failure.
 fetch() {
-    command -v curl > /dev/null || return 1
+    command -v curl >/dev/null || return 1
     curl -fsSL --retry 2 --connect-timeout 10 "$@"
 }
 
@@ -177,14 +177,14 @@ fetch() {
 
 apt_installed_version() {
     local version
-    version=$(apt-cache policy "$1" 2> /dev/null | awk '/Installed:/ { print $2 }')
+    version=$(apt-cache policy "$1" 2>/dev/null | awk '/Installed:/ { print $2 }')
     [[ $version == "(none)" ]] && version=""
     printf '%s' "$version"
 }
 
 apt_candidate_version() {
     local version
-    version=$(apt-cache policy "$1" 2> /dev/null | awk '/Candidate:/ { print $2 }')
+    version=$(apt-cache policy "$1" 2>/dev/null | awk '/Candidate:/ { print $2 }')
     [[ $version == "(none)" ]] && version=""
     printf '%s' "$version"
 }
@@ -218,7 +218,7 @@ apt_install() {
 # Whether a package is installed is asked of dpkg rather than of apt, here and in the sibling scripts, because dpkg answers about the installed state while apt-cache also carries a candidate, and the two disagree on a host whose lists are stale.
 # The candidate is still what apt_candidate_version reports, since that is the question the report asks.
 package_installed() {
-    dpkg-query -W -f='${Status}' "$1" 2> /dev/null | grep -q "^install ok installed"
+    dpkg-query -W -f='${Status}' "$1" 2>/dev/null | grep -q "^install ok installed"
 }
 
 apt_missing() {
@@ -242,7 +242,7 @@ apt_install_displacing() {
     fi
 
     local -a removals=()
-    readarray -t removals < <(apt-get -s install "$package" 2> /dev/null | awk '/^Remv / { print $2 }')
+    readarray -t removals < <(apt-get -s install "$package" 2>/dev/null | awk '/^Remv / { print $2 }')
     if [[ ${#removals[@]} -gt 0 ]]; then
         log "  Installing $package removes ${#removals[@]} package(s): ${removals[*]}"
         log "  Their dependencies are left installed, for a later apt autoremove to clean up"
@@ -263,18 +263,18 @@ install_keyring() {
     staged="$TMP_DIR/$(basename "$path")"
 
     if [[ $armored == true ]]; then
-        fetch "$url" | gpg --dearmor > "$staged"
+        fetch "$url" | gpg --dearmor >"$staged"
     else
         fetch -o "$staged" "$url"
     fi
 
     # The check is the reason to trust the key at all, so a host without gpgv stops here rather than installing the key unverified.
     # Prerequisites install it before any of this runs.
-    command -v gpgv > /dev/null ||
+    command -v gpgv >/dev/null ||
         die "gpgv is not installed, so the key at $url cannot be checked against the repository it signs"
     fetch -o "$TMP_DIR/InRelease" "$release_url" ||
         die "Cannot read the repository metadata at $release_url"
-    gpgv --keyring "$staged" "$TMP_DIR/InRelease" > /dev/null 2>&1 ||
+    gpgv --keyring "$staged" "$TMP_DIR/InRelease" >/dev/null 2>&1 ||
         die "The key at $url does not sign the repository at $release_url, refusing to trust it"
 
     if [[ -f $path ]] && cmp -s "$staged" "$path"; then
@@ -304,7 +304,7 @@ write_sources() {
         return 0
     fi
 
-    printf '%s' "$content" | "${SUDO[@]}" tee "$path" > /dev/null
+    printf '%s' "$content" | "${SUDO[@]}" tee "$path" >/dev/null
     return 0
 }
 
@@ -384,8 +384,8 @@ gh_install() {
 jq_source() { printf 'jqlang/jq'; }
 
 jq_version() {
-    command -v jq > /dev/null || return 0
-    jq --version 2> /dev/null | sed 's/^jq-//'
+    command -v jq >/dev/null || return 0
+    jq --version 2>/dev/null | sed 's/^jq-//'
 }
 
 jq_target() {
@@ -413,7 +413,7 @@ git_restore_mtime_version() {
     path=$(command -v git-restore-mtime) || return 0
     version=$(sed -n 's/^__version__ = "\(.*\)"$/\1/p' "$path" | head -1)
     if [[ -z $version ]]; then
-        version=$(git restore-mtime --version 2> /dev/null | awk '{ print $NF }')
+        version=$(git restore-mtime --version 2>/dev/null | awk '{ print $NF }')
     fi
     printf '%s' "$version"
 }
@@ -454,7 +454,7 @@ node_lts_major() {
     local index="$TMP_DIR/node-index.json" version
     [[ -s $index ]] || fetch -o "$index" "https://nodejs.org/dist/index.json" || return 1
 
-    if command -v jq > /dev/null; then
+    if command -v jq >/dev/null; then
         version=$(jq -r 'first(.[] | select(.lts != false)) | .version' "$index")
     else
         # One pass over the file rather than a pipeline: upstream serves this index without spaces today and nothing promises that, so the whitespace JSON allows is tolerated, and a reader that stopped early would leave its producer writing to a closed pipe under pipefail.
@@ -523,9 +523,9 @@ ripgrep_target() { apt_candidate_version ripgrep; }
 
 ripgrep_download_path() {
     local resolved
-    resolved=$(type -P rg 2> /dev/null || true)
+    resolved=$(type -P rg 2>/dev/null || true)
     [[ $resolved == /* ]] || return 0
-    dpkg-query -S "$resolved" > /dev/null 2>&1 || printf '%s' "$resolved"
+    dpkg-query -S "$resolved" >/dev/null 2>&1 || printf '%s' "$resolved"
 }
 
 ripgrep_remove_download() {
@@ -551,8 +551,8 @@ ripgrep_install() {
 uv_source() { printf 'astral-sh/uv'; }
 
 uv_version() {
-    command -v uv > /dev/null || return 0
-    uv --version 2> /dev/null | awk '{ print $2 }'
+    command -v uv >/dev/null || return 0
+    uv --version 2>/dev/null | awk '{ print $2 }'
 }
 
 # Upstream tags without a leading v today, and the installed version never carries one, so the tag is normalized rather than trusted: a tag that gains a prefix would otherwise read as permanently outdated and re-download on every run.
@@ -565,11 +565,11 @@ uv_target() {
 # Upstream names its assets by rust target triple rather than by dpkg architecture.
 uv_triple() {
     case "$ARCH" in
-        amd64) printf 'x86_64-unknown-linux-gnu' ;;
-        arm64) printf 'aarch64-unknown-linux-gnu' ;;
-        armhf) printf 'armv7-unknown-linux-gnueabihf' ;;
-        i386) printf 'i686-unknown-linux-gnu' ;;
-        *) return 1 ;;
+    amd64) printf 'x86_64-unknown-linux-gnu' ;;
+    arm64) printf 'aarch64-unknown-linux-gnu' ;;
+    armhf) printf 'armv7-unknown-linux-gnueabihf' ;;
+    i386) printf 'i686-unknown-linux-gnu' ;;
+    *) return 1 ;;
     esac
 }
 
@@ -605,14 +605,14 @@ docker_source() {
 # The daemon is asked first and its own banner is the fallback, because the docker on PATH inside a WSL distribution can be a separately packaged client talking to Docker Desktop's engine, and the two carry different versions (issue #751 recorded a 29.1.3 client against a 29.7.2 engine).
 # A stopped or unreachable daemon makes the first reading exit non-zero, which is what the banner answers, so this reports the weaker number rather than nothing.
 docker_version() {
-    command -v docker > /dev/null || return 0
+    command -v docker >/dev/null || return 0
     local engine
-    engine=$(docker version --format '{{.Server.Version}}' 2> /dev/null) || engine=""
+    engine=$(docker version --format '{{.Server.Version}}' 2>/dev/null) || engine=""
     if [[ $engine =~ ^[0-9]+(\.[0-9]+)*$ ]]; then
         printf '%s' "$engine"
         return 0
     fi
-    docker --version 2> /dev/null | sed -n 's/^Docker version \([0-9][0-9.]*\).*/\1/p'
+    docker --version 2>/dev/null | sed -n 's/^Docker version \([0-9][0-9.]*\).*/\1/p'
 }
 
 # Stripped of the epoch and the Debian package revision apt_candidate_version otherwise carries (e.g. "5:29.7.2-1~debian.13~trixie"), so this compares like for like against docker_version's plain reading rather than against dpkg's own packaging metadata.
@@ -633,7 +633,7 @@ docker_install() {
     if [[ $IS_WSL == true ]]; then
         warn "This is a WSL distribution, and docker here comes only from Docker Desktop's own WSL integration, never from installing docker-ce directly. Enable it in Docker Desktop under Settings, Resources, WSL integration, or check it from Windows with setup-wsl.ps1 -Status. Skipping the native install."
         # A skip is success only where the integration already answers, since --install/--upgrade otherwise exits 0 having neither installed docker nor found it working.
-        command -v docker > /dev/null && return 0
+        command -v docker >/dev/null && return 0
         warn "docker is not on PATH here either, so Docker Desktop's WSL integration is not enabled for this distribution yet."
         return 1
     fi
@@ -683,7 +683,7 @@ dotnet_source() {
 # SDK packages apt can see, lowest major first.
 # An empty result means no feed carries one yet.
 dotnet_sdk_packages() {
-    apt-cache search --names-only '^dotnet-sdk-[0-9]+\.[0-9]+$' 2> /dev/null | awk '{ print $1 }' | sort -V
+    apt-cache search --names-only '^dotnet-sdk-[0-9]+\.[0-9]+$' 2>/dev/null | awk '{ print $1 }' | sort -V
 }
 
 dotnet_sdk_latest() { dotnet_sdk_packages | tail -1; }
@@ -785,11 +785,11 @@ powershell_install() {
 # This applies the same ownership test as tool_unshadow to a shadowing copy.
 powershell_path_is_unowned() {
     local path="$1" status=0
-    dpkg-query -S "$path" > /dev/null 2>&1 || status=$?
+    dpkg-query -S "$path" >/dev/null 2>&1 || status=$?
     case "$status" in
-        0) return 1 ;;
-        1) return 0 ;;
-        *) die "Cannot determine dpkg ownership of $path" ;;
+    0) return 1 ;;
+    1) return 0 ;;
+    *) die "Cannot determine dpkg ownership of $path" ;;
     esac
 }
 
@@ -813,11 +813,11 @@ powershell_non_apt_paths() {
     # A relative PATH entry such as "." or "./bin" is never trusted.
     # This is the same guard used by tool_shadow_path.
     local resolved
-    resolved=$(type -P pwsh 2> /dev/null || true)
+    resolved=$(type -P pwsh 2>/dev/null || true)
     if [[ $resolved == /* ]] && powershell_path_is_unowned "$resolved"; then
         case "$resolved" in
-            /usr/local/bin/pwsh | /opt/microsoft/powershell/7/pwsh) ;;
-            *) die "Non-apt pwsh at $resolved is outside the known cleanup paths, remove it before installing powershell" ;;
+        /usr/local/bin/pwsh | /opt/microsoft/powershell/7/pwsh) ;;
+        *) die "Non-apt pwsh at $resolved is outside the known cleanup paths, remove it before installing powershell" ;;
         esac
     fi
 
@@ -846,9 +846,9 @@ tool_function() {
 # A tool installed from the distro while its upstream repository is unconfigured reads as current against the distro's own version, which is the one thing the report must not say, so it reads as unmanaged instead.
 tool_configured() {
     case "$1" in
-        gh) [[ -f "$SOURCES_DIR/github-cli.sources" ]] ;;
-        node) [[ -f "$SOURCES_DIR/nodesource.sources" ]] ;;
-        *) return 0 ;;
+    gh) [[ -f "$SOURCES_DIR/github-cli.sources" ]] ;;
+    node) [[ -f "$SOURCES_DIR/nodesource.sources" ]] ;;
+    *) return 0 ;;
     esac
 }
 
@@ -872,7 +872,7 @@ tool_status() {
         printf 'missing'
         return 0
     fi
-    if [[ $installed == "$target" ]] || dpkg --compare-versions "$installed" ge "$target" 2> /dev/null; then
+    if [[ $installed == "$target" ]] || dpkg --compare-versions "$installed" ge "$target" 2>/dev/null; then
         printf 'current'
     else
         printf 'outdated'
@@ -884,7 +884,7 @@ tool_status() {
 # "type -P" skips aliases and shell functions, which "command -v" answers for with no file behind them.
 tool_shadow_path() {
     local name="$1" resolved
-    resolved=$(type -P "$name" 2> /dev/null || true)
+    resolved=$(type -P "$name" 2>/dev/null || true)
     # A relative PATH entry (".", "./bin") makes this relative to the caller's current directory, not a real shadow.
     # What this returns gets removed by tool_unshadow, so only an absolute path is ever trusted as one.
     [[ $resolved == /* && $resolved != "$BIN_DIR/$name" ]] && printf '%s' "$resolved"
@@ -897,70 +897,70 @@ tool_note() {
     local -a missing=()
 
     case "$tool" in
-        python)
-            local -a packages=()
-            readarray -t packages < <(python_packages)
-            readarray -t missing < <(apt_missing "${packages[@]}")
+    python)
+        local -a packages=()
+        readarray -t packages < <(python_packages)
+        readarray -t missing < <(apt_missing "${packages[@]}")
+        if [[ ${#missing[@]} -gt 0 ]]; then
+            note "python" "${#missing[@]} package(s) not installed: ${missing[*]}"
+        fi
+        if [[ $WITH_OPTIONAL == false ]]; then
+            note "python" "optional set not selected: ${PYTHON_OPTIONAL[*]}"
+        fi
+        ;;
+    ripgrep)
+        local resolved
+        resolved=$(ripgrep_download_path)
+        if [[ -n $resolved ]]; then
+            note "ripgrep" "$resolved is an unowned downloaded copy and an install or upgrade removes it before apt installs Ripgrep"
+        fi
+        ;;
+    dotnet)
+        local -a sdks=()
+        readarray -t sdks < <(dotnet_sdk_packages)
+        if [[ ${#sdks[@]} -eq 0 ]]; then
+            note "dotnet" "no SDK package available, Microsoft's feed is not configured"
+        else
+            readarray -t missing < <(apt_missing "${sdks[@]}")
             if [[ ${#missing[@]} -gt 0 ]]; then
-                note "python" "${#missing[@]} package(s) not installed: ${missing[*]}"
+                note "dotnet" "SDK line(s) not installed: ${missing[*]}"
             fi
-            if [[ $WITH_OPTIONAL == false ]]; then
-                note "python" "optional set not selected: ${PYTHON_OPTIONAL[*]}"
-            fi
-            ;;
-        ripgrep)
-            local resolved
-            resolved=$(ripgrep_download_path)
-            if [[ -n $resolved ]]; then
-                note "ripgrep" "$resolved is an unowned downloaded copy and an install or upgrade removes it before apt installs Ripgrep"
-            fi
-            ;;
-        dotnet)
-            local -a sdks=()
-            readarray -t sdks < <(dotnet_sdk_packages)
-            if [[ ${#sdks[@]} -eq 0 ]]; then
-                note "dotnet" "no SDK package available, Microsoft's feed is not configured"
+        fi
+        ;;
+    jq | uv | git-restore-mtime)
+        # A copy earlier on the PATH keeps answering after this script installs a newer one, which reads as an upgrade that did not take.
+        # --upgrade removes it. --install removes it only when nothing managed exists yet, and warns instead when it leaves one in place.
+        local resolved
+        resolved=$(tool_shadow_path "$tool")
+        if [[ -n $resolved ]]; then
+            if [[ -x "$BIN_DIR/$tool" ]]; then
+                note "$tool" "$resolved comes first on the PATH and shadows the managed copy at $BIN_DIR/$tool"
             else
-                readarray -t missing < <(apt_missing "${sdks[@]}")
-                if [[ ${#missing[@]} -gt 0 ]]; then
-                    note "dotnet" "SDK line(s) not installed: ${missing[*]}"
-                fi
+                note "$tool" "$resolved is installed outside $BIN_DIR and keeps answering once the managed copy is installed"
             fi
-            ;;
-        jq | uv | git-restore-mtime)
-            # A copy earlier on the PATH keeps answering after this script installs a newer one, which reads as an upgrade that did not take.
-            # --upgrade removes it. --install removes it only when nothing managed exists yet, and warns instead when it leaves one in place.
-            local resolved
-            resolved=$(tool_shadow_path "$tool")
-            if [[ -n $resolved ]]; then
-                if [[ -x "$BIN_DIR/$tool" ]]; then
-                    note "$tool" "$resolved comes first on the PATH and shadows the managed copy at $BIN_DIR/$tool"
-                else
-                    note "$tool" "$resolved is installed outside $BIN_DIR and keeps answering once the managed copy is installed"
-                fi
-            fi
-            ;;
-        gh | node)
-            local name="github-cli"
-            if [[ $tool == "node" ]]; then
-                name="nodesource"
-            fi
-            if [[ ! -f "$SOURCES_DIR/$name.sources" ]]; then
-                note "$tool" "upstream repository not configured, the available version is the distro's"
-            fi
-            ;;
-        docker)
-            if [[ $IS_WSL == true ]]; then
-                note "docker" "this is a WSL distribution, docker here comes only from Docker Desktop's own WSL integration, never from installing docker-ce directly, so --install/--upgrade skip it"
-            fi
-            ;;
-        powershell)
-            # A host without the feed reads no candidate at all, since the distro never carries a powershell package, so the note says why rather than reading as absent.
-            if [[ ! -f "$SOURCES_DIR/microsoft-prod.sources" && ! -f "$SOURCES_DIR/microsoft-prod.list" ]]; then
-                note "powershell" "Microsoft's repository is not configured, so no package is available yet"
-            fi
-            ;;
-        *) ;;
+        fi
+        ;;
+    gh | node)
+        local name="github-cli"
+        if [[ $tool == "node" ]]; then
+            name="nodesource"
+        fi
+        if [[ ! -f "$SOURCES_DIR/$name.sources" ]]; then
+            note "$tool" "upstream repository not configured, the available version is the distro's"
+        fi
+        ;;
+    docker)
+        if [[ $IS_WSL == true ]]; then
+            note "docker" "this is a WSL distribution, docker here comes only from Docker Desktop's own WSL integration, never from installing docker-ce directly, so --install/--upgrade skip it"
+        fi
+        ;;
+    powershell)
+        # A host without the feed reads no candidate at all, since the distro never carries a powershell package, so the note says why rather than reading as absent.
+        if [[ ! -f "$SOURCES_DIR/microsoft-prod.sources" && ! -f "$SOURCES_DIR/microsoft-prod.list" ]]; then
+            note "powershell" "Microsoft's repository is not configured, so no package is available yet"
+        fi
+        ;;
+    *) ;;
     esac
 
     return 0
@@ -972,7 +972,7 @@ report() {
     # shellcheck disable=SC2059  # Format string is a constant defined above.
     printf "$format" "TOOL" "INSTALLED" "AVAILABLE" "SOURCE" "STATUS"
 
-    if ! command -v curl > /dev/null; then
+    if ! command -v curl >/dev/null; then
         note "report" "curl is not installed, so an upstream that is not an apt repository cannot be read yet"
     fi
 
@@ -985,8 +985,8 @@ report() {
             printf "$format" "$tool" "${installed:--}" "${target:--}" "apt:${REPO_PACKAGES[$tool]}" "$(tool_status "$installed" "$target")"
             continue
         fi
-        installed=$("$(tool_function "$tool" version)" 2> /dev/null || true)
-        target=$("$(tool_function "$tool" target)" 2> /dev/null || true)
+        installed=$("$(tool_function "$tool" version)" 2>/dev/null || true)
+        target=$("$(tool_function "$tool" target)" 2>/dev/null || true)
         # shellcheck disable=SC2059  # Format string is a constant defined above.
         printf "$format" "$tool" "${installed:--}" "${target:--}" \
             "$("$(tool_function "$tool" source)")" "$(tool_effective_status "$tool" "$installed" "$target")"
@@ -1008,13 +1008,13 @@ tool_unshadow() {
     local tool="$1"
     local -a names=()
     case "$tool" in
-        jq | git-restore-mtime) names=("$tool") ;;
-        ripgrep)
-            ripgrep_remove_download
-            return 0
-            ;;
-        uv) names=(uv uvx) ;;
-        *) return 0 ;;
+    jq | git-restore-mtime) names=("$tool") ;;
+    ripgrep)
+        ripgrep_remove_download
+        return 0
+        ;;
+    uv) names=(uv uvx) ;;
+    *) return 0 ;;
     esac
 
     # A loop, not one check, since PATH can stack more than one shadow ahead of $BIN_DIR.
@@ -1027,7 +1027,7 @@ tool_unshadow() {
 
             # A distro package's own file, found only when PATH puts it ahead of $BIN_DIR, which this script does not set up.
             # Removing it directly would desync dpkg's database from the filesystem, so it stays, and the fix is the PATH order.
-            if dpkg-query -S "$resolved" > /dev/null 2>&1; then
+            if dpkg-query -S "$resolved" >/dev/null 2>&1; then
                 warn "$tool: $resolved belongs to a distro package and stays, put $BIN_DIR ahead of it on PATH instead"
                 break
             fi
@@ -1061,7 +1061,7 @@ apply_tool() {
         installed=$(apt_installed_version "$package")
         target=$(apt_candidate_version "$package")
         status=$(tool_status "$installed" "$target")
-        if [[ $status == "current" || ( $MODE == "install" && $status == "outdated" ) ]]; then
+        if [[ $status == "current" || ($MODE == "install" && $status == "outdated") ]]; then
             log "$tool: $status at ${installed}, leaving it alone"
             return 0
         fi
@@ -1082,8 +1082,8 @@ apply_tool() {
         log "$tool: still shadowed on PATH, --upgrade removes it, --install leaves it to avoid downgrading what's shadowing it"
     fi
 
-    installed=$("$(tool_function "$tool" version)" 2> /dev/null || true)
-    target=$("$(tool_function "$tool" target)" 2> /dev/null || true)
+    installed=$("$(tool_function "$tool" version)" 2>/dev/null || true)
+    target=$("$(tool_function "$tool" target)" 2>/dev/null || true)
     status=$(tool_effective_status "$tool" "$installed" "$target")
 
     # A package set can be part installed while the tool that names it reads as current, so python and dotnet always carry on into the install and the mode decides what apt is asked to do.
@@ -1118,7 +1118,7 @@ apply_tool() {
     fi
 
     local now
-    now=$("$(tool_function "$tool" version)" 2> /dev/null || true)
+    now=$("$(tool_function "$tool" version)" 2>/dev/null || true)
     if [[ $now != "$installed" ]]; then
         CHANGED+=("$tool ${installed:--} -> ${now:--}")
     fi
@@ -1188,7 +1188,7 @@ load_repo_tools() {
     [[ -n $REPO ]] || return 0
     local declaration="$REPO/host-tools.json"
     [[ -f $declaration ]] || die "$REPO carries no host-tools.json"
-    command -v jq > /dev/null || die "--repo needs jq to read constrained package metadata. Install the fleet tools first, then run this command again."
+    command -v jq >/dev/null || die "--repo needs jq to read constrained package metadata. Install the fleet tools first, then run this command again."
 
     local name package manager rows key
     rows=$(jq -r '
@@ -1216,7 +1216,7 @@ load_repo_tools() {
         done
         [[ $known == false ]] || die "$name is already managed by the fleet installer and repository metadata cannot replace it"
         MANAGED_TOOLS+=("$name")
-    done <<< "$rows"
+    done <<<"$rows"
 }
 
 resolve_selection() {
@@ -1265,7 +1265,7 @@ sudo_target_user() {
 # The drop-in, scoped to one user, so every other account on this host keeps sudo's per-terminal default.
 sudo_timestamp_content() {
     local user="$1"
-    cat << EOF
+    cat <<EOF
 # Written by host-setup/linux/install-tools.sh --sudo-timestamp, and removing this file undoes it.
 # One credential cache for $user across every terminal, so a "sudo -v" in one is what a program started in another runs under.
 Defaults:$user timestamp_type=global
@@ -1276,10 +1276,10 @@ EOF
 # Every installed sudo implementation, as "sudo-path visudo-path".
 # The original sudo hides behind update-alternatives wherever sudo-rs holds the link, and it is the alternative rather than the link that names it.
 sudo_implementations() {
-    command -v update-alternatives > /dev/null || return 0
+    command -v update-alternatives >/dev/null || return 0
     local query
-    query=$(update-alternatives --query sudo 2> /dev/null) || return 0
-    awk '$1 == "Alternative:" { alt = $2 } alt != "" && $1 == "visudo" { print alt, $2 }' <<< "$query"
+    query=$(update-alternatives --query sudo 2>/dev/null) || return 0
+    awk '$1 == "Alternative:" { alt = $2 } alt != "" && $1 == "visudo" { print alt, $2 }' <<<"$query"
 }
 
 # A visudo named by a bare name resolved to a path, since a Debian host keeps /usr/sbin off an unprivileged PATH and the name alone would read there as an implementation that is not installed.
@@ -1289,7 +1289,7 @@ sudo_visudo_path() {
         printf '%s' "$name"
         return 0
     fi
-    if candidate=$(command -v "$name" 2> /dev/null); then
+    if candidate=$(command -v "$name" 2>/dev/null); then
         printf '%s' "$candidate"
         return 0
     fi
@@ -1307,7 +1307,7 @@ sudo_visudo_path() {
 sudo_parses() {
     local file="$1" checker
     checker=$(sudo_visudo_path "$2") || return 1
-    "$checker" -cqf "$file" > /dev/null 2>&1
+    "$checker" -cqf "$file" >/dev/null 2>&1
 }
 
 # What sudo itself reports as in effect, which is the only answer that accounts for the order it reads the drop-ins in.
@@ -1316,16 +1316,16 @@ sudo_timestamp_report() {
     local user="$1" defaults="" effective=""
 
     if [[ $EUID -eq 0 ]]; then
-        defaults=$(sudo -n -l -U "$user" 2> /dev/null) || defaults=""
+        defaults=$(sudo -n -l -U "$user" 2>/dev/null) || defaults=""
     else
-        defaults=$(sudo -n -l 2> /dev/null) || defaults=""
+        defaults=$(sudo -n -l 2>/dev/null) || defaults=""
     fi
     # An unreadable list and a list naming no timestamp option are different answers, and only the raw read separates them.
     if [[ -z $defaults ]]; then
         info "Could not read the settings back, so check them with \"sudo -l\" as $user"
         return 0
     fi
-    effective=$(grep -oE 'timestamp_(type|timeout)=[^, ]+' <<< "$defaults" | tr '\n' ' ') || effective=""
+    effective=$(grep -oE 'timestamp_(type|timeout)=[^, ]+' <<<"$defaults" | tr '\n' ' ') || effective=""
     effective="${effective% }"
 
     # A dry run reports the state it found rather than one this run reached, since nothing was written to reach it.
@@ -1350,8 +1350,8 @@ sudo_timestamp_user_re() {
     for ((i = 0; i < ${#user}; i++)); do
         c="${user:i:1}"
         case "$c" in
-            '.' | '[' | $'\\' | '^' | '$' | '(' | ')' | '*' | '+' | '?' | '{' | '}' | '|') out+="\\$c" ;;
-            *) out+="$c" ;;
+        '.' | '[' | $'\\' | '^' | '$' | '(' | ')' | '*' | '+' | '?' | '{' | '}' | '|') out+="\\$c" ;;
+        *) out+="$c" ;;
         esac
     done
     printf '%s' "$out"
@@ -1365,7 +1365,7 @@ sudo_timestamp_file_is_pure() {
     user_re=$(sudo_timestamp_user_re "$user")
     # $ here is bash's own end-of-string, and the double quotes strip a backslash before it, so grep receives a plain $ (ERE's end-of-line anchor), never a literal one.
     allow="^[[:space:]]*(#.*)?$|^[[:space:]]*Defaults:${user_re}[[:space:]]+timestamp_(type|timeout)=[^,[:space:]]+(,[[:space:]]*timestamp_(type|timeout)=[^,[:space:]]+)*[[:space:]]*$"
-    "${SUDO[@]}" grep -vE "$allow" "$file" > /dev/null 2>&1 && status=0 || status=$?
+    "${SUDO[@]}" grep -vE "$allow" "$file" >/dev/null 2>&1 && status=0 || status=$?
     # Exit 1 means every line matched the allowlist (pure), 0 means one did not (impure), and anything else is a read failure this cannot tell apart from either, so it is never treated as pure.
     [[ $status -eq 1 ]]
 }
@@ -1374,12 +1374,12 @@ sudo_timestamp_file_is_pure() {
 configure_sudo_timestamp() {
     local user staged
     user=$(sudo_target_user)
-    id -u "$user" > /dev/null 2>&1 || die "This host has no account named \"$user\""
+    id -u "$user" >/dev/null 2>&1 || die "This host has no account named \"$user\""
 
     log "Sudo timestamp: one credential cache for $user across every terminal, valid $SUDO_TIMESTAMP_TIMEOUT minutes"
 
     staged="$TMP_DIR/sudo-timestamp"
-    sudo_timestamp_content "$user" > "$staged"
+    sudo_timestamp_content "$user" >"$staged"
 
     # The implementation already in place is preferred, so a host carrying the original sudo changes nothing but the drop-in.
     local switch_to="" switch_checker="" alternative checker
@@ -1397,24 +1397,24 @@ configure_sudo_timestamp() {
     fi
 
     # A parse error in any file sudo reads makes every sudo on the host fail, so the set is proved to parse before this adds to it.
-    "${SUDO[@]}" visudo -cq > /dev/null 2>&1 ||
+    "${SUDO[@]}" visudo -cq >/dev/null 2>&1 ||
         die "This host's sudoers does not parse as it stands, so fix that before adding to it (\"visudo -c\" names the file)"
 
     # An implementation this run would switch to has to parse the set as well, since switching to one that cannot is what locks every user out.
     if [[ -n $switch_checker ]]; then
-        "${SUDO[@]}" "$switch_checker" -cq > /dev/null 2>&1 ||
+        "${SUDO[@]}" "$switch_checker" -cq >/dev/null 2>&1 ||
             die "$switch_to does not parse this host's sudoers, so switching to it would lock every user out. This host is unchanged."
     fi
 
     local own_current=false
-    "${SUDO[@]}" cmp -s "$staged" "$SUDOERS_FILE" 2> /dev/null && own_current=true
+    "${SUDO[@]}" cmp -s "$staged" "$SUDOERS_FILE" 2>/dev/null && own_current=true
 
     # Another file setting either option is named rather than merged into, since which one wins is the order sudo reads them in and not something this can decide.
     local elsewhere
     # A name holding a dot or ending in a tilde is one sudo skips, this run's own staged file included, so a setting in it is an override sudo never reads.
     elsewhere=$("${SUDO[@]}" grep -rnsE '^[[:space:]]*Defaults.*timestamp_(type|timeout)' \
         --exclude='*.*' --exclude='*~' --exclude="${SUDOERS_FILE##*/}" \
-        /etc/sudoers /etc/sudoers.d 2> /dev/null) || elsewhere=""
+        /etc/sudoers /etc/sudoers.d 2>/dev/null) || elsewhere=""
 
     # Only this user's own entry is ever a delete candidate; a different user's entry, or one with no user named at all, changes something beyond what this run was asked to change, so it is reported and left alone.
     local -a delete_files=() unsafe_files=()
@@ -1429,7 +1429,7 @@ configure_sudo_timestamp() {
             else
                 unsafe_files+=("$candidate")
             fi
-        done < <(grep -E "Defaults:${user_re}[[:space:]]+.*timestamp_(type|timeout)=" <<< "$elsewhere" | awk -F: '{print $1}' | sort -u)
+        done < <(grep -E "Defaults:${user_re}[[:space:]]+.*timestamp_(type|timeout)=" <<<"$elsewhere" | awk -F: '{print $1}' | sort -u)
     fi
 
     # A standing unsafe file still reaches the die below even when this run's own file needs no change, since silently returning here would report success over a same-user conflict this cannot resolve on its own.
@@ -1444,7 +1444,7 @@ configure_sudo_timestamp() {
         local line
         while read -r line; do
             info "$line"
-        done <<< "$elsewhere"
+        done <<<"$elsewhere"
     fi
 
     if [[ ${#unsafe_files[@]} -gt 0 ]]; then
@@ -1474,7 +1474,7 @@ configure_sudo_timestamp() {
         local pending="${SUDOERS_FILE%/*}/.${SUDOERS_FILE##*/}.pending"
         run_root install -m 0440 -o root -g root "$staged" "$pending"
         if [[ $DRY_RUN == false ]]; then
-            "${SUDO[@]}" visudo -cqf "$pending" > /dev/null 2>&1 || {
+            "${SUDO[@]}" visudo -cqf "$pending" >/dev/null 2>&1 || {
                 run_root rm -f "$pending"
                 die "The staged drop-in does not parse where sudo would read it, so this host is unchanged"
             }
@@ -1494,7 +1494,7 @@ configure_sudo_timestamp() {
         return 0
     fi
 
-    "${SUDO[@]}" visudo -cq > /dev/null 2>&1 ||
+    "${SUDO[@]}" visudo -cq >/dev/null 2>&1 ||
         die "sudoers stopped parsing once this run's changes landed. Remove $SUDOERS_FILE from a root shell to restore sudo, and recreate ${delete_files[*]:-any file this run deleted} if it turns out to have been needed."
 
     [[ $own_current == false ]] && log "Wrote $SUDOERS_FILE"
@@ -1508,27 +1508,27 @@ parse_args() {
 
     while [[ $# -gt 0 ]]; do
         case "$1" in
-            -r | --report) actions+=(report) ;;
-            -i | --install) actions+=(install) ;;
-            -u | --upgrade) actions+=(upgrade) ;;
-            -l | --list) actions+=(list) ;;
-            --sudo-timestamp) actions+=(sudo-timestamp) ;;
-            -n | --dry-run) DRY_RUN=true ;;
-            -y | --yes) ASSUME_YES=true ;;
-            -o | --optional) WITH_OPTIONAL=true ;;
-            --repo)
-                [[ $# -gt 1 ]] || die "--repo needs a path"
-                REPO="$2"
-                shift
-                ;;
-            -h | --help)
-                usage
-                exit 0
-                ;;
-            -*) die "Unknown option \"$1\", --help lists the options" ;;
-            *)
-                REQUESTED+=("$1")
-                ;;
+        -r | --report) actions+=(report) ;;
+        -i | --install) actions+=(install) ;;
+        -u | --upgrade) actions+=(upgrade) ;;
+        -l | --list) actions+=(list) ;;
+        --sudo-timestamp) actions+=(sudo-timestamp) ;;
+        -n | --dry-run) DRY_RUN=true ;;
+        -y | --yes) ASSUME_YES=true ;;
+        -o | --optional) WITH_OPTIONAL=true ;;
+        --repo)
+            [[ $# -gt 1 ]] || die "--repo needs a path"
+            REPO="$2"
+            shift
+            ;;
+        -h | --help)
+            usage
+            exit 0
+            ;;
+        -*) die "Unknown option \"$1\", --help lists the options" ;;
+        *)
+            REQUESTED+=("$1")
+            ;;
         esac
         shift
     done
@@ -1562,9 +1562,9 @@ main() {
     detect_host
 
     case "$MODE" in
-        report) report ;;
-        install | upgrade) apply ;;
-        sudo-timestamp) configure_sudo_timestamp ;;
+    report) report ;;
+    install | upgrade) apply ;;
+    sudo-timestamp) configure_sudo_timestamp ;;
     esac
 }
 
