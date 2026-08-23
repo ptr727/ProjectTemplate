@@ -69,21 +69,29 @@ skill covers all of it, scoped down by what the maintainer actually asks for.
    this session, per skill-lifecycle, every other machine still refreshes on its own next run or
    `docs/host-setup.md` "Fleet Skills Install" cadence.
 6. When the chosen scope includes a release, first check the registry's `releaseTrigger` for this
-   repo in `registry/repos.json`. Report that no release is configured and stop without
-   dispatching when it reads `none`. Otherwise `gh workflow run publish-release.yml --ref main
-   --repo owner/repo`, or `--ref develop` only when the maintainer explicitly asked for a
-   prerelease dispatch instead.
-7. Capture the dispatched run's identity right after dispatching it, `gh run list --repo
-   owner/repo --workflow publish-release.yml --branch main --limit 1 --json databaseId,createdAt`
-   (or `--branch develop` for a prerelease dispatch), matched against the dispatch time so a
-   concurrent unrelated run is never mistaken for this one. Poll that specific run id to
-   completion in one bounded background wait with an explicit timeout, `timeout <seconds> gh run
-   watch <run-id> --repo owner/repo --exit-status` on a host with GNU `timeout`, or the
-   equivalent bounded-wait mechanism on a host without it (macOS without coreutils, native
-   Windows), and report a timeout separately from a completed run's own conclusion, the tag or
-   version it produced. A run that fails, times out, or never starts is reported, never silently
-   retried.
-8. Run the repo-worktree post-merge cleanup, fetch and prune, fast-forward the base clone to
+   repo in `registry/repos.json`, three shapes: report that no release is configured and go to
+   step 8 without dispatching when it reads `none`. Report that the merge itself is what triggers
+   the release and go to step 8 without dispatching, watching for the merge-triggered run instead
+   of firing a redundant one, when it reads `publish-on-merge`. Otherwise (`two-phase` or
+   `dispatch-only`) dispatch, `gh workflow run publish-release.yml --ref main --repo owner/repo`,
+   or `--ref develop` only when the maintainer explicitly asked for a prerelease dispatch instead.
+7. Right after dispatching, correlate the specific run this dispatch created rather than assuming
+   the newest one is it, `gh run list --repo owner/repo --workflow publish-release.yml --branch
+   main --event workflow_dispatch --json databaseId,createdAt` (or `--branch develop` for a
+   prerelease dispatch) queried for multiple candidates, matched by `createdAt` against the
+   dispatch time. Poll only when exactly one candidate matches, report and stop rather than
+   guessing when zero or more than one do, a concurrent run of a different event on the same
+   branch must never be mistaken for this dispatch. Poll that one run id to completion in one
+   bounded background wait with an explicit timeout, `timeout <seconds> gh run watch <run-id>
+   --repo owner/repo --exit-status` on a host with GNU `timeout`, or the equivalent bounded-wait
+   mechanism on a host without it (macOS without coreutils, native Windows), and report a timeout
+   separately from a completed run's own conclusion, the tag or version it produced. A run that
+   fails, times out, or never starts is reported, never silently retried.
+8. Run the repo-worktree post-merge cleanup regardless of how steps 5 through 7 ended, no release
+   configured, a merge-triggered release, a dispatch failure, an ambiguous run match, a timeout,
+   or a failed run all still reach this step, the merge in step 3 already landed by then and
+   cleanup is never conditioned on the release outcome. Fetch and prune, fast-forward the base
+   clone to
    `develop`, remove any worktree the completed task leaves behind.
 
 ## Mechanics Live Elsewhere
