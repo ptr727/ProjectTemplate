@@ -143,10 +143,13 @@ skill covers all of it, scoped down by what the maintainer actually asks for.
      count exit non-zero rather than returning empty with success, an ambiguous or missing match
      must fail loud, not read as an empty value still safe to act on: `gh pr list --head
      "<branch>" --state merged --repo owner/repo --json
-     number,baseRefName,mergedAt,headRefOid,headRepositoryOwner --jq 'if length == 1 then .[0]
-     else error("expected exactly one merged PR for this head, got \(length)") end'`. Confirm
-     `headRepositoryOwner.login` names this same repo's owner, a fork's PR against the same base
-     can carry an identical head branch name and must never pass this check. Confirm `baseRefName`
+     number,baseRefName,mergedAt,headRefOid,headRefName,headRepository --jq 'if length == 1 then
+     .[0] else error("expected exactly one merged PR for this head, got \(length)") end'`.
+     `--head` matches by prefix rather than exactly, `gh pr list --help` shows `--head "typo"` as
+     its own example, so confirm `headRefName` equals `<branch>` exactly before trusting anything
+     else this query returned. Confirm `headRepository` is non-null and its `nameWithOwner` equals
+     `owner/repo`, the owner alone is not enough, a same-owner PR against an identically named
+     branch in a different repository must never pass this check either. Confirm `baseRefName`
      is `develop` (a different merged pull request can share the same head branch name against a
      different base, and that is never this sweep's target) and `mergedAt` is set. Compare tips
      only where a remote branch actually exists,
@@ -155,9 +158,12 @@ skill covers all of it, scoped down by what the maintainer actually asks for.
      straight to the local-tip check below and never attempt the remote delete a second time.
      Where the remote branch does exist, its tip must match that exact pull request's `headRefOid`
      before either delete proceeds, proving nothing landed on it since. Either way, the local
-     branch tip (`git rev-parse -- "<branch>"`) must also match `headRefOid`. Every branch name
-     below is a quoted argument for the same reason, a valid ref can start with `-` or carry a
-     shell metacharacter, and `--` marks the end of options wherever a command supports it.
+     branch tip (`git rev-parse -- "<branch>"`) must also match `headRefOid`. Every branch or
+     worktree-path placeholder below is a quoted argument the caller substitutes the real value
+     into, never text built into an executed shell command string, a valid ref can start with `-`
+     or carry a shell metacharacter, and quoting alone does not stop `$()` or backtick command
+     substitution the way passing a genuinely separate subprocess argument does. `--` marks the
+     end of options wherever a command supports it.
      `git merge-base --is-ancestor <branch> develop` must never be used for either tip check, a
      squash merge (drive-pr's own merge method) never makes the feature tip a literal ancestor of
      `develop`, so the check reports every already-finished branch as unmerged. Only once GitHub

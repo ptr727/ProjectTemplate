@@ -69,9 +69,12 @@ promotion PR once the fix lands, is the early exit this skill exists to prevent.
    the worktree, delete the now-merged local task branch, then verify before deleting the remote
    one, `git ls-remote --heads origin -- "<branch>"` matches the `headRefOid` captured above, stop
    and report a mismatch rather than deleting, someone could have pushed to the branch after the
-   merge, or the name could have been reused. Quote the branch name in both commands, a valid ref
-   can start with `-` or carry a shell metacharacter. Only once it matches, `git push origin
-   --delete -- "<branch>"`. Never `--force-with-lease` here, git-commit-conventions forbids it
+   merge, or the name could have been reused. `<branch>` is a quoted argument the caller
+   substitutes the real value into, never text built into an executed shell command string, a
+   valid ref can start with `-` or carry a shell metacharacter, and quoting alone does not stop
+   `$()` or backtick command substitution the way a genuinely separate subprocess argument does.
+   Only once it matches, `git push origin --delete -- "<branch>"`. Never `--force-with-lease`
+   here, git-commit-conventions forbids it
    unconditionally, this plain verify-then-delete is the safety gate, not a compare-and-swap at
    delete time. The
    repo's auto-delete-head-branches setting is kept off fleet-wide (to protect `develop` and
