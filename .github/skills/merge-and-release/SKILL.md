@@ -59,11 +59,14 @@ skill covers all of it, scoped down by what the maintainer actually asks for.
    head is `develop`.
 4. Confirm the merge landed, `mergedAt` set, `main`'s tip matching the merge commit.
 5. In the hub, when the chosen scope includes a release, first bring this checkout to the merged
-   content: `git fetch origin main`, then `git checkout -B main origin/main` to force the local
-   `main` to the fetched tip regardless of what it pointed to before. `skills_install.py` stamps
-   and installs from whatever this checkout's HEAD already is, so a plain `git checkout main`
-   would leave a local `main` that already existed pointing at its old, pre-fetch commit, and
-   skip the refresh silently. Only then run `python3 scripts/skills_install.py
+   content without discarding anything: `git fetch origin main`, then `git switch main` (or
+   `git switch -c main origin/main` the first time this checkout carries no local `main` at all),
+   then `git merge --ff-only origin/main`. `switch` refuses a dirty working tree or a `main`
+   checked out in another worktree, and `--ff-only` refuses anything but a clean fast-forward, so
+   this stops and reports rather than force-discarding local content, per Repository Boundaries
+   and Write Safety. `skills_install.py` stamps and installs from whatever this checkout's HEAD
+   already is, so running it against a stale, unrefreshed local `main` skips the refresh silently.
+   Only then run `python3 scripts/skills_install.py
    --report`, then `python3 scripts/skills_install.py` to install, and confirm `--report` now
    reads current, always, not only when separately asked. This refreshes only the machine running
    this session, per skill-lifecycle, every other machine still refreshes on its own next run or
