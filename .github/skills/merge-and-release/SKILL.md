@@ -79,9 +79,13 @@ skill covers all of it, scoped down by what the maintainer actually asks for.
    time. `gh run list` can momentarily omit a just-created run, so a single query reporting zero
    candidates is not yet "never started". Poll the list itself, within a bounded interval, until
    exactly one candidate matches. A concurrent run of a different event on the same branch must
-   never be mistaken for this one, more than one candidate is as inconclusive as zero. Report and
-   stop rather than guessing once the interval elapses with zero or more than one candidate still
-   matching. Only once exactly one candidate is confirmed, poll that one run id to completion in
+   never be mistaken for this one, more than one candidate is as inconclusive as zero. A run whose
+   `headSha` does not match the expected tip at all, rather than simply being absent, means the
+   dispatched ref moved between step 4's confirmation and the dispatch itself, report that
+   distinctly, the ref changed mid-dispatch, rather than folding it into an ordinary absent-run
+   timeout. Report and stop rather than guessing once the interval elapses with zero or more than
+   one candidate still matching. Only once exactly one candidate is confirmed, poll that one run
+   id to completion in
    one further bounded background wait with an explicit timeout, `timeout <seconds> gh run
    watch <run-id> --repo owner/repo --exit-status` on a host with GNU `timeout`, or the equivalent
    bounded-wait mechanism on a host without it (macOS without coreutils, native Windows), and
@@ -112,8 +116,10 @@ skill covers all of it, scoped down by what the maintainer actually asks for.
      task's feature branches, `git branch -vv` for any local feature branch, `git ls-remote
      --heads origin` for any matching remote feature branch. For each, verify it finished by
      reading GitHub's own state, `gh pr list --head <branch> --state merged --repo owner/repo`
-     (or `gh pr view <branch> --repo owner/repo`), confirming `mergedAt` is set and the branch's
-     current remote tip matches that pull request's head SHA, proving nothing landed on it since.
+     (or `gh pr view <branch> --repo owner/repo`), confirming `baseRefName` is `develop` (a
+     different merged pull request can share the same head branch name against a different base,
+     and that is never this sweep's target), `mergedAt` is set, and the branch's current remote
+     tip matches that exact pull request's head SHA, proving nothing landed on it since.
      `git merge-base --is-ancestor <branch> develop` must never be used for this, a squash merge
      (drive-pr's own merge method) never makes the feature tip a literal ancestor of `develop`, so
      the check reports every already-finished branch as unmerged. Only once GitHub confirms it,
@@ -122,9 +128,13 @@ skill covers all of it, scoped down by what the maintainer actually asks for.
      has the identical squash blindness as `git merge-base --is-ancestor` and refuses too, so use
      `git branch -D <exact-branch>` here, safe only because the GitHub-state check just proved
      that exact branch finished, the narrow post-squash exception git-commit-conventions
-     describes, never applied to an unverified branch. Then `git push origin --delete <branch>`
-     for the remote side. Never apply this sweep to `develop` or `main` themselves, only to
-     feature branches a drive-pr loop created.
+     describes, never applied to an unverified branch. Then delete the remote side the same
+     compare-and-swap way drive-pr's own cleanup does, gated on the head SHA just confirmed so a
+     stray push landing on it in the gap is never silently discarded, `git push
+     --force-with-lease=refs/heads/<branch>:<merged-head-sha> origin :refs/heads/<branch>`, a ref
+     deletion gated on its current tip, not a history rewrite, so it is not the case
+     git-commit-conventions' no-force-push rule targets. Never apply this sweep to `develop` or
+     `main` themselves, only to feature branches a drive-pr loop created.
 
 ## Mechanics Live Elsewhere
 

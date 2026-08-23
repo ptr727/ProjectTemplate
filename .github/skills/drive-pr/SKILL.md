@@ -64,10 +64,14 @@ promotion PR once the fix lands, is the early exit this skill exists to prevent.
    worktree to the base branch to delete it, which fails when `develop` is already checked out
    somewhere else, the ordinary case in this layout. Instead run repo-worktree's post-merge
    cleanup from the base clone: remove the worktree, delete the now-merged local task branch, then
-   delete the remote one explicitly, `git push origin --delete <branch>`, since the repo's
-   auto-delete-head-branches setting is kept off fleet-wide (to protect `develop` and `main` from
-   it, GitHub has no per-branch exception), so nothing deletes an ordinary feature branch
-   automatically. Stop here and report the merged PR when the target is develop only.
+   delete the remote one explicitly, compare-and-swap gated on the head SHA `gh pr merge` just
+   reported so a stray push landing on it in the gap is never silently discarded, `git push
+   --force-with-lease=refs/heads/<branch>:<merged-head-sha> origin :refs/heads/<branch>`, a ref
+   deletion gated on its current tip, not a history rewrite, so it is not the case
+   git-commit-conventions' no-force-push rule targets. The repo's auto-delete-head-branches
+   setting is kept off fleet-wide (to protect `develop` and `main` from it, GitHub has no
+   per-branch exception), so nothing deletes an ordinary feature branch automatically. Stop here
+   and report the merged PR when the target is develop only.
 5. Open the develop -> main promotion PR if it does not exist yet, or find the existing one.
 6. Drive its review loop the same way. A finding that needs a code change never gets pushed to
    the promotion PR directly, its head is develop, so land the fix as a fresh pass through steps
