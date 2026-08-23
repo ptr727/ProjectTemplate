@@ -69,19 +69,21 @@ skill covers all of it, scoped down by what the maintainer actually asks for.
    this session, per skill-lifecycle, every other machine still refreshes on its own next run or
    `docs/host-setup.md` "Fleet Skills Install" cadence.
 6. When the chosen scope includes a release, first check the registry's `releaseTrigger` for this
-   repo in `registry/repos.json`, three shapes: report that no release is configured and go to
-   step 8 without dispatching when it reads `none`. Report that the merge itself is what triggers
-   the release and go to step 8 without dispatching, watching for the merge-triggered run instead
-   of firing a redundant one, when it reads `publish-on-merge`. Otherwise (`two-phase` or
-   `dispatch-only`) dispatch, `gh workflow run publish-release.yml --ref main --repo owner/repo`,
-   or `--ref develop` only when the maintainer explicitly asked for a prerelease dispatch instead.
-7. Right after dispatching, correlate the specific run this dispatch created rather than assuming
-   the newest one is it, `gh run list --repo owner/repo --workflow publish-release.yml --branch
-   main --event workflow_dispatch --json databaseId,createdAt` (or `--branch develop` for a
-   prerelease dispatch) queried for multiple candidates, matched by `createdAt` against the
-   dispatch time. Poll only when exactly one candidate matches, report and stop rather than
-   guessing when zero or more than one do, a concurrent run of a different event on the same
-   branch must never be mistaken for this dispatch. Poll that one run id to completion in one
+   repo in `registry/repos.json`, three shapes. Report that no release is configured and go to
+   step 8 without dispatching or watching anything when it reads `none`. For `publish-on-merge`,
+   the merge in step 3 is itself the trigger, no dispatch is needed, note that and go to step 7 to
+   watch the run it produced. Otherwise (`two-phase` or `dispatch-only`), dispatch, `gh workflow
+   run publish-release.yml --ref main --repo owner/repo`, or `--ref develop` only when the
+   maintainer explicitly asked for a prerelease dispatch instead, then go to step 7.
+7. Correlate the specific run this step's trigger produced rather than assuming the newest one is
+   it. After an explicit dispatch, `gh run list --repo owner/repo --workflow
+   publish-release.yml --branch main --event workflow_dispatch --json databaseId,createdAt` (or
+   `--branch develop` for a prerelease dispatch), matched by `createdAt` against the dispatch
+   time. For a `publish-on-merge` repo, the same query with `--event push` instead, matched by
+   `createdAt` against the step 3 merge time. Poll only when exactly one candidate matches, report
+   and stop rather than guessing when zero or more than one do, a concurrent run of a different
+   event on the same branch must never be mistaken for this one. Poll that one run id to
+   completion in one
    bounded background wait with an explicit timeout, `timeout <seconds> gh run watch <run-id>
    --repo owner/repo --exit-status` on a host with GNU `timeout`, or the equivalent bounded-wait
    mechanism on a host without it (macOS without coreutils, native Windows), and report a timeout
