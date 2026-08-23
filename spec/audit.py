@@ -1541,10 +1541,9 @@ def check_interface(path, contract, text):
             block = _code_view(jobs[job])
             for t in toks:
                 if t in block:
-                    # Generic, not tied to any one contract's reason: forbidTokensInJob now guards
-                    # more than the github-release seam, and a hardcoded reason here would mislead
-                    # a reader of an unrelated contract. intentRef on the file's own entry routes
-                    # to the actual context.
+                    # Generic rather than tied to one contract's reason.
+                    # forbidTokensInJob now guards more than the github-release seam.
+                    # intentRef on the file's own entry routes a reader to the actual context.
                     findings.append(
                         ("DRIFT", f"interface: {path} job '{job}' uses forbidden '{t}'")
                     )
@@ -2695,9 +2694,9 @@ def _selftest():
         "requireTokensInJob": {
             "deploy": [
                 "deploy-site-task.yml",
-                # Anchored to the with: block specifically, not just 6-space indent (a secret
-                # named "environment" would also land there). The task declares this input
-                # required, and a caller missing it fails at dispatch, not at audit time.
+                # Anchored to the with: block specifically, not just 6-space indent.
+                # A secret named "environment" would also land at that indent otherwise.
+                # The task declares this input required, and a missing one fails at dispatch, not at audit time.
                 "with:\n      environment:",
                 "contents: read",
                 "DEPLOY_SSH_PRIVATE_KEY",
@@ -2742,9 +2741,8 @@ def _selftest():
         ),
         (
             "deploy-site.yml caller stub with environment: under the wrong mapping still reports missing",
-            # A same-indented environment: key under secrets: (a secret oddly named "environment",
-            # value left generic so it does not incidentally satisfy the DEPLOY_SSH_PRIVATE_KEY
-            # token) must not satisfy the with:-anchored requirement on its own.
+            # A same-indented environment: key under secrets: must not satisfy the with:-anchored requirement on its own.
+            # The oddly-named secret's value is left generic so it does not incidentally satisfy the DEPLOY_SSH_PRIVATE_KEY token.
             deploy_stub.replace(
                 "    with:\n      environment: ${{ inputs.environment }}\n",
                 "    secrets:\n      environment: ${{ secrets.SOME_OTHER_SECRET }}\n",
