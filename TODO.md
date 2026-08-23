@@ -393,17 +393,17 @@ Two loaders exist so a copy-paste snippet takes a stock OS install to a configur
   - **Checked** - Branch `feature/windows-bootstrap-loader` on 2026-08-13, adding this loader for the first time. It has run under `-DryRun` and against `PSScriptAnalyzer` on a dev machine that already carries `pwsh`, `winget`, and most managed tools, which is signal on the script's internal consistency and none at all on whether it survives a host it has not touched.
   - **Open** - Same as the Linux entry: which images, who runs the pass, and how a finding routes back.
 
-### Blog's `.gitattributes` Diverges From the Fleet's `text=auto` Pattern
+### Blog's `.gitattributes` Diverges from the Fleet's `text=auto` Pattern
 
 Blog carries `* -text` plus explicit named `eol=lf` pins plus a dedicated rotted-pin gate, `checks/check-eol-pins.py`, instead of the fleet default `* text=auto eol=lf`. Whether to accept that as a second pattern, or ask Blog to converge, is the hub's call rather than the reporting session's.
 
-**State** `decision`. **Touches** `.agents/skills/comment-and-doc-style/references/line-endings.md` if accepted as a pattern, or the registry's `driftNote` shape if recorded as Blog's own deviation instead. **Cost** one hub edit either way, no code change.
+**State** `decision`. **Touches** [`.agents/skills/comment-and-doc-style/references/line-endings.md`][line-endings-ref] if accepted as a pattern, or the registry's `driftNote` shape if recorded as Blog's own deviation instead. **Cost** one hub edit either way, no code change.
 
 - **Decide whether `-text` plus explicit named pins plus a rotted-pin gate is an accepted alternative to `text=auto eol=lf` for a repo with heavy binary content.**
   - **Blocked by** - Nothing.
   - **Issue** - [#931][issue-931].
-  - **Checked** - Not measured by this session. Per the issue, Blog carries 566 MB of binary media and a dedicated pin-plus-audit gate run on every pull request.
-  - **Settled** - Adopting `text=auto eol=lf` and dropping the pin list is ruled out. `scripts/repo_gate.py`'s `eol-coverage` check (from #634) asserts that representative paths and tracked shebang files resolve to `lf` via `git check-attr`. Verified empirically: under a bare `* text=auto eol=lf` wildcard with no other pins, every path resolves to `lf` this way. The check can never fail on a missing per-file pin then, the exact defect class it exists to catch.
+  - **Checked** - Not measured against Blog's own commits by this session. Per the issue, Blog carries 566 MB of binary media and a dedicated pin-plus-audit gate run on every pull request. Verified against `.github/actions/repo-gate/repo_gate.py`'s `check_eol_coverage` (lines 276-334) and a scratch git repository, on 2026-08-22. A bare `* text=auto eol=lf` wildcard with no other pins fails on `*.bat`/`*.cmd`, since they resolve to `lf` rather than the required `crlf`. Adding the two exception pins every repo needs regardless of Blog's own choice resolves every other representative path to `lf`. Every tracked shebang file resolves to `lf` the same way, with no per-file pin at all.
+  - **Settled** - Adopting `text=auto eol=lf` and dropping the pin list is ruled out anyway. Once the two baseline `*.bat`/`*.cmd` pins are in place, `eol-coverage`'s remaining `lf` checks (from #634) can never fail on a missing per-file pin. That is the exact defect class they exist to catch.
   - **Open** - Documenting the `-text` plus pins plus gate shape in `line-endings.md` as an accepted alternative, versus recording it as Blog's own `driftNote`. The issue's follow-up comment leans toward documenting it, since `eol-coverage` already rewards this shape.
   - **Open** - Whether `scripts/repo_gate.py --check eol-coverage` runs in Blog's own CI, or only on demand from a hub checkout. Blog's `check-eol-pins.py` already runs every pull request, so the fleet may carry this logic at two fidelities.
 
@@ -562,6 +562,7 @@ Regenerate [reports/divergences.md][divergences-report] before using it as the w
 [host-setup-doc]: ./docs/host-setup.md
 [host-setup-windows]: ./host-setup/windows/
 [install-tools]: ./host-setup/linux/install-tools.sh
+[line-endings-ref]: ./.agents/skills/comment-and-doc-style/references/line-endings.md
 [markdownlint]: ./.markdownlint-cli2.jsonc
 [matrix]: ./reports/conformance-matrix.md
 [operations]: ./OPERATIONS.md
