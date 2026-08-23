@@ -162,10 +162,11 @@ skill covers all of it, scoped down by what the maintainer actually asks for.
      Where the remote branch does exist, its tip must match that exact pull request's `headRefOid`
      before either delete proceeds, proving nothing landed on it since. Either way, the local
      branch tip (`git rev-parse -- "<branch>"`) must also match `headRefOid`. Every branch or
-     worktree-path placeholder below is a quoted argument the caller substitutes the real value
-     into, never text built into an executed shell command string, a valid ref can start with `-`
-     or carry a shell metacharacter, and quoting alone does not stop `$()` or backtick command
-     substitution the way passing a genuinely separate subprocess argument does. `--` marks the
+     worktree-path placeholder below is the real value, substituted as its own quoted argument
+     (a shell variable expansion such as `"$branch"`, or an argv element), never handed to `eval`
+     or `sh -c` for a second round of shell parsing, the only way an embedded `$()` or backtick
+     would actually run. A valid ref can start with `-` or carry a shell metacharacter, which is
+     why it stays quoted regardless. `--` marks the
      end of options wherever a command supports it.
      `git merge-base --is-ancestor <branch> develop` must never be used for either tip check, a
      squash merge (drive-pr's own merge method) never makes the feature tip a literal ancestor of
