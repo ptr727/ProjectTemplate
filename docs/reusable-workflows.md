@@ -363,7 +363,7 @@ A repo that vendors a theme or imports content it does not author narrows the Li
         !themes/*/**
 ```
 
-`validate-task.yml` appends each line after `**/*.md` in the Lint Markdown step's own `globs:` block. A caller only ever narrows the default this way, never restates or replaces it.
+`validate-task.yml` appends each line after `**/*.md` in the Lint Markdown step's own `globs:` block, unvalidated. A negated glob excludes, the intended use, but a non-negated one adds to what is linted rather than narrowing it.
 
 ## Adopting the Pure Functions
 

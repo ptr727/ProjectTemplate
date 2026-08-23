@@ -8,10 +8,9 @@ name: Validate task
 on:
   workflow_call:
     inputs:
-      # Appended after '**/*.md' rather than replacing it, so a caller only ever narrows the default rather than restating it.
-      # A repo that vendors a theme or imports content it does not author excludes that tree here instead of failing the gate on prose it cannot fix.
+      # Appended after '**/*.md', not validated: a negated glob excludes, a non-negated one adds to what is linted.
       markdown-exclude-globs:
-        description: Extra globs for the Lint Markdown step, one per line (for example '!content/**'), appended after '**/*.md'.
+        description: Negated globs to exclude, one per line (for example '!content/**'), appended after '**/*.md'. A non-negated line adds to what is linted rather than narrowing it.
         required: false
         type: string
         default: ''
