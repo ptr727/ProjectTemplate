@@ -195,7 +195,7 @@ The hosted gates, release chain, Docker core, and type-specific tasks are implem
   - **Checked** - Not measured. Raised by the maintainer on 2026-08-15 while reviewing the Docker family design, and the first action is a read of the five Dockerfiles.
   - **Open** - Whether the shape is a `CODESTYLE.md` section, a `docker` type check, or both.
 
-- **Give `deploy-site-task.yml`'s hook invocations a secret-forwarding path.** Only GitHub Environment variables cross into a hook invocation today (`SITE_BASE_URL`, `DEPLOY_SSH_USER`, `DEPLOY_SSH_HOST`), and Blog's `verify` mode needs a secret pair for its staging auth gate, which nothing carries there.
+- **Give `deploy-site-task.yml`'s hook invocations a secret-forwarding path.** Only GitHub Environment variables cross into a hook invocation today (`SITE_BASE_URL`, `DEPLOY_SSH_USER`, `DEPLOY_SSH_HOST`). Blog's `verify` mode needs a secret pair for its staging auth gate, and no hook invocation receives it.
   - **Blocked by** - Nothing.
   - **Issue** - [#929][issue-929].
   - **Checked** - `develop` at `fc489dd` on 2026-08-22, against `deploy-site-task.yml`'s three hook invocations and Blog's `checks/check-live-urls.sh`.
