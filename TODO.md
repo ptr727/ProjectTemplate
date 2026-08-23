@@ -397,13 +397,13 @@ Two loaders exist so a copy-paste snippet takes a stock OS install to a configur
 
 Blog carries `* -text` plus explicit named `eol=lf` pins plus a dedicated rotted-pin gate, `checks/check-eol-pins.py`, instead of the fleet default `* text=auto eol=lf`. Whether to accept that as a second pattern, or ask Blog to converge, is the hub's call rather than the reporting session's.
 
-**State** `decision`. **Touches** `comment-and-doc-style/references/line-endings.md` if accepted as a pattern, or the registry's `driftNote` shape if recorded as Blog's own deviation instead. **Cost** one hub edit either way, no code change.
+**State** `decision`. **Touches** `.agents/skills/comment-and-doc-style/references/line-endings.md` if accepted as a pattern, or the registry's `driftNote` shape if recorded as Blog's own deviation instead. **Cost** one hub edit either way, no code change.
 
 - **Decide whether `-text` plus explicit named pins plus a rotted-pin gate is an accepted alternative to `text=auto eol=lf` for a repo with heavy binary content.**
   - **Blocked by** - Nothing.
   - **Issue** - [#931][issue-931].
   - **Checked** - Not measured by this session. Per the issue, Blog carries 566 MB of binary media and a dedicated pin-plus-audit gate run on every pull request.
-  - **Settled** - Adopting `text=auto eol=lf` and dropping the pin list is ruled out. `scripts/repo_gate.py`'s `eol-coverage` check (from #634) reads `git check-attr` against the tree. A wildcard `text=auto eol=lf` would resolve `eol=lf` on every tracked path, making that check vacuous for the one repo whose bug caused it to be built.
+  - **Settled** - Adopting `text=auto eol=lf` and dropping the pin list is ruled out. `scripts/repo_gate.py`'s `eol-coverage` check (from #634) asserts that representative paths and tracked shebang files resolve to `lf` via `git check-attr`. Verified empirically: under a bare `* text=auto eol=lf` wildcard with no other pins, every path resolves to `lf` this way. The check can never fail on a missing per-file pin then, the exact defect class it exists to catch.
   - **Open** - Documenting the `-text` plus pins plus gate shape in `line-endings.md` as an accepted alternative, versus recording it as Blog's own `driftNote`. The issue's follow-up comment leans toward documenting it, since `eol-coverage` already rewards this shape.
   - **Open** - Whether `scripts/repo_gate.py --check eol-coverage` runs in Blog's own CI, or only on demand from a hub checkout. Blog's `check-eol-pins.py` already runs every pull request, so the fleet may carry this logic at two fidelities.
 
