@@ -393,6 +393,20 @@ Two loaders exist so a copy-paste snippet takes a stock OS install to a configur
   - **Checked** - Branch `feature/windows-bootstrap-loader` on 2026-08-13, adding this loader for the first time. It has run under `-DryRun` and against `PSScriptAnalyzer` on a dev machine that already carries `pwsh`, `winget`, and most managed tools, which is signal on the script's internal consistency and none at all on whether it survives a host it has not touched.
   - **Open** - Same as the Linux entry: which images, who runs the pass, and how a finding routes back.
 
+### Blog's `.gitattributes` Diverges From the Fleet's `text=auto` Pattern
+
+Blog carries `* -text` plus explicit named `eol=lf` pins plus a dedicated rotted-pin gate, `checks/check-eol-pins.py`, instead of the fleet default `* text=auto eol=lf`. Whether to accept that as a second pattern, or ask Blog to converge, is the hub's call rather than the reporting session's.
+
+**State** `decision`. **Touches** `comment-and-doc-style/references/line-endings.md` if accepted as a pattern, or the registry's `driftNote` shape if recorded as Blog's own deviation instead. **Cost** one hub edit either way, no code change.
+
+- **Decide whether `-text` plus explicit named pins plus a rotted-pin gate is an accepted alternative to `text=auto eol=lf` for a repo with heavy binary content.**
+  - **Blocked by** - Nothing.
+  - **Issue** - [#931][issue-931].
+  - **Checked** - Not measured by this session. Per the issue, Blog carries 566 MB of binary media and a dedicated pin-plus-audit gate run on every pull request.
+  - **Settled** - Adopting `text=auto eol=lf` and dropping the pin list is ruled out. `scripts/repo_gate.py`'s `eol-coverage` check (from #634) reads `git check-attr` against the tree. A wildcard `text=auto eol=lf` would resolve `eol=lf` on every tracked path, making that check vacuous for the one repo whose bug caused it to be built.
+  - **Open** - Documenting the `-text` plus pins plus gate shape in `line-endings.md` as an accepted alternative, versus recording it as Blog's own `driftNote`. The issue's follow-up comment leans toward documenting it, since `eol-coverage` already rewards this shape.
+  - **Open** - Whether `scripts/repo_gate.py --check eol-coverage` runs in Blog's own CI, or only on demand from a hub checkout. Blog's `check-eol-pins.py` already runs every pull request, so the fleet may carry this logic at two fidelities.
+
 ## Standalone Chores
 
 Small work with no research to preserve, selectable one bullet at a time.
@@ -519,6 +533,7 @@ Regenerate [reports/divergences.md][divergences-report] before using it as the w
 [issue-673]: https://github.com/ptr727/ProjectTemplate/issues/673
 [issue-767]: https://github.com/ptr727/ProjectTemplate/issues/767
 [issue-929]: https://github.com/ptr727/ProjectTemplate/issues/929
+[issue-931]: https://github.com/ptr727/ProjectTemplate/issues/931
 
 <!-- Pull requests -->
 
