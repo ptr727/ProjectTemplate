@@ -153,9 +153,13 @@ skill covers all of it, scoped down by what the maintainer actually asks for.
      branch in a different repository must never pass this check either. Confirm `baseRefName`
      is `develop` (a different merged pull request can share the same head branch name against a
      different base, and that is never this sweep's target) and `mergedAt` is set. Compare tips
-     only where a remote branch actually exists. `git ls-remote --heads origin -- "refs/heads/<branch>"`
-     is the exact-match form and must be, `--heads origin "<branch>"` alone still tail-matches, a
-     bare `topic/x` pattern also returns an unrelated `other/topic/x` if one exists. Empty means it
+     only where a remote branch actually exists. `git ls-remote --heads -- origin "refs/heads/<branch>"`
+     is the exact-match form and must be, in that argument order. `--heads origin "<branch>"` alone
+     still tail-matches, a bare `topic/x` pattern also returns an unrelated `other/topic/x` if one
+     exists. `--` placed after `origin` instead of before it is not equivalent either, verified
+     empirically: with a `refs/heads/other/--` ref present, `--heads origin -- "refs/heads/<branch>"`
+     matched both that ref and the intended one, while `--heads -- origin "refs/heads/<branch>"`
+     matched only the one intended. Empty means it
      is already gone, most likely a prior cleanup attempt got interrupted after the remote delete
      but before the local one, so skip straight to the local-tip check below and never attempt the
      remote delete a second time.
