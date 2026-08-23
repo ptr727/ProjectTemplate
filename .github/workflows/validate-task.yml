@@ -65,12 +65,40 @@ jobs:
       - name: Check shell scripts step
         run: |
           set -Eeuo pipefail
+          # Tokenizes rather than substring-matches, so `#!/usr/bin/python bash` is not mistaken for a shell script.
+          # `docker_lint.py`'s shell_shebang_interpreter is the same logic; keep both in sync on a change here.
+          is_shell_shebang() {
+            local line="$1"
+            [[ "$line" == '#!'* ]] || return 1
+            local -a tokens
+            read -ra tokens <<< "${line#\#!}"
+            [ "${#tokens[@]}" -gt 0 ] || return 1
+            local interpreter="${tokens[0]##*/}"
+            if [[ "$interpreter" == "bash" || "$interpreter" == "sh" ]]; then
+              return 0
+            fi
+            [[ "$interpreter" == "env" ]] || return 1
+            local -a args=("${tokens[@]:1}")
+            while [ "${#args[@]}" -gt 0 ] && [[ "${args[0]}" == -* ]] && [[ "${args[0]}" != "--" ]]; do
+              if [[ "${args[0]}" == "-S" ]]; then
+                args=("${args[@]:1}")
+                break
+              fi
+              args=("${args[@]:1}")
+            done
+            if [ "${#args[@]}" -gt 0 ] && [[ "${args[0]}" == "--" ]]; then
+              args=("${args[@]:1}")
+            fi
+            [ "${#args[@]}" -gt 0 ] || return 1
+            local cmd="${args[0]##*/}"
+            [[ "$cmd" == "bash" || "$cmd" == "sh" ]]
+          }
           mapfile -t scripts < <(git ls-files '*.sh')
           mapfile -d '' -t candidates < <(git ls-files -z)
           for file in "${candidates[@]}"; do
             base="${file##*/}"
             if [[ "$base" != *.* ]] && [ -f "$file" ] && IFS= read -r first_line < "$file" \
-              && [[ "$first_line" =~ ^#!.*[/[:space:]](bash|sh)([[:space:]]|$) ]]; then
+              && is_shell_shebang "$first_line"; then
               scripts+=("$file")
             fi
           done

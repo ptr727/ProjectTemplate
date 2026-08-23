@@ -5,7 +5,7 @@ from __future__ import annotations
 
 import argparse
 import os
-import re
+import shlex
 import subprocess
 import sys
 from collections.abc import Callable, Sequence
@@ -15,8 +15,6 @@ from pathlib import Path
 PSSCRIPTANALYZER_VERSION = "1.23.0"
 PSSCRIPTANALYZER_VOLUME = f"projecttemplate-psscriptanalyzer-{PSSCRIPTANALYZER_VERSION}"
 MAX_FILE_ARGUMENT_BYTES = 16 * 1024
-# A shebang interpreter path or an `env` invocation naming bash or sh, per POSIX shebang shape.
-SHEBANG_PATTERN = re.compile(r"^#!.*[/\s](bash|sh)(\s|$)")
 
 
 @dataclass(frozen=True)
@@ -140,18 +138,50 @@ def ls_files(
     return [os.fsdecode(entry) for entry in result.stdout.split(b"\0") if entry]
 
 
+def shell_shebang_interpreter(line: str) -> str | None:
+    """Return the shebang's direct interpreter, bash or sh, or None otherwise.
+
+    Tokenizes rather than substring-matches, so a plain-argument `bash` is not the interpreter.
+    An `env` shebang walks past its own flags to the command it selects.
+    """
+    if not line.startswith("#!"):
+        return None
+    try:
+        tokens = shlex.split(line[2:])
+    except ValueError:
+        return None
+    if not tokens:
+        return None
+    interpreter = tokens[0].rsplit("/", 1)[-1]
+    if interpreter in {"bash", "sh"}:
+        return interpreter
+    if interpreter != "env":
+        return None
+    args = tokens[1:]
+    while args and args[0].startswith("-") and args[0] != "--":
+        if args[0] == "-S":
+            args = args[1:]
+            break
+        args = args[1:]
+    if args and args[0] == "--":
+        args = args[1:]
+    if args and args[0].rsplit("/", 1)[-1] in {"bash", "sh"}:
+        return args[0].rsplit("/", 1)[-1]
+    return None
+
+
 def has_shell_shebang(root: Path, relative_path: str) -> bool:
-    """Report whether a tracked file's first line names a bash or sh interpreter."""
+    """Report whether a tracked file's shebang directly names bash or sh."""
     try:
         with (root / relative_path).open("rb") as handle:
             first_line = handle.readline(256)
     except OSError:
         return False
     try:
-        text = first_line.decode("utf-8")
+        text = first_line.decode("utf-8").rstrip("\n")
     except UnicodeDecodeError:
         return False
-    return bool(SHEBANG_PATTERN.match(text))
+    return shell_shebang_interpreter(text) is not None
 
 
 def extensionless_shell_scripts(root: Path) -> list[str]:

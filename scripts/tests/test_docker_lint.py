@@ -157,6 +157,35 @@ class DockerLintCase(unittest.TestCase):
             docker_lint.tracked_files(self.root, linter),
         )
 
+    def test_extensionless_untracked_shebang_script_is_not_picked_up(self) -> None:
+        path = self.root / "ops" / "vps-backup-pull"
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text("#!/usr/bin/env bash\necho hi\n", encoding="utf-8")
+        linter = next(linter for linter in docker_lint.LINTERS if linter.name == "shellcheck")
+        self.assertEqual([], docker_lint.tracked_files(self.root, linter))
+
+    def test_shell_shebang_interpreter_rejects_bash_as_a_plain_argument(self) -> None:
+        cases = {
+            "#!/bin/bash": "bash",
+            "#!/bin/sh": "sh",
+            "#!/usr/bin/env bash": "bash",
+            "#!/usr/bin/env\tbash": "bash",
+            "#!/usr/bin/env -S bash -e": "bash",
+            "#!/usr/bin/python bash": None,
+            "#!/usr/bin/env python sh": None,
+            "#!/usr/bin/env -S python -m sh": None,
+            "#!/usr/bin/env": None,
+            "not a shebang": None,
+        }
+        for line, expected in cases.items():
+            with self.subTest(line=line):
+                self.assertEqual(expected, docker_lint.shell_shebang_interpreter(line))
+
+    def test_extensionless_script_naming_bash_only_as_an_argument_is_excluded(self) -> None:
+        self.track("ops/run-me", "#!/usr/bin/python bash\nprint('hi')\n")
+        linter = next(linter for linter in docker_lint.LINTERS if linter.name == "shellcheck")
+        self.assertEqual([], docker_lint.tracked_files(self.root, linter))
+
     def test_cspell_literal_marker_precedes_option_shaped_filename(self) -> None:
         linter = next(linter for linter in docker_lint.LINTERS if linter.name == "cspell")
         command = docker_lint.container_command(
