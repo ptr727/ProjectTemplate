@@ -2677,10 +2677,7 @@ def _selftest():
     ]
     # The deploy-site.yml caller stub once deploy-site-task.yml is hub-hosted: no secrets: inherit
     # (a cross-repository reusable workflow cannot use it), the one crossing secret named instead.
-    # No job-level environment: on the caller. A job with uses: cannot carry that key at all
-    # (ptr727/ProjectTemplate#942). The task's own job binds it and resolves it against the
-    # caller's environment store cross-repository. The caller's secrets: map only puts the name
-    # in the task's reach.
+    # No job-level environment: on the caller, unsupported on a job with uses: (ptr727/ProjectTemplate#942).
     deploy_stub = (
         "jobs:\n"
         "  assert-ref:\n    runs-on: ubuntu-latest\n    steps: []\n"
@@ -2697,6 +2694,9 @@ def _selftest():
         "requireTokensInJob": {
             "deploy": [
                 "deploy-site-task.yml",
+                # Indent-anchored (6 spaces) to the with: block, since the task declares this
+                # input required and a caller missing it fails at dispatch, not at audit time.
+                "\n      environment:",
                 "contents: read",
                 "DEPLOY_SSH_PRIVATE_KEY",
             ]
@@ -2715,6 +2715,12 @@ def _selftest():
                 "    secrets:\n      DEPLOY_SSH_PRIVATE_KEY: ${{ secrets.DEPLOY_SSH_PRIVATE_KEY }}\n",
                 "    secrets: inherit\n",
             ),
+            deploy_contract,
+            1,
+        ),
+        (
+            "deploy-site.yml caller stub missing the required environment input",
+            deploy_stub.replace("    with:\n      environment: ${{ inputs.environment }}\n", ""),
             deploy_contract,
             1,
         ),
