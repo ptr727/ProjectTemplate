@@ -58,43 +58,56 @@ skill covers all of it, scoped down by what the maintainer actually asks for.
 3. `gh pr merge [number] --merge --repo owner/repo`. Never `--delete-branch`, the promotion PR's
    head is `develop`.
 4. Confirm the merge landed, `mergedAt` set, `main`'s tip matching the merge commit.
-5. In the hub, when the chosen scope includes a release, first bring this checkout to the merged
+5. When the chosen scope includes a release, first check the registry's `releaseTrigger` for this
+   repo in `registry/repos.json`, three shapes. When it reads `none`, report that no release is
+   configured, dispatch and run-correlation (step 6) do not apply. When it reads
+   `publish-on-merge`, the merge in step 3 is itself the trigger, no dispatch is needed, note that
+   and let step 6 correlate the run it produced. Otherwise (`two-phase` or `dispatch-only`),
+   dispatch, `gh workflow run publish-release.yml --ref main --repo owner/repo`, or `--ref
+   develop` only when the maintainer explicitly asked for a prerelease dispatch instead, and let
+   step 6 correlate the run it produced.
+6. When step 5 dispatched or noted a merge-triggered run (not for `none`), correlate the specific
+   run rather than assuming the newest one is it. After an explicit dispatch, `gh run list --repo
+   owner/repo --workflow publish-release.yml --branch main --event workflow_dispatch --json
+   databaseId,createdAt` (or `--branch develop` for a prerelease dispatch), matched by `createdAt`
+   against the dispatch time. For a `publish-on-merge` repo, the same query with `--event push`
+   instead, matched by `createdAt` against the step 3 merge time. Poll only when exactly one
+   candidate matches, report and stop rather than guessing when zero or more than one do, a
+   concurrent run of a different event on the same branch must never be mistaken for this one.
+   Poll that one run id to completion in one bounded background wait with an explicit timeout,
+   `timeout <seconds> gh run watch <run-id> --repo owner/repo --exit-status` on a host with GNU
+   `timeout`, or the equivalent bounded-wait mechanism on a host without it (macOS without
+   coreutils, native Windows), and report a timeout separately from a completed run's own
+   conclusion, the tag or version it produced. A run that fails, times out, or never starts is
+   reported, never silently retried.
+7. In the hub, when the chosen scope includes a release, bring this checkout to the merged
    content: `git fetch origin main`, then `git checkout -B main origin/main` to force the local
    `main` to the fetched tip regardless of what it pointed to before. `skills_install.py` stamps
    and installs from whatever this checkout's HEAD already is, so a plain `git checkout main`
    would leave a local `main` that already existed pointing at its old, pre-fetch commit, and
-   skip the refresh silently. Only then run `python3 scripts/skills_install.py
-   --report`, then `python3 scripts/skills_install.py` to install, and confirm `--report` now
-   reads current, always, not only when separately asked. This refreshes only the machine running
-   this session, per skill-lifecycle, every other machine still refreshes on its own next run or
-   `docs/host-setup.md` "Fleet Skills Install" cadence.
-6. When the chosen scope includes a release, first check the registry's `releaseTrigger` for this
-   repo in `registry/repos.json`, three shapes. Report that no release is configured and go to
-   step 8 without dispatching or watching anything when it reads `none`. For `publish-on-merge`,
-   the merge in step 3 is itself the trigger, no dispatch is needed, note that and go to step 7 to
-   watch the run it produced. Otherwise (`two-phase` or `dispatch-only`), dispatch, `gh workflow
-   run publish-release.yml --ref main --repo owner/repo`, or `--ref develop` only when the
-   maintainer explicitly asked for a prerelease dispatch instead, then go to step 7.
-7. Correlate the specific run this step's trigger produced rather than assuming the newest one is
-   it. After an explicit dispatch, `gh run list --repo owner/repo --workflow
-   publish-release.yml --branch main --event workflow_dispatch --json databaseId,createdAt` (or
-   `--branch develop` for a prerelease dispatch), matched by `createdAt` against the dispatch
-   time. For a `publish-on-merge` repo, the same query with `--event push` instead, matched by
-   `createdAt` against the step 3 merge time. Poll only when exactly one candidate matches, report
-   and stop rather than guessing when zero or more than one do, a concurrent run of a different
-   event on the same branch must never be mistaken for this one. Poll that one run id to
-   completion in one
-   bounded background wait with an explicit timeout, `timeout <seconds> gh run watch <run-id>
-   --repo owner/repo --exit-status` on a host with GNU `timeout`, or the equivalent bounded-wait
-   mechanism on a host without it (macOS without coreutils, native Windows), and report a timeout
-   separately from a completed run's own conclusion, the tag or version it produced. A run that
-   fails, times out, or never starts is reported, never silently retried.
-8. Run the repo-worktree post-merge cleanup regardless of how steps 5 through 7 ended, no release
-   configured, a merge-triggered release, a dispatch failure, an ambiguous run match, a timeout,
-   or a failed run all still reach this step, the merge in step 3 already landed by then and
-   cleanup is never conditioned on the release outcome. Fetch and prune, fast-forward the base
-   clone to
-   `develop`, remove any worktree the completed task leaves behind.
+   skip the refresh silently. Only then run `python3 scripts/skills_install.py --report`, then
+   `python3 scripts/skills_install.py` to install, and confirm `--report` now reads current,
+   regardless of whether step 5 or 6 dispatched, watched, or skipped a release, this step is
+   gated only on the chosen scope, never on the release outcome. This refreshes only the machine
+   running this session, per skill-lifecycle, every other machine still refreshes on its own next
+   run or `docs/host-setup.md` "Fleet Skills Install" cadence.
+8. Run cleanup regardless of how steps 5 through 7 ended, no release configured, a
+   merge-triggered release, a dispatch failure, an ambiguous run match, a timeout, a failed run,
+   or a hub Skills refresh all still reach this step, the merge in step 3 already landed by then.
+   Two parts, both required, neither optional:
+   - The promotion PR's own worktree: fetch and prune, fast-forward the base clone to `develop`,
+     remove the worktree. Never delete `develop`, it is the promotion PR's own head, and the
+     repo's auto-delete-head-branches setting is kept off fleet-wide for exactly this reason, so
+     nothing does this automatically.
+   - A defensive sweep for anything drive-pr's own cleanup should already have removed but might
+     not have, an interrupted loop, a fix landed by hand outside that skill, or a maintainer
+     merge in the GitHub UI. `git worktree list` for any worktree still registered under this
+     task's feature branches, `git branch -vv` for any local feature branch already merged into
+     `develop`, `git ls-remote --heads origin` for any matching remote feature branch. For each,
+     verify its tip is reachable from `develop`'s current tip (`git merge-base --is-ancestor
+     <branch> develop`) before removing anything, `git worktree remove`, `git branch -d`, `git
+     push origin --delete <branch>`. Never apply this sweep to `develop` or `main` themselves,
+     only to feature branches a drive-pr loop created.
 
 ## Mechanics Live Elsewhere
 
