@@ -26,11 +26,11 @@ repos:
         pass_filenames: false
       - id: prose-gate
         name: prose/comment-style gate (diff-scoped, fetched fresh from ProjectTemplate@main)
-        entry: uv run python3 hub-fetch-run.py .github/actions/prose-gate/prose_lint.py . --diff HEAD
+        entry: uv run python hub-fetch-run.py .github/actions/prose-gate/prose_lint.py . --diff HEAD
         language: system
         pass_filenames: false
       - id: eol-gate
         name: line-ending consistency gate (fetched fresh from ProjectTemplate@main)
-        entry: uv run python3 hub-fetch-run.py .github/actions/repo-gate/repo_gate.py --check eol
+        entry: uv run python hub-fetch-run.py .github/actions/repo-gate/repo_gate.py --check eol
         language: system
         pass_filenames: false

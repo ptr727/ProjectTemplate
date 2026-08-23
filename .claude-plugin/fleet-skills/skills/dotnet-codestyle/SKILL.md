@@ -49,10 +49,9 @@ All builds must complete without warnings, enforced three ways:
   surfaced as a warning fails the build and must be fixed or deliberately suppressed at the
   narrowest scope that fits (see Analyzer suppressions below), never left to accumulate.
 - **CI lint backstop.** CI runs the clean-compile checks on every PR as the authoritative gate.
-  A working local hook is strongly suggested, not optional: wire Husky.Net (`dotnet husky run` as
-  a style step, plus the shared prose/EOL doc gates) from the canonical
-  `catalog/snippets/husky/` config, since a repo with no hook wired at all is now a measured audit
-  finding, per GOVERNANCE.md "Running the Linters Locally".
+  A working local hook is strongly suggested, not optional: wire Husky.Net from the canonical
+  `catalog/snippets/husky/` config. See GOVERNANCE.md "Running the Linters Locally" for what the
+  hook must cover and what its absence means.
 
 **A new port is not a license to silence diagnostics.** Brownfield or just-ported status never
 justifies relaxing analyzer severities or muting newly surfaced warnings. Fix them. (The only

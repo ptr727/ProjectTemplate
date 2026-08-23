@@ -15,11 +15,13 @@ doc is only trustworthy while that rule holds.
 
 ## What Changed
 
-`spec/project-types.json`'s `crossCutting.linter-parity` dimension gained `parity.hooks`: a repo
-with no local hook mechanism wired at all is now a `linter-parity` defect, the same severity a
-missing markdownlint config already gets. A repo mid-convergence, the doc-gate half wired and the
-language-format half not yet because its own corpus does not pass it clean, stays operational, per
-the existing carve-out in GOVERNANCE.md. Two catalog snippets carry the canonical shape: Husky.Net
+`spec/project-types.json`'s `crossCutting.linter-parity` dimension gained `parity.hooks`, judged
+by hand during an `AUDIT.md` run like every sibling check in that dimension, never by
+`spec/audit.py` itself: a repo with no local hook mechanism wired at all is a `linter-parity`
+defect, the same severity a missing markdownlint config already gets. A repo mid-convergence, the
+doc-gate half wired and the language-format half not yet because its own corpus does not pass it
+clean, stays operational, per the existing carve-out in GOVERNANCE.md. Two catalog snippets carry
+the canonical shape: Husky.Net
 (`catalog/snippets/husky/`, for .NET or any project including Python) and the Python `pre-commit`
 framework (`catalog/snippets/pre-commit/`, for a repo with no `.husky/` tree). Both now carry the
 same shared doc gates, the diff-scoped prose/comment-style gate and the whole-tree line-ending

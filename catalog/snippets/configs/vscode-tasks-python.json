@@ -174,8 +174,8 @@
         {
             "label": "Lint: Prose",
             "type": "process",
-            "command": "python3",
-            "args": [ "${workspaceFolder}/hub-fetch-run.py", ".github/actions/prose-gate/prose_lint.py", "." ],
+            "command": "uv",
+            "args": [ "run", "python", "${workspaceFolder}/hub-fetch-run.py", ".github/actions/prose-gate/prose_lint.py", "." ],
             "problemMatcher": [],
             "presentation": {
                 "showReuseMessage": false,
@@ -185,8 +185,8 @@
         {
             "label": "Lint: EOL",
             "type": "process",
-            "command": "python3",
-            "args": [ "${workspaceFolder}/hub-fetch-run.py", ".github/actions/repo-gate/repo_gate.py", "--check", "eol" ],
+            "command": "uv",
+            "args": [ "run", "python", "${workspaceFolder}/hub-fetch-run.py", ".github/actions/repo-gate/repo_gate.py", "--check", "eol" ],
             "problemMatcher": [],
             "presentation": {
                 "showReuseMessage": false,

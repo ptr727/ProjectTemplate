@@ -8,8 +8,8 @@ and the whole-tree line-ending check. Copy `../hub-fetch-run.py` alongside `pre-
 the doc gates to run: it fetches those two checks fresh from `ptr727/ProjectTemplate`'s `main`
 branch and runs them, rather than vendoring or pinning a copy. A pin nothing keeps current
 goes stale by construction, and CI (this repo's own, and the hub's) is the backstop for a
-change that lands broken on `main` before it does real damage locally. This is one more
-network fetch alongside the Docker pulls the Lint tasks below already do. A fetch failure
+change that lands broken on `main` before it does real damage locally. These are two more
+network fetches alongside the Docker pulls the Lint tasks below already do. A fetch failure
 fails the commit rather than silently skipping the gate.
 
 Full linting (workflow YAML, Markdown, spelling, EditorConfig) is **not** run in the hook. It
@@ -22,5 +22,9 @@ keeps it fast and offline-safe.
 A copied `.husky/pre-commit` is an extensionless shebang script, so pin it to **LF** in
 `.gitattributes` (`.husky/pre-commit text eol=lf`), git-level enforcement independent of the
 editor. The fleet's `[*]` `.editorconfig` default already gives it LF, no path-specific
-override needed. A CRLF shebang breaks execution. Drop the `dotnet husky run` line in a
-non-.NET repo, and drop the ruff block in a non-Python repo.
+override needed. A CRLF shebang breaks execution.
+
+Both language blocks run unconditionally, with no tool-presence guard: a repo that keeps a
+block declares that tool required, so a missing one fails the commit loudly rather than
+skipping the check silently. Drop the `dotnet husky run` block in a non-.NET repo, and drop
+the ruff block in a non-Python repo, rather than leaving it in place to no-op.

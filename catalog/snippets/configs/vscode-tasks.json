@@ -175,6 +175,10 @@
             "type": "process",
             "command": "python3",
             "args": [ "${workspaceFolder}/.husky/hub-fetch-run.py", ".github/actions/prose-gate/prose_lint.py", "." ],
+            "windows": {
+                "command": "py",
+                "args": [ "-3", "${workspaceFolder}/.husky/hub-fetch-run.py", ".github/actions/prose-gate/prose_lint.py", "." ]
+            },
             "problemMatcher": [],
             "presentation": {
                 "showReuseMessage": false,
@@ -186,6 +190,10 @@
             "type": "process",
             "command": "python3",
             "args": [ "${workspaceFolder}/.husky/hub-fetch-run.py", ".github/actions/repo-gate/repo_gate.py", "--check", "eol" ],
+            "windows": {
+                "command": "py",
+                "args": [ "-3", "${workspaceFolder}/.husky/hub-fetch-run.py", ".github/actions/repo-gate/repo_gate.py", "--check", "eol" ]
+            },
             "problemMatcher": [],
             "presentation": {
                 "showReuseMessage": false,
