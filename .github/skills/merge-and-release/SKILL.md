@@ -127,11 +127,14 @@ skill covers all of it, scoped down by what the maintainer actually asks for.
      stop and report rather than guessing when selection is not exactly one match, on a non-1
      count exit non-zero rather than returning empty with success, an ambiguous or missing match
      must fail loud, not read as an empty value still safe to act on: `gh pr list --head <branch>
-     --state merged --repo owner/repo --json number,baseRefName,mergedAt,headRefOid --jq 'if
-     length == 1 then .[0] else error("expected exactly one merged PR for \(<branch>), got
-     \(length)") end'`. Confirm `baseRefName` is `develop` (a different merged pull request can
-     share the same head branch name against a different base, and that is never this sweep's
-     target) and `mergedAt` is set. Compare tips only where a remote branch actually exists,
+     --state merged --repo owner/repo --json
+     number,baseRefName,mergedAt,headRefOid,headRepositoryOwner --jq 'if length == 1 then .[0]
+     else error("expected exactly one merged PR for this head, got \(length)") end'`. Confirm
+     `headRepositoryOwner.login` names this same repo's owner, a fork's PR against the same base
+     can carry an identical head branch name and must never pass this check. Confirm `baseRefName`
+     is `develop` (a different merged pull request can share the same head branch name against a
+     different base, and that is never this sweep's target) and `mergedAt` is set. Compare tips
+     only where a remote branch actually exists,
      `git ls-remote --heads origin <branch>` empty means it is already gone, most likely a prior
      cleanup attempt got interrupted after the remote delete but before the local one, so skip
      straight to the local-tip check below and never attempt the remote delete a second time.
