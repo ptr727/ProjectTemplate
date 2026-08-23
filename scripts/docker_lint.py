@@ -16,7 +16,7 @@ PSSCRIPTANALYZER_VERSION = "1.23.0"
 PSSCRIPTANALYZER_VOLUME = f"projecttemplate-psscriptanalyzer-{PSSCRIPTANALYZER_VERSION}"
 MAX_FILE_ARGUMENT_BYTES = 16 * 1024
 # A shebang interpreter path or an `env` invocation naming bash or sh, per POSIX shebang shape.
-SHEBANG_PATTERN = re.compile(r"^#!.*[/ ](bash|sh)(\s|$)")
+SHEBANG_PATTERN = re.compile(r"^#!.*[/\s](bash|sh)(\s|$)")
 
 
 @dataclass(frozen=True)
@@ -112,8 +112,10 @@ def run_command(
         raise CommandFailed(f"could not start command: {error}") from error
 
 
-def ls_files(root: Path, patterns: Sequence[str] = ()) -> list[str]:
-    """Return tracked and unignored paths, optionally narrowed to pathspec patterns."""
+def ls_files(
+    root: Path, patterns: Sequence[str] = (), *, include_untracked: bool = True
+) -> list[str]:
+    """Return tracked paths, plus unignored untracked ones unless told to skip those."""
     command = [
         "git",
         "-C",
@@ -121,9 +123,9 @@ def ls_files(root: Path, patterns: Sequence[str] = ()) -> list[str]:
         "ls-files",
         "-z",
         "--cached",
-        "--others",
-        "--exclude-standard",
     ]
+    if include_untracked:
+        command.extend(["--others", "--exclude-standard"])
     if patterns:
         command.extend(["--", *patterns])
     try:
@@ -155,12 +157,14 @@ def has_shell_shebang(root: Path, relative_path: str) -> bool:
 def extensionless_shell_scripts(root: Path) -> list[str]:
     """Return tracked, extension-less files whose shebang names bash or sh.
 
-    A `*.sh` glob misses a script meant to run as a bare command, which carries no
-    extension by design. Its shebang is the only signal `git ls-files` cannot glob for.
+    A `*.sh` glob misses a script meant to run as a bare command, extension-less by design.
+    Its shebang is the only signal `git ls-files` cannot glob for.
+    Tracked only, matching CI's plain `git ls-files`.
+    An untracked bare script would otherwise lint here but never in CI.
     """
     return [
         path
-        for path in ls_files(root)
+        for path in ls_files(root, include_untracked=False)
         if "." not in Path(path).name and has_shell_shebang(root, path)
     ]
 

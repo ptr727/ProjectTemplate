@@ -61,16 +61,12 @@ jobs:
 
       # The file list comes from git rather than a glob, and the docker run is skipped rather than invoked on an empty argument list.
       # That is how a repo with no shell scripts stays clean instead of failing on a linter's own no-file usage error.
-      # A `*.sh` glob alone misses a tracked script meant to run as a bare command (no extension).
-      # Every tracked, extensionless file whose shebang names bash or sh joins the `*.sh` set instead.
-      # The `docker_lint.py` wrapper's `extensionless_shell_scripts` runs the same check locally.
-      # Keep the two in sync on a change here.
-      # shellcheck is the linter and shfmt the formatter, per CODESTYLE.md's Shell clean-compile.
+      # A `*.sh` glob alone misses a bare-command script with no extension, so a shebang-matched file joins the list too.
       - name: Check shell scripts step
         run: |
           set -Eeuo pipefail
           mapfile -t scripts < <(git ls-files '*.sh')
-          mapfile -t candidates < <(git ls-files)
+          mapfile -d '' -t candidates < <(git ls-files -z)
           for file in "${candidates[@]}"; do
             base="${file##*/}"
             if [[ "$base" != *.* ]] && [ -f "$file" ] && IFS= read -r first_line < "$file" \
@@ -79,7 +75,7 @@ jobs:
             fi
           done
           if [ "${#scripts[@]}" -gt 0 ]; then
-            docker run --rm --pull=always -v "$PWD":/mnt --workdir /mnt koalaman/shellcheck:stable "${scripts[@]}"
+            docker run --rm --pull=always -v "$PWD":/mnt --workdir /mnt koalaman/shellcheck:stable -- "${scripts[@]}"
             docker run --rm --pull=always -v "$PWD":/mnt --workdir /mnt mvdan/shfmt:latest -d -- "${scripts[@]}"
           else
             echo "no shell scripts are tracked"
