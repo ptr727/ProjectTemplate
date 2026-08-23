@@ -127,10 +127,12 @@ def tracked(root: Path, exclude: list[str] | None = None) -> list[str]:
     if exclude:
         args += ["--", *(f":!{pattern}" for pattern in exclude)]
     result = subprocess.run(args, capture_output=True, text=True, check=False)
-    # A failed command and a valid empty result would otherwise look the same to the caller.
-    # The command's own stderr (a bad pathspec, an unreadable root) is surfaced rather than dropped.
-    if result.returncode != 0 and result.stderr.strip():
-        print(f"git ls-files failed: {result.stderr.strip()}", file=sys.stderr)
+    if result.returncode != 0:
+        # A failed command's stdout is never trusted, even where it is non-empty.
+        # A partial listing read as complete is a scan that missed files and said nothing.
+        if result.stderr.strip():
+            print(f"git ls-files failed: {result.stderr.strip()}", file=sys.stderr)
+        return []
     return [l for l in result.stdout.split("\n") if l]
 
 
