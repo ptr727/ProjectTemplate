@@ -62,8 +62,8 @@ skill covers all of it, scoped down by what the maintainer actually asks for.
    current, `git fetch origin main`, and read this repo's `releaseTrigger` from that fetched tip,
    `git show origin/main:registry/repos.json`, rather than a possibly-stale working tree copy,
    relevant when the target repo is the hub itself and this exact promotion changed its own
-   registry entry. Two shapes, not three: when it reads `none`, report that no release is
-   configured, dispatch and run-correlation (step 6) do not apply. Otherwise (`two-phase`,
+   registry entry. Two cases, `none` versus anything else. When it reads `none`, report that no
+   release is configured, dispatch and run-correlation (step 6) do not apply. Otherwise (`two-phase`,
    `dispatch-only`, or `publish-on-merge` alike), dispatch explicitly, `gh workflow run
    publish-release.yml --ref main --repo owner/repo`, or `--ref develop` only when the maintainer
    explicitly asked for a prerelease dispatch instead. `publish-on-merge`'s automatic publish is
@@ -76,12 +76,13 @@ skill covers all of it, scoped down by what the maintainer actually asks for.
    workflow_dispatch --json databaseId,createdAt,headSha` (or `--branch develop` for a prerelease
    dispatch), matched by `headSha` against the dispatched ref's tip (`main`'s tip confirmed in
    step 4, or `develop`'s current tip for a prerelease) and by `createdAt` against the dispatch
-   time. `gh run list` can momentarily omit a just-created run, so poll this query itself for a
-   bounded interval before concluding none exists, a single query reporting zero candidates is not
-   yet "never started". Poll only when exactly one candidate matches, report and stop rather than
-   guessing when zero remain after the bounded interval or more than one do, a concurrent run of a
-   different event on the same branch must never be mistaken for this one. Poll that one run id to
-   completion in one bounded background wait with an explicit timeout, `timeout <seconds> gh run
+   time. `gh run list` can momentarily omit a just-created run, so a single query reporting zero
+   candidates is not yet "never started". Poll the list itself, within a bounded interval, until
+   exactly one candidate matches. A concurrent run of a different event on the same branch must
+   never be mistaken for this one, more than one candidate is as inconclusive as zero. Report and
+   stop rather than guessing once the interval elapses with zero or more than one candidate still
+   matching. Only once exactly one candidate is confirmed, poll that one run id to completion in
+   one further bounded background wait with an explicit timeout, `timeout <seconds> gh run
    watch <run-id> --repo owner/repo --exit-status` on a host with GNU `timeout`, or the equivalent
    bounded-wait mechanism on a host without it (macOS without coreutils, native Windows), and
    report a timeout separately from a completed run's own conclusion, the tag or version it
