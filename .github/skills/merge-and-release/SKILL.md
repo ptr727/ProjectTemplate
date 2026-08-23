@@ -64,9 +64,12 @@ skill covers all of it, scoped down by what the maintainer actually asks for.
    and this exact promotion changed its own registry entry. Select the one matching entry
    explicitly, falling back to the registry's own default when that entry sets no
    `releaseTrigger` of its own, and stop and report rather than guessing when selection is not
-   exactly one match: `git show origin/main:registry/repos.json | jq -r --arg name '<repo-name>'
-   '(.repos | map(select(.name == $name))) as $m | if ($m | length) == 1 then ($m[0].releaseTrigger
-   // .defaults.releaseTrigger) else empty end'`. Two cases, `none` versus anything else. When it
+   exactly one match, on a non-1 count exit non-zero rather than returning empty with success, an
+   ambiguous or missing match must fail loud, not read as an empty value still safe to act on: `git
+   show origin/main:registry/repos.json | jq -r --arg name '<repo-name>' '(.repos | map(select(.name
+   == $name))) as $m | if ($m | length) == 1 then ($m[0].releaseTrigger // .defaults.releaseTrigger)
+   else error("expected exactly one registry entry for \($name), got \($m | length)") end'`. Two
+   cases, `none` versus anything else. When it
    reads `none`, report that no
    release is configured, dispatch and run-correlation (step 6) do not apply. Otherwise (`two-phase`,
    `dispatch-only`, or `publish-on-merge` alike), dispatch explicitly, `gh workflow run
@@ -121,22 +124,31 @@ skill covers all of it, scoped down by what the maintainer actually asks for.
      task's feature branches, `git branch -vv` for any local feature branch, `git ls-remote
      --heads origin` for any matching remote feature branch. For each, verify it finished by
      reading GitHub's own state with the exact fields this check needs, not a bare listing, and
-     stop and report rather than guessing when selection is not exactly one match: `gh pr list
-     --head <branch> --state merged --repo owner/repo --json number,baseRefName,mergedAt,headRefOid
-     --jq 'if length == 1 then .[0] else empty end'`. Confirm `baseRefName` is `develop` (a
-     different merged pull request can share the same head branch name against a different base,
-     and that is never this sweep's target), `mergedAt` is set, and the branch's current remote
-     tip matches that exact pull request's `headRefOid`, proving nothing landed on it since.
-     `git merge-base --is-ancestor <branch> develop` must never be used for this, a squash merge
-     (drive-pr's own merge method) never makes the feature tip a literal ancestor of `develop`, so
-     the check reports every already-finished branch as unmerged. Only once GitHub confirms it,
-     and the worktree is clean (a dirty worktree stops cleanup rather than discarding uncommitted
-     work), remove the worktree, `git worktree remove`, then delete the branch. `git branch -d`
-     has the identical squash blindness as `git merge-base --is-ancestor` and refuses too, so use
-     `git branch -D <exact-branch>` here, safe only because the GitHub-state check just proved
-     that exact branch finished, the narrow post-squash exception git-commit-conventions
-     describes, never applied to an unverified branch. Then delete the remote side the same way,
-     `git push origin --delete <branch>`. Never `--force-with-lease` here, git-commit-conventions
+     stop and report rather than guessing when selection is not exactly one match, on a non-1
+     count exit non-zero rather than returning empty with success, an ambiguous or missing match
+     must fail loud, not read as an empty value still safe to act on: `gh pr list --head <branch>
+     --state merged --repo owner/repo --json number,baseRefName,mergedAt,headRefOid --jq 'if
+     length == 1 then .[0] else error("expected exactly one merged PR for \(<branch>), got
+     \(length)") end'`. Confirm `baseRefName` is `develop` (a different merged pull request can
+     share the same head branch name against a different base, and that is never this sweep's
+     target) and `mergedAt` is set. Compare tips only where a remote branch actually exists,
+     `git ls-remote --heads origin <branch>` empty means it is already gone, most likely a prior
+     cleanup attempt got interrupted after the remote delete but before the local one, so skip
+     straight to the local-tip check below and never attempt the remote delete a second time.
+     Where the remote branch does exist, its tip must match that exact pull request's `headRefOid`
+     before either delete proceeds, proving nothing landed on it since. Either way, the local
+     branch tip (`git rev-parse <branch>`) must also match `headRefOid`.
+     `git merge-base --is-ancestor <branch> develop` must never be used for either tip check, a
+     squash merge (drive-pr's own merge method) never makes the feature tip a literal ancestor of
+     `develop`, so the check reports every already-finished branch as unmerged. Only once GitHub
+     confirms it, and the worktree is clean (a dirty worktree stops cleanup rather than discarding
+     uncommitted work), remove the worktree, `git worktree remove`, then delete the local branch.
+     `git branch -d` has the identical squash blindness as `git merge-base --is-ancestor` and
+     refuses too, so use `git branch -D <exact-branch>` here, safe only because the GitHub-state
+     check just proved that exact branch finished, the narrow post-squash exception
+     git-commit-conventions describes, never applied to an unverified branch. Then, only when the
+     remote branch still exists, delete it the same way, `git push origin --delete <branch>`.
+     Never `--force-with-lease` here, git-commit-conventions
      forbids it unconditionally, the GitHub-state check just completed is the verification gate,
      not a compare-and-swap at delete time. Never apply this sweep to `develop` or `main`
      themselves, only to feature branches a drive-pr loop created.
