@@ -138,11 +138,26 @@ def ls_files(
     return [os.fsdecode(entry) for entry in result.stdout.split(b"\0") if entry]
 
 
+# The env options below take a separate operand token, never mistaken for the command.
+ENV_OPERAND_FLAGS = {"-u", "--unset", "-C", "--chdir"}
+
+
+def _is_env_assignment(token: str) -> bool:
+    """Report whether token is a `NAME=VALUE` env-style assignment."""
+    name, separator, _ = token.partition("=")
+    return (
+        bool(separator)
+        and bool(name)
+        and (name[0].isalpha() or name[0] == "_")
+        and all(char.isalnum() or char == "_" for char in name)
+    )
+
+
 def shell_shebang_interpreter(line: str) -> str | None:
     """Return the shebang's direct interpreter, bash or sh, or None otherwise.
 
     Tokenizes rather than substring-matches, so a plain-argument `bash` is not the interpreter.
-    An `env` shebang walks past its own flags to the command it selects.
+    An `env` shebang walks past its own flags and `NAME=VALUE` assignments to find the command.
     """
     if not line.startswith("#!"):
         return None
@@ -158,13 +173,21 @@ def shell_shebang_interpreter(line: str) -> str | None:
     if interpreter != "env":
         return None
     args = tokens[1:]
-    while args and args[0].startswith("-") and args[0] != "--":
-        if args[0] == "-S":
+    while args:
+        token = args[0]
+        if token == "--":
             args = args[1:]
             break
-        args = args[1:]
-    if args and args[0] == "--":
-        args = args[1:]
+        if token in {"-S", "--split-string"}:
+            args = args[1:]
+            break
+        if token.startswith("-"):
+            args = args[2:] if token in ENV_OPERAND_FLAGS else args[1:]
+            continue
+        if _is_env_assignment(token):
+            args = args[1:]
+            continue
+        break
     if args and args[0].rsplit("/", 1)[-1] in {"bash", "sh"}:
         return args[0].rsplit("/", 1)[-1]
     return None
