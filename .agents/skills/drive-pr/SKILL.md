@@ -67,14 +67,15 @@ promotion PR once the fix lands, is the early exit this skill exists to prevent.
    to delete it, which fails when `develop` is already checked out somewhere else, the ordinary
    case in this layout. Instead run repo-worktree's post-merge cleanup from the base clone: remove
    the worktree, delete the now-merged local task branch, then verify before deleting the remote
-   one, `git ls-remote --heads -- origin "refs/heads/<branch>"` matches the `headRefOid` captured
-   above, `--` before `origin` and the fully-qualified ref. `--heads origin "<branch>"` alone still
-   tail-matches a differently-prefixed branch sharing the same suffix, and `--` placed after
-   `origin` instead of before it is not equivalent either, verified empirically against a
-   `refs/heads/other/--` ref: after-origin also matched it, before-origin matched only the one
-   intended. Stop and report a mismatch rather than
-   deleting, someone could have pushed to the branch after the merge, or the name could have been
-   reused. `<branch>` is the real value, substituted as its own quoted argument (a shell variable
+   one, `git ls-remote --heads --exit-code -- origin "refs/heads/<branch>"` matches the
+   `headRefOid` captured above, `--` before `origin` and the fully-qualified ref. `--heads origin
+   "<branch>"` alone still tail-matches a differently-prefixed branch sharing the same suffix, and
+   `--` placed after `origin` instead of before it is not equivalent either, verified empirically
+   against a `refs/heads/other/--` ref: after-origin also matched it, before-origin matched only
+   the one intended. `--exit-code` distinguishes exit `2`, branch genuinely gone, from any other
+   non-zero exit, a failed query, an unreachable remote and a gone branch both print nothing to
+   stdout otherwise. Stop and report either a mismatch or a failed query rather than deleting,
+   someone could have pushed to the branch after the merge, or the name could have been reused. `<branch>` is the real value, substituted as its own quoted argument (a shell variable
    expansion such as `"$branch"`, or an argv element), never handed to `eval` or `sh -c` for a
    second round of shell parsing, the only way an embedded `$()` or backtick would actually run.
    A valid ref can start with `-` or carry a shell metacharacter, which is why it stays quoted
