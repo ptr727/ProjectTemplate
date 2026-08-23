@@ -2677,9 +2677,9 @@ def _selftest():
     ]
     # The deploy-site.yml caller stub once deploy-site-task.yml is hub-hosted: no secrets: inherit
     # (a cross-repository reusable workflow cannot use it), the one crossing secret named instead.
-    # No job-level environment: on the caller - a job with uses: cannot carry that key at all
+    # No job-level environment: on the caller. A job with uses: cannot carry that key at all
     # (ptr727/ProjectTemplate#942). The task's own job binds it and resolves it against the
-    # caller's environment store cross-repository; the caller's secrets: map only puts the name
+    # caller's environment store cross-repository. The caller's secrets: map only puts the name
     # in the task's reach.
     deploy_stub = (
         "jobs:\n"
