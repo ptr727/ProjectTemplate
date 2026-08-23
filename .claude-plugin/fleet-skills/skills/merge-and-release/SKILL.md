@@ -109,9 +109,13 @@ skill covers all of it, scoped down by what the maintainer actually asks for.
    `checkout` needs no minimum version for this), and `git merge --ff-only origin/main`.
    `checkout` still refuses a `main` checked out in another worktree, and `--ff-only` refuses
    anything but a clean fast-forward, so either stops and reports on top of what the preflight
-   already ruled out, per Repository Boundaries and Write Safety. `skills_install.py` stamps and
-   installs from whatever this checkout's HEAD already is, so running it against a stale,
-   unrefreshed local `main` skips the refresh silently. Only then run `python3 scripts/skills_install.py --report`, then
+   already ruled out, per Repository Boundaries and Write Safety. `--ff-only` does not fail when
+   local `main` is already ahead of `origin/main`, since a strict superset needs no fast-forward
+   and reports up to date, so assert `git rev-parse main` equals `git rev-parse origin/main`
+   afterward and stop and report on a mismatch, a local-only commit this checkout never pushed is
+   exactly the case a bare "up to date" would hide. `skills_install.py` stamps and installs from
+   whatever this checkout's HEAD already is, so running it against a stale, unrefreshed, or
+   locally-diverged `main` skips the refresh silently. Only then run `python3 scripts/skills_install.py --report`, then
    `python3 scripts/skills_install.py` to install, and confirm `--report` now reads current,
    regardless of whether step 5 or 6 dispatched, skipped, or failed a release, this step is gated
    only on the chosen scope, never on the release outcome. This refreshes only the machine running
