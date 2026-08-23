@@ -8,6 +8,13 @@
 # See hub-fetch-run.py's own docstring, and catalog/snippets/husky/README.md, for why.
 # Full doc-lint set (Markdown, spelling, workflow YAML, EditorConfig) stays in CI and the VS Code Lint tasks, since those need Docker.
 
+# The absolute path is captured before the cd below, since $0 resolves against the original directory.
+hub_fetch_run="$(cd "$(dirname "$0")" && pwd)/hub-fetch-run.py"
+
+# Git already runs a hook from the top level, but this is belt and braces for an invocation that does not.
+# The doc gates below take a relative scan root, which would otherwise resolve against whatever directory the caller stood in.
+cd "$(git rev-parse --show-toplevel)" || exit 1
+
 # .NET: CSharpier + dotnet format style via Husky.Net.
 # Drop this block in a non-.NET repo, rather than guarding it.
 # A repo that keeps it declares dotnet required, and a missing tool fails the commit loudly, not silently.
@@ -34,5 +41,5 @@ fi
 # The prose gate scopes to the working tree against HEAD, not only the staged index.
 # A partially staged file is judged on all of its edits, not only the staged ones.
 # CI re-checks the whole tree regardless, which is what makes that scope affordable in a hook.
-run_py "$(dirname "$0")/hub-fetch-run.py" .github/actions/prose-gate/prose_lint.py . --diff HEAD || exit 1
-run_py "$(dirname "$0")/hub-fetch-run.py" .github/actions/repo-gate/repo_gate.py --check eol || exit 1
+run_py "$hub_fetch_run" .github/actions/prose-gate/prose_lint.py . --diff HEAD || exit 1
+run_py "$hub_fetch_run" .github/actions/repo-gate/repo_gate.py --check eol || exit 1
