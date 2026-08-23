@@ -110,6 +110,8 @@ jobs:
           DEPLOY_SSH_HOST: ${{ vars.DEPLOY_SSH_HOST }}
           DEPLOY_SSH_KNOWN_HOSTS: ${{ vars.DEPLOY_SSH_KNOWN_HOSTS }}
           DEPLOY_SSH_PRIVATE_KEY: ${{ secrets.DEPLOY_SSH_PRIVATE_KEY }}
+          SITE_AUTH_TOKEN_ID: ${{ secrets.SITE_AUTH_TOKEN_ID }}
+          SITE_AUTH_TOKEN: ${{ secrets.SITE_AUTH_TOKEN }}
         run: |
           set -Eeuo pipefail
           missing=()
@@ -120,6 +122,11 @@ jobs:
           [ -n "$DEPLOY_SSH_PRIVATE_KEY" ] || missing+=(DEPLOY_SSH_PRIVATE_KEY)
           if [ "${#missing[@]}" -gt 0 ]; then
             echo "::error::Missing or empty GitHub Environment value(s) on '${{ inputs.environment }}': ${missing[*]}"
+            exit 1
+          fi
+          # SITE_AUTH_TOKEN_ID and SITE_AUTH_TOKEN are each optional, but only together: a caller that maps one without the other reaches the verify hook as a silent partial credential rather than a caught mistake.
+          if { [ -n "$SITE_AUTH_TOKEN_ID" ] && [ -z "$SITE_AUTH_TOKEN" ]; } || { [ -z "$SITE_AUTH_TOKEN_ID" ] && [ -n "$SITE_AUTH_TOKEN" ]; }; then
+            echo "::error::SITE_AUTH_TOKEN_ID and SITE_AUTH_TOKEN must both be mapped or neither; got only one."
             exit 1
           fi
 
