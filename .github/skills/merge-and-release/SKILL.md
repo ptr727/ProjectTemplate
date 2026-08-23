@@ -102,12 +102,17 @@ skill covers all of it, scoped down by what the maintainer actually asks for.
    - A defensive sweep for anything drive-pr's own cleanup should already have removed but might
      not have, an interrupted loop, a fix landed by hand outside that skill, or a maintainer
      merge in the GitHub UI. `git worktree list` for any worktree still registered under this
-     task's feature branches, `git branch -vv` for any local feature branch already merged into
-     `develop`, `git ls-remote --heads origin` for any matching remote feature branch. For each,
-     verify its tip is reachable from `develop`'s current tip (`git merge-base --is-ancestor
-     <branch> develop`) before removing anything, `git worktree remove`, `git branch -d`, `git
-     push origin --delete <branch>`. Never apply this sweep to `develop` or `main` themselves,
-     only to feature branches a drive-pr loop created.
+     task's feature branches, `git branch -vv` for any local feature branch, `git ls-remote
+     --heads origin` for any matching remote feature branch. For each, verify it finished by
+     reading GitHub's own state, `gh pr list --head <branch> --state merged --repo owner/repo`
+     (or `gh pr view <branch> --repo owner/repo`), confirming `mergedAt` is set and the branch's
+     current remote tip matches that pull request's head SHA, proving nothing landed on it since.
+     `git merge-base --is-ancestor <branch> develop` must never be used for this, a squash merge
+     (drive-pr's own merge method) never makes the feature tip a literal ancestor of `develop`, so
+     the check reports every already-finished branch as unmerged. Only once GitHub confirms it,
+     remove the worktree, `git worktree remove`, then the branch, `git branch -d`, `git push
+     origin --delete <branch>`. Never apply this sweep to `develop` or `main` themselves, only to
+     feature branches a drive-pr loop created.
 
 ## Mechanics Live Elsewhere
 
