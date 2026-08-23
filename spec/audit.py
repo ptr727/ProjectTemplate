@@ -1542,7 +1542,7 @@ def check_interface(path, contract, text):
             for t in toks:
                 if t in block:
                     # Generic rather than tied to one contract's reason.
-                    # forbidTokensInJob now guards more than the github-release seam.
+                    # forbidTokensInJob guards more than the github-release seam.
                     # intentRef on the file's own entry routes a reader to the actual context.
                     findings.append(
                         ("DRIFT", f"interface: {path} job '{job}' uses forbidden '{t}'")
