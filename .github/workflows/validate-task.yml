@@ -3,10 +3,18 @@ name: Validate task
 # The fleet validation gate, hosted here once and reached by every repo's test-pull-request stub and its own publish-release stub.
 # Three jobs: lint (the fleet doc-lint block plus language lint by tree detection, the prose gate, and the repo gate), unit-test (a generic dotnet test or uv run pytest, skipped where the caller has no test project), and validate (the validate hook, a repo's own domain checks such as an ESPHome compile, a Hugo build, a KiCad ERC, a codegen-drift check, or PowerShell tests).
 # No permissions beyond contents: read where a job needs one, since every job here only checks out and reads.
-# No required inputs, and CODECOV_TOKEN is the one optional secret, since coverage upload is best-effort.
+# No required inputs, markdown-exclude-globs is the one optional input, and CODECOV_TOKEN is the one optional secret, since coverage upload is best-effort.
 # Hub-owned gates and default hooks resolve through $/ at the reusable workflow's commit, so each implementation is reproducible against the caller's released pin without a second checkout.
 on:
   workflow_call:
+    inputs:
+      # Appended after '**/*.md' rather than replacing it, so a caller only ever narrows the default rather than restating it.
+      # A repo that vendors a theme or imports content it does not author excludes that tree here instead of failing the gate on prose it cannot fix.
+      markdown-exclude-globs:
+        description: Extra globs for the Lint Markdown step, one per line (for example '!content/**'), appended after '**/*.md'.
+        required: false
+        type: string
+        default: ''
     secrets:
       CODECOV_TOKEN:
         required: false
@@ -29,10 +37,13 @@ jobs:
           fetch-depth: 0
 
       # The fleet doc-lint block, hosted once rather than carried by every repo of every type.
+      # An empty markdown-exclude-globs leaves a blank line here, which the action's own globs.split(separator).filter(String) drops, so the default caller passes nothing extra.
       - name: Lint Markdown step
         uses: DavidAnson/markdownlint-cli2-action@21c1be1b93ad9ed58fa840aacc3f279cde2a72ff # v24.2.0
         with:
-          globs: '**/*.md'
+          globs: |
+            **/*.md
+            ${{ inputs.markdown-exclude-globs }}
 
       # The spell check covers README + HISTORY only, per CODESTYLE.md "Markdown and Spelling".
       - name: Spell check step

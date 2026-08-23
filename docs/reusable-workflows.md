@@ -349,6 +349,22 @@ jobs:
           done
 ```
 
+A repo that vendors a theme or imports content it does not author narrows the Lint Markdown step's glob instead. Blog carries a WordPress archive and the PaperMod theme, for instance. `.markdownlint-cli2.jsonc` is declared `"fidelity": "verbatim", "whole": true` in `spec/files.json`, so it is not locally editable:
+
+```yaml
+  validate:
+    name: Validate sources job
+    uses: ptr727/ProjectTemplate/.github/workflows/validate-task.yml@<hub-main-commit-sha> # <release-tag>
+    permissions:
+      contents: read
+    with:
+      markdown-exclude-globs: |
+        !content/**
+        !themes/*/**
+```
+
+`validate-task.yml` appends each line after `**/*.md` in the Lint Markdown step's own `globs:` block. A caller only ever narrows the default this way, never restates or replaces it.
+
 ## Adopting the Pure Functions
 
 Neither `get-version-task.yml` nor `publish-plan-task.yml` has a caller-stub snippet of its own, since a caller reaching either one is a job inside a repo's own `publish-release.yml` or a future `build-release-task.yml`, not a standalone top-level workflow. A repo whose publisher reads NBGV's version outputs directly, without carrying the whole release orchestrator, reaches `get-version-task.yml` by pin in place of its own copy:
