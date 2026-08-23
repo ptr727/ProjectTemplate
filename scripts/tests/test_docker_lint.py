@@ -186,6 +186,24 @@ class DockerLintCase(unittest.TestCase):
         linter = next(linter for linter in docker_lint.LINTERS if linter.name == "shellcheck")
         self.assertEqual([], docker_lint.tracked_files(self.root, linter))
 
+    def test_extensionless_shebang_script_with_no_trailing_newline_is_picked_up(self) -> None:
+        self.track("ops/vps-backup-pull", "#!/usr/bin/env bash")
+        linter = next(linter for linter in docker_lint.LINTERS if linter.name == "shellcheck")
+        self.assertEqual(["ops/vps-backup-pull"], docker_lint.tracked_files(self.root, linter))
+
+    def test_shell_shebang_interpreter_walks_past_env_grammar(self) -> None:
+        cases = {
+            "#!/usr/bin/env FOO=1 bash": "bash",
+            "#!/usr/bin/env -u bash python": None,
+            "#!/usr/bin/env -i FOO=1 bash": "bash",
+            "#!/usr/bin/env --unset=FOO bash": "bash",
+            "#!/usr/bin/env -C /tmp bash": "bash",
+            "#!/usr/bin/env FOO=1 BAR=2 sh": "sh",
+        }
+        for line, expected in cases.items():
+            with self.subTest(line=line):
+                self.assertEqual(expected, docker_lint.shell_shebang_interpreter(line))
+
     def test_cspell_literal_marker_precedes_option_shaped_filename(self) -> None:
         linter = next(linter for linter in docker_lint.LINTERS if linter.name == "cspell")
         command = docker_lint.container_command(

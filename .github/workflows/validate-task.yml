@@ -79,16 +79,34 @@ jobs:
             fi
             [[ "$interpreter" == "env" ]] || return 1
             local -a args=("${tokens[@]:1}")
-            while [ "${#args[@]}" -gt 0 ] && [[ "${args[0]}" == -* ]] && [[ "${args[0]}" != "--" ]]; do
-              if [[ "${args[0]}" == "-S" ]]; then
+            local token
+            while [ "${#args[@]}" -gt 0 ]; do
+              token="${args[0]}"
+              if [[ "$token" == "--" ]]; then
                 args=("${args[@]:1}")
                 break
               fi
-              args=("${args[@]:1}")
+              if [[ "$token" == "-S" || "$token" == "--split-string" ]]; then
+                args=("${args[@]:1}")
+                break
+              fi
+              if [[ "$token" == -* ]]; then
+                case "$token" in
+                -u | --unset | -C | --chdir)
+                  args=("${args[@]:2}")
+                  ;;
+                *)
+                  args=("${args[@]:1}")
+                  ;;
+                esac
+                continue
+              fi
+              if [[ "$token" =~ ^[A-Za-z_][A-Za-z0-9_]*= ]]; then
+                args=("${args[@]:1}")
+                continue
+              fi
+              break
             done
-            if [ "${#args[@]}" -gt 0 ] && [[ "${args[0]}" == "--" ]]; then
-              args=("${args[@]:1}")
-            fi
             [ "${#args[@]}" -gt 0 ] || return 1
             local cmd="${args[0]##*/}"
             [[ "$cmd" == "bash" || "$cmd" == "sh" ]]
@@ -97,9 +115,13 @@ jobs:
           mapfile -d '' -t candidates < <(git ls-files -z)
           for file in "${candidates[@]}"; do
             base="${file##*/}"
-            if [[ "$base" != *.* ]] && [ -f "$file" ] && IFS= read -r first_line < "$file" \
-              && is_shell_shebang "$first_line"; then
-              scripts+=("$file")
+            if [[ "$base" != *.* ]] && [ -f "$file" ]; then
+              # `read` fails at EOF even when it fills first_line, so the check reads the content regardless.
+              first_line=""
+              IFS= read -r first_line < "$file" || true
+              if is_shell_shebang "$first_line"; then
+                scripts+=("$file")
+              fi
             fi
           done
           if [ "${#scripts[@]}" -gt 0 ]; then
