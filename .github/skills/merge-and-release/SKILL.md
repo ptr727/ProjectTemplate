@@ -100,10 +100,12 @@ skill covers all of it, scoped down by what the maintainer actually asks for.
    report a timeout separately from a completed run's own conclusion, the tag or version it
    produced. A run that fails, times out, or never starts is reported, never silently retried.
 7. In the hub, when the chosen scope includes a release, bring this checkout to the merged
-   content without discarding or mixing in anything local. First assert `git status --porcelain`
-   is empty, and stop and report rather than proceeding over any uncommitted content, tracked or
-   not, since `skills_install.py` installs from whatever ends up on disk and a leftover local file
-   would ride along into the install silently. Then `git fetch origin main`, `git checkout main`
+   content without discarding or mixing in anything local. First assert `git status --porcelain
+   --untracked-files=all --ignored` is empty, and stop and report rather than proceeding over any
+   uncommitted content, tracked, untracked, or gitignored, since `skills_install.py` installs
+   each skill directory with `shutil.copytree()`, which copies a gitignored stray file the same
+   as any other, so the plain porcelain form (silent on ignored paths) would pass this preflight
+   while one still rides along into the install. Then `git fetch origin main`, `git checkout main`
    (or `git checkout -b main origin/main` the first time this checkout carries no local `main` at
    all, `checkout` rather than `switch` since the fleet's own `git` floor is undeclared and
    `checkout` needs no minimum version for this), and `git merge --ff-only origin/main`.
@@ -125,10 +127,12 @@ skill covers all of it, scoped down by what the maintainer actually asks for.
    failure, an ambiguous run match, a timeout, a failed run, or a hub Skills refresh all still
    reach this step, the merge in step 3 already landed by then. Two parts, both required, neither
    optional:
-   - The promotion PR's own worktree: fetch and prune, fast-forward the base clone to `develop`,
-     remove the worktree. Never delete `develop`, it is the promotion PR's own head, and the
-     repo's auto-delete-head-branches setting is kept off fleet-wide for exactly this reason, so
-     nothing does this automatically.
+   - The promotion PR's own worktree: fetch and prune, remove the worktree, then fast-forward the
+     base clone to `develop`. Removing first, not after, matters: the base clone cannot check out
+     `develop` while the promotion worktree still has it checked out, one branch checked out in
+     two worktrees at once is refused outright. Never delete `develop`, it is the promotion PR's
+     own head, and the repo's auto-delete-head-branches setting is kept off fleet-wide for exactly
+     this reason, so nothing does this automatically.
    - A defensive sweep for anything drive-pr's own cleanup should already have removed but might
      not have, an interrupted loop, a fix landed by hand outside that skill, or a maintainer
      merge in the GitHub UI. `git worktree list` for any worktree still registered under this
@@ -137,8 +141,8 @@ skill covers all of it, scoped down by what the maintainer actually asks for.
      reading GitHub's own state with the exact fields this check needs, not a bare listing, and
      stop and report rather than guessing when selection is not exactly one match, on a non-1
      count exit non-zero rather than returning empty with success, an ambiguous or missing match
-     must fail loud, not read as an empty value still safe to act on: `gh pr list --head <branch>
-     --state merged --repo owner/repo --json
+     must fail loud, not read as an empty value still safe to act on: `gh pr list --head
+     "<branch>" --state merged --repo owner/repo --json
      number,baseRefName,mergedAt,headRefOid,headRepositoryOwner --jq 'if length == 1 then .[0]
      else error("expected exactly one merged PR for this head, got \(length)") end'`. Confirm
      `headRepositoryOwner.login` names this same repo's owner, a fork's PR against the same base
@@ -146,22 +150,25 @@ skill covers all of it, scoped down by what the maintainer actually asks for.
      is `develop` (a different merged pull request can share the same head branch name against a
      different base, and that is never this sweep's target) and `mergedAt` is set. Compare tips
      only where a remote branch actually exists,
-     `git ls-remote --heads origin <branch>` empty means it is already gone, most likely a prior
+     `git ls-remote --heads origin "<branch>"` empty means it is already gone, most likely a prior
      cleanup attempt got interrupted after the remote delete but before the local one, so skip
      straight to the local-tip check below and never attempt the remote delete a second time.
      Where the remote branch does exist, its tip must match that exact pull request's `headRefOid`
      before either delete proceeds, proving nothing landed on it since. Either way, the local
-     branch tip (`git rev-parse <branch>`) must also match `headRefOid`.
+     branch tip (`git rev-parse -- "<branch>"`) must also match `headRefOid`. Every branch name
+     below is a quoted argument for the same reason, a valid ref can start with `-` or carry a
+     shell metacharacter, and `--` marks the end of options wherever a command supports it.
      `git merge-base --is-ancestor <branch> develop` must never be used for either tip check, a
      squash merge (drive-pr's own merge method) never makes the feature tip a literal ancestor of
      `develop`, so the check reports every already-finished branch as unmerged. Only once GitHub
      confirms it, and the worktree is clean (a dirty worktree stops cleanup rather than discarding
-     uncommitted work), remove the worktree, `git worktree remove`, then delete the local branch.
-     `git branch -d` has the identical squash blindness as `git merge-base --is-ancestor` and
-     refuses too, so use `git branch -D <exact-branch>` here, safe only because the GitHub-state
-     check just proved that exact branch finished, the narrow post-squash exception
-     git-commit-conventions describes, never applied to an unverified branch. Then, only when the
-     remote branch still exists, delete it the same way, `git push origin --delete <branch>`.
+     uncommitted work), remove the worktree by its exact path, `git worktree remove
+     "<worktree-path>"`, `git worktree list` names it, then delete the local branch. `git branch
+     -d` has the identical squash blindness as `git merge-base --is-ancestor` and refuses too, so
+     use `git branch -D -- "<exact-branch>"` here, safe only because the GitHub-state check just
+     proved that exact branch finished, the narrow post-squash exception git-commit-conventions
+     describes, never applied to an unverified branch. Then, only when the remote branch still
+     exists, delete it the same way, `git push origin --delete -- "<branch>"`.
      Never `--force-with-lease` here, git-commit-conventions
      forbids it unconditionally, the GitHub-state check just completed is the verification gate,
      not a compare-and-swap at delete time. Never apply this sweep to `develop` or `main`
