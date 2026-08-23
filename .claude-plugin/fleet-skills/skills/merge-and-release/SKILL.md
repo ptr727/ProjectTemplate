@@ -93,12 +93,14 @@ skill covers all of it, scoped down by what the maintainer actually asks for.
    distinctly, the ref changed mid-dispatch, rather than folding it into an ordinary absent-run
    timeout. Report and stop rather than guessing once the interval elapses with zero or more than
    one candidate still matching. Only once exactly one candidate is confirmed, poll that one run
-   id to completion in
-   one further bounded background wait with an explicit timeout, `timeout <seconds> gh run
-   watch <run-id> --repo owner/repo --exit-status` on a host with GNU `timeout`, or the equivalent
-   bounded-wait mechanism on a host without it (macOS without coreutils, native Windows), and
-   report a timeout separately from a completed run's own conclusion, the tag or version it
-   produced. A run that fails, times out, or never starts is reported, never silently retried.
+   id to completion in one further bounded background wait with an explicit, finite timeout,
+   2700 seconds (45 minutes, matching `scripts/pr_review.py`'s own default) unless the maintainer
+   states a different bound for this specific release: `timeout 2700 gh run watch <run-id> --repo
+   owner/repo --exit-status` on a host with GNU `timeout`, or the equivalent bounded-wait
+   mechanism enforcing the same bound on a host without it (macOS without coreutils, native
+   Windows). Report a timeout separately from a completed run's own conclusion, the tag or
+   version it produced. A run that fails, times out, or never starts is reported, never silently
+   retried.
 7. In the hub, when the chosen scope includes a release, bring this checkout to the merged
    content without discarding or mixing in anything local. First assert `git status --porcelain
    --untracked-files=all --ignored` is empty, and stop and report rather than proceeding over any
