@@ -167,12 +167,16 @@ skill covers all of it, scoped down by what the maintainer actually asks for.
      problem, and stops and reports rather than being read as absence, an unreachable remote and a
      genuinely gone branch both print nothing to stdout, only the exit code tells them apart.
      Where the remote branch does exist, its tip must match that exact pull request's `headRefOid`
-     before either delete proceeds, proving nothing landed on it since. Either way, the local
-     branch tip (`git rev-parse --verify "refs/heads/<branch>"`) must also match `headRefOid`. No
-     `--` here, verified empirically: `git rev-parse -- "<branch>"` treats the argument after `--`
-     as a path rather than a revision and never resolves a SHA at all. The fully-qualified form
-     needs no `--` regardless, since `refs/heads/<branch>` never itself starts with `-`, and
-     `--verify` fails loudly rather than guessing when it does not resolve. Every branch or
+     before its own delete proceeds, proving nothing landed on it since. Where a local branch
+     still exists too, its tip (`git rev-parse --verify "refs/heads/<branch>"`) must independently
+     match `headRefOid` before its own delete proceeds. Neither side needs the other to exist, a
+     prior interrupted attempt may have deleted one side already and left only the other, so
+     verify and delete whichever side is still there and skip whichever already is not, never
+     block one side's cleanup on the other side's absence. No `--` on `rev-parse`, verified
+     empirically: `git rev-parse -- "<branch>"` treats the argument after `--` as a path rather
+     than a revision and never resolves a SHA at all. The fully-qualified form needs no `--`
+     regardless, since `refs/heads/<branch>` never itself starts with `-`, and `--verify` fails
+     loudly rather than guessing when it does not resolve. Every branch or
      worktree-path placeholder below is the real value, substituted as its own quoted argument
      (a shell variable expansion such as `"$branch"`, or an argv element), never handed to `eval`
      or `sh -c` for a second round of shell parsing, the only way an embedded `$()` or backtick
@@ -182,9 +186,10 @@ skill covers all of it, scoped down by what the maintainer actually asks for.
      `git merge-base --is-ancestor <branch> develop` must never be used for either tip check, a
      squash merge (drive-pr's own merge method) never makes the feature tip a literal ancestor of
      `develop`, so the check reports every already-finished branch as unmerged. Only once GitHub
-     confirms it, and the worktree is clean (a dirty worktree stops cleanup rather than discarding
-     uncommitted work), remove the worktree by its exact path, `git worktree remove
-     "<worktree-path>"`, `git worktree list` names it, then delete the local branch. `git branch
+     confirms it, and only when a local worktree or branch is still there to remove, remove the
+     worktree by its exact path (a dirty worktree stops cleanup rather than discarding uncommitted
+     work), `git worktree remove "<worktree-path>"`, `git worktree list` names it, then delete the
+     local branch. `git branch
      -d` has the identical squash blindness as `git merge-base --is-ancestor` and refuses too, so
      use `git branch -D -- "<exact-branch>"` here, safe only because the GitHub-state check just
      proved that exact branch finished, the narrow post-squash exception git-commit-conventions
