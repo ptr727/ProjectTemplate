@@ -130,8 +130,8 @@ def tracked(root: Path, exclude: list[str] | None = None) -> list[str]:
     if result.returncode != 0:
         # A failed command's stdout is never trusted, even where it is non-empty.
         # A partial listing read as complete is a scan that missed files and said nothing.
-        if result.stderr.strip():
-            print(f"git ls-files failed: {result.stderr.strip()}", file=sys.stderr)
+        reason = result.stderr.strip() or f"exit {result.returncode}, no stderr"
+        print(f"git ls-files failed: {reason}", file=sys.stderr)
         return []
     return [l for l in result.stdout.split("\n") if l]
 
