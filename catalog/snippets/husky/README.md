@@ -1,7 +1,26 @@
 # Husky snippet
 
-`pre-commit` is the reference git pre-commit hook (installed under `.husky/` by Husky). It runs **language formatting and style only**: CSharpier and `dotnet format` style via `dotnet husky run` for .NET, or ruff for a Python repo. Native tooling and no Docker is what keeps it fast.
+`pre-commit` is the reference git pre-commit hook (installed under `.husky/` by Husky). It
+runs **language formatting/lint and the fleet's shared doc gates**: CSharpier and
+`dotnet format` style via `dotnet husky run` for .NET, or `ruff format --check` / `ruff check`
+for a Python repo (native tooling, no Docker), plus the diff-scoped prose/comment-style gate
+and the whole-tree line-ending check. Copy `../hub-fetch-run.py` alongside `pre-commit` for
+the doc gates to run: it fetches those two checks fresh from `ptr727/ProjectTemplate`'s `main`
+branch and runs them, rather than vendoring or pinning a copy. A pin nothing keeps current
+goes stale by construction, and CI (this repo's own, and the hub's) is the backstop for a
+change that lands broken on `main` before it does real damage locally. This is one more
+network fetch alongside the Docker pulls the Lint tasks below already do. A fetch failure
+fails the commit rather than silently skipping the gate.
 
-Full linting (line endings, workflow YAML, Markdown, spelling) is **not** run in the hook. It runs in CI as pinned action wrappers, and on demand via the VS Code **Lint** tasks in `catalog/snippets/configs/vscode-tasks.json` (Docker at `:latest`). Keeping the doc linters out of the hook is what keeps it simple.
+Full linting (workflow YAML, Markdown, spelling, EditorConfig) is **not** run in the hook. It
+runs in CI as pinned action wrappers, and on demand via the VS Code **Lint** tasks in
+`catalog/snippets/configs/vscode-tasks.json` (Docker at `:latest`), which also carries the
+same prose/EOL gates in whole-repo mode for on-demand full-tree validation, not just the
+diff-scoped commit-time run. Keeping the Docker-dependent doc linters out of the hook is what
+keeps it fast and offline-safe.
 
-A copied `.husky/pre-commit` is an extensionless shebang script, so pin it to **LF** in `.gitattributes` (`.husky/pre-commit text eol=lf`), git-level enforcement independent of the editor. The fleet's `[*]` `.editorconfig` default already gives it LF, no path-specific override needed. A CRLF shebang breaks execution. Drop the `dotnet husky run` line in a non-.NET repo.
+A copied `.husky/pre-commit` is an extensionless shebang script, so pin it to **LF** in
+`.gitattributes` (`.husky/pre-commit text eol=lf`), git-level enforcement independent of the
+editor. The fleet's `[*]` `.editorconfig` default already gives it LF, no path-specific
+override needed. A CRLF shebang breaks execution. Drop the `dotnet husky run` line in a
+non-.NET repo, and drop the ruff block in a non-Python repo.

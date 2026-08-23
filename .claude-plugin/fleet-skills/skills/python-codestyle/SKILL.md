@@ -90,8 +90,11 @@ The Python clean-compile is `uv run ruff format` + `uv run ruff check` + the rep
 both (see Type checking above). Run it, plus `uv run pytest`, before committing. These are
 documented commands, and an optional VS Code tasks mirror (all `type: process`, no `&&` shell
 chaining, so it runs the same on any task shell) is in the hub `vscode-tasks-python.json` snippet.
-CI runs the same clean-compile commands as the authoritative backstop. Git hooks are opt-in, so
-wire `pre-commit` for `ruff` and the type checker yourself if you want local enforcement.
+CI runs the same clean-compile commands as the authoritative backstop. A working local hook is
+strongly suggested, not opt-in: wire the Python `pre-commit` framework from the canonical
+`catalog/snippets/pre-commit/.pre-commit-config.yaml` (ruff, the type checker, and the shared
+prose/EOL doc gates), since a repo with no hook wired at all is now a measured audit finding, per
+GOVERNANCE.md "Running the Linters Locally".
 
 A restricted executor gives each task a cache directory under a writable temporary root. Point
 `UV_CACHE_DIR`, `RUFF_CACHE_DIR`, `MYPY_CACHE_DIR`, and `COVERAGE_FILE` into that directory before

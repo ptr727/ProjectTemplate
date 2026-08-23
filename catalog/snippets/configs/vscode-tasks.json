@@ -124,7 +124,8 @@
         // Lint group, run on demand via Docker, where --pull=always pins each to the current :latest.
         // It mirrors the CI lint gate.
         // Broad live spell-checking is the cspell extension's job.
-        // Pre-commit does formatting only.
+        // Pre-commit already runs the prose/EOL gates diff-scoped.
+        // Lint: Prose and Lint: EOL below add the same two checks in whole-repo mode, for on-demand full-tree validation.
         {
             "label": "Lint: EditorConfig",
             "type": "process",
@@ -170,13 +171,37 @@
             }
         },
         {
+            "label": "Lint: Prose",
+            "type": "process",
+            "command": "python3",
+            "args": [ "${workspaceFolder}/.husky/hub-fetch-run.py", ".github/actions/prose-gate/prose_lint.py", "." ],
+            "problemMatcher": [],
+            "presentation": {
+                "showReuseMessage": false,
+                "clear": false
+            }
+        },
+        {
+            "label": "Lint: EOL",
+            "type": "process",
+            "command": "python3",
+            "args": [ "${workspaceFolder}/.husky/hub-fetch-run.py", ".github/actions/repo-gate/repo_gate.py", "--check", "eol" ],
+            "problemMatcher": [],
+            "presentation": {
+                "showReuseMessage": false,
+                "clear": false
+            }
+        },
+        {
             "label": "Lint: All",
             "dependsOrder": "sequence",
             "dependsOn": [
                 "Lint: EditorConfig",
                 "Lint: Workflows",
                 "Lint: Markdown",
-                "Lint: Spelling"
+                "Lint: Spelling",
+                "Lint: Prose",
+                "Lint: EOL"
             ],
             "problemMatcher": []
         }
