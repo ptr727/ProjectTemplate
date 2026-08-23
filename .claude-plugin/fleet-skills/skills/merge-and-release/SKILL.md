@@ -52,9 +52,9 @@ skill covers all of it, scoped down by what the maintainer actually asks for.
 ## The Procedure
 
 1. Identify the open develop -> main promotion PR for this repo, stop and report if none is open.
-2. Run `scripts/pr_review.py status [number] --repo owner/repo` on it and confirm the
-   pr-review-conduct Merge Gate. Stop and report exactly what is missing rather than merging on a
-   partial gate.
+2. From a hub checkout, `scripts/` is not carried into downstream repos, run `scripts/pr_review.py
+   status [number] --repo owner/repo` on it and confirm the pr-review-conduct Merge Gate. Stop
+   and report exactly what is missing rather than merging on a partial gate.
 3. `gh pr merge [number] --merge --repo owner/repo`. Never `--delete-branch`, the promotion PR's
    head is `develop`.
 4. Confirm the merge landed, `mergedAt` set, `main`'s tip matching the merge commit.
@@ -77,10 +77,12 @@ skill covers all of it, scoped down by what the maintainer actually asks for.
    owner/repo --workflow publish-release.yml --branch main --limit 1 --json databaseId,createdAt`
    (or `--branch develop` for a prerelease dispatch), matched against the dispatch time so a
    concurrent unrelated run is never mistaken for this one. Poll that specific run id to
-   completion in one bounded background wait, `timeout <seconds> gh run watch <run-id> --repo
-   owner/repo --exit-status`, and report a timeout separately from a completed run's own
-   conclusion, the tag or version it produced. A run that fails, times out, or never starts is
-   reported, never silently retried.
+   completion in one bounded background wait with an explicit timeout, `timeout <seconds> gh run
+   watch <run-id> --repo owner/repo --exit-status` on a host with GNU `timeout`, or the
+   equivalent bounded-wait mechanism on a host without it (macOS without coreutils, native
+   Windows), and report a timeout separately from a completed run's own conclusion, the tag or
+   version it produced. A run that fails, times out, or never starts is reported, never silently
+   retried.
 8. Run the repo-worktree post-merge cleanup, fetch and prune, fast-forward the base clone to
    `develop`, remove any worktree the completed task leaves behind.
 
