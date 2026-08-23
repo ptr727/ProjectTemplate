@@ -67,9 +67,11 @@ promotion PR once the fix lands, is the early exit this skill exists to prevent.
    to delete it, which fails when `develop` is already checked out somewhere else, the ordinary
    case in this layout. Instead run repo-worktree's post-merge cleanup from the base clone: remove
    the worktree, delete the now-merged local task branch, then verify before deleting the remote
-   one, `git ls-remote --heads origin -- "<branch>"` matches the `headRefOid` captured above, stop
-   and report a mismatch rather than deleting, someone could have pushed to the branch after the
-   merge, or the name could have been reused. `<branch>` is a quoted argument the caller
+   one, `git ls-remote --heads origin -- "refs/heads/<branch>"` matches the `headRefOid` captured
+   above, the fully-qualified form since `--heads origin "<branch>"` alone still tail-matches a
+   differently-prefixed branch sharing the same suffix. Stop and report a mismatch rather than
+   deleting, someone could have pushed to the branch after the merge, or the name could have been
+   reused. `<branch>` is a quoted argument the caller
    substitutes the real value into, never text built into an executed shell command string, a
    valid ref can start with `-` or carry a shell metacharacter, and quoting alone does not stop
    `$()` or backtick command substitution the way a genuinely separate subprocess argument does.
