@@ -58,46 +58,107 @@ skill covers all of it, scoped down by what the maintainer actually asks for.
 3. `gh pr merge [number] --merge --repo owner/repo`. Never `--delete-branch`, the promotion PR's
    head is `develop`.
 4. Confirm the merge landed, `mergedAt` set, `main`'s tip matching the merge commit.
-5. In the hub, when the chosen scope includes a release, first bring this checkout to the merged
+5. When the chosen scope includes a release, first bring the hub checkout used for this procedure
+   current, `git fetch origin main`, and read this repo's `releaseTrigger` from that fetched tip
+   rather than a possibly-stale working tree copy, relevant when the target repo is the hub itself
+   and this exact promotion changed its own registry entry. Select the one matching entry
+   explicitly, falling back to the registry's own default when that entry sets no
+   `releaseTrigger` of its own, and stop and report rather than guessing when selection is not
+   exactly one match, on a non-1 count exit non-zero rather than returning empty with success, an
+   ambiguous or missing match must fail loud, not read as an empty value still safe to act on: `git
+   show origin/main:registry/repos.json | jq -r --arg name '<repo-name>' '(.repos | map(select(.name
+   == $name))) as $m | if ($m | length) == 1 then ($m[0].releaseTrigger // .defaults.releaseTrigger)
+   else error("expected exactly one registry entry for \($name), got \($m | length)") end'`. Two
+   cases, `none` versus anything else. When it
+   reads `none`, report that no
+   release is configured, dispatch and run-correlation (step 6) do not apply. Otherwise (`two-phase`,
+   `dispatch-only`, or `publish-on-merge` alike), dispatch explicitly, `gh workflow run
+   publish-release.yml --ref main --repo owner/repo`, or `--ref develop` only when the maintainer
+   explicitly asked for a prerelease dispatch instead. `publish-on-merge`'s automatic publish is
+   gated on the actor being the codegen App merging a Dependabot or codegen PR
+   (operational-vs-release-workflow's publishing rules), so an ordinary human promotion merge,
+   exactly what step 3 just did, never triggers it, this step's explicit dispatch is what actually
+   ships the release here, not a side effect of the merge.
+6. Correlate the specific run this dispatch produced rather than assuming the newest one is it.
+   `gh run list --repo owner/repo --workflow publish-release.yml --branch main --event
+   workflow_dispatch --json databaseId,createdAt,headSha` (or `--branch develop` for a prerelease
+   dispatch), matched by `headSha` against the dispatched ref's tip (`main`'s tip confirmed in
+   step 4, or `develop`'s current tip for a prerelease) and by `createdAt` against the dispatch
+   time. `gh run list` can momentarily omit a just-created run, so a single query reporting zero
+   candidates is not yet "never started". Poll the list itself, within a bounded interval, until
+   exactly one candidate matches. A concurrent run of a different event on the same branch must
+   never be mistaken for this one, more than one candidate is as inconclusive as zero. A run whose
+   `headSha` does not match the expected tip at all, rather than simply being absent, means the
+   dispatched ref moved between step 4's confirmation and the dispatch itself, report that
+   distinctly, the ref changed mid-dispatch, rather than folding it into an ordinary absent-run
+   timeout. Report and stop rather than guessing once the interval elapses with zero or more than
+   one candidate still matching. Only once exactly one candidate is confirmed, poll that one run
+   id to completion in
+   one further bounded background wait with an explicit timeout, `timeout <seconds> gh run
+   watch <run-id> --repo owner/repo --exit-status` on a host with GNU `timeout`, or the equivalent
+   bounded-wait mechanism on a host without it (macOS without coreutils, native Windows), and
+   report a timeout separately from a completed run's own conclusion, the tag or version it
+   produced. A run that fails, times out, or never starts is reported, never silently retried.
+7. In the hub, when the chosen scope includes a release, bring this checkout to the merged
    content without discarding anything: `git fetch origin main`, then `git switch main` (or
    `git switch -c main origin/main` the first time this checkout carries no local `main` at all),
-   then `git merge --ff-only origin/main`. `switch` refuses a dirty working tree or a `main`
-   checked out in another worktree, and `--ff-only` refuses anything but a clean fast-forward, so
-   this stops and reports rather than force-discarding local content, per Repository Boundaries
-   and Write Safety. `skills_install.py` stamps and installs from whatever this checkout's HEAD
+   then `git merge --ff-only origin/main`. `switch` never discards an uncommitted change, it
+   carries a clean one over and refuses one that would conflict, and it also refuses a `main`
+   checked out in another worktree. `--ff-only` refuses anything but a clean fast-forward. Either
+   way this stops and reports rather than force-discarding local content, per Repository
+   Boundaries and Write Safety. `skills_install.py` stamps and installs from whatever this checkout's HEAD
    already is, so running it against a stale, unrefreshed local `main` skips the refresh silently.
-   Only then run `python3 scripts/skills_install.py
-   --report`, then `python3 scripts/skills_install.py` to install, and confirm `--report` now
-   reads current, always, not only when separately asked. This refreshes only the machine running
+   Only then run `python3 scripts/skills_install.py --report`, then
+   `python3 scripts/skills_install.py` to install, and confirm `--report` now reads current,
+   regardless of whether step 5 or 6 dispatched, skipped, or failed a release, this step is gated
+   only on the chosen scope, never on the release outcome. This refreshes only the machine running
    this session, per skill-lifecycle, every other machine still refreshes on its own next run or
    `docs/host-setup.md` "Fleet Skills Install" cadence.
-6. When the chosen scope includes a release, first check the registry's `releaseTrigger` for this
-   repo in `registry/repos.json`, three shapes. Report that no release is configured and go to
-   step 8 without dispatching or watching anything when it reads `none`. For `publish-on-merge`,
-   the merge in step 3 is itself the trigger, no dispatch is needed, note that and go to step 7 to
-   watch the run it produced. Otherwise (`two-phase` or `dispatch-only`), dispatch, `gh workflow
-   run publish-release.yml --ref main --repo owner/repo`, or `--ref develop` only when the
-   maintainer explicitly asked for a prerelease dispatch instead, then go to step 7.
-7. Correlate the specific run this step's trigger produced rather than assuming the newest one is
-   it. After an explicit dispatch, `gh run list --repo owner/repo --workflow
-   publish-release.yml --branch main --event workflow_dispatch --json databaseId,createdAt` (or
-   `--branch develop` for a prerelease dispatch), matched by `createdAt` against the dispatch
-   time. For a `publish-on-merge` repo, the same query with `--event push` instead, matched by
-   `createdAt` against the step 3 merge time. Poll only when exactly one candidate matches, report
-   and stop rather than guessing when zero or more than one do, a concurrent run of a different
-   event on the same branch must never be mistaken for this one. Poll that one run id to
-   completion in one
-   bounded background wait with an explicit timeout, `timeout <seconds> gh run watch <run-id>
-   --repo owner/repo --exit-status` on a host with GNU `timeout`, or the equivalent bounded-wait
-   mechanism on a host without it (macOS without coreutils, native Windows), and report a timeout
-   separately from a completed run's own conclusion, the tag or version it produced. A run that
-   fails, times out, or never starts is reported, never silently retried.
-8. Run the repo-worktree post-merge cleanup regardless of how steps 5 through 7 ended, no release
-   configured, a merge-triggered release, a dispatch failure, an ambiguous run match, a timeout,
-   or a failed run all still reach this step, the merge in step 3 already landed by then and
-   cleanup is never conditioned on the release outcome. Fetch and prune, fast-forward the base
-   clone to
-   `develop`, remove any worktree the completed task leaves behind.
+8. Run cleanup regardless of how steps 5 through 7 ended, no release configured, a dispatch
+   failure, an ambiguous run match, a timeout, a failed run, or a hub Skills refresh all still
+   reach this step, the merge in step 3 already landed by then. Two parts, both required, neither
+   optional:
+   - The promotion PR's own worktree: fetch and prune, fast-forward the base clone to `develop`,
+     remove the worktree. Never delete `develop`, it is the promotion PR's own head, and the
+     repo's auto-delete-head-branches setting is kept off fleet-wide for exactly this reason, so
+     nothing does this automatically.
+   - A defensive sweep for anything drive-pr's own cleanup should already have removed but might
+     not have, an interrupted loop, a fix landed by hand outside that skill, or a maintainer
+     merge in the GitHub UI. `git worktree list` for any worktree still registered under this
+     task's feature branches, `git branch -vv` for any local feature branch, `git ls-remote
+     --heads origin` for any matching remote feature branch. For each, verify it finished by
+     reading GitHub's own state with the exact fields this check needs, not a bare listing, and
+     stop and report rather than guessing when selection is not exactly one match, on a non-1
+     count exit non-zero rather than returning empty with success, an ambiguous or missing match
+     must fail loud, not read as an empty value still safe to act on: `gh pr list --head <branch>
+     --state merged --repo owner/repo --json
+     number,baseRefName,mergedAt,headRefOid,headRepositoryOwner --jq 'if length == 1 then .[0]
+     else error("expected exactly one merged PR for this head, got \(length)") end'`. Confirm
+     `headRepositoryOwner.login` names this same repo's owner, a fork's PR against the same base
+     can carry an identical head branch name and must never pass this check. Confirm `baseRefName`
+     is `develop` (a different merged pull request can share the same head branch name against a
+     different base, and that is never this sweep's target) and `mergedAt` is set. Compare tips
+     only where a remote branch actually exists,
+     `git ls-remote --heads origin <branch>` empty means it is already gone, most likely a prior
+     cleanup attempt got interrupted after the remote delete but before the local one, so skip
+     straight to the local-tip check below and never attempt the remote delete a second time.
+     Where the remote branch does exist, its tip must match that exact pull request's `headRefOid`
+     before either delete proceeds, proving nothing landed on it since. Either way, the local
+     branch tip (`git rev-parse <branch>`) must also match `headRefOid`.
+     `git merge-base --is-ancestor <branch> develop` must never be used for either tip check, a
+     squash merge (drive-pr's own merge method) never makes the feature tip a literal ancestor of
+     `develop`, so the check reports every already-finished branch as unmerged. Only once GitHub
+     confirms it, and the worktree is clean (a dirty worktree stops cleanup rather than discarding
+     uncommitted work), remove the worktree, `git worktree remove`, then delete the local branch.
+     `git branch -d` has the identical squash blindness as `git merge-base --is-ancestor` and
+     refuses too, so use `git branch -D <exact-branch>` here, safe only because the GitHub-state
+     check just proved that exact branch finished, the narrow post-squash exception
+     git-commit-conventions describes, never applied to an unverified branch. Then, only when the
+     remote branch still exists, delete it the same way, `git push origin --delete <branch>`.
+     Never `--force-with-lease` here, git-commit-conventions
+     forbids it unconditionally, the GitHub-state check just completed is the verification gate,
+     not a compare-and-swap at delete time. Never apply this sweep to `develop` or `main`
+     themselves, only to feature branches a drive-pr loop created.
 
 ## Mechanics Live Elsewhere
 
