@@ -115,8 +115,18 @@ def pin_resolves(nwo: str, sha: str, cache: dict[tuple[str, str], bool | None]) 
     return cache[key]
 
 
-def tracked(root: Path) -> list[str]:
-    out = sh("git", "-C", str(root), "ls-files")
+def tracked(root: Path, exclude: list[str] | None = None) -> list[str]:
+    """Every git-tracked path, narrowed by `exclude` pathspec patterns where the caller gives any.
+
+    Each pattern is turned into a `:!<pattern>` exclude pathspec and appended after `--`, so a
+    caller vendoring a subtree it does not author (per GOVERNANCE.md's carry-versus-reach test)
+    can scope every check that reads this list out of that subtree without touching the checks
+    themselves. Additive only: an empty or absent `exclude` scans exactly what it always has.
+    """
+    args = ["git", "-C", str(root), "ls-files"]
+    if exclude:
+        args += ["--", *(f":!{pattern}" for pattern in exclude)]
+    out = sh(*args)
     return [l for l in out.split("\n") if l]
 
 
@@ -341,12 +351,27 @@ def main(argv: list[str] | None = None) -> int:
     ap = argparse.ArgumentParser()
     ap.add_argument("--root", default=".")
     ap.add_argument("--check", action="append", choices=sorted(CHECKS))
+    ap.add_argument(
+        "--exclude",
+        action="append",
+        default=[],
+        metavar="PATTERN",
+        help="git pathspec pattern to exclude from every check's tracked-file scan "
+        "(for example 'themes/PaperMod/**'); repeatable",
+    )
     a = ap.parse_args(argv)
     root = Path(a.root).resolve()
-    files = tracked(root)
+    files = tracked(root, a.exclude)
     if not files:
         print(f"{root}: not a git repo or no tracked files", file=sys.stderr)
         return 2
+    if a.exclude:
+        # Printed once, ahead of every check, since the narrowing applies to the whole scan rather than to one check.
+        # The docstring's rule is that a check saying it did less than its name prints that, rather than leaving it to be inferred from a clean line.
+        print(
+            f"note: {len(a.exclude)} exclude pattern(s) narrowed the tracked-file scan: "
+            f"{', '.join(a.exclude)}"
+        )
 
     total = 0
     for name in a.check or sorted(CHECKS):

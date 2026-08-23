@@ -489,6 +489,19 @@ class TestCoverageFloors(unittest.TestCase):
         """A workflow glob that matched nothing would print `0 issue(s)` and read as clean."""
         self.assertGreaterEqual(len(repo_gate.workflow_files(repo_gate.tracked(REPO))), 4)
 
+    def test_excluding_every_workflow_empties_the_sha_pin_scan(self) -> None:
+        """Proves the `--exclude` plumbing actually reaches sha-pin's own tracked-file scan.
+
+        Two directories carry a `workflows/*.yml` path in this repo: the real workflows and the
+        `catalog/snippets/workflows/` examples the audit also scans, so both are excluded.
+        """
+        self.assertEqual(
+            [],
+            repo_gate.workflow_files(
+                repo_gate.tracked(REPO, [".github/workflows/**", "catalog/snippets/workflows/**"])
+            ),
+        )
+
     def test_the_representative_eol_check_runs_against_this_repo(self) -> None:
         self.assertEqual([], repo_gate.check_eol_coverage(REPO, repo_gate.tracked(REPO)))
 
@@ -529,6 +542,58 @@ class TestCoverageFloors(unittest.TestCase):
     def test_an_unreadable_workflow_is_skipped_rather_than_raising(self) -> None:
         """`git ls-files` lists a path a later commit deleted from the working tree."""
         self.assertEqual([], repo_gate.check_sha_pin(REPO, [".github/workflows/absent.yml"]))
+
+
+class TestExcludeGlobs(unittest.TestCase):
+    """A caller vendoring a subtree it does not author needs `tracked()` narrowed, not re-derived.
+
+    Own git repo rather than REPO, so a case proves the exclude reaches a real subtree it built
+    rather than one this repo happens to carry today.
+    """
+
+    def setUp(self) -> None:
+        if shutil.which("git") is None:
+            self.skipTest("git absent, so ls-files cannot be asked")
+        repo_gate.NOTES.clear()
+        self.tmp = Path(self.enterContext(tempfile.TemporaryDirectory()))
+        subprocess.run(["git", "-C", str(self.tmp), "init", "-q", "."], check=True)
+        for rel in ("kept.py", "vendor/upstream.py", "vendor/nested/deep.py"):
+            p = self.tmp / rel
+            p.parent.mkdir(parents=True, exist_ok=True)
+            p.write_text("pass\n", encoding="utf-8")
+        subprocess.run(["git", "-C", str(self.tmp), "add", "-A"], check=True, capture_output=True)
+
+    def test_a_pathspec_pattern_drops_the_matching_subtree(self) -> None:
+        self.assertEqual(
+            ["kept.py", "vendor/nested/deep.py", "vendor/upstream.py"],
+            sorted(repo_gate.tracked(self.tmp)),
+        )
+        self.assertEqual(["kept.py"], repo_gate.tracked(self.tmp, ["vendor/**"]))
+
+    def test_no_exclude_scans_exactly_as_before(self) -> None:
+        """`exclude=[]` and `exclude=None` are both the CLI's own no-flag default."""
+        baseline = repo_gate.tracked(self.tmp)
+        self.assertEqual(baseline, repo_gate.tracked(self.tmp, []))
+        self.assertEqual(baseline, repo_gate.tracked(self.tmp, None))
+
+    def test_every_pattern_given_is_applied(self) -> None:
+        self.assertEqual([], repo_gate.tracked(self.tmp, ["kept.py", "vendor/**"]))
+
+    def test_the_cli_wires_the_exclude_flag_through_to_tracked(self) -> None:
+        with contextlib.redirect_stdout(io.StringIO()) as out:
+            code = repo_gate.main(
+                ["--root", str(self.tmp), "--check", "sha-pin", "--exclude", "vendor/**"]
+            )
+        self.assertEqual(0, code)
+        self.assertIn(
+            "note: 1 exclude pattern(s) narrowed the tracked-file scan: vendor/**",
+            out.getvalue(),
+        )
+
+    def test_the_narrowing_note_is_silent_when_nothing_was_excluded(self) -> None:
+        with contextlib.redirect_stdout(io.StringIO()) as out:
+            repo_gate.main(["--root", str(self.tmp), "--check", "sha-pin"])
+        self.assertNotIn("narrowed the tracked-file scan", out.getvalue())
 
 
 class TestHarness(unittest.TestCase):
