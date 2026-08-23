@@ -150,7 +150,7 @@ skill covers all of it, scoped down by what the maintainer actually asks for.
      is `develop` (a different merged pull request can share the same head branch name against a
      different base, and that is never this sweep's target) and `mergedAt` is set. Compare tips
      only where a remote branch actually exists,
-     `git ls-remote --heads origin "<branch>"` empty means it is already gone, most likely a prior
+     `git ls-remote --heads origin -- "<branch>"` empty means it is already gone, most likely a prior
      cleanup attempt got interrupted after the remote delete but before the local one, so skip
      straight to the local-tip check below and never attempt the remote delete a second time.
      Where the remote branch does exist, its tip must match that exact pull request's `headRefOid`

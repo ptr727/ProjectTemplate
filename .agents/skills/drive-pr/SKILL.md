@@ -67,7 +67,7 @@ promotion PR once the fix lands, is the early exit this skill exists to prevent.
    to delete it, which fails when `develop` is already checked out somewhere else, the ordinary
    case in this layout. Instead run repo-worktree's post-merge cleanup from the base clone: remove
    the worktree, delete the now-merged local task branch, then verify before deleting the remote
-   one, `git ls-remote --heads origin "<branch>"` matches the `headRefOid` captured above, stop
+   one, `git ls-remote --heads origin -- "<branch>"` matches the `headRefOid` captured above, stop
    and report a mismatch rather than deleting, someone could have pushed to the branch after the
    merge, or the name could have been reused. Quote the branch name in both commands, a valid ref
    can start with `-` or carry a shell metacharacter. Only once it matches, `git push origin
