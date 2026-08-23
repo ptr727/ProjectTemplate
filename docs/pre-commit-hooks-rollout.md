@@ -48,10 +48,9 @@ mistake for unfinished work.
 Repos and their current `registry/repos.json` `types`, from the hub's own registry as of this
 doc's authorship. Archived repos are not tracked.
 
-- [ ] **ProjectTemplate** (`source-only`, `docs`): the hub itself, already mid-convergence, doc
-      gates wired in `.husky/pre-commit` since PR #642. The ruff half stays out until this repo's
-      own Python corpus passes `ruff format --check` / `ruff check` clean, tracked separately in
-      `TODO.md`. Checked once that convergence lands, not as part of the downstream sweep below.
+- [x] **ProjectTemplate** (`source-only`, `docs`): the hub itself. Doc gates wired in
+      `.husky/pre-commit` since PR #642, and the ruff/mypy half added in this PR's own commits,
+      once the corpus was confirmed clean (0 ruff errors, 200 files formatted, mypy clean).
 - [ ] **Utilities** (`csharp`, `nuget`): Husky.Net + doc gates.
 - [ ] **LanguageTags** (`csharp`, `nuget`, `codegen`): Husky.Net + doc gates.
 - [ ] **aiopurpleair** (`python`, `pypi`): `pre-commit` framework + doc gates.

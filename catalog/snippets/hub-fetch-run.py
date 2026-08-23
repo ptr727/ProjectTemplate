@@ -1,4 +1,3 @@
-#!/usr/bin/env python3
 """Fetch a ptr727/ProjectTemplate script fresh from `main` and run it in-process.
 
 Never pinned or vendored: a pin nothing keeps current goes stale by construction, and CI
@@ -35,6 +34,7 @@ def resolve_unborn_head(argv: list[str]) -> list[str]:
                 ["git", "rev-parse", "--verify", "-q", "HEAD"],
                 stdout=subprocess.DEVNULL,
                 stderr=subprocess.DEVNULL,
+                check=False,
             )
             if probe.returncode != 0:
                 out[i + 1] = EMPTY_TREE
@@ -43,12 +43,15 @@ def resolve_unborn_head(argv: list[str]) -> list[str]:
 
 def main(argv: list[str]) -> int:
     if not argv:
-        print("hub-fetch-run: usage: hub-fetch-run.py <hub-relative-path> [script-args...]", file=sys.stderr)
+        print(
+            "hub-fetch-run: usage: hub-fetch-run.py <hub-relative-path> [script-args...]",
+            file=sys.stderr,
+        )
         return 2
     hub_path, script_args = argv[0], resolve_unborn_head(argv[1:])
     url = f"{HUB_RAW_BASE}/{hub_path}"
     try:
-        with urllib.request.urlopen(url, timeout=30) as response:  # noqa: S310 - fixed https host
+        with urllib.request.urlopen(url, timeout=30) as response:
             content = response.read()
     except (urllib.error.URLError, OSError) as exc:
         print(f"hub-fetch-run: could not fetch {url}: {exc}", file=sys.stderr)

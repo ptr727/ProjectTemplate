@@ -7,11 +7,7 @@
 # Sourcing it would therefore break the hook in a fresh clone.
 # The path is kept for the fleet convention the line-ending pins are written against.
 #
-# The language-formatting half the fleet convention names is absent here, and measured rather than assumed.
-# This repository declares ruff in `pyproject.toml`, no workflow runs it, and the tree does not pass it.
-# `ruff format --check` reports 13 of 57 files would be reformatted and `ruff check` reports 106 errors.
-# A gate failing on the corpus it guards blocks every commit from the moment it lands.
-# Converging the Python comes first, and the step is added here after that rather than before it.
+# The language-formatting half the fleet convention names runs via uvx, matching CI's own invocation for a repo with no `uv.lock` (the Scripts profile, CODESTYLE.md "Two profiles").
 #
 # `repo_gate.py --check sha-pin` is absent for a different reason.
 # It resolves same-owner pins against the GitHub API, and a hook needing a network fails offline.
@@ -22,6 +18,11 @@ set -e
 # This is belt and braces for an invocation that does not come from git.
 # The relative paths below would otherwise resolve against whatever directory the caller was in.
 cd "$(git rev-parse --show-toplevel)"
+
+# Ruff and mypy, via uvx per this repo's own CI invocation for a repo with no `uv.lock`.
+uvx ruff@latest format --check .
+uvx ruff@latest check .
+uvx mypy@latest
 
 # The interpreter is chosen by running the probes spec/host-tools.json declares, in its order.
 # On native Windows the python.org install registers `py` and not `python3`.
