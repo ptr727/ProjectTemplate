@@ -115,9 +115,25 @@ def pin_resolves(nwo: str, sha: str, cache: dict[tuple[str, str], bool | None]) 
     return cache[key]
 
 
-def tracked(root: Path) -> list[str]:
-    out = sh("git", "-C", str(root), "ls-files")
-    return [l for l in out.split("\n") if l]
+def tracked(root: Path, exclude: list[str] | None = None) -> list[str]:
+    """Every git-tracked path, narrowed by `exclude` pathspec patterns where the caller gives any.
+
+    Each pattern becomes a `:!<pattern>` exclude pathspec, appended to `git ls-files` after `--`.
+    A caller vendoring a subtree it does not author, per GOVERNANCE.md's carry-versus-reach test,
+    can scope every check out of that subtree this way. No check itself needs to change.
+    Additive only: an empty or absent `exclude` scans exactly what it always has.
+    """
+    args = ["git", "-C", str(root), "ls-files"]
+    if exclude:
+        args += ["--", *(f":!{pattern}" for pattern in exclude)]
+    result = subprocess.run(args, capture_output=True, text=True, check=False)
+    if result.returncode != 0:
+        # A failed command's stdout is never trusted, even where it is non-empty.
+        # A partial listing read as complete is a scan that missed files and said nothing.
+        reason = result.stderr.strip() or f"exit {result.returncode}, no stderr"
+        print(f"git ls-files failed: {reason}", file=sys.stderr)
+        return []
+    return [l for l in result.stdout.split("\n") if l]
 
 
 def workflow_files(files: list[str]) -> list[str]:
@@ -341,12 +357,43 @@ def main(argv: list[str] | None = None) -> int:
     ap = argparse.ArgumentParser()
     ap.add_argument("--root", default=".")
     ap.add_argument("--check", action="append", choices=sorted(CHECKS))
+    ap.add_argument(
+        "--exclude",
+        action="append",
+        default=[],
+        metavar="PATTERN",
+        help="git pathspec pattern to exclude from every check's tracked-file scan "
+        "(for example 'themes/PaperMod/**'); repeatable",
+    )
     a = ap.parse_args(argv)
     root = Path(a.root).resolve()
-    files = tracked(root)
+    files = tracked(root, a.exclude)
     if not files:
-        print(f"{root}: not a git repo or no tracked files", file=sys.stderr)
+        # `tracked()` already printed git's own stderr above where the command itself failed.
+        # This distinguishes that root cause from a caller's exclude matching every tracked file.
+        if a.exclude:
+            print(
+                f"{root}: no tracked files remain after excluding "
+                f"{', '.join(a.exclude)} (or the ls-files command above failed)",
+                file=sys.stderr,
+            )
+        else:
+            print(f"{root}: not a git repo or no tracked files", file=sys.stderr)
         return 2
+    if a.exclude:
+        # Compared against the unfiltered scan.
+        # A pattern matching nothing tracked is not reported as narrowing, which would misreport a caller's own typo as having worked.
+        excluded = len(tracked(root)) - len(files)
+        if excluded > 0:
+            print(
+                f"note: {len(a.exclude)} exclude pattern(s) narrowed the tracked-file scan "
+                f"by {excluded} file(s): {', '.join(a.exclude)}"
+            )
+        else:
+            print(
+                f"note: {len(a.exclude)} exclude pattern(s) matched no tracked file, so "
+                f"nothing was narrowed: {', '.join(a.exclude)}"
+            )
 
     total = 0
     for name in a.check or sorted(CHECKS):

@@ -3,7 +3,7 @@ name: Validate task
 # The fleet validation gate, hosted here once and reached by every repo's test-pull-request stub and its own publish-release stub.
 # Three jobs: lint (the fleet doc-lint block plus language lint by tree detection, the prose gate, and the repo gate), unit-test (a generic dotnet test or uv run pytest, skipped where the caller has no test project), and validate (the validate hook, a repo's own domain checks such as an ESPHome compile, a Hugo build, a KiCad ERC, a codegen-drift check, or PowerShell tests).
 # No permissions beyond contents: read where a job needs one, since every job here only checks out and reads.
-# No required inputs, markdown-exclude-globs is the one optional input, and CODECOV_TOKEN is the one optional secret, since coverage upload is best-effort.
+# No required inputs, markdown-exclude-globs and repo-gate-exclude-globs are the two optional inputs, and CODECOV_TOKEN is the one optional secret, since coverage upload is best-effort.
 # Hub-owned gates and default hooks resolve through $/ at the reusable workflow's commit, so each implementation is reproducible against the caller's released pin without a second checkout.
 on:
   workflow_call:
@@ -11,6 +11,12 @@ on:
       # Appended after '**/*.md', not validated: a negated glob excludes, a non-negated one adds to what is linted.
       markdown-exclude-globs:
         description: Negated globs to exclude, one per line (for example '!content/**'), appended after '**/*.md'. A non-negated line adds to what is linted rather than narrowing it.
+        required: false
+        type: string
+        default: ''
+      # Threaded to the repo-gate composite action's own exclude-globs input, unvalidated.
+      repo-gate-exclude-globs:
+        description: Git pathspec patterns to exclude, one per line (for example 'themes/PaperMod/**'), narrowing sha-pin and tracked-path eol-coverage scans via repo_gate.py's --exclude.
         required: false
         type: string
         default: ''
@@ -243,8 +249,11 @@ jobs:
         with:
           base: ${{ github.event.pull_request.base.sha }}
 
+      # An empty repo-gate-exclude-globs leaves the action's own input at its default, so the default caller excludes nothing.
       - name: Check repo gates step
         uses: $/.github/actions/repo-gate
+        with:
+          exclude-globs: ${{ inputs.repo-gate-exclude-globs }}
 
   # No job-level if: here, since GitHub Actions does not evaluate hashFiles in a job condition, only a step one.
   # Every step below carries its own tree-detection guard instead.
