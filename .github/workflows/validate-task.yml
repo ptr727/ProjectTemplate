@@ -36,7 +36,7 @@ jobs:
           fetch-depth: 0
 
       # The fleet doc-lint block, hosted once rather than carried by every repo of every type.
-      # An empty markdown-exclude-globs leaves a blank line here, which the action's own globs.split(separator).filter(String) drops, so the default caller passes nothing extra.
+      # An empty markdown-exclude-globs leaves a blank line here, which the action ignores, so the default caller passes nothing extra.
       - name: Lint Markdown step
         uses: DavidAnson/markdownlint-cli2-action@21c1be1b93ad9ed58fa840aacc3f279cde2a72ff # v24.2.0
         with:
