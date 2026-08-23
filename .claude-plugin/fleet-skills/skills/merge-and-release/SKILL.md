@@ -64,7 +64,7 @@ skill covers all of it, scoped down by what the maintainer actually asks for.
    and this exact promotion changed its own registry entry. Select the one matching entry
    explicitly, falling back to the registry's own default when that entry sets no
    `releaseTrigger` of its own, and stop and report rather than guessing when selection is not
-   exactly one match: `git show origin/main:registry/repos.json | jq --arg name '<repo-name>'
+   exactly one match: `git show origin/main:registry/repos.json | jq -r --arg name '<repo-name>'
    '(.repos | map(select(.name == $name))) as $m | if ($m | length) == 1 then ($m[0].releaseTrigger
    // .defaults.releaseTrigger) else empty end'`. Two cases, `none` versus anything else. When it
    reads `none`, report that no
