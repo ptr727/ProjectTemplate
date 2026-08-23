@@ -194,9 +194,15 @@ def shell_shebang_interpreter(line: str) -> str | None:
 
 
 def has_shell_shebang(root: Path, relative_path: str) -> bool:
-    """Report whether a tracked file's shebang directly names bash or sh."""
+    """Report whether a tracked file's shebang directly names bash or sh.
+
+    Never follows a tracked symlink: `is_symlink()` uses `lstat`, keeping the target unreached.
+    """
+    path = root / relative_path
     try:
-        with (root / relative_path).open("rb") as handle:
+        if path.is_symlink():
+            return False
+        with path.open("rb") as handle:
             first_line = handle.readline(256)
     except OSError:
         return False

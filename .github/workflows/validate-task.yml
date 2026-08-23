@@ -115,10 +115,10 @@ jobs:
           mapfile -d '' -t candidates < <(git ls-files -z)
           for file in "${candidates[@]}"; do
             base="${file##*/}"
-            if [[ "$base" != *.* ]] && [ -f "$file" ]; then
-              # `read` fails at EOF even when it fills first_line, so the check reads the content regardless.
-              first_line=""
-              IFS= read -r first_line < "$file" || true
+            # Never follows a tracked symlink: -h short-circuits before -f's own dereferencing stat.
+            if [[ "$base" != *.* ]] && [ ! -h "$file" ] && [ -f "$file" ]; then
+              # `head` reads a no-trailing-newline file cleanly and still fails on a genuine read error.
+              first_line="$(head -n 1 -- "$file")"
               if is_shell_shebang "$first_line"; then
                 scripts+=("$file")
               fi
