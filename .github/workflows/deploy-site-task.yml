@@ -9,6 +9,7 @@ name: Deploy site task
 # It runs three times, once each for build, prune, and verify, passing mode plus whichever of bundle-path, release-id, and environment that mode needs.
 # A hook declares all four inputs in its own action.yml, since a composite action rejects an invocation that supplies an input it does not declare, even one a different mode leaves unset.
 # A composite action's own steps are not guaranteed to read the caller's vars context directly, so each invocation also passes the GitHub Environment variables that mode needs (SITE_BASE_URL, DEPLOY_SSH_USER, DEPLOY_SSH_HOST) as plain env vars, the same mechanism the upload and flip steps below use.
+# The verify invocation also carries an optional SITE_AUTH_TOKEN_ID/SITE_AUTH_TOKEN secret pair the same way, for a hook whose live check needs its own token-gated auth.
 # The upload and the flip stay here as the one atomic sequence every site repo shares, so a hook cannot fork that guarantee.
 #
 # The transport's options are pinned rather than left to the runner's OpenSSH defaults, and declared once so the two transfers cannot drift apart.
@@ -31,6 +32,12 @@ on:
       # The deploy job below reads them directly through its own environment binding.
       DEPLOY_SSH_PRIVATE_KEY:
         required: true
+      # Optional token-gated auth pair for the verify hook's own live check, required: false since not every caller needs one.
+      # Checked as a pair by the assert step below, then forwarded to the hook only on the verify invocation.
+      SITE_AUTH_TOKEN_ID:
+        required: false
+      SITE_AUTH_TOKEN:
+        required: false
     outputs:
       # The caller records what shipped, without this a rollback has to read the host to find out.
       release-id:
@@ -101,6 +108,8 @@ jobs:
           DEPLOY_SSH_HOST: ${{ vars.DEPLOY_SSH_HOST }}
           DEPLOY_SSH_KNOWN_HOSTS: ${{ vars.DEPLOY_SSH_KNOWN_HOSTS }}
           DEPLOY_SSH_PRIVATE_KEY: ${{ secrets.DEPLOY_SSH_PRIVATE_KEY }}
+          SITE_AUTH_TOKEN_ID: ${{ secrets.SITE_AUTH_TOKEN_ID }}
+          SITE_AUTH_TOKEN: ${{ secrets.SITE_AUTH_TOKEN }}
         run: |
           set -Eeuo pipefail
           missing=()
@@ -111,6 +120,11 @@ jobs:
           [ -n "$DEPLOY_SSH_PRIVATE_KEY" ] || missing+=(DEPLOY_SSH_PRIVATE_KEY)
           if [ "${#missing[@]}" -gt 0 ]; then
             echo "::error::Missing or empty GitHub Environment value(s) on '${{ inputs.environment }}': ${missing[*]}"
+            exit 1
+          fi
+          # SITE_AUTH_TOKEN_ID and SITE_AUTH_TOKEN are each optional, but only together: a caller that maps one without the other reaches the verify hook as a silent partial credential rather than a caught mistake.
+          if { [ -n "$SITE_AUTH_TOKEN_ID" ] && [ -z "$SITE_AUTH_TOKEN" ]; } || { [ -z "$SITE_AUTH_TOKEN_ID" ] && [ -n "$SITE_AUTH_TOKEN" ]; }; then
+            echo "::error::SITE_AUTH_TOKEN_ID and SITE_AUTH_TOKEN must both be mapped or neither; got only one."
             exit 1
           fi
 
@@ -225,6 +239,8 @@ jobs:
         uses: ./.github/actions/deploy
         env:
           SITE_BASE_URL: ${{ vars.SITE_BASE_URL }}
+          SITE_AUTH_TOKEN_ID: ${{ secrets.SITE_AUTH_TOKEN_ID }}
+          SITE_AUTH_TOKEN: ${{ secrets.SITE_AUTH_TOKEN }}
         with:
           mode: verify
           environment: ${{ inputs.environment }}
