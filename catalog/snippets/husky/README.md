@@ -2,9 +2,10 @@
 
 `pre-commit` is the reference git pre-commit hook (installed under `.husky/` by Husky). It
 runs **language formatting/lint and the fleet's shared doc gates**: CSharpier and
-`dotnet format` style via `dotnet husky run` for .NET, or `ruff format --check` / `ruff check`
-for a Python repo (native tooling, no Docker), plus the diff-scoped prose/comment-style gate
-and the whole-tree line-ending check. Copy `../hub-fetch-run.py` alongside `pre-commit` for
+`dotnet format` style via `dotnet husky run` for .NET, or `ruff format --check` / `ruff check` /
+the repo's type checker for a Python repo (native tooling, no Docker, the same checks the
+`../pre-commit/.pre-commit-config.yaml` snippet runs), plus the diff-scoped prose/comment-style
+gate and the whole-tree line-ending check. Copy `../hub-fetch-run.py` alongside `pre-commit` for
 the doc gates to run: it fetches those two checks fresh from `ptr727/ProjectTemplate`'s `main`
 branch and runs them, rather than vendoring or pinning a copy. A pin nothing keeps current
 goes stale by construction, and CI (this repo's own, and the hub's) is the backstop for a
@@ -27,4 +28,4 @@ override needed. A CRLF shebang breaks execution.
 Both language blocks run unconditionally, with no tool-presence guard: a repo that keeps a
 block declares that tool required, so a missing one fails the commit loudly rather than
 skipping the check silently. Drop the `dotnet husky run` block in a non-.NET repo, and drop
-the ruff block in a non-Python repo, rather than leaving it in place to no-op.
+the Python block in a non-Python repo, rather than leaving it in place to no-op.
