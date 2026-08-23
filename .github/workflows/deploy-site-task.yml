@@ -9,6 +9,9 @@ name: Deploy site task
 # It runs three times, once each for build, prune, and verify, passing mode plus whichever of bundle-path, release-id, and environment that mode needs.
 # A hook declares all four inputs in its own action.yml, since a composite action rejects an invocation that supplies an input it does not declare, even one a different mode leaves unset.
 # A composite action's own steps are not guaranteed to read the caller's vars context directly, so each invocation also passes the GitHub Environment variables that mode needs (SITE_BASE_URL, DEPLOY_SSH_USER, DEPLOY_SSH_HOST) as plain env vars, the same mechanism the upload and flip steps below use.
+# The verify invocation also carries an optional SITE_AUTH_TOKEN_ID/SITE_AUTH_TOKEN secret pair the same way, for a hook whose live check sits behind its own token-gated auth, such as a non-production environment fronted by an access-controlled proxy.
+# Both are required: false, since most callers need no such gate.
+# A declared with: input was rejected for the same reason the vars above are not one: every mode's hook invocation would then need to declare and pass an input only verify uses.
 # The upload and the flip stay here as the one atomic sequence every site repo shares, so a hook cannot fork that guarantee.
 #
 # The transport's options are pinned rather than left to the runner's OpenSSH defaults, and declared once so the two transfers cannot drift apart.
@@ -31,6 +34,12 @@ on:
       # The deploy job below reads them directly through its own environment binding.
       DEPLOY_SSH_PRIVATE_KEY:
         required: true
+      # Optional token-gated auth pair for the verify hook's own live check, e.g. a non-production environment behind an access-controlled proxy.
+      # Not every caller needs one, so both are required: false, and only the verify invocation below receives them.
+      SITE_AUTH_TOKEN_ID:
+        required: false
+      SITE_AUTH_TOKEN:
+        required: false
     outputs:
       # The caller records what shipped, without this a rollback has to read the host to find out.
       release-id:
@@ -225,6 +234,8 @@ jobs:
         uses: ./.github/actions/deploy
         env:
           SITE_BASE_URL: ${{ vars.SITE_BASE_URL }}
+          SITE_AUTH_TOKEN_ID: ${{ secrets.SITE_AUTH_TOKEN_ID }}
+          SITE_AUTH_TOKEN: ${{ secrets.SITE_AUTH_TOKEN }}
         with:
           mode: verify
           environment: ${{ inputs.environment }}
