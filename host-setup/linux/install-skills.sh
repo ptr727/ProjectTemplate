@@ -50,14 +50,14 @@ EOF
 parse_args() {
     while [[ $# -gt 0 ]]; do
         case "$1" in
-            -r | --report) MODE="report" ;;
-            -n | --dry-run) DRY_RUN=true ;;
-            -y | --yes) ;;
-            -h | --help)
-                usage
-                exit 0
-                ;;
-            *) die "Unknown option \"$1\", --help lists the options" ;;
+        -r | --report) MODE="report" ;;
+        -n | --dry-run) DRY_RUN=true ;;
+        -y | --yes) ;;
+        -h | --help)
+            usage
+            exit 0
+            ;;
+        *) die "Unknown option \"$1\", --help lists the options" ;;
         esac
         shift
     done
@@ -77,8 +77,8 @@ refuse_sudo() {
 find_python() {
     local candidate
     for candidate in python3 python; do
-        if command -v "$candidate" > /dev/null &&
-            "$candidate" -c 'import sys; raise SystemExit(0 if sys.version_info >= (3, 7) else 1)' 2> /dev/null; then
+        if command -v "$candidate" >/dev/null &&
+            "$candidate" -c 'import sys; raise SystemExit(0 if sys.version_info >= (3, 7) else 1)' 2>/dev/null; then
             printf '%s' "$candidate"
             return 0
         fi

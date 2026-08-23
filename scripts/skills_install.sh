@@ -12,10 +12,14 @@ here="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 # Python-2 `python` is rejected rather than handed the script, which would fail to parse.
 py=""
 for c in python3 python; do
-  if command -v "$c" >/dev/null 2>&1 && "$c" -c 'import sys; raise SystemExit(0 if sys.version_info >= (3, 7) else 1)' 2>/dev/null; then
-    py="$c"; break
-  fi
+    if command -v "$c" >/dev/null 2>&1 && "$c" -c 'import sys; raise SystemExit(0 if sys.version_info >= (3, 7) else 1)' 2>/dev/null; then
+        py="$c"
+        break
+    fi
 done
-[ -n "$py" ] || { echo "Python 3.7+ is required and was not found on PATH (tried python3, python)." >&2; exit 1; }
+[ -n "$py" ] || {
+    echo "Python 3.7+ is required and was not found on PATH (tried python3, python)." >&2
+    exit 1
+}
 
 exec "$py" "$here/skills_install.py" "$@"

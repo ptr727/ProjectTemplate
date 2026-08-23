@@ -44,11 +44,19 @@ class DockerLintCase(unittest.TestCase):
     def setUp(self) -> None:
         self.root = Path(self.enterContext(tempfile.TemporaryDirectory()))
         subprocess.run(["git", "init", "-q", str(self.root)], check=True)
+        # A separate temp dir, not self.root's own parent, which is the shared system temp root.
+        self.outside = Path(self.enterContext(tempfile.TemporaryDirectory()))
 
     def track(self, name: str, body: str = "content\n") -> None:
         path = self.root / name
         path.parent.mkdir(parents=True, exist_ok=True)
         path.write_text(body, encoding="utf-8")
+        subprocess.run(["git", "-C", str(self.root), "add", "--", name], check=True)
+
+    def track_symlink(self, name: str, target: Path) -> None:
+        path = self.root / name
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.symlink_to(target)
         subprocess.run(["git", "-C", str(self.root), "add", "--", name], check=True)
 
     def invoke(self, selected: set[str], runner: FakeRunner) -> tuple[int, str]:
@@ -128,6 +136,104 @@ class DockerLintCase(unittest.TestCase):
             self.root, linter, "example@sha256:123", ["-release.sh"]
         )
         self.assertEqual(["--", "-release.sh"], command[-2:])
+
+    def test_shfmt_literal_marker_precedes_option_shaped_filename(self) -> None:
+        linter = next(linter for linter in docker_lint.LINTERS if linter.name == "shfmt")
+        command = docker_lint.container_command(
+            self.root, linter, "example@sha256:123", ["-release.sh"]
+        )
+        self.assertEqual(["-d", "--", "-release.sh"], command[-3:])
+
+    def test_shellcheck_and_shfmt_pick_up_an_extensionless_shebang_script(self) -> None:
+        self.track("ops/vps-backup-pull", "#!/usr/bin/env bash\nset -Eeuo pipefail\necho hi\n")
+        for name in ("shellcheck", "shfmt"):
+            linter = next(linter for linter in docker_lint.LINTERS if linter.name == name)
+            self.assertEqual(["ops/vps-backup-pull"], docker_lint.tracked_files(self.root, linter))
+
+    def test_extensionless_non_shell_file_is_not_picked_up(self) -> None:
+        self.track("ops/README", "not a script\n")
+        self.track("ops/run-me", "#!/usr/bin/env python3\nprint('hi')\n")
+        linter = next(linter for linter in docker_lint.LINTERS if linter.name == "shellcheck")
+        self.assertEqual([], docker_lint.tracked_files(self.root, linter))
+
+    def test_extensionless_shebang_script_merges_with_glob_matched_scripts(self) -> None:
+        self.track("regular.sh", "#!/usr/bin/env bash\necho hi\n")
+        self.track("ops/vps-backup-pull", "#!/bin/sh\necho hi\n")
+        linter = next(linter for linter in docker_lint.LINTERS if linter.name == "shellcheck")
+        self.assertEqual(
+            ["ops/vps-backup-pull", "regular.sh"],
+            docker_lint.tracked_files(self.root, linter),
+        )
+
+    def test_extensionless_symlink_is_never_followed(self) -> None:
+        secret = self.outside / "secret"
+        secret.write_text("#!/usr/bin/env bash\n", encoding="utf-8")
+        self.track_symlink("ops/evil-symlink", secret)
+        linter = next(linter for linter in docker_lint.LINTERS if linter.name == "shellcheck")
+        with mock.patch.object(Path, "open", side_effect=AssertionError("symlink target opened")):
+            self.assertEqual([], docker_lint.tracked_files(self.root, linter))
+
+    def test_has_shell_shebang_reports_false_for_a_symlink_without_reading_it(self) -> None:
+        secret = self.outside / "secret"
+        secret.write_text("#!/usr/bin/env bash\n", encoding="utf-8")
+        self.track_symlink("ops/evil-symlink", secret)
+        with mock.patch.object(Path, "open", side_effect=AssertionError("symlink target opened")):
+            self.assertFalse(docker_lint.has_shell_shebang(self.root, "ops/evil-symlink"))
+
+    def test_has_shell_shebang_raises_rather_than_swallowing_a_read_failure(self) -> None:
+        self.track("ops/unreadable")
+        with (
+            mock.patch.object(Path, "open", side_effect=PermissionError("denied")),
+            self.assertRaisesRegex(docker_lint.CommandFailed, "could not read"),
+        ):
+            docker_lint.has_shell_shebang(self.root, "ops/unreadable")
+
+    def test_extensionless_untracked_shebang_script_is_not_picked_up(self) -> None:
+        path = self.root / "ops" / "vps-backup-pull"
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text("#!/usr/bin/env bash\necho hi\n", encoding="utf-8")
+        linter = next(linter for linter in docker_lint.LINTERS if linter.name == "shellcheck")
+        self.assertEqual([], docker_lint.tracked_files(self.root, linter))
+
+    def test_shell_shebang_interpreter_rejects_bash_as_a_plain_argument(self) -> None:
+        cases = {
+            "#!/bin/bash": "bash",
+            "#!/bin/sh": "sh",
+            "#!/usr/bin/env bash": "bash",
+            "#!/usr/bin/env\tbash": "bash",
+            "#!/usr/bin/env -S bash -e": "bash",
+            "#!/usr/bin/python bash": None,
+            "#!/usr/bin/env python sh": None,
+            "#!/usr/bin/env -S python -m sh": None,
+            "#!/usr/bin/env": None,
+            "not a shebang": None,
+        }
+        for line, expected in cases.items():
+            with self.subTest(line=line):
+                self.assertEqual(expected, docker_lint.shell_shebang_interpreter(line))
+
+    def test_extensionless_script_naming_bash_only_as_an_argument_is_excluded(self) -> None:
+        self.track("ops/run-me", "#!/usr/bin/python bash\nprint('hi')\n")
+        linter = next(linter for linter in docker_lint.LINTERS if linter.name == "shellcheck")
+        self.assertEqual([], docker_lint.tracked_files(self.root, linter))
+
+    def test_extensionless_shebang_script_with_no_trailing_newline_is_picked_up(self) -> None:
+        self.track("ops/vps-backup-pull", "#!/usr/bin/env bash")
+        linter = next(linter for linter in docker_lint.LINTERS if linter.name == "shellcheck")
+        self.assertEqual(["ops/vps-backup-pull"], docker_lint.tracked_files(self.root, linter))
+
+    def test_shell_shebang_interpreter_walks_past_env_grammar(self) -> None:
+        cases = {
+            "#!/usr/bin/env FOO=1 bash": "bash",
+            "#!/usr/bin/env -u bash python": None,
+            "#!/usr/bin/env -i FOO=1 bash": "bash",
+            "#!/usr/bin/env --unset=FOO bash": "bash",
+            "#!/usr/bin/env -C /tmp bash": "bash",
+            "#!/usr/bin/env FOO=1 BAR=2 sh": "sh",
+        }
+        for line, expected in cases.items():
+            with self.subTest(line=line):
+                self.assertEqual(expected, docker_lint.shell_shebang_interpreter(line))
 
     def test_cspell_literal_marker_precedes_option_shaped_filename(self) -> None:
         linter = next(linter for linter in docker_lint.LINTERS if linter.name == "cspell")

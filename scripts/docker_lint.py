@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import argparse
 import os
+import shlex
 import subprocess
 import sys
 from collections.abc import Callable, Sequence
@@ -25,6 +26,9 @@ class Linter:
     patterns: tuple[str, ...]
     workdir: str
     arguments: tuple[str, ...] = ()
+    # A `*.sh` pattern alone misses a tracked script meant to run as a bare command (no extension).
+    # Shell linters set this so their target list also matches an extensionless shebang script.
+    discover_shebang: bool = False
 
 
 LINTERS = (
@@ -49,7 +53,15 @@ LINTERS = (
         "/workdir",
         arguments=("--no-progress",),
     ),
-    Linter("shellcheck", "koalaman/shellcheck:stable", ("*.sh",), "/mnt"),
+    Linter("shellcheck", "koalaman/shellcheck:stable", ("*.sh",), "/mnt", discover_shebang=True),
+    Linter(
+        "shfmt",
+        "mvdan/shfmt:latest",
+        ("*.sh",),
+        "/mnt",
+        arguments=("-d",),
+        discover_shebang=True,
+    ),
     Linter("PSScriptAnalyzer", "mcr.microsoft.com/powershell:latest", ("*.ps1",), "/mnt"),
 )
 
@@ -98,8 +110,10 @@ def run_command(
         raise CommandFailed(f"could not start command: {error}") from error
 
 
-def tracked_files(root: Path, linter: Linter) -> list[str]:
-    """Return the tracked files the linter can inspect."""
+def ls_files(
+    root: Path, patterns: Sequence[str] = (), *, include_untracked: bool = True
+) -> list[str]:
+    """Return tracked paths, plus unignored untracked ones unless told to skip those."""
     command = [
         "git",
         "-C",
@@ -107,11 +121,11 @@ def tracked_files(root: Path, linter: Linter) -> list[str]:
         "ls-files",
         "-z",
         "--cached",
-        "--others",
-        "--exclude-standard",
     ]
-    if linter.patterns:
-        command.extend(["--", *linter.patterns])
+    if include_untracked:
+        command.extend(["--others", "--exclude-standard"])
+    if patterns:
+        command.extend(["--", *patterns])
     try:
         result = subprocess.run(command, check=True, capture_output=True)
     except FileNotFoundError as error:
@@ -124,6 +138,108 @@ def tracked_files(root: Path, linter: Linter) -> list[str]:
     return [os.fsdecode(entry) for entry in result.stdout.split(b"\0") if entry]
 
 
+# The env options below take a separate operand token, never mistaken for the command.
+ENV_OPERAND_FLAGS = {"-u", "--unset", "-C", "--chdir"}
+
+
+def _is_env_assignment(token: str) -> bool:
+    """Report whether token is a `NAME=VALUE` env-style assignment."""
+    name, separator, _ = token.partition("=")
+    return (
+        bool(separator)
+        and bool(name)
+        and (name[0].isalpha() or name[0] == "_")
+        and all(char.isalnum() or char == "_" for char in name)
+    )
+
+
+def shell_shebang_interpreter(line: str) -> str | None:
+    """Return the shebang's direct interpreter, bash or sh, or None otherwise.
+
+    Tokenizes rather than substring-matches, so a plain-argument `bash` is not the interpreter.
+    An `env` shebang walks past its own flags and `NAME=VALUE` assignments to find the command.
+    """
+    if not line.startswith("#!"):
+        return None
+    try:
+        tokens = shlex.split(line[2:])
+    except ValueError:
+        return None
+    if not tokens:
+        return None
+    interpreter = tokens[0].rsplit("/", 1)[-1]
+    if interpreter in {"bash", "sh"}:
+        return interpreter
+    if interpreter != "env":
+        return None
+    args = tokens[1:]
+    while args:
+        token = args[0]
+        if token == "--":
+            args = args[1:]
+            break
+        if token in {"-S", "--split-string"}:
+            args = args[1:]
+            break
+        if token.startswith("-"):
+            args = args[2:] if token in ENV_OPERAND_FLAGS else args[1:]
+            continue
+        if _is_env_assignment(token):
+            args = args[1:]
+            continue
+        break
+    if args and args[0].rsplit("/", 1)[-1] in {"bash", "sh"}:
+        return args[0].rsplit("/", 1)[-1]
+    return None
+
+
+def has_shell_shebang(root: Path, relative_path: str) -> bool:
+    """Report whether a tracked file's shebang directly names bash or sh.
+
+    Never follows a tracked symlink: `is_symlink()` uses `lstat`, keeping the target unreached.
+    A read failure raises `CommandFailed` instead of returning `False`.
+    That keeps a tracked file this cannot open from silently dropping out of the target list.
+    """
+    path = root / relative_path
+    if path.is_symlink():
+        return False
+    try:
+        with path.open("rb") as handle:
+            first_line = handle.readline(256)
+    except OSError as error:
+        raise CommandFailed(
+            f"target discovery failed: could not read {relative_path}: {error}"
+        ) from error
+    try:
+        text = first_line.decode("utf-8").rstrip("\n")
+    except UnicodeDecodeError:
+        return False
+    return shell_shebang_interpreter(text) is not None
+
+
+def extensionless_shell_scripts(root: Path) -> list[str]:
+    """Return tracked, extension-less files whose shebang names bash or sh.
+
+    A `*.sh` glob misses a script meant to run as a bare command, extension-less by design.
+    Its shebang is the only signal `git ls-files` cannot glob for.
+    Tracked only, matching CI's plain `git ls-files`.
+    An untracked bare script would otherwise lint here but never in CI.
+    """
+    return [
+        path
+        for path in ls_files(root, include_untracked=False)
+        if "." not in Path(path).name and has_shell_shebang(root, path)
+    ]
+
+
+def tracked_files(root: Path, linter: Linter) -> list[str]:
+    """Return the tracked files the linter can inspect."""
+    files = ls_files(root, linter.patterns)
+    if linter.discover_shebang:
+        files = sorted(set(files) | set(extensionless_shell_scripts(root)))
+    return files
+
+
 def docker_mount(root: Path, destination: str) -> str:
     """Build the read-only repository mount argument."""
     source = str(root).replace('"', '""')
@@ -132,7 +248,7 @@ def docker_mount(root: Path, destination: str) -> str:
 
 def file_batches(linter: Linter, files: Sequence[str]) -> list[list[str]]:
     """Split file arguments before the host command-line limit becomes relevant."""
-    if linter.name not in {"markdownlint", "cspell", "shellcheck", "PSScriptAnalyzer"}:
+    if linter.name not in {"markdownlint", "cspell", "shellcheck", "shfmt", "PSScriptAnalyzer"}:
         return [list(files)]
 
     batches: list[list[str]] = []
@@ -239,7 +355,7 @@ def container_command(root: Path, linter: Linter, digest: str, files: Sequence[s
         )
     else:
         command.extend([digest, *linter.arguments])
-        if linter.name in {"markdownlint", "cspell", "shellcheck"}:
+        if linter.name in {"markdownlint", "cspell", "shellcheck", "shfmt"}:
             command.append("--")
             command.extend(files)
     return command

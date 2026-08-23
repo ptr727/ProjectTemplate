@@ -1541,11 +1541,11 @@ def check_interface(path, contract, text):
             block = _code_view(jobs[job])
             for t in toks:
                 if t in block:
+                    # Generic rather than tied to one contract's reason.
+                    # forbidTokensInJob guards more than the github-release seam.
+                    # intentRef on the file's own entry routes a reader to the actual context.
                     findings.append(
-                        (
-                            "DRIFT",
-                            f"interface: {path} job '{job}' uses forbidden '{t}' (forks the verbatim github-release download, see WORKFLOW.md \"The Seam Contract\")",
-                        )
+                        ("DRIFT", f"interface: {path} job '{job}' uses forbidden '{t}'")
                     )
     return findings
 
@@ -2677,13 +2677,13 @@ def _selftest():
     ]
     # The deploy-site.yml caller stub once deploy-site-task.yml is hub-hosted: no secrets: inherit
     # (a cross-repository reusable workflow cannot use it), the one crossing secret named instead.
+    # No job-level environment: on the caller, unsupported on a job with uses: (ptr727/ProjectTemplate#942).
     deploy_stub = (
         "jobs:\n"
         "  assert-ref:\n    runs-on: ubuntu-latest\n    steps: []\n"
         "  validate:\n    uses: ./.github/workflows/validate-task.yml\n"
         "  deploy:\n"
         "    name: Deploy job\n"
-        "    environment: ${{ inputs.environment }}\n"
         "    permissions:\n      contents: read\n"
         "    uses: acme/hub/.github/workflows/deploy-site-task.yml@" + "a" * 40 + " # 2.0.1\n"
         "    with:\n      environment: ${{ inputs.environment }}\n"
@@ -2694,11 +2694,18 @@ def _selftest():
         "requireTokensInJob": {
             "deploy": [
                 "deploy-site-task.yml",
-                # Indent-anchored (4 spaces) so a with: input of the same name, indented 6, cannot satisfy this on its own.
-                "\n    environment:",
+                # Anchored to the with: block specifically, not just 6-space indent.
+                # A secret named "environment" would also land at that indent otherwise.
+                # The task declares this input required, and a missing one fails at dispatch, not at audit time.
+                "with:\n      environment:",
                 "contents: read",
                 "DEPLOY_SSH_PRIVATE_KEY",
             ]
+        },
+        "forbidTokensInJob": {
+            # Indent-anchored (4 spaces) to the job's own top level, the shape GitHub rejects
+            # at parse time on a job with uses: (ptr727/ProjectTemplate#942).
+            "deploy": ["\n    environment:"]
         },
     }
     cases += [
@@ -2718,11 +2725,27 @@ def _selftest():
             1,
         ),
         (
-            "deploy-site.yml caller stub missing the environment binding the crossing secret needs",
-            # Removes only the job-level environment: line, leaving the with:-nested environment: input untouched, the exact ambiguity an unanchored token would miss.
+            "deploy-site.yml caller stub reintroducing the invalid job-level environment: key",
             deploy_stub.replace(
-                "    name: Deploy job\n    environment: ${{ inputs.environment }}\n",
                 "    name: Deploy job\n",
+                "    name: Deploy job\n    environment: ${{ inputs.environment }}\n",
+            ),
+            deploy_contract,
+            1,
+        ),
+        (
+            "deploy-site.yml caller stub missing the required environment input",
+            deploy_stub.replace("    with:\n      environment: ${{ inputs.environment }}\n", ""),
+            deploy_contract,
+            1,
+        ),
+        (
+            "deploy-site.yml caller stub with environment: under the wrong mapping still reports missing",
+            # A same-indented environment: key under secrets: must not satisfy the with:-anchored requirement on its own.
+            # The oddly-named secret's value is left generic so it does not incidentally satisfy the DEPLOY_SSH_PRIVATE_KEY token.
+            deploy_stub.replace(
+                "    with:\n      environment: ${{ inputs.environment }}\n",
+                "    secrets:\n      environment: ${{ secrets.SOME_OTHER_SECRET }}\n",
             ),
             deploy_contract,
             1,
