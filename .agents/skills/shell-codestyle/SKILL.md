@@ -5,14 +5,14 @@ description: >-
   host-tool script may be shell instead of Python, the mandatory set -Eeuo pipefail header, the
   pipefail-versus-early-reader pitfall, self-locating scripts, the shellcheck-plus-shfmt
   clean-compile, and the why-not-what comment rule. Use this whenever writing, reviewing, or
-  editing a .sh file, whenever deciding whether a new script should be Bash or Python, or
-  whenever a pipeline built from `curl`/`grep`/`jq`-style commands looks like it silently
-  swallowed a failure. Triggers even when the task looks like a one-line tweak to an existing
-  script, because a missing `-e`/`pipefail`, or a reader piped straight from a producer that
-  closes the pipe early, are each invisible until the exact failure mode they guard against
-  actually happens. Fleet-wide: a shell script can appear in any repo (a bootstrap that installs
-  the interpreter, a host tool that must run before a toolchain exists), not only a repo whose
-  primary language is shell.
+  editing a shell script (a `.sh` file, or an extensionless bash/sh shebang script), whenever
+  deciding whether a new script should be Bash or Python, or whenever a pipeline built from
+  `curl`/`grep`/`jq`-style commands looks like it silently swallowed a failure. Triggers even when
+  the task looks like a one-line tweak to an existing script, because a missing `-e`/`pipefail`,
+  or a reader piped straight from a producer that closes the pipe early, are each invisible until
+  the exact failure mode they guard against actually happens. Fleet-wide: a shell script can
+  appear in any repo (a bootstrap that installs the interpreter, a host tool that must run before
+  a toolchain exists), not only a repo whose primary language is shell.
 ---
 
 # Shell Codestyle
