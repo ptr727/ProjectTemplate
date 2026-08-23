@@ -75,12 +75,13 @@ promotion PR once the fix lands, is the early exit this skill exists to prevent.
    the one intended. `--exit-code` distinguishes exit `2`, branch genuinely gone, from any other
    non-zero exit, a failed query, an unreachable remote and a gone branch both print nothing to
    stdout otherwise. Stop and report either a mismatch or a failed query rather than deleting,
-   someone could have pushed to the branch after the merge, or the name could have been reused. `<branch>` is the real value, substituted as its own quoted argument (a shell variable
+   someone could have pushed to the branch after the merge, or the name could have been reused.
+   `<branch>` is the real value, substituted as its own quoted argument (a shell variable
    expansion such as `"$branch"`, or an argv element), never handed to `eval` or `sh -c` for a
    second round of shell parsing, the only way an embedded `$()` or backtick would actually run.
    A valid ref can start with `-` or carry a shell metacharacter, which is why it stays quoted
-   regardless. Only once it matches, `git push origin --delete -- "<branch>"`. Never `--force-with-lease`
-   here, git-commit-conventions forbids it
+   regardless. Only once it matches, `git push origin --delete -- "<branch>"`. Never
+   `--force-with-lease` here, git-commit-conventions forbids it
    unconditionally, this plain verify-then-delete is the safety gate, not a compare-and-swap at
    delete time. The
    repo's auto-delete-head-branches setting is kept off fleet-wide (to protect `develop` and
