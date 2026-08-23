@@ -60,13 +60,51 @@ jobs:
         run: docker run --rm --pull=always -v "$PWD":/check --workdir /check mstruebing/editorconfig-checker:latest
 
       # The file list comes from git rather than a glob, and the docker run is skipped rather than invoked on an empty argument list.
-      # That is how a repo with no shell scripts stays clean instead of failing on shellcheck's own no-file usage error.
+      # That is how a repo with no shell scripts stays clean instead of failing on a linter's own no-file usage error.
+      # A `*.sh` glob alone misses a bare-command script with no extension, so a shebang-matched file joins the list too.
       - name: Check shell scripts step
         run: |
           set -Eeuo pipefail
+          # Tokenizes rather than substring-matches, so `#!/usr/bin/python bash` is not mistaken for a shell script.
+          # `docker_lint.py`'s shell_shebang_interpreter is the same logic; keep both in sync on a change here.
+          is_shell_shebang() {
+            local line="$1"
+            [[ "$line" == '#!'* ]] || return 1
+            local -a tokens
+            read -ra tokens <<< "${line#\#!}"
+            [ "${#tokens[@]}" -gt 0 ] || return 1
+            local interpreter="${tokens[0]##*/}"
+            if [[ "$interpreter" == "bash" || "$interpreter" == "sh" ]]; then
+              return 0
+            fi
+            [[ "$interpreter" == "env" ]] || return 1
+            local -a args=("${tokens[@]:1}")
+            while [ "${#args[@]}" -gt 0 ] && [[ "${args[0]}" == -* ]] && [[ "${args[0]}" != "--" ]]; do
+              if [[ "${args[0]}" == "-S" ]]; then
+                args=("${args[@]:1}")
+                break
+              fi
+              args=("${args[@]:1}")
+            done
+            if [ "${#args[@]}" -gt 0 ] && [[ "${args[0]}" == "--" ]]; then
+              args=("${args[@]:1}")
+            fi
+            [ "${#args[@]}" -gt 0 ] || return 1
+            local cmd="${args[0]##*/}"
+            [[ "$cmd" == "bash" || "$cmd" == "sh" ]]
+          }
           mapfile -t scripts < <(git ls-files '*.sh')
+          mapfile -d '' -t candidates < <(git ls-files -z)
+          for file in "${candidates[@]}"; do
+            base="${file##*/}"
+            if [[ "$base" != *.* ]] && [ -f "$file" ] && IFS= read -r first_line < "$file" \
+              && is_shell_shebang "$first_line"; then
+              scripts+=("$file")
+            fi
+          done
           if [ "${#scripts[@]}" -gt 0 ]; then
-            docker run --rm --pull=always -v "$PWD":/mnt --workdir /mnt koalaman/shellcheck:stable "${scripts[@]}"
+            docker run --rm --pull=always -v "$PWD":/mnt --workdir /mnt koalaman/shellcheck:stable -- "${scripts[@]}"
+            docker run --rm --pull=always -v "$PWD":/mnt --workdir /mnt mvdan/shfmt:latest -d -- "${scripts[@]}"
           else
             echo "no shell scripts are tracked"
           fi

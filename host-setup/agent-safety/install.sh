@@ -11,10 +11,14 @@ here="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 # The installer and the hook use Python 3 syntax, so a bare `python` that is Python 2 is rejected rather than handed the script, which would fail on import.
 py=""
 for c in python3 python; do
-  if command -v "$c" >/dev/null 2>&1 && "$c" -c 'import sys; raise SystemExit(0 if sys.version_info[0] == 3 else 1)' 2>/dev/null; then
-    py="$c"; break
-  fi
+    if command -v "$c" >/dev/null 2>&1 && "$c" -c 'import sys; raise SystemExit(0 if sys.version_info[0] == 3 else 1)' 2>/dev/null; then
+        py="$c"
+        break
+    fi
 done
-[ -n "$py" ] || { echo "Python 3 is required and was not found on PATH (tried python3, python)." >&2; exit 1; }
+[ -n "$py" ] || {
+    echo "Python 3 is required and was not found on PATH (tried python3, python)." >&2
+    exit 1
+}
 
 exec "$py" "$here/install.py" "$@"

@@ -123,7 +123,7 @@ The sibling scripts are independently fetchable, and this one deliberately is no
 
 ## Why There Is No Linter Category
 
-Neither this tooling nor its Windows sibling installs `markdownlint`, `cspell`, `actionlint`, `editorconfig-checker`, `shellcheck`, `PSScriptAnalyzer` or `ruff`. That is a decision rather than a gap. Each runs as a pinned container image or through `uvx`, which is what keeps a local run and CI the same check. Installing native copies would put a second, unpinned version of each on the host. The only host requirements any of it creates are `docker` and `uv`, and both are already managed here. The [Windows README][windows-readme] states the same decision from its side.
+Neither this tooling nor its Windows sibling installs `markdownlint`, `cspell`, `actionlint`, `editorconfig-checker`, `shellcheck`, `shfmt`, `PSScriptAnalyzer` or `ruff`. That is a decision rather than a gap. Each runs as a pinned container image or through `uvx`, which is what keeps a local run and CI the same check. Installing native copies would put a second, unpinned version of each on the host. The only host requirements any of it creates are `docker` and `uv`, and both are already managed here. The [Windows README][windows-readme] states the same decision from its side.
 
 ## bootstrap.sh
 
@@ -162,7 +162,7 @@ Two of those are guards rather than previews. `--release --dry-run` on a Proxmox
 
 `--repo` adds the repository's `install.linux` entries to the report or action. Only `apt` package names are accepted. The script does not execute the declaration's `remedy` text. Reading the JSON needs `jq`, which the ordinary fleet install provides.
 
-The scripts are checked by `shellcheck`, which runs in CI over every `.sh` file `git ls-files` returns. A local run uses the same `koalaman/shellcheck:stable` container. [`scripts/tests/test_bootstrap.py`][test-bootstrap] asserts that every tool the spec requires on Linux is one `install-tools.sh` can provide, or a recorded exception. It also asserts each script here is tracked executable, so a fresh checkout can run it.
+The scripts are checked by `shellcheck` and `shfmt`, which run in CI over every `.sh` file `git ls-files` returns, plus a tracked, extension-less file whose shebang names bash or sh. A local run uses the same `koalaman/shellcheck:stable` and `mvdan/shfmt:latest` containers. [`scripts/tests/test_bootstrap.py`][test-bootstrap] asserts that every tool the spec requires on Linux is one `install-tools.sh` can provide, or a recorded exception. It also asserts each script here is tracked executable, so a fresh checkout can run it.
 
 <!-- Repo -->
 

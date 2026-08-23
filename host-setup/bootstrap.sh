@@ -75,7 +75,7 @@ EOF
 # --- Fetch ---
 
 fetch() {
-    command -v curl > /dev/null || return 1
+    command -v curl >/dev/null || return 1
     curl -fsSL --retry 2 --connect-timeout 15 "$@"
 }
 
@@ -83,7 +83,7 @@ fetch() {
 # The plain-text accept header returns the commit alone, which keeps this free of a JSON parser on a host that has none.
 resolve_ref() {
     local sha
-    sha=$(fetch -H 'Accept: application/vnd.github.sha' "https://api.github.com/repos/$REPO/commits/$REF" 2> /dev/null) || sha=""
+    sha=$(fetch -H 'Accept: application/vnd.github.sha' "https://api.github.com/repos/$REPO/commits/$REF" 2>/dev/null) || sha=""
 
     if [[ -n $sha ]]; then
         RESOLVED="$sha"
@@ -230,16 +230,16 @@ menu() {
     local choice
     read -r -p "Choose: " choice
     case "$choice" in
-        1) MODE="report" ;;
-        2) MODE="upgrade" ;;
-        3) MODE="tools" ;;
-        4) MODE="github" ;;
-        5) MODE="skills" ;;
-        6) MODE="sudo" ;;
-        7) MODE="host" ;;
-        8) MODE="dev" ;;
-        q | Q) exit 0 ;;
-        *) die "Not one of the choices" ;;
+    1) MODE="report" ;;
+    2) MODE="upgrade" ;;
+    3) MODE="tools" ;;
+    4) MODE="github" ;;
+    5) MODE="skills" ;;
+    6) MODE="sudo" ;;
+    7) MODE="host" ;;
+    8) MODE="dev" ;;
+    q | Q) exit 0 ;;
+    *) die "Not one of the choices" ;;
     esac
 }
 
@@ -250,36 +250,36 @@ parse_args() {
 
     while [[ $# -gt 0 ]]; do
         case "$1" in
-            -r | --report) actions+=(report) ;;
-            --host) actions+=(host) ;;
-            --dev) actions+=(dev) ;;
-            --upgrade) actions+=(upgrade) ;;
-            --tools) actions+=(tools) ;;
-            --github) actions+=(github) ;;
-            --skills) actions+=(skills) ;;
-            --sudo) actions+=(sudo) ;;
-            --release) actions+=(release) ;;
-            -y | --yes) ASSUME_YES=true ;;
-            -n | --dry-run) DRY_RUN=true ;;
-            --keep) KEEP=true ;;
-            --ref)
-                [[ $# -ge 2 ]] || die "--ref takes a branch, tag, pull request ref, or commit"
-                REF="$2"
-                shift
-                ;;
-            --dir)
-                [[ $# -ge 2 ]] || die "--dir takes a path"
-                # An absolute path, and never the root, since everything below is created and removed under it.
-                [[ $2 == /* ]] || die "--dir takes an absolute path, and \"$2\" is relative"
-                [[ $2 != "/" ]] || die "--dir may not be the root directory"
-                DIR="${2%/}"
-                shift
-                ;;
-            -h | --help)
-                usage
-                exit 0
-                ;;
-            *) die "Unknown option \"$1\", --help lists the options" ;;
+        -r | --report) actions+=(report) ;;
+        --host) actions+=(host) ;;
+        --dev) actions+=(dev) ;;
+        --upgrade) actions+=(upgrade) ;;
+        --tools) actions+=(tools) ;;
+        --github) actions+=(github) ;;
+        --skills) actions+=(skills) ;;
+        --sudo) actions+=(sudo) ;;
+        --release) actions+=(release) ;;
+        -y | --yes) ASSUME_YES=true ;;
+        -n | --dry-run) DRY_RUN=true ;;
+        --keep) KEEP=true ;;
+        --ref)
+            [[ $# -ge 2 ]] || die "--ref takes a branch, tag, pull request ref, or commit"
+            REF="$2"
+            shift
+            ;;
+        --dir)
+            [[ $# -ge 2 ]] || die "--dir takes a path"
+            # An absolute path, and never the root, since everything below is created and removed under it.
+            [[ $2 == /* ]] || die "--dir takes an absolute path, and \"$2\" is relative"
+            [[ $2 != "/" ]] || die "--dir may not be the root directory"
+            DIR="${2%/}"
+            shift
+            ;;
+        -h | --help)
+            usage
+            exit 0
+            ;;
+        *) die "Unknown option \"$1\", --help lists the options" ;;
         esac
         shift
     done
@@ -295,9 +295,9 @@ parse_args() {
 main() {
     parse_args "$@"
 
-    command -v curl > /dev/null ||
+    command -v curl >/dev/null ||
         die "curl is required to fetch the tooling. Install it with this host's package manager, then run this again."
-    command -v tar > /dev/null || die "tar is required to unpack the tooling"
+    command -v tar >/dev/null || die "tar is required to unpack the tooling"
 
     # A run with no action and no terminal reports rather than guessing, which is what a pipe into a shell is.
     # The remedy is printed rather than assumed, since somebody reaching this has just pasted a one-line install.
@@ -318,15 +318,15 @@ main() {
     download_tree
 
     case "$MODE" in
-        report) report ;;
-        upgrade) run_tool upgrade-host.sh --packages ;;
-        tools) run_tool install-tools.sh --install ;;
-        github) run_tool setup-github.sh --configure ;;
-        skills) SKILLS_SOURCE_COMMIT="$RESOLVED" run_tool install-skills.sh ;;
-        sudo) run_tool install-tools.sh --sudo-timestamp ;;
-        release) run_tool upgrade-host.sh --release ;;
-        host) stand_up host ;;
-        dev) stand_up dev ;;
+    report) report ;;
+    upgrade) run_tool upgrade-host.sh --packages ;;
+    tools) run_tool install-tools.sh --install ;;
+    github) run_tool setup-github.sh --configure ;;
+    skills) SKILLS_SOURCE_COMMIT="$RESOLVED" run_tool install-skills.sh ;;
+    sudo) run_tool install-tools.sh --sudo-timestamp ;;
+    release) run_tool upgrade-host.sh --release ;;
+    host) stand_up host ;;
+    dev) stand_up dev ;;
     esac
 
     step "Done"
