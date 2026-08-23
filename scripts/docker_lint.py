@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import argparse
 import os
+import re
 import subprocess
 import sys
 from collections.abc import Callable, Sequence
@@ -14,6 +15,8 @@ from pathlib import Path
 PSSCRIPTANALYZER_VERSION = "1.23.0"
 PSSCRIPTANALYZER_VOLUME = f"projecttemplate-psscriptanalyzer-{PSSCRIPTANALYZER_VERSION}"
 MAX_FILE_ARGUMENT_BYTES = 16 * 1024
+# A shebang interpreter path or an `env` invocation naming bash or sh, per POSIX shebang shape.
+SHEBANG_PATTERN = re.compile(r"^#!.*[/ ](bash|sh)(\s|$)")
 
 
 @dataclass(frozen=True)
@@ -25,6 +28,9 @@ class Linter:
     patterns: tuple[str, ...]
     workdir: str
     arguments: tuple[str, ...] = ()
+    # A `*.sh` pattern alone misses a tracked script meant to run as a bare command (no extension).
+    # Shell linters set this so their target list also matches an extensionless shebang script.
+    discover_shebang: bool = False
 
 
 LINTERS = (
@@ -49,7 +55,15 @@ LINTERS = (
         "/workdir",
         arguments=("--no-progress",),
     ),
-    Linter("shellcheck", "koalaman/shellcheck:stable", ("*.sh",), "/mnt"),
+    Linter("shellcheck", "koalaman/shellcheck:stable", ("*.sh",), "/mnt", discover_shebang=True),
+    Linter(
+        "shfmt",
+        "mvdan/shfmt:latest",
+        ("*.sh",),
+        "/mnt",
+        arguments=("-d",),
+        discover_shebang=True,
+    ),
     Linter("PSScriptAnalyzer", "mcr.microsoft.com/powershell:latest", ("*.ps1",), "/mnt"),
 )
 
@@ -98,8 +112,8 @@ def run_command(
         raise CommandFailed(f"could not start command: {error}") from error
 
 
-def tracked_files(root: Path, linter: Linter) -> list[str]:
-    """Return the tracked files the linter can inspect."""
+def ls_files(root: Path, patterns: Sequence[str] = ()) -> list[str]:
+    """Return tracked and unignored paths, optionally narrowed to pathspec patterns."""
     command = [
         "git",
         "-C",
@@ -110,8 +124,8 @@ def tracked_files(root: Path, linter: Linter) -> list[str]:
         "--others",
         "--exclude-standard",
     ]
-    if linter.patterns:
-        command.extend(["--", *linter.patterns])
+    if patterns:
+        command.extend(["--", *patterns])
     try:
         result = subprocess.run(command, check=True, capture_output=True)
     except FileNotFoundError as error:
@@ -124,6 +138,41 @@ def tracked_files(root: Path, linter: Linter) -> list[str]:
     return [os.fsdecode(entry) for entry in result.stdout.split(b"\0") if entry]
 
 
+def has_shell_shebang(root: Path, relative_path: str) -> bool:
+    """Report whether a tracked file's first line names a bash or sh interpreter."""
+    try:
+        with (root / relative_path).open("rb") as handle:
+            first_line = handle.readline(256)
+    except OSError:
+        return False
+    try:
+        text = first_line.decode("utf-8")
+    except UnicodeDecodeError:
+        return False
+    return bool(SHEBANG_PATTERN.match(text))
+
+
+def extensionless_shell_scripts(root: Path) -> list[str]:
+    """Return tracked, extension-less files whose shebang names bash or sh.
+
+    A `*.sh` glob misses a script meant to run as a bare command, which carries no
+    extension by design. Its shebang is the only signal `git ls-files` cannot glob for.
+    """
+    return [
+        path
+        for path in ls_files(root)
+        if "." not in Path(path).name and has_shell_shebang(root, path)
+    ]
+
+
+def tracked_files(root: Path, linter: Linter) -> list[str]:
+    """Return the tracked files the linter can inspect."""
+    files = ls_files(root, linter.patterns)
+    if linter.discover_shebang:
+        files = sorted(set(files) | set(extensionless_shell_scripts(root)))
+    return files
+
+
 def docker_mount(root: Path, destination: str) -> str:
     """Build the read-only repository mount argument."""
     source = str(root).replace('"', '""')
@@ -132,7 +181,7 @@ def docker_mount(root: Path, destination: str) -> str:
 
 def file_batches(linter: Linter, files: Sequence[str]) -> list[list[str]]:
     """Split file arguments before the host command-line limit becomes relevant."""
-    if linter.name not in {"markdownlint", "cspell", "shellcheck", "PSScriptAnalyzer"}:
+    if linter.name not in {"markdownlint", "cspell", "shellcheck", "shfmt", "PSScriptAnalyzer"}:
         return [list(files)]
 
     batches: list[list[str]] = []
@@ -239,7 +288,7 @@ def container_command(root: Path, linter: Linter, digest: str, files: Sequence[s
         )
     else:
         command.extend([digest, *linter.arguments])
-        if linter.name in {"markdownlint", "cspell", "shellcheck"}:
+        if linter.name in {"markdownlint", "cspell", "shellcheck", "shfmt"}:
             command.append("--")
             command.extend(files)
     return command

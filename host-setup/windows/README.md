@@ -59,7 +59,7 @@ These are listed apart, left alone, and printed with **no command beside them**.
 
 ## Why There Is No Linter Category
 
-Neither this tooling nor its Linux sibling installs `markdownlint`, `cspell`, `actionlint`, `editorconfig-checker`, `shellcheck`, `PSScriptAnalyzer` or `ruff`, and that is a decision rather than a gap.
+Neither this tooling nor its Linux sibling installs `markdownlint`, `cspell`, `actionlint`, `editorconfig-checker`, `shellcheck`, `shfmt`, `PSScriptAnalyzer` or `ruff`, and that is a decision rather than a gap.
 
 Each of those runs as a pinned container image or through `uvx`, which is what keeps a local run and CI the same check: the image tag fixes the version. Installing native copies through `winget` would put a second, unpinned version of each on the host, and a local run would then differ from CI, which is the exact property the pinned images exist to guarantee. The only host requirements any of it creates are `docker` and `uv`, and both are already in the registry.
 

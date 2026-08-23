@@ -129,6 +129,34 @@ class DockerLintCase(unittest.TestCase):
         )
         self.assertEqual(["--", "-release.sh"], command[-2:])
 
+    def test_shfmt_literal_marker_precedes_option_shaped_filename(self) -> None:
+        linter = next(linter for linter in docker_lint.LINTERS if linter.name == "shfmt")
+        command = docker_lint.container_command(
+            self.root, linter, "example@sha256:123", ["-release.sh"]
+        )
+        self.assertEqual(["-d", "--", "-release.sh"], command[-3:])
+
+    def test_shellcheck_and_shfmt_pick_up_an_extensionless_shebang_script(self) -> None:
+        self.track("ops/vps-backup-pull", "#!/usr/bin/env bash\nset -Eeuo pipefail\necho hi\n")
+        for name in ("shellcheck", "shfmt"):
+            linter = next(linter for linter in docker_lint.LINTERS if linter.name == name)
+            self.assertEqual(["ops/vps-backup-pull"], docker_lint.tracked_files(self.root, linter))
+
+    def test_extensionless_non_shell_file_is_not_picked_up(self) -> None:
+        self.track("ops/README", "not a script\n")
+        self.track("ops/run-me", "#!/usr/bin/env python3\nprint('hi')\n")
+        linter = next(linter for linter in docker_lint.LINTERS if linter.name == "shellcheck")
+        self.assertEqual([], docker_lint.tracked_files(self.root, linter))
+
+    def test_extensionless_shebang_script_merges_with_glob_matched_scripts(self) -> None:
+        self.track("regular.sh", "#!/usr/bin/env bash\necho hi\n")
+        self.track("ops/vps-backup-pull", "#!/bin/sh\necho hi\n")
+        linter = next(linter for linter in docker_lint.LINTERS if linter.name == "shellcheck")
+        self.assertEqual(
+            ["ops/vps-backup-pull", "regular.sh"],
+            docker_lint.tracked_files(self.root, linter),
+        )
+
     def test_cspell_literal_marker_precedes_option_shaped_filename(self) -> None:
         linter = next(linter for linter in docker_lint.LINTERS if linter.name == "cspell")
         command = docker_lint.container_command(
