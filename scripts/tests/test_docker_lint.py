@@ -51,6 +51,12 @@ class DockerLintCase(unittest.TestCase):
         path.write_text(body, encoding="utf-8")
         subprocess.run(["git", "-C", str(self.root), "add", "--", name], check=True)
 
+    def track_symlink(self, name: str, target: Path) -> None:
+        path = self.root / name
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.symlink_to(target)
+        subprocess.run(["git", "-C", str(self.root), "add", "--", name], check=True)
+
     def invoke(self, selected: set[str], runner: FakeRunner) -> tuple[int, str]:
         output = io.StringIO()
         with contextlib.redirect_stdout(output):
@@ -156,6 +162,19 @@ class DockerLintCase(unittest.TestCase):
             ["ops/vps-backup-pull", "regular.sh"],
             docker_lint.tracked_files(self.root, linter),
         )
+
+    def test_extensionless_symlink_is_never_followed(self) -> None:
+        secret = self.root.parent / "secret"
+        secret.write_text("TOP SECRET\n#!/usr/bin/env bash\n", encoding="utf-8")
+        self.track_symlink("ops/evil-symlink", secret)
+        linter = next(linter for linter in docker_lint.LINTERS if linter.name == "shellcheck")
+        self.assertEqual([], docker_lint.tracked_files(self.root, linter))
+
+    def test_has_shell_shebang_reports_false_for_a_symlink_without_reading_it(self) -> None:
+        secret = self.root.parent / "secret"
+        secret.write_text("#!/usr/bin/env bash\n", encoding="utf-8")
+        self.track_symlink("ops/evil-symlink", secret)
+        self.assertFalse(docker_lint.has_shell_shebang(self.root, "ops/evil-symlink"))
 
     def test_extensionless_untracked_shebang_script_is_not_picked_up(self) -> None:
         path = self.root / "ops" / "vps-backup-pull"
