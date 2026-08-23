@@ -145,9 +145,10 @@ skill covers all of it, scoped down by what the maintainer actually asks for.
      "<branch>" --state merged --repo owner/repo --json
      number,baseRefName,mergedAt,headRefOid,headRefName,headRepository --jq 'if length == 1 then
      .[0] else error("expected exactly one merged PR for this head, got \(length)") end'`.
-     `--head` matches by prefix rather than exactly, `gh pr list --help` shows `--head "typo"` as
-     its own example, so confirm `headRefName` equals `<branch>` exactly before trusting anything
-     else this query returned. Confirm `headRepository` is non-null and its `nameWithOwner` equals
+     `--head` is expected to match exactly (verified against `gh` 2.97.0 on this repo, a bare
+     prefix of a real branch name returned nothing), but confirming `headRefName` equals `<branch>`
+     costs one field and is cheap insurance against a future `gh` behavior change, not a workaround
+     for a known partial-match case. Confirm `headRepository` is non-null and its `nameWithOwner` equals
      `owner/repo`, the owner alone is not enough, a same-owner PR against an identically named
      branch in a different repository must never pass this check either. Confirm `baseRefName`
      is `develop` (a different merged pull request can share the same head branch name against a
