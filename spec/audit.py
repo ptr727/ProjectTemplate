@@ -2701,6 +2701,11 @@ def _selftest():
                 "DEPLOY_SSH_PRIVATE_KEY",
             ]
         },
+        "forbidTokensInJob": {
+            # Indent-anchored (4 spaces) to the job's own top level, the shape GitHub rejects
+            # at parse time on a job with uses: (ptr727/ProjectTemplate#942).
+            "deploy": ["\n    environment:"]
+        },
     }
     cases += [
         (
@@ -2714,6 +2719,15 @@ def _selftest():
             deploy_stub.replace(
                 "    secrets:\n      DEPLOY_SSH_PRIVATE_KEY: ${{ secrets.DEPLOY_SSH_PRIVATE_KEY }}\n",
                 "    secrets: inherit\n",
+            ),
+            deploy_contract,
+            1,
+        ),
+        (
+            "deploy-site.yml caller stub reintroducing the invalid job-level environment: key",
+            deploy_stub.replace(
+                "    name: Deploy job\n",
+                "    name: Deploy job\n    environment: ${{ inputs.environment }}\n",
             ),
             deploy_contract,
             1,
