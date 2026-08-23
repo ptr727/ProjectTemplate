@@ -2677,13 +2677,16 @@ def _selftest():
     ]
     # The deploy-site.yml caller stub once deploy-site-task.yml is hub-hosted: no secrets: inherit
     # (a cross-repository reusable workflow cannot use it), the one crossing secret named instead.
+    # No job-level environment: on the caller - a job with uses: cannot carry that key at all
+    # (ptr727/ProjectTemplate#942). The task's own job binds it and resolves it against the
+    # caller's environment store cross-repository; the caller's secrets: map only puts the name
+    # in the task's reach.
     deploy_stub = (
         "jobs:\n"
         "  assert-ref:\n    runs-on: ubuntu-latest\n    steps: []\n"
         "  validate:\n    uses: ./.github/workflows/validate-task.yml\n"
         "  deploy:\n"
         "    name: Deploy job\n"
-        "    environment: ${{ inputs.environment }}\n"
         "    permissions:\n      contents: read\n"
         "    uses: acme/hub/.github/workflows/deploy-site-task.yml@" + "a" * 40 + " # 2.0.1\n"
         "    with:\n      environment: ${{ inputs.environment }}\n"
@@ -2694,8 +2697,6 @@ def _selftest():
         "requireTokensInJob": {
             "deploy": [
                 "deploy-site-task.yml",
-                # Indent-anchored (4 spaces) so a with: input of the same name, indented 6, cannot satisfy this on its own.
-                "\n    environment:",
                 "contents: read",
                 "DEPLOY_SSH_PRIVATE_KEY",
             ]
@@ -2713,16 +2714,6 @@ def _selftest():
             deploy_stub.replace(
                 "    secrets:\n      DEPLOY_SSH_PRIVATE_KEY: ${{ secrets.DEPLOY_SSH_PRIVATE_KEY }}\n",
                 "    secrets: inherit\n",
-            ),
-            deploy_contract,
-            1,
-        ),
-        (
-            "deploy-site.yml caller stub missing the environment binding the crossing secret needs",
-            # Removes only the job-level environment: line, leaving the with:-nested environment: input untouched, the exact ambiguity an unanchored token would miss.
-            deploy_stub.replace(
-                "    name: Deploy job\n    environment: ${{ inputs.environment }}\n",
-                "    name: Deploy job\n",
             ),
             deploy_contract,
             1,
