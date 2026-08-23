@@ -116,8 +116,13 @@ skill covers all of it, scoped down by what the maintainer actually asks for.
      `git merge-base --is-ancestor <branch> develop` must never be used for this, a squash merge
      (drive-pr's own merge method) never makes the feature tip a literal ancestor of `develop`, so
      the check reports every already-finished branch as unmerged. Only once GitHub confirms it,
-     remove the worktree, `git worktree remove`, then the branch, `git branch -d`, `git push
-     origin --delete <branch>`. Never apply this sweep to `develop` or `main` themselves, only to
+     and the worktree is clean (a dirty worktree stops cleanup rather than discarding uncommitted
+     work), remove the worktree, `git worktree remove`, then delete the branch. `git branch -d`
+     has the identical squash blindness as `git merge-base --is-ancestor` and refuses too, so use
+     `git branch -D <exact-branch>` here, safe only because the GitHub-state check just proved
+     that exact branch finished, the narrow post-squash exception git-commit-conventions
+     describes, never applied to an unverified branch. Then `git push origin --delete <branch>`
+     for the remote side. Never apply this sweep to `develop` or `main` themselves, only to
      feature branches a drive-pr loop created.
 
 ## Mechanics Live Elsewhere
