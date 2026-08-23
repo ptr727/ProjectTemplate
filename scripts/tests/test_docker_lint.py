@@ -180,6 +180,14 @@ class DockerLintCase(unittest.TestCase):
         with mock.patch.object(Path, "open", side_effect=AssertionError("symlink target opened")):
             self.assertFalse(docker_lint.has_shell_shebang(self.root, "ops/evil-symlink"))
 
+    def test_has_shell_shebang_raises_rather_than_swallowing_a_read_failure(self) -> None:
+        self.track("ops/unreadable")
+        with (
+            mock.patch.object(Path, "open", side_effect=PermissionError("denied")),
+            self.assertRaisesRegex(docker_lint.CommandFailed, "could not read"),
+        ):
+            docker_lint.has_shell_shebang(self.root, "ops/unreadable")
+
     def test_extensionless_untracked_shebang_script_is_not_picked_up(self) -> None:
         path = self.root / "ops" / "vps-backup-pull"
         path.parent.mkdir(parents=True, exist_ok=True)
