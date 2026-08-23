@@ -58,20 +58,16 @@ promotion PR once the fix lands, is the early exit this skill exists to prevent.
 2. Push the branch and open the feature -> develop PR if it does not exist yet.
 3. Drive pr-review-conduct's review loop on it to the Merge Gate, disposing of every finding per
    "Disposing of Every Finding" below.
-4. Capture the branch's own tip before merging, `gh pr view [number] --json headRefOid --jq
-   .headRefOid`, `gh pr merge` reports the resulting squash commit on `develop`, not the PR's
-   `headRefOid`, and the compare-and-swap delete below needs the latter. Merge the feature PR into
-   develop, `gh pr merge [number] --squash --repo owner/repo`. Never `--delete-branch` on this
-   call, it is run from inside the task's own worktree per step 1, where the feature branch is
-   checked out, and `gh pr merge --delete-branch` needs to switch that worktree to the base branch
-   to delete it, which fails when `develop` is already checked out somewhere else, the ordinary
-   case in this layout. Instead run repo-worktree's post-merge cleanup from the base clone: remove
-   the worktree, delete the now-merged local task branch, then delete the remote one explicitly,
-   compare-and-swap gated on the `headRefOid` captured above so a stray push landing on it in the
-   gap is never silently discarded, `git push
-   --force-with-lease=refs/heads/<branch>:<headRefOid> origin :refs/heads/<branch>`, a ref
-   deletion gated on its current tip, not a history rewrite, so it is not the case
-   git-commit-conventions' no-force-push rule targets. The repo's auto-delete-head-branches
+4. Merge the feature PR into develop, `gh pr merge [number] --squash --repo owner/repo`. Never
+   `--delete-branch` on this call, it is run from inside the task's own worktree per step 1, where
+   the feature branch is checked out, and `gh pr merge --delete-branch` needs to switch that
+   worktree to the base branch to delete it, which fails when `develop` is already checked out
+   somewhere else, the ordinary case in this layout. Instead run repo-worktree's post-merge
+   cleanup from the base clone: remove the worktree, delete the now-merged local task branch, then
+   delete the remote one explicitly, `git push origin --delete <branch>`. Never
+   `--force-with-lease` here, git-commit-conventions forbids it unconditionally, this merge just
+   confirmed by `gh pr merge` itself is the verification gate, not a compare-and-swap at delete
+   time. The repo's auto-delete-head-branches
    setting is kept off fleet-wide (to protect `develop` and `main` from it, GitHub has no
    per-branch exception), so nothing deletes an ordinary feature branch automatically. Stop here
    and report the merged PR when the target is develop only.
