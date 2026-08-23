@@ -365,7 +365,7 @@ A repo that vendors a theme or imports content it does not author narrows the Li
 
 `validate-task.yml` appends each line after `**/*.md` in the Lint Markdown step's own `globs:` block, unvalidated. A negated glob excludes, the intended use, but a non-negated one adds to what is linted rather than narrowing it.
 
-The repo gate's `sha-pin` and `eol-coverage` checks read the same tracked-file list and hit the same wall for a vendored subtree carrying its own CI: PaperMod's own workflows pin actions by floating tag, which Blog does not author and, per `themes/README.md`'s byte-identical-to-upstream invariant, does not locally edit either. `repo-gate-exclude-globs` narrows that scan the same way, one git pathspec pattern per line:
+The repo gate's `sha-pin` and `eol-coverage` checks read the same tracked-file list, hitting the same wall for a vendored subtree carrying its own CI. PaperMod's own workflows pin actions by floating tag, which Blog does not author. Per `themes/README.md`'s byte-identical-to-upstream invariant, Blog does not locally edit them either. `repo-gate-exclude-globs` narrows that scan the same way, one git pathspec pattern per line:
 
 ```yaml
     with:
@@ -373,7 +373,7 @@ The repo gate's `sha-pin` and `eol-coverage` checks read the same tracked-file l
         themes/PaperMod/**
 ```
 
-`validate-task.yml` passes each line straight through to the `repo-gate` composite action's own `exclude-globs` input, which turns it into a `--exclude` argument for `repo_gate.py`. Unlike `markdown-exclude-globs`, a line here is never negated: it is always a pathspec to drop from `git ls-files`, so `themes/PaperMod/**` excludes rather than `!themes/PaperMod/**`.
+`validate-task.yml` passes each line straight through to the `repo-gate` composite action's own `exclude-globs` input. That input turns each line into a `--exclude` argument for `repo_gate.py`. Unlike `markdown-exclude-globs`, a line here is never negated: it is always a pathspec to drop from `git ls-files`. So `themes/PaperMod/**` excludes, rather than `!themes/PaperMod/**`.
 
 ## Adopting the Pure Functions
 

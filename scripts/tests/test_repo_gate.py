@@ -586,14 +586,36 @@ class TestExcludeGlobs(unittest.TestCase):
             )
         self.assertEqual(0, code)
         self.assertIn(
-            "note: 1 exclude pattern(s) narrowed the tracked-file scan: vendor/**",
+            "note: 1 exclude pattern(s) narrowed the tracked-file scan by 2 file(s): vendor/**",
             out.getvalue(),
         )
 
-    def test_the_narrowing_note_is_silent_when_nothing_was_excluded(self) -> None:
+    def test_the_narrowing_note_is_silent_when_no_exclude_was_given(self) -> None:
         with contextlib.redirect_stdout(io.StringIO()) as out:
             repo_gate.main(["--root", str(self.tmp), "--check", "sha-pin"])
         self.assertNotIn("narrowed the tracked-file scan", out.getvalue())
+
+    def test_a_pattern_matching_nothing_is_not_reported_as_narrowing(self) -> None:
+        """A caller's own typo drops zero files, and a false 'narrowed' note would hide that."""
+        with contextlib.redirect_stdout(io.StringIO()) as out:
+            repo_gate.main(
+                ["--root", str(self.tmp), "--check", "sha-pin", "--exclude", "no/such/path/**"]
+            )
+        printed = out.getvalue()
+        self.assertIn("matched no tracked file, so nothing was narrowed", printed)
+        self.assertNotIn("narrowed the tracked-file scan by", printed)
+
+    def test_a_failed_ls_files_call_prints_gits_own_error(self) -> None:
+        """A command failure and a valid empty result both return `[]`; only this prints why."""
+        proc = subprocess.CompletedProcess([], 128, "", "fatal: Invalid pathspec magic 'bogus'\n")
+        with (
+            mock.patch.object(repo_gate.subprocess, "run", return_value=proc),
+            contextlib.redirect_stderr(io.StringIO()) as err,
+        ):
+            files = repo_gate.tracked(self.tmp, ["bogus/**"])
+        self.assertEqual([], files)
+        self.assertIn("git ls-files failed", err.getvalue())
+        self.assertIn("Invalid pathspec magic", err.getvalue())
 
 
 class TestHarness(unittest.TestCase):

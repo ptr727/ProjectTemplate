@@ -4,9 +4,9 @@ description: Check action pins and line-ending contracts.
 inputs:
   exclude-globs:
     description: >-
-      Newline-separated git pathspec patterns (for example 'themes/PaperMod/**'), each turned
-      into a `--exclude` argument for repo_gate.py so a caller vendoring a subtree it does not
-      author can scope every check's tracked-file scan out of it. Empty by default: nothing is
+      Newline-separated git pathspec patterns, for example 'themes/PaperMod/**'. Each becomes a
+      `--exclude` argument for repo_gate.py. A caller vendoring a subtree it does not author can
+      scope every check's tracked-file scan out of it this way. Empty by default: nothing is
       excluded, and every check keeps scanning the whole repository.
     required: false
     default: ''
