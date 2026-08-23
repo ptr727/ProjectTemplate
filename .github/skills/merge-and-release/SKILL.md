@@ -93,18 +93,25 @@ skill covers all of it, scoped down by what the maintainer actually asks for.
    distinctly, the ref changed mid-dispatch, rather than folding it into an ordinary absent-run
    timeout. Report and stop rather than guessing once the interval elapses with zero or more than
    one candidate still matching. Only once exactly one candidate is confirmed, poll that one run
-   id to completion in
-   one further bounded background wait with an explicit timeout, `timeout <seconds> gh run
-   watch <run-id> --repo owner/repo --exit-status` on a host with GNU `timeout`, or the equivalent
-   bounded-wait mechanism on a host without it (macOS without coreutils, native Windows), and
-   report a timeout separately from a completed run's own conclusion, the tag or version it
-   produced. A run that fails, times out, or never starts is reported, never silently retried.
-7. In the hub, when the chosen scope includes a release, bring this checkout to the merged
-   content: `git fetch origin main`, then `git checkout -B main origin/main` to force the local
-   `main` to the fetched tip regardless of what it pointed to before. `skills_install.py` stamps
-   and installs from whatever this checkout's HEAD already is, so a plain `git checkout main`
-   would leave a local `main` that already existed pointing at its old, pre-fetch commit, and
-   skip the refresh silently. Only then run `python3 scripts/skills_install.py --report`, then
+   id to completion in one further bounded background wait with an explicit, finite timeout,
+   2700 seconds (45 minutes, matching `scripts/pr_review.py`'s own default) unless the maintainer
+   states a different bound for this specific release, `timeout 2700 gh run watch <run-id> --repo
+   owner/repo --exit-status` on a host with GNU `timeout`, or the equivalent bounded-wait
+   mechanism enforcing the same bound on a host without it (macOS without coreutils, native
+   Windows), and report a timeout separately from a completed run's own conclusion, the tag or
+   version it produced. A run that fails, times out, or never starts is reported, never silently
+   retried.
+7. In the hub, when the chosen scope includes a release, first confirm this checkout is clean,
+   `git status --porcelain` empty, a dirty checkout stops here and is reported rather than being
+   switched or reconciled, per this fleet's no-discard-work rule. `git fetch origin main`. When a
+   local `main` already exists, confirm the fetch is a fast-forward for it, `git merge-base
+   --is-ancestor main origin/main`, stop and report a diverged local `main` rather than
+   force-resetting it, the same rule applies to a diverged branch as to a dirty tree. Only once
+   both checks pass, `git checkout -B main origin/main` to bring the local `main` to the fetched
+   tip. `skills_install.py` stamps and installs from whatever this checkout's HEAD already is, so
+   a plain `git checkout main` would leave a local `main` that already existed pointing at its
+   old, pre-fetch commit, and skip the refresh silently. Only then run `python3
+   scripts/skills_install.py --report`, then
    `python3 scripts/skills_install.py` to install, and confirm `--report` now reads current,
    regardless of whether step 5 or 6 dispatched, skipped, or failed a release, this step is gated
    only on the chosen scope, never on the release outcome. This refreshes only the machine running
