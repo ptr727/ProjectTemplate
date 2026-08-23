@@ -197,15 +197,19 @@ def has_shell_shebang(root: Path, relative_path: str) -> bool:
     """Report whether a tracked file's shebang directly names bash or sh.
 
     Never follows a tracked symlink: `is_symlink()` uses `lstat`, keeping the target unreached.
+    A read failure raises `CommandFailed` instead of returning `False`.
+    That keeps a tracked file this cannot open from silently dropping out of the target list.
     """
     path = root / relative_path
+    if path.is_symlink():
+        return False
     try:
-        if path.is_symlink():
-            return False
         with path.open("rb") as handle:
             first_line = handle.readline(256)
-    except OSError:
-        return False
+    except OSError as error:
+        raise CommandFailed(
+            f"target discovery failed: could not read {relative_path}: {error}"
+        ) from error
     try:
         text = first_line.decode("utf-8").rstrip("\n")
     except UnicodeDecodeError:
