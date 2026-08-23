@@ -110,9 +110,8 @@ skill covers all of it, scoped down by what the maintainer actually asks for.
    both checks pass, `git checkout -B main origin/main` to bring the local `main` to the fetched
    tip. `skills_install.py` stamps and installs from whatever this checkout's HEAD already is, so
    a plain `git checkout main` would leave a local `main` that already existed pointing at its
-   old, pre-fetch commit, and skip the refresh silently. Only then run `python3
-   scripts/skills_install.py --report`, then
-   `python3 scripts/skills_install.py` to install, and confirm `--report` now reads current,
+   old, pre-fetch commit, and skip the refresh silently. Only then run `python3 scripts/skills_install.py --report`,
+   then `python3 scripts/skills_install.py` to install, and confirm `--report` now reads current,
    regardless of whether step 5 or 6 dispatched, skipped, or failed a release, this step is gated
    only on the chosen scope, never on the release outcome. This refreshes only the machine running
    this session, per skill-lifecycle, every other machine still refreshes on its own next run or
