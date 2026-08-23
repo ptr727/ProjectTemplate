@@ -100,15 +100,18 @@ skill covers all of it, scoped down by what the maintainer actually asks for.
    report a timeout separately from a completed run's own conclusion, the tag or version it
    produced. A run that fails, times out, or never starts is reported, never silently retried.
 7. In the hub, when the chosen scope includes a release, bring this checkout to the merged
-   content without discarding anything: `git fetch origin main`, then `git switch main` (or
-   `git switch -c main origin/main` the first time this checkout carries no local `main` at all),
-   then `git merge --ff-only origin/main`. `switch` never discards an uncommitted change, it
-   carries a clean one over and refuses one that would conflict, and it also refuses a `main`
-   checked out in another worktree. `--ff-only` refuses anything but a clean fast-forward. Either
-   way this stops and reports rather than force-discarding local content, per Repository
-   Boundaries and Write Safety. `skills_install.py` stamps and installs from whatever this checkout's HEAD
-   already is, so running it against a stale, unrefreshed local `main` skips the refresh silently.
-   Only then run `python3 scripts/skills_install.py --report`, then
+   content without discarding or mixing in anything local. First assert `git status --porcelain`
+   is empty, and stop and report rather than proceeding over any uncommitted content, tracked or
+   not, since `skills_install.py` installs from whatever ends up on disk and a leftover local file
+   would ride along into the install silently. Then `git fetch origin main`, `git checkout main`
+   (or `git checkout -b main origin/main` the first time this checkout carries no local `main` at
+   all, `checkout` rather than `switch` since the fleet's own `git` floor is undeclared and
+   `checkout` needs no minimum version for this), and `git merge --ff-only origin/main`.
+   `checkout` still refuses a `main` checked out in another worktree, and `--ff-only` refuses
+   anything but a clean fast-forward, so either stops and reports on top of what the preflight
+   already ruled out, per Repository Boundaries and Write Safety. `skills_install.py` stamps and
+   installs from whatever this checkout's HEAD already is, so running it against a stale,
+   unrefreshed local `main` skips the refresh silently. Only then run `python3 scripts/skills_install.py --report`, then
    `python3 scripts/skills_install.py` to install, and confirm `--report` now reads current,
    regardless of whether step 5 or 6 dispatched, skipped, or failed a release, this step is gated
    only on the chosen scope, never on the release outcome. This refreshes only the machine running
