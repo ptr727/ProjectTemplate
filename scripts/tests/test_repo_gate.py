@@ -617,6 +617,28 @@ class TestExcludeGlobs(unittest.TestCase):
         self.assertIn("git ls-files failed", err.getvalue())
         self.assertIn("Invalid pathspec magic", err.getvalue())
 
+    def test_a_failed_call_is_never_trusted_even_with_nonempty_stdout(self) -> None:
+        """A partial listing read as a complete one is a scan that missed files silently."""
+        proc = subprocess.CompletedProcess([], 128, "kept.py\n", "fatal: something went wrong\n")
+        with (
+            mock.patch.object(repo_gate.subprocess, "run", return_value=proc),
+            contextlib.redirect_stderr(io.StringIO()),
+        ):
+            files = repo_gate.tracked(self.tmp, ["vendor/**"])
+        self.assertEqual([], files)
+
+    def test_a_failure_with_no_stderr_still_prints_a_reason(self) -> None:
+        """Empty stderr on a nonzero exit must not read as a silent, unexplained empty scan."""
+        proc = subprocess.CompletedProcess([], 1, "", "")
+        with (
+            mock.patch.object(repo_gate.subprocess, "run", return_value=proc),
+            contextlib.redirect_stderr(io.StringIO()) as err,
+        ):
+            files = repo_gate.tracked(self.tmp, ["vendor/**"])
+        self.assertEqual([], files)
+        self.assertIn("git ls-files failed", err.getvalue())
+        self.assertIn("exit 1", err.getvalue())
+
 
 class TestHarness(unittest.TestCase):
     def test_this_module_collects_a_plausible_number_of_cases(self) -> None:
