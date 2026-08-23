@@ -16,7 +16,7 @@ on:
         default: ''
       # Threaded to the repo-gate composite action's own exclude-globs input, unvalidated.
       repo-gate-exclude-globs:
-        description: Git pathspec patterns to exclude, one per line (for example 'themes/PaperMod/**'), narrowing what sha-pin/eol/eol-coverage scan via repo_gate.py's --exclude.
+        description: Git pathspec patterns to exclude, one per line (for example 'themes/PaperMod/**'), narrowing sha-pin and tracked-path eol-coverage scans via repo_gate.py's --exclude.
         required: false
         type: string
         default: ''
