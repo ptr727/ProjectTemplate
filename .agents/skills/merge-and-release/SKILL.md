@@ -165,7 +165,11 @@ skill covers all of it, scoped down by what the maintainer actually asks for.
      remote delete a second time.
      Where the remote branch does exist, its tip must match that exact pull request's `headRefOid`
      before either delete proceeds, proving nothing landed on it since. Either way, the local
-     branch tip (`git rev-parse -- "<branch>"`) must also match `headRefOid`. Every branch or
+     branch tip (`git rev-parse --verify "refs/heads/<branch>"`) must also match `headRefOid`. No
+     `--` here, verified empirically: `git rev-parse -- "<branch>"` treats the argument after `--`
+     as a path rather than a revision and never resolves a SHA at all. The fully-qualified form
+     needs no `--` regardless, since `refs/heads/<branch>` never itself starts with `-`, and
+     `--verify` fails loudly rather than guessing when it does not resolve. Every branch or
      worktree-path placeholder below is the real value, substituted as its own quoted argument
      (a shell variable expansion such as `"$branch"`, or an argv element), never handed to `eval`
      or `sh -c` for a second round of shell parsing, the only way an embedded `$()` or backtick
