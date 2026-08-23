@@ -78,7 +78,7 @@ jobs:
           esac
 
   # Every host-specific value comes from the environment, so this file names no host, path, or address.
-  # The caller's own job binds the same environment, which is what makes the secret mapped into DEPLOY_SSH_PRIVATE_KEY below resolve from the environment store rather than from the repository store.
+  # The caller still maps DEPLOY_SSH_PRIVATE_KEY via workflow_call.secrets (required below), but this job's own binding is what determines the real value: cross-repository it resolves from the caller's environments, per docs/reusable-workflows.md "Deploy-site." (a caller job with uses: cannot carry environment: itself).
   deploy:
     name: Deploy site job
     runs-on: ubuntu-latest
