@@ -4714,13 +4714,13 @@ def _selftest():
             "catalog/snippets/configs/codecov.yml",
         ),
         (
-            "a literal '#' in reference is not mistaken for an anchor and stripped",
+            "a literal '#' in reference is preserved rather than treated as an anchor",
             {"reference": "docs/notes#1.md"},
             "notes.md",
             "docs/notes#1.md",
         ),
         (
-            "a literal '#' in path is not mistaken for an anchor and stripped",
+            "a literal '#' in path is preserved rather than treated as an anchor",
             {},
             "docs/notes#1.md",
             "docs/notes#1.md",

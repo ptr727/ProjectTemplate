@@ -815,6 +815,17 @@ def main():
         intent_ref = item.get("intentRef")
         if intent_ref is not None and not isinstance(intent_ref, str):
             errors.append(f"files.json: {path} intentRef must be a string")
+        elif isinstance(intent_ref, str):
+            # The audit engine strips a trailing #anchor before ever joining this with ROOT, so validate the same part it will actually read.
+            intent_path = intent_ref.split("#", 1)[0]
+            if (
+                not intent_path
+                or intent_path.startswith("/")
+                or ".." in pathlib.PurePosixPath(intent_path).parts
+            ):
+                errors.append(
+                    f"files.json: {path} intentRef '{intent_ref}' must be a repo-relative path"
+                )
 
         sections = item.get("sections", [])
         if not isinstance(sections, list):
