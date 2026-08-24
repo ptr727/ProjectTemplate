@@ -19,6 +19,36 @@ HUB_RAW_BASE = "https://raw.githubusercontent.com/ptr727/ProjectTemplate/main"
 EMPTY_TREE = "4b825dc642cb6eb9a060e54bf8d69288fbee4904"
 
 
+def head_is_unborn() -> bool:
+    """Whether HEAD is confirmed unborn (a real branch, no commits yet), never guessed.
+
+    `git rev-parse --verify -q HEAD` exits 1 with empty stderr for a confirmed unborn HEAD,
+    verified directly: a fresh `git init` with no commits gives exactly that signature. Any
+    other shape, a non-git directory (exit 128, a `fatal:` message even with `-q`), a missing
+    or broken git executable (raised as OSError), a permission error, or any other failure, is
+    a probe failure to propagate, never a reason to guess at the diff scope.
+    """
+    try:
+        probe = subprocess.run(
+            ["git", "rev-parse", "--verify", "-q", "HEAD"],
+            capture_output=True,
+            check=False,
+        )
+    except OSError as exc:
+        print(f"hub-fetch-run: could not run git to probe HEAD: {exc}", file=sys.stderr)
+        sys.exit(1)
+    if probe.returncode == 1 and not probe.stderr:
+        return True
+    if probe.returncode == 0:
+        return False
+    print(
+        f"hub-fetch-run: git rev-parse --verify -q HEAD failed unexpectedly "
+        f"(exit {probe.returncode}): {probe.stderr.decode(errors='replace').strip()}",
+        file=sys.stderr,
+    )
+    sys.exit(1)
+
+
 def resolve_unborn_head(argv: list[str]) -> list[str]:
     """Replace a `--diff HEAD` pair with git's empty-tree hash when HEAD does not exist yet.
 
@@ -29,15 +59,8 @@ def resolve_unborn_head(argv: list[str]) -> list[str]:
     """
     out = list(argv)
     for i, token in enumerate(out[:-1]):
-        if token == "--diff" and out[i + 1] == "HEAD":
-            probe = subprocess.run(
-                ["git", "rev-parse", "--verify", "-q", "HEAD"],
-                stdout=subprocess.DEVNULL,
-                stderr=subprocess.DEVNULL,
-                check=False,
-            )
-            if probe.returncode != 0:
-                out[i + 1] = EMPTY_TREE
+        if token == "--diff" and out[i + 1] == "HEAD" and head_is_unborn():
+            out[i + 1] = EMPTY_TREE
     return out
 
 
