@@ -1675,6 +1675,16 @@ def hub_last_change(rel_path):
     return date, sha
 
 
+def intent_canonical_rel(item, path):
+    """The hub path an intent unit's copy is judged against for staleness: `reference` if the
+    manifest sets one, else the intent unit's own canonical, `intentRef`, else `path` itself.
+    `reference` never carries an anchor, but `intentRef` routes a reader to one section of a
+    larger doc, so an anchor there names a place to read rather than a narrower file to diff
+    against, and is stripped - the whole canonical is a wrong-but-safe over-approximation, where
+    leaving it in would make the path unreadable and silently fall back to `path` (#726)."""
+    return (item.get("reference") or item.get("intentRef") or path).split("#", 1)[0]
+
+
 def check_intent_staleness(slug, ground, path, canonical_rel, down_text):
     """The intent-staleness advisory: a last-modified comparison, since intent has no content check.
 
@@ -2109,7 +2119,7 @@ def audit_repo(entry, spec, branch=None):
         # The hub's own copies are the canonicals, so the hub itself has nothing to trail.
         elif item is not None and fid == "intent" and entry.get("name") != HUB_NAME:
             findings.extend(
-                check_intent_staleness(slug, ground, path, item.get("reference") or path, text)
+                check_intent_staleness(slug, ground, path, intent_canonical_rel(item, path), text)
             )
         # Heading-based presence is only meaningful for Markdown.
         # A "section" named on a non-md file, a tasks.json task group being one, is an intent marker judged per AUDIT.md rather than a heading grep.
@@ -4666,6 +4676,41 @@ def _selftest():
                 print(f"  ok   membership: {label}")
     finally:
         globals()["owner_repos"] = real_owner_repos
+
+    # intent_canonical_rel: an intentRef with an anchor resolves to the whole hub file, not the
+    # anchor-qualified name git cannot look up, and reference still wins where the manifest sets both (#726).
+    canonical_cases = [
+        (
+            "no reference or intentRef falls back to the file's own path",
+            {},
+            "AGENTS.md",
+            "AGENTS.md",
+        ),
+        (
+            "an intentRef equal to the path is itself the canonical",
+            {"intentRef": "GOVERNANCE.md"},
+            "GOVERNANCE.md",
+            "GOVERNANCE.md",
+        ),
+        (
+            "an anchored intentRef strips the anchor and keeps the whole file",
+            {"intentRef": "GOVERNANCE.md#line-endings"},
+            ".editorconfig",
+            "GOVERNANCE.md",
+        ),
+        (
+            "reference wins over intentRef when the manifest sets both",
+            {"reference": "catalog/snippets/configs/codecov.yml", "intentRef": "WORKFLOW.md"},
+            "codecov.yml",
+            "catalog/snippets/configs/codecov.yml",
+        ),
+    ]
+    for label, item, path, want in canonical_cases:
+        got = intent_canonical_rel(item, path)
+        good = got == want
+        if not good:
+            ok = False
+        print(f"  {'ok  ' if good else 'FAIL'} intent_canonical_rel: {label} -> {got!r}")
 
     print("SELFTEST PASS" if ok else "SELFTEST FAIL")
     return 0 if ok else 1
