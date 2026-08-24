@@ -56,6 +56,21 @@ def is_str_list(v):
     return isinstance(v, list) and all(isinstance(x, str) for x in v)
 
 
+def escapes_repo_root(value):
+    """Whether `ROOT / value` could resolve outside ROOT on some host `PurePosixPath` alone
+    misses: a POSIX `..` segment, a leading `/`, a backslash (Windows treats it as a separator
+    even though POSIX reads the whole thing as one filename), or a Windows drive letter such as
+    `C:`.
+    """
+    return (
+        not value
+        or value.startswith("/")
+        or "\\" in value
+        or re.match(r"^[A-Za-z]:", value) is not None
+        or ".." in pathlib.PurePosixPath(value).parts
+    )
+
+
 def description_errors_for_repo(repo, name):
     """The per-repo optional-field guard: an explicit `"description": null` is declared-but-invalid, not absent.
 
@@ -798,12 +813,8 @@ def main():
         if ref is not None and not isinstance(ref, str):
             errors.append(f"files.json: {path} reference must be a string")
             ref = None
-        elif isinstance(ref, str) and (
-            ref.startswith("/") or ".." in pathlib.PurePosixPath(ref).parts
-        ):
-            errors.append(
-                f"files.json: {path} reference '{ref}' must be a repo-relative path (no leading / or ..)"
-            )
+        elif isinstance(ref, str) and escapes_repo_root(ref):
+            errors.append(f"files.json: {path} reference '{ref}' must be a repo-relative path")
         if fid == "verbatim":
             src = ref if isinstance(ref, str) else path
             if isinstance(src, str) and not (ROOT / src).exists():
@@ -818,11 +829,7 @@ def main():
         elif isinstance(intent_ref, str):
             # The audit engine strips a trailing #anchor before ever joining this with ROOT, so validate the same part it will actually read.
             intent_path = intent_ref.split("#", 1)[0]
-            if (
-                not intent_path
-                or intent_path.startswith("/")
-                or ".." in pathlib.PurePosixPath(intent_path).parts
-            ):
+            if escapes_repo_root(intent_path):
                 errors.append(
                     f"files.json: {path} intentRef '{intent_ref}' must be a repo-relative path"
                 )
