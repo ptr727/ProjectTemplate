@@ -185,9 +185,9 @@ in the new tree.
 - **Husky.Net:** When `.husky/pre-commit` sources `.husky/_/husky.sh` and the local .NET tool
   manifest declares Husky.Net, run `dotnet tool restore`, then `dotnet husky install` from the
   worktree root.
-- **Python pre-commit:** When `.pre-commit-config.yaml` exists, install the repository's declared
-  Python environment, then run `pre-commit install` through that environment. A uv project runs
-  `uv sync --frozen`, then `uv run pre-commit install`.
+- **Python pre-commit:** When `.pre-commit-config.yaml` exists, run `uv tool install pre-commit`
+  once per host if not already installed, then `pre-commit install` from the worktree root.
+  `pre-commit` is never a project dependency, so this is the same regardless of profile.
 - **Repository override:** Follow a repository's explicit hook-setup instructions when they
   differ from these standard cases. Do not infer a replacement command from the language alone.
 
