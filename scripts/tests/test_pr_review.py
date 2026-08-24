@@ -77,6 +77,7 @@ def hist_review(number: int, body: str, at: str = LATE) -> dict:
                 }
             ]
         },
+        "comments": {"nodes": []},
     }
 
 
@@ -950,7 +951,7 @@ class TestRefusal(GqlCase):
 class TestQuotaRefusal(GqlCase):
     """The refusal wording naming the account quota, distinct from any other refusal cause.
 
-    A file-count refusal is cleared by splitting the pull request; a quota one is an
+    A file-count refusal is cleared by splitting the pull request. A quota one is an
     account-level state that neither a re-request nor a further wait touches. Folding the two
     into one field or one exit code sends a reader at a remedy that does nothing for the quota
     case, which is why each gets its own reading below.
@@ -2416,8 +2417,8 @@ class TestCli(GqlCase):
         `self.answer(...)` already installs a default returning no history at all, which is what
         every other wait test relies on to skip the auto-request and the repo-wide quota
         reading both, untouched. This overrides that default for the tests below that exercise
-        either: `wire_bot` is the narrower case, an id and nothing else; the tests further down
-        need a review's own body and `submittedAt` too, which `hist_review` builds.
+        either. `wire_bot` is the narrower case, an id and nothing else, and the tests further
+        down need a review's own body and `submittedAt` too, which `hist_review` builds.
         """
         calls: list[tuple[str, dict]] = []
 
@@ -2530,8 +2531,8 @@ class TestCli(GqlCase):
 class TestCopilotHistoryReadings(GqlCase):
     """The readings built from the reviewer's own review history across the repository."""
 
-    def test_history_sorts_by_submitted_at_regardless_of_pull_request_order(self) -> None:
-        """The query orders pull requests by creation, not by when each round was submitted."""
+    def test_history_sorts_by_timestamp_regardless_of_pull_request_order(self) -> None:
+        """The query orders pull requests by their own update time, not by when each round landed."""
         self.answer(payload([]))
         self.enterContext(
             mock.patch.object(
@@ -2552,16 +2553,68 @@ class TestCopilotHistoryReadings(GqlCase):
         history = pr_review.copilot_history("o", "r")
         self.assertEqual([962, 900], [number for number, _ in history])
 
+    def test_a_later_comment_outranks_an_earlier_review_in_the_merged_history(self) -> None:
+        """A plain comment answers the same way `answered_outside_review` reads one per pull request."""
+        self.answer(payload([]))
+        self.enterContext(
+            mock.patch.object(
+                pr_review,
+                "gh_graphql",
+                return_value={
+                    "repository": {
+                        "pullRequests": {
+                            "nodes": [
+                                {
+                                    "number": 962,
+                                    "reviews": {
+                                        "nodes": [
+                                            {
+                                                "author": {
+                                                    "__typename": "Bot",
+                                                    "login": pr_review.REVIEWER,
+                                                    "id": "BOT_1",
+                                                },
+                                                "state": "COMMENTED",
+                                                "body": QUOTA_REFUSED,
+                                                "submittedAt": EARLY,
+                                            }
+                                        ]
+                                    },
+                                    "comments": {
+                                        "nodes": [
+                                            {
+                                                "author": {"login": pr_review.REVIEWER},
+                                                "body": "Reviewed and it looks fine.",
+                                                "createdAt": LATE,
+                                            }
+                                        ]
+                                    },
+                                }
+                            ]
+                        }
+                    }
+                },
+            )
+        )
+        history = pr_review.copilot_history("o", "r")
+        self.assertEqual("comment", history[0][1]["_kind"])
+        self.assertIsNone(pr_review.quota_signal(history))
+
     def test_an_empty_history_carries_no_signal_and_no_bot_id(self) -> None:
         self.assertIsNone(pr_review.quota_signal([]))
         self.assertIsNone(pr_review.copilot_bot_id([]))
 
-    def test_the_bot_id_is_read_from_the_first_entry_that_carries_one(self) -> None:
+    def test_the_bot_id_is_read_from_the_first_review_entry_that_carries_one(self) -> None:
         history: list[tuple[int, dict]] = [
-            (1, {"author": {"id": None}}),
-            (2, {"author": {"id": "BOT_9"}}),
+            (1, {"_kind": "review", "author": {"id": None}}),
+            (2, {"_kind": "review", "author": {"id": "BOT_9"}}),
         ]
         self.assertEqual("BOT_9", pr_review.copilot_bot_id(history))
+
+    def test_a_comment_entry_carries_no_id_to_read_even_if_it_had_one(self) -> None:
+        """The id field belongs to the review connection's `... on Bot{ id }` selection only."""
+        history: list[tuple[int, dict]] = [(1, {"_kind": "comment", "author": {"id": "BOT_9"}})]
+        self.assertIsNone(pr_review.copilot_bot_id(history))
 
     def test_the_signal_names_the_pull_request_the_refusal_came_from(self) -> None:
         history = [(962, {"body": QUOTA_REFUSED, "submittedAt": LATE})]

@@ -32,7 +32,7 @@ Subcommands
            45 = the review covering the head stated no changed-file coverage. Request another
            review only after confirming the head branch carries the current review instructions.
            A refusal naming the account quota still reads as absent here, exit 0, since a
-           refusal covers no head either; its printed digest line carries `refusal=QUOTA`
+           refusal covers no head either. Its printed digest line carries `refusal=QUOTA`
            regardless. `wait` is where that state gets its own exit codes, 46 and 47 below,
            because only `wait` is the command a caller might otherwise poll out a timeout on.
            `unresolved` counts every tracked reviewer's own open thread, not only Copilot's:
@@ -87,7 +87,7 @@ Subcommands
            reviewer's own most recent review anywhere else in the repository is that same
            account-quota refusal with nothing having answered it since. The poll that would
            otherwise have run is skipped for this reason, printed as a `note:` line before the
-           digest, rather than spent finding the same account state out a call late; pass
+           digest, rather than spent finding the same account state out a call late. Pass
            --ignore-quota-signal to poll --timeout anyway once the quota is believed to have
            reset. 46 is read directly from this pull request and 47 is inferred from another
            one, so a genuine 0/40/41/42/43/45 on this pull request outranks 47 whenever both
@@ -314,6 +314,14 @@ FILES_WINDOW = 100
 # A case is not the guarantee though, since it holds only where someone runs it.
 CHECKS_WINDOW = 100
 
+# How many of the repository's own pull requests, and how much of each one's own reviewer history within them, the repo-wide history read looks across.
+# Smaller than WINDOW on purpose, since this is a best-effort signal rather than the certainty WINDOW's own two queries are read for.
+# Neither carries a `hasPreviousPage` guard for that same reason.
+# A caller finding the signal wrong once quota has plainly reset already has --ignore-quota-signal for it, which is a cheaper remedy than paginating this window out.
+HISTORY_PRS = 20
+HISTORY_REVIEWS = 20
+HISTORY_COMMENTS = 5
+
 # Liveness query: timestamps and ids only, no comment or review bodies.
 # A liveness check does not need the finding text, and re-fetching bodies was 76% of polls.
 # It does need the reviewer's non-review answers.
@@ -328,19 +336,26 @@ query($o:String!,$r:String!,$n:Int!){
   }}}
 """
 
-# The reviewer's own review history, read live from this repository's last 20 pull requests rather than hand-typed or cached across runs.
+# The reviewer's own review and comment history, read live from the repository's own pull requests rather than hand-typed or cached across runs.
 # Two callers share this one query.
 # The bot's node id belongs to the reviewer account rather than to any one PR or review, so it is identical wherever it is found and recency does not matter once one is found.
-# A repo-wide reading of the reviewer's own most recent activity is the other caller, and recency is the whole point there, so `submittedAt` and `body` ride along for a reader that does not stop at the first bot id.
-# `pullRequests` orders newest first so an old, possibly-archived PR is not preferred over a live one, and `reviews(first:20)` inside it reaches every round a PR carries.
-# It resolves even on a PR whose own round 1 carries no review yet, per the fleet's standing rule against fabricating or reusing a GitHub node id.
-Q_BOT_ID = """
+# A repo-wide reading of the reviewer's own most recent activity is the other caller, and recency is the whole point there, so `submittedAt`, `createdAt`, and `body` ride along for a reader that does not stop at the first bot id.
+# Ordered by `UPDATED_AT` rather than `CREATED_AT`, since a fresh review round bumps a pull request's own update time regardless of how long ago it was opened, where creation order can leave a re-reviewed older pull request outside the window entirely.
+# `reviews(last:HISTORY_REVIEWS)` reads the newest rounds a pull request carries rather than the oldest, and `comments(last:HISTORY_COMMENTS)` catches a plain answer that supersedes a formal review without needing every comment a busy pull request holds.
+# It resolves even on a pull request whose own round 1 carries no review yet, per the fleet's standing rule against fabricating or reusing a GitHub node id.
+Q_BOT_ID = (
+    """
 query($o:String!,$r:String!){
   repository(owner:$o,name:$r){
-    pullRequests(first:20, orderBy:{field:CREATED_AT, direction:DESC}){
-      nodes{ number reviews(first:20){
-        nodes{ author{ __typename login ... on Bot{ id } } state body submittedAt } } } } } }
-"""
+    pullRequests(first:__HISTORY_PRS__, orderBy:{field:UPDATED_AT, direction:DESC}){
+      nodes{ number
+        reviews(last:__HISTORY_REVIEWS__){ nodes{ author{ __typename login ... on Bot{ id } } state body submittedAt } }
+        comments(last:__HISTORY_COMMENTS__){ nodes{ author{ login } body createdAt } }
+      } } } }
+""".replace("__HISTORY_PRS__", str(HISTORY_PRS))
+    .replace("__HISTORY_REVIEWS__", str(HISTORY_REVIEWS))
+    .replace("__HISTORY_COMMENTS__", str(HISTORY_COMMENTS))
+)
 
 M_REQUEST_REVIEWS = """
 mutation($pr:ID!,$bot:ID!){
@@ -491,54 +506,72 @@ def reviewer_requested(pr: dict) -> bool:
 
 
 def copilot_history(owner: str, repo: str) -> list[tuple[int, dict]]:
-    """The reviewer's own reviews across the repository's last 20 pull requests, newest first.
+    """The reviewer's own reviews and comments across the repository's 20 most recently updated
+    pull requests, newest activity first regardless of which connection it came from.
 
     Paired with the pull request number each came from, since a repo-wide reading has to name
-    where it looked rather than just assert one. Sorted by `submittedAt` rather than trusted to
-    arrive in that order: the query orders pull requests by creation, and a re-request on an
-    older, still-open one can post more recently than a review on a newly created one.
+    where it looked rather than just assert one. Sorted by timestamp rather than trusted to
+    arrive in that order, since the two connections are read separately and merged.
+
+    A plain comment is read alongside a formal review, tagged `_kind` so `copilot_bot_id` can
+    still tell them apart, because `answered_outside_review` already treats a comment as
+    meaningful reviewer activity for one pull request, and a repo-wide reading that only checked
+    reviews could keep reporting a stale refusal after a newer plain comment answered it.
 
     One call serves both the bot-id lookup and the repo-wide quota reading below, since both
     need the same traversal and a caller needing either otherwise pays for it twice.
     """
     data = gh_graphql(Q_BOT_ID, o=owner, r=repo)
     prs = ((data.get("repository") or {}).get("pullRequests") or {}).get("nodes") or []
-    reviews = [
-        (node.get("number"), review)
-        for node in prs
-        for review in (node.get("reviews") or {}).get("nodes") or []
-        if ((review.get("author") or {}).get("__typename") == "Bot")
-        and ((review.get("author") or {}).get("login") == REVIEWER)
-    ]
-    return sorted(reviews, key=lambda pair: pair[1].get("submittedAt") or "", reverse=True)
+    entries = []
+    for node in prs:
+        number = node.get("number")
+        for review in (node.get("reviews") or {}).get("nodes") or []:
+            author = review.get("author") or {}
+            if author.get("__typename") == "Bot" and author.get("login") == REVIEWER:
+                entries.append(
+                    (number, {**review, "_at": review.get("submittedAt") or "", "_kind": "review"})
+                )
+        for comment in (node.get("comments") or {}).get("nodes") or []:
+            if (comment.get("author") or {}).get("login") == REVIEWER:
+                entries.append(
+                    (number, {**comment, "_at": comment.get("createdAt") or "", "_kind": "comment"})
+                )
+    return sorted(entries, key=lambda pair: pair[1]["_at"], reverse=True)
 
 
 def copilot_bot_id(history: list[tuple[int, dict]]) -> str | None:
     """The Copilot reviewer bot's node id from an already-fetched history, or None where none
     carries one.
 
+    Read from the review entries only, since a comment's author carries no node id in the query
+    that fetches it, that field belonging to the review connection's `... on Bot{ id }` selection.
     None is a real answer, not a failure to retry: a repository's very first PR, or one Copilot
     has never reviewed, carries no review to read the id from. The caller falls back to polling
     only rather than guessing, since a fabricated or reused id resolves globally and a wrong one
     would silently target another repository's PR.
     """
-    for _number, review in history:
-        bot_id = (review.get("author") or {}).get("id")
+    for _number, entry in history:
+        if entry.get("_kind") != "review":
+            continue
+        bot_id = (entry.get("author") or {}).get("id")
         if bot_id:
             return bot_id
     return None
 
 
 def quota_signal(history: list[tuple[int, dict]]) -> tuple[int, dict] | None:
-    """The reviewer's own most recent review anywhere in this repository, where it is a quota
-    refusal, paired with the pull request number it came from.
+    """The reviewer's own most recent activity anywhere in this repository, review or comment,
+    where it is a quota refusal, paired with the pull request number it came from.
 
     The most recent rather than any match, since a repository can carry an old refusal and a
-    later working round both, and only the most recent record says which is still true: a
+    later working round both, and only the most recent record says which is still true. A
     genuine review anywhere since the refusal spends it, the same reading `refusing_review`
-    already gives one pull request's own history. Reading across pull requests rather than one
-    is what a repository-wide account state needs, since the pull request in front of a caller
-    can carry none of its own reviewer activity to read that state from at all.
+    already gives one pull request's own history, and so does a later plain comment, since
+    `answered_outside_review` treats one the same way for that one pull request. Reading across
+    pull requests rather than one is what a repository-wide account state needs, since the pull
+    request in front of a caller can carry none of its own reviewer activity to read that state
+    from at all.
     """
     newest = history[0] if history else None
     return newest if newest and quota_refusal(newest[1]) else None
@@ -546,7 +579,7 @@ def quota_signal(history: list[tuple[int, dict]]) -> tuple[int, dict] | None:
 
 def rate_limited_by(pr: dict, login: str) -> str | None:
     """The service name a rate-limit marker gives, where this login's newest comment or review
-    on this pull request carries one; `None` otherwise.
+    on this pull request carries one. `None` otherwise.
 
     Reads both connections since the one observed marker (CodeRabbit, ptr727/Blog #110) rides a
     plain PR comment rather than a formal review, and a future bot using the same convention
@@ -663,7 +696,7 @@ def quota_refusal(node: dict) -> bool:
     this reading too: a node that is not a refusal at all returns `""` here, on which `QUOTA`
     cannot match, rather than this needing its own opening-line anchor and fenced-quote guard.
     The distinction matters because the two remedies are opposite. A file-count refusal is
-    cleared by splitting the pull request; a quota one is an account-level state that a
+    cleared by splitting the pull request. A quota one is an account-level state that a
     re-request or a wait does not touch, so treating the two alike sends a reader at a remedy
     that does nothing here.
     """
@@ -2025,7 +2058,7 @@ def main(argv: list[str] | None = None) -> int:
         action="store_true",
         help="wait: poll the full --timeout even where the reviewer's own most recent "
         "activity elsewhere in this repository is a quota-limit refusal with nothing "
-        "answering it since; pass this once the quota is believed to have reset",
+        "answering it since, pass this once the quota is believed to have reset",
     )
     # `reply` takes the finding's words rather than its id.
     # There is deliberately no argument an id fits in, so the caller never holds one to mistype.
