@@ -71,6 +71,20 @@ def escapes_repo_root(value):
     )
 
 
+def canonical_file_in_root(rel_path):
+    """Whether `ROOT / rel_path` resolves, symlinks followed, to an existing file that stays
+    under ROOT. `escapes_repo_root()` only reads the lexical string, so a tracked symlink whose
+    target escapes ROOT would otherwise pass it and then `Path.is_file()` too, since both follow
+    the link. The audit engine would then read that external target's live content while dating
+    it from the symlink's own git history.
+    """
+    try:
+        resolved = (ROOT / rel_path).resolve(strict=True)
+    except OSError:
+        return False
+    return resolved.is_file() and resolved.is_relative_to(ROOT)
+
+
 def description_errors_for_repo(repo, name):
     """The per-repo optional-field guard: an explicit `"description": null` is declared-but-invalid, not absent.
 
@@ -816,7 +830,7 @@ def main():
         elif isinstance(ref, str):
             if escapes_repo_root(ref):
                 errors.append(f"files.json: {path} reference '{ref}' must be a repo-relative path")
-            elif fid == "intent" and not (ROOT / ref).is_file():
+            elif fid == "intent" and not canonical_file_in_root(ref):
                 # This field outranks intentRef in the audit engine's canonical resolution.
                 # An intent unit's reference needs the same existing-file check intentRef gets below.
                 errors.append(
@@ -840,7 +854,7 @@ def main():
                 errors.append(
                     f"files.json: {path} intentRef '{intent_ref}' must be a repo-relative path"
                 )
-            elif not (ROOT / intent_path).is_file():
+            elif not canonical_file_in_root(intent_path):
                 # A directory such as "." exists but is not a file.
                 # The staleness check would then read the whole repo's most recent commit as this one file's, false-flagging every intent unit as stale.
                 errors.append(
