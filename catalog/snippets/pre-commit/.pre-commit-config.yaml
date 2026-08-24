@@ -22,7 +22,7 @@ repos:
         language: system
         pass_filenames: false
       - id: type-check
-        name: pyright (swap for "uvx mypy@latest" if this repo's CI runs mypy instead)
+        name: pyright (swap for "uvx mypy@latest ." if this repo's CI runs mypy instead)
         entry: uvx pyright@latest
         language: system
         pass_filenames: false
