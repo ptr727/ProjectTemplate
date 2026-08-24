@@ -30,9 +30,12 @@ vendored or pinned.
 
 ## Per-Repo Conversion
 
-Copy and adapt the applicable catalog snippet plus `catalog/snippets/hub-fetch-run.py`, enable it
-(`git config core.hooksPath .husky`, or `uv tool install pre-commit` once then `pre-commit install`), confirm the doc gates run
-clean against the repo's current tree, and open the PR through the repo's normal branching model.
+Copy and adapt the applicable catalog snippet plus `catalog/snippets/hub-fetch-run.py`.
+Enable it (`git config core.hooksPath .husky`, or `uv tool install pre-commit` once then
+`pre-commit install`). For the Husky.Net snippet specifically, also run `dotnet tool restore`
+then `dotnet husky install`, which generates `.husky/_/husky.sh`, the file the hook sources.
+Confirm the doc gates run clean against the repo's current tree.
+Open the PR through the repo's normal branching model.
 A repo whose corpus does not yet pass its language formatter clean ships the doc-gate half first
 and adds the language half once it does, per the mid-convergence carve-out. That partial state is
 not a reason to leave the box unchecked, since the doc-gate half alone already satisfies
