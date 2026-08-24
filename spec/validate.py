@@ -57,10 +57,9 @@ def is_str_list(v):
 
 
 def escapes_repo_root(value):
-    """Whether `ROOT / value` could resolve outside ROOT on some host `PurePosixPath` alone
-    misses: a POSIX `..` segment, a leading `/`, a backslash (Windows treats it as a separator
-    even though POSIX reads the whole thing as one filename), or a Windows drive letter such as
-    `C:`.
+    """Whether `ROOT / value` could resolve outside ROOT on some host.
+
+    `PurePosixPath` alone misses a backslash (Windows treats it as a separator, though POSIX reads it as one filename) and a Windows drive letter such as `C:`.
     """
     return (
         not value
