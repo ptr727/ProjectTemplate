@@ -32,8 +32,7 @@ Build it from your existing public key:
 
 ```shell
 mkdir -p ~/.config/git
-echo "$(git config user.email) namespaces=\"git\" $(cat ~/.ssh/id_ed25519.pub)" \
-    >> ~/.config/git/allowed_signers
+echo "$(git config --global user.email) namespaces=\"git\" $(cat ~/.ssh/id_ed25519.pub)" >> ~/.config/git/allowed_signers
 ```
 
 If you collaborate with others, append their entries to the same file, where each line maps an email to a public key.
@@ -115,7 +114,7 @@ If the container's `~/.ssh` directory exists with the wrong owner (root, surface
 
 **`gpg.ssh.allowedSignersFile needs to be configured`.** Set `git config --global gpg.ssh.allowedSignersFile ~/.config/git/allowed_signers` and ensure the file exists.
 
-**`signing failed: no allowed signers`.** The `allowed_signers` file exists but doesn't contain a line matching `user.email` + a key. Re-run the `echo $(git config user.email) namespaces="git" $(cat ~/.ssh/id_ed25519.pub) >> ...` snippet.
+**`signing failed: no allowed signers`.** The `allowed_signers` file exists but doesn't contain a line matching `user.email` + a key. Re-run `echo "$(git config --global user.email) namespaces=\"git\" $(cat ~/.ssh/id_ed25519.pub)" >> ~/.config/git/allowed_signers`.
 
 **Verifies on the host but not in the container.** The bind-mount source path differs. `${localEnv:HOME}` resolves on Linux/macOS hosts, and on Windows hosts (WSL2 backend) the `${localEnv:USERPROFILE}` fallback in `devcontainer.json` handles it. Check the actual mount with `mount | grep ssh` inside the container.
 
