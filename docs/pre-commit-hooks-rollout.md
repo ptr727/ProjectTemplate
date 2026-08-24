@@ -8,10 +8,13 @@ not a restatement of the rule. It is **hub-only** and is not carried downstream,
 [`docs/eol-lf-rollout.md`][eol-lf-rollout] is hub-only, because it tracks the hub's own migration
 rather than a fact a downstream repo's own docs need to carry.
 
-**Maintenance rule.** Check a repo's box in the same pull request that converts it, via the
-normal `resync-a-repo` procedure, once that repo's own audit reports `parity.hooks` operational.
-A register showing a repo unchecked after its conversion PR merged is itself stale prose, so this
-doc is only trustworthy while that rule holds.
+**Maintenance rule.** This file is hub-only, so a downstream repo's own conversion PR cannot edit
+it, and the audit that judges `parity.hooks` is always hub-authored, never a repo's own report of
+itself, per `AUDIT.md`. Once the hub's post-merge audit reports a repo's `parity.hooks` operational,
+the hub opens that repo's own small hub-side PR, the next step of the same `resync-a-repo` pass,
+and checks the repo's box below in it. A repo's box stays unchecked while that follow-up PR is
+pending, which is expected, not stale. It is stale only once the audit has confirmed
+`parity.hooks` operational and no follow-up PR exists to show for it.
 
 ## What Changed
 
@@ -39,7 +42,9 @@ Open the PR through the repo's normal branching model.
 A repo whose corpus does not yet pass its language formatter clean ships the doc-gate half first
 and adds the language half once it does, per the mid-convergence carve-out. That partial state is
 not a reason to leave the box unchecked, since the doc-gate half alone already satisfies
-`parity.hooks`' intent tier. Check the box below in this same PR, before it merges, per the maintenance rule above.
+`parity.hooks`' intent tier. After the downstream PR merges and the hub's post-merge audit
+confirms `parity.hooks` operational, open the small hub-side PR the maintenance rule above
+describes and check the box below in it.
 
 A repo declaring neither `csharp` nor `python` in `registry/repos.json` (the `eda` repos, and any
 repo with no fleet-covered language) has no language-format half to add: the doc-gate half alone
