@@ -72,11 +72,9 @@ def escapes_repo_root(value):
 
 
 def canonical_file_in_root(rel_path):
-    """Whether `ROOT / rel_path` resolves, symlinks followed, to an existing file that stays
-    under ROOT. `escapes_repo_root()` only reads the lexical string, so a tracked symlink whose
-    target escapes ROOT would otherwise pass it and then `Path.is_file()` too, since both follow
-    the link. The audit engine would then read that external target's live content while dating
-    it from the symlink's own git history.
+    """Whether `ROOT / rel_path` resolves, symlinks followed, to an existing file under ROOT.
+
+    A tracked symlink whose target escapes ROOT passes a bare `Path.is_file()` the same way a real file would, since both follow the link.
     """
     try:
         resolved = (ROOT / rel_path).resolve(strict=True)
