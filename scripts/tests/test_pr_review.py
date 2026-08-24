@@ -2563,7 +2563,10 @@ class TestCopilotHistoryReadings(GqlCase):
     """The readings built from the reviewer's own review history across the repository."""
 
     def test_history_sorts_by_timestamp_regardless_of_pull_request_order(self) -> None:
-        """The query orders pull requests by their own update time, not by when each round landed."""
+        """The query orders pull requests by their own update time, not by when each round
+        landed. The mocked nodes carry the EARLY one first, the opposite of the expected
+        result, so a passthrough that trusted the query's own order would fail this rather
+        than pass it by coincidence."""
         self.answer(payload([]))
         self.enterContext(
             mock.patch.object(
@@ -2573,8 +2576,8 @@ class TestCopilotHistoryReadings(GqlCase):
                     "repository": {
                         "pullRequests": {
                             "nodes": [
-                                hist_review(962, QUOTA_REFUSED, at=LATE),
                                 hist_review(900, QUOTA_REFUSED, at=EARLY),
+                                hist_review(962, QUOTA_REFUSED, at=LATE),
                             ]
                         }
                     }
