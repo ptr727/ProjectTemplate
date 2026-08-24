@@ -1682,15 +1682,17 @@ def intent_canonical_rel(item, path):
     Otherwise the intent unit's own canonical, `intentRef`, wins.
     Otherwise the unit compares against its own `path`.
     Only `intentRef` ever carries a `#anchor`, routing a reader to one section of a larger doc.
-    The anchor names a place to read, not a narrower file to diff against, so it is stripped
-    there and nowhere else, comparing the whole canonical file instead.
+    The anchor names a place to read, not a narrower file to diff against, so it is stripped there and nowhere else, comparing the whole canonical file instead.
     """
+    # spec/validate.py shape-checks these fields, but this engine runs standalone and does not invoke it first.
     ref = item.get("reference")
-    if ref:
+    if isinstance(ref, str) and ref:
         return ref
     intent = item.get("intentRef")
-    if intent:
-        return intent.split("#", 1)[0]
+    if isinstance(intent, str) and intent:
+        canonical = intent.split("#", 1)[0]
+        if canonical:
+            return canonical
     return path
 
 
@@ -4686,8 +4688,7 @@ def _selftest():
     finally:
         globals()["owner_repos"] = real_owner_repos
 
-    # intent_canonical_rel: an intentRef with an anchor resolves to the whole hub file, not the
-    # anchor-qualified name git cannot look up, and reference still wins where the manifest sets both.
+    # An intentRef with an anchor resolves to the whole hub file, not the anchor-qualified name git cannot look up, and reference still wins where the manifest sets both.
     canonical_cases = [
         (
             "no reference or intentRef falls back to the file's own path",
@@ -4724,6 +4725,18 @@ def _selftest():
             {},
             "docs/notes#1.md",
             "docs/notes#1.md",
+        ),
+        (
+            "a non-string intentRef falls back to path instead of crashing",
+            {"intentRef": 123},
+            "AUDIT.md",
+            "AUDIT.md",
+        ),
+        (
+            "an anchor-only intentRef falls back to path rather than an empty canonical",
+            {"intentRef": "#line-endings"},
+            "AUDIT.md",
+            "AUDIT.md",
         ),
     ]
     for label, item, path, want in canonical_cases:
