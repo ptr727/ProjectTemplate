@@ -83,15 +83,15 @@ Subcommands
            re-request or a further wait does not clear, unlike 41's other causes (a file count
            over the limit, cleared by splitting the pull request), so it is its own code rather
            than folded into 41: proceed on the other reviewers' coverage instead of retrying.
-           47 = this pull request's head carries no Copilot activity of its own, and the
-           reviewer's own most recent activity anywhere else in the repository, another pull
-           request's review or comment, is that same account-quota refusal with nothing having
-           answered it since. The poll that would
+           47 = this pull request's current head carries no Copilot activity of its own, and
+           the reviewer's own most recent activity found in the repository, a review or comment
+           on any pull request including an earlier round on this one, is that same
+           account-quota refusal with nothing having answered it since. The poll that would
            otherwise have run is skipped for this reason, printed as a `note:` line before the
            digest, rather than spent finding the same account state out a call late. Pass
            --ignore-quota-signal to poll --timeout anyway once the quota is believed to have
-           reset. 46 is read directly from this pull request and 47 is inferred from another
-           one, so a genuine 0/40/41/42/43/45 on this pull request outranks 47 whenever both
+           reset. 46 is read directly from the current head and always takes priority over 47,
+           so a genuine 0/40/41/42/43/45 on this pull request outranks 47 whenever both
            would otherwise apply.
            A pending request remains pending until a review, an answer, or the timeout. GitHub's
            effort-labeled review lifecycle does not always emit `copilot_work_started`, so that
@@ -514,12 +514,12 @@ def copilot_history(owner: str, repo: str) -> list[tuple[int, dict]]:
     where it looked rather than just assert one. Sorted by timestamp rather than trusted to
     arrive in that order, since the two connections are read separately and merged.
 
-    Unfiltered, including the caller's own pull request if it appears in the window, since
-    `copilot_bot_id` is happy to read a valid id from anywhere, including an earlier round on
-    the very pull request `wait` is running against. A caller needing the repo-wide quota
-    reading instead, where the caller's own pull request adds nothing and only crowds its own
-    "most recently updated" window, filters this result by pull request number before handing
-    it to `quota_signal` rather than losing that id lookup to the same exclusion.
+    Unfiltered, including the caller's own pull request if it appears in the window. No pull
+    request is special-cased out: `copilot_bot_id` is happy to read a valid id from anywhere,
+    including an earlier round on the very pull request `wait` is running against, and
+    `quota_signal` treats an earlier round on that same pull request as real evidence about the
+    account rather than a self-reference to discard. A refusal on the caller's own current head
+    is caught directly, at higher priority, before either reading here is ever consulted.
 
     A plain comment is read alongside a formal review, tagged `_kind` so `copilot_bot_id` can
     still tell them apart, because `answered_outside_review` already treats a comment as
@@ -2168,10 +2168,9 @@ def main(argv: list[str] | None = None) -> int:
     history = [] if done or answer or drift else copilot_history(owner, repo)
     # `--ignore-quota-signal` only changes whether the signal below is acted on.
     # It does not change whether the history is read, since the auto-request line still needs it for the bot id regardless.
-    # Filtered to elsewhere only for the signal, since this pull request's own head is already read directly and an earlier round on it is still a valid bot id for the auto-request below.
-    signal = (
-        None if a.ignore_quota_signal else quota_signal([e for e in history if e[0] != a.number])
-    )
+    # Read from the same, unfiltered history rather than one that drops this pull request's own entries: a genuine review on an earlier head of this same pull request, superseded since by a push, is real evidence about the account and not a self-reference to discard.
+    # A refusal on this pull request's own current head still never reaches this signal, since it is caught directly and at higher priority first.
+    signal = None if a.ignore_quota_signal else quota_signal(history)
     # Request before the first poll, not just at the call site: a caller expects `wait` to make a review happen, not merely to watch for one.
     # Two prior gaps this closed, a push superseding an already-answered request and an auto-seed that never fired, both left nothing outstanding for the loop below to ever see land.
     # Skipped once a review already covers the head, once Copilot has already answered outside a formal review, or once something is already in the request set, so a second `wait` on the same PR never double-requests.
