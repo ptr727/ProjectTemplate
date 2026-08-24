@@ -813,8 +813,15 @@ def main():
         if ref is not None and not isinstance(ref, str):
             errors.append(f"files.json: {path} reference must be a string")
             ref = None
-        elif isinstance(ref, str) and escapes_repo_root(ref):
-            errors.append(f"files.json: {path} reference '{ref}' must be a repo-relative path")
+        elif isinstance(ref, str):
+            if escapes_repo_root(ref):
+                errors.append(f"files.json: {path} reference '{ref}' must be a repo-relative path")
+            elif fid == "intent" and not (ROOT / ref).is_file():
+                # This field outranks intentRef in the audit engine's canonical resolution.
+                # An intent unit's reference needs the same existing-file check intentRef gets below.
+                errors.append(
+                    f"files.json: {path} reference '{ref}' is not a file in this checkout"
+                )
         if fid == "verbatim":
             src = ref if isinstance(ref, str) else path
             if isinstance(src, str) and not (ROOT / src).exists():
