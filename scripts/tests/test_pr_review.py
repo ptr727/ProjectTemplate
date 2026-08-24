@@ -2563,7 +2563,16 @@ class TestCopilotHistoryReadings(GqlCase):
     """The readings built from the reviewer's own review history across the repository."""
 
     def test_history_sorts_by_timestamp_regardless_of_pull_request_order(self) -> None:
-        """The query orders pull requests by their own update time, not by when each round landed."""
+        """The query orders pull requests by their own update time, not by when each round
+        landed, and the sort key is that timestamp specifically rather than the pull request
+        number or the query's own order.
+
+        Three pull requests whose number order, timestamp order, and mocked query order are
+        each different from the other two: ascending by number is 900, 950, 962, the query
+        lists them 950, 962, 900, and only descending by `_at` gives the expected 962, 900, 950.
+        A reader trusting the query's own order, or sorting by number in either direction,
+        produces a different sequence than the one this asserts.
+        """
         self.answer(payload([]))
         self.enterContext(
             mock.patch.object(
@@ -2573,8 +2582,9 @@ class TestCopilotHistoryReadings(GqlCase):
                     "repository": {
                         "pullRequests": {
                             "nodes": [
+                                hist_review(950, QUOTA_REFUSED, at=EARLY),
                                 hist_review(962, QUOTA_REFUSED, at=LATE),
-                                hist_review(900, QUOTA_REFUSED, at=EARLY),
+                                hist_review(900, QUOTA_REFUSED, at="2026-08-02T10:30:00Z"),
                             ]
                         }
                     }
@@ -2582,7 +2592,7 @@ class TestCopilotHistoryReadings(GqlCase):
             )
         )
         history = pr_review.copilot_history("o", "r")
-        self.assertEqual([962, 900], [number for number, _ in history])
+        self.assertEqual([962, 900, 950], [number for number, _ in history])
 
     def test_a_later_comment_outranks_an_earlier_review_in_the_merged_history(self) -> None:
         """A plain comment answers the same way `answered_outside_review` reads one per pull request."""
