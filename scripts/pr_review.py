@@ -506,7 +506,7 @@ def reviewer_requested(pr: dict) -> bool:
     )
 
 
-def copilot_history(owner: str, repo: str, exclude: int | None = None) -> list[tuple[int, dict]]:
+def copilot_history(owner: str, repo: str) -> list[tuple[int, dict]]:
     """The reviewer's own reviews and comments across the repository's 20 most recently updated
     pull requests, newest activity first regardless of which connection it came from.
 
@@ -514,10 +514,12 @@ def copilot_history(owner: str, repo: str, exclude: int | None = None) -> list[t
     where it looked rather than just assert one. Sorted by timestamp rather than trusted to
     arrive in that order, since the two connections are read separately and merged.
 
-    `exclude` drops the caller's own pull request from the result. A caller's own head is
-    already read directly and takes precedence over anything inferred here, so its own entries
-    add nothing repo-wide, and an actively pushed-to pull request otherwise sits at the top of
-    its own "most recently updated" window and crowds out the history the reading is for.
+    Unfiltered, including the caller's own pull request if it appears in the window, since
+    `copilot_bot_id` is happy to read a valid id from anywhere, including an earlier round on
+    the very pull request `wait` is running against. A caller needing the repo-wide quota
+    reading instead, where the caller's own pull request adds nothing and only crowds its own
+    "most recently updated" window, filters this result by pull request number before handing
+    it to `quota_signal` rather than losing that id lookup to the same exclusion.
 
     A plain comment is read alongside a formal review, tagged `_kind` so `copilot_bot_id` can
     still tell them apart, because `answered_outside_review` already treats a comment as
@@ -532,8 +534,6 @@ def copilot_history(owner: str, repo: str, exclude: int | None = None) -> list[t
     entries = []
     for node in prs:
         number = node.get("number")
-        if number == exclude:
-            continue
         for review in (node.get("reviews") or {}).get("nodes") or []:
             author = review.get("author") or {}
             if author.get("__typename") == "Bot" and author.get("login") == REVIEWER:
@@ -2165,10 +2165,13 @@ def main(argv: list[str] | None = None) -> int:
     # Read whenever nothing has landed on this pull request yet, whether or not a request is already outstanding.
     # An already-pending request drawing no answer at all is exactly the shape a repo-wide quota exhaustion leaves, per PR #962 and the six pull requests after it that carried no Copilot activity at all.
     # The bot id for a fresh request comes from this same traversal, so a caller needing either pays for one call rather than two.
-    history = [] if done or answer or drift else copilot_history(owner, repo, exclude=a.number)
+    history = [] if done or answer or drift else copilot_history(owner, repo)
     # `--ignore-quota-signal` only changes whether the signal below is acted on.
     # It does not change whether the history is read, since the auto-request line still needs it for the bot id regardless.
-    signal = None if a.ignore_quota_signal else quota_signal(history)
+    # Filtered to elsewhere only for the signal, since this pull request's own head is already read directly and an earlier round on it is still a valid bot id for the auto-request below.
+    signal = (
+        None if a.ignore_quota_signal else quota_signal([e for e in history if e[0] != a.number])
+    )
     # Request before the first poll, not just at the call site: a caller expects `wait` to make a review happen, not merely to watch for one.
     # Two prior gaps this closed, a push superseding an already-answered request and an auto-seed that never fired, both left nothing outstanding for the loop below to ever see land.
     # Skipped once a review already covers the head, once Copilot has already answered outside a formal review, or once something is already in the request set, so a second `wait` on the same PR never double-requests.

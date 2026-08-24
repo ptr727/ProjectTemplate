@@ -2506,6 +2506,22 @@ class TestCli(GqlCase):
         # It costs nothing extra either, since the same history read already answered the bot-id lookup it needs.
         self.assertEqual(1, len([c for c in calls if "requestReviews" in c[0]]))
 
+    def test_the_current_pull_requests_own_bot_id_still_seeds_the_auto_request(self) -> None:
+        """The bot-id lookup reads the caller's own history unfiltered even though the signal
+        excludes it: an earlier round on this very pull request is still a valid id to request
+        with, and it must not also be misread as repo-wide evidence about this same head."""
+        self.answer(payload([review(oid=OLD)]))
+        calls = self.wire_history([hist_review(7, OVERVIEW + "\n" + COVERED, at=EARLY)])
+        with mock.patch.object(pr_review.time, "sleep") as slept:
+            self.assertEqual(30, self.cli(["wait", "7", "--timeout", "0"]))
+        slept.assert_not_called()
+        mutations = [(q, v) for q, v in calls if "requestReviews" in q]
+        self.assertEqual(1, len(mutations))
+        self.assertEqual("BOT_1", mutations[0][1].get("bot"))
+        out = self.out.getvalue()
+        self.assertNotIn("COPILOT_QUOTA_EXHAUSTED_REPO_WIDE", out)
+        self.assertIn("status=PENDING", out)
+
     def test_a_genuine_review_since_the_refusal_clears_the_signal(self) -> None:
         """The most recent record settles it: a working round after the refusal spends it."""
         self.answer(payload([]))
@@ -2610,10 +2626,11 @@ class TestCopilotHistoryReadings(GqlCase):
         self.assertEqual("comment", history[0][1]["_kind"])
         self.assertIsNone(pr_review.quota_signal(history))
 
-    def test_exclude_drops_the_callers_own_pull_request_from_the_result(self) -> None:
-        """The caller's own head is read directly and outranks anything inferred here, so its
-        own entries add nothing repo-wide, and an actively pushed-to pull request otherwise
-        crowds its own "most recently updated" window."""
+    def test_copilot_history_is_unfiltered_so_a_caller_can_choose_what_to_exclude(self) -> None:
+        """`copilot_bot_id` reads a valid id from anywhere, including the caller's own pull
+        request, so the fetch itself carries every pull request in the window; a caller
+        computing the repo-wide quota signal instead filters this result by number itself,
+        rather than losing that id lookup to the same exclusion."""
         self.answer(payload([]))
         self.enterContext(
             mock.patch.object(
@@ -2631,8 +2648,10 @@ class TestCopilotHistoryReadings(GqlCase):
                 },
             )
         )
-        history = pr_review.copilot_history("o", "r", exclude=969)
-        self.assertEqual([962], [number for number, _ in history])
+        history = pr_review.copilot_history("o", "r")
+        self.assertEqual([969, 962], [number for number, _ in history])
+        elsewhere = [e for e in history if e[0] != 969]
+        self.assertEqual([962], [number for number, _ in elsewhere])
 
     def test_an_empty_history_carries_no_signal_and_no_bot_id(self) -> None:
         self.assertIsNone(pr_review.quota_signal([]))
