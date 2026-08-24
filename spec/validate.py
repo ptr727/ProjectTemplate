@@ -826,6 +826,12 @@ def main():
                 errors.append(
                     f"files.json: {path} intentRef '{intent_ref}' must be a repo-relative path"
                 )
+            elif not (ROOT / intent_path).is_file():
+                # A directory such as "." exists but is not a file.
+                # The staleness check would then read the whole repo's most recent commit as this one file's, false-flagging every intent unit as stale.
+                errors.append(
+                    f"files.json: {path} intentRef '{intent_ref}' canonical {intent_path} is not a file in this checkout"
+                )
 
         sections = item.get("sections", [])
         if not isinstance(sections, list):
