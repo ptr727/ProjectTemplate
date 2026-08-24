@@ -1690,7 +1690,9 @@ def intent_canonical_rel(item, path):
         return ref
     intent = item.get("intentRef")
     if isinstance(intent, str) and intent:
-        return intent.split("#", 1)[0]
+        canonical = intent.split("#", 1)[0]
+        if canonical:
+            return canonical
     return path
 
 
@@ -4727,6 +4729,12 @@ def _selftest():
         (
             "a non-string intentRef falls back to path instead of crashing",
             {"intentRef": 123},
+            "AUDIT.md",
+            "AUDIT.md",
+        ),
+        (
+            "an anchor-only intentRef falls back to path rather than an empty canonical",
+            {"intentRef": "#line-endings"},
             "AUDIT.md",
             "AUDIT.md",
         ),
