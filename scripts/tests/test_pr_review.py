@@ -2509,9 +2509,14 @@ class TestCli(GqlCase):
     def test_the_current_pull_requests_own_bot_id_still_seeds_the_auto_request(self) -> None:
         """The bot-id lookup reads the caller's own history unfiltered even though the signal
         excludes it: an earlier round on this very pull request is still a valid id to request
-        with, and it must not also be misread as repo-wide evidence about this same head."""
+        with, and it must not also be misread as repo-wide evidence about this same head.
+
+        The history entry carries a quota refusal specifically, since ordinary content would
+        pass this same assertion whether or not the exclusion existed at all: it is the refusal
+        that a caller-scoped exclusion has to catch and a missing one would leak through as 47.
+        """
         self.answer(payload([review(oid=OLD)]))
-        calls = self.wire_history([hist_review(7, OVERVIEW + "\n" + COVERED, at=EARLY)])
+        calls = self.wire_history([hist_review(7, QUOTA_REFUSED, at=EARLY)])
         with mock.patch.object(pr_review.time, "sleep") as slept:
             self.assertEqual(30, self.cli(["wait", "7", "--timeout", "0"]))
         slept.assert_not_called()
