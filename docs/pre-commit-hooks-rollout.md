@@ -9,10 +9,10 @@ not a restatement of the rule. It is **hub-only** and is not carried downstream,
 rather than a fact a downstream repo's own docs need to carry.
 
 **Maintenance rule.** This file is hub-only, so a downstream repo's own conversion PR cannot edit
-it. Check a repo's box in its own small hub-side PR, opened as part of the same `resync-a-repo`
-session that converts the downstream repo, once that repo's own audit reports `parity.hooks`
-operational. A register showing a repo unchecked after its conversion PR merged is itself stale
-prose, so this doc is only trustworthy while that rule holds.
+it. Once a repo's own audit reports `parity.hooks` operational, follow up with its own small
+hub-side PR that checks the repo's box below, the next step of the same `resync-a-repo` pass. A
+register showing a repo unchecked after its conversion PR merged is itself stale prose, so this
+doc is only trustworthy while that rule holds.
 
 ## What Changed
 
