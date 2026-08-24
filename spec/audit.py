@@ -1676,13 +1676,22 @@ def hub_last_change(rel_path):
 
 
 def intent_canonical_rel(item, path):
-    """The hub path an intent unit's copy is judged against for staleness: `reference` if the
-    manifest sets one, else the intent unit's own canonical, `intentRef`, else `path` itself.
-    `reference` never carries an anchor, but `intentRef` routes a reader to one section of a
-    larger doc, so an anchor there names a place to read rather than a narrower file to diff
-    against, and is stripped - the whole canonical is a wrong-but-safe over-approximation, where
-    leaving it in would make the path unreadable and silently fall back to `path` (#726)."""
-    return (item.get("reference") or item.get("intentRef") or path).split("#", 1)[0]
+    """The hub path an intent unit's copy is judged against for staleness.
+
+    `reference` wins where the manifest sets one.
+    Otherwise the intent unit's own canonical, `intentRef`, wins.
+    Otherwise the unit compares against its own `path`.
+    Only `intentRef` ever carries a `#anchor`, routing a reader to one section of a larger doc.
+    The anchor names a place to read, not a narrower file to diff against, so it is stripped
+    there and nowhere else, comparing the whole canonical file instead.
+    """
+    ref = item.get("reference")
+    if ref:
+        return ref
+    intent = item.get("intentRef")
+    if intent:
+        return intent.split("#", 1)[0]
+    return path
 
 
 def check_intent_staleness(slug, ground, path, canonical_rel, down_text):
@@ -4678,7 +4687,7 @@ def _selftest():
         globals()["owner_repos"] = real_owner_repos
 
     # intent_canonical_rel: an intentRef with an anchor resolves to the whole hub file, not the
-    # anchor-qualified name git cannot look up, and reference still wins where the manifest sets both (#726).
+    # anchor-qualified name git cannot look up, and reference still wins where the manifest sets both.
     canonical_cases = [
         (
             "no reference or intentRef falls back to the file's own path",
@@ -4703,6 +4712,18 @@ def _selftest():
             {"reference": "catalog/snippets/configs/codecov.yml", "intentRef": "WORKFLOW.md"},
             "codecov.yml",
             "catalog/snippets/configs/codecov.yml",
+        ),
+        (
+            "a literal '#' in reference is not mistaken for an anchor and stripped",
+            {"reference": "docs/notes#1.md"},
+            "notes.md",
+            "docs/notes#1.md",
+        ),
+        (
+            "a literal '#' in path is not mistaken for an anchor and stripped",
+            {},
+            "docs/notes#1.md",
+            "docs/notes#1.md",
         ),
     ]
     for label, item, path, want in canonical_cases:

@@ -811,6 +811,11 @@ def main():
                     f"files.json: {path} fidelity 'verbatim' but its canonical source {src} is missing"
                 )
 
+        # The audit engine's intent_canonical_rel() trusts this is a string once validated, the same way it trusts reference above.
+        intent_ref = item.get("intentRef")
+        if intent_ref is not None and not isinstance(intent_ref, str):
+            errors.append(f"files.json: {path} intentRef must be a string")
+
         sections = item.get("sections", [])
         if not isinstance(sections, list):
             errors.append(f"files.json: {path} sections must be an array")
