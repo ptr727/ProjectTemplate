@@ -32,6 +32,7 @@
         { "name": "NEbml", "link": "https://github.com/OlegZee/NEbml", "description": "EBML reader and writer for .NET." },
         { "name": "Nerdbank.GitVersioning", "link": "https://github.com/dotnet/Nerdbank.GitVersioning", "description": "Version computation from git height." },
         { "name": "PaperMod", "link": "https://github.com/adityatelange/hugo-PaperMod", "description": "Hugo theme." },
+        { "name": "pre-commit", "link": "https://pre-commit.com/", "description": "Git hook manager for Python." },
         { "name": "Proxmox VE", "link": "https://www.proxmox.com/en/proxmox-virtual-environment/overview", "description": "Virtualization platform." },
         { "name": "regex101.com", "link": "https://regex101.com/", "description": "Regular expression tester." },
         { "name": "RFC 5646 language tags", "link": "https://www.rfc-editor.org/rfc/rfc5646.html", "description": "Language tag standard." },

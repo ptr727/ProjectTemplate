@@ -1,0 +1,102 @@
+"""Fetch a ptr727/ProjectTemplate script fresh from `main` and run it in-process.
+
+Never pinned or vendored: a pin nothing keeps current goes stale by construction, and CI
+(this repo's own, and the hub's) is the backstop for a change that lands broken on `main`.
+A fetch failure fails the caller loudly rather than silently skipping the gate it guards.
+Usage: hub-fetch-run.py <hub-relative-path> [script-args...]
+Example: hub-fetch-run.py .github/actions/prose-gate/prose_lint.py . --diff HEAD
+"""
+
+import runpy
+import subprocess
+import sys
+import tempfile
+import urllib.error
+import urllib.request
+from pathlib import Path
+
+HUB_RAW_BASE = "https://raw.githubusercontent.com/ptr727/ProjectTemplate/main"
+EMPTY_TREE = "4b825dc642cb6eb9a060e54bf8d69288fbee4904"
+
+
+def head_is_unborn() -> bool:
+    """Whether HEAD is confirmed unborn (a real branch, no commits yet), never guessed.
+
+    `git rev-parse --verify -q HEAD` exits 1 with empty stderr for a confirmed unborn HEAD,
+    verified directly: a fresh `git init` with no commits gives exactly that signature. Any
+    other shape, a non-git directory (exit 128, a `fatal:` message even with `-q`), a missing
+    or broken git executable (raised as OSError), a permission error, or any other failure, is
+    a probe failure to propagate, never a reason to guess at the diff scope.
+    """
+    try:
+        probe = subprocess.run(
+            ["git", "rev-parse", "--verify", "-q", "HEAD"],
+            capture_output=True,
+            check=False,
+        )
+    except OSError as exc:
+        print(f"hub-fetch-run: could not run git to probe HEAD: {exc}", file=sys.stderr)
+        sys.exit(1)
+    if probe.returncode == 1 and not probe.stderr:
+        return True
+    if probe.returncode == 0:
+        return False
+    print(
+        f"hub-fetch-run: git rev-parse --verify -q HEAD failed unexpectedly "
+        f"(exit {probe.returncode}): {probe.stderr.decode(errors='replace').strip()}",
+        file=sys.stderr,
+    )
+    sys.exit(1)
+
+
+def resolve_unborn_head(argv: list[str]) -> list[str]:
+    """Replace a `--diff HEAD` pair with git's empty-tree hash when HEAD does not exist yet.
+
+    A brand-new repository's first commit has no HEAD to diff against, and the fetched gate
+    scripts refuse to widen to a whole-tree scan rather than report the backlog as new. The
+    empty tree diffs cleanly against everything staged, which is the correct scope for a first
+    commit. Any other `--diff` value passes through unchanged.
+    """
+    out = list(argv)
+    for i, token in enumerate(out[:-1]):
+        if token == "--diff" and out[i + 1] == "HEAD" and head_is_unborn():
+            out[i + 1] = EMPTY_TREE
+    return out
+
+
+def main(argv: list[str]) -> int:
+    if not argv:
+        print(
+            "hub-fetch-run: usage: hub-fetch-run.py <hub-relative-path> [script-args...]",
+            file=sys.stderr,
+        )
+        return 2
+    hub_path, script_args = argv[0], resolve_unborn_head(argv[1:])
+    url = f"{HUB_RAW_BASE}/{hub_path}"
+    try:
+        with urllib.request.urlopen(url, timeout=30) as response:
+            content = response.read()
+    except (urllib.error.URLError, OSError) as exc:
+        print(f"hub-fetch-run: could not fetch {url}: {exc}", file=sys.stderr)
+        print("hub-fetch-run: the gate did not run.", file=sys.stderr)
+        return 1
+    with tempfile.NamedTemporaryFile(suffix=".py", delete=False) as handle:
+        handle.write(content)
+        tmp_path = Path(handle.name)
+    old_argv = sys.argv
+    try:
+        sys.argv = [str(tmp_path), *script_args]
+        try:
+            runpy.run_path(str(tmp_path), run_name="__main__")
+        except SystemExit as exc:
+            if exc.code is None:
+                return 0
+            return exc.code if isinstance(exc.code, int) else 1
+        return 0
+    finally:
+        sys.argv = old_argv
+        tmp_path.unlink(missing_ok=True)
+
+
+if __name__ == "__main__":
+    sys.exit(main(sys.argv[1:]))
