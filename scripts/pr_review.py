@@ -31,6 +31,22 @@ Subcommands
            maintainer's decision rather than the agent's.
            45 = the review covering the head stated no changed-file coverage. Request another
            review only after confirming the head branch carries the current review instructions.
+           A refusal naming the account quota still reads as absent here, exit 0, since a
+           refusal covers no head either; its printed digest line carries `refusal=QUOTA`
+           regardless. `wait` is where that state gets its own exit codes, 46 and 47 below,
+           because only `wait` is the command a caller might otherwise poll out a timeout on.
+           `unresolved` counts every tracked reviewer's own open thread, not only Copilot's:
+           CodeRabbit (`coderabbitai`) and qodo (`qodo-code-review`) are tracked at the identity
+           and thread-resolution level, since an open thread blocks a ruleset-gated merge
+           whoever opened it and `unresolved=0` once hid one of theirs that still did (PR #915).
+           Neither is read past that: no coverage, no refusal, no suppressed-finding parsing, no
+           `wait`/request support, each being its own format and its own future task. Where
+           either has posted anything at all on the current head, `other_reviewed` names it,
+           identity and commit only, no verdict read from what it said. `other_rate_limited`
+           names one whose newest comment or review carries its own rate-limit marker instead,
+           a structural `<!-- ... rate limited by ... -->` convention rather than free-text
+           prose (observed on CodeRabbit, ptr727/Blog #110), so reading it needs no per-bot
+           wording model the way Copilot's quota refusal needed `QUOTA` built for its own text.
   reply    Answer one thread selected by its text, and resolve it on request. Exists
            because the hand-run form keeps failing the same way: a node id typed into a
            mutation, which resolves globally and so writes to a real thread somewhere
@@ -62,6 +78,20 @@ Subcommands
            not this and exits 0, and neither is a stuck check on a merge that is not BLOCKED,
            since the rollup carries checks no ruleset requires. The digest reports the check
            in both cases, so a shape outside 44 is still named rather than lost.
+           46 = the review carrying the head is a refusal naming the account quota specifically,
+           printed above under COPILOT REFUSED THIS ROUND. That is an account-level state a
+           re-request or a further wait does not clear, unlike 41's other causes (a file count
+           over the limit, cleared by splitting the pull request), so it is its own code rather
+           than folded into 41: proceed on the other reviewers' coverage instead of retrying.
+           47 = this pull request's head carries no Copilot activity of its own, and the
+           reviewer's own most recent review anywhere else in the repository is that same
+           account-quota refusal with nothing having answered it since. The poll that would
+           otherwise have run is skipped for this reason, printed as a `note:` line before the
+           digest, rather than spent finding the same account state out a call late; pass
+           --ignore-quota-signal to poll --timeout anyway once the quota is believed to have
+           reset. 46 is read directly from this pull request and 47 is inferred from another
+           one, so a genuine 0/40/41/42/43/45 on this pull request outranks 47 whenever both
+           would otherwise apply.
            A pending request remains pending until a review, an answer, or the timeout. GitHub's
            effort-labeled review lifecycle does not always emit `copilot_work_started`, so that
            event is not evidence that distinguishes queued work from abandoned work.
@@ -88,6 +118,15 @@ from datetime import UTC, datetime
 from pathlib import Path
 
 REVIEWER = "copilot-pull-request-reviewer"
+# Other review bots this repository has trialed alongside Copilot.
+# Tracked at the identity level only, login and commit oid, never body prose.
+# No coverage parsing, no refusal reading, no wait/request support here.
+# Each of those writes its own findings in its own format, and doing that well is a separate task per bot.
+# What generalizes without reading any of their prose is thread resolution.
+# An open thread blocks a ruleset-gated merge whoever opened it, and `status`'s `unresolved=0` once silently hid a CodeRabbit/qodo thread that did block one (PR #915, ptr727/ProjectTemplate).
+# Login spellings are read off this repository's own history (`gh pr view --json reviews,comments`) rather than guessed.
+OTHER_REVIEWERS = ("coderabbitai", "qodo-code-review")
+KNOWN_REVIEWERS = (REVIEWER, *OTHER_REVIEWERS)
 
 # A check dispatched to a runner and not begun, in the spellings a CheckRun carries.
 # PENDING here means dispatched and not begun, which a StatusContext's means the opposite of.
@@ -126,6 +165,17 @@ SUPPRESSED = re.compile(r"Suppressed comments|low confidence", re.IGNORECASE)
 REFUSAL = re.compile(
     r"wasn.t able to review|was not able to review|unable to review", re.IGNORECASE
 )
+# The account-level cause among the refusal wordings, as opposed to a per-pull-request one like the file count.
+# Read against `refusal_of`'s own return rather than the raw body.
+# That way the exemptions built for that anchor, the opening line and the fenced quotation, protect this reading too instead of needing their own.
+# This script's own corpus and this file both quote the sentence below its overview, same as the refusal wording itself does.
+# Observed once, on PR #962 here: "Copilot was unable to review this pull request because the user who requested the review has reached their quota limit."
+QUOTA = re.compile(r"reached (?:their|its|his|her|your|my) quota limit", re.IGNORECASE)
+# A structural marker rather than prose, so reading it needs no per-bot wording model the way `QUOTA` above needs one for Copilot's free-text refusal.
+# Observed on CodeRabbit, a plain PR comment rather than a formal review, ptr727/Blog #110: "<!-- This is an auto-generated comment: rate limited by coderabbit.ai -->".
+# The service name is captured rather than assumed.
+# A second bot using the same auto-generated-comment convention is read without a new pattern, and one that does not use it stays unread rather than guessed at.
+RATE_LIMITED = re.compile(r"auto-generated comment:\s*rate limited by\s*(\S+?)\s*-->")
 # A round states how much of the diff it read on a line of its own.
 # A round that read part of it is the clean pass elsewhere, same commit and threads and digest.
 # Five such rounds landed across three merged pull requests here.
@@ -278,15 +328,18 @@ query($o:String!,$r:String!,$n:Int!){
   }}}
 """
 
-# The Copilot reviewer bot's node id, read live from this repository's own review history rather than hand-typed or cached across runs.
-# The id belongs to the reviewer account, not to any one PR or any one review, so it is identical wherever it is found and recency does not matter once one is found.
-# `pullRequests` orders newest first so an old, possibly-archived PR is not preferred over a live one, and `reviews(first:20)` inside it just needs any one Copilot review among a PR's own, not its most recent.
+# The reviewer's own review history, read live from this repository's last 20 pull requests rather than hand-typed or cached across runs.
+# Two callers share this one query.
+# The bot's node id belongs to the reviewer account rather than to any one PR or review, so it is identical wherever it is found and recency does not matter once one is found.
+# A repo-wide reading of the reviewer's own most recent activity is the other caller, and recency is the whole point there, so `submittedAt` and `body` ride along for a reader that does not stop at the first bot id.
+# `pullRequests` orders newest first so an old, possibly-archived PR is not preferred over a live one, and `reviews(first:20)` inside it reaches every round a PR carries.
 # It resolves even on a PR whose own round 1 carries no review yet, per the fleet's standing rule against fabricating or reusing a GitHub node id.
 Q_BOT_ID = """
 query($o:String!,$r:String!){
   repository(owner:$o,name:$r){
     pullRequests(first:20, orderBy:{field:CREATED_AT, direction:DESC}){
-      nodes{ reviews(first:20){ nodes{ author{ __typename login ... on Bot{ id } } } } } } } }
+      nodes{ number reviews(first:20){
+        nodes{ author{ __typename login ... on Bot{ id } } state body submittedAt } } } } } }
 """
 
 M_REQUEST_REVIEWS = """
@@ -437,41 +490,93 @@ def reviewer_requested(pr: dict) -> bool:
     )
 
 
-def copilot_bot_id(owner: str, repo: str) -> str | None:
-    """The Copilot reviewer bot's node id, or None where no recent review names one to read.
+def copilot_history(owner: str, repo: str) -> list[tuple[int, dict]]:
+    """The reviewer's own reviews across the repository's last 20 pull requests, newest first.
+
+    Paired with the pull request number each came from, since a repo-wide reading has to name
+    where it looked rather than just assert one. Sorted by `submittedAt` rather than trusted to
+    arrive in that order: the query orders pull requests by creation, and a re-request on an
+    older, still-open one can post more recently than a review on a newly created one.
+
+    One call serves both the bot-id lookup and the repo-wide quota reading below, since both
+    need the same traversal and a caller needing either otherwise pays for it twice.
+    """
+    data = gh_graphql(Q_BOT_ID, o=owner, r=repo)
+    prs = ((data.get("repository") or {}).get("pullRequests") or {}).get("nodes") or []
+    reviews = [
+        (node.get("number"), review)
+        for node in prs
+        for review in (node.get("reviews") or {}).get("nodes") or []
+        if ((review.get("author") or {}).get("__typename") == "Bot")
+        and ((review.get("author") or {}).get("login") == REVIEWER)
+    ]
+    return sorted(reviews, key=lambda pair: pair[1].get("submittedAt") or "", reverse=True)
+
+
+def copilot_bot_id(history: list[tuple[int, dict]]) -> str | None:
+    """The Copilot reviewer bot's node id from an already-fetched history, or None where none
+    carries one.
 
     None is a real answer, not a failure to retry: a repository's very first PR, or one Copilot
     has never reviewed, carries no review to read the id from. The caller falls back to polling
     only rather than guessing, since a fabricated or reused id resolves globally and a wrong one
     would silently target another repository's PR.
     """
-    data = gh_graphql(Q_BOT_ID, o=owner, r=repo)
-    prs = ((data.get("repository") or {}).get("pullRequests") or {}).get("nodes") or []
-    for node in prs:
-        for review in (node.get("reviews") or {}).get("nodes") or []:
-            author = review.get("author") or {}
-            if author.get("__typename") == "Bot" and author.get("login") == REVIEWER:
-                bot_id = author.get("id")
-                if bot_id:
-                    return bot_id
+    for _number, review in history:
+        bot_id = (review.get("author") or {}).get("id")
+        if bot_id:
+            return bot_id
     return None
 
 
-def request_copilot_review(owner: str, repo: str, pr_node_id: str) -> str:
+def quota_signal(history: list[tuple[int, dict]]) -> tuple[int, dict] | None:
+    """The reviewer's own most recent review anywhere in this repository, where it is a quota
+    refusal, paired with the pull request number it came from.
+
+    The most recent rather than any match, since a repository can carry an old refusal and a
+    later working round both, and only the most recent record says which is still true: a
+    genuine review anywhere since the refusal spends it, the same reading `refusing_review`
+    already gives one pull request's own history. Reading across pull requests rather than one
+    is what a repository-wide account state needs, since the pull request in front of a caller
+    can carry none of its own reviewer activity to read that state from at all.
+    """
+    newest = history[0] if history else None
+    return newest if newest and quota_refusal(newest[1]) else None
+
+
+def rate_limited_by(pr: dict, login: str) -> str | None:
+    """The service name a rate-limit marker gives, where this login's newest comment or review
+    on this pull request carries one; `None` otherwise.
+
+    Reads both connections since the one observed marker (CodeRabbit, ptr727/Blog #110) rides a
+    plain PR comment rather than a formal review, and a future bot using the same convention
+    might use either. Current pull request only, unlike Copilot's `quota_signal`: that one
+    generalizes from a pattern of silence across several pull requests, and this has one
+    observed instance to generalize from, not a history to read one out of.
+    """
+    nodes = reviewer_nodes(pr, "comments", login) + reviewer_nodes(pr, "reviews", login)
+    if not nodes:
+        return None
+    newest = max(nodes, key=lambda n: n.get("createdAt") or n.get("submittedAt") or "")
+    match = RATE_LIMITED.search(newest.get("body") or "")
+    return match.group(1) if match else None
+
+
+def request_copilot_review(pr_node_id: str, bot_id: str | None) -> str:
     """Ask Copilot to review the current head, and say in one line what happened.
 
     This exists because `wait` used to only ever poll, never request, so a PR whose auto-seed
     never fired or whose prior request was superseded by a later push sat waiting the full
     timeout for a review nothing had asked for, twice in one session before this was written.
     `union:true` adds the bot to the request set rather than replacing it, so a human reviewer
-    requested alongside it stays requested. Raises where `gh_graphql` does, on the bot id read
-    or on the mutation itself, the same as every other write in this script: a failed write is
-    reported, never quietly swallowed into a fallback that would recreate the exact blind-poll
-    failure this function exists to prevent, from a different cause. The one quiet path is
-    finding no bot id to request with at all, which is not a failure, since a repository with no
-    Copilot review anywhere carries nothing to read the id from.
+    requested alongside it stays requested. Raises where `gh_graphql` does, on the mutation
+    itself, the same as every other write in this script: a failed write is reported, never
+    quietly swallowed into a fallback that would recreate the exact blind-poll failure this
+    function exists to prevent, from a different cause. The one quiet path is finding no bot id
+    to request with at all, which is not a failure, since a repository with no Copilot review
+    anywhere carries nothing to read the id from. The id itself is the caller's to find, via
+    `copilot_bot_id` over a `copilot_history` read it already paid for.
     """
-    bot_id = copilot_bot_id(owner, repo)
     if not bot_id:
         return (
             "no Copilot review found across the last 20 PRs to read the reviewer bot id "
@@ -482,12 +587,17 @@ def request_copilot_review(owner: str, repo: str, pr_node_id: str) -> str:
     return f"requested a Copilot review on the current head (bot {bot_id})"
 
 
-def reviewer_nodes(pr: dict, field: str) -> list[dict]:
-    """The reviewer's own nodes under `field`, oldest first as the API returns them."""
+def reviewer_nodes(pr: dict, field: str, login: str = REVIEWER) -> list[dict]:
+    """This login's own nodes under `field`, oldest first as the API returns them.
+
+    `login` defaults to the fully-modeled reviewer, so every existing call keeps reading
+    Copilot's own nodes unchanged. A caller reading another known reviewer's presence
+    generically, identity and commit only, no body parsing, passes it explicitly.
+    """
     return [
         n
         for n in ((pr.get(field) or {}).get("nodes") or [])
-        if (n.get("author") or {}).get("login") == REVIEWER
+        if (n.get("author") or {}).get("login") == login
     ]
 
 
@@ -544,6 +654,20 @@ def refusal_of(node: dict) -> str:
     body = node.get("body") or ""
     opening = next((ln for ln in body.splitlines() if ln.strip()), "")
     return body if REFUSAL.search(opening) else ""
+
+
+def quota_refusal(node: dict) -> bool:
+    """True where a refusal on this node names the account quota rather than another cause.
+
+    Read from `refusal_of`'s own return rather than the raw body, so its exemptions protect
+    this reading too: a node that is not a refusal at all returns `""` here, on which `QUOTA`
+    cannot match, rather than this needing its own opening-line anchor and fenced-quote guard.
+    The distinction matters because the two remedies are opposite. A file-count refusal is
+    cleared by splitting the pull request; a quota one is an account-level state that a
+    re-request or a wait does not touch, so treating the two alike sends a reader at a remedy
+    that does nothing here.
+    """
+    return bool(QUOTA.search(refusal_of(node)))
 
 
 def refusing_review(pr: dict) -> dict | None:
@@ -1193,6 +1317,17 @@ def finding_count(block: str) -> int:
     return max(int(m.group(1)), 1) if m else 1
 
 
+def thread_author(t: dict) -> str:
+    """The login on a thread's opening comment, or `""` where there is none to read.
+
+    A deleted account leaves `author` present and null, which a chained `.get` would crash on
+    without the default here.
+    """
+    return (((t.get("comments") or {}).get("nodes") or [{}])[0].get("author") or {}).get(
+        "login"
+    ) or ""
+
+
 def digest(
     owner: str,
     repo: str,
@@ -1228,17 +1363,22 @@ def digest(
     cover, cover_line = head_coverage(pr)
     unknown = unrecognized_shapes(pr)
     threads = pr["reviewThreads"]["nodes"]
-    # A deleted account leaves `author` present and null, which `.get('author', {})` returns as
-    # None rather than as the default, so the chained lookup crashes the whole digest.
-    unresolved = [
-        t
-        for t in threads
-        if not t["isResolved"]
-        and (
-            (((t.get("comments") or {}).get("nodes") or [{}])[0].get("author") or {}).get("login")
-            == REVIEWER
-        )
-    ]
+    # Any known reviewer's own thread, not only Copilot's.
+    # An open thread blocks a ruleset-gated merge whoever opened it, and counting Copilot's alone hid a CodeRabbit/qodo thread that did block one (PR #915).
+    # `thread_author` carries the deleted-account default this needs.
+    unresolved = [t for t in threads if not t["isResolved"] and thread_author(t) in KNOWN_REVIEWERS]
+    # A breakdown beside the raw count, but only where more than one reviewer contributes to it.
+    # A single reviewer's own count is what `unresolved=N` already meant before this generalized.
+    # Printing one name beside its own total says nothing the number did not already say.
+    by_login = {
+        login: sum(1 for t in unresolved if thread_author(t) == login) for login in KNOWN_REVIEWERS
+    }
+    contributors = {login: n for login, n in by_login.items() if n}
+    breakdown = (
+        " (" + " ".join(f"{login}={n}" for login, n in contributors.items()) + ")"
+        if len(contributors) > 1
+        else ""
+    )
 
     # Every round, not just the head, because a suppressed finding has no resolved state to read.
     # Head-scoping treated "superseded by a push" as "answered", and the two are not the same.
@@ -1255,6 +1395,8 @@ def digest(
     # Reported regardless, it prints `review_on_head=yes refusal=YES` over a reviewed head.
     # That tells a reader to split a pull request the reviewer has just reviewed.
     refusal = None if on_head else refusing_review(pr)
+    # Read once and handed to the line below, since `quota_refusal` re-walks `refusal_of`.
+    refusal_field = "no" if not refusal else ("QUOTA" if quota_refusal(refusal) else "YES")
     blind = [f for f in ("reviews", "comments") if window_blind(pr, f)]
     answered = "yes" if answer else ("unknown" if blind else "no")
     # Normalized once and handed to both readers, since the parse is the cost here.
@@ -1263,12 +1405,37 @@ def digest(
     checks = check_nodes(pr) if checks is None else checks
     ok, total = checks_tally(checks)
     stuck = checks_stuck(checks, now, grace, stall)
+    # Which other known reviewers have posted anything at all on this exact head, identity and commit only, no body read.
+    # Whether it is a clean pass, a finding, or a refusal of its own is each bot's own prose to parse, which this script does not do for any reviewer but Copilot.
+    # Omitted entirely where none has, so a repository not trialing either stays silent.
+    other_on_head = [
+        login
+        for login in OTHER_REVIEWERS
+        if any(
+            (n.get("commit") or {}).get("oid") == head for n in reviewer_nodes(pr, "reviews", login)
+        )
+    ]
+    # The service name each tracked other-reviewer's own rate-limit marker gives, where its newest comment or review on this pull request carries one.
+    # Not head-scoped, unlike `other_on_head`, since the one observed marker rides a plain comment, which carries no commit to compare against the head at all.
+    other_limited = {
+        login: name for login in OTHER_REVIEWERS if (name := rate_limited_by(pr, login))
+    }
     lines = [
         # The repository leads the line, since a number alone reads as correct anywhere.
         # A digest of the wrong pull request is well-formed, so naming it is what shows the miss.
         f"repo={owner}/{repo} pr={num} head={head[:8]} rounds={len(revs)} "
         f"review_on_head={'yes' if on_head else 'NO'} "
-        f"effort={effort} effort_source={effort_source} "
+        # Present only where at least one other tracked reviewer has posted on this exact head.
+        # No verdict rides on it, unlike `review_on_head`, since nothing here reads what a CodeRabbit or qodo round said, only that one landed.
+        + (f"other_reviewed={','.join(other_on_head)} " if other_on_head else "")
+        # Present only where a tracked other-reviewer's newest word is that marker.
+        # The common case, neither is rate-limited right now, stays silent rather than printing `none`.
+        + (
+            f"other_rate_limited={','.join(f'{login}:{name}' for login, name in other_limited.items())} "
+            if other_limited
+            else ""
+        )
+        + f"effort={effort} effort_source={effort_source} "
         # A field of its own beside that one, since a round can cover the head and read part.
         # Those two readings are what `review_on_head=yes` alone conflates.
         f"coverage={COVERAGE_FIELD[cover]} "
@@ -1278,8 +1445,10 @@ def digest(
         # A field of its own, since `rounds=1 review_on_head=NO` is also what a stale round is.
         # The two want opposite responses, one a re-request and the other a split pull request.
         # Upper-case for the reason `NO` is, as a state that blocks a merge is not one to skim.
-        f"refusal={'YES' if refusal else 'no'} "
-        f"threads={len(threads)} unresolved={len(unresolved)} "
+        # `QUOTA` is its own value rather than folded into `YES`, since its remedy is neither a re-request nor a split.
+        # It is the account-level state `status`/`wait` name distinctly.
+        f"refusal={refusal_field} "
+        f"threads={len(threads)} unresolved={len(unresolved)}{breakdown} "
         f"suppressed={sum(finding_count(b) for n, b in blocks)} "
         f"(on_head={sum(finding_count(b) for b in on_head_blocks)} earlier={stale}) "
         f"answered_outside_review={answered} "
@@ -1292,7 +1461,7 @@ def digest(
         f"checks={ok}/{total}"
         # Named only where there is one to name.
         # A field reading `none` on every green run is one a reader skips when it finally says more.
-        + (f" stuck={','.join(sorted({s for _, s in stuck}))}" if stuck else "")
+         + (f" stuck={','.join(sorted({s for _, s in stuck}))}" if stuck else "")
     ]
     if refusal:
         # Printed whole for the reason the comment below is, as the wording carries the remedy.
@@ -1851,6 +2020,13 @@ def main(argv: list[str] | None = None) -> int:
         help="seconds a check may run before its duration is reported "
         f"(default {CHECK_STALL // 60}m)",
     )
+    ap.add_argument(
+        "--ignore-quota-signal",
+        action="store_true",
+        help="wait: poll the full --timeout even where the reviewer's own most recent "
+        "activity elsewhere in this repository is a quota-limit refusal with nothing "
+        "answering it since; pass this once the quota is believed to have reset",
+    )
     # `reply` takes the finding's words rather than its id.
     # There is deliberately no argument an id fits in, so the caller never holds one to mistype.
     ap.add_argument(
@@ -1945,24 +2121,44 @@ def main(argv: list[str] | None = None) -> int:
     # Waiting it out reports a review that landed as one that never did, at the timeout.
     # The liveness query carries the authors, so this costs the loop no extra call.
     drift = reviewer_login_drift(pr)
+    # Read whenever nothing has landed on this pull request yet, whether or not a request is already outstanding.
+    # An already-pending request drawing no answer at all is exactly the shape a repo-wide quota exhaustion leaves, per PR #962 and the six pull requests after it that carried no Copilot activity at all.
+    # The bot id for a fresh request comes from this same traversal, so a caller needing either pays for one call rather than two.
+    history = [] if done or answer or drift else copilot_history(owner, repo)
+    # `--ignore-quota-signal` only changes whether the signal below is acted on.
+    # It does not change whether the history is read, since the auto-request line still needs it for the bot id regardless.
+    signal = None if a.ignore_quota_signal else quota_signal(history)
     # Request before the first poll, not just at the call site: a caller expects `wait` to make a review happen, not merely to watch for one.
     # Two prior gaps this closed, a push superseding an already-answered request and an auto-seed that never fired, both left nothing outstanding for the loop below to ever see land.
     # Skipped once a review already covers the head, once Copilot has already answered outside a formal review, or once something is already in the request set, so a second `wait` on the same PR never double-requests.
     if not done and not answer and not drift and not reviewer_requested(pr):
-        print(f"auto-request: {request_copilot_review(owner, repo, pr['id'])}")
+        print(f"auto-request: {request_copilot_review(pr['id'], copilot_bot_id(history))}")
         # No re-read here: Copilot never resolves within the round trip that just issued the request.
         # The loop below picks up fresh state on its own first iteration instead of this spending a second call to learn nothing new.
-    i = 0
-    while not done and not answer and not drift:
-        elapsed = time.monotonic() - start
-        if elapsed > a.timeout:
-            break
-        time.sleep(delays[min(i, len(delays) - 1)])
-        i += 1
-        # Re-read head each iteration: a push during the wait moves it.
-        pr = gql(Q_LIVE, owner, repo, a.number)
-        done, answer = reviewed_head(pr), answered_outside_review(pr)
-        drift = reviewer_login_drift(pr)
+    if signal:
+        # The poll below is skipped rather than shortened, because there is nothing partial about this signal.
+        # The reviewer's own most recent word anywhere in the repository is the account quota, and nothing has answered it since.
+        # Polling this pull request's own silence for up to 45 minutes would only relearn that same account state a call late.
+        number, hist_refusal = signal
+        print(
+            f"note: the reviewer's own most recent review anywhere in this repository, on "
+            f"pull request #{number} at {hist_refusal.get('submittedAt') or 'an unknown time'}, "
+            "is a quota-limit refusal with nothing answering it since, so this wait stops here "
+            "rather than polling --timeout out against the same account state. Pass "
+            "--ignore-quota-signal to poll anyway, once the quota is believed to have reset."
+        )
+    else:
+        i = 0
+        while not done and not answer and not drift:
+            elapsed = time.monotonic() - start
+            if elapsed > a.timeout:
+                break
+            time.sleep(delays[min(i, len(delays) - 1)])
+            i += 1
+            # Re-read head each iteration: a push during the wait moves it.
+            pr = gql(Q_LIVE, owner, repo, a.number)
+            done, answer = reviewed_head(pr), answered_outside_review(pr)
+            drift = reviewer_login_drift(pr)
 
     # One payload decides the digest and the exit code together.
     # Read separately, a review landing between them prints coverage and returns a timeout code.
@@ -2031,12 +2227,22 @@ def main(argv: list[str] | None = None) -> int:
         return 0
     # A refusal before an answer, since it names the round that declined where 40 names none.
     # The digest prints both bodies regardless, so the narrower code costs the reader nothing.
-    if refusing_review(final):
+    refusal = refusing_review(final)
+    if refusal and quota_refusal(refusal):
+        print(
+            "status=COPILOT_QUOTA_EXHAUSTED the review carrying the head declined because the "
+            "requesting account has reached its Copilot review quota, printed above under "
+            "COPILOT REFUSED THIS ROUND: that is an account-level state, not one this pull "
+            "request or a re-request clears, so proceed on the coverage the other reviewers "
+            "already gave this pull request rather than waiting on Copilot again"
+        )
+        return 46
+    if refusal:
         print(
             "status=REVIEW_IS_A_REFUSAL the review carrying the head says it did not review, "
             "so it covers nothing and no further review follows it: read the body above, "
-            "since a file-count refusal is cleared by splitting the pull request and a quota "
-            "one by waiting, and re-requesting this head clears neither"
+            "since a file-count refusal is cleared by splitting the pull request, and "
+            "re-requesting this head clears nothing"
         )
         return 41
     # An answer before a stall, because the reviewer saying something outranks it saying nothing.
@@ -2047,6 +2253,20 @@ def main(argv: list[str] | None = None) -> int:
             "no review follows and re-requesting does not clear it"
         )
         return 40
+    # Lowest priority of the terminal readings, since it is inferred from elsewhere in the repository rather than read on this pull request directly.
+    # Any of the three above, being concrete evidence about this head, outranks it.
+    if signal:
+        number, hist_refusal = signal
+        print(
+            "status=COPILOT_QUOTA_EXHAUSTED_REPO_WIDE this pull request's head carries no "
+            f"Copilot review or comment of its own, and the reviewer's own most recent activity "
+            f"in this repository, on pull request #{number} at "
+            f"{hist_refusal.get('submittedAt') or 'an unknown time'}, was a refusal citing the "
+            "account quota limit rather than a review of this head. Proceed on the coverage "
+            "the other reviewers already gave this pull request, or pass --ignore-quota-signal "
+            "to poll this pull request's own head for the full --timeout"
+        )
+        return 47
     print("status=PENDING")
     return 30
 

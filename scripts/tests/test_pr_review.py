@@ -57,6 +57,29 @@ def review(
     }
 
 
+def hist_review(number: int, body: str, at: str = LATE) -> dict:
+    """One `pullRequests.nodes` entry in the shape `copilot_history` reads it: a pull request
+    number paired with one reviewer review, for the repo-wide reading `wire_history` drives.
+
+    `body` has no default, unlike `review()`'s, since every caller of this one cares which
+    wording it carries: the whole point of the repo-wide reading is telling a quota refusal
+    from a genuine round.
+    """
+    return {
+        "number": number,
+        "reviews": {
+            "nodes": [
+                {
+                    "author": {"__typename": "Bot", "login": pr_review.REVIEWER, "id": "BOT_1"},
+                    "state": "COMMENTED",
+                    "body": body,
+                    "submittedAt": at,
+                }
+            ]
+        },
+    }
+
+
 def comment(
     login: str = pr_review.REVIEWER,
     at: str = LATE,
@@ -142,6 +165,19 @@ REFUSED = (
     "Copilot wasn't able to review this pull request because it exceeds the maximum "
     "number of files (300). Try reducing the number of changed files and requesting a "
     "review from Copilot again."
+)
+
+# Quoted from the corpus rather than invented: the body PR #962 here carried, byte for byte.
+QUOTA_REFUSED = (
+    "Copilot was unable to review this pull request because the user who requested the "
+    "review has reached their quota limit."
+)
+
+# Quoted from the corpus rather than invented: ptr727/Blog #110's own comment, trimmed to the marker and its opening line.
+# The rest is CodeRabbit's ordinary walkthrough prose.
+RATE_LIMITED_COMMENT = (
+    "<!-- This is an auto-generated comment: rate limited by coderabbit.ai -->\n\n"
+    "> [!WARNING]\n> ## Review limit reached\n"
 )
 
 
@@ -520,6 +556,130 @@ class TestDigest(GqlCase):
         self.assertLessEqual(len(body.split("a.py:1 ")[1]), 160)
 
 
+class TestOtherReviewers(GqlCase):
+    """Thread resolution and head-presence, generalized past Copilot to the other review bots
+    this repository has trialed: identity and commit only, no prose parsed for either one.
+
+    `status`'s `unresolved=0` used to hide a CodeRabbit/qodo thread that still blocked a
+    ruleset-gated merge (PR #915, ptr727/ProjectTemplate), since only Copilot's own threads
+    counted. Coverage, refusal, and suppressed-finding reading stay Copilot-only: each of the
+    others writes its own findings in its own format, which is its own future task per bot.
+    """
+
+    def other_review(self, login: str, oid: str = HEAD) -> dict:
+        """A minimal review node for a tracked non-Copilot reviewer: identity and commit only."""
+        return {
+            "author": {"login": login},
+            "state": "COMMENTED",
+            "commit": {"oid": oid},
+            "body": "",
+            "submittedAt": LATE,
+        }
+
+    def test_a_coderabbit_and_a_qodo_thread_both_count_toward_unresolved(self) -> None:
+        self.answer(
+            payload(
+                [review()],
+                [
+                    thread("T1", login="coderabbitai"),
+                    thread("T2", login="qodo-code-review"),
+                    thread("T3", resolved=True, login="coderabbitai"),
+                ],
+            )
+        )
+        out, unresolved = pr_review.digest("o", "r", 7)
+        self.assertEqual(2, unresolved)
+        self.assertIn("unresolved=2", out)
+        self.assertIn("T1", out)
+        self.assertIn("T2", out)
+        self.assertNotIn("T3", out)
+
+    def test_a_human_thread_still_does_not_count(self) -> None:
+        """Generalizing past Copilot means the other tracked bots, not every account."""
+        self.answer(payload([review()], [thread("T1", login="ptr727")]))
+        out, unresolved = pr_review.digest("o", "r", 7)
+        self.assertEqual(0, unresolved)
+        self.assertNotIn("T1", out)
+
+    def test_the_breakdown_appears_only_once_more_than_one_reviewer_contributes(self) -> None:
+        self.answer(payload([review()], [thread("T1"), thread("T2")]))
+        out, unresolved = pr_review.digest("o", "r", 7)
+        self.assertEqual(2, unresolved)
+        self.assertIn("unresolved=2 ", out)
+        self.assertNotIn("unresolved=2 (", out)
+
+        self.answer(payload([review()], [thread("T1"), thread("T2", login="coderabbitai")]))
+        out, unresolved = pr_review.digest("o", "r", 7)
+        self.assertEqual(2, unresolved)
+        self.assertIn(f"unresolved=2 ({pr_review.REVIEWER}=1 coderabbitai=1)", out)
+
+    def test_other_reviewed_names_only_the_bots_that_posted_on_this_exact_head(self) -> None:
+        self.answer(
+            payload(
+                [
+                    review(),
+                    self.other_review("coderabbitai"),
+                    self.other_review("qodo-code-review", oid=OLD),
+                ]
+            )
+        )
+        out, _ = pr_review.digest("o", "r", 7)
+        self.assertIn("other_reviewed=coderabbitai", out)
+        self.assertNotIn("qodo-code-review", out)
+
+    def test_other_reviewed_is_absent_where_neither_has_posted(self) -> None:
+        """The common case, a repository not trialing either, stays silent rather than `none`."""
+        self.answer(payload([review()]))
+        out, _ = pr_review.digest("o", "r", 7)
+        self.assertNotIn("other_reviewed", out)
+
+    def test_reviewer_nodes_defaults_to_copilot_but_reads_any_login_explicitly(self) -> None:
+        pr = payload([review(), self.other_review("coderabbitai")])
+        self.assertEqual(1, len(pr_review.reviewer_nodes(pr, "reviews")))
+        self.assertEqual(1, len(pr_review.reviewer_nodes(pr, "reviews", "coderabbitai")))
+        self.assertEqual(0, len(pr_review.reviewer_nodes(pr, "reviews", "qodo-code-review")))
+
+    def test_other_rate_limited_reads_the_structural_marker_on_a_plain_comment(self) -> None:
+        """The one observed shape: a rate-limit notice riding a PR comment, not a formal review."""
+        self.answer(
+            payload([review()], comments=[comment(login="coderabbitai", body=RATE_LIMITED_COMMENT)])
+        )
+        out, _ = pr_review.digest("o", "r", 7)
+        self.assertIn("other_rate_limited=coderabbitai:coderabbit.ai", out)
+
+    def test_other_rate_limited_clears_once_a_later_comment_supersedes_it(self) -> None:
+        self.answer(
+            payload(
+                [review()],
+                comments=[
+                    comment(login="coderabbitai", body=RATE_LIMITED_COMMENT, at=EARLY),
+                    comment(login="coderabbitai", body="Ordinary walkthrough prose.", at=LATE),
+                ],
+            )
+        )
+        out, _ = pr_review.digest("o", "r", 7)
+        self.assertNotIn("other_rate_limited", out)
+
+    def test_other_rate_limited_is_absent_where_no_marker_is_present(self) -> None:
+        """The common case, neither is rate-limited right now, stays silent rather than `none`."""
+        self.answer(payload([review()], comments=[comment(login="coderabbitai", body="Hi.")]))
+        out, _ = pr_review.digest("o", "r", 7)
+        self.assertNotIn("other_rate_limited", out)
+
+    def test_rate_limited_by_reads_either_connection_and_names_no_untracked_login(self) -> None:
+        pr = payload(
+            [review()], comments=[comment(login="coderabbitai", body=RATE_LIMITED_COMMENT)]
+        )
+        self.assertEqual("coderabbit.ai", pr_review.rate_limited_by(pr, "coderabbitai"))
+        self.assertIsNone(pr_review.rate_limited_by(pr, "qodo-code-review"))
+
+    def test_thread_author_defaults_a_deleted_account_rather_than_crashing(self) -> None:
+        orphan = thread("T1")
+        orphan["comments"]["nodes"][0]["author"] = None
+        self.assertEqual("", pr_review.thread_author(orphan))
+        self.assertEqual(pr_review.REVIEWER, pr_review.thread_author(thread("T2")))
+
+
 class TestSuppressed(GqlCase):
     """The findings collapsed in a review body, which reach no thread and so no thread poll."""
 
@@ -785,6 +945,46 @@ class TestRefusal(GqlCase):
         self.answer(payload([review(login="ptr727", body=REFUSED), review(oid=OLD)]))
         out, _ = pr_review.digest("o", "r", 7)
         self.assertIn("refusal=no", out)
+
+
+class TestQuotaRefusal(GqlCase):
+    """The refusal wording naming the account quota, distinct from any other refusal cause.
+
+    A file-count refusal is cleared by splitting the pull request; a quota one is an
+    account-level state that neither a re-request nor a further wait touches. Folding the two
+    into one field or one exit code sends a reader at a remedy that does nothing for the quota
+    case, which is why each gets its own reading below.
+    """
+
+    def test_the_field_and_exit_code_are_distinct_from_a_generic_refusal(self) -> None:
+        self.answer(payload([review(body=QUOTA_REFUSED)]))
+        out, _ = pr_review.digest("o", "r", 7)
+        self.assertIn("refusal=QUOTA", out)
+        self.assertNotIn("refusal=YES", out)
+        with (
+            contextlib.redirect_stdout(io.StringIO()) as captured,
+            mock.patch.object(pr_review.time, "sleep"),
+        ):
+            self.assertEqual(46, pr_review.main(["wait", "7", "--repo", "o/r", "--timeout", "0"]))
+        self.assertIn("status=COPILOT_QUOTA_EXHAUSTED", captured.getvalue())
+        self.assertNotIn("status=REVIEW_IS_A_REFUSAL", captured.getvalue())
+
+    def test_a_file_count_refusal_still_reads_as_the_generic_shape(self) -> None:
+        """A regression guard: the new field must not swallow the cause it already had a code for."""
+        self.assertFalse(pr_review.quota_refusal({"body": REFUSED}))
+        self.answer(payload([review(body=REFUSED)]))
+        out, _ = pr_review.digest("o", "r", 7)
+        self.assertIn("refusal=YES", out)
+        with (
+            contextlib.redirect_stdout(io.StringIO()),
+            mock.patch.object(pr_review.time, "sleep"),
+        ):
+            self.assertEqual(41, pr_review.main(["wait", "7", "--repo", "o/r", "--timeout", "0"]))
+
+    def test_a_quotation_of_the_wording_is_not_itself_a_refusal(self) -> None:
+        """The same opening-line anchor that protects `refusal_of` protects this reading too."""
+        body = "## Pull request overview\n\nThis PR documents: " + QUOTA_REFUSED + "\n"
+        self.assertFalse(pr_review.quota_refusal({"body": body}))
 
 
 class TestCoverage(GqlCase):
@@ -2209,47 +2409,42 @@ class TestCli(GqlCase):
         self.assertEqual(0, self.cli(["status", "7"]))
         self.assertIn("repo=o/r pr=7", self.out.getvalue())
 
-    def wire_bot(self, bot_id: str | None) -> list[tuple[str, dict]]:
-        """Route `gh_graphql` calls after `self.answer(...)`, recording each one made.
+    def wire_history(self, prs: list[dict]) -> list[tuple[str, dict]]:
+        """Route `gh_graphql` calls after `self.answer(...)`, answering the bot-id/history query
+        with `prs` verbatim as `pullRequests.nodes`, and recording every call made.
 
-        `self.answer(...)` already installs a default returning no bot id, which is what every
-        other wait test relies on to skip the auto-request path untouched. This overrides that
-        default for the handful of tests below that exercise the auto-request itself.
+        `self.answer(...)` already installs a default returning no history at all, which is what
+        every other wait test relies on to skip the auto-request and the repo-wide quota
+        reading both, untouched. This overrides that default for the tests below that exercise
+        either: `wire_bot` is the narrower case, an id and nothing else; the tests further down
+        need a review's own body and `submittedAt` too, which `hist_review` builds.
         """
         calls: list[tuple[str, dict]] = []
 
         def fake(query: str, **variables: object) -> dict:
             calls.append((query, variables))
             if "pullRequests(first:20" in query:
-                if bot_id is None:
-                    return {"repository": {"pullRequests": {"nodes": []}}}
-                return {
-                    "repository": {
-                        "pullRequests": {
-                            "nodes": [
-                                {
-                                    "reviews": {
-                                        "nodes": [
-                                            {
-                                                "author": {
-                                                    "__typename": "Bot",
-                                                    "login": pr_review.REVIEWER,
-                                                    "id": bot_id,
-                                                }
-                                            }
-                                        ]
-                                    }
-                                }
-                            ]
-                        }
-                    }
-                }
+                return {"repository": {"pullRequests": {"nodes": prs}}}
             if "requestReviews" in query:
                 return {"requestReviews": {"pullRequest": {"id": variables.get("pr")}}}
             raise AssertionError(f"unexpected document: {query[:60]}")
 
         self.enterContext(mock.patch.object(pr_review, "gh_graphql", side_effect=fake))
         return calls
+
+    def wire_bot(self, bot_id: str | None) -> list[tuple[str, dict]]:
+        """`wire_history` narrowed to just an id, for the tests that need nothing else."""
+        if bot_id is None:
+            return self.wire_history([])
+        node = {
+            "number": 1,
+            "reviews": {
+                "nodes": [
+                    {"author": {"__typename": "Bot", "login": pr_review.REVIEWER, "id": bot_id}}
+                ]
+            },
+        }
+        return self.wire_history([node])
 
     def test_a_resolved_bot_id_issues_the_request_before_the_first_poll(self) -> None:
         """The gap this closed: nothing outstanding and nothing ever asked for, twice measured."""
@@ -2281,6 +2476,105 @@ class TestCli(GqlCase):
         self.assertEqual(0, self.cli(["wait", "7"]))
         self.assertFalse(calls)
         self.assertNotIn("auto-request:", self.out.getvalue())
+
+    def test_a_silent_head_short_circuits_on_the_repo_wide_quota_signal(self) -> None:
+        """The shape observed live on ptr727/Blog #108 and #109: no Copilot activity at all on
+        this pull request, while the reviewer's own most recent word anywhere in the repository
+        is the account quota. Polling this pull request's silence for the full timeout would
+        only relearn that same account state a call late, so the wait stops here instead."""
+        self.answer(payload([]))
+        calls = self.wire_history([hist_review(962, QUOTA_REFUSED)])
+        with mock.patch.object(pr_review.time, "sleep") as slept:
+            self.assertEqual(47, self.cli(["wait", "7"]))
+        slept.assert_not_called()
+        out = self.out.getvalue()
+        self.assertIn("status=COPILOT_QUOTA_EXHAUSTED_REPO_WIDE", out)
+        self.assertIn("#962", out)
+        self.assertIn("note: the reviewer's own most recent review", out)
+        # The auto-request still fires: it is harmless and idempotent.
+        # It costs nothing extra either, since the same history read already answered the bot-id lookup it needs.
+        self.assertEqual(1, len([c for c in calls if "requestReviews" in c[0]]))
+
+    def test_a_genuine_review_since_the_refusal_clears_the_signal(self) -> None:
+        """The most recent record settles it: a working round after the refusal spends it."""
+        self.answer(payload([]))
+        self.wire_history(
+            [
+                hist_review(962, QUOTA_REFUSED, at=EARLY),
+                hist_review(965, OVERVIEW + "\n" + COVERED, at=LATE),
+            ]
+        )
+        with mock.patch.object(pr_review.time, "sleep") as slept:
+            self.assertEqual(30, self.cli(["wait", "7", "--timeout", "0"]))
+        slept.assert_not_called()
+        out = self.out.getvalue()
+        self.assertNotIn("COPILOT_QUOTA_EXHAUSTED_REPO_WIDE", out)
+        self.assertIn("status=PENDING", out)
+
+    def test_ignore_quota_signal_restores_plain_polling(self) -> None:
+        """The override: skip the reading entirely and poll --timeout, once quota might have
+        reset. The auto-request still needs the same history, so `--ignore-quota-signal` only
+        changes whether the signal is acted on, not whether it is read."""
+        self.answer(payload([]))
+        self.wire_history([hist_review(962, QUOTA_REFUSED)])
+        with mock.patch.object(pr_review.time, "sleep") as slept:
+            code = self.cli(["wait", "7", "--timeout", "0", "--ignore-quota-signal"])
+        self.assertEqual(30, code)
+        slept.assert_not_called()
+        out = self.out.getvalue()
+        self.assertNotIn("COPILOT_QUOTA_EXHAUSTED_REPO_WIDE", out)
+        self.assertNotIn("note: the reviewer's own most recent review", out)
+        self.assertIn("status=PENDING", out)
+
+
+class TestCopilotHistoryReadings(GqlCase):
+    """The readings built from the reviewer's own review history across the repository."""
+
+    def test_history_sorts_by_submitted_at_regardless_of_pull_request_order(self) -> None:
+        """The query orders pull requests by creation, not by when each round was submitted."""
+        self.answer(payload([]))
+        self.enterContext(
+            mock.patch.object(
+                pr_review,
+                "gh_graphql",
+                return_value={
+                    "repository": {
+                        "pullRequests": {
+                            "nodes": [
+                                hist_review(962, QUOTA_REFUSED, at=LATE),
+                                hist_review(900, QUOTA_REFUSED, at=EARLY),
+                            ]
+                        }
+                    }
+                },
+            )
+        )
+        history = pr_review.copilot_history("o", "r")
+        self.assertEqual([962, 900], [number for number, _ in history])
+
+    def test_an_empty_history_carries_no_signal_and_no_bot_id(self) -> None:
+        self.assertIsNone(pr_review.quota_signal([]))
+        self.assertIsNone(pr_review.copilot_bot_id([]))
+
+    def test_the_bot_id_is_read_from_the_first_entry_that_carries_one(self) -> None:
+        history: list[tuple[int, dict]] = [
+            (1, {"author": {"id": None}}),
+            (2, {"author": {"id": "BOT_9"}}),
+        ]
+        self.assertEqual("BOT_9", pr_review.copilot_bot_id(history))
+
+    def test_the_signal_names_the_pull_request_the_refusal_came_from(self) -> None:
+        history = [(962, {"body": QUOTA_REFUSED, "submittedAt": LATE})]
+        signal = pr_review.quota_signal(history)
+        self.assertIsNotNone(signal)
+        assert signal is not None
+        number, node = signal
+        self.assertEqual(962, number)
+        self.assertEqual(LATE, node.get("submittedAt"))
+
+    def test_a_generic_refusal_is_not_a_quota_signal(self) -> None:
+        history = [(1, {"body": REFUSED, "submittedAt": LATE})]
+        self.assertIsNone(pr_review.quota_signal(history))
 
 
 def rthread(
