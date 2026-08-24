@@ -84,8 +84,9 @@ Subcommands
            over the limit, cleared by splitting the pull request), so it is its own code rather
            than folded into 41: proceed on the other reviewers' coverage instead of retrying.
            47 = this pull request's head carries no Copilot activity of its own, and the
-           reviewer's own most recent review anywhere else in the repository is that same
-           account-quota refusal with nothing having answered it since. The poll that would
+           reviewer's own most recent activity anywhere else in the repository, another pull
+           request's review or comment, is that same account-quota refusal with nothing having
+           answered it since. The poll that would
            otherwise have run is skipped for this reason, printed as a `note:` line before the
            digest, rather than spent finding the same account state out a call late. Pass
            --ignore-quota-signal to poll --timeout anyway once the quota is believed to have
@@ -505,13 +506,18 @@ def reviewer_requested(pr: dict) -> bool:
     )
 
 
-def copilot_history(owner: str, repo: str) -> list[tuple[int, dict]]:
+def copilot_history(owner: str, repo: str, exclude: int | None = None) -> list[tuple[int, dict]]:
     """The reviewer's own reviews and comments across the repository's 20 most recently updated
     pull requests, newest activity first regardless of which connection it came from.
 
     Paired with the pull request number each came from, since a repo-wide reading has to name
     where it looked rather than just assert one. Sorted by timestamp rather than trusted to
     arrive in that order, since the two connections are read separately and merged.
+
+    `exclude` drops the caller's own pull request from the result. A caller's own head is
+    already read directly and takes precedence over anything inferred here, so its own entries
+    add nothing repo-wide, and an actively pushed-to pull request otherwise sits at the top of
+    its own "most recently updated" window and crowds out the history the reading is for.
 
     A plain comment is read alongside a formal review, tagged `_kind` so `copilot_bot_id` can
     still tell them apart, because `answered_outside_review` already treats a comment as
@@ -526,6 +532,8 @@ def copilot_history(owner: str, repo: str) -> list[tuple[int, dict]]:
     entries = []
     for node in prs:
         number = node.get("number")
+        if number == exclude:
+            continue
         for review in (node.get("reviews") or {}).get("nodes") or []:
             author = review.get("author") or {}
             if author.get("__typename") == "Bot" and author.get("login") == REVIEWER:
@@ -2157,7 +2165,7 @@ def main(argv: list[str] | None = None) -> int:
     # Read whenever nothing has landed on this pull request yet, whether or not a request is already outstanding.
     # An already-pending request drawing no answer at all is exactly the shape a repo-wide quota exhaustion leaves, per PR #962 and the six pull requests after it that carried no Copilot activity at all.
     # The bot id for a fresh request comes from this same traversal, so a caller needing either pays for one call rather than two.
-    history = [] if done or answer or drift else copilot_history(owner, repo)
+    history = [] if done or answer or drift else copilot_history(owner, repo, exclude=a.number)
     # `--ignore-quota-signal` only changes whether the signal below is acted on.
     # It does not change whether the history is read, since the auto-request line still needs it for the bot id regardless.
     signal = None if a.ignore_quota_signal else quota_signal(history)
@@ -2174,9 +2182,9 @@ def main(argv: list[str] | None = None) -> int:
         # Polling this pull request's own silence for up to 45 minutes would only relearn that same account state a call late.
         number, hist_refusal = signal
         print(
-            f"note: the reviewer's own most recent review anywhere in this repository, on "
-            f"pull request #{number} at {hist_refusal.get('submittedAt') or 'an unknown time'}, "
-            "is a quota-limit refusal with nothing answering it since, so this wait stops here "
+            f"note: the reviewer's own most recent activity anywhere in this repository, on "
+            f"pull request #{number} at {hist_refusal.get('_at') or 'an unknown time'}, is a "
+            "quota-limit refusal with nothing answering it since, so this wait stops here "
             "rather than polling --timeout out against the same account state. Pass "
             "--ignore-quota-signal to poll anyway, once the quota is believed to have reset."
         )
@@ -2294,7 +2302,7 @@ def main(argv: list[str] | None = None) -> int:
             "status=COPILOT_QUOTA_EXHAUSTED_REPO_WIDE this pull request's head carries no "
             f"Copilot review or comment of its own, and the reviewer's own most recent activity "
             f"in this repository, on pull request #{number} at "
-            f"{hist_refusal.get('submittedAt') or 'an unknown time'}, was a refusal citing the "
+            f"{hist_refusal.get('_at') or 'an unknown time'}, was a refusal citing the "
             "account quota limit rather than a review of this head. Proceed on the coverage "
             "the other reviewers already gave this pull request, or pass --ignore-quota-signal "
             "to poll this pull request's own head for the full --timeout"

@@ -567,13 +567,13 @@ class TestOtherReviewers(GqlCase):
     others writes its own findings in its own format, which is its own future task per bot.
     """
 
-    def other_review(self, login: str, oid: str = HEAD) -> dict:
+    def other_review(self, login: str, oid: str = HEAD, body: str = "") -> dict:
         """A minimal review node for a tracked non-Copilot reviewer: identity and commit only."""
         return {
             "author": {"login": login},
             "state": "COMMENTED",
             "commit": {"oid": oid},
-            "body": "",
+            "body": body,
             "submittedAt": LATE,
         }
 
@@ -670,6 +670,16 @@ class TestOtherReviewers(GqlCase):
     def test_rate_limited_by_reads_either_connection_and_names_no_untracked_login(self) -> None:
         pr = payload(
             [review()], comments=[comment(login="coderabbitai", body=RATE_LIMITED_COMMENT)]
+        )
+        self.assertEqual("coderabbit.ai", pr_review.rate_limited_by(pr, "coderabbitai"))
+        self.assertIsNone(pr_review.rate_limited_by(pr, "qodo-code-review"))
+
+    def test_rate_limited_by_reads_the_reviews_connection_too(self) -> None:
+        """The marker rides a plain comment on the one observed instance, but the reader
+        checks both connections, since a future bot's own marker might ride a formal review."""
+        pr = payload(
+            [review(), self.other_review("coderabbitai", body=RATE_LIMITED_COMMENT)],
+            comments=[],
         )
         self.assertEqual("coderabbit.ai", pr_review.rate_limited_by(pr, "coderabbitai"))
         self.assertIsNone(pr_review.rate_limited_by(pr, "qodo-code-review"))
@@ -2424,7 +2434,7 @@ class TestCli(GqlCase):
 
         def fake(query: str, **variables: object) -> dict:
             calls.append((query, variables))
-            if "pullRequests(first:20" in query:
+            if f"pullRequests(first:{pr_review.HISTORY_PRS}" in query:
                 return {"repository": {"pullRequests": {"nodes": prs}}}
             if "requestReviews" in query:
                 return {"requestReviews": {"pullRequest": {"id": variables.get("pr")}}}
@@ -2491,7 +2501,7 @@ class TestCli(GqlCase):
         out = self.out.getvalue()
         self.assertIn("status=COPILOT_QUOTA_EXHAUSTED_REPO_WIDE", out)
         self.assertIn("#962", out)
-        self.assertIn("note: the reviewer's own most recent review", out)
+        self.assertIn("note: the reviewer's own most recent activity", out)
         # The auto-request still fires: it is harmless and idempotent.
         # It costs nothing extra either, since the same history read already answered the bot-id lookup it needs.
         self.assertEqual(1, len([c for c in calls if "requestReviews" in c[0]]))
@@ -2524,7 +2534,7 @@ class TestCli(GqlCase):
         slept.assert_not_called()
         out = self.out.getvalue()
         self.assertNotIn("COPILOT_QUOTA_EXHAUSTED_REPO_WIDE", out)
-        self.assertNotIn("note: the reviewer's own most recent review", out)
+        self.assertNotIn("note: the reviewer's own most recent activity", out)
         self.assertIn("status=PENDING", out)
 
 
@@ -2600,6 +2610,30 @@ class TestCopilotHistoryReadings(GqlCase):
         self.assertEqual("comment", history[0][1]["_kind"])
         self.assertIsNone(pr_review.quota_signal(history))
 
+    def test_exclude_drops_the_callers_own_pull_request_from_the_result(self) -> None:
+        """The caller's own head is read directly and outranks anything inferred here, so its
+        own entries add nothing repo-wide, and an actively pushed-to pull request otherwise
+        crowds its own "most recently updated" window."""
+        self.answer(payload([]))
+        self.enterContext(
+            mock.patch.object(
+                pr_review,
+                "gh_graphql",
+                return_value={
+                    "repository": {
+                        "pullRequests": {
+                            "nodes": [
+                                hist_review(969, "Ordinary prose.", at=LATE),
+                                hist_review(962, QUOTA_REFUSED, at=EARLY),
+                            ]
+                        }
+                    }
+                },
+            )
+        )
+        history = pr_review.copilot_history("o", "r", exclude=969)
+        self.assertEqual([962], [number for number, _ in history])
+
     def test_an_empty_history_carries_no_signal_and_no_bot_id(self) -> None:
         self.assertIsNone(pr_review.quota_signal([]))
         self.assertIsNone(pr_review.copilot_bot_id([]))
@@ -2617,16 +2651,27 @@ class TestCopilotHistoryReadings(GqlCase):
         self.assertIsNone(pr_review.copilot_bot_id(history))
 
     def test_the_signal_names_the_pull_request_the_refusal_came_from(self) -> None:
-        history = [(962, {"body": QUOTA_REFUSED, "submittedAt": LATE})]
+        history = [(962, {"_kind": "review", "_at": LATE, "body": QUOTA_REFUSED})]
         signal = pr_review.quota_signal(history)
         self.assertIsNotNone(signal)
         assert signal is not None
         number, node = signal
         self.assertEqual(962, number)
-        self.assertEqual(LATE, node.get("submittedAt"))
+        self.assertEqual(LATE, node.get("_at"))
+
+    def test_a_comment_sourced_signal_names_the_same_way(self) -> None:
+        """`_at` is normalized from `createdAt` for a comment, the same as `submittedAt` for a
+        review, so the caller printing it needs no branch on which connection it came from."""
+        history = [(962, {"_kind": "comment", "_at": LATE, "body": QUOTA_REFUSED})]
+        signal = pr_review.quota_signal(history)
+        self.assertIsNotNone(signal)
+        assert signal is not None
+        number, node = signal
+        self.assertEqual(962, number)
+        self.assertEqual(LATE, node.get("_at"))
 
     def test_a_generic_refusal_is_not_a_quota_signal(self) -> None:
-        history = [(1, {"body": REFUSED, "submittedAt": LATE})]
+        history = [(1, {"_kind": "review", "_at": LATE, "body": REFUSED})]
         self.assertIsNone(pr_review.quota_signal(history))
 
 
