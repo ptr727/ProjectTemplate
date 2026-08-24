@@ -33,7 +33,7 @@ vendored or pinned.
 Copy and adapt the applicable catalog snippet plus `catalog/snippets/hub-fetch-run.py`.
 Enable it (`git config core.hooksPath .husky`, or `uv tool install pre-commit` once then
 `pre-commit install`). For the Husky.Net snippet specifically, also run `dotnet tool restore`
-then `dotnet husky install`, which generates `.husky/_/husky.sh` the hook sources.
+then `dotnet husky install`, which generates `.husky/_/husky.sh`, the file the hook sources.
 Confirm the doc gates run clean against the repo's current tree.
 Open the PR through the repo's normal branching model.
 A repo whose corpus does not yet pass its language formatter clean ships the doc-gate half first
