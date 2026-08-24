@@ -1,0 +1,38 @@
+# Reference pre-commit (pre-commit.com) config for a fleet Python repo with no .NET/Husky.Net tree.
+# Copy into the repo root alongside ../hub-fetch-run.py.
+# Adapt the type-check hook to match this repo's own CI checker (pyright or mypy, per python-codestyle).
+# Install and enable with `uv tool install pre-commit` once, then `pre-commit install`.
+# The type checker and ruff hooks run via uvx, native tooling, no Docker.
+# That needs no project dependency, matching CI's own invocation for the lint-only profile.
+# A repo on the build profile with a uv.lock may swap an entry for `uv run <tool>` to pin its own project version instead.
+# The prose/EOL hooks fetch their scripts fresh from ptr727/ProjectTemplate's `main` branch via hub-fetch-run.py, rather than vendoring or pinning a copy.
+# See that file's docstring for why.
+# A fetch failure fails the commit, and it never silently skips the gate.
+repos:
+  - repo: local
+    hooks:
+      - id: ruff-format
+        name: ruff format --check
+        entry: uvx ruff@latest format --check
+        language: system
+        pass_filenames: false
+      - id: ruff-check
+        name: ruff check
+        entry: uvx ruff@latest check
+        language: system
+        pass_filenames: false
+      - id: type-check
+        name: pyright (swap for "uvx mypy@latest ." if this repo's CI runs mypy instead)
+        entry: uvx pyright@latest
+        language: system
+        pass_filenames: false
+      - id: prose-gate
+        name: prose/comment-style gate (diff-scoped, fetched fresh from ProjectTemplate@main)
+        entry: uv run python hub-fetch-run.py .github/actions/prose-gate/prose_lint.py . --diff HEAD
+        language: system
+        pass_filenames: false
+      - id: eol-gate
+        name: line-ending consistency gate (fetched fresh from ProjectTemplate@main)
+        entry: uv run python hub-fetch-run.py .github/actions/repo-gate/repo_gate.py --check eol
+        language: system
+        pass_filenames: false

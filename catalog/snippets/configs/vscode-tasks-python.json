@@ -123,8 +123,12 @@
         // Lint group, run on demand via Docker, where --pull=always forces each to re-pull :latest.
         // It mirrors the CI lint gate.
         // Broad live spell-checking is the cspell extension's job.
-        // Pre-commit does formatting only.
-        // These tasks are language-agnostic, identical to the .NET snippet's Lint group.
+        // Pre-commit already runs the prose/EOL gates diff-scoped.
+        // Lint: Prose and Lint: EOL below add the same two checks in whole-repo mode, for on-demand full-tree validation.
+        // Lint: EditorConfig/Workflows/Markdown/Spelling are language-agnostic, identical to the
+        // .NET snippet's Lint group.
+        // Lint: Prose and Lint: EOL assume the pre-commit-framework layout (hub-fetch-run.py at the workspace root).
+        // A repo using the Husky.Net snippet instead points these two tasks at .husky/hub-fetch-run.py.
         {
             "label": "Lint: EditorConfig",
             "type": "process",
@@ -170,13 +174,37 @@
             }
         },
         {
+            "label": "Lint: Prose",
+            "type": "process",
+            "command": "uv",
+            "args": [ "run", "python", "${workspaceFolder}/hub-fetch-run.py", ".github/actions/prose-gate/prose_lint.py", "." ],
+            "problemMatcher": [],
+            "presentation": {
+                "showReuseMessage": false,
+                "clear": false
+            }
+        },
+        {
+            "label": "Lint: EOL",
+            "type": "process",
+            "command": "uv",
+            "args": [ "run", "python", "${workspaceFolder}/hub-fetch-run.py", ".github/actions/repo-gate/repo_gate.py", "--check", "eol" ],
+            "problemMatcher": [],
+            "presentation": {
+                "showReuseMessage": false,
+                "clear": false
+            }
+        },
+        {
             "label": "Lint: All",
             "dependsOrder": "sequence",
             "dependsOn": [
                 "Lint: EditorConfig",
                 "Lint: Workflows",
                 "Lint: Markdown",
-                "Lint: Spelling"
+                "Lint: Spelling",
+                "Lint: Prose",
+                "Lint: EOL"
             ],
             "problemMatcher": []
         }

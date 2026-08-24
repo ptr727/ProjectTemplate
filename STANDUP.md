@@ -179,6 +179,8 @@ Carry `AGENTS.md`'s skill-dependency pointer paragraph, the one naming `scripts/
 
 Choose the destination while scaffolding rather than after. Repo-specific content left in a carried file is drift, which the audit lists as an undeclared section to reconcile, and reconciling it later means moving prose that downstream readers have already started trusting in the wrong place.
 
+**Wire a local commit hook here, not after the fact.** `.husky/pre-commit` and `.pre-commit-config.yaml` are deliberately excluded from the baseline above (each repo's own formatters make the content repo-owned, per [`spec/divergences.json`][divergences]), so nothing in the carry step above wires one. Copy and adapt the applicable catalog snippet, `catalog/snippets/husky/` for Husky.Net or `catalog/snippets/pre-commit/` for the Python `pre-commit` framework, each with `catalog/snippets/hub-fetch-run.py` alongside it, and enable it (`git config core.hooksPath .husky`, or `uv tool install pre-commit` once then `pre-commit install`) before the section 5 audit run. The Husky.Net snippet needs one more step per clone, `dotnet tool restore` then `dotnet husky install`, which generates `.husky/_/husky.sh`, the file the hook sources. A freshly stood-up repo with nothing wired starts pre-failed on `parity.hooks`.
+
 ## 3. Stand Up the Workflows
 
 Implement the Actions that satisfy [`WORKFLOW.md`][workflow] for the repo's type (its section 6 per-type walkthrough): the source-only subset for a source-only repo, the file-target leaf(s) for a publishing repo, the two-workflow shape for an operational config repo. Reuse [`catalog/snippets/workflows/`][workflows] as the reference implementation, satisfying the contract by outcome rather than byte for byte.
@@ -236,6 +238,7 @@ The same [`AUDIT.md`][audit] run is the on-demand audit for any known repo, and 
 [audit]: ./AUDIT.md
 [codestyle]: ./CODESTYLE.md
 [content-import]: ./docs/content-import.md
+[divergences]: ./spec/divergences.json
 [files]: ./spec/files.json
 [fleet-map]: ./docs/fleet-map.md
 [git-commit-conventions]: ./.agents/skills/git-commit-conventions/SKILL.md
