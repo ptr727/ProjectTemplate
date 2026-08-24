@@ -18,6 +18,7 @@ dist/
 .pytest_cache/
 .ruff_cache/
 .pyright/
+.mypy_cache/
 
 # Coverage output (dotnet XPlat/coverlet, Python coverage.py)
 coverage/
