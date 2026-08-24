@@ -39,7 +39,7 @@ Open the PR through the repo's normal branching model.
 A repo whose corpus does not yet pass its language formatter clean ships the doc-gate half first
 and adds the language half once it does, per the mid-convergence carve-out. That partial state is
 not a reason to leave the box unchecked, since the doc-gate half alone already satisfies
-`parity.hooks`' intent tier. After merge, check the box below.
+`parity.hooks`' intent tier. Check the box below in this same PR, before it merges, per the maintenance rule above.
 
 A repo declaring neither `csharp` nor `python` in `registry/repos.json` (the `eda` repos, and any
 repo with no fleet-covered language) has no language-format half to add: the doc-gate half alone
