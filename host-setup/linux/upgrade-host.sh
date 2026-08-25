@@ -174,7 +174,7 @@ refresh_snaps() {
 }
 
 upgradable_count() {
-    # A failed listing and a listing that genuinely found nothing upgradable both read as "no matches" through grep alone, so the two are told apart here rather than both printing 0 (issue #954).
+    # A failed listing and a listing that genuinely found nothing upgradable both read as "no matches" through grep alone, so the two are told apart here rather than both printing 0.
     # This only ever backs a status report, so the answer here is "unknown" rather than a die: nothing downstream mutates on the strength of this count.
     local out status=0
     out=$(apt list --upgradable 2>/dev/null) || status=$?
@@ -249,7 +249,7 @@ release_preconditions() {
         die "Held packages block a release upgrade, unhold them first: $held"
     fi
 
-    # A dpkg --audit that fails to run is not the same as one that runs and finds nothing, and only the second one clears the way into a release upgrade (issue #954).
+    # A dpkg --audit that fails to run is not the same as one that runs and finds nothing, and only the second one clears the way into a release upgrade.
     local audit status=0
     audit=$("${SUDO[@]}" dpkg --audit 2>&1) || status=$?
     if [[ $status -ne 0 ]]; then
