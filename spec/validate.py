@@ -56,6 +56,32 @@ def is_str_list(v):
     return isinstance(v, list) and all(isinstance(x, str) for x in v)
 
 
+def escapes_repo_root(value):
+    """Whether `ROOT / value` could resolve outside ROOT on some host.
+
+    `PurePosixPath` alone misses a backslash (Windows treats it as a separator, though POSIX reads it as one filename) and a Windows drive letter such as `C:`.
+    """
+    return (
+        not value
+        or value.startswith("/")
+        or "\\" in value
+        or re.match(r"^[A-Za-z]:", value) is not None
+        or ".." in pathlib.PurePosixPath(value).parts
+    )
+
+
+def canonical_file_in_root(rel_path):
+    """Whether `ROOT / rel_path` resolves, symlinks followed, to an existing file under ROOT.
+
+    A tracked symlink whose target escapes ROOT passes a bare `Path.is_file()` the same way a real file would, since both follow the link.
+    """
+    try:
+        resolved = (ROOT / rel_path).resolve(strict=True)
+    except OSError:
+        return False
+    return resolved.is_file() and resolved.is_relative_to(ROOT)
+
+
 def description_errors_for_repo(repo, name):
     """The per-repo optional-field guard: an explicit `"description": null` is declared-but-invalid, not absent.
 
@@ -798,17 +824,38 @@ def main():
         if ref is not None and not isinstance(ref, str):
             errors.append(f"files.json: {path} reference must be a string")
             ref = None
-        elif isinstance(ref, str) and (
-            ref.startswith("/") or ".." in pathlib.PurePosixPath(ref).parts
-        ):
-            errors.append(
-                f"files.json: {path} reference '{ref}' must be a repo-relative path (no leading / or ..)"
-            )
+        elif isinstance(ref, str):
+            if escapes_repo_root(ref):
+                errors.append(f"files.json: {path} reference '{ref}' must be a repo-relative path")
+            elif fid == "intent" and not canonical_file_in_root(ref):
+                # This field outranks intentRef in the audit engine's canonical resolution.
+                # An intent unit's reference needs the same existing-file check intentRef gets below.
+                errors.append(
+                    f"files.json: {path} reference '{ref}' is not a file in this checkout"
+                )
         if fid == "verbatim":
             src = ref if isinstance(ref, str) else path
             if isinstance(src, str) and not (ROOT / src).exists():
                 errors.append(
                     f"files.json: {path} fidelity 'verbatim' but its canonical source {src} is missing"
+                )
+
+        # The audit engine's intent_canonical_rel() trusts this is a string once validated, the same way it trusts reference above.
+        intent_ref = item.get("intentRef")
+        if intent_ref is not None and not isinstance(intent_ref, str):
+            errors.append(f"files.json: {path} intentRef must be a string")
+        elif isinstance(intent_ref, str):
+            # The audit engine strips a trailing #anchor before ever joining this with ROOT, so validate the same part it will actually read.
+            intent_path = intent_ref.split("#", 1)[0]
+            if escapes_repo_root(intent_path):
+                errors.append(
+                    f"files.json: {path} intentRef '{intent_ref}' must be a repo-relative path"
+                )
+            elif not canonical_file_in_root(intent_path):
+                # A directory such as "." exists but is not a file.
+                # The staleness check would then read the whole repo's most recent commit as this one file's, false-flagging every intent unit as stale.
+                errors.append(
+                    f"files.json: {path} intentRef '{intent_ref}' canonical {intent_path} is not a file in this checkout"
                 )
 
         sections = item.get("sections", [])
