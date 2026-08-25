@@ -1468,13 +1468,10 @@ def split_jobs(text):
     return blocks
 
 
-# A `key: |` or `key: >` line - block chomp (`+`/`-`) and explicit indentation digit are both
-# optional and may appear in either order, and a trailing comment on the indicator line is
-# legal YAML. Anchored whole-line so a mapping value that merely contains "|"/">" mid-string
-# (a `key: "a|b"`) does not match.
-_BLOCK_SCALAR_KEY = re.compile(r"^[^:#\n]*:\s*[|>][0-9+-]*\s*(#.*)?$")
-# A step's own `- key: |` sequence-item prefix, stripped before matching the key pattern above,
-# since the block scalar's out-indent boundary is the key's own column, not the dash's.
+# A `key: |`/`key: >` block-scalar indicator, with an optional anchor (`&name`) before it.
+# Anchored whole-line so `key: "a|b"` does not match.
+_BLOCK_SCALAR_KEY = re.compile(r"^[^:#\n]*:\s*(&\S+\s+)?[|>][0-9+-]*\s*(#.*)?$")
+# A step's `- key: |` sequence-item prefix, stripped before matching the key pattern above.
 _SEQUENCE_ITEM_PREFIX = re.compile(r"^-[ \t]+")
 
 
@@ -1484,13 +1481,8 @@ def _code_view(text):
     A carried task file documents its own contract in comments (build-release-task.yml names
     `release-asset-` and `artifact-ids:` in prose), so a raw substring search over the whole text would
     both false-pass a missing handoff and false-flag a forbidden token that appears only in a comment.
-    The same raw search would also false-pass a token crafted into a block-scalar string value (`name: |`
-    followed by indented text) as though it were real YAML structure - ptr727/ProjectTemplate#949 - so a
-    block scalar's body lines, more indented than its own `key:` line and running until the first line at
-    or below that indent, are dropped too, keeping only the `key:` line itself. A step's `- run: |` is the
-    same case with a sequence-item dash first: the out-indent boundary is `run:`'s own column, not the
-    dash's, or a sibling key genuinely at that column (`env:` alongside the step) reads as still inside the
-    block scalar and is dropped as data along with it.
+    A block-scalar string value (`name: |` followed by indented text) can hide or fake a token the same
+    way, so its body is dropped too, keeping only the `key:` line itself (ptr727/ProjectTemplate#949).
     """
     out = []
     skip_indent = None
@@ -1499,13 +1491,15 @@ def _code_view(text):
             continue
         if skip_indent is not None:
             if ln.strip() and (len(ln) - len(ln.lstrip())) <= skip_indent:
-                skip_indent = None  # dedented back to (or past) the key - the block body ended
+                skip_indent = None  # a dedent back to (or past) the key column ends the block body
             else:
-                continue  # still inside the block scalar body - data, not structure
+                continue  # still inside the block scalar body, not real structure
         stripped = ln.lstrip()
         key_col = len(ln) - len(stripped)
         dash = _SEQUENCE_ITEM_PREFIX.match(stripped)
         if dash:
+            # The out-indent boundary is the key's own column, not the dash's.
+            # A sibling key genuinely at that column (`env:` alongside a `- run: |` step) is real structure.
             key_col += dash.end()
             stripped = stripped[dash.end() :]
         if _BLOCK_SCALAR_KEY.match(stripped):
@@ -2814,9 +2808,8 @@ def _selftest():
             1,
         ),
         (
-            # A block scalar (`name: |`) crafted to contain the required token as string content,
-            # with the real `with:` mapping removed, must still report it missing rather than read
-            # the scalar's body as structure (ptr727/ProjectTemplate#949).
+            # A block scalar crafted to contain the required token as string content must still report it missing.
+            # The real `with:` mapping is removed here, so only the block scalar carries the text (ptr727/ProjectTemplate#949).
             "deploy-site.yml caller stub with the with:/environment: tokens only inside a block-scalar name still reports missing",
             deploy_stub.replace(
                 "    name: Deploy job\n", "    name: |\n      with:\n      environment:\n"
@@ -2940,8 +2933,7 @@ def _selftest():
     else:
         print("  ok   split_jobs (inline-mapping job captured with its content)")
 
-    # _code_view()'s block-scalar handling: only the body is dropped, a dedent back out is read normally
-    # again, and a folded scalar's chomp indicator plus trailing comment do not stop it matching.
+    # _code_view()'s block-scalar handling: only the body is dropped, never the key line itself.
     code_view_cases = [
         (
             "block scalar body dropped, key line kept",
@@ -2959,12 +2951,17 @@ def _selftest():
             "  deploy:\n    name: >-  # a folded, strip-chomped scalar",
         ),
         (
-            # A `- run: |` sequence item's own boundary is `run:`'s column, not the dash's - a
-            # sibling `env:` genuinely at that column must survive, not be misread as still
-            # inside the block scalar and dropped alongside its body (CodeRabbit, PR #1003).
+            # A step's `- run: |` boundary is `run:`'s column, not the dash's column.
+            # A sibling `env:` key genuinely at that column is real structure, not block-scalar body.
             "a step's `- run: |` block scalar body drops, its sibling env: mapping survives",
             "      - run: |\n          echo body\n        env:\n          TOKEN: xyz\n",
             "      - run: |\n        env:\n          TOKEN: xyz",
+        ),
+        (
+            # A valid YAML anchor property (`&label`) sits between the colon and the indicator.
+            "an anchored block scalar (`name: &label |`) is still recognized as a block-scalar key",
+            "  deploy:\n    name: &lbl |\n      with:\n      environment:\n",
+            "  deploy:\n    name: &lbl |",
         ),
     ]
     for label, text, want in code_view_cases:
