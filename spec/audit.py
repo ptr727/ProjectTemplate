@@ -1714,40 +1714,64 @@ def classify_verbatim(down_text, canon_text, past_texts):
     return "modified"
 
 
-_HISTORY_CACHE: dict[
-    str, list[str]
-] = {}  # rel_path -> past revision contents, cached because one canonical is compared against every audited repo
+@functools.cache
+def _git_revisions(rel_path):
+    """Every commit that touched rel_path in the hub's history, newest first, as (date, sha, text).
+
+    `text` is None where `git show` failed (rare: a permission or encoding fluke, never absence -
+    the commit came from `git log -- rel_path`, so the path existed at that revision). Cached
+    because one canonical's history is read once per fidelity/staleness check, then reused for
+    every audited repo's copy.
+    """
+    r = subprocess.run(
+        ["git", "log", "--format=%cI %H", "--", rel_path],
+        cwd=ROOT,
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    if r.returncode != 0 or not r.stdout.strip():
+        return []
+    out = []
+    for line in r.stdout.splitlines():
+        date, sha = line.split(" ", 1)
+        # Decode as UTF-8 with replacement to match the downstream and canonical reads.
+        # A divergent decode would fabricate a mismatch.
+        s = subprocess.run(
+            ["git", "show", f"{sha}:{rel_path}"],
+            cwd=ROOT,
+            capture_output=True,
+            encoding="utf-8",
+            errors="replace",
+            check=False,
+        )
+        out.append((date, sha, s.stdout if s.returncode == 0 else None))
+    return out
 
 
 def git_file_history(rel_path):
-    """Every past revision's content of a hub-tracked file (to tell a stale copy from a modified one), cached per rel_path."""
-    if rel_path in _HISTORY_CACHE:
-        return _HISTORY_CACHE[rel_path]
-    out = []
-    # Decode as UTF-8 with replacement to match the downstream and canonical reads.
-    # A divergent decode would fabricate a mismatch.
-    r = subprocess.run(
-        ["git", "log", "--format=%H", "--", rel_path],
-        cwd=ROOT,
-        capture_output=True,
-        encoding="utf-8",
-        errors="replace",
-        check=False,
-    )
-    if r.returncode == 0:
-        for sha in r.stdout.split():
-            s = subprocess.run(
-                ["git", "show", f"{sha}:{rel_path}"],
-                cwd=ROOT,
-                capture_output=True,
-                encoding="utf-8",
-                errors="replace",
-                check=False,
-            )
-            if s.returncode == 0:
-                out.append(s.stdout)
-    _HISTORY_CACHE[rel_path] = out
-    return out
+    """Every past revision's content of a hub-tracked file (to tell a stale copy from a modified one)."""
+    return [text for _, _, text in _git_revisions(rel_path) if text is not None]
+
+
+def _last_effective_change(revisions):
+    """The (date, sha) of the newest revision in `revisions` (newest-first (date, sha, text)
+    triples for one file) whose content differs from its predecessor after normalize() - or the
+    oldest (creation) revision, if every later one differs from its predecessor only by normalized
+    churn (spec/fidelity-model.md "Normalization": EOL, a Dependabot action-pin bump, a pruned
+    `needs:` list). None if `revisions` is empty.
+
+    The creation revision always counts as effective: it has no predecessor, and normalize()
+    applied to only one side proves nothing. A revision with unreadable text (None) also counts as
+    effective rather than being silently skipped, since a real difference cannot be ruled out.
+    """
+    for i, (date, sha, text) in enumerate(revisions):
+        if i + 1 == len(revisions):
+            return date, sha
+        older_text = revisions[i + 1][2]
+        if text is None or older_text is None or normalize(text) != normalize(older_text):
+            return date, sha
+    return None
 
 
 @functools.cache
@@ -1765,21 +1789,22 @@ def git_blob_in_file_history(rel_path, blob_sha):
 
 @functools.cache
 def hub_last_change(rel_path):
-    """The hub checkout's last commit touching rel_path, as (iso_date, short_sha), or None if untracked.
+    """The hub checkout's most recent EFFECTIVE change to rel_path, as (iso_date, short_sha), or
+    None if untracked.
+
+    "Effective" excludes normalized churn (spec/fidelity-model.md "Normalization": EOL, a
+    Dependabot action-pin bump, a pruned `needs:` list) the same way the verbatim check already
+    does, via _last_effective_change over the file's full history. A raw last-commit date treated
+    every one of those bumps as the copy "trailing", even though the fidelity model already
+    classifies that class as governed per-repo drift rather than a deviation (ptr727/ProjectTemplate#735).
 
     Cached because one canonical's date is compared against every audited repo's copy.
     """
-    r = subprocess.run(
-        ["git", "log", "-1", "--format=%cI %h", "--", rel_path],
-        cwd=ROOT,
-        capture_output=True,
-        text=True,
-        check=False,
-    )
-    if r.returncode != 0 or not r.stdout.strip():
+    change = _last_effective_change(_git_revisions(rel_path))
+    if change is None:
         return None
-    date, sha = r.stdout.strip().split(" ", 1)
-    return date, sha
+    date, sha = change
+    return date, sha[:7]
 
 
 def intent_canonical_rel(item, path):
@@ -1810,8 +1835,10 @@ def check_intent_staleness(slug, ground, path, canonical_rel, down_text):
     (spec/fidelity-model.md), which is how a copy trailed the hub by many revisions while every
     check read clean. No reconciliation record exists anywhere, so the implementable proxy is
     when each side last changed: the hub canonical changing after the repo's copy marks the copy
-    as possibly trailing. Advisory only, DRIFT and never a failure, and honest about its blind
-    spot: a copy touched after the hub change without actually reconciling reads current.
+    as possibly trailing. "Changed" excludes normalized churn (hub_last_change), so a Dependabot
+    action-pin bump or a needs-list prune does not by itself mark every carrier as trailing.
+    Advisory only, DRIFT and never a failure, and honest about its blind spot: a copy touched
+    after the hub change without actually reconciling reads current.
 
     A copy content-identical to the canonical cannot trail it, so that case is skipped however
     old the copy's last commit is. It is also the promotion candidate spec/fidelity_honesty.py
@@ -3156,6 +3183,50 @@ def _selftest():
     else:
         print(
             "  ok   needs-mask: pruned needs (inline, block, scalar) normalizes equal, forked step differs, next key preserved"
+        )
+
+    # _last_effective_change: the intent-staleness date must skip a normalized-only bump (a
+    # Dependabot pin, per ptr727/ProjectTemplate#735) and keep walking history for a real change,
+    # falling back to the creation revision if every bump back to it was normalized-only.
+    d3, d2, d1 = (
+        "2024-03-01T00:00:00+00:00",
+        "2024-02-01T00:00:00+00:00",
+        "2024-01-01T00:00:00+00:00",
+    )
+    lec_cases = [
+        (
+            "every bump back to creation is pin-only -> creation wins",
+            [(d3, "sha3", pin_b), (d2, "sha2", pin_a), (d1, "sha1", pin_a)],
+            (d1, "sha1"),
+        ),
+        (
+            "newest differs for real -> newest wins",
+            [(d3, "sha3", pin_struct), (d2, "sha2", pin_a), (d1, "sha1", pin_a)],
+            (d3, "sha3"),
+        ),
+        (
+            "newest is a pin-only bump over a real change -> the real change wins",
+            [(d3, "sha3", pin_b), (d2, "sha2", pin_a), (d1, "sha1", pin_struct)],
+            (d2, "sha2"),
+        ),
+        (
+            "one revision (creation) -> that revision wins, nothing to compare against",
+            [(d1, "sha1", "only revision\n")],
+            (d1, "sha1"),
+        ),
+        (
+            "unreadable newest text -> treated as effective, never silently skipped",
+            [(d2, "sha2", None), (d1, "sha1", "whatever\n")],
+            (d2, "sha2"),
+        ),
+        ("no history -> None", [], None),
+    ]
+    for label, revisions, want in lec_cases:
+        got = _last_effective_change(revisions)
+        if got != want:
+            ok = False
+        print(
+            f"  {'ok  ' if got == want else 'FAIL'} want={want!s:<24} got={got!s:<24}  _last_effective_change: {label}"
         )
 
     # Region extraction and hashing: a forked github-release block must hash differently from the canonical.
