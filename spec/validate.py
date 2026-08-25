@@ -42,10 +42,60 @@ CONTRACT_KEYS = {
 MARKDOWN_INLINE_LINK = re.compile(r"\]\((?P<target>[^)\s]+)")
 MARKDOWN_REFERENCE_LINK = re.compile(r"^\[[^]]+\]:\s*(?P<target>\S+)", re.MULTILINE)
 TEMPLATE_REPOSITORY_URL = "https://github.com/ptr727/ProjectTemplate"
-# A description-shaped link use, `[text](url)` or `[text][ref]`, kept in sync with spec/audit.py's strip_md_links().
-# The carried-link regexes above find a definition's target inside a whole document, not a use inside one short string.
-DESCRIPTION_LINK_INLINE = re.compile(r"\[([^\]]*)\]\((?:[^()]|\([^()]*\))*\)")
-DESCRIPTION_LINK_REF = re.compile(r"\[([^\]]*)\]\[[^\]]*\]")
+
+
+def _bracket_span(text, open_pos, open_char, close_char):
+    """The index just past the char matching text[open_pos], counting only open_char/close_char nesting.
+
+    A character class like `[^\\]]*` cannot count depth, so it stops at the first close and misses a link
+    label carrying its own nested brackets, e.g. `[API [docs]](url)`. This walks one bracket type at a time
+    instead, so it is called once for a `[]` run and once for a `()` run rather than mixed in a single pass.
+    Returns None if open_pos is out of range or the run never balances back to depth 0.
+    """
+    if open_pos >= len(text) or text[open_pos] != open_char:
+        return None
+    depth = 0
+    for i in range(open_pos, len(text)):
+        c = text[i]
+        if c == open_char:
+            depth += 1
+        elif c == close_char:
+            depth -= 1
+            if depth == 0:
+                return i + 1
+    return None
+
+
+def contains_description_markdown_link(text):
+    """Whether `text` carries a `[text](url)` or `[text][ref]` use, brackets/parens balanced.
+
+    Kept in sync with spec/audit.py's markdown_link_spans(), which needs the same balanced-nesting rule for
+    the same reason: this is a description-shaped link use inside one short string, not the carried-link
+    regexes above, which find a definition's target inside a whole document.
+    """
+    i, n = 0, len(text)
+    while i < n:
+        if text[i] != "[":
+            i += 1
+            continue
+        label_end = _bracket_span(text, i, "[", "]")
+        if label_end is None:
+            i += 1
+            continue
+        if (
+            label_end < n
+            and text[label_end] == "("
+            and _bracket_span(text, label_end, "(", ")") is not None
+        ):
+            return True
+        if (
+            label_end < n
+            and text[label_end] == "["
+            and _bracket_span(text, label_end, "[", "]") is not None
+        ):
+            return True
+        i = label_end
+    return False
 
 
 def load(rel):
@@ -113,7 +163,7 @@ def description_errors(name, desc):
         return [
             f"{name}: description must be plain single-line text with no leading or trailing whitespace"
         ]
-    if DESCRIPTION_LINK_INLINE.search(desc) or DESCRIPTION_LINK_REF.search(desc):
+    if contains_description_markdown_link(desc):
         return [f"{name}: description carries Markdown links - keep it link-free plain text"]
     if len(desc) > 100:
         return [f"{name}: description is {len(desc)} characters, over the 100-char limit"]

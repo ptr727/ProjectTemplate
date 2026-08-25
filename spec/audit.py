@@ -624,10 +624,65 @@ def heading_texts(markdown):
 
 
 _HTML_COMMENT = re.compile(r"<!--.*?-->", re.DOTALL)
-_MD_LINK_INLINE = re.compile(
-    r"\[([^\]]*)\]\((?:[^()]|\([^()]*\))*\)"
-)  # URL may hold one level of ()
-_MD_LINK_REF = re.compile(r"\[([^\]]*)\]\[[^\]]*\]")
+
+
+def _bracket_span(text, open_pos, open_char, close_char):
+    """The index just past the char matching text[open_pos], counting only open_char/close_char nesting.
+
+    A character class like `[^\\]]*` cannot count depth, so it stops at the first close and misses a link
+    label carrying its own nested brackets, e.g. `[API [docs]](url)`. This walks one bracket type at a time
+    instead, so it is called once for a `[]` run and once for a `()` run rather than mixed in a single pass.
+    Returns None if open_pos is out of range or the run never balances back to depth 0.
+    """
+    if open_pos >= len(text) or text[open_pos] != open_char:
+        return None
+    depth = 0
+    for i in range(open_pos, len(text)):
+        c = text[i]
+        if c == open_char:
+            depth += 1
+        elif c == close_char:
+            depth -= 1
+            if depth == 0:
+                return i + 1
+    return None
+
+
+def markdown_link_spans(text):
+    """Yield (start, end, label) for each `[label](dest)` or `[label][ref]` use, brackets/parens balanced.
+
+    Kept in sync with spec/validate.py's DESCRIPTION_LINK_INLINE/DESCRIPTION_LINK_REF detection, which needs
+    the same balanced-nesting rule for the same reason.
+    """
+    i, n = 0, len(text)
+    while i < n:
+        if text[i] != "[":
+            i += 1
+            continue
+        label_end = _bracket_span(text, i, "[", "]")
+        if label_end is None:
+            i += 1
+            continue
+        label = text[i + 1 : label_end - 1]
+        dest_end = (
+            _bracket_span(text, label_end, "(", ")")
+            if label_end < n and text[label_end] == "("
+            else None
+        )
+        if dest_end is not None:
+            yield i, dest_end, label
+            i = dest_end
+            continue
+        ref_end = (
+            _bracket_span(text, label_end, "[", "]")
+            if label_end < n and text[label_end] == "["
+            else None
+        )
+        if ref_end is not None:
+            yield i, ref_end, label
+            i = ref_end
+            continue
+        i = label_end
 
 
 def strip_md_links(text):
@@ -635,7 +690,16 @@ def strip_md_links(text):
 
     The plain-text form GOVERNANCE.md "Repository Details" says the About description carries.
     """
-    return _MD_LINK_REF.sub(r"\1", _MD_LINK_INLINE.sub(r"\1", text))
+    spans = list(markdown_link_spans(text))
+    if not spans:
+        return text
+    out, pos = [], 0
+    for start, end, label in spans:
+        out.append(text[pos:start])
+        out.append(label)
+        pos = end
+    out.append(text[pos:])
+    return "".join(out)
 
 
 def title_and_intro(text):
@@ -3398,14 +3462,18 @@ def _selftest():
         )
     # Description mirror: links reduce to their text, and a link-free line passes through unchanged.
     linked = "Utility to clean [media](https://x.example/Foo_(bar)) per the [spec][spec-ref]."
+    nested = "See [API [docs]](https://example.test/a_(b)_(c)) for details."
     if (
         strip_md_links(linked) != "Utility to clean media per the spec."
         or strip_md_links("Plain intro line.") != "Plain intro line."
+        or strip_md_links(nested) != "See API [docs] for details."
     ):
         ok = False
         print("  FAIL description: strip_md_links behavior")
     else:
-        print("  ok   description: Markdown links reduce to their text, plain text passes through")
+        print(
+            "  ok   description: Markdown links reduce to their text, plain text passes through, nested brackets/parens balance"
+        )
     # cspell duplication: a workspace cSpell word list is detected, and a mere cspell.json mention is not.
     ws_dup = '{ "settings": { "cSpell.words": ["foo"] } }'
     ws_ok = '{ "settings": { "editor.rulers": [100] }, "note": "words live in cspell.json" }'

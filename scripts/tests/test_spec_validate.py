@@ -188,6 +188,24 @@ class DescriptionErrorsCase(unittest.TestCase):
             ["Fixture: description carries Markdown links - keep it link-free plain text"],
         )
 
+    def test_a_nested_bracket_link_label_is_rejected(self) -> None:
+        # Regresses a gap where `[^\]]*` stopped at the first `]` and missed a label with its own brackets.
+        self.assertEqual(
+            validate.description_errors(
+                "Fixture", "See [API [docs]](https://example.test) for more."
+            ),
+            ["Fixture: description carries Markdown links - keep it link-free plain text"],
+        )
+
+    def test_a_destination_with_two_parenthesized_groups_is_rejected(self) -> None:
+        # Regresses the matching gap on the destination side: more than one balanced `()` run after the link.
+        self.assertEqual(
+            validate.description_errors(
+                "Fixture", "See [docs](https://example.test/a_(b)_(c)) for more."
+            ),
+            ["Fixture: description carries Markdown links - keep it link-free plain text"],
+        )
+
     def test_leading_or_trailing_whitespace_is_rejected(self) -> None:
         # Not silently trimmed here, even though spec/audit.py and configure.sh both strip it defensively.
         # Rejecting it at the source keeps the registry's own text the exact canonical form every mirror carries.
