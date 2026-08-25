@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import sys
 import tempfile
+import time
 import unittest
 from pathlib import Path
 
@@ -188,6 +189,40 @@ class DescriptionErrorsCase(unittest.TestCase):
             ["Fixture: description carries Markdown links - keep it link-free plain text"],
         )
 
+    def test_a_nested_bracket_link_label_is_rejected(self) -> None:
+        # Regresses a gap where `[^\]]*` stopped at the first `]` and missed a label with its own brackets.
+        self.assertEqual(
+            validate.description_errors(
+                "Fixture", "See [API [docs]](https://example.test) for more."
+            ),
+            ["Fixture: description carries Markdown links - keep it link-free plain text"],
+        )
+
+    def test_a_destination_with_two_parenthesized_groups_is_rejected(self) -> None:
+        # Regresses the matching gap on the destination side: more than one balanced `()` run after the link.
+        self.assertEqual(
+            validate.description_errors(
+                "Fixture", "See [docs](https://example.test/a_(b)_(c)) for more."
+            ),
+            ["Fixture: description carries Markdown links - keep it link-free plain text"],
+        )
+
+    def test_a_link_nested_inside_a_non_link_bracket_run_is_still_rejected(self) -> None:
+        # A failed outer span used to jump past the whole run instead of retrying one character in.
+        # That skipped the valid inner link in `[[docs](url)]` (#1011, qodo).
+        self.assertEqual(
+            validate.description_errors("Fixture", "See [[docs](url)] for more."),
+            ["Fixture: description carries Markdown links - keep it link-free plain text"],
+        )
+
+    def test_an_escaped_bracket_inside_a_label_does_not_corrupt_the_match(self) -> None:
+        # A backslash-escaped `\[` used to count as real nesting, corrupting the label match.
+        # It reads as a literal character instead (#1011, qodo).
+        self.assertEqual(
+            validate.description_errors("Fixture", r"See [API \[docs](url) for more."),
+            ["Fixture: description carries Markdown links - keep it link-free plain text"],
+        )
+
     def test_leading_or_trailing_whitespace_is_rejected(self) -> None:
         # Not silently trimmed here, even though spec/audit.py and configure.sh both strip it defensively.
         # Rejecting it at the source keeps the registry's own text the exact canonical form every mirror carries.
@@ -205,6 +240,13 @@ class DescriptionErrorsCase(unittest.TestCase):
                 "Fixture: description must be plain single-line text with no leading or trailing whitespace"
             ],
         )
+
+    def test_a_long_run_of_unmatched_brackets_stays_linear(self) -> None:
+        # A run of unmatched '[' used to re-scan the remaining text from every position.
+        # That was O(N^2) (#1011, CodeRabbit), and a slow run here means a regression back to it.
+        start = time.monotonic()
+        validate.contains_description_markdown_link("[" * 20000)
+        self.assertLess(time.monotonic() - start, 1.0)
 
     def test_exactly_the_cap_is_clean(self) -> None:
         self.assertEqual(validate.description_errors("Fixture", "a" * 100), [])

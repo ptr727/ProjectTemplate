@@ -51,7 +51,7 @@ This is packaged as the `python-codestyle` Skill at `.agents/skills/python-codes
 
 ## Shell
 
-Bash, and only where a program cannot be Python: a bootstrap that installs the interpreter cannot be written in it, and a host tool that must run before a development toolchain exists cannot depend on one. Everything else is Python, with a test under the scripts tree's `tests/` directory. The mandatory `set -Eeuo pipefail` header, the pipefail-versus-early-reader pitfall, self-locating scripts, the `shellcheck`-plus-`shfmt` clean-compile, and the why-not-what comment rule are packaged as the `shell-codestyle` Skill at `.agents/skills/shell-codestyle/SKILL.md` in the hub, not a repo-relative link since that path is hub-local and not carried into every fleet repo. Read the skill for the full rules.
+Bash, and only where a program cannot be Python: a bootstrap that installs the interpreter cannot be written in it, and a host tool that must run before a development toolchain exists cannot depend on one. Everything else is Python, with a test under the scripts tree's `tests/` directory. The mandatory `set -Eeuo pipefail` header, the pipefail-versus-early-reader pitfall, self-locating scripts, the `shellcheck`-plus-`shfmt` clean-compile, and the why-not-what comment rule are packaged as the `shell-codestyle` Skill at `.agents/skills/shell-codestyle/SKILL.md` in the hub, not a repo-relative link since that path is hub-local and not carried into every fleet repo. Read the skill for the full rules. Run the clean-compile check itself per [GOVERNANCE.md "Running the Linters Locally"][governance-running-the-linters-locally], not by probing `command -v shellcheck`.
 
 <!-- Repo -->
 

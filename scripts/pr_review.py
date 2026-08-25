@@ -522,19 +522,30 @@ def copilot_history(owner: str, repo: str) -> list[tuple[int, dict]]:
     """The reviewer's own reviews and comments across the repository's most recently updated
     pull requests, newest activity first regardless of which connection it came from.
 
-    Read at HISTORY_PRS first and, only where that comes back with nothing at all, read again at
-    the wider HISTORY_PRS_WIDE. A narrow window emptying out is the ordinary case, a repository
-    whose most recent activity genuinely carries none of the reviewer's, and costs nothing beyond
-    the one call either caller below was always going to make. It stops being ordinary once an
-    outage outlasts HISTORY_PRS pull requests: every one of them then carries the same silence,
-    the narrow window empties out too, and both callers would otherwise fall back to blind
-    polling for the rest of the outage with no way to tell that outage apart from a repository
-    that has simply never seen a Copilot review (#985, reproduced on ptr727/ProjectTemplate
-    PRs #981-984). The wider read is what tells the two apart, and it is tried only once the
-    narrow one is empty, so the ordinary case still costs one call rather than two.
+    Read at HISTORY_PRS first and, only where that comes back carrying no usable bot id, read
+    again at the wider HISTORY_PRS_WIDE. A narrow window emptying out is the ordinary case, a
+    repository whose most recent activity genuinely carries none of the reviewer's, and costs
+    nothing beyond the one call either caller below was always going to make. It stops being
+    ordinary once an outage outlasts HISTORY_PRS pull requests: every one of them then carries
+    the same silence, the narrow window empties out too, and both callers would otherwise fall
+    back to blind polling for the rest of the outage with no way to tell that outage apart from a
+    repository that has simply never seen a Copilot review (#985, reproduced on
+    ptr727/ProjectTemplate PRs #981-984). The wider read is what tells the two apart.
+
+    Emptying out is not the only way the narrow window fails a bot-id lookup, though: it can
+    carry real activity and still have none, when every entry within it is a plain comment. A
+    formal review, `copilot_bot_id`'s only source for the id, can sit just outside the narrow
+    window while a newer comment sits inside it, and returning the narrow read as soon as it has
+    anything at all left that review permanently unread. Widening is keyed on
+    `copilot_bot_id(entries)` rather than on emptiness for exactly that case, so a comment-only
+    narrow window still triggers the wider read the same way an empty one does. The ordinary case
+    -- a narrow window already carrying a review -- still costs one call rather than two, since
+    that is the common shape a usable bot id already satisfies.
     """
     entries = _copilot_history_window(owner, repo, HISTORY_PRS)
-    return entries if entries else _copilot_history_window(owner, repo, HISTORY_PRS_WIDE)
+    if entries and copilot_bot_id(entries) is not None:
+        return entries
+    return _copilot_history_window(owner, repo, HISTORY_PRS_WIDE)
 
 
 def _copilot_history_window(owner: str, repo: str, prs: int) -> list[tuple[int, dict]]:

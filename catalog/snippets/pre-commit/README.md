@@ -20,8 +20,8 @@ the commit rather than silently skipping the gate.
 
 Install and enable with `uv tool install pre-commit` once, then `pre-commit install`.
 `pre-commit` itself is never added as a project dependency: the lint-only profile has no
-project environment to add it to, and `uv tool install` gives a persistent, PATH-available
-command independent of any project, the same footing `uvx` gives the tools the hooks run.
+project environment to add it to, and `uv tool install` gives a persistent command independent
+of any project. The hooks use `uvx` to run tools independently of the project.
 If `pre-commit install` reports the command not found right after installing it, `uv tool
 install`'s own bin directory is not yet on `PATH`: run `uv tool update-shell` and restart or
 re-source the shell, or add the directory `uv tool dir --bin` prints directly.

@@ -2790,6 +2790,29 @@ class TestCopilotHistoryReadings(GqlCase):
         pr_review.copilot_history("o", "r")
         self.assertEqual([pr_review.HISTORY_PRS], seen)
 
+    def test_a_comment_only_narrow_window_still_widens(self) -> None:
+        """A narrow window carrying activity is not itself a usable bot id: a comment carries
+        none, per `copilot_bot_id`, so this must widen the same as an empty window would rather
+        than returning a history no caller can read a bot id from."""
+        self.answer(payload([]))
+        seen: list[object] = []
+        narrow_node = {
+            "number": 970,
+            "reviews": {"nodes": []},
+            "comments": {"nodes": [comment(at=LATE)]},
+        }
+
+        def fake(_query: str, **variables: object) -> dict:
+            seen.append(variables["prs"])
+            if variables["prs"] == pr_review.HISTORY_PRS:
+                return {"repository": {"pullRequests": {"nodes": [narrow_node]}}}
+            return {"repository": {"pullRequests": {"nodes": [hist_review(900, QUOTA_REFUSED)]}}}
+
+        self.enterContext(mock.patch.object(pr_review, "gh_graphql", side_effect=fake))
+        history = pr_review.copilot_history("o", "r")
+        self.assertEqual([pr_review.HISTORY_PRS, pr_review.HISTORY_PRS_WIDE], seen)
+        self.assertEqual("BOT_1", pr_review.copilot_bot_id(history))
+
     def test_both_windows_empty_still_carries_no_signal_and_no_bot_id(self) -> None:
         """An outage wide enough to empty HISTORY_PRS_WIDE too is a real, if rarer, case: still
         no id to request with and no fabricated one, rather than a crash on the second call."""
