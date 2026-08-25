@@ -41,7 +41,7 @@ indent_size = 2
 end_of_line = crlf
 
 # .NET-only below, covering C# and ReSharper style.
-# Everything above is the line-ending governance every derived repo carries, and a non-.NET repo may drop from here down.
+# Everything above is the line-ending governance every derived repo carries, and a non-.NET repo carries this section unused, per CODESTYLE.md's whole-file model.
 
 # C# files
 [*.cs]
