@@ -103,14 +103,17 @@ skill covers all of it, scoped down by what the maintainer actually asks for.
    retried.
 7. In the hub, when the chosen scope includes a release, bring this checkout to the merged
    content without discarding or mixing in anything local. First assert `git status --porcelain
-   --untracked-files=all --ignored -- .agents/skills/` is empty, and stop and report rather than
-   proceeding over any uncommitted content there, tracked, untracked, or gitignored, since
-   `skills_install.py` installs each skill directory with `shutil.copytree()`, which copies a
-   gitignored stray file the same as any other, so the plain porcelain form (silent on ignored
-   paths) would pass this preflight while one still rides along into the install. Scoped to
-   `.agents/skills/` rather than the whole tree, since that is the only content this install
-   step reads, an ignored file elsewhere in the checkout (a build cache, a lockfile) is not this
-   preflight's concern and should not block the refresh on it. Then `git fetch origin main`, `git checkout main`
+   --untracked-files=all --ignored -- .agents/skills/ .claude-plugin/` is empty, and stop and
+   report rather than proceeding over any uncommitted content there, tracked, untracked, or
+   gitignored, since `skills_install.py` reads both paths: `shutil.copytree()` installs each
+   `.agents/skills/` skill directory for Codex/opencode, and `claude plugin marketplace add`
+   installs from `.claude-plugin/` for Claude Code, so a gitignored stray file under either rides
+   along the same as any other, and the plain porcelain form (silent on ignored paths) would pass
+   this preflight while one still rides into an install. Scoped to those two paths rather than
+   the whole tree, matching `skills_install.py`'s own `source_ref()` dirty check (`watched =
+   [SKILLS_SRC, CLAUDE_PLUGIN_DIR]`), since an ignored file elsewhere in the checkout (a build
+   cache, a lockfile) is not this preflight's concern and should not block the refresh on it.
+   Then `git fetch origin main`, `git checkout main`
    (or `git checkout -b main origin/main` the first time this checkout carries no local `main` at
    all, `checkout` rather than `switch` since the fleet's own `git` floor is undeclared and
    `checkout` needs no minimum version for this), and `git merge --ff-only origin/main`.
