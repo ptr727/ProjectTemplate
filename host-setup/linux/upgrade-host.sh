@@ -174,7 +174,16 @@ refresh_snaps() {
 }
 
 upgradable_count() {
-    apt list --upgradable 2>/dev/null | grep -c '/' || true
+    # A failed listing and a listing that genuinely found nothing upgradable both read as "no matches" through grep alone, so the two are told apart here rather than both printing 0.
+    # This only ever backs a status report, so the answer here is "unknown" rather than a die: nothing downstream mutates on the strength of this count.
+    local out status=0
+    out=$(apt list --upgradable 2>/dev/null) || status=$?
+    if [[ $status -ne 0 ]]; then
+        # Re-run once more, stdout discarded this time, so the diagnostic comes from a pipe head bounds in memory rather than a file this would otherwise have to size-cap and clean up itself.
+        printf 'unknown, apt list --upgradable failed (exit %s): %s' "$status" "$(apt list --upgradable 2>&1 >/dev/null | head -c 200 | tr '\n' ' ')"
+        return 0
+    fi
+    printf '%s package(s), against the lists as they stand' "$(grep -c '/' <<<"$out" || true)"
 }
 
 # --- Reboot ---
@@ -241,8 +250,12 @@ release_preconditions() {
         die "Held packages block a release upgrade, unhold them first: $held"
     fi
 
-    local audit
-    audit=$("${SUDO[@]}" dpkg --audit 2>/dev/null || true)
+    # A dpkg --audit that fails to run is not the same as one that runs and finds nothing, and only the second one clears the way into a release upgrade.
+    local audit status=0
+    audit=$("${SUDO[@]}" dpkg --audit 2>&1) || status=$?
+    if [[ $status -ne 0 ]]; then
+        die "dpkg --audit failed to run (exit $status), so half-configured packages cannot be ruled out before a release upgrade: $audit"
+    fi
     if [[ -n $audit ]]; then
         die "dpkg reports half-configured packages, fix them first: $audit"
     fi
@@ -547,7 +560,7 @@ release_summary() {
 
 status() {
     log "Host      : $(host_description)"
-    log "Upgradable: $(upgradable_count) package(s), against the lists as they stand"
+    log "Upgradable: $(upgradable_count)"
     log "Release   : $(release_summary)"
 
     report_reboot
