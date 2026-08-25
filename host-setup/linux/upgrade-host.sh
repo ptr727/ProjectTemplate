@@ -177,7 +177,11 @@ upgradable_count() {
     # A failed listing and a listing that genuinely found nothing upgradable both read as "no matches" through grep alone, so the two are told apart here rather than both printing 0.
     # This only ever backs a status report, so the answer here is "unknown" rather than a die: nothing downstream mutates on the strength of this count.
     local out err_file status=0
-    err_file=$(mktemp "$TMP_DIR/upgradable-count.XXXXXX")
+    # This runs inside $(upgradable_count), where the script's own set -e does not reach without "shopt -s inherit_errexit", unset here, so a failed mktemp is checked explicitly rather than left to abort the function on its own.
+    err_file=$(mktemp "$TMP_DIR/upgradable-count.XXXXXX") || {
+        printf 'unknown, could not create a diagnostic capture file'
+        return 0
+    }
     out=$(apt list --upgradable 2>"$err_file") || status=$?
     if [[ $status -ne 0 ]]; then
         printf 'unknown, apt list --upgradable failed (exit %s): %s' "$status" "$(tr '\n' ' ' <"$err_file" | cut -c1-200)"
