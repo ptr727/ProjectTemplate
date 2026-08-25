@@ -1468,14 +1468,38 @@ def split_jobs(text):
     return blocks
 
 
+# A `key: |` or `key: >` line - block chomp (`+`/`-`) and explicit indentation digit are both
+# optional and may appear in either order, and a trailing comment on the indicator line is
+# legal YAML. Anchored whole-line so a mapping value that merely contains "|"/">" mid-string
+# (a `key: "a|b"`) does not match.
+_BLOCK_SCALAR_KEY = re.compile(r"^[^:#\n]*:\s*[|>][0-9+-]*\s*(#.*)?$")
+
+
 def _code_view(text):
-    """Workflow text with comment-only lines dropped, so a token mentioned only in a comment is not signal.
+    """Workflow text with comment-only lines and block-scalar bodies dropped, neither is structure.
 
     A carried task file documents its own contract in comments (build-release-task.yml names
     `release-asset-` and `artifact-ids:` in prose), so a raw substring search over the whole text would
     both false-pass a missing handoff and false-flag a forbidden token that appears only in a comment.
+    The same raw search would also false-pass a token crafted into a block-scalar string value (`name: |`
+    followed by indented text) as though it were real YAML structure - ptr727/ProjectTemplate#949 - so a
+    block scalar's body lines, more indented than its own `key:` line and running until the first line at
+    or below that indent, are dropped too, keeping only the `key:` line itself.
     """
-    return "\n".join(ln for ln in text.splitlines() if not ln.lstrip().startswith("#"))
+    out = []
+    skip_indent = None
+    for ln in text.splitlines():
+        if ln.lstrip().startswith("#"):
+            continue
+        if skip_indent is not None:
+            if ln.strip() and (len(ln) - len(ln.lstrip())) <= skip_indent:
+                skip_indent = None  # dedented back to (or past) the key - the block body ended
+            else:
+                continue  # still inside the block scalar body - data, not structure
+        if _BLOCK_SCALAR_KEY.match(ln.lstrip()):
+            skip_indent = len(ln) - len(ln.lstrip())
+        out.append(ln)
+    return "\n".join(out)
 
 
 def job_level_names(blocks):
@@ -2777,6 +2801,17 @@ def _selftest():
             deploy_contract,
             1,
         ),
+        (
+            # A block scalar (`name: |`) crafted to contain the required token as string content,
+            # with the real `with:` mapping removed, must still report it missing rather than read
+            # the scalar's body as structure (ptr727/ProjectTemplate#949).
+            "deploy-site.yml caller stub with the with:/environment: tokens only inside a block-scalar name still reports missing",
+            deploy_stub.replace(
+                "    name: Deploy job\n", "    name: |\n      with:\n      environment:\n"
+            ).replace("    with:\n      environment: ${{ inputs.environment }}\n", ""),
+            deploy_contract,
+            1,
+        ),
     ]
     # The stage-5 type-specific hub tasks carry no manifest entry yet, since no repo has adopted a caller stub for them.
     # These fixtures exercise the contract adoption will register, proving the interface engine reads it correctly before any downstream repo depends on that reading.
@@ -2892,6 +2927,33 @@ def _selftest():
         print(f"  FAIL split_jobs (inline mapping) -> {sorted(inline)}")
     else:
         print("  ok   split_jobs (inline-mapping job captured with its content)")
+
+    # _code_view()'s block-scalar handling: only the body is dropped, a dedent back out is read normally
+    # again, and a folded scalar's chomp indicator plus trailing comment do not stop it matching.
+    code_view_cases = [
+        (
+            "block scalar body dropped, key line kept",
+            "  deploy:\n    name: |\n      with:\n      environment:\n",
+            "  deploy:\n    name: |",
+        ),
+        (
+            "a dedented sibling key ends the block scalar body",
+            "  deploy:\n    name: |\n      with:\n    with:\n      environment: prod\n",
+            "  deploy:\n    name: |\n    with:\n      environment: prod",
+        ),
+        (
+            "folded scalar, strip-chomp indicator, trailing comment on the key line",
+            "  deploy:\n    name: >-  # a folded, strip-chomped scalar\n      environment:\n",
+            "  deploy:\n    name: >-  # a folded, strip-chomped scalar",
+        ),
+    ]
+    for label, text, want in code_view_cases:
+        got = _code_view(text)
+        if got != want:
+            ok = False
+            print(f"  FAIL _code_view ({label}) -> {got!r}, want {want!r}")
+        else:
+            print(f"  ok   _code_view ({label})")
 
     # The verbatim engine, covering EOL normalization, hashing, and the stale-versus-modified classification.
     # It is exercised here rather than only in production, because a latent bug in the comparison would otherwise surface as a false clean on a real fleet run.
