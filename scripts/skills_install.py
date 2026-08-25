@@ -282,9 +282,11 @@ def main():
     stamp_path.write_text(
         json.dumps(build_stamp(claude_registered), indent=2) + "\n", encoding="utf-8"
     )
-    print(
-        f"Installed to {home / 'skills'}. Claude Code marketplace registered: {claude_registered}."
-    )
+    # Materializing skills and registering the marketplace are independent operations.
+    # Each can succeed or be skipped on its own (`claude` missing skips only the second).
+    # Separate lines keep that distinction once a third target (Codex/opencode) joins them.
+    print(f"Skills materialized to {home / 'skills'}.")
+    print(f"Claude Code marketplace registered: {claude_registered}.")
 
     # `claude` missing is a partial-but-expected install (a Codex/opencode-only machine).
     # `claude` present but registration failing is a real failure.
