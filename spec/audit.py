@@ -1471,7 +1471,9 @@ def split_jobs(text):
 # A `key: |`/`key: >` block-scalar indicator, with an optional anchor (`&name`) before it.
 # Anchored whole-line so `key: "a|b"` does not match.
 _BLOCK_SCALAR_KEY = re.compile(r"^[^:#\n]*:\s*(&\S+\s+)?[|>][0-9+-]*\s*(#.*)?$")
-# A step's `- key: |` sequence-item prefix, stripped before matching the key pattern above.
+# A bare `- |`/`- >` sequence item, a block scalar with no mapping key at all (a matrix string).
+_BARE_BLOCK_SCALAR = re.compile(r"^(&\S+\s+)?[|>][0-9+-]*\s*(#.*)?$")
+# A step's `- key: |` sequence-item prefix, stripped before matching the two patterns above.
 _SEQUENCE_ITEM_PREFIX = re.compile(r"^-[ \t]+")
 
 
@@ -1495,15 +1497,19 @@ def _code_view(text):
             else:
                 continue  # still inside the block scalar body, not real structure
         stripped = ln.lstrip()
-        key_col = len(ln) - len(stripped)
+        dash_col = len(ln) - len(stripped)
+        key_col = dash_col
         dash = _SEQUENCE_ITEM_PREFIX.match(stripped)
         if dash:
-            # The out-indent boundary is the key's own column, not the dash's.
+            # A keyed scalar's boundary is the key's own column, not the dash's.
             # A sibling key genuinely at that column (`env:` alongside a `- run: |` step) is real structure.
             key_col += dash.end()
             stripped = stripped[dash.end() :]
         if _BLOCK_SCALAR_KEY.match(stripped):
             skip_indent = key_col
+        elif dash and _BARE_BLOCK_SCALAR.match(stripped):
+            # A bare `- |` has no key, so its own boundary is the dash's column, not a key past it.
+            skip_indent = dash_col
         out.append(ln)
     return "\n".join(out)
 
@@ -2962,6 +2968,13 @@ def _selftest():
             "an anchored block scalar (`name: &label |`) is still recognized as a block-scalar key",
             "  deploy:\n    name: &lbl |\n      with:\n      environment:\n",
             "  deploy:\n    name: &lbl |",
+        ),
+        (
+            # A bare sequence item (a matrix string) has no key at all, so its own boundary is the
+            # dash's column: content one past the dash parses, content at or before it does not.
+            "a bare sequence-item block scalar (`- |`, a matrix string) still drops its body",
+            "  include:\n    - |\n      TOKEN\n",
+            "  include:\n    - |",
         ),
     ]
     for label, text, want in code_view_cases:
