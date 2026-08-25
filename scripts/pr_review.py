@@ -39,6 +39,11 @@ Subcommands
            CodeRabbit (`coderabbitai`) and qodo (`qodo-code-review`) are tracked at the identity
            and thread-resolution level, since an open thread blocks a ruleset-gated merge
            whoever opened it and `unresolved=0` once hid one of theirs that still did (PR #915).
+           Both `threads=` and `unresolved=` are read from a single 100-thread page with no
+           further pagination, so a pull request carrying more than that undercounts silently
+           past that point: `threads=` prints a trailing `+` and a `THREADS TRUNCATED` block
+           follows, naming the gap rather than leaving the two counts to be trusted as whole
+           (#973). Reading past the cut needs `reply`'s own paginated walk instead.
            Neither is read past that: no coverage, no refusal, no suppressed-finding parsing, no
            `wait`/request support, each being its own format and its own future task. Where
            either has posted anything at all on the current head, `other_reviewed` names it,
@@ -60,10 +65,14 @@ Subcommands
            review already covers the head, once Copilot has already answered outside a formal
            review, or once one is already in the pending request set, so calling `wait` again on
            the same PR never double-requests. It reads the Copilot reviewer's bot id from the
-           repository's own last 20 PRs rather than a fixed id, and requests nothing (falling
-           back to polling only) where that comes up empty, since a repository with no Copilot
-           review in that window has nothing to read the id from and a fabricated one is never
-           an option. The loop runs in-process, so a 45-minute wait costs one agent turn, not 90.
+           repository's own most recently updated PRs rather than a fixed id: the last
+           HISTORY_PRS, widened once to HISTORY_PRS_WIDE where that narrow window carries no
+           Copilot activity at all, since an outage that outlasts HISTORY_PRS PRs would otherwise
+           empty it on every call for as long as the outage runs (#985). Requests nothing
+           (falling back to polling only) where both windows come up empty, since a repository
+           with no Copilot review in either has nothing to read the id from and a fabricated one
+           is never an option. The loop runs in-process, so a 45-minute wait costs one agent
+           turn, not 90.
            Exit 0 = review present, 30 = still pending at timeout (pending is not failure),
            40 = Copilot answered outside a formal review, so read the printed body.
            40 reports the shape of that answer and reads nothing of its cause: an answer
@@ -323,6 +332,11 @@ HISTORY_PRS = 20
 HISTORY_REVIEWS = 20
 HISTORY_COMMENTS = 5
 
+# The one-time widened retry `copilot_history` reaches for where HISTORY_PRS carries no Copilot activity at all, rather than reverting every caller to blind polling for the rest of an outage that outlasts it (#985).
+# GitHub's own connection ceiling for a single `first`, the same reason FILES_WINDOW and CHECKS_WINDOW hold it.
+# Reaching further back needs cursor pagination, which this best-effort signal is not worth paying for, so one wider try is where this stops.
+HISTORY_PRS_WIDE = 100
+
 # Liveness query: timestamps and ids only, no comment or review bodies.
 # A liveness check does not need the finding text, and re-fetching bodies was 76% of polls.
 # It does need the reviewer's non-review answers.
@@ -342,21 +356,19 @@ query($o:String!,$r:String!,$n:Int!){
 # The bot's node id belongs to the reviewer account rather than to any one PR or review, so it is identical wherever it is found and recency does not matter once one is found.
 # A repo-wide reading of the reviewer's own most recent activity is the other caller, and recency is the whole point there, so `submittedAt`, `createdAt`, and `body` ride along for a reader that does not stop at the first bot id.
 # Ordered by `UPDATED_AT` rather than `CREATED_AT`, since a fresh review round bumps a pull request's own update time regardless of how long ago it was opened, where creation order can leave a re-reviewed older pull request outside the window entirely.
-# `reviews(last:HISTORY_REVIEWS)` reads the newest rounds a pull request carries rather than the oldest, and `comments(last:HISTORY_COMMENTS)` catches a plain answer that supersedes a formal review without needing every comment a busy pull request holds.
+# `reviews(last:$reviews)` reads the newest rounds a pull request carries rather than the oldest, and `comments(last:$comments)` catches a plain answer that supersedes a formal review without needing every comment a busy pull request holds.
 # It resolves even on a pull request whose own round 1 carries no review yet, per the fleet's standing rule against fabricating or reusing a GitHub node id.
-Q_BOT_ID = (
-    """
-query($o:String!,$r:String!){
+# `$prs` is a variable rather than baked into the document, unlike the other windows in this file, because `copilot_history` runs this same query twice on an empty narrow read, once at HISTORY_PRS and, only then, once at HISTORY_PRS_WIDE (#985).
+# One document read at two widths costs nothing a second document would not, and it keeps the two reads provably identical apart from that one number.
+Q_BOT_ID = """
+query($o:String!,$r:String!,$prs:Int!,$reviews:Int!,$comments:Int!){
   repository(owner:$o,name:$r){
-    pullRequests(first:__HISTORY_PRS__, orderBy:{field:UPDATED_AT, direction:DESC}){
+    pullRequests(first:$prs, orderBy:{field:UPDATED_AT, direction:DESC}){
       nodes{ number
-        reviews(last:__HISTORY_REVIEWS__){ nodes{ author{ __typename login ... on Bot{ id } } state body submittedAt } }
-        comments(last:__HISTORY_COMMENTS__){ nodes{ author{ login } body createdAt } }
+        reviews(last:$reviews){ nodes{ author{ __typename login ... on Bot{ id } } state body submittedAt } }
+        comments(last:$comments){ nodes{ author{ login } body createdAt } }
       } } } }
-""".replace("__HISTORY_PRS__", str(HISTORY_PRS))
-    .replace("__HISTORY_REVIEWS__", str(HISTORY_REVIEWS))
-    .replace("__HISTORY_COMMENTS__", str(HISTORY_COMMENTS))
-)
+"""
 
 M_REQUEST_REVIEWS = """
 mutation($pr:ID!,$bot:ID!){
@@ -373,7 +385,7 @@ query($o:String!,$r:String!,$n:Int!){
     headRefOid mergeable mergeStateStatus
     reviews(last:100){ nodes{ author{login} state commit{oid} submittedAt body } pageInfo{ hasPreviousPage } }
     reviewThreads(first:100){ nodes{ id isResolved
-      comments(first:1){ nodes{ author{login} path line body } } }}
+      comments(first:1){ nodes{ author{login} path line body } } } pageInfo{ hasNextPage } }
     comments(last:100){ nodes{ author{login} createdAt body } pageInfo{ hasPreviousPage } }
     reviewRequests(first:10){ nodes{ requestedReviewer{ __typename ... on Bot{login} ... on User{login} } } }
     files(first:__FILES_WINDOW__){ pageInfo{ hasNextPage } nodes{ path } }
@@ -507,8 +519,27 @@ def reviewer_requested(pr: dict) -> bool:
 
 
 def copilot_history(owner: str, repo: str) -> list[tuple[int, dict]]:
-    """The reviewer's own reviews and comments across the repository's 20 most recently updated
+    """The reviewer's own reviews and comments across the repository's most recently updated
     pull requests, newest activity first regardless of which connection it came from.
+
+    Read at HISTORY_PRS first and, only where that comes back with nothing at all, read again at
+    the wider HISTORY_PRS_WIDE. A narrow window emptying out is the ordinary case, a repository
+    whose most recent activity genuinely carries none of the reviewer's, and costs nothing beyond
+    the one call either caller below was always going to make. It stops being ordinary once an
+    outage outlasts HISTORY_PRS pull requests: every one of them then carries the same silence,
+    the narrow window empties out too, and both callers would otherwise fall back to blind
+    polling for the rest of the outage with no way to tell that outage apart from a repository
+    that has simply never seen a Copilot review (#985, reproduced on ptr727/ProjectTemplate
+    PRs #981-984). The wider read is what tells the two apart, and it is tried only once the
+    narrow one is empty, so the ordinary case still costs one call rather than two.
+    """
+    entries = _copilot_history_window(owner, repo, HISTORY_PRS)
+    return entries if entries else _copilot_history_window(owner, repo, HISTORY_PRS_WIDE)
+
+
+def _copilot_history_window(owner: str, repo: str, prs: int) -> list[tuple[int, dict]]:
+    """One read of `copilot_history`'s traversal, over the `prs` most recently updated pull
+    requests. Split out so the narrow and widened reads share every line but the one count.
 
     Paired with the pull request number each came from, since a repo-wide reading has to name
     where it looked rather than just assert one. Sorted by timestamp rather than trusted to
@@ -529,10 +560,12 @@ def copilot_history(owner: str, repo: str) -> list[tuple[int, dict]]:
     One call serves both the bot-id lookup and the repo-wide quota reading below, since both
     need the same traversal and a caller needing either otherwise pays for it twice.
     """
-    data = gh_graphql(Q_BOT_ID, o=owner, r=repo)
-    prs = ((data.get("repository") or {}).get("pullRequests") or {}).get("nodes") or []
+    data = gh_graphql(
+        Q_BOT_ID, o=owner, r=repo, prs=prs, reviews=HISTORY_REVIEWS, comments=HISTORY_COMMENTS
+    )
+    nodes = ((data.get("repository") or {}).get("pullRequests") or {}).get("nodes") or []
     entries = []
-    for node in prs:
+    for node in nodes:
         number = node.get("number")
         for review in (node.get("reviews") or {}).get("nodes") or []:
             author = review.get("author") or {}
@@ -616,13 +649,15 @@ def request_copilot_review(pr_node_id: str, bot_id: str | None) -> str:
     function exists to prevent, from a different cause. The one quiet path is finding no bot id
     to request with at all, which is not a failure, since a repository with no Copilot review
     anywhere carries nothing to read the id from. The id itself is the caller's to find, via
-    `copilot_bot_id` over a `copilot_history` read it already paid for.
+    `copilot_bot_id` over a `copilot_history` read it already paid for, which already tried both
+    the narrow HISTORY_PRS window and the wider HISTORY_PRS_WIDE one before coming up empty (#985).
     """
     if not bot_id:
         return (
-            "no Copilot review found across the last 20 PRs to read the reviewer bot id "
-            "from, so nothing was requested here; polling only. Seed one via the UI, or "
-            "widen the search if this repository has more unreviewed history than that."
+            f"no Copilot review found across the last {HISTORY_PRS} or, widened once for "
+            f"exactly this reason, the last {HISTORY_PRS_WIDE} most-recently-updated pull "
+            "requests to read the reviewer bot id from, so nothing was requested here; "
+            "polling only. Seed one via the UI if this repository has never had one at all."
         )
     gh_graphql(M_REQUEST_REVIEWS, pr=pr_node_id, bot=bot_id)
     return f"requested a Copilot review on the current head (bot {bot_id})"
@@ -674,6 +709,21 @@ def window_blind(pr: dict, field: str) -> bool:
     """
     older = ((pr.get(field) or {}).get("pageInfo") or {}).get("hasPreviousPage")
     return bool(older) and not reviewer_nodes(pr, field)
+
+
+def threads_truncated(pr: dict) -> bool:
+    """True where `reviewThreads(first:100)` cut off before this pull request's actual thread
+    count, so `threads=`/`unresolved=` below undercount rather than reading the true total.
+
+    Unlike `window_blind`'s `last`-windowed connections, `reviewThreads` reads forward from the
+    first page in the connection's own creation order, so `hasNextPage` here means the threads
+    left unread are the newest ones, not the oldest, exactly the ones most likely to still be
+    open. That inversion is why this is its own guard rather than a second use of `window_blind`:
+    that one settles the question from what is already in view, and there is no such settling
+    available here, only the fact that something was cut (#973, undercounted since PR #969
+    widened `unresolved` from Copilot's own threads to every tracked reviewer's).
+    """
+    return bool(((pr.get("reviewThreads") or {}).get("pageInfo") or {}).get("hasNextPage"))
 
 
 def refusal_of(node: dict) -> str:
@@ -1404,6 +1454,9 @@ def digest(
     cover, cover_line = head_coverage(pr)
     unknown = unrecognized_shapes(pr)
     threads = pr["reviewThreads"]["nodes"]
+    # True where the connection cut off before this pull request's actual thread count (#973).
+    # Read here rather than inline below, since both the summary line and the explanatory block need it.
+    truncated = threads_truncated(pr)
     # Any known reviewer's own thread, not only Copilot's.
     # An open thread blocks a ruleset-gated merge whoever opened it, and counting Copilot's alone hid a CodeRabbit/qodo thread that did block one (PR #915).
     # `thread_author` carries the deleted-account default this needs.
@@ -1489,7 +1542,8 @@ def digest(
         # `QUOTA` is its own value rather than folded into `YES`, since its remedy is neither a re-request nor a split.
         # It is the account-level state `status`/`wait` name distinctly.
         f"refusal={refusal_field} "
-        f"threads={len(threads)} unresolved={len(unresolved)}{breakdown} "
+        # A trailing `+` says the two counts right after it undercount, rather than a reader having to notice a fourth field further down to learn the same thing.
+        f"threads={len(threads)}{'+' if truncated else ''} unresolved={len(unresolved)}{breakdown} "
         f"suppressed={sum(finding_count(b) for n, b in blocks)} "
         f"(on_head={sum(finding_count(b) for b in on_head_blocks)} earlier={stale}) "
         f"answered_outside_review={answered} "
@@ -1602,6 +1656,14 @@ def digest(
         lines.append(
             f"  BEHIND THE WINDOW ({' and '.join(blind)}): the newest {WINDOW} carry "
             "none from the reviewer and older ones exist, so this cannot decide"
+        )
+    if truncated:
+        lines.append(
+            "  THREADS TRUNCATED: this pull request carries more review threads than the "
+            "100 read here, and the connection reads oldest-first, so the ones cut off are "
+            "the newest rather than the oldest, exactly the ones most likely to still be "
+            "open. `threads=` and `unresolved=` above undercount; read the rest with "
+            "`reply`'s own paginated walk before trusting either number"
         )
     if answer:
         # Printed whole for the same reason a suppressed finding is, since it reaches no thread.
