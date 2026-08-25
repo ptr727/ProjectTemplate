@@ -1468,14 +1468,44 @@ def split_jobs(text):
     return blocks
 
 
+# A `key: |`/`key: >` block-scalar indicator, with an optional anchor (`&name`) before it.
+# Anchored whole-line so `key: "a|b"` does not match.
+_BLOCK_SCALAR_KEY = re.compile(r"^[^:#\n]*:\s*(&\S+\s+)?[|>][0-9+-]*\s*(#.*)?$")
+# A step's `- key: |` sequence-item prefix, stripped before matching the key pattern above.
+_SEQUENCE_ITEM_PREFIX = re.compile(r"^-[ \t]+")
+
+
 def _code_view(text):
-    """Workflow text with comment-only lines dropped, so a token mentioned only in a comment is not signal.
+    """Workflow text with comment-only lines and block-scalar bodies dropped, neither is structure.
 
     A carried task file documents its own contract in comments (build-release-task.yml names
     `release-asset-` and `artifact-ids:` in prose), so a raw substring search over the whole text would
     both false-pass a missing handoff and false-flag a forbidden token that appears only in a comment.
+    A block-scalar string value (`name: |` followed by indented text) can hide or fake a token the same
+    way, so its body is dropped too, keeping only the `key:` line itself (ptr727/ProjectTemplate#949).
     """
-    return "\n".join(ln for ln in text.splitlines() if not ln.lstrip().startswith("#"))
+    out = []
+    skip_indent = None
+    for ln in text.splitlines():
+        if ln.lstrip().startswith("#"):
+            continue
+        if skip_indent is not None:
+            if ln.strip() and (len(ln) - len(ln.lstrip())) <= skip_indent:
+                skip_indent = None  # a dedent back to (or past) the key column ends the block body
+            else:
+                continue  # still inside the block scalar body, not real structure
+        stripped = ln.lstrip()
+        key_col = len(ln) - len(stripped)
+        dash = _SEQUENCE_ITEM_PREFIX.match(stripped)
+        if dash:
+            # The out-indent boundary is the key's own column, not the dash's.
+            # A sibling key genuinely at that column (`env:` alongside a `- run: |` step) is real structure.
+            key_col += dash.end()
+            stripped = stripped[dash.end() :]
+        if _BLOCK_SCALAR_KEY.match(stripped):
+            skip_indent = key_col
+        out.append(ln)
+    return "\n".join(out)
 
 
 def job_level_names(blocks):
@@ -2777,6 +2807,16 @@ def _selftest():
             deploy_contract,
             1,
         ),
+        (
+            # A block scalar crafted to contain the required token as string content must still report it missing.
+            # The real `with:` mapping is removed here, so only the block scalar carries the text (ptr727/ProjectTemplate#949).
+            "deploy-site.yml caller stub with the with:/environment: tokens only inside a block-scalar name still reports missing",
+            deploy_stub.replace(
+                "    name: Deploy job\n", "    name: |\n      with:\n      environment:\n"
+            ).replace("    with:\n      environment: ${{ inputs.environment }}\n", ""),
+            deploy_contract,
+            1,
+        ),
     ]
     # The stage-5 type-specific hub tasks carry no manifest entry yet, since no repo has adopted a caller stub for them.
     # These fixtures exercise the contract adoption will register, proving the interface engine reads it correctly before any downstream repo depends on that reading.
@@ -2892,6 +2932,45 @@ def _selftest():
         print(f"  FAIL split_jobs (inline mapping) -> {sorted(inline)}")
     else:
         print("  ok   split_jobs (inline-mapping job captured with its content)")
+
+    # _code_view()'s block-scalar handling: only the body is dropped, never the key line itself.
+    code_view_cases = [
+        (
+            "block scalar body dropped, key line kept",
+            "  deploy:\n    name: |\n      with:\n      environment:\n",
+            "  deploy:\n    name: |",
+        ),
+        (
+            "a dedented sibling key ends the block scalar body",
+            "  deploy:\n    name: |\n      with:\n    with:\n      environment: prod\n",
+            "  deploy:\n    name: |\n    with:\n      environment: prod",
+        ),
+        (
+            "folded scalar, strip-chomp indicator, trailing comment on the key line",
+            "  deploy:\n    name: >-  # a folded, strip-chomped scalar\n      environment:\n",
+            "  deploy:\n    name: >-  # a folded, strip-chomped scalar",
+        ),
+        (
+            # A step's `- run: |` boundary is `run:`'s column, not the dash's column.
+            # A sibling `env:` key genuinely at that column is real structure, not block-scalar body.
+            "a step's `- run: |` block scalar body drops, its sibling env: mapping survives",
+            "      - run: |\n          echo body\n        env:\n          TOKEN: xyz\n",
+            "      - run: |\n        env:\n          TOKEN: xyz",
+        ),
+        (
+            # A valid YAML anchor property (`&label`) sits between the colon and the indicator.
+            "an anchored block scalar (`name: &label |`) is still recognized as a block-scalar key",
+            "  deploy:\n    name: &lbl |\n      with:\n      environment:\n",
+            "  deploy:\n    name: &lbl |",
+        ),
+    ]
+    for label, text, want in code_view_cases:
+        got = _code_view(text)
+        if got != want:
+            ok = False
+            print(f"  FAIL _code_view ({label}) -> {got!r}, want {want!r}")
+        else:
+            print(f"  ok   _code_view ({label})")
 
     # The verbatim engine, covering EOL normalization, hashing, and the stale-versus-modified classification.
     # It is exercised here rather than only in production, because a latent bug in the comparison would otherwise surface as a false clean on a real fleet run.
