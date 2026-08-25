@@ -1761,14 +1761,23 @@ def git_file_history(rel_path):
 
 def _last_effective_change(revisions):
     """The (date, sha) of the newest revision in `revisions` (newest-first (date, sha, text)
-    triples for one file) whose content differs from its predecessor after normalize() - or the
-    oldest (creation) revision, if every later one differs from its predecessor only by normalized
+    triples for one file) whose content differs from its predecessor after normalize(), or the
+    oldest (creation) revision if every later one differs from its predecessor only by normalized
     churn (spec/fidelity-model.md "Normalization": EOL, a Dependabot action-pin bump, a pruned
     `needs:` list). None if `revisions` is empty.
 
     The creation revision always counts as effective: it has no predecessor, and normalize()
     applied to only one side proves nothing. A revision with unreadable text (None) also counts as
     effective rather than being silently skipped, since a real difference cannot be ruled out.
+
+    `revisions` is assumed newest-first with each entry the immediate predecessor of the one
+    before it (verified empirically over every intent-fidelity canonical file's full history,
+    ptr727/ProjectTemplate#1014): this repo's own branching is forward-only (no back-merges from
+    main into develop) with feature branches squash-merged one at a time, so a canonical file's
+    per-path `git log` is a single line, not a graph with siblings to mis-order. A canonical file
+    reached through a genuinely branching history (a direct hotfix to main alongside independent
+    develop work touching the same path) would need each revision compared against its actual git
+    parent(s) instead of its list neighbor.
     """
     for i, (date, sha, text) in enumerate(revisions):
         if i + 1 == len(revisions):
