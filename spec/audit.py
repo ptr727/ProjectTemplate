@@ -36,6 +36,7 @@ import pathlib
 import re
 import subprocess
 import sys
+import time
 import urllib.error
 import urllib.request
 from datetime import UTC, datetime
@@ -626,58 +627,52 @@ def heading_texts(markdown):
 _HTML_COMMENT = re.compile(r"<!--.*?-->", re.DOTALL)
 
 
-def _bracket_span(text, open_pos, open_char, close_char):
-    """The index just past the char matching text[open_pos], counting only open_char/close_char nesting.
+def _bracket_matches(text, open_char, close_char):
+    """Map from each open_char index in text to the index just past its balanced close_char.
 
     A character class like `[^\\]]*` cannot count depth, so it stops at the first close and misses a link
-    label carrying its own nested brackets, e.g. `[API [docs]](url)`. This walks one bracket type at a time
-    instead, so it is called once for a `[]` run and once for a `()` run rather than mixed in a single pass.
-    Returns None if open_pos is out of range or the run never balances back to depth 0.
+    label carrying its own nested brackets, e.g. `[API [docs]](url)`. Counting only open_char/close_char
+    nesting, ignoring the other bracket type, needs one such map per bracket type rather than one pass
+    mixing both. Built with a single left-to-right stack pass over the whole text rather than one depth-
+    counting scan per open position: re-scanning from every unmatched open is what made the previous
+    version O(N^2) on a run of N unmatched opens (#1011, CodeRabbit). A close pops the most recently pushed
+    open, the same pairing a fresh depth count from that open would find, so this is one pass, not N.
+    An open with no closing partner, or a close with nothing open, is left out of the map, same as before.
     """
-    if open_pos >= len(text) or text[open_pos] != open_char:
-        return None
-    depth = 0
-    for i in range(open_pos, len(text)):
-        c = text[i]
+    stack = []
+    matches = {}
+    for i, c in enumerate(text):
         if c == open_char:
-            depth += 1
-        elif c == close_char:
-            depth -= 1
-            if depth == 0:
-                return i + 1
-    return None
+            stack.append(i)
+        elif c == close_char and stack:
+            matches[stack.pop()] = i + 1
+    return matches
 
 
 def markdown_link_spans(text):
     """Yield (start, end, label) for each `[label](dest)` or `[label][ref]` use, brackets/parens balanced.
 
-    Kept in sync with spec/validate.py's DESCRIPTION_LINK_INLINE/DESCRIPTION_LINK_REF detection, which needs
-    the same balanced-nesting rule for the same reason.
+    Kept in sync with spec/validate.py's contains_description_markdown_link(), which needs the same
+    balanced-nesting rule for the same reason.
     """
+    bracket_close = _bracket_matches(text, "[", "]")
+    paren_close = _bracket_matches(text, "(", ")")
     i, n = 0, len(text)
     while i < n:
         if text[i] != "[":
             i += 1
             continue
-        label_end = _bracket_span(text, i, "[", "]")
+        label_end = bracket_close.get(i)
         if label_end is None:
             i += 1
             continue
         label = text[i + 1 : label_end - 1]
-        dest_end = (
-            _bracket_span(text, label_end, "(", ")")
-            if label_end < n and text[label_end] == "("
-            else None
-        )
+        dest_end = paren_close.get(label_end) if label_end < n and text[label_end] == "(" else None
         if dest_end is not None:
             yield i, dest_end, label
             i = dest_end
             continue
-        ref_end = (
-            _bracket_span(text, label_end, "[", "]")
-            if label_end < n and text[label_end] == "["
-            else None
-        )
+        ref_end = bracket_close.get(label_end) if label_end < n and text[label_end] == "[" else None
         if ref_end is not None:
             yield i, ref_end, label
             i = ref_end
@@ -3473,6 +3468,21 @@ def _selftest():
     else:
         print(
             "  ok   description: Markdown links reduce to their text, plain text passes through, nested brackets/parens balance"
+        )
+    # A run of unmatched '[' used to re-scan the remaining text from every position (#1011, CodeRabbit),
+    # O(N^2) on a README tagline read before any length limit. Linear now: a slow run means a regression.
+    pathological = "[" * 20000
+    start = time.monotonic()
+    strip_md_links(pathological)
+    elapsed = time.monotonic() - start
+    if elapsed > 1.0:
+        ok = False
+        print(
+            f"  FAIL description: strip_md_links took {elapsed:.2f}s on unmatched brackets, expected linear"
+        )
+    else:
+        print(
+            f"  ok   description: strip_md_links stays linear on unmatched brackets ({elapsed:.3f}s for 20000)"
         )
     # cspell duplication: a workspace cSpell word list is detected, and a mere cspell.json mention is not.
     ws_dup = '{ "settings": { "cSpell.words": ["foo"] } }'

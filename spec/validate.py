@@ -44,26 +44,27 @@ MARKDOWN_REFERENCE_LINK = re.compile(r"^\[[^]]+\]:\s*(?P<target>\S+)", re.MULTIL
 TEMPLATE_REPOSITORY_URL = "https://github.com/ptr727/ProjectTemplate"
 
 
-def _bracket_span(text, open_pos, open_char, close_char):
-    """The index just past the char matching text[open_pos], counting only open_char/close_char nesting.
+def _bracket_matches(text, open_char, close_char):
+    """Map from each open_char index in text to the index just past its balanced close_char.
 
     A character class like `[^\\]]*` cannot count depth, so it stops at the first close and misses a link
-    label carrying its own nested brackets, e.g. `[API [docs]](url)`. This walks one bracket type at a time
-    instead, so it is called once for a `[]` run and once for a `()` run rather than mixed in a single pass.
-    Returns None if open_pos is out of range or the run never balances back to depth 0.
+    label carrying its own nested brackets, e.g. `[API [docs]](url)`. Counting only open_char/close_char
+    nesting, ignoring the other bracket type, needs one such map per bracket type rather than one pass
+    mixing both. Built with a single left-to-right stack pass over the whole text rather than one depth-
+    counting scan per open position: re-scanning from every unmatched open is what made a prior version of
+    this walk O(N^2) on a run of N unmatched opens (#1011, CodeRabbit, on spec/audit.py's sibling
+    implementation). A close pops the most recently pushed open, the same pairing a fresh depth count from
+    that open would find, so this is one pass, not N. An open with no closing partner, or a close with
+    nothing open, is left out of the map, same as before.
     """
-    if open_pos >= len(text) or text[open_pos] != open_char:
-        return None
-    depth = 0
-    for i in range(open_pos, len(text)):
-        c = text[i]
+    stack = []
+    matches = {}
+    for i, c in enumerate(text):
         if c == open_char:
-            depth += 1
-        elif c == close_char:
-            depth -= 1
-            if depth == 0:
-                return i + 1
-    return None
+            stack.append(i)
+        elif c == close_char and stack:
+            matches[stack.pop()] = i + 1
+    return matches
 
 
 def contains_description_markdown_link(text):
@@ -73,26 +74,20 @@ def contains_description_markdown_link(text):
     the same reason: this is a description-shaped link use inside one short string, not the carried-link
     regexes above, which find a definition's target inside a whole document.
     """
+    bracket_close = _bracket_matches(text, "[", "]")
+    paren_close = _bracket_matches(text, "(", ")")
     i, n = 0, len(text)
     while i < n:
         if text[i] != "[":
             i += 1
             continue
-        label_end = _bracket_span(text, i, "[", "]")
+        label_end = bracket_close.get(i)
         if label_end is None:
             i += 1
             continue
-        if (
-            label_end < n
-            and text[label_end] == "("
-            and _bracket_span(text, label_end, "(", ")") is not None
-        ):
+        if label_end < n and text[label_end] == "(" and label_end in paren_close:
             return True
-        if (
-            label_end < n
-            and text[label_end] == "["
-            and _bracket_span(text, label_end, "[", "]") is not None
-        ):
+        if label_end < n and text[label_end] == "[" and label_end in bracket_close:
             return True
         i = label_end
     return False

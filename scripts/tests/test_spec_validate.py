@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import sys
 import tempfile
+import time
 import unittest
 from pathlib import Path
 
@@ -223,6 +224,13 @@ class DescriptionErrorsCase(unittest.TestCase):
                 "Fixture: description must be plain single-line text with no leading or trailing whitespace"
             ],
         )
+
+    def test_a_long_run_of_unmatched_brackets_stays_linear(self) -> None:
+        # A run of unmatched '[' used to re-scan the remaining text from every position.
+        # That was O(N^2) (#1011, CodeRabbit), and a slow run here means a regression back to it.
+        start = time.monotonic()
+        validate.contains_description_markdown_link("[" * 20000)
+        self.assertLess(time.monotonic() - start, 1.0)
 
     def test_exactly_the_cap_is_clean(self) -> None:
         self.assertEqual(validate.description_errors("Fixture", "a" * 100), [])
