@@ -1473,6 +1473,9 @@ def split_jobs(text):
 # legal YAML. Anchored whole-line so a mapping value that merely contains "|"/">" mid-string
 # (a `key: "a|b"`) does not match.
 _BLOCK_SCALAR_KEY = re.compile(r"^[^:#\n]*:\s*[|>][0-9+-]*\s*(#.*)?$")
+# A step's own `- key: |` sequence-item prefix, stripped before matching the key pattern above,
+# since the block scalar's out-indent boundary is the key's own column, not the dash's.
+_SEQUENCE_ITEM_PREFIX = re.compile(r"^-[ \t]+")
 
 
 def _code_view(text):
@@ -1484,7 +1487,10 @@ def _code_view(text):
     The same raw search would also false-pass a token crafted into a block-scalar string value (`name: |`
     followed by indented text) as though it were real YAML structure - ptr727/ProjectTemplate#949 - so a
     block scalar's body lines, more indented than its own `key:` line and running until the first line at
-    or below that indent, are dropped too, keeping only the `key:` line itself.
+    or below that indent, are dropped too, keeping only the `key:` line itself. A step's `- run: |` is the
+    same case with a sequence-item dash first: the out-indent boundary is `run:`'s own column, not the
+    dash's, or a sibling key genuinely at that column (`env:` alongside the step) reads as still inside the
+    block scalar and is dropped as data along with it.
     """
     out = []
     skip_indent = None
@@ -1496,8 +1502,14 @@ def _code_view(text):
                 skip_indent = None  # dedented back to (or past) the key - the block body ended
             else:
                 continue  # still inside the block scalar body - data, not structure
-        if _BLOCK_SCALAR_KEY.match(ln.lstrip()):
-            skip_indent = len(ln) - len(ln.lstrip())
+        stripped = ln.lstrip()
+        key_col = len(ln) - len(stripped)
+        dash = _SEQUENCE_ITEM_PREFIX.match(stripped)
+        if dash:
+            key_col += dash.end()
+            stripped = stripped[dash.end() :]
+        if _BLOCK_SCALAR_KEY.match(stripped):
+            skip_indent = key_col
         out.append(ln)
     return "\n".join(out)
 
@@ -2945,6 +2957,14 @@ def _selftest():
             "folded scalar, strip-chomp indicator, trailing comment on the key line",
             "  deploy:\n    name: >-  # a folded, strip-chomped scalar\n      environment:\n",
             "  deploy:\n    name: >-  # a folded, strip-chomped scalar",
+        ),
+        (
+            # A `- run: |` sequence item's own boundary is `run:`'s column, not the dash's - a
+            # sibling `env:` genuinely at that column must survive, not be misread as still
+            # inside the block scalar and dropped alongside its body (CodeRabbit, PR #1003).
+            "a step's `- run: |` block scalar body drops, its sibling env: mapping survives",
+            "      - run: |\n          echo body\n        env:\n          TOKEN: xyz\n",
+            "      - run: |\n        env:\n          TOKEN: xyz",
         ),
     ]
     for label, text, want in code_view_cases:
