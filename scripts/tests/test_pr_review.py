@@ -521,7 +521,7 @@ class TestDigest(GqlCase):
         self.answer(payload([review()], [thread("T1")], more_threads=True))
         out, unresolved = pr_review.digest("o", "r", 7)
         self.assertEqual(1, unresolved)
-        self.assertIn("threads=1+ unresolved=1", out)
+        self.assertIn("threads=1+ unresolved=1+", out)
         self.assertIn("THREADS TRUNCATED", out)
 
     def test_an_untruncated_thread_page_carries_no_marker_or_block(self) -> None:
@@ -2764,10 +2764,10 @@ class TestCopilotHistoryReadings(GqlCase):
         """The gap #985 fixes: an outage outlasting HISTORY_PRS pull requests must not silently
         revert every caller to blind polling for the rest of the outage."""
         self.answer(payload([]))
-        seen: list[int] = []
+        seen: list[object] = []
 
         def fake(_query: str, **variables: object) -> dict:
-            seen.append(variables["prs"])  # type: ignore[arg-type]
+            seen.append(variables["prs"])
             if variables["prs"] == pr_review.HISTORY_PRS:
                 return {"repository": {"pullRequests": {"nodes": []}}}
             return {"repository": {"pullRequests": {"nodes": [hist_review(900, QUOTA_REFUSED)]}}}
@@ -2780,10 +2780,10 @@ class TestCopilotHistoryReadings(GqlCase):
     def test_a_narrow_window_carrying_history_never_widens(self) -> None:
         """The ordinary case costs one call, not two."""
         self.answer(payload([]))
-        seen: list[int] = []
+        seen: list[object] = []
 
         def fake(_query: str, **variables: object) -> dict:
-            seen.append(variables["prs"])  # type: ignore[arg-type]
+            seen.append(variables["prs"])
             return {"repository": {"pullRequests": {"nodes": [hist_review(900, QUOTA_REFUSED)]}}}
 
         self.enterContext(mock.patch.object(pr_review, "gh_graphql", side_effect=fake))

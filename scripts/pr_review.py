@@ -41,8 +41,8 @@ Subcommands
            whoever opened it and `unresolved=0` once hid one of theirs that still did (PR #915).
            Both `threads=` and `unresolved=` are read from a single 100-thread page with no
            further pagination, so a pull request carrying more than that undercounts silently
-           past that point: `threads=` prints a trailing `+` and a `THREADS TRUNCATED` block
-           follows, naming the gap rather than leaving the two counts to be trusted as whole
+           past that point: both fields print a trailing `+` and a `THREADS TRUNCATED` block
+           follows, naming the gap rather than leaving either count to be trusted as whole
            (#973). Reading past the cut needs `reply`'s own paginated walk instead.
            Neither is read past that: no coverage, no refusal, no suppressed-finding parsing, no
            `wait`/request support, each being its own format and its own future task. Where
@@ -1542,8 +1542,10 @@ def digest(
         # `QUOTA` is its own value rather than folded into `YES`, since its remedy is neither a re-request nor a split.
         # It is the account-level state `status`/`wait` name distinctly.
         f"refusal={refusal_field} "
-        # A trailing `+` says the two counts right after it undercount, rather than a reader having to notice a fourth field further down to learn the same thing.
-        f"threads={len(threads)}{'+' if truncated else ''} unresolved={len(unresolved)}{breakdown} "
+        # A trailing `+` says the count right before it undercounts, rather than a reader having to notice a fourth field further down to learn the same thing.
+        # `unresolved` is drawn from the same truncated `threads` list, so a cut page can hide an open thread exactly as easily as it hides a resolved one, and both counts carry the marker.
+        f"threads={len(threads)}{'+' if truncated else ''} "
+        f"unresolved={len(unresolved)}{'+' if truncated else ''}{breakdown} "
         f"suppressed={sum(finding_count(b) for n, b in blocks)} "
         f"(on_head={sum(finding_count(b) for b in on_head_blocks)} earlier={stale}) "
         f"answered_outside_review={answered} "
