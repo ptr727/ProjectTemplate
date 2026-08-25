@@ -176,15 +176,11 @@ refresh_snaps() {
 upgradable_count() {
     # A failed listing and a listing that genuinely found nothing upgradable both read as "no matches" through grep alone, so the two are told apart here rather than both printing 0.
     # This only ever backs a status report, so the answer here is "unknown" rather than a die: nothing downstream mutates on the strength of this count.
-    local out err_file status=0
-    # This runs inside $(upgradable_count), where the script's own set -e does not reach without "shopt -s inherit_errexit", unset here, so a failed mktemp is checked explicitly rather than left to abort the function on its own.
-    err_file=$(mktemp "$TMP_DIR/upgradable-count.XXXXXX") || {
-        printf 'unknown, could not create a diagnostic capture file'
-        return 0
-    }
-    out=$(apt list --upgradable 2>"$err_file") || status=$?
+    local out status=0
+    out=$(apt list --upgradable 2>/dev/null) || status=$?
     if [[ $status -ne 0 ]]; then
-        printf 'unknown, apt list --upgradable failed (exit %s): %s' "$status" "$(tr '\n' ' ' <"$err_file" | cut -c1-200)"
+        # Re-run once more, stdout discarded this time, so the diagnostic comes from a pipe head bounds in memory rather than a file this would otherwise have to size-cap and clean up itself.
+        printf 'unknown, apt list --upgradable failed (exit %s): %s' "$status" "$(apt list --upgradable 2>&1 >/dev/null | head -c 200 | tr '\n' ' ')"
         return 0
     fi
     printf '%s package(s), against the lists as they stand' "$(grep -c '/' <<<"$out" || true)"
