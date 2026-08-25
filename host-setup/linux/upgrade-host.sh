@@ -179,7 +179,8 @@ upgradable_count() {
     local out status=0
     out=$(apt list --upgradable 2>/dev/null) || status=$?
     if [[ $status -ne 0 ]]; then
-        printf 'unknown, apt list --upgradable failed (exit %s)' "$status"
+        # Re-run once more, stdout discarded this time, so the diagnostic comes from a pipe head bounds in memory rather than a file this would otherwise have to size-cap and clean up itself.
+        printf 'unknown, apt list --upgradable failed (exit %s): %s' "$status" "$(apt list --upgradable 2>&1 >/dev/null | head -c 200 | tr '\n' ' ')"
         return 0
     fi
     printf '%s package(s), against the lists as they stand' "$(grep -c '/' <<<"$out" || true)"
