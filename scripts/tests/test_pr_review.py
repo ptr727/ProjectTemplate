@@ -265,6 +265,7 @@ def payload(
     rollup_oid: str | None = None,
     files: list[str] | None = None,
     more_files: bool = False,
+    more_threads: bool = False,
 ) -> dict:
     requested = (
         [{"requestedReviewer": {"__typename": "Bot", "login": pr_review.REVIEWER}}]
@@ -283,7 +284,10 @@ def payload(
             "pageInfo": {"hasNextPage": more_files},
         },
         "reviews": {"nodes": reviews, "pageInfo": {"hasPreviousPage": older_reviews}},
-        "reviewThreads": {"nodes": threads or []},
+        "reviewThreads": {
+            "nodes": threads or [],
+            "pageInfo": {"hasNextPage": more_threads},
+        },
         "comments": {"nodes": comments or [], "pageInfo": {"hasPreviousPage": older}},
         "reviewRequests": {"nodes": requested},
         "commits": {
@@ -441,6 +445,13 @@ class TestAnsweredOutsideReview(unittest.TestCase):
         self.assertIsNone(pr_review.answered_outside_review(pr))
         self.assertFalse(pr_review.window_blind(pr, "comments"))
 
+    def test_threads_truncated_reads_the_review_threads_page_info(self) -> None:
+        """Unlike `window_blind`'s `last`-windowed connections, `reviewThreads` reads forward
+        from the first page, so `hasNextPage` alone says a page was cut, with nothing in view
+        to settle which end (#973)."""
+        self.assertTrue(pr_review.threads_truncated(payload([review()], more_threads=True)))
+        self.assertFalse(pr_review.threads_truncated(payload([review()], more_threads=False)))
+
 
 class TestReviewEffort(unittest.TestCase):
     """Review effort is observed from completed review metadata and never selected here."""
@@ -502,6 +513,22 @@ class TestDigest(GqlCase):
         self.assertIn("threads=2", out)
         self.assertIn("unresolved=1", out)
         self.assertIn("merge=CLEAN", out)
+
+    def test_a_truncated_thread_page_marks_the_summary_and_names_the_gap(self) -> None:
+        """#973: `reviewThreads(first:100)` carries no cursor, so a pull request with more than
+        that many threads must say so rather than letting `threads=`/`unresolved=` undercount
+        silently. The connection reads oldest-first, so what is cut is the newest threads."""
+        self.answer(payload([review()], [thread("T1")], more_threads=True))
+        out, unresolved = pr_review.digest("o", "r", 7)
+        self.assertEqual(1, unresolved)
+        self.assertIn("threads=1+ unresolved=1+", out)
+        self.assertIn("THREADS TRUNCATED", out)
+
+    def test_an_untruncated_thread_page_carries_no_marker_or_block(self) -> None:
+        self.answer(payload([review()], [thread("T1")], more_threads=False))
+        out, _ = pr_review.digest("o", "r", 7)
+        self.assertIn("threads=1 unresolved=1", out)
+        self.assertNotIn("THREADS TRUNCATED", out)
 
     def test_review_on_head_reports_no_when_every_round_is_stale(self) -> None:
         """`NO` is upper-case on purpose, so the one state that blocks a merge is not skimmed past."""
@@ -2434,7 +2461,7 @@ class TestCli(GqlCase):
 
         def fake(query: str, **variables: object) -> dict:
             calls.append((query, variables))
-            if f"pullRequests(first:{pr_review.HISTORY_PRS}" in query:
+            if "pullRequests(first:$prs" in query:
                 return {"repository": {"pullRequests": {"nodes": prs}}}
             if "requestReviews" in query:
                 return {"requestReviews": {"pullRequest": {"id": variables.get("pr")}}}
@@ -2479,6 +2506,44 @@ class TestCli(GqlCase):
         self.assertEqual(1, slept.call_count)
         self.assertFalse([c for c in calls if "requestReviews" in c[0]])
         self.assertIn("no Copilot review found", self.out.getvalue())
+
+    def test_wait_widens_the_lookback_when_the_narrow_window_is_empty(self) -> None:
+        """The end-to-end path for #985: `wait`'s own auto-request still finds a bot id once
+        the narrow window has aged out, rather than falling back to polling only."""
+        self.answer(payload([review(oid=OLD)]), payload([review()]))
+        calls: list[tuple[str, dict]] = []
+
+        def fake(query: str, **variables: object) -> dict:
+            calls.append((query, variables))
+            if "pullRequests(first:$prs" in query:
+                if variables.get("prs") == pr_review.HISTORY_PRS:
+                    return {"repository": {"pullRequests": {"nodes": []}}}
+                node = {
+                    "number": 1,
+                    "reviews": {
+                        "nodes": [
+                            {
+                                "author": {
+                                    "__typename": "Bot",
+                                    "login": pr_review.REVIEWER,
+                                    "id": "BOT_999",
+                                }
+                            }
+                        ]
+                    },
+                }
+                return {"repository": {"pullRequests": {"nodes": [node]}}}
+            if "requestReviews" in query:
+                return {"requestReviews": {"pullRequest": {"id": variables.get("pr")}}}
+            raise AssertionError(f"unexpected document: {query[:60]}")
+
+        self.enterContext(mock.patch.object(pr_review, "gh_graphql", side_effect=fake))
+        with mock.patch.object(pr_review.time, "sleep") as slept:
+            self.assertEqual(0, self.cli(["wait", "7"]))
+        self.assertEqual(1, slept.call_count)
+        mutations = [(q, v) for q, v in calls if "requestReviews" in q]
+        self.assertEqual(1, len(mutations))
+        self.assertEqual("BOT_999", mutations[0][1].get("bot"))
 
     def test_an_already_requested_review_is_not_re_requested(self) -> None:
         """Calling `wait` twice on the same pending request never double-requests it."""
@@ -2694,6 +2759,51 @@ class TestCopilotHistoryReadings(GqlCase):
         )
         history = pr_review.copilot_history("o", "r")
         self.assertEqual([969, 962], [number for number, _ in history])
+
+    def test_an_empty_narrow_window_widens_before_giving_up(self) -> None:
+        """The gap #985 fixes: an outage outlasting HISTORY_PRS pull requests must not silently
+        revert every caller to blind polling for the rest of the outage."""
+        self.answer(payload([]))
+        seen: list[object] = []
+
+        def fake(_query: str, **variables: object) -> dict:
+            seen.append(variables["prs"])
+            if variables["prs"] == pr_review.HISTORY_PRS:
+                return {"repository": {"pullRequests": {"nodes": []}}}
+            return {"repository": {"pullRequests": {"nodes": [hist_review(900, QUOTA_REFUSED)]}}}
+
+        self.enterContext(mock.patch.object(pr_review, "gh_graphql", side_effect=fake))
+        history = pr_review.copilot_history("o", "r")
+        self.assertEqual([pr_review.HISTORY_PRS, pr_review.HISTORY_PRS_WIDE], seen)
+        self.assertEqual([900], [number for number, _ in history])
+
+    def test_a_narrow_window_carrying_history_never_widens(self) -> None:
+        """The ordinary case costs one call, not two."""
+        self.answer(payload([]))
+        seen: list[object] = []
+
+        def fake(_query: str, **variables: object) -> dict:
+            seen.append(variables["prs"])
+            return {"repository": {"pullRequests": {"nodes": [hist_review(900, QUOTA_REFUSED)]}}}
+
+        self.enterContext(mock.patch.object(pr_review, "gh_graphql", side_effect=fake))
+        pr_review.copilot_history("o", "r")
+        self.assertEqual([pr_review.HISTORY_PRS], seen)
+
+    def test_both_windows_empty_still_carries_no_signal_and_no_bot_id(self) -> None:
+        """An outage wide enough to empty HISTORY_PRS_WIDE too is a real, if rarer, case: still
+        no id to request with and no fabricated one, rather than a crash on the second call."""
+        self.answer(payload([]))
+        self.enterContext(
+            mock.patch.object(
+                pr_review,
+                "gh_graphql",
+                return_value={"repository": {"pullRequests": {"nodes": []}}},
+            )
+        )
+        history = pr_review.copilot_history("o", "r")
+        self.assertEqual([], history)
+        self.assertIsNone(pr_review.copilot_bot_id(history))
 
     def test_an_empty_history_carries_no_signal_and_no_bot_id(self) -> None:
         self.assertIsNone(pr_review.quota_signal([]))
