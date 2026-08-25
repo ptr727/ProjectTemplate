@@ -1718,10 +1718,10 @@ def classify_verbatim(down_text, canon_text, past_texts):
 def _git_revisions(rel_path):
     """Every commit that touched rel_path in the hub's history, newest first, as (date, sha, text).
 
-    `text` is None where `git show` failed (rare: a permission or encoding fluke, never absence -
-    the commit came from `git log -- rel_path`, so the path existed at that revision). Cached
-    because one canonical's history is read once per fidelity/staleness check, then reused for
-    every audited repo's copy.
+    `text` is None where `git show` failed (rare: a permission or encoding fluke, not absence,
+    since the commit came from `git log -- rel_path` and so the path existed at that revision).
+    Cached because one canonical's history is read once per fidelity/staleness check, then reused
+    for every audited repo's copy.
     """
     r = subprocess.run(
         ["git", "log", "--format=%cI %H", "--", rel_path],
@@ -1730,7 +1730,12 @@ def _git_revisions(rel_path):
         text=True,
         check=False,
     )
-    if r.returncode != 0 or not r.stdout.strip():
+    if r.returncode != 0:
+        # A real command failure (not a git repo, a corrupt object) must not read as "no
+        # history": that silently clears the intent-staleness advisory and drops verbatim's
+        # past-revision list, both misreporting a tool fault as a clean audit.
+        raise RuntimeError(f"git log failed for {rel_path}: {r.stderr.strip()}")
+    if not r.stdout.strip():
         return []
     out = []
     for line in r.stdout.splitlines():
@@ -3185,9 +3190,7 @@ def _selftest():
             "  ok   needs-mask: pruned needs (inline, block, scalar) normalizes equal, forked step differs, next key preserved"
         )
 
-    # _last_effective_change: the intent-staleness date must skip a normalized-only bump (a
-    # Dependabot pin, per ptr727/ProjectTemplate#735) and keep walking history for a real change,
-    # falling back to the creation revision if every bump back to it was normalized-only.
+    # _last_effective_change must skip a normalized-only bump, per ptr727/ProjectTemplate#735.
     d3, d2, d1 = (
         "2024-03-01T00:00:00+00:00",
         "2024-02-01T00:00:00+00:00",
