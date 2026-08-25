@@ -7,6 +7,8 @@ Run as `python3 scripts/tests/test_skills_install.py`, or under `python3 -m unit
 
 from __future__ import annotations
 
+import contextlib
+import io
 import json
 import os
 import shutil
@@ -398,6 +400,16 @@ class MainExitCodeCase(unittest.TestCase):
     def test_claude_absent_is_a_partial_install_not_a_failure(self) -> None:
         mock.patch("skills_install.claude_available", return_value=False).start()
         self.assertEqual(skills_install.main(), 0)
+
+    def test_skills_and_marketplace_outcomes_print_on_separate_lines(self) -> None:
+        mock.patch("skills_install.claude_available", return_value=True).start()
+        mock.patch("skills_install.register_claude_marketplace", return_value=True).start()
+        out = io.StringIO()
+        with contextlib.redirect_stdout(out):
+            skills_install.main()
+        lines = out.getvalue().splitlines()
+        self.assertIn(f"Skills materialized to {self.tmp / 'skills'}.", lines)
+        self.assertIn("Claude Code marketplace registered: True.", lines)
 
 
 LINUX_WRAPPER = (
