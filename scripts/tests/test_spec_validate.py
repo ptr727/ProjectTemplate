@@ -207,6 +207,22 @@ class DescriptionErrorsCase(unittest.TestCase):
             ["Fixture: description carries Markdown links - keep it link-free plain text"],
         )
 
+    def test_a_link_nested_inside_a_non_link_bracket_run_is_still_rejected(self) -> None:
+        # A failed outer span used to jump past the whole run instead of retrying one character in.
+        # That skipped the valid inner link in `[[docs](url)]` (#1011, qodo).
+        self.assertEqual(
+            validate.description_errors("Fixture", "See [[docs](url)] for more."),
+            ["Fixture: description carries Markdown links - keep it link-free plain text"],
+        )
+
+    def test_an_escaped_bracket_inside_a_label_does_not_corrupt_the_match(self) -> None:
+        # A backslash-escaped `\[` used to count as real nesting, corrupting the label match.
+        # It reads as a literal character instead (#1011, qodo).
+        self.assertEqual(
+            validate.description_errors("Fixture", r"See [API \[docs](url) for more."),
+            ["Fixture: description carries Markdown links - keep it link-free plain text"],
+        )
+
     def test_leading_or_trailing_whitespace_is_rejected(self) -> None:
         # Not silently trimmed here, even though spec/audit.py and configure.sh both strip it defensively.
         # Rejecting it at the source keeps the registry's own text the exact canonical form every mirror carries.

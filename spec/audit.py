@@ -638,11 +638,20 @@ def _bracket_matches(text, open_char, close_char):
     version O(N^2) on a run of N unmatched opens (#1011, CodeRabbit). A close pops the most recently pushed
     open, the same pairing a fresh depth count from that open would find, so this is one pass, not N.
     An open with no closing partner, or a close with nothing open, is left out of the map, same as before.
+
+    A backslash-escaped delimiter (`\\[`, `\\]`, `\\(`, `\\)`) is skipped rather than pushed or popped,
+    matching Markdown's own escaping rule, so a literal bracket inside a label does not corrupt the nesting
+    count (#1011, qodo).
     """
     stack = []
     matches = {}
+    escaped = False
     for i, c in enumerate(text):
-        if c == open_char:
+        if escaped:
+            escaped = False
+        elif c == "\\":
+            escaped = True
+        elif c == open_char:
             stack.append(i)
         elif c == close_char and stack:
             matches[stack.pop()] = i + 1
@@ -677,7 +686,10 @@ def markdown_link_spans(text):
             yield i, ref_end, label
             i = ref_end
             continue
-        i = label_end
+        # This span is not itself a link.
+        # A nested bracket run starting inside it may still be one, e.g. `[[docs](url)]`.
+        # Retry one character in rather than skipping past the whole span (#1011, qodo).
+        i += 1
 
 
 def strip_md_links(text):
@@ -3458,16 +3470,24 @@ def _selftest():
     # Description mirror: links reduce to their text, and a link-free line passes through unchanged.
     linked = "Utility to clean [media](https://x.example/Foo_(bar)) per the [spec][spec-ref]."
     nested = "See [API [docs]](https://example.test/a_(b)_(c)) for details."
+    # A failed outer span used to jump past the whole run instead of retrying one character in,
+    # so a link nested inside a non-link bracket run was skipped (#1011, qodo).
+    inner_link = "See [[docs](url)] for details."
+    # A backslash-escaped `\[` used to count as real nesting, corrupting the label match instead
+    # of being read as a literal character (#1011, qodo).
+    escaped_bracket = r"See [API \[docs](url) for details."
     if (
         strip_md_links(linked) != "Utility to clean media per the spec."
         or strip_md_links("Plain intro line.") != "Plain intro line."
         or strip_md_links(nested) != "See API [docs] for details."
+        or strip_md_links(inner_link) != "See [docs] for details."
+        or strip_md_links(escaped_bracket) != r"See API \[docs for details."
     ):
         ok = False
         print("  FAIL description: strip_md_links behavior")
     else:
         print(
-            "  ok   description: Markdown links reduce to their text, plain text passes through, nested brackets/parens balance"
+            "  ok   description: Markdown links reduce to their text, plain text passes through, nested brackets/parens balance, nested and escaped labels handled"
         )
     # A run of unmatched '[' used to re-scan the remaining text from every position (#1011, CodeRabbit),
     # O(N^2) on a README tagline read before any length limit. Linear now: a slow run means a regression.

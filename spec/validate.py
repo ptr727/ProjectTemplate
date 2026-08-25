@@ -56,11 +56,20 @@ def _bracket_matches(text, open_char, close_char):
     implementation). A close pops the most recently pushed open, the same pairing a fresh depth count from
     that open would find, so this is one pass, not N. An open with no closing partner, or a close with
     nothing open, is left out of the map, same as before.
+
+    A backslash-escaped delimiter (`\\[`, `\\]`, `\\(`, `\\)`) is skipped rather than pushed or popped,
+    matching Markdown's own escaping rule, so a literal bracket inside a label does not corrupt the nesting
+    count (#1011, qodo).
     """
     stack = []
     matches = {}
+    escaped = False
     for i, c in enumerate(text):
-        if c == open_char:
+        if escaped:
+            escaped = False
+        elif c == "\\":
+            escaped = True
+        elif c == open_char:
             stack.append(i)
         elif c == close_char and stack:
             matches[stack.pop()] = i + 1
@@ -89,7 +98,10 @@ def contains_description_markdown_link(text):
             return True
         if label_end < n and text[label_end] == "[" and label_end in bracket_close:
             return True
-        i = label_end
+        # This span is not itself a link.
+        # A nested bracket run starting inside it may still be one, e.g. `[[docs](url)]`.
+        # Retry one character in rather than skipping past the whole span (#1011, qodo).
+        i += 1
     return False
 
 
