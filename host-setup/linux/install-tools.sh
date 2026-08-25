@@ -241,8 +241,13 @@ apt_install_displacing() {
         return 0
     fi
 
+    # The simulation is what removals are previewed from, so a simulation that fails to run at all must not read the same as a simulation that ran and found nothing to remove (issue #954).
+    local sim
+    sim=$(apt-get -s install "$package" 2>&1) ||
+        die "apt-get -s install $package failed, so removals cannot be previewed before the real install runs: $sim"
+
     local -a removals=()
-    readarray -t removals < <(apt-get -s install "$package" 2>/dev/null | awk '/^Remv / { print $2 }')
+    readarray -t removals < <(awk '/^Remv / { print $2 }' <<<"$sim")
     if [[ ${#removals[@]} -gt 0 ]]; then
         log "  Installing $package removes ${#removals[@]} package(s): ${removals[*]}"
         log "  Their dependencies are left installed, for a later apt autoremove to clean up"
@@ -1410,11 +1415,15 @@ configure_sudo_timestamp() {
     "${SUDO[@]}" cmp -s "$staged" "$SUDOERS_FILE" 2>/dev/null && own_current=true
 
     # Another file setting either option is named rather than merged into, since which one wins is the order sudo reads them in and not something this can decide.
-    local elsewhere
+    local elsewhere status=0
     # A name holding a dot or ending in a tilde is one sudo skips, this run's own staged file included, so a setting in it is an override sudo never reads.
     elsewhere=$("${SUDO[@]}" grep -rnsE '^[[:space:]]*Defaults.*timestamp_(type|timeout)' \
         --exclude='*.*' --exclude='*~' --exclude="${SUDOERS_FILE##*/}" \
-        /etc/sudoers /etc/sudoers.d 2>/dev/null) || elsewhere=""
+        /etc/sudoers /etc/sudoers.d 2>&1) || status=$?
+    # Grep exits 1 for "no matches", the ordinary and expected case; anything higher means the scan itself did not complete, and this must not write or delete a sudoers file on the strength of a scan that never actually ran (issue #954).
+    if [[ $status -gt 1 ]]; then
+        die "Scanning /etc/sudoers and /etc/sudoers.d for other timestamp_type/timestamp_timeout entries failed (grep exit $status): $elsewhere"
+    fi
 
     # Only this user's own entry is ever a delete candidate; a different user's entry, or one with no user named at all, changes something beyond what this run was asked to change, so it is reported and left alone.
     local -a delete_files=() unsafe_files=()

@@ -92,6 +92,8 @@ resolve_ref() {
 
     # An unauthenticated request is rate limited per address, so a busy network can lose the lookup while the download itself is fine.
     # The run continues and says it cannot name its own revision, which is worth a warning rather than a refusal.
+    # Deliberately lenient (issue #954): unlike the other host-setup precondition checks, this one gates no mutation.
+    # The download step falls back to fetching $REF by name when RESOLVED is empty, exactly as it would if resolve_ref did not exist, and it has its own die on a real download failure, so a lost lookup here cannot make a download look like it succeeded when it did not.
     warn "Could not resolve $REF to a commit, so this run cannot be attributed to one"
     RESOLVED=""
     return 0
