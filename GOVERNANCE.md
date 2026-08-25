@@ -214,7 +214,7 @@ This section and [`WORKFLOW.md`](./WORKFLOW.md) keep the full rules, this sectio
 
 ### Running the Linters Locally (Known-Working Invocations)
 
-CI runs the full lint set, but run the linters locally before pushing to catch issues early, so an agent must know how to invoke them. Their non-Docker install paths (curl-pipe installers, global npm) are frequently blocked in sandboxes or fail on WSL, so **prefer the Docker invocations below, the known-working path that needs no local toolchain.** These tools auto-discover their targets from the working directory.
+CI runs the full lint set, but run the linters locally before pushing to catch issues early, so an agent must know how to invoke them. Their non-Docker install paths (curl-pipe installers, global npm) are frequently blocked in sandboxes or fail on WSL, so **prefer the Docker invocations below, the known-working path that needs no local toolchain.** These tools auto-discover their targets from the working directory. None of markdownlint, cspell, actionlint, editorconfig-checker, shellcheck, shfmt, or PSScriptAnalyzer is installed natively on a fleet host, by decision, so a `command -v <tool>` miss means exactly that and not that the check is unavailable here: read this section for the working invocation before reporting a check as skipped or unavailable.
 
 **Each surface runs the lint with the tool that fits it, all from the same config files** (`.markdownlint-cli2.jsonc`, `cspell.json`, `.editorconfig`):
 
