@@ -42,10 +42,67 @@ CONTRACT_KEYS = {
 MARKDOWN_INLINE_LINK = re.compile(r"\]\((?P<target>[^)\s]+)")
 MARKDOWN_REFERENCE_LINK = re.compile(r"^\[[^]]+\]:\s*(?P<target>\S+)", re.MULTILINE)
 TEMPLATE_REPOSITORY_URL = "https://github.com/ptr727/ProjectTemplate"
-# A description-shaped link use, `[text](url)` or `[text][ref]`, kept in sync with spec/audit.py's strip_md_links().
-# The carried-link regexes above find a definition's target inside a whole document, not a use inside one short string.
-DESCRIPTION_LINK_INLINE = re.compile(r"\[([^\]]*)\]\((?:[^()]|\([^()]*\))*\)")
-DESCRIPTION_LINK_REF = re.compile(r"\[([^\]]*)\]\[[^\]]*\]")
+
+
+def _bracket_matches(text, open_char, close_char):
+    """Map from each open_char index in text to the index just past its balanced close_char.
+
+    A character class like `[^\\]]*` cannot count depth, so it stops at the first close and misses a link
+    label carrying its own nested brackets, e.g. `[API [docs]](url)`. Counting only open_char/close_char
+    nesting, ignoring the other bracket type, needs one such map per bracket type rather than one pass
+    mixing both. Built with a single left-to-right stack pass over the whole text rather than one depth-
+    counting scan per open position: re-scanning from every unmatched open is what made a prior version of
+    this walk O(N^2) on a run of N unmatched opens (#1011, CodeRabbit, on spec/audit.py's sibling
+    implementation). A close pops the most recently pushed open, the same pairing a fresh depth count from
+    that open would find, so this is one pass, not N. An open with no closing partner, or a close with
+    nothing open, is left out of the map, same as before.
+
+    A backslash-escaped delimiter (`\\[`, `\\]`, `\\(`, `\\)`) is skipped rather than pushed or popped,
+    matching Markdown's own escaping rule, so a literal bracket inside a label does not corrupt the nesting
+    count (#1011, qodo).
+    """
+    stack = []
+    matches = {}
+    escaped = False
+    for i, c in enumerate(text):
+        if escaped:
+            escaped = False
+        elif c == "\\":
+            escaped = True
+        elif c == open_char:
+            stack.append(i)
+        elif c == close_char and stack:
+            matches[stack.pop()] = i + 1
+    return matches
+
+
+def contains_description_markdown_link(text):
+    """Whether `text` carries a `[text](url)` or `[text][ref]` use, brackets/parens balanced.
+
+    Kept in sync with spec/audit.py's markdown_link_spans(), which needs the same balanced-nesting rule for
+    the same reason: this is a description-shaped link use inside one short string, not the carried-link
+    regexes above, which find a definition's target inside a whole document.
+    """
+    bracket_close = _bracket_matches(text, "[", "]")
+    paren_close = _bracket_matches(text, "(", ")")
+    i, n = 0, len(text)
+    while i < n:
+        if text[i] != "[":
+            i += 1
+            continue
+        label_end = bracket_close.get(i)
+        if label_end is None:
+            i += 1
+            continue
+        if label_end < n and text[label_end] == "(" and label_end in paren_close:
+            return True
+        if label_end < n and text[label_end] == "[" and label_end in bracket_close:
+            return True
+        # This span is not itself a link.
+        # A nested bracket run starting inside it may still be one, e.g. `[[docs](url)]`.
+        # Retry one character in rather than skipping past the whole span (#1011, qodo).
+        i += 1
+    return False
 
 
 def load(rel):
@@ -113,7 +170,7 @@ def description_errors(name, desc):
         return [
             f"{name}: description must be plain single-line text with no leading or trailing whitespace"
         ]
-    if DESCRIPTION_LINK_INLINE.search(desc) or DESCRIPTION_LINK_REF.search(desc):
+    if contains_description_markdown_link(desc):
         return [f"{name}: description carries Markdown links - keep it link-free plain text"]
     if len(desc) > 100:
         return [f"{name}: description is {len(desc)} characters, over the 100-char limit"]
