@@ -282,9 +282,9 @@ def main():
     stamp_path.write_text(
         json.dumps(build_stamp(claude_registered), indent=2) + "\n", encoding="utf-8"
     )
-    print(
-        f"Installed to {home / 'skills'}. Claude Code marketplace registered: {claude_registered}."
-    )
+    # Two independent operations get separate lines, not one combined sentence.
+    print(f"Skills materialized to {home / 'skills'}.")
+    print(f"Claude Code marketplace registered: {claude_registered}.")
 
     # `claude` missing is a partial-but-expected install (a Codex/opencode-only machine).
     # `claude` present but registration failing is a real failure.
