@@ -13,7 +13,7 @@
         { "path": "README.md", "appliesTo": "*" },
         { "path": "HISTORY.md", "appliesTo": "*" },
         { "path": "OPERATIONS.md", "appliesTo": "*" },
-        { "path": ".github/copilot-instructions.md", "fidelity": "intent", "whole": true, "sections": ["Commit Messages and Pull Request Titles", "Reviewing Carried Fleet Content", "GitHub Copilot Review Runbook"], "placeholders": ["<owner>", "<repo>", "<N>"], "appliesTo": "*" },
+        { "path": ".github/copilot-instructions.md", "fidelity": "intent", "whole": true, "sections": ["Commit Messages and Pull Request Titles", "Reviewing Carried Fleet Content", "GitHub Copilot Review Runbook", "When in Doubt"], "placeholders": ["<owner>", "<repo>", "<N>"], "appliesTo": "*" },
         { "path": ".editorconfig", "fidelity": "intent", "whole": true, "intentRef": "GOVERNANCE.md#line-endings", "appliesTo": "*" },
         { "path": ".editorconfig-checker.json", "fidelity": "intent", "whole": true, "intentRef": "GOVERNANCE.md#line-endings", "appliesTo": "*" },
         { "path": ".gitattributes", "fidelity": "intent", "whole": true, "intentRef": "GOVERNANCE.md#line-endings", "appliesTo": "*" },
