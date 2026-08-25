@@ -2970,8 +2970,7 @@ def _selftest():
             "  deploy:\n    name: &lbl |",
         ),
         (
-            # A bare sequence item (a matrix string) has no key at all, so its own boundary is the
-            # dash's column: content one past the dash parses, content at or before it does not.
+            # A bare sequence item (a matrix string) has no key, so its boundary is the dash's column.
             "a bare sequence-item block scalar (`- |`, a matrix string) still drops its body",
             "  include:\n    - |\n      TOKEN\n",
             "  include:\n    - |",
