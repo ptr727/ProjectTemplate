@@ -656,7 +656,7 @@ def request_copilot_review(pr_node_id: str, bot_id: str | None) -> str:
         return (
             f"no Copilot review found across the last {HISTORY_PRS} or, widened once for "
             f"exactly this reason, the last {HISTORY_PRS_WIDE} most-recently-updated pull "
-            "requests to read the reviewer bot id from, so nothing was requested here; "
+            "requests to read the reviewer bot id from, so nothing was requested here, "
             "polling only. Seed one via the UI if this repository has never had one at all."
         )
     gh_graphql(M_REQUEST_REVIEWS, pr=pr_node_id, bot=bot_id)
@@ -1664,7 +1664,7 @@ def digest(
             "  THREADS TRUNCATED: this pull request carries more review threads than the "
             "100 read here, and the connection reads oldest-first, so the ones cut off are "
             "the newest rather than the oldest, exactly the ones most likely to still be "
-            "open. `threads=` and `unresolved=` above undercount; read the rest with "
+            "open. `threads=` and `unresolved=` above undercount. Read the rest with "
             "`reply`'s own paginated walk before trusting either number"
         )
     if answer:
