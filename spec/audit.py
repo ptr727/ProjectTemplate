@@ -1722,11 +1722,12 @@ def _git_revisions(rel_path):
     `text` is None where rel_path has no file content at this revision: absent (deleted, checked
     against the revision's own tree rather than `git show`'s stderr wording, which reads
     differently once rel_path exists again in a later commit), or present as something other than
-    a regular file (a directory from a file-to-directory transition, a submodule gitlink). A
-    `git show` failure for any other reason (a permission or encoding fluke, a corrupt object)
-    raises instead of folding into the same None, so a real command fault cannot pass as an
-    ordinary absence. Cached because one canonical's history is read once per fidelity/staleness
-    check, then reused for every audited repo's copy.
+    a regular file, by ls-tree mode rather than type (a directory from a file-to-directory
+    transition, a symlink, whose ls-tree type is "blob" too but whose content is its target path
+    rather than a file's, a submodule gitlink). A `git show` failure for any other reason (a
+    permission or encoding fluke, a corrupt object) raises instead of folding into the same None,
+    so a real command fault cannot pass as an ordinary absence. Cached because one canonical's
+    history is read once per fidelity/staleness check, then reused for every audited repo's copy.
     """
     r = subprocess.run(
         ["git", "log", "--format=%cI %H", "--", rel_path],
@@ -1757,11 +1758,13 @@ def _git_revisions(rel_path):
             # only for that, never for a merely absent path (empty stdout, exit 0, below).
             raise RuntimeError(f"git ls-tree failed for {sha}:{rel_path}: {t.stderr.strip()}")
         entry = t.stdout.strip()
-        entry_type = entry.split(None, 2)[1] if entry else None
-        if entry_type != "blob":
+        mode = entry.split(None, 1)[0] if entry else None
+        if mode not in ("100644", "100755"):
             # Absent (empty stdout), or present as something other than a regular file (a
-            # directory from a file-to-directory transition, a submodule gitlink): neither has
-            # file content to compare, so both read the same as a confirmed deletion.
+            # directory from a file-to-directory transition, a symlink, a submodule gitlink):
+            # none has file content to compare, so all read the same as a confirmed deletion. A
+            # symlink's ls-tree type is "blob" too (its content is the link target), so the mode
+            # is checked directly rather than the type.
             out.append((date, sha, None))
             continue
         # Decode as UTF-8 with replacement to match the downstream and canonical reads.
@@ -3358,6 +3361,51 @@ def _selftest():
         ok = False
     print(
         f"  {'ok  ' if got == want else 'FAIL'} want={want!s:<24} got={got!s:<24}  _git_revisions: file-to-directory transition"
+    )
+
+    # _git_revisions: a path that becomes a symlink reads as None too, per
+    # ptr727/ProjectTemplate#1016 (a symlink's ls-tree type is "blob", but git show returns its
+    # target path, not file content).
+    with tempfile.TemporaryDirectory() as tmp_root:
+        tmp_root_path = pathlib.Path(tmp_root)
+        for cmd in (
+            ["git", "init", "-q"],
+            ["git", "config", "user.email", "test@test.invalid"],
+            ["git", "config", "user.name", "test"],
+        ):
+            subprocess.run(cmd, cwd=tmp_root_path, check=True, capture_output=True)
+        rel = "thing"
+        (tmp_root_path / rel).write_text("v1\n")
+        subprocess.run(["git", "add", rel], cwd=tmp_root_path, check=True, capture_output=True)
+        subprocess.run(
+            ["git", "commit", "-q", "-m", "file"],
+            cwd=tmp_root_path,
+            check=True,
+            capture_output=True,
+        )
+        subprocess.run(["git", "rm", "-q", rel], cwd=tmp_root_path, check=True, capture_output=True)
+        (tmp_root_path / rel).symlink_to("target")
+        subprocess.run(["git", "add", rel], cwd=tmp_root_path, check=True, capture_output=True)
+        subprocess.run(
+            ["git", "commit", "-q", "-m", "now a symlink"],
+            cwd=tmp_root_path,
+            check=True,
+            capture_output=True,
+        )
+        saved_root = ROOT
+        ROOT = tmp_root_path
+        try:
+            _git_revisions.cache_clear()
+            revisions = _git_revisions(rel)
+        finally:
+            ROOT = saved_root
+            _git_revisions.cache_clear()
+    got = [text for _, _, text in revisions]
+    want = [None, "v1\n"]
+    if got != want:
+        ok = False
+    print(
+        f"  {'ok  ' if got == want else 'FAIL'} want={want!s:<24} got={got!s:<24}  _git_revisions: file-to-symlink transition"
     )
 
     # Region extraction and hashing: a forked github-release block must hash differently from the canonical.
