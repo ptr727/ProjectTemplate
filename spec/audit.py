@@ -1719,11 +1719,13 @@ def classify_verbatim(down_text, canon_text, past_texts):
 def _git_revisions(rel_path):
     """Every commit that touched rel_path in the hub's history, newest first, as (date, sha, text).
 
-    `text` is None for a confirmed deletion, checked against the revision's own tree rather than
-    `git show`'s stderr wording (which reads differently once rel_path exists again in a later
-    commit). A `git show` failure for any other reason (a permission or encoding fluke, a corrupt
-    object) raises instead of folding into the same None, so a real command fault cannot pass as
-    an ordinary deletion. Cached because one canonical's history is read once per fidelity/staleness
+    `text` is None where rel_path has no file content at this revision: absent (deleted, checked
+    against the revision's own tree rather than `git show`'s stderr wording, which reads
+    differently once rel_path exists again in a later commit), or present as something other than
+    a regular file (a directory from a file-to-directory transition, a submodule gitlink). A
+    `git show` failure for any other reason (a permission or encoding fluke, a corrupt object)
+    raises instead of folding into the same None, so a real command fault cannot pass as an
+    ordinary absence. Cached because one canonical's history is read once per fidelity/staleness
     check, then reused for every audited repo's copy.
     """
     r = subprocess.run(
@@ -1754,9 +1756,12 @@ def _git_revisions(rel_path):
             # A real lookup failure (a corrupt object, not this sha): git ls-tree exits non-zero
             # only for that, never for a merely absent path (empty stdout, exit 0, below).
             raise RuntimeError(f"git ls-tree failed for {sha}:{rel_path}: {t.stderr.strip()}")
-        if not t.stdout.strip():
-            # Confirmed deletion: rel_path is absent from this revision's own tree, whether or
-            # not it exists again in a later commit or the current working tree.
+        entry = t.stdout.strip()
+        entry_type = entry.split(None, 2)[1] if entry else None
+        if entry_type != "blob":
+            # Absent (empty stdout), or present as something other than a regular file (a
+            # directory from a file-to-directory transition, a submodule gitlink): neither has
+            # file content to compare, so both read the same as a confirmed deletion.
             out.append((date, sha, None))
             continue
         # Decode as UTF-8 with replacement to match the downstream and canonical reads.
@@ -3308,6 +3313,51 @@ def _selftest():
         ok = False
     print(
         f"  {'ok  ' if got == want else 'FAIL'} want={want!s:<24} got={got!s:<24}  _git_revisions: re-added file"
+    )
+
+    # _git_revisions: a path that becomes a directory reads as None too, per
+    # ptr727/ProjectTemplate#1016 (git show on a tree path returns a listing, not file content).
+    with tempfile.TemporaryDirectory() as tmp_root:
+        tmp_root_path = pathlib.Path(tmp_root)
+        for cmd in (
+            ["git", "init", "-q"],
+            ["git", "config", "user.email", "test@test.invalid"],
+            ["git", "config", "user.name", "test"],
+        ):
+            subprocess.run(cmd, cwd=tmp_root_path, check=True, capture_output=True)
+        rel = "thing"
+        (tmp_root_path / rel).write_text("v1\n")
+        subprocess.run(["git", "add", rel], cwd=tmp_root_path, check=True, capture_output=True)
+        subprocess.run(
+            ["git", "commit", "-q", "-m", "file"],
+            cwd=tmp_root_path,
+            check=True,
+            capture_output=True,
+        )
+        subprocess.run(["git", "rm", "-q", rel], cwd=tmp_root_path, check=True, capture_output=True)
+        (tmp_root_path / rel).mkdir()
+        (tmp_root_path / rel / "inner.txt").write_text("v2\n")
+        subprocess.run(["git", "add", rel], cwd=tmp_root_path, check=True, capture_output=True)
+        subprocess.run(
+            ["git", "commit", "-q", "-m", "now a directory"],
+            cwd=tmp_root_path,
+            check=True,
+            capture_output=True,
+        )
+        saved_root = ROOT
+        ROOT = tmp_root_path
+        try:
+            _git_revisions.cache_clear()
+            revisions = _git_revisions(rel)
+        finally:
+            ROOT = saved_root
+            _git_revisions.cache_clear()
+    got = [text for _, _, text in revisions]
+    want = [None, "v1\n"]
+    if got != want:
+        ok = False
+    print(
+        f"  {'ok  ' if got == want else 'FAIL'} want={want!s:<24} got={got!s:<24}  _git_revisions: file-to-directory transition"
     )
 
     # Region extraction and hashing: a forked github-release block must hash differently from the canonical.
