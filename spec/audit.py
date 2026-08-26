@@ -36,6 +36,7 @@ import pathlib
 import re
 import subprocess
 import sys
+import tempfile
 import time
 import urllib.error
 import urllib.request
@@ -1718,10 +1719,12 @@ def classify_verbatim(down_text, canon_text, past_texts):
 def _git_revisions(rel_path):
     """Every commit that touched rel_path in the hub's history, newest first, as (date, sha, text).
 
-    `text` is None where `git show` failed (rare: a permission or encoding fluke, not absence,
-    since the commit came from `git log -- rel_path` and so the path existed at that revision).
-    Cached because one canonical's history is read once per fidelity/staleness check, then reused
-    for every audited repo's copy.
+    `text` is None for a confirmed deletion: `git log -- rel_path` includes the commit that
+    removed rel_path, and `git show <sha>:rel_path` correctly has no content there. A `git show`
+    failure for any other reason (a permission or encoding fluke, a corrupt object) raises instead
+    of being folded into the same None, so a real command fault cannot pass as an ordinary
+    deletion. Cached because one canonical's history is read once per fidelity/staleness check,
+    then reused for every audited repo's copy.
     """
     r = subprocess.run(
         ["git", "log", "--format=%cI %H", "--", rel_path],
@@ -1750,7 +1753,14 @@ def _git_revisions(rel_path):
             errors="replace",
             check=False,
         )
-        out.append((date, sha, s.stdout if s.returncode == 0 else None))
+        if s.returncode == 0:
+            text = s.stdout
+        elif "does not exist in" in s.stderr:
+            # Confirmed deletion: this revision is the commit that removed rel_path.
+            text = None
+        else:
+            raise RuntimeError(f"git show failed for {sha}:{rel_path}: {s.stderr.strip()}")
+        out.append((date, sha, text))
     return out
 
 
@@ -3240,6 +3250,46 @@ def _selftest():
         print(
             f"  {'ok  ' if got == want else 'FAIL'} want={want!s:<24} got={got!s:<24}  _last_effective_change: {label}"
         )
+
+    # _git_revisions must read a confirmed deletion as None, never drop it or raise, per
+    # ptr727/ProjectTemplate#1016 (a real `git show` failure for any other reason still raises).
+    with tempfile.TemporaryDirectory() as tmp_root:
+        tmp_root_path = pathlib.Path(tmp_root)
+        for cmd in (
+            ["git", "init", "-q"],
+            ["git", "config", "user.email", "test@test.invalid"],
+            ["git", "config", "user.name", "test"],
+        ):
+            subprocess.run(cmd, cwd=tmp_root_path, check=True, capture_output=True)
+        rel = "deletion-probe.txt"
+        (tmp_root_path / rel).write_text("v1\n")
+        subprocess.run(["git", "add", rel], cwd=tmp_root_path, check=True, capture_output=True)
+        subprocess.run(
+            ["git", "commit", "-q", "-m", "add"], cwd=tmp_root_path, check=True, capture_output=True
+        )
+        subprocess.run(["git", "rm", "-q", rel], cwd=tmp_root_path, check=True, capture_output=True)
+        subprocess.run(
+            ["git", "commit", "-q", "-m", "delete"],
+            cwd=tmp_root_path,
+            check=True,
+            capture_output=True,
+        )
+        global ROOT
+        saved_root = ROOT
+        ROOT = tmp_root_path
+        try:
+            _git_revisions.cache_clear()
+            revisions = _git_revisions(rel)
+        finally:
+            ROOT = saved_root
+            _git_revisions.cache_clear()
+    got = [text for _, _, text in revisions]
+    want = [None, "v1\n"]
+    if got != want:
+        ok = False
+    print(
+        f"  {'ok  ' if got == want else 'FAIL'} want={want!s:<24} got={got!s:<24}  _git_revisions: deletion revision reads as None, not dropped or raised"
+    )
 
     # Region extraction and hashing: a forked github-release block must hash differently from the canonical.
     region = split_jobs(rel_ok).get("github-release")
