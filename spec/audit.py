@@ -1716,7 +1716,49 @@ def classify_verbatim(down_text, canon_text, past_texts):
 
 
 @functools.cache
-def _git_revisions(rel_path):
+def _hub_main_rev():
+    """The hub's own `main`, resolved fresh from `origin` immediately before use, as a commit SHA.
+
+    `_git_revisions` and `git_blob_in_file_history` read the hub's canonical history to judge a
+    downstream copy against, and per AGENTS.md `main` is that ground truth. Walking git's implicit
+    HEAD instead answers with whatever branch ROOT (the invoking checkout) happens to have
+    checked out - commonly `develop` for this repo's own working checkouts
+    (ptr727/ProjectTemplate#1017) - so a downstream copy that already matches `main` could read as
+    trailing (hub_last_change) or modified (classify_verbatim) against a commit `main` never
+    contained.
+
+    `git fetch origin main` lands the objects in ROOT's own object database without touching its
+    working tree or checked-out branch: the same freshness guarantee AGENTS.md documents for
+    reaching the hub as a checkout of one's own, fetched immediately before reading, without the
+    weight of a separate clone. The result is resolved to a concrete SHA right away rather than
+    handed back as the mutable `FETCH_HEAD` pointer, so every read this run walks the exact same
+    commit even if something else in the process fetches again afterward.
+
+    Cached: one fetch and one resolve per run, reused by every rel_path this run reads.
+    """
+    fetch = subprocess.run(
+        ["git", "fetch", "-q", "origin", "main"],
+        cwd=ROOT,
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    if fetch.returncode != 0:
+        raise RuntimeError(f"git fetch origin main failed in {ROOT}: {fetch.stderr.strip()}")
+    resolved = subprocess.run(
+        ["git", "rev-parse", "FETCH_HEAD"],
+        cwd=ROOT,
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    if resolved.returncode != 0 or not resolved.stdout.strip():
+        raise RuntimeError(f"git rev-parse FETCH_HEAD failed in {ROOT}: {resolved.stderr.strip()}")
+    return resolved.stdout.strip()
+
+
+@functools.cache
+def _git_revisions(rel_path, rev=None):
     """Every commit that touched rel_path in the hub's history, newest first, as (date, sha, text).
 
     `text` is None where rel_path has no file content at this revision: absent (deleted, checked
@@ -1728,9 +1770,15 @@ def _git_revisions(rel_path):
     permission or encoding fluke, a corrupt object) raises instead of folding into the same None,
     so a real command fault cannot pass as an ordinary absence. Cached because one canonical's
     history is read once per fidelity/staleness check, then reused for every audited repo's copy.
+
+    `rev` names the git revision walked; defaults to the hub's own `main` via `_hub_main_rev()`
+    (ptr727/ProjectTemplate#1017) rather than the implicit HEAD of whatever branch ROOT has
+    checked out. The --selftest fixtures pass an explicit `rev` to exercise a plain local branch
+    in a throwaway repo with no `origin` to fetch, keeping the offline engine self-test offline.
     """
+    walk_rev = _hub_main_rev() if rev is None else rev
     r = subprocess.run(
-        ["git", "log", "--format=%cI %H", "--", rel_path],
+        ["git", "log", "--format=%cI %H", walk_rev, "--", rel_path],
         cwd=ROOT,
         capture_output=True,
         text=True,
@@ -1818,10 +1866,17 @@ def _last_effective_change(revisions):
 
 
 @functools.cache
-def git_blob_in_file_history(rel_path, blob_sha):
-    """Whether a blob occurred in a path's hub history."""
+def git_blob_in_file_history(rel_path, blob_sha, rev=None):
+    """Whether a blob occurred in a path's hub history.
+
+    `rev` defaults to the hub's own `main` via `_hub_main_rev()` (ptr727/ProjectTemplate#1017)
+    for the same reason `_git_revisions` does: ROOT's checked-out branch is not necessarily
+    `main`, and a develop-only revision matching `blob_sha` must not read as "stale" against a
+    hub history `main` doesn't actually contain.
+    """
+    walk_rev = _hub_main_rev() if rev is None else rev
     result = subprocess.run(
-        ["git", "log", "--format=%H", f"--find-object={blob_sha}", "--", rel_path],
+        ["git", "log", "--format=%H", f"--find-object={blob_sha}", walk_rev, "--", rel_path],
         cwd=ROOT,
         capture_output=True,
         text=True,
@@ -3306,7 +3361,7 @@ def _selftest():
         ROOT = tmp_root_path
         try:
             _git_revisions.cache_clear()
-            revisions = _git_revisions(rel)
+            revisions = _git_revisions(rel, rev="HEAD")
         finally:
             ROOT = saved_root
             _git_revisions.cache_clear()
@@ -3351,7 +3406,7 @@ def _selftest():
         ROOT = tmp_root_path
         try:
             _git_revisions.cache_clear()
-            revisions = _git_revisions(rel)
+            revisions = _git_revisions(rel, rev="HEAD")
         finally:
             ROOT = saved_root
             _git_revisions.cache_clear()
@@ -3403,7 +3458,7 @@ def _selftest():
             ROOT = tmp_root_path
             try:
                 _git_revisions.cache_clear()
-                revisions = _git_revisions(rel)
+                revisions = _git_revisions(rel, rev="HEAD")
             finally:
                 ROOT = saved_root
                 _git_revisions.cache_clear()
@@ -3414,6 +3469,65 @@ def _selftest():
             print(
                 f"  {'ok  ' if got == want else 'FAIL'} want={want!s:<24} got={got!s:<24}  _git_revisions: file-to-symlink transition"
             )
+
+    # _git_revisions/_hub_main_rev: the default rev reads the hub's own `main` via `origin`,
+    # not whatever branch ROOT (the invoking checkout) has checked out, per
+    # ptr727/ProjectTemplate#1017. `origin` here is a plain local path, so the fetch stays
+    # offline like every other subprocess call in this self-test.
+    with tempfile.TemporaryDirectory() as tmp_upstream, tempfile.TemporaryDirectory() as tmp_root:
+        tmp_upstream_path = pathlib.Path(tmp_upstream)
+        tmp_root_path = pathlib.Path(tmp_root)
+        rel = "hub-probe.txt"
+        for cmd in (
+            ["git", "init", "-q", "-b", "main"],
+            ["git", "config", "user.email", "test@test.invalid"],
+            ["git", "config", "user.name", "test"],
+        ):
+            subprocess.run(cmd, cwd=tmp_upstream_path, check=True, capture_output=True)
+        (tmp_upstream_path / rel).write_text("main-content\n")
+        subprocess.run(["git", "add", rel], cwd=tmp_upstream_path, check=True, capture_output=True)
+        subprocess.run(
+            ["git", "commit", "-q", "-m", "add on main"],
+            cwd=tmp_upstream_path,
+            check=True,
+            capture_output=True,
+        )
+        subprocess.run(
+            ["git", "clone", "-q", str(tmp_upstream_path), str(tmp_root_path)],
+            check=True,
+            capture_output=True,
+        )
+        subprocess.run(
+            ["git", "checkout", "-q", "-b", "develop"],
+            cwd=tmp_root_path,
+            check=True,
+            capture_output=True,
+        )
+        (tmp_root_path / rel).write_text("develop-only-content\n")
+        subprocess.run(["git", "add", rel], cwd=tmp_root_path, check=True, capture_output=True)
+        subprocess.run(
+            ["git", "commit", "-q", "-m", "develop-only change"],
+            cwd=tmp_root_path,
+            check=True,
+            capture_output=True,
+        )
+        saved_root = ROOT
+        ROOT = tmp_root_path
+        try:
+            _git_revisions.cache_clear()
+            _hub_main_rev.cache_clear()
+            revisions = _git_revisions(rel)
+        finally:
+            ROOT = saved_root
+            _git_revisions.cache_clear()
+            _hub_main_rev.cache_clear()
+    got = [text for _, _, text in revisions]
+    want = ["main-content\n"]
+    if got != want:
+        ok = False
+    print(
+        f"  {'ok  ' if got == want else 'FAIL'} want={want!s:<24} got={got!s:<24}  _git_revisions: default rev reads origin's main, not the checked-out branch"
+    )
 
     # Region extraction and hashing: a forked github-release block must hash differently from the canonical.
     region = split_jobs(rel_ok).get("github-release")
