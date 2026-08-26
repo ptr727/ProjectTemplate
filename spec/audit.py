@@ -32,6 +32,7 @@ import functools
 import hashlib
 import itertools
 import json
+import locale
 import pathlib
 import re
 import subprocess
@@ -103,25 +104,27 @@ def hub_tracked(rev=None):
     nothing" and silently clear every hub-only finding.
     """
     walk_rev = _hub_main_rev() if rev is None else rev
+    # No text=True: -z's pathnames are raw bytes, and locale decoding here would crash on an invalid byte before the NUL-split below ever runs.
+    # Decode each record with a fixed utf-8/surrogateescape policy instead of os.fsdecode(), whose error handler is platform-dependent (surrogatepass on Windows) and still crashes on an arbitrary invalid byte there.
     r = subprocess.run(
         ["git", "ls-tree", "-r", "-z", walk_rev],
         cwd=ROOT,
         capture_output=True,
-        text=True,
         check=False,
     )
     if r.returncode != 0:
+        stderr = r.stderr.decode("utf-8", errors="replace").strip()
         raise RuntimeError(
-            f"git ls-tree -r {walk_rev} failed in {ROOT}: {r.stderr.strip() or 'non-zero exit'}"
+            f"git ls-tree -r {walk_rev} failed in {ROOT}: {stderr or 'non-zero exit'}"
         )
     paths = set()
-    for record in r.stdout.split("\0"):
+    for record in r.stdout.split(b"\0"):
         if not record:
             continue
-        meta, _, path = record.partition("\t")
+        meta, _, path = record.partition(b"\t")
         mode = meta.split(None, 1)[0] if meta else None
-        if mode in ("100644", "100755"):
-            paths.add(path)
+        if mode in (b"100644", b"100755"):
+            paths.add(path.decode("utf-8", errors="surrogateescape"))
     return frozenset(paths)
 
 
@@ -140,7 +143,7 @@ def hub_only_paths(spec, rev=None):
     So only a `retire` disposition in spec/divergences.json asserts a deletion, and an untriaged hit asks for
     the file to be read.
 
-    `rev` is passed through to `hub_tracked()`; see its docstring.
+    `rev` is passed through to `hub_tracked()`. See its docstring.
     """
     declared = {e["path"] for e in spec["files"]["baseline"]}
     tree_paths = set()
@@ -198,14 +201,14 @@ def repo_tree(slug, ground_head):
 def canonical_blob_sha(path):
     """The hub's git blob identity for path, from the same resolved `main` commit
     `_git_revisions()` and `_hub_main_rev()` walk, not from ROOT's checked-out working tree,
-    which is not necessarily `main` (ptr727/ProjectTemplate#1017 review). `git rev-parse` resolves
-    a `<rev>:<path>` tree-ish straight to the blob object id, so no separate read-and-hash step is
-    needed. Raises OSError, matching a filesystem read's own contract, when path is absent from
-    that commit or is not a regular file there.
+    which is not necessarily `main` (ptr727/ProjectTemplate#1017 review). Raises OSError, matching
+    a filesystem read's own contract, when path is absent from that commit or is not a regular
+    file there.
     """
     rev = _hub_main_rev()
+    # Read via git ls-tree, not git rev-parse <rev>:<path>, which resolves a directory to a tree object id just as readily as a file to a blob one, silently breaking the regular-file promise above.
     result = subprocess.run(
-        ["git", "rev-parse", f"{rev}:{path}"],
+        ["git", "ls-tree", rev, "--", path],
         cwd=ROOT,
         capture_output=True,
         text=True,
@@ -213,7 +216,13 @@ def canonical_blob_sha(path):
     )
     if result.returncode != 0:
         raise OSError(f"{path} is unreadable from the hub's main at {rev}: {result.stderr.strip()}")
-    return result.stdout.strip()
+    entry = result.stdout.strip()
+    if not entry:
+        raise OSError(f"{path} is absent from the hub's main at {rev}")
+    mode, _, sha = entry.partition("\t")[0].split()
+    if mode not in ("100644", "100755"):
+        raise OSError(f"{path} is not a regular file at {rev} (mode {mode})")
+    return sha
 
 
 def tree_path_included(path, patterns):
@@ -3576,6 +3585,59 @@ def _selftest():
     print(
         f"  {'ok  ' if got == want else 'FAIL'} want={want!s:<24} got={got!s:<24}  _git_revisions: default rev reads origin's main, not the checked-out branch"
     )
+
+    # hub_tracked(): a tracked filename with a byte the active locale rejects must round-trip rather than crash.
+    # git ls-tree -z is NUL-delimited raw bytes, and decoding it as text before the NUL-split (the bug review caught) raises UnicodeDecodeError instead of enumerating the path.
+    encoding = locale.getpreferredencoding(False)
+    invalid_bytes = None
+    for candidate in (b"\xff", b"\x80\x81", b"\xfe\xff"):
+        try:
+            candidate.decode(encoding)
+        except UnicodeDecodeError:
+            invalid_bytes = candidate
+            break
+    if invalid_bytes is None:
+        # No candidate is actually invalid under this host's active encoding: skip rather than asserting a regression the fixture cannot exercise here.
+        print(f"  skip hub_tracked: no candidate byte sequence is invalid under {encoding!r}")
+    else:
+        bad_name = "bad-" + invalid_bytes.decode("utf-8", errors="surrogateescape") + "-name.txt"
+        with tempfile.TemporaryDirectory() as tmp_root:
+            tmp_root_path = pathlib.Path(tmp_root)
+            for cmd in (
+                ["git", "init", "-q", "-b", "main"],
+                ["git", "config", "user.email", "test@test.invalid"],
+                ["git", "config", "user.name", "test"],
+            ):
+                subprocess.run(cmd, cwd=tmp_root_path, check=True, capture_output=True)
+            try:
+                (tmp_root_path / bad_name).write_text("x")
+            except OSError:
+                # This host's filesystem cannot represent the byte: skip rather than aborting the whole --selftest run over an environment limitation, not a code fault.
+                print("  skip hub_tracked: non-UTF-8 filename (host cannot create it)")
+            else:
+                subprocess.run(
+                    ["git", "add", "-A"], cwd=tmp_root_path, check=True, capture_output=True
+                )
+                subprocess.run(
+                    ["git", "commit", "-q", "-m", "add invalid-utf8 name"],
+                    cwd=tmp_root_path,
+                    check=True,
+                    capture_output=True,
+                )
+                saved_root = ROOT
+                ROOT = tmp_root_path
+                try:
+                    hub_tracked.cache_clear()
+                    tracked = hub_tracked(rev="HEAD")
+                finally:
+                    ROOT = saved_root
+                    hub_tracked.cache_clear()
+                got = bad_name in tracked
+                if not got:
+                    ok = False
+                print(
+                    f"  {'ok  ' if got else 'FAIL'} want=True                     got={got!s:<24}  hub_tracked: a non-UTF-8 filename round-trips instead of crashing"
+                )
 
     # Region extraction and hashing: a forked github-release block must hash differently from the canonical.
     region = split_jobs(rel_ok).get("github-release")
