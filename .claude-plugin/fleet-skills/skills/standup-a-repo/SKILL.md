@@ -74,10 +74,10 @@ maintainer can supply what section 0A lists.
    inventing a shape.
 
 8. **Settings, rulesets, and secrets.** STANDUP.md section 4: confirm the remote and the GitHub
-   repository agree before running anything else here, then apply with
-   `repo-config/configure.sh apply owner/repo release` (substitute `operational` for an
-   operational repo) from the hub at `main` and check with the same command's `check` subcommand,
-   never from a hand-built or carried copy.
+   repository agree before running anything else here, then run
+   `repo-config/configure.sh check owner/repo release` (substitute `operational` for an
+   operational repo) from the hub at `main`, then apply only what it reports with the same
+   command's `apply` subcommand, never from a hand-built or carried copy.
 
 9. **Verify with the audit.** STANDUP.md section 5: run `AUDIT.md` end to end. The repo is stood
    up only when it passes for its type, or its residual deltas are tracked in

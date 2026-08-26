@@ -129,7 +129,8 @@ public async Task<string> GetQuoteOfTheDayAsync(string category, CancellationTok
         throw new ArgumentException($"Unsupported category: {category}", nameof(category));
     }
 
-    await Task.Delay(0, cancellationToken);
+    cancellationToken.ThrowIfCancellationRequested();
+    await Task.Delay(1, cancellationToken);
     return $"Quote for {category}";
 }
 ```
