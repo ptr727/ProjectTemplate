@@ -81,21 +81,43 @@ def load(rel):
 
 
 @functools.cache
-def hub_tracked():
-    """The hub's own git-tracked paths, which is what "hub-side" means for the hub-only comparison.
+def hub_tracked(rev=None):
+    """The hub's own tracked paths at the resolved `main` commit, which is what "hub-side" means
+    for the hub-only comparison.
 
-    git ls-files rather than a filesystem walk, since a walk picks up __pycache__ and a local .venv and
-    would make the result depend on working-tree state.
-    A non-zero exit raises rather than returning an empty set, which would read as "the hub tracks nothing"
-    and silently clear every hub-only finding.
+    `git ls-tree -r` at that commit rather than `git ls-files` against ROOT's checked-out index
+    (a filesystem walk is avoided too, since it would pick up __pycache__ and a local .venv and
+    make the result depend on working-tree state), so a path present on `main` but absent on
+    `develop`, or the reverse, is not silently missed or falsely added
+    (ptr727/ProjectTemplate#1017 review). Filtered to regular-file modes (100644, 100755) the same
+    way `_git_revisions()` is: a directory, a symlink, or a submodule gitlink has no file content
+    to compare, and every caller here assumes a plain file at each returned path.
+
+    `rev` defaults to `_hub_main_rev()`. The --selftest fixture passes an explicit `rev` to check
+    against ROOT's own real tracked files without a network fetch, keeping the offline engine
+    self-test offline.
+
+    A non-zero exit raises rather than returning an empty set, which would read as "the hub tracks
+    nothing" and silently clear every hub-only finding.
     """
-    r = subprocess.run(["git", "ls-files"], cwd=ROOT, capture_output=True, text=True, check=False)
+    walk_rev = _hub_main_rev() if rev is None else rev
+    r = subprocess.run(
+        ["git", "ls-tree", "-r", walk_rev], cwd=ROOT, capture_output=True, text=True, check=False
+    )
     if r.returncode != 0:
-        raise RuntimeError(f"git ls-files failed in {ROOT}: {r.stderr.strip() or 'non-zero exit'}")
-    return frozenset(r.stdout.splitlines())
+        raise RuntimeError(
+            f"git ls-tree -r {walk_rev} failed in {ROOT}: {r.stderr.strip() or 'non-zero exit'}"
+        )
+    paths = set()
+    for line in r.stdout.splitlines():
+        meta, _, path = line.partition("\t")
+        mode = meta.split(None, 1)[0] if meta else None
+        if mode in ("100644", "100755"):
+            paths.add(path)
+    return frozenset(paths)
 
 
-def hub_only_paths(spec):
+def hub_only_paths(spec, rev=None):
     """Hub-tracked paths the manifest does not declare, so a downstream copy is hub-hosted content rather than a carry.
 
     This is the deletion detector: the manifest says what a repo carries, so a file the hub tracks and the
@@ -109,6 +131,8 @@ def hub_only_paths(spec):
     hooks at .husky/pre-commit.
     So only a `retire` disposition in spec/divergences.json asserts a deletion, and an untriaged hit asks for
     the file to be read.
+
+    `rev` is passed through to `hub_tracked()`; see its docstring.
     """
     declared = {e["path"] for e in spec["files"]["baseline"]}
     tree_paths = set()
@@ -116,11 +140,11 @@ def hub_only_paths(spec):
         root = declaration["source"].rstrip("/") + "/"
         tree_paths.update(
             path
-            for path in hub_tracked()
+            for path in hub_tracked(rev)
             if path.startswith(root)
             and tree_path_included(path.removeprefix(root), declaration["include"])
         )
-    return hub_tracked() - declared - tree_paths
+    return hub_tracked(rev) - declared - tree_paths
 
 
 def gap_dispositions(spec):
@@ -4989,7 +5013,7 @@ def _selftest():
     # The hub-only set is the manifest subtracted from the hub's tracked files, so a declared path must never appear in it.
     # Asserted against the live manifest rather than a fixture, since the failure this guards is a declared path leaking into the deletion list, which only the real pairing can show.
     declared = {e["path"] for e in load("spec/files.json")["baseline"]}
-    hub_only = hub_only_paths({"files": load("spec/files.json")})
+    hub_only = hub_only_paths({"files": load("spec/files.json")}, rev="HEAD")
     leaked = sorted(declared & hub_only)
     if leaked or not hub_only:
         ok = False
