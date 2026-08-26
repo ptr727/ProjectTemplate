@@ -1,5 +1,9 @@
 # Python Testing Conventions
 
+This covers the **build** profile. A **lint-only** Scripts profile has no `uv.lock` to run pytest
+against, its testing conventions (`unittest`, `uvx coverage@latest run -m unittest discover`) are
+in `references/profiles.md`.
+
 Use `pytest` with configuration in `[tool.pytest.ini_options]`. Default invocation:
 `uv run pytest`.
 
