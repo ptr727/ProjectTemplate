@@ -48,7 +48,7 @@ One pull request measuring the remaining carried surface against the carry-versu
   - **Open** - Whether it moves.
   - **Settled** - The test is stated: a repository carries the content it is audited against and the configuration that describes it, and it reaches machinery whose content is identical in every repository.
   - **Settled** - `repo-config/configure.sh` is the first file moved across, carrying the ledger's only `retire` disposition and naming six repos, NxWitness, aiopurpleair, homeassistant-purpleair, ESPHome-NonRoot, VSCode-Server-DotNetCore and LanguageTags.
-  - **Settled** - [`spec/secrets.json`][secrets]'s adapted `baseline`/`mechanisms` carry is the second, retired outright rather than moved (ptr727/ProjectTemplate#993): `baseline` never varied per repo and `mechanisms`/`targetMechanisms`/`typeMechanisms` were already computed centrally by `spec/audit.py` from the hub's own file plus `registry/repos.json`, so no downstream repo needs a replacement local copy.
+  - **Settled** - [`spec/secrets.json`][secrets]'s adapted `baseline`/`mechanisms` carry is the second, retired outright rather than moved (ptr727/ProjectTemplate#993): `baseline` applies to every fleet repo by definition and `mechanisms`/`targetMechanisms`/`typeMechanisms` resolve centrally, `spec/audit.py` reading the hub's own file plus `registry/repos.json`, so no downstream repo needs a replacement local copy.
   - **Settled** - An unreachable hub means the tool did not run, reported as not run rather than worked around, since a hand-rolled substitute is the duplicated effort the model exists to end.
 
 ### The README Structure Rework
