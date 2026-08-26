@@ -32,6 +32,7 @@ import functools
 import hashlib
 import itertools
 import json
+import locale
 import pathlib
 import re
 import subprocess
@@ -81,21 +82,53 @@ def load(rel):
 
 
 @functools.cache
-def hub_tracked():
-    """The hub's own git-tracked paths, which is what "hub-side" means for the hub-only comparison.
+def hub_tracked(rev=None):
+    """The hub's own tracked paths at the resolved `main` commit, which is what "hub-side" means
+    for the hub-only comparison.
 
-    git ls-files rather than a filesystem walk, since a walk picks up __pycache__ and a local .venv and
-    would make the result depend on working-tree state.
-    A non-zero exit raises rather than returning an empty set, which would read as "the hub tracks nothing"
-    and silently clear every hub-only finding.
+    `git ls-tree -r` at that commit rather than `git ls-files` against ROOT's checked-out index
+    (a filesystem walk is avoided too, since it would pick up __pycache__ and a local .venv and
+    make the result depend on working-tree state), so a path present on `main` but absent on
+    `develop`, or the reverse, is not silently missed or falsely added
+    (ptr727/ProjectTemplate#1017 review). Filtered to regular-file modes (100644, 100755) the same
+    way `_git_revisions()` is: a directory, a symlink, or a submodule gitlink has no file content
+    to compare, and every caller here assumes a plain file at each returned path. `-z` NUL-delimits
+    the output so an unusual path is not C-quoted, which would otherwise return an escaped string
+    that matches nothing a caller compares it against.
+
+    `rev` defaults to `_hub_main_rev()`. The --selftest fixture passes an explicit `rev` to check
+    against ROOT's own real tracked files without a network fetch, keeping the offline engine
+    self-test offline.
+
+    A non-zero exit raises rather than returning an empty set, which would read as "the hub tracks
+    nothing" and silently clear every hub-only finding.
     """
-    r = subprocess.run(["git", "ls-files"], cwd=ROOT, capture_output=True, text=True, check=False)
+    walk_rev = _hub_main_rev() if rev is None else rev
+    # No text=True: -z's pathnames are raw bytes, and locale decoding here would crash on an invalid byte before the NUL-split below ever runs.
+    # Decode each record with a fixed utf-8/surrogateescape policy instead of os.fsdecode(), whose error handler is platform-dependent (surrogatepass on Windows) and still crashes on an arbitrary invalid byte there.
+    r = subprocess.run(
+        ["git", "ls-tree", "-r", "-z", walk_rev],
+        cwd=ROOT,
+        capture_output=True,
+        check=False,
+    )
     if r.returncode != 0:
-        raise RuntimeError(f"git ls-files failed in {ROOT}: {r.stderr.strip() or 'non-zero exit'}")
-    return frozenset(r.stdout.splitlines())
+        stderr = r.stderr.decode("utf-8", errors="replace").strip()
+        raise RuntimeError(
+            f"git ls-tree -r {walk_rev} failed in {ROOT}: {stderr or 'non-zero exit'}"
+        )
+    paths = set()
+    for record in r.stdout.split(b"\0"):
+        if not record:
+            continue
+        meta, _, path = record.partition(b"\t")
+        mode = meta.split(None, 1)[0] if meta else None
+        if mode in (b"100644", b"100755"):
+            paths.add(path.decode("utf-8", errors="surrogateescape"))
+    return frozenset(paths)
 
 
-def hub_only_paths(spec):
+def hub_only_paths(spec, rev=None):
     """Hub-tracked paths the manifest does not declare, so a downstream copy is hub-hosted content rather than a carry.
 
     This is the deletion detector: the manifest says what a repo carries, so a file the hub tracks and the
@@ -109,6 +142,8 @@ def hub_only_paths(spec):
     hooks at .husky/pre-commit.
     So only a `retire` disposition in spec/divergences.json asserts a deletion, and an untriaged hit asks for
     the file to be read.
+
+    `rev` is passed through to `hub_tracked()`. See its docstring.
     """
     declared = {e["path"] for e in spec["files"]["baseline"]}
     tree_paths = set()
@@ -116,11 +151,11 @@ def hub_only_paths(spec):
         root = declaration["source"].rstrip("/") + "/"
         tree_paths.update(
             path
-            for path in hub_tracked()
+            for path in hub_tracked(rev)
             if path.startswith(root)
             and tree_path_included(path.removeprefix(root), declaration["include"])
         )
-    return hub_tracked() - declared - tree_paths
+    return hub_tracked(rev) - declared - tree_paths
 
 
 def gap_dispositions(spec):
@@ -162,14 +197,32 @@ def repo_tree(slug, ground_head):
     return None if entries is None else set(entries)
 
 
-def git_blob_sha(content):
-    header = f"blob {len(content)}\0".encode()
-    return hashlib.sha1(header + content).hexdigest()
-
-
 @functools.cache
 def canonical_blob_sha(path):
-    return git_blob_sha((ROOT / path).read_bytes())
+    """The hub's git blob identity for path, from the same resolved `main` commit
+    `_git_revisions()` and `_hub_main_rev()` walk, not from ROOT's checked-out working tree,
+    which is not necessarily `main` (ptr727/ProjectTemplate#1017 review). Raises OSError, matching
+    a filesystem read's own contract, when path is absent from that commit or is not a regular
+    file there.
+    """
+    rev = _hub_main_rev()
+    # Read via git ls-tree, not git rev-parse <rev>:<path>, which resolves a directory to a tree object id just as readily as a file to a blob one, silently breaking the regular-file promise above.
+    result = subprocess.run(
+        ["git", "ls-tree", rev, "--", path],
+        cwd=ROOT,
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    if result.returncode != 0:
+        raise OSError(f"{path} is unreadable from the hub's main at {rev}: {result.stderr.strip()}")
+    entry = result.stdout.strip()
+    if not entry:
+        raise OSError(f"{path} is absent from the hub's main at {rev}")
+    mode, _, sha = entry.partition("\t")[0].split()
+    if mode not in ("100644", "100755"):
+        raise OSError(f"{path} is not a regular file at {rev} (mode {mode})")
+    return sha
 
 
 def tree_path_included(path, patterns):
@@ -1716,7 +1769,40 @@ def classify_verbatim(down_text, canon_text, past_texts):
 
 
 @functools.cache
-def _git_revisions(rel_path):
+def _hub_main_rev():
+    """The hub's own `main`, fetched fresh from `origin` and resolved to a commit SHA.
+
+    Reached as a checkout of one's own, fetched immediately before use, per AGENTS.md and
+    ptr727/ProjectTemplate#1017, rather than trusting ROOT's checked-out branch. `git fetch`
+    writes into ROOT's own object database, so a separate clone is not needed. Resolved to a
+    concrete SHA right away, not the mutable `FETCH_HEAD` pointer, so a later fetch elsewhere in
+    the process cannot move it mid-run.
+
+    Cached: one fetch and resolve per run, reused for every rel_path read.
+    """
+    fetch = subprocess.run(
+        ["git", "fetch", "-q", "origin", "main"],
+        cwd=ROOT,
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    if fetch.returncode != 0:
+        raise RuntimeError(f"git fetch origin main failed in {ROOT}: {fetch.stderr.strip()}")
+    resolved = subprocess.run(
+        ["git", "rev-parse", "FETCH_HEAD"],
+        cwd=ROOT,
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    if resolved.returncode != 0 or not resolved.stdout.strip():
+        raise RuntimeError(f"git rev-parse FETCH_HEAD failed in {ROOT}: {resolved.stderr.strip()}")
+    return resolved.stdout.strip()
+
+
+@functools.cache
+def _git_revisions(rel_path, rev=None):
     """Every commit that touched rel_path in the hub's history, newest first, as (date, sha, text).
 
     `text` is None where rel_path has no file content at this revision: absent (deleted, checked
@@ -1728,9 +1814,16 @@ def _git_revisions(rel_path):
     permission or encoding fluke, a corrupt object) raises instead of folding into the same None,
     so a real command fault cannot pass as an ordinary absence. Cached because one canonical's
     history is read once per fidelity/staleness check, then reused for every audited repo's copy.
+
+    `rev` names the git revision walked. It defaults to the hub's own `main` via
+    `_hub_main_rev()` (ptr727/ProjectTemplate#1017) rather than the implicit HEAD of whatever
+    branch ROOT has checked out. The --selftest fixtures pass an explicit `rev` to exercise a
+    plain local branch in a throwaway repo with no `origin` to fetch, keeping the offline engine
+    self-test offline.
     """
+    walk_rev = _hub_main_rev() if rev is None else rev
     r = subprocess.run(
-        ["git", "log", "--format=%cI %H", "--", rel_path],
+        ["git", "log", "--format=%cI %H", walk_rev, "--", rel_path],
         cwd=ROOT,
         capture_output=True,
         text=True,
@@ -1788,6 +1881,18 @@ def git_file_history(rel_path):
     return [text for _, _, text in _git_revisions(rel_path) if text is not None]
 
 
+def canonical_current_text(rel_path):
+    """The hub's current canonical content of rel_path, from the same `_git_revisions()` call
+    `git_file_history()` and `hub_last_change()` already make, so "current" and "history" can
+    never disagree about which commit they read (ptr727/ProjectTemplate#1017 review: reading
+    "current" from ROOT's working tree while history walked the resolved `main` SHA let a copy
+    that matches today's main misclassify as stale against its own most recent history entry).
+    None if rel_path has no history at `main`, or its newest revision has no file content there.
+    """
+    revisions = _git_revisions(rel_path)
+    return revisions[0][2] if revisions else None
+
+
 def _last_effective_change(revisions):
     """The (date, sha) of the newest revision in `revisions` (newest-first (date, sha, text)
     triples for one file) whose content differs from its predecessor after normalize(), or the
@@ -1818,10 +1923,17 @@ def _last_effective_change(revisions):
 
 
 @functools.cache
-def git_blob_in_file_history(rel_path, blob_sha):
-    """Whether a blob occurred in a path's hub history."""
+def git_blob_in_file_history(rel_path, blob_sha, rev=None):
+    """Whether a blob occurred in a path's hub history.
+
+    `rev` defaults to the hub's own `main` via `_hub_main_rev()` (ptr727/ProjectTemplate#1017)
+    for the same reason `_git_revisions` does: ROOT's checked-out branch is not necessarily
+    `main`, and a develop-only revision matching `blob_sha` must not read as "stale" against a
+    hub history `main` doesn't actually contain.
+    """
+    walk_rev = _hub_main_rev() if rev is None else rev
     result = subprocess.run(
-        ["git", "log", "--format=%H", f"--find-object={blob_sha}", "--", rel_path],
+        ["git", "log", "--format=%H", f"--find-object={blob_sha}", walk_rev, "--", rel_path],
         cwd=ROOT,
         capture_output=True,
         text=True,
@@ -1891,10 +2003,7 @@ def check_intent_staleness(slug, ground, path, canonical_rel, down_text):
     if hub_change is None:
         return []
     if down_text is not None:
-        try:
-            canon_text = (ROOT / canonical_rel).read_text(encoding="utf-8", errors="replace")
-        except OSError:
-            canon_text = None
+        canon_text = canonical_current_text(canonical_rel)
         if canon_text is not None and content_hash(down_text) == content_hash(canon_text):
             return []
     commits = gh(f"repos/{slug}/commits?path={path}&sha={ground}&per_page=1")
@@ -1921,10 +2030,9 @@ def check_verbatim(label, down_text, canonical_rel, extract=None):
     and classify a mismatch as stale or modified via the canonical's git history. All findings are DRIFT: a
     byte diff is a hint to review, never proof of breakage.
     """
-    try:
-        # Same decode policy as the downstream copy and the git history, so a stray byte can never make otherwise-equal content hash differently across the three sources.
-        canon_text = (ROOT / canonical_rel).read_text(encoding="utf-8", errors="replace")
-    except OSError:
+    # canonical_current_text() and git_file_history() both read the same _git_revisions() call, so a copy matching today's main can never mismatch against its own history's newest entry (ptr727/ProjectTemplate#1017 review).
+    canon_text = canonical_current_text(canonical_rel)
+    if canon_text is None:
         return [
             (
                 "DRIFT",
@@ -3306,7 +3414,7 @@ def _selftest():
         ROOT = tmp_root_path
         try:
             _git_revisions.cache_clear()
-            revisions = _git_revisions(rel)
+            revisions = _git_revisions(rel, rev="HEAD")
         finally:
             ROOT = saved_root
             _git_revisions.cache_clear()
@@ -3351,7 +3459,7 @@ def _selftest():
         ROOT = tmp_root_path
         try:
             _git_revisions.cache_clear()
-            revisions = _git_revisions(rel)
+            revisions = _git_revisions(rel, rev="HEAD")
         finally:
             ROOT = saved_root
             _git_revisions.cache_clear()
@@ -3403,7 +3511,7 @@ def _selftest():
             ROOT = tmp_root_path
             try:
                 _git_revisions.cache_clear()
-                revisions = _git_revisions(rel)
+                revisions = _git_revisions(rel, rev="HEAD")
             finally:
                 ROOT = saved_root
                 _git_revisions.cache_clear()
@@ -3414,6 +3522,122 @@ def _selftest():
             print(
                 f"  {'ok  ' if got == want else 'FAIL'} want={want!s:<24} got={got!s:<24}  _git_revisions: file-to-symlink transition"
             )
+
+    # _git_revisions: the default rev reads origin's `main`, not ROOT's checked-out branch (ptr727/ProjectTemplate#1017).
+    # `origin` is a plain local path here, so the fetch stays offline.
+    with tempfile.TemporaryDirectory() as tmp_upstream, tempfile.TemporaryDirectory() as tmp_root:
+        tmp_upstream_path = pathlib.Path(tmp_upstream)
+        tmp_root_path = pathlib.Path(tmp_root)
+        rel = "hub-probe.txt"
+        for cmd in (
+            ["git", "init", "-q", "-b", "main"],
+            ["git", "config", "user.email", "test@test.invalid"],
+            ["git", "config", "user.name", "test"],
+        ):
+            subprocess.run(cmd, cwd=tmp_upstream_path, check=True, capture_output=True)
+        (tmp_upstream_path / rel).write_text("main-content\n")
+        subprocess.run(["git", "add", rel], cwd=tmp_upstream_path, check=True, capture_output=True)
+        subprocess.run(
+            ["git", "commit", "-q", "-m", "add on main"],
+            cwd=tmp_upstream_path,
+            check=True,
+            capture_output=True,
+        )
+        subprocess.run(
+            ["git", "clone", "-q", str(tmp_upstream_path), str(tmp_root_path)],
+            check=True,
+            capture_output=True,
+        )
+        # A clone carries no committer identity of its own (no global config on a CI runner either), so this repo needs the same setup as tmp_upstream_path above.
+        for cmd in (
+            ["git", "config", "user.email", "test@test.invalid"],
+            ["git", "config", "user.name", "test"],
+        ):
+            subprocess.run(cmd, cwd=tmp_root_path, check=True, capture_output=True)
+        subprocess.run(
+            ["git", "checkout", "-q", "-b", "develop"],
+            cwd=tmp_root_path,
+            check=True,
+            capture_output=True,
+        )
+        (tmp_root_path / rel).write_text("develop-only-content\n")
+        subprocess.run(["git", "add", rel], cwd=tmp_root_path, check=True, capture_output=True)
+        subprocess.run(
+            ["git", "commit", "-q", "-m", "develop-only change"],
+            cwd=tmp_root_path,
+            check=True,
+            capture_output=True,
+        )
+        saved_root = ROOT
+        ROOT = tmp_root_path
+        try:
+            _git_revisions.cache_clear()
+            _hub_main_rev.cache_clear()
+            revisions = _git_revisions(rel)
+        finally:
+            ROOT = saved_root
+            _git_revisions.cache_clear()
+            _hub_main_rev.cache_clear()
+    got = [text for _, _, text in revisions]
+    want = ["main-content\n"]
+    if got != want:
+        ok = False
+    print(
+        f"  {'ok  ' if got == want else 'FAIL'} want={want!s:<24} got={got!s:<24}  _git_revisions: default rev reads origin's main, not the checked-out branch"
+    )
+
+    # hub_tracked(): a tracked filename with a byte the active locale rejects must round-trip rather than crash.
+    # git ls-tree -z is NUL-delimited raw bytes, and decoding it as text before the NUL-split (the bug review caught) raises UnicodeDecodeError instead of enumerating the path.
+    encoding = locale.getpreferredencoding(False)
+    invalid_bytes = None
+    for candidate in (b"\xff", b"\x80\x81", b"\xfe\xff"):
+        try:
+            candidate.decode(encoding)
+        except UnicodeDecodeError:
+            invalid_bytes = candidate
+            break
+    if invalid_bytes is None:
+        # No candidate is actually invalid under this host's active encoding: skip rather than asserting a regression the fixture cannot exercise here.
+        print(f"  skip hub_tracked: no candidate byte sequence is invalid under {encoding!r}")
+    else:
+        bad_name = "bad-" + invalid_bytes.decode("utf-8", errors="surrogateescape") + "-name.txt"
+        with tempfile.TemporaryDirectory() as tmp_root:
+            tmp_root_path = pathlib.Path(tmp_root)
+            for cmd in (
+                ["git", "init", "-q", "-b", "main"],
+                ["git", "config", "user.email", "test@test.invalid"],
+                ["git", "config", "user.name", "test"],
+            ):
+                subprocess.run(cmd, cwd=tmp_root_path, check=True, capture_output=True)
+            try:
+                (tmp_root_path / bad_name).write_text("x")
+            except OSError:
+                # This host's filesystem cannot represent the byte: skip rather than aborting the whole --selftest run over an environment limitation, not a code fault.
+                print("  skip hub_tracked: non-UTF-8 filename (host cannot create it)")
+            else:
+                subprocess.run(
+                    ["git", "add", "-A"], cwd=tmp_root_path, check=True, capture_output=True
+                )
+                subprocess.run(
+                    ["git", "commit", "-q", "-m", "add invalid-utf8 name"],
+                    cwd=tmp_root_path,
+                    check=True,
+                    capture_output=True,
+                )
+                saved_root = ROOT
+                ROOT = tmp_root_path
+                try:
+                    hub_tracked.cache_clear()
+                    tracked = hub_tracked(rev="HEAD")
+                finally:
+                    ROOT = saved_root
+                    hub_tracked.cache_clear()
+                got = bad_name in tracked
+                if not got:
+                    ok = False
+                print(
+                    f"  {'ok  ' if got else 'FAIL'} want=True                     got={got!s:<24}  hub_tracked: a non-UTF-8 filename round-trips instead of crashing"
+                )
 
     # Region extraction and hashing: a forked github-release block must hash differently from the canonical.
     region = split_jobs(rel_ok).get("github-release")
@@ -4859,7 +5083,7 @@ def _selftest():
     # The hub-only set is the manifest subtracted from the hub's tracked files, so a declared path must never appear in it.
     # Asserted against the live manifest rather than a fixture, since the failure this guards is a declared path leaking into the deletion list, which only the real pairing can show.
     declared = {e["path"] for e in load("spec/files.json")["baseline"]}
-    hub_only = hub_only_paths({"files": load("spec/files.json")})
+    hub_only = hub_only_paths({"files": load("spec/files.json")}, rev="HEAD")
     leaked = sorted(declared & hub_only)
     if leaked or not hub_only:
         ok = False
