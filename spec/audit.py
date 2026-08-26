@@ -162,14 +162,26 @@ def repo_tree(slug, ground_head):
     return None if entries is None else set(entries)
 
 
-def git_blob_sha(content):
-    header = f"blob {len(content)}\0".encode()
-    return hashlib.sha1(header + content).hexdigest()
-
-
 @functools.cache
 def canonical_blob_sha(path):
-    return git_blob_sha((ROOT / path).read_bytes())
+    """The hub's git blob identity for path, from the same resolved `main` commit
+    `_git_revisions()` and `_hub_main_rev()` walk, not from ROOT's checked-out working tree,
+    which is not necessarily `main` (ptr727/ProjectTemplate#1017 review). `git rev-parse` resolves
+    a `<rev>:<path>` tree-ish straight to the blob object id, so no separate read-and-hash step is
+    needed. Raises OSError, matching a filesystem read's own contract, when path is absent from
+    that commit or is not a regular file there.
+    """
+    rev = _hub_main_rev()
+    result = subprocess.run(
+        ["git", "rev-parse", f"{rev}:{path}"],
+        cwd=ROOT,
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    if result.returncode != 0:
+        raise OSError(f"{path} is unreadable from the hub's main at {rev}: {result.stderr.strip()}")
+    return result.stdout.strip()
 
 
 def tree_path_included(path, patterns):
@@ -1717,24 +1729,15 @@ def classify_verbatim(down_text, canon_text, past_texts):
 
 @functools.cache
 def _hub_main_rev():
-    """The hub's own `main`, resolved fresh from `origin` immediately before use, as a commit SHA.
+    """The hub's own `main`, fetched fresh from `origin` and resolved to a commit SHA.
 
-    `_git_revisions` and `git_blob_in_file_history` read the hub's canonical history to judge a
-    downstream copy against, and per AGENTS.md `main` is that ground truth. Walking git's implicit
-    HEAD instead answers with whatever branch ROOT (the invoking checkout) happens to have
-    checked out - commonly `develop` for this repo's own working checkouts
-    (ptr727/ProjectTemplate#1017) - so a downstream copy that already matches `main` could read as
-    trailing (hub_last_change) or modified (classify_verbatim) against a commit `main` never
-    contained.
+    Reached as a checkout of one's own, fetched immediately before use, per AGENTS.md and
+    ptr727/ProjectTemplate#1017, rather than trusting ROOT's checked-out branch. `git fetch`
+    writes into ROOT's own object database, so a separate clone is not needed. Resolved to a
+    concrete SHA right away, not the mutable `FETCH_HEAD` pointer, so a later fetch elsewhere in
+    the process cannot move it mid-run.
 
-    `git fetch origin main` lands the objects in ROOT's own object database without touching its
-    working tree or checked-out branch: the same freshness guarantee AGENTS.md documents for
-    reaching the hub as a checkout of one's own, fetched immediately before reading, without the
-    weight of a separate clone. The result is resolved to a concrete SHA right away rather than
-    handed back as the mutable `FETCH_HEAD` pointer, so every read this run walks the exact same
-    commit even if something else in the process fetches again afterward.
-
-    Cached: one fetch and one resolve per run, reused by every rel_path this run reads.
+    Cached: one fetch and resolve per run, reused for every rel_path read.
     """
     fetch = subprocess.run(
         ["git", "fetch", "-q", "origin", "main"],
@@ -1771,10 +1774,11 @@ def _git_revisions(rel_path, rev=None):
     so a real command fault cannot pass as an ordinary absence. Cached because one canonical's
     history is read once per fidelity/staleness check, then reused for every audited repo's copy.
 
-    `rev` names the git revision walked; defaults to the hub's own `main` via `_hub_main_rev()`
-    (ptr727/ProjectTemplate#1017) rather than the implicit HEAD of whatever branch ROOT has
-    checked out. The --selftest fixtures pass an explicit `rev` to exercise a plain local branch
-    in a throwaway repo with no `origin` to fetch, keeping the offline engine self-test offline.
+    `rev` names the git revision walked. It defaults to the hub's own `main` via
+    `_hub_main_rev()` (ptr727/ProjectTemplate#1017) rather than the implicit HEAD of whatever
+    branch ROOT has checked out. The --selftest fixtures pass an explicit `rev` to exercise a
+    plain local branch in a throwaway repo with no `origin` to fetch, keeping the offline engine
+    self-test offline.
     """
     walk_rev = _hub_main_rev() if rev is None else rev
     r = subprocess.run(
@@ -1834,6 +1838,18 @@ def _git_revisions(rel_path, rev=None):
 def git_file_history(rel_path):
     """Every past revision's content of a hub-tracked file (to tell a stale copy from a modified one)."""
     return [text for _, _, text in _git_revisions(rel_path) if text is not None]
+
+
+def canonical_current_text(rel_path):
+    """The hub's current canonical content of rel_path, from the same `_git_revisions()` call
+    `git_file_history()` and `hub_last_change()` already make, so "current" and "history" can
+    never disagree about which commit they read (ptr727/ProjectTemplate#1017 review: reading
+    "current" from ROOT's working tree while history walked the resolved `main` SHA let a copy
+    that matches today's main misclassify as stale against its own most recent history entry).
+    None if rel_path has no history at `main`, or its newest revision has no file content there.
+    """
+    revisions = _git_revisions(rel_path)
+    return revisions[0][2] if revisions else None
 
 
 def _last_effective_change(revisions):
@@ -1946,10 +1962,7 @@ def check_intent_staleness(slug, ground, path, canonical_rel, down_text):
     if hub_change is None:
         return []
     if down_text is not None:
-        try:
-            canon_text = (ROOT / canonical_rel).read_text(encoding="utf-8", errors="replace")
-        except OSError:
-            canon_text = None
+        canon_text = canonical_current_text(canonical_rel)
         if canon_text is not None and content_hash(down_text) == content_hash(canon_text):
             return []
     commits = gh(f"repos/{slug}/commits?path={path}&sha={ground}&per_page=1")
@@ -1976,10 +1989,9 @@ def check_verbatim(label, down_text, canonical_rel, extract=None):
     and classify a mismatch as stale or modified via the canonical's git history. All findings are DRIFT: a
     byte diff is a hint to review, never proof of breakage.
     """
-    try:
-        # Same decode policy as the downstream copy and the git history, so a stray byte can never make otherwise-equal content hash differently across the three sources.
-        canon_text = (ROOT / canonical_rel).read_text(encoding="utf-8", errors="replace")
-    except OSError:
+    # canonical_current_text() and git_file_history() both read the same _git_revisions() call, so a copy matching today's main can never mismatch against its own history's newest entry (ptr727/ProjectTemplate#1017 review).
+    canon_text = canonical_current_text(canonical_rel)
+    if canon_text is None:
         return [
             (
                 "DRIFT",
@@ -3470,10 +3482,8 @@ def _selftest():
                 f"  {'ok  ' if got == want else 'FAIL'} want={want!s:<24} got={got!s:<24}  _git_revisions: file-to-symlink transition"
             )
 
-    # _git_revisions/_hub_main_rev: the default rev reads the hub's own `main` via `origin`,
-    # not whatever branch ROOT (the invoking checkout) has checked out, per
-    # ptr727/ProjectTemplate#1017. `origin` here is a plain local path, so the fetch stays
-    # offline like every other subprocess call in this self-test.
+    # _git_revisions: the default rev reads origin's `main`, not ROOT's checked-out branch (ptr727/ProjectTemplate#1017).
+    # `origin` is a plain local path here, so the fetch stays offline.
     with tempfile.TemporaryDirectory() as tmp_upstream, tempfile.TemporaryDirectory() as tmp_root:
         tmp_upstream_path = pathlib.Path(tmp_upstream)
         tmp_root_path = pathlib.Path(tmp_root)
@@ -3497,6 +3507,12 @@ def _selftest():
             check=True,
             capture_output=True,
         )
+        # A clone carries no committer identity of its own (no global config on a CI runner either), so this repo needs the same setup as tmp_upstream_path above.
+        for cmd in (
+            ["git", "config", "user.email", "test@test.invalid"],
+            ["git", "config", "user.name", "test"],
+        ):
+            subprocess.run(cmd, cwd=tmp_root_path, check=True, capture_output=True)
         subprocess.run(
             ["git", "checkout", "-q", "-b", "develop"],
             cwd=tmp_root_path,
