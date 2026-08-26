@@ -82,4 +82,5 @@ One focused pull request per drift class, branched from the target's `develop`, 
 push to a protected branch and never a hand edit outside a pull request. Close the review loop,
 per the `pr-review-conduct` skill, before asking the maintainer for merge permission. The
 maintainer merges, the agent drives to green and stops. Re-run the audit after the merge and
-commit the report per `git-commit-conventions`, done means measured, not applied.
+commit the report once authorized, per `git-commit-conventions`, done means measured, not
+applied.
