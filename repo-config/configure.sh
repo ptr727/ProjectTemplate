@@ -25,7 +25,8 @@
 # The derived settings apply computes are asserted by name rather than from a payload, meaning has_discussions and default_branch.
 # The two Dependabot security features are asserted the same way, since apply enables them and no payload declares them.
 # What is unaudited is a static setting absent from settings.json, since only that group is payload-driven.
-# Secret names are checked separately, by spec/audit.py from a hub checkout; this script leaves them a manual-verify note for values, which are never readable via the API.
+# Secret names are checked separately, by spec/audit.py from a hub checkout.
+# This script leaves them a manual-verify note for values, which are never readable via the API.
 set -Eeuo pipefail
 
 # ----- Command + target + model -----
@@ -382,8 +383,9 @@ cmd_check() {
     check_ruleset "$main_ruleset"
     check_settings
     check_security
-    # Secret names are asserted by spec/audit.py, not here; values are never readable via the API regardless.
-    note "run spec/audit.py <RepoName> (the registry name, not owner/repo) for required secret names; verify manually that their values are valid"
+    # Secret names are asserted by spec/audit.py, not here.
+    # Values are never readable via the API regardless.
+    note "run spec/audit.py [RepoName] (the registry name, not owner/repo) for required secret names, then verify by hand that their values are valid"
     if [ "$FAILED" -ne 0 ]; then
         echo "Configuration drift detected on $repo."
         exit 1
