@@ -3384,29 +3384,36 @@ def _selftest():
             capture_output=True,
         )
         subprocess.run(["git", "rm", "-q", rel], cwd=tmp_root_path, check=True, capture_output=True)
-        (tmp_root_path / rel).symlink_to("target")
-        subprocess.run(["git", "add", rel], cwd=tmp_root_path, check=True, capture_output=True)
-        subprocess.run(
-            ["git", "commit", "-q", "-m", "now a symlink"],
-            cwd=tmp_root_path,
-            check=True,
-            capture_output=True,
-        )
-        saved_root = ROOT
-        ROOT = tmp_root_path
         try:
-            _git_revisions.cache_clear()
-            revisions = _git_revisions(rel)
-        finally:
-            ROOT = saved_root
-            _git_revisions.cache_clear()
-    got = [text for _, _, text in revisions]
-    want = [None, "v1\n"]
-    if got != want:
-        ok = False
-    print(
-        f"  {'ok  ' if got == want else 'FAIL'} want={want!s:<24} got={got!s:<24}  _git_revisions: file-to-symlink transition"
-    )
+            (tmp_root_path / rel).symlink_to("target")
+        except OSError:
+            # Creating a symlink needs a privilege this host or user may not have (notably
+            # Windows without Developer Mode or an elevated prompt): skip this case rather than
+            # aborting the whole --selftest run over an environment limitation, not a code fault.
+            print("  skip _git_revisions: file-to-symlink transition (host cannot create symlinks)")
+        else:
+            subprocess.run(["git", "add", rel], cwd=tmp_root_path, check=True, capture_output=True)
+            subprocess.run(
+                ["git", "commit", "-q", "-m", "now a symlink"],
+                cwd=tmp_root_path,
+                check=True,
+                capture_output=True,
+            )
+            saved_root = ROOT
+            ROOT = tmp_root_path
+            try:
+                _git_revisions.cache_clear()
+                revisions = _git_revisions(rel)
+            finally:
+                ROOT = saved_root
+                _git_revisions.cache_clear()
+            got = [text for _, _, text in revisions]
+            want = [None, "v1\n"]
+            if got != want:
+                ok = False
+            print(
+                f"  {'ok  ' if got == want else 'FAIL'} want={want!s:<24} got={got!s:<24}  _git_revisions: file-to-symlink transition"
+            )
 
     # Region extraction and hashing: a forked github-release block must hash differently from the canonical.
     region = split_jobs(rel_ok).get("github-release")
