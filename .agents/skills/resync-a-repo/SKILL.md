@@ -69,7 +69,7 @@ Preserve the evidence RESYNC.md section 2 requires, and do not leave the finding
 5. **Settings, rulesets, and secrets.** Run
    `repo-config/configure.sh check "<owner>/<repo>" release` (substitute `operational` for an
    operational repo) from the hub at `main`, then `apply` for what it reports, never from a
-   carried copy.
+   carried copy. Run `spec/audit.py [RepoName]` from the same checkout for secrets.
 6. **Intent files last, and by hand,** since nothing mechanical judges these.
 
 Reconcile the registry entry (`status`, `types`, `releaseTrigger`, `workflowModel`,

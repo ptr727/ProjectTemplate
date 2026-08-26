@@ -353,6 +353,7 @@ HUB_HOSTED = frozenset(
         "repo-config/main.json",
         "repo-config/README.md",
         "repo-config/settings.json",
+        "spec/secrets.json",
         ".github/workflows/get-version-task.yml",
         ".github/workflows/publish-plan-task.yml",
         ".github/workflows/build-release-task.yml",
