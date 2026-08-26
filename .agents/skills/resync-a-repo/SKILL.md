@@ -67,7 +67,7 @@ Preserve the evidence RESYNC.md section 2 requires, and do not leave the finding
 4. **Interface workflows.** Honor the named contract, required jobs, the ruleset-bound check name,
    the artifact-name handoff, rather than copying bytes.
 5. **Settings, rulesets, and secrets.** Run
-   `repo-config/configure.sh check <owner>/<repo> release` (substitute `operational` for an
+   `repo-config/configure.sh check "<owner>/<repo>" release` (substitute `operational` for an
    operational repo) from the hub at `main`, then `apply` for what it reports, never from a
    carried copy.
 6. **Intent files last, and by hand,** since nothing mechanical judges these.

@@ -35,7 +35,7 @@ Two traps, both learned the hard way:
   `git checkout -b promote/develop-to-main origin/main && git merge origin/develop`, take
   `develop`'s side for the EOL-conflicted files (`git checkout --theirs <file>`) **after
   confirming each is content-identical modulo EOL, or that `develop` is a strict superset**
-  (`diff <(git show :2:<file> | tr -d '\r') <(git show :3:<file> | tr -d '\r')`), then open that branch into
+  (`diff <(git show ":2:<file>" | tr -d '\r') <(git show ":3:<file>" | tr -d '\r')`), then open that branch into
   `main`. Verify no genuine `main`-only content is dropped (build/test where the repo supports it).
 
 ## Why both rulesets omit "Require branches to be up to date before merging"

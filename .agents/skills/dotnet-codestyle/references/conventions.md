@@ -124,6 +124,11 @@ parameters, return values, exceptions, and crefs.
 /// </exception>
 public async Task<string> GetQuoteOfTheDayAsync(string category, CancellationToken cancellationToken)
 {
+    if (category is not ("motivational" or "humor"))
+    {
+        throw new ArgumentException($"Unsupported category: {category}", nameof(category));
+    }
+
     await Task.Delay(0, cancellationToken);
     return $"Quote for {category}";
 }
