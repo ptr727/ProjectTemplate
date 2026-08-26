@@ -39,15 +39,16 @@ One pull request pointing a hub `uses:` at a hub-owned action, so that the resol
 
 One pull request measuring the remaining carried surface against the carry-versus-reach test and moving whatever qualifies, now that the model is settled rather than open.
 
-**State** `decision`. **Touches** [`AUDIT.md`][audit-doc], [`spec/secrets.json`][secrets], and [`spec/files.json`][files]. **Cost** one hub edit plus a retirement per repo on its next visit. The workflow half of this cluster, replacing copy-pasted workflow content with cross-repo reuse, is measured and answered under "Hub-Hosted Reusable Workflows" below.
+**State** `decision`. **Touches** [`AUDIT.md`][audit-doc] and [`spec/files.json`][files]. **Cost** one hub edit plus a retirement per repo on its next visit. The workflow half of this cluster, replacing copy-pasted workflow content with cross-repo reuse, is measured and answered under "Hub-Hosted Reusable Workflows" below.
 
-- **Measure carried [`AUDIT.md`][audit-doc] and [`spec/secrets.json`][secrets] against the test.** Each is adapted per repo today and the question is how much of each is genuinely per-repo.
+- **Measure carried [`AUDIT.md`][audit-doc] against the test.** It is adapted per repo today and the question is how much of it is genuinely per-repo.
   - **Blocked by** - Nothing.
   - **Issue** - None filed, and [#305][issue-305] covers the propagation half from the other direction.
-  - **Checked** - `develop` at `3d1a0b1` on 2026-08-06, where [`spec/files.json`][files] declares both at `intent` and no longer declares `repo-config/configure.sh` at all.
-  - **Open** - Which of the two moves, if either.
+  - **Checked** - `develop` at `743fc81` on 2026-08-26, where [`spec/files.json`][files] declares it at `intent`.
+  - **Open** - Whether it moves.
   - **Settled** - The test is stated: a repository carries the content it is audited against and the configuration that describes it, and it reaches machinery whose content is identical in every repository.
   - **Settled** - `repo-config/configure.sh` is the first file moved across, carrying the ledger's only `retire` disposition and naming six repos, NxWitness, aiopurpleair, homeassistant-purpleair, ESPHome-NonRoot, VSCode-Server-DotNetCore and LanguageTags.
+  - **Settled** - [`spec/secrets.json`][secrets]'s adapted `baseline`/`mechanisms` carry is the second, retired outright rather than moved (ptr727/ProjectTemplate#993): `baseline` never varied per repo and `mechanisms`/`targetMechanisms`/`typeMechanisms` were already computed centrally by `spec/audit.py` from the hub's own file plus `registry/repos.json`, so no downstream repo needs a replacement local copy.
   - **Settled** - An unreachable hub means the tool did not run, reported as not run rather than worked around, since a hand-rolled substitute is the duplicated effort the model exists to end.
 
 ### The README Structure Rework
