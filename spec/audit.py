@@ -1743,16 +1743,18 @@ def _git_revisions(rel_path):
     out = []
     for line in r.stdout.splitlines():
         date, sha = line.split(" ", 1)
-        exists = (
-            subprocess.run(
-                ["git", "cat-file", "-e", f"{sha}:{rel_path}"],
-                cwd=ROOT,
-                capture_output=True,
-                check=False,
-            ).returncode
-            == 0
+        t = subprocess.run(
+            ["git", "ls-tree", sha, "--", rel_path],
+            cwd=ROOT,
+            capture_output=True,
+            text=True,
+            check=False,
         )
-        if not exists:
+        if t.returncode != 0:
+            # A real lookup failure (a corrupt object, not this sha): git ls-tree exits non-zero
+            # only for that, never for a merely absent path (empty stdout, exit 0, below).
+            raise RuntimeError(f"git ls-tree failed for {sha}:{rel_path}: {t.stderr.strip()}")
+        if not t.stdout.strip():
             # Confirmed deletion: rel_path is absent from this revision's own tree, whether or
             # not it exists again in a later commit or the current working tree.
             out.append((date, sha, None))
