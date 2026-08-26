@@ -116,6 +116,8 @@ Run [`WORKFLOW.md`][workflow]'s methodology against the repo's **own** Actions: 
   # then read dependabot.yml and confirm each present ecosystem has both a main and a develop target-branch entry
   ```
 
+- **Dependabot on self-hosted runners (account setting)** - a repo whose `dependabot-updates` and `update-graph` workflow runs are all `cancelled` with zero steps has this problem. The account-wide toggle at `https://github.com/settings/security_analysis`, `Dependabot on self-hosted runners`, routes Dependabot's own update jobs to a self-hosted runner pool. With none registered on the account, those jobs queue forever and get cancelled after 24 hours. Nothing about it surfaces in the Actions API or in ordinary CI, only a `Self-hosted runner unavailable` message on the repo's own Dependabot page. GitHub never routes a public repo through this setting, so `ProjectTemplate` itself cannot show the symptom (ptr727/ProjectTemplate#1015). Confirm the toggle, and `Automatically enable for new repositories` beside it, are both off. Disabling it does not rerun jobs already queued. Each affected repo still needs a manual `Check for Updates` click on its own Dependabot page.
+
 ## 7. Verdict Model
 
 Per dimension, record `operational | not-operational | N/A`, each with a letter verdict and an intent verdict:
