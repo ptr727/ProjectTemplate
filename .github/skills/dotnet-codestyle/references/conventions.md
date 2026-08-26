@@ -122,5 +122,9 @@ parameters, return values, exceptions, and crefs.
 /// <exception cref="System.ArgumentException">
 /// Thrown when <paramref name="category"/> is not a supported value.
 /// </exception>
-public async Task<string> GetQuoteOfTheDayAsync(string category, CancellationToken cancellationToken) {}
+public async Task<string> GetQuoteOfTheDayAsync(string category, CancellationToken cancellationToken)
+{
+    await Task.Delay(0, cancellationToken);
+    return $"Quote for {category}";
+}
 ```
