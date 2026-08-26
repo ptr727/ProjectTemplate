@@ -72,7 +72,9 @@ inherently consistent.
 
 ## Local development loop
 
-From inside the Python project directory:
+From inside a **build**-profile Python project directory. A **lint-only** Scripts profile has no
+`uv.lock` to sync and no pytest to run, substitute `uvx` per tool and `unittest` per the Two
+Profiles section above:
 
 ```sh
 uv sync                          # creates .venv, installs deps + dev group
@@ -142,9 +144,10 @@ For comments, docstrings, full type-hint rules, naming, imports, and all pattern
 
 ## Tests
 
-`uv run pytest`. One test file per module (`test_<module>.py`), fixtures over setup/teardown,
-fakes over mocks. Test the docstring's contract, not implementation details. See
-`references/testing.md` for the full conventions.
+`uv run pytest` for a build profile, `unittest` for a lint-only Scripts profile (see Two Profiles
+above). One test file per module (`test_<module>.py`), fixtures over setup/teardown (build
+profile only, `unittest` has no fixture mechanism), fakes over mocks. Test the docstring's
+contract, not implementation details. See `references/testing.md` for the full conventions.
 
 ## Versioning
 

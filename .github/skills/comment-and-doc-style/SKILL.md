@@ -224,8 +224,8 @@ hub-hosted tool the reader runs, are in `references/carried-doc-references.md`.
 
 ## PR titles and commit messages
 
-- **Format**: an imperative subject, 72 characters or fewer, no trailing period ("Add 24-hour
-  PM2.5 average sensor", not "Added X" or "Adds X"). An optional body, blank-line separated,
+- **Format**: an imperative subject, 72 characters or fewer, no trailing period ("Add 24-Hour
+  PM2.5 Average Sensor", not "Added X" or "Adds X"). An optional body, blank-line separated,
   explains *why* the change is being made when that is non-obvious, the diff already shows *what*.
 - **Rules**: no vague titles (`update stuff`, `wip`). Dependabot's default `Bump X from Y to Z`
   titles are fine as-is. No `Co-Authored-By:` lines unless the developer explicitly asks. No
@@ -237,11 +237,11 @@ hub-hosted tool the reader runs, are in `references/carried-doc-references.md`.
   *EPA-Corrected*, *24-Hour*).
 
 ```text
-Add structured logging extensions to library
-Pin softprops/action-gh-release to commit SHA
-Drop net8.0 multi-targeting from console project
+Add Structured Logging Extensions to Library
+Pin softprops/action-gh-release to Commit SHA
+Drop net8.0 Multi-Targeting from Console Project
 Bump xunit.v3 from 3.2.2 to 3.3.0
-Clarify devcontainer setup steps in README
+Clarify devcontainer Setup Steps in README
 ```
 
 ## Quantitative claims
