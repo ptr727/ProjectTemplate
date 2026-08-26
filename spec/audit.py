@@ -36,6 +36,7 @@ import pathlib
 import re
 import subprocess
 import sys
+import tempfile
 import time
 import urllib.error
 import urllib.request
@@ -1714,40 +1715,106 @@ def classify_verbatim(down_text, canon_text, past_texts):
     return "modified"
 
 
-_HISTORY_CACHE: dict[
-    str, list[str]
-] = {}  # rel_path -> past revision contents, cached because one canonical is compared against every audited repo
+@functools.cache
+def _git_revisions(rel_path):
+    """Every commit that touched rel_path in the hub's history, newest first, as (date, sha, text).
+
+    `text` is None where rel_path has no file content at this revision: absent (deleted, checked
+    against the revision's own tree rather than `git show`'s stderr wording, which reads
+    differently once rel_path exists again in a later commit), or present as something other than
+    a regular file, by ls-tree mode rather than type (a directory from a file-to-directory
+    transition, a symlink, whose ls-tree type is "blob" too but whose content is its target path
+    rather than a file's, a submodule gitlink). A `git show` failure for any other reason (a
+    permission or encoding fluke, a corrupt object) raises instead of folding into the same None,
+    so a real command fault cannot pass as an ordinary absence. Cached because one canonical's
+    history is read once per fidelity/staleness check, then reused for every audited repo's copy.
+    """
+    r = subprocess.run(
+        ["git", "log", "--format=%cI %H", "--", rel_path],
+        cwd=ROOT,
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    if r.returncode != 0:
+        # A real command failure (not a git repo, a corrupt object) must not read as "no
+        # history": that silently clears the intent-staleness advisory and drops verbatim's
+        # past-revision list, both misreporting a tool fault as a clean audit.
+        raise RuntimeError(f"git log failed for {rel_path}: {r.stderr.strip()}")
+    if not r.stdout.strip():
+        return []
+    out = []
+    for line in r.stdout.splitlines():
+        date, sha = line.split(" ", 1)
+        t = subprocess.run(
+            ["git", "ls-tree", sha, "--", rel_path],
+            cwd=ROOT,
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+        if t.returncode != 0:
+            # A real lookup failure (a corrupt object, not this sha): git ls-tree exits non-zero
+            # only for that, never for a merely absent path (empty stdout, exit 0, below).
+            raise RuntimeError(f"git ls-tree failed for {sha}:{rel_path}: {t.stderr.strip()}")
+        entry = t.stdout.strip()
+        mode = entry.split(None, 1)[0] if entry else None
+        if mode not in ("100644", "100755"):
+            # Absent (empty stdout), or present as something other than a regular file (a
+            # directory from a file-to-directory transition, a symlink, a submodule gitlink):
+            # none has file content to compare, so all read the same as a confirmed deletion. A
+            # symlink's ls-tree type is "blob" too (its content is the link target), so the mode
+            # is checked directly rather than the type.
+            out.append((date, sha, None))
+            continue
+        # Decode as UTF-8 with replacement to match the downstream and canonical reads.
+        # A divergent decode would fabricate a mismatch.
+        s = subprocess.run(
+            ["git", "show", f"{sha}:{rel_path}"],
+            cwd=ROOT,
+            capture_output=True,
+            encoding="utf-8",
+            errors="replace",
+            check=False,
+        )
+        if s.returncode != 0:
+            raise RuntimeError(f"git show failed for {sha}:{rel_path}: {s.stderr.strip()}")
+        out.append((date, sha, s.stdout))
+    return out
 
 
 def git_file_history(rel_path):
-    """Every past revision's content of a hub-tracked file (to tell a stale copy from a modified one), cached per rel_path."""
-    if rel_path in _HISTORY_CACHE:
-        return _HISTORY_CACHE[rel_path]
-    out = []
-    # Decode as UTF-8 with replacement to match the downstream and canonical reads.
-    # A divergent decode would fabricate a mismatch.
-    r = subprocess.run(
-        ["git", "log", "--format=%H", "--", rel_path],
-        cwd=ROOT,
-        capture_output=True,
-        encoding="utf-8",
-        errors="replace",
-        check=False,
-    )
-    if r.returncode == 0:
-        for sha in r.stdout.split():
-            s = subprocess.run(
-                ["git", "show", f"{sha}:{rel_path}"],
-                cwd=ROOT,
-                capture_output=True,
-                encoding="utf-8",
-                errors="replace",
-                check=False,
-            )
-            if s.returncode == 0:
-                out.append(s.stdout)
-    _HISTORY_CACHE[rel_path] = out
-    return out
+    """Every past revision's content of a hub-tracked file (to tell a stale copy from a modified one)."""
+    return [text for _, _, text in _git_revisions(rel_path) if text is not None]
+
+
+def _last_effective_change(revisions):
+    """The (date, sha) of the newest revision in `revisions` (newest-first (date, sha, text)
+    triples for one file) whose content differs from its predecessor after normalize(), or the
+    oldest (creation) revision if every later one differs from its predecessor only by normalized
+    churn (spec/fidelity-model.md "Normalization": EOL, a Dependabot action-pin bump, a pruned
+    `needs:` list). None if `revisions` is empty.
+
+    The creation revision always counts as effective: it has no predecessor, and normalize()
+    applied to only one side proves nothing. A revision with unreadable text (None) also counts as
+    effective rather than being silently skipped, since a real difference cannot be ruled out.
+
+    `revisions` is assumed newest-first with each entry the immediate predecessor of the one
+    before it (verified empirically over every intent-fidelity canonical file's full history,
+    ptr727/ProjectTemplate#1014): this repo's own branching is forward-only (no back-merges from
+    main into develop) with feature branches squash-merged one at a time, so a canonical file's
+    per-path `git log` is a single line, not a graph with siblings to mis-order. A canonical file
+    reached through a genuinely branching history (a direct hotfix to main alongside independent
+    develop work touching the same path) would need each revision compared against its actual git
+    parent(s) instead of its list neighbor.
+    """
+    for i, (date, sha, text) in enumerate(revisions):
+        if i + 1 == len(revisions):
+            return date, sha
+        older_text = revisions[i + 1][2]
+        if text is None or older_text is None or normalize(text) != normalize(older_text):
+            return date, sha
+    return None
 
 
 @functools.cache
@@ -1765,21 +1832,22 @@ def git_blob_in_file_history(rel_path, blob_sha):
 
 @functools.cache
 def hub_last_change(rel_path):
-    """The hub checkout's last commit touching rel_path, as (iso_date, short_sha), or None if untracked.
+    """The hub checkout's most recent EFFECTIVE change to rel_path, as (iso_date, short_sha), or
+    None if untracked.
+
+    "Effective" excludes normalized churn (spec/fidelity-model.md "Normalization": EOL, a
+    Dependabot action-pin bump, a pruned `needs:` list) the same way the verbatim check already
+    does, via _last_effective_change over the file's full history. A raw last-commit date treated
+    every one of those bumps as the copy "trailing", even though the fidelity model already
+    classifies that class as governed per-repo drift rather than a deviation (ptr727/ProjectTemplate#735).
 
     Cached because one canonical's date is compared against every audited repo's copy.
     """
-    r = subprocess.run(
-        ["git", "log", "-1", "--format=%cI %h", "--", rel_path],
-        cwd=ROOT,
-        capture_output=True,
-        text=True,
-        check=False,
-    )
-    if r.returncode != 0 or not r.stdout.strip():
+    change = _last_effective_change(_git_revisions(rel_path))
+    if change is None:
         return None
-    date, sha = r.stdout.strip().split(" ", 1)
-    return date, sha
+    date, sha = change
+    return date, sha[:7]
 
 
 def intent_canonical_rel(item, path):
@@ -1810,8 +1878,10 @@ def check_intent_staleness(slug, ground, path, canonical_rel, down_text):
     (spec/fidelity-model.md), which is how a copy trailed the hub by many revisions while every
     check read clean. No reconciliation record exists anywhere, so the implementable proxy is
     when each side last changed: the hub canonical changing after the repo's copy marks the copy
-    as possibly trailing. Advisory only, DRIFT and never a failure, and honest about its blind
-    spot: a copy touched after the hub change without actually reconciling reads current.
+    as possibly trailing. "Changed" excludes normalized churn (hub_last_change), so a Dependabot
+    action-pin bump or a needs-list prune does not by itself mark every carrier as trailing.
+    Advisory only, DRIFT and never a failure, and honest about its blind spot: a copy touched
+    after the hub change without actually reconciling reads current.
 
     A copy content-identical to the canonical cannot trail it, so that case is skipped however
     old the copy's last commit is. It is also the promotion candidate spec/fidelity_honesty.py
@@ -3157,6 +3227,193 @@ def _selftest():
         print(
             "  ok   needs-mask: pruned needs (inline, block, scalar) normalizes equal, forked step differs, next key preserved"
         )
+
+    # _last_effective_change must skip a normalized-only bump, per ptr727/ProjectTemplate#735.
+    d3, d2, d1 = (
+        "2024-03-01T00:00:00+00:00",
+        "2024-02-01T00:00:00+00:00",
+        "2024-01-01T00:00:00+00:00",
+    )
+    lec_cases = [
+        (
+            "every bump back to creation is pin-only -> creation wins",
+            [(d3, "sha3", pin_b), (d2, "sha2", pin_a), (d1, "sha1", pin_a)],
+            (d1, "sha1"),
+        ),
+        (
+            "newest differs for real -> newest wins",
+            [(d3, "sha3", pin_struct), (d2, "sha2", pin_a), (d1, "sha1", pin_a)],
+            (d3, "sha3"),
+        ),
+        (
+            "newest is a pin-only bump over a real change -> the real change wins",
+            [(d3, "sha3", pin_b), (d2, "sha2", pin_a), (d1, "sha1", pin_struct)],
+            (d2, "sha2"),
+        ),
+        (
+            "one revision (creation) -> that revision wins, nothing to compare against",
+            [(d1, "sha1", "only revision\n")],
+            (d1, "sha1"),
+        ),
+        (
+            "unreadable newest text -> treated as effective, never silently skipped",
+            [(d2, "sha2", None), (d1, "sha1", "whatever\n")],
+            (d2, "sha2"),
+        ),
+        ("no history -> None", [], None),
+    ]
+    for label, revisions, want in lec_cases:
+        got = _last_effective_change(revisions)
+        if got != want:
+            ok = False
+        print(
+            f"  {'ok  ' if got == want else 'FAIL'} want={want!s:<24} got={got!s:<24}  _last_effective_change: {label}"
+        )
+
+    # _git_revisions: a deletion revision reads as None even once rel_path exists again in a
+    # later commit, per ptr727/ProjectTemplate#1016 and #1018.
+    with tempfile.TemporaryDirectory() as tmp_root:
+        tmp_root_path = pathlib.Path(tmp_root)
+        for cmd in (
+            ["git", "init", "-q"],
+            ["git", "config", "user.email", "test@test.invalid"],
+            ["git", "config", "user.name", "test"],
+        ):
+            subprocess.run(cmd, cwd=tmp_root_path, check=True, capture_output=True)
+        rel = "deletion-probe.txt"
+        (tmp_root_path / rel).write_text("v1\n")
+        subprocess.run(["git", "add", rel], cwd=tmp_root_path, check=True, capture_output=True)
+        subprocess.run(
+            ["git", "commit", "-q", "-m", "add"], cwd=tmp_root_path, check=True, capture_output=True
+        )
+        subprocess.run(["git", "rm", "-q", rel], cwd=tmp_root_path, check=True, capture_output=True)
+        subprocess.run(
+            ["git", "commit", "-q", "-m", "delete"],
+            cwd=tmp_root_path,
+            check=True,
+            capture_output=True,
+        )
+        (tmp_root_path / rel).write_text("v2\n")
+        subprocess.run(["git", "add", rel], cwd=tmp_root_path, check=True, capture_output=True)
+        subprocess.run(
+            ["git", "commit", "-q", "-m", "readd"],
+            cwd=tmp_root_path,
+            check=True,
+            capture_output=True,
+        )
+        global ROOT
+        saved_root = ROOT
+        ROOT = tmp_root_path
+        try:
+            _git_revisions.cache_clear()
+            revisions = _git_revisions(rel)
+        finally:
+            ROOT = saved_root
+            _git_revisions.cache_clear()
+    got = [text for _, _, text in revisions]
+    want = ["v2\n", None, "v1\n"]
+    if got != want:
+        ok = False
+    print(
+        f"  {'ok  ' if got == want else 'FAIL'} want={want!s:<24} got={got!s:<24}  _git_revisions: re-added file"
+    )
+
+    # _git_revisions: a path that becomes a directory reads as None too, per
+    # ptr727/ProjectTemplate#1016 (git show on a tree path returns a listing, not file content).
+    with tempfile.TemporaryDirectory() as tmp_root:
+        tmp_root_path = pathlib.Path(tmp_root)
+        for cmd in (
+            ["git", "init", "-q"],
+            ["git", "config", "user.email", "test@test.invalid"],
+            ["git", "config", "user.name", "test"],
+        ):
+            subprocess.run(cmd, cwd=tmp_root_path, check=True, capture_output=True)
+        rel = "thing"
+        (tmp_root_path / rel).write_text("v1\n")
+        subprocess.run(["git", "add", rel], cwd=tmp_root_path, check=True, capture_output=True)
+        subprocess.run(
+            ["git", "commit", "-q", "-m", "file"],
+            cwd=tmp_root_path,
+            check=True,
+            capture_output=True,
+        )
+        subprocess.run(["git", "rm", "-q", rel], cwd=tmp_root_path, check=True, capture_output=True)
+        (tmp_root_path / rel).mkdir()
+        (tmp_root_path / rel / "inner.txt").write_text("v2\n")
+        subprocess.run(["git", "add", rel], cwd=tmp_root_path, check=True, capture_output=True)
+        subprocess.run(
+            ["git", "commit", "-q", "-m", "now a directory"],
+            cwd=tmp_root_path,
+            check=True,
+            capture_output=True,
+        )
+        saved_root = ROOT
+        ROOT = tmp_root_path
+        try:
+            _git_revisions.cache_clear()
+            revisions = _git_revisions(rel)
+        finally:
+            ROOT = saved_root
+            _git_revisions.cache_clear()
+    got = [text for _, _, text in revisions]
+    want = [None, "v1\n"]
+    if got != want:
+        ok = False
+    print(
+        f"  {'ok  ' if got == want else 'FAIL'} want={want!s:<24} got={got!s:<24}  _git_revisions: file-to-directory transition"
+    )
+
+    # _git_revisions: a path that becomes a symlink reads as None too, per
+    # ptr727/ProjectTemplate#1016 (a symlink's ls-tree type is "blob", but git show returns its
+    # target path, not file content).
+    with tempfile.TemporaryDirectory() as tmp_root:
+        tmp_root_path = pathlib.Path(tmp_root)
+        for cmd in (
+            ["git", "init", "-q"],
+            ["git", "config", "user.email", "test@test.invalid"],
+            ["git", "config", "user.name", "test"],
+        ):
+            subprocess.run(cmd, cwd=tmp_root_path, check=True, capture_output=True)
+        rel = "thing"
+        (tmp_root_path / rel).write_text("v1\n")
+        subprocess.run(["git", "add", rel], cwd=tmp_root_path, check=True, capture_output=True)
+        subprocess.run(
+            ["git", "commit", "-q", "-m", "file"],
+            cwd=tmp_root_path,
+            check=True,
+            capture_output=True,
+        )
+        subprocess.run(["git", "rm", "-q", rel], cwd=tmp_root_path, check=True, capture_output=True)
+        try:
+            (tmp_root_path / rel).symlink_to("target")
+        except OSError:
+            # Creating a symlink needs a privilege this host or user may not have (notably
+            # Windows without Developer Mode or an elevated prompt): skip this case rather than
+            # aborting the whole --selftest run over an environment limitation, not a code fault.
+            print("  skip _git_revisions: file-to-symlink transition (host cannot create symlinks)")
+        else:
+            subprocess.run(["git", "add", rel], cwd=tmp_root_path, check=True, capture_output=True)
+            subprocess.run(
+                ["git", "commit", "-q", "-m", "now a symlink"],
+                cwd=tmp_root_path,
+                check=True,
+                capture_output=True,
+            )
+            saved_root = ROOT
+            ROOT = tmp_root_path
+            try:
+                _git_revisions.cache_clear()
+                revisions = _git_revisions(rel)
+            finally:
+                ROOT = saved_root
+                _git_revisions.cache_clear()
+            got = [text for _, _, text in revisions]
+            want = [None, "v1\n"]
+            if got != want:
+                ok = False
+            print(
+                f"  {'ok  ' if got == want else 'FAIL'} want={want!s:<24} got={got!s:<24}  _git_revisions: file-to-symlink transition"
+            )
 
     # Region extraction and hashing: a forked github-release block must hash differently from the canonical.
     region = split_jobs(rel_ok).get("github-release")
