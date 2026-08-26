@@ -91,7 +91,9 @@ def hub_tracked(rev=None):
     `develop`, or the reverse, is not silently missed or falsely added
     (ptr727/ProjectTemplate#1017 review). Filtered to regular-file modes (100644, 100755) the same
     way `_git_revisions()` is: a directory, a symlink, or a submodule gitlink has no file content
-    to compare, and every caller here assumes a plain file at each returned path.
+    to compare, and every caller here assumes a plain file at each returned path. `-z` NUL-delimits
+    the output so an unusual path is not C-quoted, which would otherwise return an escaped string
+    that matches nothing a caller compares it against.
 
     `rev` defaults to `_hub_main_rev()`. The --selftest fixture passes an explicit `rev` to check
     against ROOT's own real tracked files without a network fetch, keeping the offline engine
@@ -102,15 +104,21 @@ def hub_tracked(rev=None):
     """
     walk_rev = _hub_main_rev() if rev is None else rev
     r = subprocess.run(
-        ["git", "ls-tree", "-r", walk_rev], cwd=ROOT, capture_output=True, text=True, check=False
+        ["git", "ls-tree", "-r", "-z", walk_rev],
+        cwd=ROOT,
+        capture_output=True,
+        text=True,
+        check=False,
     )
     if r.returncode != 0:
         raise RuntimeError(
             f"git ls-tree -r {walk_rev} failed in {ROOT}: {r.stderr.strip() or 'non-zero exit'}"
         )
     paths = set()
-    for line in r.stdout.splitlines():
-        meta, _, path = line.partition("\t")
+    for record in r.stdout.split("\0"):
+        if not record:
+            continue
+        meta, _, path = record.partition("\t")
         mode = meta.split(None, 1)[0] if meta else None
         if mode in ("100644", "100755"):
             paths.add(path)
