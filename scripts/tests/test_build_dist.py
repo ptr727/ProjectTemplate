@@ -265,6 +265,22 @@ class RegenerateCase(unittest.TestCase):
             exit_code = build_dist.main()
         self.assertEqual(exit_code, 1)
 
+    def test_check_reports_a_symlink_as_2_not_1(self) -> None:
+        """1 is --check's own documented "stale" result, so a caller reading the exit code (host-setup/menu.sh among them) needs a different code to tell a real failure apart from that finding.
+
+        is_stale() short-circuits to True (stale, exit 1) the moment the distribution stamp is
+        missing, so the symlink has to be introduced only after a clean regenerate() already
+        produced one, reaching the digest walk that actually raises rather than the early return.
+        """
+        self.make_skill("foo")
+        build_dist.regenerate()
+        (self.skills_src / "foo" / "escape").symlink_to(self.tmp)
+        from unittest import mock
+
+        with mock.patch("sys.argv", ["build_dist.py", "--check"]), mock.patch("builtins.print"):
+            exit_code = build_dist.main()
+        self.assertEqual(exit_code, 2)
+
 
 if __name__ == "__main__":
     unittest.main()

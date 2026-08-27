@@ -92,6 +92,13 @@ fetch_hub() {
     }
     step "Fetching $HUB_REPO at $REF"
     mkdir -p "$DIR"
+    # Held for the rest of this fetch, so a second menu.sh sharing this --dir blocks here instead of passing remove_unowned_hub_check and deleting the tree this one is still cloning into.
+    local lock_fd
+    exec {lock_fd}>"$DIR/hub.lock"
+    flock "$lock_fd" || {
+        fail "Could not lock $DIR/hub.lock"
+        return 1
+    }
     remove_unowned_hub_check || return 1
     rm -rf "$DIR/hub"
     # A full clone of the default branch first, whatever $REF names: spec/audit.py walks the hub's own history to judge whether a carried copy is trailing the file it was copied from, and a shallow clone would read every file as changed at the truncation boundary and misreport every repo as stale.
