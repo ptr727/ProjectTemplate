@@ -9,12 +9,17 @@ extend-select = ["I"]  # isort import ordering, on top of the default rules
 
 [tool.mypy]
 python_version = "3.13"
+# CI always runs this on ubuntu-latest, so pinning the platform keeps a host running mypy natively on Windows or macOS in step with it.
+# Otherwise a POSIX-only stdlib attribute a runtime skip guard already excludes on that host still fails here, since mypy's own flow analysis does not narrow it away.
+platform = "linux"
 files = ["spec", "host-setup", "scripts"]
 mypy_path = [".github/actions/prose-gate", ".github/actions/repo-gate"]
 exclude = 'scripts/(prose_lint|repo_gate)\.py'
 
 [tool.pyright]
 pythonVersion = "3.13"
+# Matches [tool.mypy]'s platform pin above, for the same reason: Pylance in an editor otherwise flags the same POSIX-only attributes live on a Windows or macOS host.
+pythonPlatform = "Linux"
 typeCheckingMode = "standard"
 include = ["spec", "host-setup", "scripts"]
 exclude = ["**/__pycache__"]
