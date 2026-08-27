@@ -166,8 +166,10 @@ def is_stale():
     names = skill_names()
     try:
         manifest = json.loads(PLUGIN_MANIFEST.read_text(encoding="utf-8"))
-    except (OSError, json.JSONDecodeError):
+    except json.JSONDecodeError:
+        # A corrupted or hand-edited manifest is exactly the stale case this function exists to catch.
         return True
+    # OSError (an unreadable file, one removed between the is_file() check above and this read) is deliberately not caught here: --check's own caller needs it to propagate as the execution failure it is, not read as this function's ordinary stale result.
     # The full manifest, not only "skills".
     # A hand-edited description/author/version is exactly as much a corrupted-plugin case as a hand-edited skills list.
     # The manifest is entirely deterministic from `names`, so comparing all of it costs nothing extra to get right.

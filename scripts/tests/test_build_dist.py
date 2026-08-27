@@ -7,6 +7,7 @@ Run as `python3 scripts/tests/test_build_dist.py`, or under `python3 -m unittest
 from __future__ import annotations
 
 import json
+import os
 import sys
 import unittest
 from pathlib import Path
@@ -290,6 +291,20 @@ class RegenerateCase(unittest.TestCase):
             mock.patch("builtins.print"),
             mock.patch.object(build_dist, "is_stale", side_effect=OSError("permission denied")),
         ):
+            exit_code = build_dist.main()
+        self.assertEqual(exit_code, 2)
+
+    def test_check_reports_an_unreadable_manifest_as_2_not_1(self) -> None:
+        """The manifest read has its own try/except inside is_stale() (JSONDecodeError, a genuinely stale manifest), and an OSError there has to propagate through it rather than being caught by the same clause, or an unreadable file reads as the ordinary stale result this test would otherwise miss."""
+        if os.geteuid() == 0:
+            self.skipTest("running as root ignores the permission bits this test depends on")
+        self.make_skill("foo")
+        build_dist.regenerate()
+        build_dist.PLUGIN_MANIFEST.chmod(0o000)
+        self.addCleanup(build_dist.PLUGIN_MANIFEST.chmod, 0o644)
+        from unittest import mock
+
+        with mock.patch("sys.argv", ["build_dist.py", "--check"]), mock.patch("builtins.print"):
             exit_code = build_dist.main()
         self.assertEqual(exit_code, 2)
 
