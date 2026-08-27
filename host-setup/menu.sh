@@ -85,6 +85,11 @@ remove_unowned_hub_check() {
 }
 
 fetch_hub() {
+    # --dry-run promises to change nothing, and fetching is the one real change this whole script makes to the host.
+    [[ $DRY_RUN == true ]] && {
+        fail "This task needs a fetched hub checkout, and fetching one is itself a change --dry-run does not make. Run without --dry-run, or from inside a hub checkout already on $DEFAULT_REF."
+        return 1
+    }
     step "Fetching $HUB_REPO at $REF"
     mkdir -p "$DIR"
     remove_unowned_hub_check || return 1
@@ -115,27 +120,44 @@ fetch_hub() {
     info "Cloned to $HUB_ROOT"
 }
 
-# A checkout already sitting on the hub is used as is, so a maintainer working in their own ProjectTemplate tree never pays for a second clone of the repo they are standing in.
+# Whether the current checkout is the hub, by origin identity alone, independent of --ref or of whether that checkout is fresh enough to reuse.
+# Read by detect_downstream_root so the hub is never misclassified as a downstream repo, whatever ref was asked for.
+IS_HUB_CHECKOUT=false
+
+# A checkout already sitting on the hub is a candidate to reuse as is, so a maintainer working in their own ProjectTemplate tree never pays for a second clone of the repo they are standing in.
 # Only for the default ref: naming any other --ref always fetches fresh, even from inside the hub itself, since AUDIT.md and the sync procedure both rely on this loader reaching a ref other than whatever happens to be checked out locally.
+# HUB_ROOT set here is tentative, verified against a freshly fetched origin/main by ensure_hub_root before any tool actually reads it, since a candidate this stale is exactly the wrong answer for an audit or a Skills-distribution check.
 detect_hub_root() {
-    [[ $REF == "$DEFAULT_REF" ]] || return 0
     local top
     top=$(git rev-parse --show-toplevel 2>/dev/null) || return 0
     [[ $(origin_slug "$top") == "$HUB_REPO" ]] || return 0
-    HUB_ROOT="$top"
+    IS_HUB_CHECKOUT=true
+    [[ $REF == "$DEFAULT_REF" ]] && HUB_ROOT="$top"
+    return 0
 }
 
+# Confirms a tentative local HUB_ROOT still matches origin/main before any tool reads it, checked here rather than at startup so opening the menu costs no network call until a hub-dependent task actually runs.
+# A local checkout that has moved on (a feature branch, a commit behind) falls back to a real fetch rather than being trusted, the same freshness carry.py's own verify_hub already requires of its own hub argument.
 ensure_hub_root() {
-    [[ -n $HUB_ROOT ]] && return 0
+    if [[ -z $HUB_ROOT ]]; then
+        fetch_hub
+        return
+    fi
+    if git -C "$HUB_ROOT" fetch --quiet origin "$DEFAULT_REF" &&
+        [[ $(git -C "$HUB_ROOT" rev-parse HEAD) == "$(git -C "$HUB_ROOT" rev-parse "origin/$DEFAULT_REF")" ]]; then
+        return 0
+    fi
+    HUB_ROOT=""
     fetch_hub
 }
 
 # A downstream repo is whatever git repo the menu is run from, when that repo is not the hub itself.
 # It stays unset from inside the hub or off a checkout entirely, and the downstream section of the menu is what reads that.
+# Gated on IS_HUB_CHECKOUT rather than HUB_ROOT: the hub is never a downstream repo, even when --ref left HUB_ROOT unset.
 detect_downstream_root() {
+    [[ $IS_HUB_CHECKOUT == true ]] && return 0
     local top
     top=$(git rev-parse --show-toplevel 2>/dev/null) || return 0
-    [[ -n $HUB_ROOT && $top == "$HUB_ROOT" ]] && return 0
     DOWNSTREAM_ROOT="$top"
     DOWNSTREAM_NAME=$(basename "$(origin_slug "$top")")
 }
