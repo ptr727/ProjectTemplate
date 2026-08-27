@@ -9,7 +9,11 @@ directory, so this script materializes a plugin (.claude-plugin/fleet-skills/) t
 place a skill's content is ever hand-edited.
 
 Usage: python3 scripts/build_dist.py           regenerate distributions from .agents/skills/
-       python3 scripts/build_dist.py --check   read-only: exit 1 if a distribution is stale
+       python3 scripts/build_dist.py --check   read-only: exit 0 clean, 1 stale, 2 on a real
+                                                 failure (a symlink under .agents/skills/, an
+                                                 unreadable file), so a caller reading the exit
+                                                 code can tell a finding apart from the check
+                                                 itself not having run.
 """
 
 from __future__ import annotations
@@ -162,8 +166,10 @@ def is_stale():
     names = skill_names()
     try:
         manifest = json.loads(PLUGIN_MANIFEST.read_text(encoding="utf-8"))
-    except (OSError, json.JSONDecodeError):
+    except json.JSONDecodeError:
+        # A corrupted or hand-edited manifest is exactly the stale case this function exists to catch.
         return True
+    # OSError (an unreadable file, one removed between the is_file() check above and this read) is deliberately not caught here: --check's own caller needs it to propagate as the execution failure it is, not read as this function's ordinary stale result.
     # The full manifest, not only "skills".
     # A hand-edited description/author/version is exactly as much a corrupted-plugin case as a hand-edited skills list.
     # The manifest is entirely deterministic from `names`, so comparing all of it costs nothing extra to get right.
@@ -190,16 +196,18 @@ def main():
     parser.add_argument(
         "--check",
         action="store_true",
-        help="read-only: exit 1 if a generated skill distribution is stale",
+        help="read-only: exit 0 clean, 1 stale, 2 on a real failure",
     )
     args = parser.parse_args()
 
     if args.check:
         try:
             stale = is_stale()
-        except ValueError as exc:
+        except (ValueError, OSError) as exc:
+            # 2 rather than 1, so a caller reading the exit code (host-setup/menu.sh among them) can tell this apart from the stale result below, which also exits 1 by this flag's own documented contract.
+            # OSError alongside ValueError: is_stale() reads several files beyond the one call already wrapped in its own try/except, and a permissions problem or a file removed out from under it raises that, not ValueError.
             print(exc, file=sys.stderr)
-            return 1
+            return 2
         if stale:
             print(
                 "Generated skill distributions are stale: run `python3 scripts/build_dist.py`.",
