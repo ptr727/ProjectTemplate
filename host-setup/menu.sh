@@ -136,14 +136,20 @@ detect_hub_root() {
     return 0
 }
 
-# Confirms a tentative local HUB_ROOT still matches origin/main before any tool reads it, checked here rather than at startup so opening the menu costs no network call until a hub-dependent task actually runs.
-# A local checkout that has moved on (a feature branch, a commit behind) falls back to a real fetch rather than being trusted, the same freshness carry.py's own verify_hub already requires of its own hub argument.
+# Confirms a tentative local HUB_ROOT still matches a clean, freshly fetched origin/main before any tool reads it, checked here rather than at startup so opening the menu costs no network call until a hub-dependent task actually runs.
+# A local checkout that has moved on (a feature branch, a commit behind, an uncommitted edit) falls back to a real fetch rather than being trusted, the same freshness and cleanliness carry.py's own verify_hub already requires of its own hub argument.
 ensure_hub_root() {
+    # The freshness check below itself fetches, which updates FETCH_HEAD and the remote-tracking ref even though it touches no working file, so it is as much a change as fetch_hub's own clone and is refused for the same reason.
+    [[ $DRY_RUN == true ]] && {
+        fail "This task needs to confirm the hub checkout is fresh, and confirming it means fetching, which --dry-run does not do. Run without --dry-run."
+        return 1
+    }
     if [[ -z $HUB_ROOT ]]; then
         fetch_hub
         return
     fi
     if git -C "$HUB_ROOT" fetch --quiet origin "$DEFAULT_REF" &&
+        [[ -z $(git -C "$HUB_ROOT" status --porcelain) ]] &&
         [[ $(git -C "$HUB_ROOT" rev-parse HEAD) == "$(git -C "$HUB_ROOT" rev-parse "origin/$DEFAULT_REF")" ]]; then
         return 0
     fi
