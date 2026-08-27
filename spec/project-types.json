@@ -162,6 +162,13 @@
                 { "id": "setup.dependabot.ecosystems", "verdict": "intent", "assert": "For each ecosystem the repo's tree implies, .github/dependabot.yml declares it (dual-target main+develop per the fleet norm): github-actions when .github/workflows/ is present (its workflows reference actions, else their versions go stale and a stood-up merge-bot has no PRs to auto-merge), devcontainers when a .devcontainer is present. A missing implied ecosystem is a drift finding. Language ecosystems (nuget/uv/npm) are directory-scoped, audited by inspection.", "intentRef": "GOVERNANCE.md#branching-model" }
             ]
         },
+        "runtime-secrets": {
+            "appliesTo": "*",
+            "checks": [
+                { "id": "runtimesecrets.naming", "verdict": "letter", "assert": "A repo-scoped runtime-secrets directory is named .secrets/ (dotted, not a bare secrets/), a single opaque credential file inside it carries no extension, a structured credential keeps its own format's extension, and the shared env file is named for what it configures rather than a bare .env. A bare secrets/ directory or a .txt-suffixed single-value secret file is drift. N/A for a repo carrying no repo-scoped secrets directory.", "intentRef": "GOVERNANCE.md#repo-scoped-secrets" },
+                { "id": "runtimesecrets.catalog", "verdict": "letter", "assert": "Every real secret file in a repo-scoped .secrets/ directory has a tracked <name>.example beside it, .gitignore un-ignores only the .example files plus README.md, and that README.md catalogs each file: what it holds and what consumes it. N/A for a repo carrying no repo-scoped secrets directory.", "intentRef": "GOVERNANCE.md#repo-scoped-secrets" }
+            ]
+        },
         "linter-parity": {
             "appliesTo": "*",
             "checks": [
