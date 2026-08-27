@@ -33,6 +33,8 @@ die() {
     printf 'ERROR: %s\n' "$*" >&2
     exit 1
 }
+# Reports a task-time error without ending the process, unlike die: a dispatched action's failure returns to the menu, and only a startup failure (bad arguments, no git) is fatal.
+fail() { printf 'ERROR: %s\n' "$*" >&2; }
 
 usage() {
     cat <<'EOF'
@@ -40,11 +42,12 @@ Usage: menu.sh [options]
 
 An interactive menu over this fleet's host and repo tooling: update the host tools, upgrade the
 OS, install the fleet skills, audit a cataloged repo, and pull the hub's verbatim-owned files into
-a downstream repo's own worktree. Run from a hub checkout or from any other repo; the menu shows
+a downstream repo's own worktree. Run from a hub checkout or from any other repo. The menu shows
 each the tasks that apply to it.
 
 Options:
-  -y, --yes         Do not prompt, and pass the same to each tool this menu runs
+  -y, --yes         Pass --yes to each tool this menu runs, so a tool does not prompt. The menu's
+                    own choice, confirmation, and repo-name prompts still ask.
   -n, --dry-run     Print what each step would run, change nothing
       --ref REF     Hub branch, tag, pull request ref, or commit to run from, default main
       --dir PATH    Where a fetched hub checkout is cloned, default ${XDG_CACHE_HOME:-~/.cache}/host-setup
@@ -73,13 +76,39 @@ origin_slug() {
 # Inside the clone it would be an untracked file, and carry.py's own hub-is-clean check would then refuse the tree this run just fetched for it.
 marker_path() { printf '%s\n' "$DIR/hub.owned"; }
 
+# Refuses to remove an existing $DIR/hub this run did not create, rather than trusting the name, mirroring bootstrap.sh's own remove_tree.
+remove_unowned_hub_check() {
+    [[ -e "$DIR/hub" || -L "$DIR/hub" ]] || return 0
+    [[ -e "$(marker_path)" ]] && return 0
+    fail "$DIR/hub exists and this run did not create it, so it will not be removed. Pass --dir to choose another cache location."
+    return 1
+}
+
 fetch_hub() {
     step "Fetching $HUB_REPO at $REF"
     mkdir -p "$DIR"
-    [[ -e "$DIR/hub" ]] && rm -rf "$DIR/hub"
-    # A full clone rather than --depth 1: spec/audit.py walks the hub's own history to judge whether a carried copy is trailing the file it was copied from, and a shallow clone would read every file as changed at the truncation boundary and misreport every repo as stale.
-    git clone --quiet --branch "$REF" --single-branch "$HUB_URL" "$DIR/hub" ||
-        die "Could not clone $HUB_REPO at $REF. Check the ref exists and that this host reaches github.com."
+    remove_unowned_hub_check || return 1
+    rm -rf "$DIR/hub"
+    # A full clone of the default branch first, whatever $REF names: spec/audit.py walks the hub's own history to judge whether a carried copy is trailing the file it was copied from, and a shallow clone would read every file as changed at the truncation boundary and misreport every repo as stale.
+    git clone --quiet --branch "$DEFAULT_REF" --single-branch "$HUB_URL" "$DIR/hub" ||
+        {
+            fail "Could not clone $HUB_REPO. Check that this host reaches github.com."
+            return 1
+        }
+    # A branch name is already checked out by the clone above.
+    # A tag, a pull request ref, or a commit needs an explicit fetch and checkout, since "git clone --branch" only takes a branch or a tag, not an arbitrary commit.
+    if [[ $REF != "$DEFAULT_REF" ]]; then
+        git -C "$DIR/hub" fetch --quiet origin "$REF" ||
+            {
+                fail "Could not fetch $REF from $HUB_REPO. Check the ref exists."
+                return 1
+            }
+        git -C "$DIR/hub" checkout --quiet FETCH_HEAD ||
+            {
+                fail "Could not check out $REF"
+                return 1
+            }
+    fi
     touch "$(marker_path)"
     HUB_ROOT="$DIR/hub"
     HUB_FETCHED=true
@@ -87,7 +116,9 @@ fetch_hub() {
 }
 
 # A checkout already sitting on the hub is used as is, so a maintainer working in their own ProjectTemplate tree never pays for a second clone of the repo they are standing in.
+# Only for the default ref: naming any other --ref always fetches fresh, even from inside the hub itself, since AUDIT.md and the sync procedure both rely on this loader reaching a ref other than whatever happens to be checked out locally.
 detect_hub_root() {
+    [[ $REF == "$DEFAULT_REF" ]] || return 0
     local top
     top=$(git rev-parse --show-toplevel 2>/dev/null) || return 0
     [[ $(origin_slug "$top") == "$HUB_REPO" ]] || return 0
@@ -95,7 +126,8 @@ detect_hub_root() {
 }
 
 ensure_hub_root() {
-    [[ -n $HUB_ROOT ]] || fetch_hub
+    [[ -n $HUB_ROOT ]] && return 0
+    fetch_hub
 }
 
 # A downstream repo is whatever git repo the menu is run from, when that repo is not the hub itself.
@@ -117,11 +149,16 @@ cleanup() {
 # --- Running a tool ---
 
 # Every host tool runs from inside the hub tree, and this is the only place a path inside it is named, matching bootstrap.sh's run_tool.
+# Resolves the hub root itself rather than assuming a caller already did: a host task must work standalone, off a downstream checkout, or off no checkout at all, none of which set HUB_ROOT on their own.
 host_tool() {
     local tool="$1"
     shift
+    ensure_hub_root || return 1
     local path="$HUB_ROOT/host-setup/linux/$tool"
-    [[ -x $path ]] || die "$HUB_ROOT carries no $tool at host-setup/linux, so this ref is not one to run tasks from"
+    [[ -x $path ]] || {
+        fail "$HUB_ROOT carries no $tool at host-setup/linux, so this ref is not one to run tasks from"
+        return 1
+    }
 
     local -a flags=()
     [[ $ASSUME_YES == true ]] && flags+=(--yes)
@@ -132,7 +169,10 @@ host_tool() {
 # The Python tools under scripts/ and spec/ resolve their own root from __file__ rather than the working directory, so they are called by absolute path from wherever this script runs and need no cd.
 # Checked here rather than upfront in main, the same reasoning host-setup/linux/install-skills.sh already carries: a host with no interpreter yet can still use every host action, and only the actions that need one name it as their own prerequisite.
 hub_python() {
-    command -v python3 >/dev/null || die "python3 is required for this task; host-setup/linux/install-tools.sh provides it"
+    command -v python3 >/dev/null || {
+        fail "python3 is required for this task; host-setup/linux/install-tools.sh provides it"
+        return 1
+    }
     local script="$1"
     shift
     python3 "$HUB_ROOT/$script" "$@"
@@ -146,12 +186,12 @@ audit_repo() {
     local name
     read -r -p "Repo to audit [$default]: " name
     name="${name:-$default}"
-    ensure_hub_root
+    ensure_hub_root || return 1
     hub_python spec/audit.py "$name"
 }
 
 check_skills_dist() {
-    ensure_hub_root
+    ensure_hub_root || return 1
     if hub_python scripts/build_dist.py --check; then
         info "Every generated Skills distribution matches .agents/skills/"
     else
@@ -162,12 +202,15 @@ check_skills_dist() {
 carry_action() {
     local mode="$1"
     [[ -n $DOWNSTREAM_ROOT ]] ||
-        die "No downstream repo checkout found; run this menu from inside the target repo's own worktree"
+        {
+            fail "No downstream repo checkout found; run this menu from inside the target repo's own worktree"
+            return 1
+        }
     local default="$DOWNSTREAM_NAME"
     local name
     read -r -p "Repo name as cataloged in registry/repos.json [$default]: " name
     name="${name:-$default}"
-    ensure_hub_root
+    ensure_hub_root || return 1
     hub_python scripts/carry.py "$mode" "$name" --target "$DOWNSTREAM_ROOT"
 }
 
@@ -200,10 +243,12 @@ print_menu() {
     log "Hub, ptr727/ProjectTemplate:"
     log "  10  Audit a cataloged repo"
     log "  11  Check the generated Skills distributions are current"
-    log ""
-    log "Downstream, the repo this menu is run from:"
-    log "  12  Check what the hub would change here, change nothing"
-    log "  13  Pull the hub's verbatim-owned files into this repo"
+    if [[ -n $DOWNSTREAM_ROOT ]]; then
+        log ""
+        log "Downstream, the repo this menu is run from:"
+        log "  12  Check what the hub would change here, change nothing"
+        log "  13  Pull the hub's verbatim-owned files into this repo"
+    fi
     log ""
     log "   q  Quit"
     log ""
@@ -226,7 +271,14 @@ dispatch() {
     10) audit_repo ;;
     11) check_skills_dist ;;
     12) carry_action check ;;
-    13) carry_action apply ;;
+    # --dry-run changes nothing, and carry.py itself has no dry-run mode, so a dry-run apply reads as its own check instead of silently mutating the downstream worktree.
+    13)
+        if [[ $DRY_RUN == true ]]; then
+            carry_action check
+        else
+            carry_action apply
+        fi
+        ;;
     q | Q) QUIT=true ;;
     *)
         warn "Not one of the choices"
