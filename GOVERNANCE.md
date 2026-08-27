@@ -114,7 +114,7 @@ A repo whose own stacks or scripts read local runtime credentials from disk, mos
   !**/.secrets/README.md
   ```
 
-  A fresh checkout then documents its own required shape without ever exposing a real value.
+  A fresh checkout then documents its own required shape without ever exposing a real value. This negation keeps a real secret file out of a **new** commit. It does not remove one already tracked: `.gitignore` has no effect on a path git already follows. A real secret file found tracked is removed from the index (`git rm --cached <path>`) and its credential is rotated, not just added to `.gitignore` going forward.
 - **`.secrets/README.md` is a catalog**, one row per file naming what it holds and what consumes it, plus a short note on how the directory relates to `~/.secrets/` where the repo also touches that.
 
 ## Repository Onboarding and Conformance
