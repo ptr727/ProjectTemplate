@@ -7,6 +7,7 @@ Run as `python3 scripts/tests/test_build_dist.py`, or under `python3 -m unittest
 from __future__ import annotations
 
 import json
+import os
 import sys
 import unittest
 from pathlib import Path
@@ -264,6 +265,52 @@ class RegenerateCase(unittest.TestCase):
         with mock.patch("sys.argv", ["build_dist.py"]), mock.patch("builtins.print"):
             exit_code = build_dist.main()
         self.assertEqual(exit_code, 1)
+
+    def test_check_reports_a_symlink_as_2_not_1(self) -> None:
+        """1 is --check's own documented "stale" result, so a caller reading the exit code (host-setup/menu.sh among them) needs a different code to tell a real failure apart from that finding.
+
+        is_stale() short-circuits to True (stale, exit 1) the moment the distribution stamp is
+        missing, so the symlink has to be introduced only after a clean regenerate() already
+        produced one, reaching the digest walk that actually raises rather than the early return.
+        """
+        self.make_skill("foo")
+        build_dist.regenerate()
+        (self.skills_src / "foo" / "escape").symlink_to(self.tmp)
+        from unittest import mock
+
+        with mock.patch("sys.argv", ["build_dist.py", "--check"]), mock.patch("builtins.print"):
+            exit_code = build_dist.main()
+        self.assertEqual(exit_code, 2)
+
+    def test_check_reports_an_os_error_as_2_not_1(self) -> None:
+        """is_stale() reads several files beyond the one already wrapped in its own try/except, and a permissions problem or a file removed out from under it raises OSError there, not ValueError."""
+        from unittest import mock
+
+        with (
+            mock.patch("sys.argv", ["build_dist.py", "--check"]),
+            mock.patch("builtins.print"),
+            mock.patch.object(build_dist, "is_stale", side_effect=OSError("permission denied")),
+        ):
+            exit_code = build_dist.main()
+        self.assertEqual(exit_code, 2)
+
+    def test_check_reports_an_unreadable_manifest_as_2_not_1(self) -> None:
+        """The manifest read has its own try/except inside is_stale() (JSONDecodeError, a genuinely stale manifest), and an OSError there has to propagate through it rather than being caught by the same clause, or an unreadable file reads as the ordinary stale result this test would otherwise miss."""
+        if os.name != "posix":
+            self.skipTest(
+                "chmod does not carry POSIX unreadable-file semantics, and os.geteuid() does not exist, on this platform"
+            )
+        if os.geteuid() == 0:
+            self.skipTest("running as root ignores the permission bits this test depends on")
+        self.make_skill("foo")
+        build_dist.regenerate()
+        build_dist.PLUGIN_MANIFEST.chmod(0o000)
+        self.addCleanup(build_dist.PLUGIN_MANIFEST.chmod, 0o644)
+        from unittest import mock
+
+        with mock.patch("sys.argv", ["build_dist.py", "--check"]), mock.patch("builtins.print"):
+            exit_code = build_dist.main()
+        self.assertEqual(exit_code, 2)
 
 
 if __name__ == "__main__":
