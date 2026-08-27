@@ -296,6 +296,10 @@ class RegenerateCase(unittest.TestCase):
 
     def test_check_reports_an_unreadable_manifest_as_2_not_1(self) -> None:
         """The manifest read has its own try/except inside is_stale() (JSONDecodeError, a genuinely stale manifest), and an OSError there has to propagate through it rather than being caught by the same clause, or an unreadable file reads as the ordinary stale result this test would otherwise miss."""
+        if os.name != "posix":
+            self.skipTest(
+                "chmod does not carry POSIX unreadable-file semantics, and os.geteuid() does not exist, on this platform"
+            )
         if os.geteuid() == 0:
             self.skipTest("running as root ignores the permission bits this test depends on")
         self.make_skill("foo")
