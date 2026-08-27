@@ -203,7 +203,9 @@ function Invoke-FetchHubLocked {
     & git clone --quiet --branch $script:DEFAULT_REF --single-branch $script:HUB_URL $hubPath | Out-Host
     if ($LASTEXITCODE -ne 0) {
         fail "Could not clone $script:HUB_REPO. Check that this host reaches github.com."
+        # The marker goes with the directory it marked: an orphaned one left behind would grant false ownership to whatever unrelated directory a person later puts at this same path.
         Remove-Item -Recurse -Force $hubPath -ErrorAction SilentlyContinue
+        Remove-Item -Force (Get-MarkerPath) -ErrorAction SilentlyContinue
         return $false
     }
     if ($script:REF -ne $script:DEFAULT_REF) {
@@ -239,21 +241,27 @@ function Test-HubCheckout {
 # A local checkout that has moved on falls back to a real fetch rather than being trusted.
 function Confirm-HubRoot {
     if ($script:HUB_ROOT) {
-        # -DryRun trusts an already-known checkout (this hub checkout, or one this run already fetched) as is, rather than fetching to confirm it is still fresh: confirming means fetching, and fetching is a change -DryRun does not make.
-        if ($script:DRY_RUN) { return $true }
-        & git -C $script:HUB_ROOT fetch --quiet origin $script:DEFAULT_REF | Out-Host
-        if ($LASTEXITCODE -eq 0) {
+        if ($script:DRY_RUN) {
+            # No network call, since confirming freshness against origin means fetching, which -DryRun does not do, but this still confirms the checkout is clean and actually on main: Test-HubCheckout checked only origin identity, and a dirty or feature-branch checkout must not be read as the hub's main either.
             $status = & git -C $script:HUB_ROOT status --porcelain
-            if (-not $status) {
-                $head = "$(& git -C $script:HUB_ROOT rev-parse HEAD)".Trim()
-                $originHead = "$(& git -C $script:HUB_ROOT rev-parse "origin/$script:DEFAULT_REF")".Trim()
-                if ($head -eq $originHead) { return $true }
+            $branch = "$(& git -C $script:HUB_ROOT rev-parse --abbrev-ref HEAD)".Trim()
+            if ((-not $status) -and ($branch -eq $script:DEFAULT_REF)) { return $true }
+            $script:HUB_ROOT = ''
+        } else {
+            & git -C $script:HUB_ROOT fetch --quiet origin $script:DEFAULT_REF | Out-Host
+            if ($LASTEXITCODE -eq 0) {
+                $status = & git -C $script:HUB_ROOT status --porcelain
+                if (-not $status) {
+                    $head = "$(& git -C $script:HUB_ROOT rev-parse HEAD)".Trim()
+                    $originHead = "$(& git -C $script:HUB_ROOT rev-parse "origin/$script:DEFAULT_REF")".Trim()
+                    if ($head -eq $originHead) { return $true }
+                }
             }
+            $script:HUB_ROOT = ''
         }
-        $script:HUB_ROOT = ''
     }
     if ($script:DRY_RUN) {
-        fail "This task needs a fetched hub checkout, and fetching one is itself a change -DryRun does not make. Run without -DryRun, or from inside a hub checkout already on $script:DEFAULT_REF."
+        fail "This task needs a fetched hub checkout, and fetching one is itself a change -DryRun does not make. Run without -DryRun, or from inside a clean hub checkout already on $script:DEFAULT_REF."
         return $false
     }
     return (Invoke-FetchHub)
@@ -275,8 +283,10 @@ function Test-DownstreamCheckout {
 function Invoke-Cleanup {
     if ($script:KEEP -or -not $script:HUB_FETCHED) { return }
     if (-not (Test-Path (Get-MarkerPath))) { return }
-    Remove-Item -Recurse -Force (Join-Path $script:DIR 'hub') -ErrorAction SilentlyContinue
-    Remove-Item -Force (Get-MarkerPath) -ErrorAction SilentlyContinue
+    $hubPath = Join-Path $script:DIR 'hub'
+    # The marker is removed only once the directory it marks is actually gone, rather than unconditionally alongside it: a suppressed removal failure must not leave a leftover hub with no marker to explain it.
+    Remove-Item -Recurse -Force $hubPath -ErrorAction SilentlyContinue
+    if (-not (Test-Path $hubPath)) { Remove-Item -Force (Get-MarkerPath) -ErrorAction SilentlyContinue }
 }
 
 # --- Running a tool ---
