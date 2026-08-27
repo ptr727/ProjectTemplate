@@ -98,6 +98,25 @@ pull request.
 
 Line-ending governance for an operational repo is in [Line Endings](#line-endings), where its `[*]` default follows the consuming app's native platform per the registry `lineEndings` field, not the fleet LF default.
 
+### Repo-Scoped Secrets
+
+A repo whose own stacks or scripts read local runtime credentials from disk, most commonly an operational repo's Docker Compose stack, keeps them in a dotted `.secrets/` directory at the repo root. This is the repo-scoped counterpart to the host-scoped `~/.secrets/` convention a repo's own `OPERATIONS.md` may document, and it is a different thing from `spec/secrets.json`, the CI/GitHub Actions secret-name registry `spec/audit.py` cross-checks. `spec/secrets.json` governs what a workflow reads from GitHub Actions. This convention governs what a repo's own process reads from its own checkout.
+
+- **The directory is named `.secrets/`, dotted, never a bare `secrets/`.**
+- **A single opaque credential file carries no extension** (`homeassistant_db_password`, not `homeassistant_db_password.txt`), the same reason `README` and `LICENSE` carry none. It is a security property, read but never sourced, not a formatting preference.
+- **A structured credential keeps its format's extension** (`.json` for structured config).
+- **The shared env file is named for what it configures**, not a bare `.env` (`docker.env` for a repo whose stacks are Docker Compose), so a second env-shaped file added later stays unambiguous.
+- **Every real secret file has a tracked `<name>.example` beside it**, and only the `.example` files plus a `README.md` catalog are un-ignored:
+
+  ```gitignore
+  **/.secrets/*
+  !**/.secrets/*.example
+  !**/.secrets/README.md
+  ```
+
+  A fresh checkout then documents its own required shape without ever exposing a real value.
+- **`.secrets/README.md` is a catalog**, one row per file naming what it holds and what consumes it, plus a short note on how the directory relates to `~/.secrets/` where the repo also touches that.
+
 ## Repository Onboarding and Conformance
 
 Every fleet repo is a standard-style repo the hub audits **downward** against its declared type, the model the fleet uses because managing downstream divergence is too costly. Three obligations follow, and they are not optional:
