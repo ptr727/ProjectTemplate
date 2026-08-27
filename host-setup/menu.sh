@@ -84,21 +84,32 @@ remove_unowned_hub_check() {
     return 1
 }
 
+# The lock lives only here, in the wrapper, so the locked body below can use its ordinary fail/return pattern with no awareness of it.
+# A RETURN trap was tried and dropped: bash does not scope one to the function that set it, so it re-fires (against an already-unset local by then) on whatever function returns next, which surfaced as this script's own "unbound variable" crash on the very next return up the call chain.
 fetch_hub() {
     # --dry-run promises to change nothing, and fetching is the one real change this whole script makes to the host.
     [[ $DRY_RUN == true ]] && {
         fail "This task needs a fetched hub checkout, and fetching one is itself a change --dry-run does not make. Run without --dry-run, or from inside a hub checkout already on $DEFAULT_REF."
         return 1
     }
-    step "Fetching $HUB_REPO at $REF"
     mkdir -p "$DIR"
     # Held for the rest of this fetch, so a second menu.sh sharing this --dir blocks here instead of passing remove_unowned_hub_check and deleting the tree this one is still cloning into.
-    local lock_fd
+    # Closed unconditionally on the way out, success or failure, rather than left open for the rest of this process: interactive_menu's loop keeps it alive well past this one fetch otherwise, and a lock nothing ever releases blocks every other menu.sh sharing this --dir until this session quits.
+    local lock_fd rc
     exec {lock_fd}>"$DIR/hub.lock"
-    flock "$lock_fd" || {
+    if ! flock "$lock_fd"; then
         fail "Could not lock $DIR/hub.lock"
+        exec {lock_fd}>&-
         return 1
-    }
+    fi
+    rc=0
+    fetch_hub_locked || rc=$?
+    exec {lock_fd}>&-
+    return "$rc"
+}
+
+fetch_hub_locked() {
+    step "Fetching $HUB_REPO at $REF"
     remove_unowned_hub_check || return 1
     rm -rf "$DIR/hub"
     # A full clone of the default branch first, whatever $REF names: spec/audit.py walks the hub's own history to judge whether a carried copy is trailing the file it was copied from, and a shallow clone would read every file as changed at the truncation boundary and misreport every repo as stale.

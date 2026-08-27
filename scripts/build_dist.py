@@ -10,9 +10,10 @@ place a skill's content is ever hand-edited.
 
 Usage: python3 scripts/build_dist.py           regenerate distributions from .agents/skills/
        python3 scripts/build_dist.py --check   read-only: exit 0 clean, 1 stale, 2 on a real
-                                                 failure (a symlink under .agents/skills/), so a
-                                                 caller reading the exit code can tell a finding
-                                                 apart from the check itself not having run.
+                                                 failure (a symlink under .agents/skills/, an
+                                                 unreadable file), so a caller reading the exit
+                                                 code can tell a finding apart from the check
+                                                 itself not having run.
 """
 
 from __future__ import annotations
@@ -200,8 +201,9 @@ def main():
     if args.check:
         try:
             stale = is_stale()
-        except ValueError as exc:
+        except (ValueError, OSError) as exc:
             # 2 rather than 1, so a caller reading the exit code (host-setup/menu.sh among them) can tell this apart from the stale result below, which also exits 1 by this flag's own documented contract.
+            # OSError alongside ValueError: is_stale() reads several files beyond the one call already wrapped in its own try/except, and a permissions problem or a file removed out from under it raises that, not ValueError.
             print(exc, file=sys.stderr)
             return 2
         if stale:

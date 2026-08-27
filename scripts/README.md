@@ -221,7 +221,7 @@ The match is on the block's heading rather than anywhere in the body, and on the
 
 Regenerates [`.github/skills/`][github-skills-dist] and [`.claude-plugin/fleet-skills/`][fleet-skills-dist] from [`.agents/skills/`][agents-skills], the hub's own hand-authored fleet Skills. Codex and opencode read `.agents/skills/` directly, GitHub Copilot reads `.github/skills/`, and Claude Code reads the generated plugin published through [`.claude-plugin/marketplace.json`][marketplace]. `.agents/skills/` stays the one place a skill is hand-edited. Both generated trees are never hand-edited.
 
-`--check` is the read-only mode: it exits `1` when either generated tree differs from `.agents/skills/`, comparing a digest over every file rather than a file count or timestamp, and `2` on a real failure (a symlink under `.agents/skills/`), so a caller reading the exit code can tell that apart from the stale finding. CI runs `--check` rather than trusting a contributor to have run the generator, the same reason `spec/audit.py` exists rather than trusting a hand-carried file.
+`--check` is the read-only mode: it exits `1` when either generated tree differs from `.agents/skills/`, comparing a digest over every file rather than a file count or timestamp, and `2` on a real failure (a symlink under `.agents/skills/`, an unreadable file), so a caller reading the exit code can tell that apart from the stale finding. CI runs `--check` rather than trusting a contributor to have run the generator, the same reason `spec/audit.py` exists rather than trusting a hand-carried file.
 
 ## `carry.py`
 

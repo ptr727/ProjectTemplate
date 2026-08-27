@@ -281,6 +281,18 @@ class RegenerateCase(unittest.TestCase):
             exit_code = build_dist.main()
         self.assertEqual(exit_code, 2)
 
+    def test_check_reports_an_os_error_as_2_not_1(self) -> None:
+        """is_stale() reads several files beyond the one already wrapped in its own try/except, and a permissions problem or a file removed out from under it raises OSError there, not ValueError."""
+        from unittest import mock
+
+        with (
+            mock.patch("sys.argv", ["build_dist.py", "--check"]),
+            mock.patch("builtins.print"),
+            mock.patch.object(build_dist, "is_stale", side_effect=OSError("permission denied")),
+        ):
+            exit_code = build_dist.main()
+        self.assertEqual(exit_code, 2)
+
 
 if __name__ == "__main__":
     unittest.main()
