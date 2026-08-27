@@ -35,6 +35,7 @@ $REF = if ($Ref) { $Ref } else { $DEFAULT_REF }
 $KEEP = [bool]$Keep
 $WANT_HELP = [bool]$Help
 
+# No placeholder for $DIR here, matching bootstrap.ps1: PowerShell variable names are case-insensitive, so $DIR and the -Dir parameter $Dir are the same variable, and Resolve-Directory's own assignment in main is what gives it its resolved value.
 $HUB_ROOT = ''
 $HUB_FETCHED = $false
 $IS_HUB_CHECKOUT = $false
@@ -150,8 +151,8 @@ function Get-OriginSlug {
 # A marker sitting beside the clone rather than inside it, so a -Dir pointed at a directory this run does not own is never the one removed on exit.
 function Get-MarkerPath { Join-Path $script:DIR 'hub.owned' }
 
-# Refuses to remove an existing $DIR\hub this run did not create, rather than trusting the name.
-function Test-UnownedHub {
+# Answers whether an existing $DIR\hub may be removed: absent, or created by this run.
+function Test-HubRemovable {
     $hubPath = Join-Path $script:DIR 'hub'
     if (-not (Test-Path $hubPath)) { return $true }
     if (Test-Path (Get-MarkerPath)) { return $true }
@@ -183,6 +184,8 @@ function Invoke-FetchHub {
         }
         return (Invoke-FetchHubLocked)
     } finally {
+        # Released here, once the fetch itself finishes, rather than held for the rest of this session: Invoke-InteractiveMenu's loop keeps a session alive well past its one fetch, and holding the lock that long would block every other menu.ps1 sharing this -Dir until this session quits.
+        # A second session starting its own fetch while this one is still reading the tree it just cloned is the accepted residual race left by that choice, the same one menu.sh's own flock accepts for the same reason.
         if ($acquired) { $mutex.ReleaseMutex() }
         $mutex.Dispose()
     }
@@ -190,18 +193,19 @@ function Invoke-FetchHub {
 
 function Invoke-FetchHubLocked {
     step "Fetching $script:HUB_REPO at $script:REF"
-    if (-not (Test-UnownedHub)) { return $false }
+    if (-not (Test-HubRemovable)) { return $false }
     $hubPath = Join-Path $script:DIR 'hub'
     if (Test-Path $hubPath) { Remove-Item -Recurse -Force $hubPath }
+    # Marked as ours before git can create anything under $hubPath, not only once the clone also succeeds: git can leave a partial directory behind on a failed or interrupted clone, and an unmarked one would then block every retry until removed by hand.
+    New-Item -ItemType File -Path (Get-MarkerPath) -Force | Out-Null
     # A full clone of the default branch first, whatever -Ref names: spec\audit.py walks the hub's own history to judge whether a carried copy is trailing the file it was copied from, and a shallow clone would read every file as changed at the truncation boundary.
     # Piped to Out-Host rather than left bare: an unassigned native call's stdout otherwise joins this function's own return value, which return $true/$false below would then be appended to instead of replacing.
     & git clone --quiet --branch $script:DEFAULT_REF --single-branch $script:HUB_URL $hubPath | Out-Host
     if ($LASTEXITCODE -ne 0) {
         fail "Could not clone $script:HUB_REPO. Check that this host reaches github.com."
+        Remove-Item -Recurse -Force $hubPath -ErrorAction SilentlyContinue
         return $false
     }
-    # Marked as ours the moment the clone lands rather than only once every later step also succeeds, so a failure below still leaves a tree Test-UnownedHub will clean up on the next run.
-    New-Item -ItemType File -Path (Get-MarkerPath) -Force | Out-Null
     if ($script:REF -ne $script:DEFAULT_REF) {
         & git -C $hubPath fetch --quiet origin $script:REF | Out-Host
         if ($LASTEXITCODE -ne 0) {
@@ -234,23 +238,24 @@ function Test-HubCheckout {
 # Confirms a tentative local HUB_ROOT still matches a clean, freshly fetched origin/main before any tool reads it.
 # A local checkout that has moved on falls back to a real fetch rather than being trusted.
 function Confirm-HubRoot {
+    if ($script:HUB_ROOT) {
+        # -DryRun trusts an already-known checkout (this hub checkout, or one this run already fetched) as is, rather than fetching to confirm it is still fresh: confirming means fetching, and fetching is a change -DryRun does not make.
+        if ($script:DRY_RUN) { return $true }
+        & git -C $script:HUB_ROOT fetch --quiet origin $script:DEFAULT_REF | Out-Host
+        if ($LASTEXITCODE -eq 0) {
+            $status = & git -C $script:HUB_ROOT status --porcelain
+            if (-not $status) {
+                $head = "$(& git -C $script:HUB_ROOT rev-parse HEAD)".Trim()
+                $originHead = "$(& git -C $script:HUB_ROOT rev-parse "origin/$script:DEFAULT_REF")".Trim()
+                if ($head -eq $originHead) { return $true }
+            }
+        }
+        $script:HUB_ROOT = ''
+    }
     if ($script:DRY_RUN) {
-        fail 'This task needs to confirm the hub checkout is fresh, and confirming it means fetching, which -DryRun does not do. Run without -DryRun.'
+        fail "This task needs a fetched hub checkout, and fetching one is itself a change -DryRun does not make. Run without -DryRun, or from inside a hub checkout already on $script:DEFAULT_REF."
         return $false
     }
-    if (-not $script:HUB_ROOT) {
-        return (Invoke-FetchHub)
-    }
-    & git -C $script:HUB_ROOT fetch --quiet origin $script:DEFAULT_REF | Out-Host
-    if ($LASTEXITCODE -eq 0) {
-        $status = & git -C $script:HUB_ROOT status --porcelain
-        if (-not $status) {
-            $head = "$(& git -C $script:HUB_ROOT rev-parse HEAD)".Trim()
-            $originHead = "$(& git -C $script:HUB_ROOT rev-parse "origin/$script:DEFAULT_REF")".Trim()
-            if ($head -eq $originHead) { return $true }
-        }
-    }
-    $script:HUB_ROOT = ''
     return (Invoke-FetchHub)
 }
 
@@ -469,12 +474,14 @@ function Test-Interactive {
     return $true
 }
 
-# An absolute path, and never a drive root, since everything below it is created and removed under it.
+# An absolute path, and never a drive or UNC share root, since everything below it is created and removed under it.
 function Resolve-Directory {
     if (-not $script:Dir) { return (Join-Path $env:LOCALAPPDATA 'host-setup') }
     if (-not [IO.Path]::IsPathRooted($script:Dir)) { die "-Dir takes an absolute path, and `"$($script:Dir)`" is relative" }
-    $trimmed = $script:Dir.TrimEnd('\', '/')
-    if ((-not $trimmed) -or ($trimmed -match '^[A-Za-z]:$')) { die '-Dir may not be a drive root' }
+    # Canonicalized before the root check, since a lexically rooted "C:\temp\.." is not the string "C:\" but resolves to it the moment anything below opens a path under it, matching menu.sh's own readlink -m step.
+    $canonical = [IO.Path]::GetFullPath($script:Dir)
+    $trimmed = $canonical.TrimEnd('\', '/')
+    if ((-not $trimmed) -or ($trimmed -match '^[A-Za-z]:$') -or ($trimmed -match '^\\\\[^\\]+\\[^\\]+$')) { die '-Dir may not be a drive or share root' }
     return $trimmed
 }
 
@@ -492,6 +499,7 @@ function main {
     if (-not (Test-Interactive)) {
         warn 'No console to ask on, so there is no menu to show'
         info 'Download the file and run it, rather than piping it, to reach the menu:'
+        info '  [Net.ServicePointManager]::SecurityProtocol = [Net.ServicePointManager]::SecurityProtocol -bor [Net.SecurityProtocolType]::Tls12'
         info "  Invoke-WebRequest -UseBasicParsing -Uri https://raw.githubusercontent.com/$script:HUB_REPO/$script:DEFAULT_REF/host-setup/menu.ps1 -OutFile menu.ps1"
         info '  powershell -ExecutionPolicy Bypass -File menu.ps1'
         exit 0

@@ -82,6 +82,7 @@ host-setup/menu.sh   # from a checkout of this repository, or of any other repo 
 `menu.ps1` is its Windows counterpart, fetchable the same way and pasted into a stock `powershell.exe` console:
 
 ```powershell
+[Net.ServicePointManager]::SecurityProtocol = [Net.ServicePointManager]::SecurityProtocol -bor [Net.SecurityProtocolType]::Tls12
 Invoke-WebRequest -UseBasicParsing -Uri https://raw.githubusercontent.com/ptr727/ProjectTemplate/main/host-setup/menu.ps1 -OutFile menu.ps1
 powershell -ExecutionPolicy Bypass -File menu.ps1
 host-setup\menu.ps1   # from a checkout of this repository, or of any other repo in the fleet
