@@ -44,9 +44,10 @@ from urllib.parse import quote
 
 # --- What counts as a GitHub write -------------------------------------------------------------------
 # The gh subcommands that mutate.
-# The `gh api` command is handled separately, since it needs field and method inspection.
+# A path-qualified or `.exe`-suffixed `gh` still starts a shell word this matches, the same recognition `_is_gh_exe` gives it for argv-position parsing.
+# The `gh api` command is handled separately, in `_is_gh_write`, since it needs argv-aware method and GraphQL-query inspection rather than a fixed subcommand list.
 _GH_WRITE_SUB = re.compile(
-    r"""\bgh\s+(?:
+    r"""\bgh(?:\.exe)?\s+(?:
         pr\s+(?:create|comment|close|merge|edit|review|reopen|ready|lock|unlock)
       | issue\s+(?:create|comment|close|edit|reopen|delete|lock|unlock|pin|unpin|transfer)
       | release\s+(?:create|edit|delete|upload)
@@ -56,17 +57,7 @@ _GH_WRITE_SUB = re.compile(
     )\b""",
     re.VERBOSE,
 )
-_GH_API = re.compile(r"\bgh\s+api\b")
-# `-X`/`--method` accept a separate value (`-X POST`), an attached one (`-XPOST`), and an equals-attached one (`-X=POST`, `--method=POST`).
-# This must match every spelling, matching how `_gh_effective_method` reads it.
-_EXPLICIT_WRITE_METHOD = re.compile(
-    r"(?:--method[= ]|-X[= ]?)\s*(?:POST|PUT|PATCH|DELETE)\b", re.IGNORECASE
-)
-# A gh api call with a field flag defaults to POST even without -X, so it is a write.
-# `-f`/`-F` also accept an attached value (`-fbody=x`), so no trailing `\b` is required after them.
-# It is required after the long-form spellings, where one legitimately separates the flag from the next word.
-_API_FIELD_FLAG = re.compile(r"(?:^|\s)(?:-f|-F)|(?:^|\s)(?:--field|--raw-field|--input)\b")
-_GRAPHQL = re.compile(r"\bgh\s+api\b.*\bgraphql\b", re.DOTALL)
+_GRAPHQL = re.compile(r"\bgh(?:\.exe)?\s+api\b.*\bgraphql\b", re.DOTALL)
 _MUTATION = re.compile(r"\bmutation\b")
 # Loose pre-filter only: matches `git` before `push` even with global options between them
 # (git -C <dir> push). _push_arg_lists is the accurate arbiter that confirms an executable push.
@@ -82,7 +73,7 @@ _GIT_PUSH = re.compile(r"\bgit\b.*?\bpush\b", re.DOTALL)
 _PROTECTED_DEFAULT_ORDER = ("main", "master", "develop")
 _PROTECTED_DEFAULT = set(_PROTECTED_DEFAULT_ORDER)
 # `gh pr merge --admin` overrides required reviews/status checks with admin power.
-_GH_ADMIN_MERGE = re.compile(r"\bgh\s+pr\s+merge\b[^\n|&;]*(?:^|\s)--admin\b")
+_GH_ADMIN_MERGE = re.compile(r"\bgh(?:\.exe)?\s+pr\s+merge\b[^\n|&;]*(?:^|\s)--admin\b")
 
 # --- Risk-pattern detectors --------------------------------------------------------------------------
 # Output-discard and force-success tails.
@@ -104,21 +95,28 @@ _FIELD_ASSIGN = re.compile(
 # Every spelling gh accepts for the target flag, being `--repo x`, `--repo=x`, `-R x`, `-R=x`, and the attached short form `-Rx`.
 # A form left out is not a near-miss, it is a silent bypass of the whole repository scope, so each is read by argv position below (`_gh_write_targets`) rather than assumed to be a space-separated pair.
 _REPO_FLAG_BARE = {"--repo", "-R"}
-_REPOS_PATH_TOKEN = re.compile(r"^repos/(?P<owner>[A-Za-z0-9_.\-]+)/(?P<repo>[A-Za-z0-9_.\-]+)")
-# Flags whose own value is opaque text (a PR/issue title or body, a GraphQL field, a jq/template expression, a header), and so is skipped whole rather than pattern-matched for a repo target.
+# `gh api` accepts a leading slash on the path (`gh api /repos/o/r/...`), so it is optional here too.
+_REPOS_PATH_TOKEN = re.compile(r"^/?repos/(?P<owner>[A-Za-z0-9_.\-]+)/(?P<repo>[A-Za-z0-9_.\-]+)")
+# Flags whose own value is opaque text (a PR/issue title, body, or notes), and so is skipped whole rather than pattern-matched for a repo target.
 # Without this, a --body describing a `--repo <owner>/<repo>` doc line, or a commit message quoting the same convention, reads as a real flag.
-# The incident this closes denied an ordinary `git commit` whose message body merely quoted the fleet's own `--repo owner/repo` example text.
-_GH_TEXT_VALUE_FLAGS = {
+# Shared across every create/comment/edit-style subcommand (pr, issue, release, gist).
+_GH_CREATE_TEXT_VALUE_FLAGS = {
     "--title",
     "-t",
     "--body",
     "-b",
     "--body-file",
+    "-F",
     "--notes",
     "--notes-file",
     "--message",
     "-m",
     "--desc",
+}
+# `gh api`'s own value-taking flags, meaningful only inside an `api` invocation.
+# `-f` alone is the boolean `--fill` on `gh pr create`, so it must not be treated as value-consuming outside of `api`, or the flag right after it (a real `--repo <owner>/<repo>`) is silently skipped.
+# `-F` is value-taking either way (`--body-file` on create, `--field` on api), so it stays shared.
+_GH_API_VALUE_FLAGS = _GH_CREATE_TEXT_VALUE_FLAGS | {
     "-f",
     "-F",
     "--field",
@@ -139,15 +137,33 @@ _GH_TEXT_VALUE_FLAGS = {
 
 
 def _is_gh_write(cmd):
+    """True when `cmd` is a GitHub write: a known-mutating `gh` subcommand, a `git push`, or a `gh api`
+    call whose effective method is not GET. A GraphQL call is a write only when its query is a mutation,
+    or when its body is supplied by `--input` and so cannot be read at all.
+    """
+    # Argv-aware for the `gh api` half, reading a flag or a GraphQL query only from where it actually sits in one invocation's own argv, not a raw substring search over the whole command.
+    # A substring search reads a write-method spelling out of an opaque flag value too, such as a
+    # `--jq` expression that merely contains the text `-XPOST` as data, misclassifying a harmless read.
     if _GH_WRITE_SUB.search(cmd) or _push_arg_lists(cmd):
         return True
-    if _GH_API.search(cmd):
-        if _EXPLICIT_WRITE_METHOD.search(cmd):
+    for args in _all_gh_arg_lists(cmd):
+        if not args or args[0] != "api":
+            continue
+        path = _gh_api_path(args)
+        if path == "graphql":
+            # --input checked before trusting any -f/-F query=... value.
+            # A -f/-F field becomes a URL query-string parameter rather than a body field whenever --input is also present.
+            # A harmless-looking inline query alongside --input therefore has no effect on the actual request, and the real body is the uninspectable input file.
+            if _gh_has_input(args):
+                return True  # uninspectable body, treated cautiously so rules 1-5 can look closer
+            q = _gh_graphql_query(args)
+            if q:
+                if _MUTATION.search(q):
+                    return True
+                continue  # a genuine read-only query, not a mutation
+            continue
+        if _gh_effective_method(args) != "GET":
             return True
-        if _GRAPHQL.search(cmd) and _MUTATION.search(cmd):
-            return True
-        if _API_FIELD_FLAG.search(cmd) and not _GRAPHQL.search(cmd):
-            return True  # gh api <path> -f k=v  => POST
     return False
 
 
@@ -490,11 +506,13 @@ def _gh_write_targets(cmd):
     """
     targets = []
     for args in _all_gh_arg_lists(cmd):
+        # `-f` alone is value-taking only inside `api`, on `pr create` it is the boolean `--fill`, so treating it as value-consuming there would swallow a real following `--repo` flag whole.
+        flags = _GH_API_VALUE_FLAGS if args and args[0] == "api" else _GH_CREATE_TEXT_VALUE_FLAGS
         n = len(args)
         i = 0
         while i < n:
             t = args[i]
-            if t in _GH_TEXT_VALUE_FLAGS and "=" not in t:
+            if t in flags and "=" not in t:
                 i += 2  # this flag's own value is opaque text, never a repo target
                 continue
             if t in _REPO_FLAG_BARE:
@@ -530,7 +548,7 @@ def _gh_api_path(args):
     i = 1
     while i < n:
         t = args[i]
-        if t in _GH_TEXT_VALUE_FLAGS and "=" not in t:
+        if t in _GH_API_VALUE_FLAGS and "=" not in t:
             i += 2
             continue
         if t.startswith("-"):
@@ -581,15 +599,22 @@ def _gh_graphql_query(args):
     return None
 
 
+def _gh_has_input(args):
+    """True when this `gh api` invocation's own argv carries `--input` (bare or equals-attached), gh's
+    flag for supplying the request body from a file or stdin.
+    """
+    return any(t == "--input" or t.startswith("--input=") for t in args)
+
+
 def _gh_effective_method(args):
     """The effective HTTP method of a `gh api` invocation's own argv: an explicit `-X`/`--method` value
-    when present, in every spelling `gh` accepts, else POST when a field flag is present (`gh`'s own
-    default for a write-shaped call), else GET.
+    when present, in every spelling `gh` accepts, else POST when a field flag or `--input` is present
+    (`gh`'s own default for a write-shaped call), else GET.
     """
     n = len(args)
     i = 0
     method = None
-    has_field = False
+    has_field = _gh_has_input(args)
     while i < n:
         t = args[i]
         if t in ("-X", "--method"):
@@ -791,6 +816,10 @@ def _check_reply_resolve_helper(cmd, environ):
     target in its own text (the thread id is opaque), so the same fallback is permitted there whenever
     any grant is active this session, a coarser signal than a REST reply gets, and the residual gap the
     module docstring's "precision over recall" already accepts for this class of rule.
+
+    A GraphQL body supplied via `--input` is denied outright when it has no `-f`/`-F query=...` field to
+    read instead (`_gh_graphql_query` returns None), since a `resolveReviewThread` mutation there is
+    equally invisible to this parser and there is nothing to distinguish it from the inline case above.
     """
     granted = _granted_targets(environ)
     helper = (
@@ -802,6 +831,16 @@ def _check_reply_resolve_helper(cmd, environ):
     for args in _all_gh_arg_lists(cmd):
         path = _gh_api_path(args)
         if path == "graphql":
+            # --input checked before trusting any -f/-F query=... value, matching `_is_gh_write`.
+            # A harmless decoy query alongside --input has no effect on gh's actual request.
+            if _gh_has_input(args):
+                if granted:
+                    continue
+                return "deny", (
+                    "This gh api graphql call supplies its body via --input, which cannot be inspected "
+                    "for a resolveReviewThread mutation, so it is denied by the same rule as an inline "
+                    "one. " + helper
+                )
             q = _gh_graphql_query(args)
             if q and _MUTATION.search(q) and _RESOLVE_THREAD_MUTATION.search(q):
                 if granted:
@@ -1231,6 +1270,77 @@ _SCOPE_CASES = [
         "deny",
         "the equals-attached -X=POST form still enters the write gate (CodeRabbit)",
     ),
+    (
+        "gh api repos/ptr727/PlexCleaner/pulls/5/comments/9/replies --input body.json",
+        {},
+        "deny",
+        "--input on the replies endpoint is still read as a write (promotion review)",
+    ),
+    (
+        "gh api graphql --method POST --input resolve.json",
+        {},
+        "deny",
+        "a GraphQL body from --input is denied as uninspectable (promotion review)",
+    ),
+    (
+        "gh api graphql --method POST --input resolve.json",
+        {_ALLOW_ENV: "esphome/esphome"},
+        "allow",
+        "an uninspectable --input GraphQL body is permitted under a cross-owner grant, like the inline case",
+    ),
+    (
+        "gh api graphql --input mutation.json -f query='{viewer{login}}'",
+        {},
+        "deny",
+        "a decoy -f query=... alongside --input does not hide an uninspectable body (CodeRabbit)",
+    ),
+]
+
+_SCOPE_CASES_MORE: list[tuple[str, dict[str, str], str, str]] = [
+    # More Rule-3 scope cases, covering the promotion-review round's findings, kept as their own literal rather than growing the one above further.
+    # (command, environ, expected_decision, label)
+    (
+        "gh api repos/esphome/esphome/issues --jq '.[] | \"-XPOST\"'",
+        {},
+        "allow",
+        "a --jq expression only containing the text -XPOST is a read, not misread as a write (promotion review)",
+    ),
+    (
+        "gh.exe api repos/esphome/esphome/issues -f body=x",
+        {},
+        "deny",
+        "gh.exe is still recognized for an api write (CodeRabbit)",
+    ),
+    (
+        "gh.exe pr create --repo esphome/esphome --title x",
+        {},
+        "deny",
+        "gh.exe is still recognized for a pr-create write (companion to CodeRabbit's gh.exe finding)",
+    ),
+    (
+        "gh api /repos/esphome/esphome/issues -f title=x",
+        {},
+        "deny",
+        "a leading slash on the REST path does not hide the cross-owner target (CodeRabbit)",
+    ),
+    (
+        "gh pr create -f --repo esphome/esphome --title x",
+        {},
+        "deny",
+        "-f as pr create's boolean --fill does not swallow the following --repo (CodeRabbit)",
+    ),
+    (
+        "gh pr create -f --title x --body y",
+        {},
+        "allow",
+        "-f as pr create's boolean --fill does not swallow --title either, with no foreign target present",
+    ),
+    (
+        "gh pr create -F repos/esphome/esphome --title x",
+        {},
+        "allow",
+        "-F stays value-taking (--body-file) on pr create, so a body-file path is not misread as an API target (qodo)",
+    ),
 ]
 
 # Rule-4 cases, covering branch-rule bypass.
@@ -1402,6 +1512,13 @@ _GIT_CASES = [
         {},
         "deny",
         "line-continued gh pr merge --admin still caught",
+    ),
+    (
+        "gh.exe pr merge 5 --admin --squash",
+        None,
+        {},
+        "deny",
+        "gh.exe pr merge --admin still caught (CodeRabbit)",
     ),
     (
         "git commit -m 'mention --no-verify in the message'",
@@ -1631,7 +1748,7 @@ def _selftest():
         if got != want:
             ok = False
         print(f"  {mark} [{got:5}] want={want:5} {label}")
-    for cmd, env, want, label in _SCOPE_CASES:
+    for cmd, env, want, label in _SCOPE_CASES + _SCOPE_CASES_MORE:
         got, _ = classify(
             cmd,
             origin=origin,
