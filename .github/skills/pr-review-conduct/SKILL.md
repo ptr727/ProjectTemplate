@@ -69,6 +69,8 @@ that says only "open a PR" is not such an instruction.
 Run every `scripts/pr_review.py` command below from a hub checkout. The script is hosted there and
 is never carried into a downstream repository.
 
+Run `local-strict-review` against the branch's current diff before step 1's push, and again before any fix push under outcome 1 below.
+
 1. Push changes to the PR branch and open the pull request when it does not exist.
 2. Run `scripts/pr_review.py status` once in the foreground and read its output.
 3. Re-request a review for the **current head SHA**. Auto-trigger is unreliable, so request it
@@ -94,7 +96,8 @@ After an authorized merge, run the `repo-worktree` post-merge cleanup procedure 
 
 ## Every finding ends in one of five outcomes
 
-1. **Real, so fix it.** Reply with the fixing commit SHA. For a finding on platform-specific code
+1. **Real, so fix it.** Run `local-strict-review` against the branch's current diff before pushing
+   the fix, then reply with the fixing commit SHA. For a finding on platform-specific code
    (PowerShell, a macOS- or WSL-only path), "fixed" means executed on that platform, per
    `agent-conduct` "Before Claiming Done": a fix reasoned out by analogy to a tested equivalent
    elsewhere is not yet fixed, and the reply says so rather than claiming the SHA closes it.
