@@ -23,8 +23,8 @@ maintainer's admin bypass. The denied shapes:
      is blocked, or an explicit-bypass flag (`gh pr merge --admin`, `git commit/push --no-verify`). The
      branch's live rules are the judge, so a code-style develop is denied and a config-style develop is
      allowed with no hardcoded repo list.
-  5. a hand-rolled reply/resolve for a review thread - a `resolveReviewThread` mutation via `gh api
-     graphql`, or a POST to the review-comment replies endpoint - where `scripts/pr_review.py reply ...
+  5. a hand-rolled reply/resolve for a review thread: a `resolveReviewThread` mutation via `gh api
+     graphql`, or a POST to the review-comment replies endpoint, where `scripts/pr_review.py reply ...
      --resolve` is the documented one-call path. Splitting the two into separate hand-run acts is what
      let a reply sit unresolved across a push and a re-request, reading as untriaged to a maintainer
      skimming the pull request (the incident behind this rule). Permitted only under the same
@@ -99,7 +99,7 @@ _FIELD_ASSIGN = re.compile(
 # A form left out is not a near-miss, it is a silent bypass of the whole repository scope, so each is read by argv position below (`_gh_write_targets`) rather than assumed to be a space-separated pair.
 _REPO_FLAG_BARE = {"--repo", "-R"}
 _REPOS_PATH_TOKEN = re.compile(r"^repos/(?P<owner>[A-Za-z0-9_.\-]+)/(?P<repo>[A-Za-z0-9_.\-]+)")
-# Flags whose own value is opaque text - a PR/issue title or body, a GraphQL field, a jq/template expression, a header - and so is skipped whole rather than pattern-matched for a repo target.
+# Flags whose own value is opaque text (a PR/issue title or body, a GraphQL field, a jq/template expression, a header), and so is skipped whole rather than pattern-matched for a repo target.
 # Without this, a --body describing a `--repo <owner>/<repo>` doc line, or a commit message quoting the same convention, reads as a real flag.
 # The incident this closes denied an ordinary `git commit` whose message body merely quoted the fleet's own `--repo owner/repo` example text.
 _GH_TEXT_VALUE_FLAGS = {
@@ -314,7 +314,7 @@ def _is_git_exe(tok):
 
 
 def _is_gh_exe(tok):
-    """True if the token invokes gh, including an absolute/relative path or a .exe suffix - the same
+    """True if the token invokes gh, including an absolute/relative path or a .exe suffix, the same
     recognition `_is_git_exe` gives git, so an invocation named only inside a quoted --body forms no
     such token and is never mistaken for a real gh call.
     """
@@ -325,8 +325,8 @@ def _is_gh_exe(tok):
 def _collect_arglist(toks, start):
     """Collect argv tokens from `start` up to the next shell separator (|, &&, ;, newline), skipping a
     redirection operator and the file-descriptor number or target token attached to it. Shared by
-    `_git_subcommand_arglists` and `_gh_arg_lists` so a command's own argv - not text living inside an
-    unrelated --body/--title/-f value elsewhere in the line - is what either scans for a target.
+    `_git_subcommand_arglists` and `_gh_arg_lists` so a command's own argv, not text living inside an
+    unrelated --body/--title/-f value elsewhere in the line, is what either scans for a target.
 
     Returns (args, index_after_this_invocation).
     """
@@ -383,7 +383,8 @@ def _git_subcommand_arglists(cmd, sub):
 
 def _gh_arg_lists(cmd):
     """Every `gh [args...]` invocation's own argv, from the token after `gh` up to the next shell
-    separator - the same argv-position parsing `_git_subcommand_arglists` gives git, so a `--repo`/`-R`
+    separator, in `cmd` itself, not inside any `sh -c`/`bash -c` wrapper (`_all_gh_arg_lists` covers
+    that). Argv-position parsing, the same as `_git_subcommand_arglists` gives git, so a `--repo`/`-R`
     flag, a `repos/<owner>/<repo>` API path, or a GraphQL query field is read only from where a real gh
     argument sits, never from text carried inside an unrelated flag value elsewhere in the command.
     """
@@ -401,9 +402,56 @@ def _gh_arg_lists(cmd):
     return out
 
 
+_SHELL_WRAPPER_EXE = ("sh", "bash", "zsh", "ksh", "dash")
+
+
+def _is_shell_wrapper_exe(tok):
+    """True if the token invokes a shell that runs a `-c <string>` argument as a nested command line."""
+    base = tok.rsplit("/", 1)[-1].rsplit("\\", 1)[-1].lower().removesuffix(".exe")
+    return base in _SHELL_WRAPPER_EXE
+
+
+def _embedded_wrapper_commands(cmd, _depth=0):
+    """Every command string embedded in a `sh -c '...'`/`bash -c "..."`-style wrapper invocation in
+    `cmd`, recursively, capped at a few levels of nesting. A `gh`/`git` call wrapped this way forms no
+    standalone `gh`/`git` token of its own, so `_gh_arg_lists` and `_git_subcommand_arglists` would
+    otherwise miss it entirely, the same bypass `sh -c 'gh issue comment --repo <foreign>/<repo> ...'`
+    exercises against a plain token scan.
+    """
+    if _depth > 4:
+        return []
+    out = []
+    toks = _shell_tokens(cmd)
+    n = len(toks)
+    i = 0
+    while i < n:
+        if _is_shell_wrapper_exe(toks[i]):
+            args, k = _collect_arglist(toks, i + 1)
+            if "-c" in args:
+                ci = args.index("-c")
+                if ci + 1 < len(args):
+                    inner = args[ci + 1]
+                    out.append(inner)
+                    out.extend(_embedded_wrapper_commands(inner, _depth + 1))
+            i = k
+        else:
+            i += 1
+    return out
+
+
+def _all_gh_arg_lists(cmd):
+    """`_gh_arg_lists` for `cmd` itself, plus for every command string a `sh -c`/`bash -c`-style wrapper
+    embeds in it, so a `gh` call hidden behind such a wrapper is scanned exactly like a bare one.
+    """
+    out = list(_gh_arg_lists(cmd))
+    for inner in _embedded_wrapper_commands(cmd):
+        out.extend(_gh_arg_lists(inner))
+    return out
+
+
 def _repo_flag_value(tok):
     """The value carried by a `--repo=value`/`-R=value`/`-Rvalue` (attached-short-form) token, or None
-    when tok is not one of those - a bare `--repo`/`-R` is handled separately since its value is the next
+    when tok is not one of those. A bare `--repo`/`-R` is handled separately since its value is the next
     token rather than part of this one.
     """
     if tok.startswith("--repo="):
@@ -416,14 +464,14 @@ def _repo_flag_value(tok):
 
 
 def _gh_write_targets(cmd):
-    """Every explicit owner/repo target named in an actual `gh` invocation's own argv: a `--repo`/`-R`
-    flag value, or a `repos/<owner>/<repo>` API path token. Argv-position parsing, the way `_push_targets`
-    reads a git push target, rather than a substring search over the whole command text - the shape that
-    previously read a `--repo owner/repo` doc example or API path quoted in an unrelated --body or commit
-    message as a real write target, denying a command that made no such write at all.
+    """Every explicit owner/repo target named in an actual `gh` invocation's own argv (including one
+    embedded in a `sh -c`/`bash -c` wrapper): a `--repo`/`-R` flag value, or a `repos/<owner>/<repo>` API
+    path token. Argv-position parsing, the way `_push_targets` reads a git push target, so a --repo/repos
+    mention that is only prose, inside an unrelated --body/--title value or a commit message, is never
+    read as one.
     """
     targets = []
-    for args in _gh_arg_lists(cmd):
+    for args in _all_gh_arg_lists(cmd):
         n = len(args)
         i = 0
         while i < n:
@@ -474,24 +522,76 @@ def _gh_api_path(args):
     return None
 
 
+def _gh_field_value(tok):
+    """The `name=value` field text carried by one token, in every field-flag spelling `gh` accepts: a
+    bare `-f`/`-F`/`--field`/`--raw-field` (the caller reads the next token as the value), the
+    equals-attached long form (`--field=name=value`/`--raw-field=name=value`), or the attached short form
+    (`-fname=value`/`-Fname=value`, no separator). Returns None for a bare flag, whose value is the next
+    token rather than part of this one.
+    """
+    for pfx in ("--field=", "--raw-field="):
+        if tok.startswith(pfx):
+            return tok[len(pfx) :]
+    if tok.startswith(("-f", "-F")) and len(tok) > 2 and tok[2] != "=":
+        return tok[2:]
+    return None
+
+
 def _gh_graphql_query(args):
-    """The GraphQL query text carried by this `gh api graphql` invocation's own `-f`/`-F query=...` field
-    argument, or None. `gh` takes the query as the argv token immediately following the flag, so this
-    reads only that token's own content rather than searching the whole command for the mutation's name -
-    a --body or PR description merely describing the mutation is not read as one issuing it.
+    """The GraphQL query text carried by this `gh api graphql` invocation's own `query=...` field
+    argument, in whichever field-flag spelling carries it (`_gh_field_value`), or None. Reads only that
+    field token's own content rather than searching the whole command for the mutation's name, so a
+    --body or PR description merely describing the mutation is not read as one issuing it.
     """
     n = len(args)
     i = 0
     while i < n:
         t = args[i]
-        if t in ("-f", "-F", "--field", "--raw-field") and i + 1 < n:
-            v = args[i + 1]
+        if t in ("-f", "-F", "--field", "--raw-field"):
+            if i + 1 < n and args[i + 1].startswith("query="):
+                return args[i + 1][len("query=") :]
+            i += 2
+            continue
+        v = _gh_field_value(t)
+        if v is not None:
             if v.startswith("query="):
                 return v[len("query=") :]
-            i += 2
+            i += 1
             continue
         i += 1
     return None
+
+
+def _gh_effective_method(args):
+    """The effective HTTP method of a `gh api` invocation's own argv: an explicit `-X`/`--method` value
+    when present, in every spelling `gh` accepts, else POST when a field flag is present (`gh`'s own
+    default for a write-shaped call), else GET.
+    """
+    n = len(args)
+    i = 0
+    method = None
+    has_field = False
+    while i < n:
+        t = args[i]
+        if t in ("-X", "--method"):
+            if i + 1 < n:
+                method = args[i + 1].upper()
+            i += 2
+            continue
+        if t.startswith("--method="):
+            method = t[len("--method=") :].upper()
+            i += 1
+            continue
+        if t.startswith("-X") and len(t) > 2:
+            method = t[2:].upper()
+            i += 1
+            continue
+        if t in ("-f", "-F", "--field", "--raw-field") or _gh_field_value(t) is not None:
+            has_field = True
+        i += 1
+    if method:
+        return method
+    return "POST" if has_field else "GET"
 
 
 def _push_arg_lists(cmd):
@@ -647,7 +747,7 @@ def _check_push_bypass(cmd, cwd, origin, current_branch=None, rules_lookup=None)
     return "allow", ""
 
 
-# The GraphQL mutation resolving a review thread - denied when hand-rolled (see `_check_reply_resolve_helper`).
+# The GraphQL mutation resolving a review thread, denied when hand-rolled (see `_check_reply_resolve_helper`).
 _RESOLVE_THREAD_MUTATION = re.compile(r"\bresolveReviewThread\b")
 # The REST endpoint the incident's reply half hand-rolled: `POST /repos/{owner}/{repo}/pulls/{n}/comments/{id}/replies`.
 # Distinct from the `addPullRequestReviewThreadReply` GraphQL mutation, which stays allowed as the documented cross-owner fallback (.github/copilot-instructions.md) and is not matched here.
@@ -655,40 +755,51 @@ _REPLY_ENDPOINT_PATH = re.compile(r"\bpulls/\d+/comments/\d+/replies\b")
 
 
 def _check_reply_resolve_helper(cmd, environ):
-    """Deny a hand-rolled `resolveReviewThread` mutation or a raw POST to the review-comment replies
-    endpoint - the two-step shape that let a reply sit unresolved across a push and a re-request, reading
+    """Deny a hand-rolled `resolveReviewThread` mutation or a POST to the review-comment replies
+    endpoint, the two-step shape that let a reply sit unresolved across a push and a re-request, reading
     as untriaged to a maintainer skimming the pull request. `scripts/pr_review.py reply ... --resolve`
-    captures the thread id from a live query and posts the reply and the resolve as one call; that is the
+    captures the thread id from a live query and posts the reply and the resolve as one call, the
     documented path either way.
 
     Scoped to the query text or API path an actual `gh api graphql`/`gh api` invocation's own argv
-    carries (via `_gh_graphql_query`/`_gh_api_path`), never a substring search over the whole command, so
-    a --body or PR description merely describing the mutation or the endpoint - as this fix's own commit
-    message and pull request body do - is not misread as a real call.
+    carries, including one embedded in a `sh -c`/`bash -c` wrapper, never a substring search over the
+    whole command, so a --body or PR description merely describing the mutation or the endpoint is not
+    misread as a real call.
 
-    Permitted when the maintainer has already granted a cross-owner target this session
-    (GH_WRITE_GUARD_ALLOW non-empty): the helper refuses a cross-owner pull request outright, so the
-    hand-run GraphQL form is then the documented fallback, not a footgun.
+    A REST reply is permitted when its own URL names a target the maintainer has already granted this
+    session, since the helper refuses a cross-owner pull request outright and the hand-run form is then
+    the documented fallback for that specific repository. A `resolveReviewThread` mutation carries no
+    target in its own text (the thread id is opaque), so the same fallback is permitted there whenever
+    any grant is active this session, a coarser signal than a REST reply gets, and the residual gap the
+    module docstring's "precision over recall" already accepts for this class of rule.
     """
-    if _granted_targets(environ):
-        return "allow", ""
+    granted = _granted_targets(environ)
     helper = (
         'Use `scripts/pr_review.py reply <N> --repo <owner>/<repo> --match "<words from the finding>" '
         '--body "<answer>" --resolve` instead, which captures the thread id from a live query and posts '
         "the reply and the resolve as one call. See .github/copilot-instructions.md 'Interacting with "
         "GitHub Copilot PR reviews'."
     )
-    for args in _gh_arg_lists(cmd):
+    for args in _all_gh_arg_lists(cmd):
         if len(args) >= 2 and args[0] == "api" and args[1] == "graphql":
             q = _gh_graphql_query(args)
             if q and _MUTATION.search(q) and _RESOLVE_THREAD_MUTATION.search(q):
+                if granted:
+                    continue
                 return "deny", (
                     "This resolves a review thread directly through `gh api graphql` instead of the "
                     "helper that captures the reply and the resolve in one call, so a reply can be left "
                     "unresolved across a push and a re-request. " + helper
                 )
         path = _gh_api_path(args)
-        if path and _REPLY_ENDPOINT_PATH.search(path):
+        if path and _REPLY_ENDPOINT_PATH.search(path) and _gh_effective_method(args) == "POST":
+            m = _REPOS_PATH_TOKEN.match(path)
+            if m:
+                target = (m.group("owner").lower(), m.group("repo").lower())
+                if target in granted or (target[0], "*") in granted:
+                    continue  # this exact target is the maintainer's granted cross-owner exception
+            elif granted:
+                continue  # path carries no readable owner/repo; fall back to grant presence like the graphql case above
             return "deny", (
                 "This posts a review-comment reply directly to the REST replies endpoint instead of the "
                 "helper that captures the reply and the resolve in one call. " + helper
@@ -892,10 +1003,16 @@ _REPLY_RESOLVE_CASES = [
         "cross-owner grant present: hand-run resolve is the documented fallback",
     ),
     (
-        'gh api repos/ptr727/PlexCleaner/pulls/5/comments/9/replies -f body="fixed"',
+        'gh api repos/esphome/esphome/pulls/5/comments/9/replies -f body="fixed"',
         {_ALLOW_ENV: "esphome/esphome"},
         "allow",
-        "cross-owner grant present: hand-run REST reply is permitted too",
+        "REST reply permitted only for the exact granted target",
+    ),
+    (
+        'gh api repos/ptr727/PlexCleaner/pulls/5/comments/9/replies -f body="fixed"',
+        {_ALLOW_ENV: "esphome/esphome"},
+        "deny",
+        "an unrelated grant does not exempt a same-owner REST reply (#757 review)",
     ),
     (
         'gh api graphql -f query=\'mutation($t:ID!,$b:String!){addPullRequestReviewThreadReply(input:{pullRequestReviewThreadId:$t,body:$b}){comment{id}}}\' -F t="$TID" -F b="Fixed in abc123: summary."',
@@ -908,6 +1025,36 @@ _REPLY_RESOLVE_CASES = [
         {},
         "allow",
         "a --body merely describing the mutation/endpoint is not read as issuing one",
+    ),
+    (
+        'sh -c \'gh api graphql -f query="mutation($t:ID!){resolveReviewThread(input:{threadId:$t}){thread{isResolved}}}" -F t="$TID"\'',
+        {},
+        "deny",
+        "a resolve hidden behind sh -c is still caught (#757 review)",
+    ),
+    (
+        'bash -c "gh api repos/ptr727/PlexCleaner/pulls/5/comments/9/replies -f body=fixed"',
+        {},
+        "deny",
+        "a REST reply hidden behind bash -c is still caught (#757 review)",
+    ),
+    (
+        'gh api graphql --field=query=mutation{resolveReviewThread(input:{threadId:$t}){thread{isResolved}}} -F t="$TID"',
+        {},
+        "deny",
+        "the equals-attached --field=query=... spelling is still caught (#757 review)",
+    ),
+    (
+        "gh api graphql -Fquery='mutation{resolveReviewThread(input:{threadId:$t}){thread{isResolved}}}' -F t=\"$TID\"",
+        {},
+        "deny",
+        "the attached-short-form -Fquery=... spelling is still caught (#757 review)",
+    ),
+    (
+        "gh api repos/ptr727/PlexCleaner/pulls/5/comments/9/replies --method GET -f page=1",
+        {},
+        "allow",
+        "a GET to the replies endpoint is a read, not the denied POST (#757 review)",
     ),
 ]
 
@@ -1004,6 +1151,12 @@ _SCOPE_CASES = [
         {},
         "allow",
         "a --body describing --repo/repos path syntax is opaque text, not a real flag or API path",
+    ),
+    (
+        "sh -c 'gh issue comment 5 --repo esphome/esphome --body hi'",
+        {},
+        "deny",
+        "a cross-owner target hidden behind sh -c is still caught (#757 review)",
     ),
 ]
 
