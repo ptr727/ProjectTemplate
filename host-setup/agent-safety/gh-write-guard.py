@@ -106,6 +106,7 @@ _GH_CREATE_TEXT_VALUE_FLAGS = {
     "--body",
     "-b",
     "--body-file",
+    "-F",
     "--notes",
     "--notes-file",
     "--message",
@@ -113,7 +114,8 @@ _GH_CREATE_TEXT_VALUE_FLAGS = {
     "--desc",
 }
 # `gh api`'s own value-taking flags, meaningful only inside an `api` invocation.
-# `-f`/`-F` are the boolean `--fill` on `gh pr create`, so they must not be treated as value-consuming outside of `api`, or the flag right after them (a real `--repo <owner>/<repo>`) is silently skipped.
+# `-f` alone is the boolean `--fill` on `gh pr create`, so it must not be treated as value-consuming outside of `api`, or the flag right after it (a real `--repo <owner>/<repo>`) is silently skipped.
+# `-F` is value-taking either way (`--body-file` on create, `--field` on api), so it stays shared.
 _GH_API_VALUE_FLAGS = _GH_CREATE_TEXT_VALUE_FLAGS | {
     "-f",
     "-F",
@@ -136,18 +138,12 @@ _GH_API_VALUE_FLAGS = _GH_CREATE_TEXT_VALUE_FLAGS | {
 
 def _is_gh_write(cmd):
     """True when `cmd` is a GitHub write: a known-mutating `gh` subcommand, a `git push`, or a `gh api`
-    call whose effective method is not GET.
-
-    The `gh api` half is argv-aware (via `_all_gh_arg_lists`/`_gh_api_path`/`_gh_effective_method`/
-    `_gh_graphql_query`), reading a flag or a GraphQL query only from where it actually sits in one
-    invocation's own argv rather than a substring search over the whole command. A raw substring search
-    reads a write-method spelling out of an opaque flag value too, such as a `--jq` expression that
-    merely contains the text `-XPOST` as data, misclassifying a harmless read as a write.
-
-    A GraphQL call whose body comes from `--input` is treated as a write whenever its query text cannot
-    be read at all (`_gh_graphql_query` returns None), since a `resolveReviewThread` mutation supplied
-    that way is equally invisible; `_check_reply_resolve_helper` denies that case explicitly.
+    call whose effective method is not GET. A GraphQL call is a write only when its query is a mutation,
+    or when its body is supplied by `--input` and so cannot be read at all.
     """
+    # Argv-aware for the `gh api` half, reading a flag or a GraphQL query only from where it actually sits in one invocation's own argv, not a raw substring search over the whole command.
+    # A substring search reads a write-method spelling out of an opaque flag value too, such as a
+    # `--jq` expression that merely contains the text `-XPOST` as data, misclassifying a harmless read.
     if _GH_WRITE_SUB.search(cmd) or _push_arg_lists(cmd):
         return True
     for args in _all_gh_arg_lists(cmd):
@@ -159,7 +155,7 @@ def _is_gh_write(cmd):
             # A -f/-F field becomes a URL query-string parameter rather than a body field whenever --input is also present.
             # A harmless-looking inline query alongside --input therefore has no effect on the actual request, and the real body is the uninspectable input file.
             if _gh_has_input(args):
-                return True  # uninspectable body; treat cautiously so rules 1-5 can look closer
+                return True  # uninspectable body, treated cautiously so rules 1-5 can look closer
             q = _gh_graphql_query(args)
             if q:
                 if _MUTATION.search(q):
@@ -510,7 +506,7 @@ def _gh_write_targets(cmd):
     """
     targets = []
     for args in _all_gh_arg_lists(cmd):
-        # `-f`/`-F` are value-taking only inside `api`, on `pr create` etc. they are the boolean `--fill`, so treating them as value-consuming there would swallow a real following `--repo` flag whole.
+        # `-f` alone is value-taking only inside `api`, on `pr create` it is the boolean `--fill`, so treating it as value-consuming there would swallow a real following `--repo` flag whole.
         flags = _GH_API_VALUE_FLAGS if args and args[0] == "api" else _GH_CREATE_TEXT_VALUE_FLAGS
         n = len(args)
         i = 0
@@ -1338,6 +1334,12 @@ _SCOPE_CASES_MORE: list[tuple[str, dict[str, str], str, str]] = [
         {},
         "allow",
         "-f as pr create's boolean --fill does not swallow --title either, with no foreign target present",
+    ),
+    (
+        "gh pr create -F repos/esphome/esphome --title x",
+        {},
+        "allow",
+        "-F stays value-taking (--body-file) on pr create, so a body-file path is not misread as an API target (qodo)",
     ),
 ]
 
