@@ -1485,12 +1485,8 @@ def marker_blocks(body: str, marker: re.Pattern[str], strip_blockquote: bool = F
     """Return the review body's sections whose own heading matches `marker`, each sliced from
     that heading through to the end of its own region.
 
-    Shared by `suppressed_blocks` (Copilot's low-confidence findings) and `outside_diff_blocks`
-    (CodeRabbit's outside-diff-range findings): both are a review body collapsing real findings
-    into a block that raises no `reviewThreads` entry, so a thread poll alone reports a clean
-    pass over either.
-
-    `strip_blockquote` affects heading detection only, never the returned content.
+    Shared by `suppressed_blocks` and `outside_diff_blocks`. `strip_blockquote` affects heading
+    detection only, never the returned content.
     """
     if not body:
         return []

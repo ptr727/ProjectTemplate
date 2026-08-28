@@ -1116,9 +1116,9 @@ class TestQodoOpenFindings(GqlCase):
         self.assertIn("qodo_open=0", out)
 
     def test_a_finding_titled_about_the_badge_word_itself_is_not_read_as_carrying_it(self) -> None:
-        """The required glyph, not the bare word, keeps this script's own `isResolved`
-        identifier, quoted in a finding's title, from being read as the badge and closing an
-        open finding on its title."""
+        """The required glyph, not the bare word, decides. This script's own `isResolved`
+        identifier, quoted in a finding's title, is not the badge and does not close an open
+        finding."""
         body = qodo_review_body(heading="isResolved handling is inconsistent")
         self.answer(payload([review()], comments=[comment(login="qodo-code-review", body=body)]))
         out, _ = pr_review.digest("o", "r", 7)
