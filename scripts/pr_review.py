@@ -21,7 +21,7 @@ Subcommands
            Exit 0 = no Copilot review covers the head yet, or every output shape is recognized
            and the round covering the head read the whole diff. `review_on_head` and `rounds=`
            in the digest name Copilot's own coverage specifically, the reviewer this script
-           requests and waits for, never "no review of any kind covers this head" (#1066): a
+           requests and waits for, never "no review of any kind covers this head": a
            tracked other reviewer, named under `other_reviewed` below, can carry the exact head
            commit while Copilot's own `review_on_head` still reads `NO`, and an empty body from
            that other reviewer on that head is its own ordinary "reviewed, nothing to flag"
@@ -50,7 +50,10 @@ Subcommands
            further pagination, so a pull request carrying more than that undercounts silently
            past that point: both fields print a trailing `+` and a `THREADS TRUNCATED` block
            follows, naming the gap rather than leaving either count to be trusted as whole
-           (#973). Reading past the cut needs `reply`'s own paginated walk instead.
+           (#973). Reading past the cut needs `reply`'s own paginated walk instead. `suppressed=`
+           and `cr_outside_diff=` carry the identical marker over the separate 100-review page
+           they are both read from, a `REVIEWS TRUNCATED` block following, since an unanswered
+           finding on a round old enough to fall out of that window is exactly as invisible.
            Coverage, refusal, and `wait`/request support stay Copilot-only, each being its own
            format and its own future task per bot. Where either has posted anything at all on
            the current head, `other_reviewed` names it, identity and commit only, no verdict
@@ -60,7 +63,7 @@ Subcommands
            CodeRabbit, ptr727/Blog #110), so reading it needs no per-bot wording model the way
            Copilot's quota refusal needed `QUOTA` built for its own text.
            Two of their own finding shapes are read, though, each its own blind spot a thread
-           poll alone cannot see (#1058). `cr_outside_diff=N (on_head=X earlier=Y)` counts
+           poll alone cannot see. `cr_outside_diff=N (on_head=X earlier=Y)` counts
            CodeRabbit's own "outside diff range" findings, collapsed into the review body rather
            than raised as an inline review comment because the finding sits on a line outside
            the pull request's changed hunks. Printed only once CodeRabbit has raised one, on any
@@ -69,12 +72,12 @@ Subcommands
            badge: Qodo's formal review carries an empty body on every round observed, so its
            findings are read from its "Code Review by Qodo" PR-level comment instead, not
            head-scoped since a comment carries no commit. Printed as `0` once Qodo has posted
-           that comment at all, since a `0` is itself a reading, `unknown` where the newest 100
-           comments carry none of Qodo's own and older ones exist so its silence cannot be told
-           from it never having commented, and absent only where the window is not blind and it
-           genuinely never has. Qodo's own badge is a fast pre-triage signal, not a substitute
-           for reading the finding: spot-verify against `gh pr diff` rather than trusting it
-           outright.
+           that comment at all, since a `0` is itself a reading, `unknown` where its findings
+           comment specifically could be sitting behind the 100-comment window even while a
+           paired `PR Summary by Qodo` stays visible, so its silence cannot be told from it
+           never having commented, and absent only where it genuinely never has. Qodo's own
+           badge is a fast pre-triage signal, not a substitute for reading the finding:
+           spot-verify against `gh pr diff` rather than trusting it outright.
   reply    Answer one thread selected by its text, and resolve it on request. Exists
            because the hand-run form keeps failing the same way: a node id typed into a
            mutation, which resolves globally and so writes to a real thread somewhere
@@ -152,14 +155,14 @@ from pathlib import Path
 
 REVIEWER = "copilot-pull-request-reviewer"
 # Other review bots this repository has trialed alongside Copilot.
-# Tracked at the identity level only, login and commit oid, never body prose, except where a reader below names one explicitly (CodeRabbit's outside-diff blocks, Qodo's comment-only findings, #1058).
+# Tracked at the identity level only, login and commit oid, never body prose, except where a reader below names one explicitly.
 # Each format read here is its own reader, and doing that well is a separate task per bot.
 # What generalizes without reading any of their prose is thread resolution.
 # An open thread blocks a ruleset-gated merge whoever opened it, and `status`'s `unresolved=0` once silently hid a CodeRabbit/qodo thread that did block one (PR #915, ptr727/ProjectTemplate).
 # Login spellings are read off this repository's own history (`gh pr view --json reviews,comments`) rather than guessed.
 CODERABBIT_LOGIN = "coderabbitai"
 QODO_LOGIN = "qodo-code-review"
-# Named rather than inlined at each of their own readers below, so a login rename updates one spelling instead of silently leaving a hardcoded copy matching nothing (#1058).
+# Named rather than inlined at each of their own readers below, so a login rename updates one spelling instead of silently leaving a hardcoded copy matching nothing.
 OTHER_REVIEWERS = (CODERABBIT_LOGIN, QODO_LOGIN)
 KNOWN_REVIEWERS = (REVIEWER, *OTHER_REVIEWERS)
 
@@ -191,9 +194,7 @@ CHECK_STALL = 1800
 # The alternation is the runbook's, since the heading wording has changed once already.
 # Matching one phrasing alone reports zero on a review that has them.
 SUPPRESSED = re.compile(r"Suppressed comments|low confidence", re.IGNORECASE)
-# CodeRabbit's own equivalent: a real finding on a line outside the pull request's changed hunks, which GitHub cannot attach as an inline review comment, so CodeRabbit collapses it into the review body instead.
-# Same blind spot as `SUPPRESSED`, no `reviewThreads` entry either (#1058).
-# Quoted from the corpus, ptr727/ProjectTemplate PR #1053: "Outside diff range comments (1)".
+# CodeRabbit's own equivalent, collapsed into the review body like `SUPPRESSED` rather than raised as an inline comment.
 CR_OUTSIDE_DIFF = re.compile(r"Outside diff range comments", re.IGNORECASE)
 # A refusal declines the round as a formal review carrying the head and no threads.
 # That is the clean pass byte for byte, so every coverage check passes over a round that never ran.
@@ -225,11 +226,9 @@ QODO_FINDING = re.compile(r"\s*\d+\.\s")
 # Qodo's own self-tracked disposition, re-checked against the current head on its own schedule.
 # Present on a finding it has re-verified as addressed or intentionally dismissed, absent on one still open.
 # A fast pre-triage signal per the runbook, not a substitute for reading the finding: spot-verify against `gh pr diff` rather than trusting it outright.
-# Matched on the word rather than the check mark or cross Qodo prefixes it with in its own `<code>` tag, the way `SUPPRESSED` and `REFUSAL` above match their own marker's stable text and leave its decorative glyph unanchored.
-# That also keeps this source inside the ASCII charset rule that governs the repository.
-# Word-boundaried rather than a bare substring, since an unanchored match reads a finding titled about this script's own `isResolved` identifier as carrying the badge.
-# That closes an open finding on the strength of its own title.
-QODO_BADGE = re.compile(r"<code>[^<]*\b(?:Resolved|Dismissed)\b[^<]*</code>")
+# The glyph is required rather than left unanchored, since a bare word match reads any finding whose own title quotes the identifier `Resolved` or `Dismissed` in its own `<code>` tag as carrying the badge, closing an open finding on the strength of its own title.
+# Escaped rather than typed literally (check mark U+2713, ballot x U+2717), keeping this source inside the ASCII charset rule that governs the repository.
+QODO_BADGE = re.compile(r"<code>[^<]*(?:\u2713 Resolved|\u2717 Dismissed)[^<]*</code>")
 # A round states how much of the diff it read on a line of its own.
 # A round that read part of it is the clean pass elsewhere, same commit and threads and digest.
 # Five such rounds landed across three merged pull requests here.
@@ -756,7 +755,7 @@ def window_blind(pr: dict, field: str, login: str = REVIEWER) -> bool:
 
     `login` defaults to the fully-modeled reviewer, so every existing caller keeps reading
     Copilot's own blind spot unchanged. A caller reading another known reviewer's own window,
-    Qodo's `comments` connection carrying its findings comment, passes it explicitly (#1058).
+    Qodo's `comments` connection carrying its findings comment, passes it explicitly.
 
     Each query reads the newest nodes rather than this login's, so ordinary traffic is what
     pushes theirs out of reach. Nodes arrive in creation order, so anything behind the window is
@@ -782,6 +781,22 @@ def threads_truncated(pr: dict) -> bool:
     widened `unresolved` from Copilot's own threads to every tracked reviewer's).
     """
     return bool(((pr.get("reviewThreads") or {}).get("pageInfo") or {}).get("hasNextPage"))
+
+
+def reviews_truncated(pr: dict) -> bool:
+    """True where the `reviews` connection's own page cut off before this pull request's actual
+    round count, so a suppressed or outside-diff-range finding raised on an older, windowed-out
+    round is missing from `suppressed=`/`cr_outside_diff=` below rather than merely counted as
+    stale.
+
+    Unlike `window_blind`, which settles a coverage or dating question once even one of a
+    login's own reviews sits in view, a finding count needs every round read, not just a
+    recent-enough one: an unread round can carry a finding of its own regardless of whether a
+    newer round from the same login is visible. `hasPreviousPage` on this `last`-windowed
+    connection means the reviews left unread are the oldest, exactly where an unanswered
+    finding is most likely to still sit unresolved.
+    """
+    return bool(((pr.get("reviews") or {}).get("pageInfo") or {}).get("hasPreviousPage"))
 
 
 def refusal_of(node: dict) -> str:
@@ -1436,18 +1451,13 @@ def heading_of(block: str) -> str:
 # Copilot's own shapes carry no such prefix, so this is only ever asked of CodeRabbit's own marker below, never of `SUPPRESSED`.
 BLOCKQUOTE = re.compile(r"^>+\s?")
 # `<details>(.*?)</details>` lazily pairs each open with the *next* close, which is the innermost one once a shape nests, silently losing everything the outer wrapper still carries after it.
-# CodeRabbit's outside-diff section does exactly that: a file wrapper nested inside the section heading, itself wrapping a per-finding "Prompt for AI Agents" block three levels deep (#1058).
+# CodeRabbit's outside-diff section does exactly that: a file wrapper nested inside the section heading, itself wrapping a per-finding "Prompt for AI Agents" block three levels deep.
 DETAILS_TAG = re.compile(r"<details(?:\s[^>]*)?>|</details>", re.IGNORECASE)
 
 
 def details_regions(body: str) -> tuple[list[str], str]:
-    """Every top-level `<details>...</details>` region's own content, matched by counting open
-    and close tags rather than pairing each open with the first close a lazy regex meets, plus
-    what is left once every top-level region is removed whole.
-
-    A nested shape needs the count, per `DETAILS_TAG`'s own reasoning above. Counting still
-    reduces to the lazy reading on a shape with no nesting at all, since the first open then
-    pairs with the very next close regardless of which way it is matched.
+    """Every top-level `<details>...</details>` region's own content, plus what is left once
+    every top-level region is removed whole.
     """
     regions: list[str] = []
     leftover: list[str] = []
@@ -1475,7 +1485,7 @@ def marker_blocks(body: str, marker: re.Pattern[str], strip_blockquote: bool = F
     that heading through to the end of its own region.
 
     Shared by `suppressed_blocks` (Copilot's low-confidence findings) and `outside_diff_blocks`
-    (CodeRabbit's outside-diff-range findings, #1058): both are a review body collapsing real
+    (CodeRabbit's outside-diff-range findings): both are a review body collapsing real
     findings into a block that raises no `reviewThreads` entry, so a thread poll alone reports a
     clean pass over either.
 
@@ -1494,7 +1504,7 @@ def marker_blocks(body: str, marker: re.Pattern[str], strip_blockquote: bool = F
     `strip_blockquote` is read on a copy used only to find the heading line, never on what is
     returned: CodeRabbit's own outside-diff section wraps its lines in a Markdown blockquote,
     which `BLOCKQUOTE` strips for detection, but a finding quoting code (`>&2 echo`, `>> $LOG`)
-    would otherwise be corrupted by that same strip once it landed in the printed digest (#1058).
+    would otherwise be corrupted by that same strip once it landed in the printed digest.
     Left off by default, so `suppressed_blocks` reads exactly as it always has.
     """
     if not body:
@@ -1528,7 +1538,7 @@ def outside_diff_blocks(body: str) -> list[str]:
     CodeRabbit collapses it into the review body instead. Observed corpus, ptr727/ProjectTemplate
     PR #1053: a `<summary>...Outside diff range comments (N)</summary>` heading, nested one
     file-level `<details>` deep in turn nesting a per-finding "Prompt for AI Agents" block,
-    wrapped in the review's own blockquote (#1058).
+    wrapped in the review's own blockquote.
 
     Reads a section spanning several files or several findings in one file just as reliably as a
     single finding, since `details_regions` counts the nesting rather than pairing the first
@@ -1547,7 +1557,7 @@ def qodo_review_comment(pr: dict) -> dict | None:
     """The reviewer's newest `Code Review by Qodo` comment, where its actual findings live.
 
     Its formal review object carries an empty body on every review checked, confirmed across
-    roughly 60 (#1058). The findings ride a PR-level comment instead, alongside a second one, `PR
+    roughly 60. The findings ride a PR-level comment instead, alongside a second one, `PR
     Summary by Qodo`, that carries none, told apart by this comment's own heading. Comments carry
     no commit, so this is read by recency rather than by head, the same limitation
     `answered_outside_review` already has for Copilot's own plain comments.
@@ -1562,7 +1572,7 @@ def qodo_review_comment(pr: dict) -> dict | None:
 
 def qodo_open_findings(body: str) -> list[str]:
     """Each numbered finding in a `Code Review by Qodo` comment that carries neither Qodo's own
-    `Resolved` nor `Dismissed` self-tracked badge, so it is still open (#1058).
+    `Resolved` nor `Dismissed` self-tracked badge, so it is still open.
 
     Qodo nests each finding's own Description/Code/Relevance/Evidence/Agent-prompt sections
     under `<summary>` tags of their own, so every `<summary>` in the comment is read rather than
@@ -1576,6 +1586,27 @@ def qodo_open_findings(body: str) -> list[str]:
         for s in SUMMARY.findall(body)
         if QODO_FINDING.match(s) and not QODO_BADGE.search(s)
     ]
+
+
+def qodo_comments_blind(pr: dict) -> bool:
+    """True where Qodo's own `Code Review by Qodo` comment specifically can be sitting behind
+    the comments window, so `qodo_open` cannot tell "never commented" from "commented, unseen".
+
+    `window_blind(pr, "comments", QODO_LOGIN)` alone is not enough: it clears the moment any
+    Qodo comment is visible, including the paired `PR Summary by Qodo` that carries no findings
+    of its own, so a findings comment old enough to fall out of the window would read as though
+    Qodo had never posted one at all. A second check closes that gap: an older page exists, some
+    Qodo comment is visible, yet `qodo_review_comment` still finds none matching the findings
+    heading among what is visible, so the one that matters is the one sitting behind the cut.
+    """
+    if window_blind(pr, "comments", QODO_LOGIN):
+        return True
+    older = ((pr.get("comments") or {}).get("pageInfo") or {}).get("hasPreviousPage")
+    return (
+        bool(older)
+        and bool(reviewer_nodes(pr, "comments", QODO_LOGIN))
+        and not qodo_review_comment(pr)
+    )
 
 
 def thread_author(t: dict) -> str:
@@ -1627,6 +1658,8 @@ def digest(
     # True where the connection cut off before this pull request's actual thread count (#973).
     # Read here rather than inline below, since both the summary line and the explanatory block need it.
     truncated = threads_truncated(pr)
+    # Same reasoning, the `reviews` connection rather than `reviewThreads`, feeding `suppressed=` and `cr_outside_diff=` below.
+    revs_truncated = reviews_truncated(pr)
     # Any known reviewer's own thread, not only Copilot's.
     # An open thread blocks a ruleset-gated merge whoever opened it, and counting Copilot's alone hid a CodeRabbit/qodo thread that did block one (PR #915).
     # `thread_author` carries the deleted-account default this needs.
@@ -1671,7 +1704,7 @@ def digest(
     stuck = checks_stuck(checks, now, grace, stall)
     # Which other known reviewers have posted anything at all on this exact head, identity and commit only, no body read.
     # Whether it is a clean pass, a finding, or a refusal of its own is each bot's own prose to parse.
-    # Two shapes of that are read below rather than left as each bot's own future task: CodeRabbit's outside-diff-range blocks and Qodo's comment-only findings (#1058).
+    # Two shapes of that are read below rather than left as each bot's own future task: CodeRabbit's outside-diff-range blocks and Qodo's comment-only findings.
     # Coverage and refusal reading stay Copilot-only, each of the others writing its own findings in its own format.
     # Omitted entirely where none has, so a repository not trialing either stays silent.
     other_on_head = [
@@ -1687,7 +1720,7 @@ def digest(
         login: name for login in OTHER_REVIEWERS if (name := rate_limited_by(pr, login))
     }
     # CodeRabbit's own outside-diff-range findings, the identical blind spot `blocks` above reads for Copilot.
-    # A real finding collapsed into the review body rather than raised as an inline review comment opens no `reviewThreads` entry either (#1058).
+    # A real finding collapsed into the review body rather than raised as an inline review comment opens no `reviewThreads` entry either.
     # Read every round, not only the head, for the same reason `blocks` is: a finding nobody replied to must not drop out of the digest the moment a later push supersedes its own round.
     cr_revs = reviewer_nodes(pr, "reviews", CODERABBIT_LOGIN)
     cr_blocks = [(n, b) for n in cr_revs for b in outside_diff_blocks(n.get("body") or "")]
@@ -1695,7 +1728,7 @@ def digest(
     cr_stale = sum(finding_count(b) for n, b in cr_blocks) - sum(
         finding_count(b) for b in cr_on_head_blocks
     )
-    # Qodo's own comment-only findings: its formal review carries no body at all on any round checked, so its numbered findings are read from its `Code Review by Qodo` PR comment instead (#1058).
+    # Qodo's own comment-only findings: its formal review carries no body at all on any round checked, so its numbered findings are read from its `Code Review by Qodo` PR comment instead.
     # Comments carry no commit, so this is read by recency, not head-scoped the way `cr_blocks` above is.
     qodo_comment = qodo_review_comment(pr)
     qodo_open = qodo_open_findings(qodo_comment.get("body") or "") if qodo_comment else []
@@ -1731,24 +1764,25 @@ def digest(
         # `unresolved` is drawn from the same truncated `threads` list, so a cut page can hide an open thread exactly as easily as it hides a resolved one, and both counts carry the marker.
         f"threads={len(threads)}{'+' if truncated else ''} "
         f"unresolved={len(unresolved)}{'+' if truncated else ''}{breakdown} "
-        f"suppressed={sum(finding_count(b) for n, b in blocks)} "
+        # A trailing `+` on either count says the same as it does on `threads=`/`unresolved=` above: a round old enough to fall out of the `reviews` window is a round its own finding cannot be read from.
+        f"suppressed={sum(finding_count(b) for n, b in blocks)}{'+' if revs_truncated else ''} "
         f"(on_head={sum(finding_count(b) for b in on_head_blocks)} earlier={stale}) "
-        # Present only where CodeRabbit has raised at least one outside-diff-range finding on any round.
-        # A repository not trialing it, or one whose CodeRabbit rounds have none, stays silent rather than printing a permanent `cr_outside_diff=0`.
+        # Present where CodeRabbit has raised at least one outside-diff-range finding on any round, or the truncated window means one could exist unseen.
+        # A repository not trialing it, on an untruncated window, stays silent rather than printing a permanent `cr_outside_diff=0`.
         + (
-            f"cr_outside_diff={sum(finding_count(b) for n, b in cr_blocks)} "
+            f"cr_outside_diff={sum(finding_count(b) for n, b in cr_blocks)}{'+' if revs_truncated else ''} "
             f"(on_head={sum(finding_count(b) for b in cr_on_head_blocks)} earlier={cr_stale}) "
-            if cr_blocks
+            if cr_blocks or revs_truncated
             else ""
         )
         # Present once Qodo has posted a `Code Review by Qodo` comment at all, `0` included.
         # A `0` here is itself a reading, Qodo reviewed and left nothing open, rather than silence about whether it reviewed.
-        # `unknown` where the newest 100 comments carry none of Qodo's own and older ones exist, so its silence here cannot be told apart from it never having commented.
-        # Absent only where the window is not blind and it genuinely never has.
+        # `unknown` where its findings comment specifically can be sitting behind the window, so its silence here cannot be told apart from it never having commented.
+        # Absent only where `qodo_comments_blind` clears it and it genuinely never has.
         + (
             f"qodo_open={len(qodo_open)} "
             if qodo_comment
-            else ("qodo_open=unknown " if window_blind(pr, "comments", QODO_LOGIN) else "")
+            else ("qodo_open=unknown " if qodo_comments_blind(pr) else "")
         )
         + f"answered_outside_review={answered} "
         f"requested={'yes' if reviewer_requested(pr) else 'no'} "
@@ -1868,6 +1902,14 @@ def digest(
             "the newest rather than the oldest, exactly the ones most likely to still be "
             "open. `threads=` and `unresolved=` above undercount. Read the rest with "
             "`reply`'s own paginated walk before trusting either number"
+        )
+    if revs_truncated:
+        lines.append(
+            "  REVIEWS TRUNCATED: this pull request carries more reviews than the 100 read "
+            "here, and the connection reads newest-first, so the ones cut off are the "
+            "oldest, exactly where an unanswered suppressed or outside-diff-range finding is "
+            "most likely to still sit unresolved. `suppressed=` and `cr_outside_diff=` above "
+            "undercount"
         )
     if answer:
         # Printed whole for the same reason a suppressed finding is, since it reaches no thread.

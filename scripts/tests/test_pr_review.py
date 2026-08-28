@@ -876,6 +876,21 @@ class TestSuppressed(GqlCase):
         out, _ = pr_review.digest("o", "r", 7)
         self.assertIn("suppressed=0", out)
 
+    def test_a_truncated_reviews_window_marks_suppressed_as_undercounting(self) -> None:
+        """An older round old enough to fall out of the 100-review window can carry a finding
+        of its own that `suppressed=` then has no way to read, the same blind spot `threads=`
+        already carries its own `+` marker for."""
+        self.answer(payload([review()], older_reviews=True))
+        out, _ = pr_review.digest("o", "r", 7)
+        self.assertIn("suppressed=0+", out)
+        self.assertIn("REVIEWS TRUNCATED", out)
+
+    def test_an_untruncated_reviews_window_carries_no_marker(self) -> None:
+        self.answer(payload([review()], older_reviews=False))
+        out, _ = pr_review.digest("o", "r", 7)
+        self.assertIn("suppressed=0 ", out)
+        self.assertNotIn("REVIEWS TRUNCATED", out)
+
 
 # Trimmed from CodeRabbit's own review body on ptr727/ProjectTemplate PR #1053, one file and one finding rather than the two files the live round carried.
 # Its warning emoji is dropped, since this file's own charset rule keeps its literal source ASCII.
@@ -935,10 +950,7 @@ def cr_outside_diff_body_multi(findings: list[str], path: str = "a.py") -> str:
 
 
 class TestCodeRabbitOutsideDiff(GqlCase):
-    """CodeRabbit's own outside-diff-range findings, the identical blind spot `TestSuppressed`
-    covers for Copilot: collapsed into the review body rather than raised as an inline review
-    comment, so they open no `reviewThreads` entry either (#1058, #1066).
-    """
+    """CodeRabbit's own equivalent of the blind spot `TestSuppressed` covers for Copilot."""
 
     def cr_review(self, oid: str = HEAD, body: str = "") -> dict:
         return {
@@ -988,6 +1000,15 @@ class TestCodeRabbitOutsideDiff(GqlCase):
         out, _ = pr_review.digest("o", "r", 7)
         self.assertNotIn("cr_outside_diff", out)
 
+    def test_a_truncated_reviews_window_surfaces_cr_outside_diff_even_at_zero(self) -> None:
+        """Silence on `cr_outside_diff` reads as "nothing to triage", so an older CodeRabbit
+        round old enough to fall out of the window must not stay silent just because none of
+        the rounds still in view happen to carry a finding of their own."""
+        self.answer(payload([review()], older_reviews=True))
+        out, _ = pr_review.digest("o", "r", 7)
+        self.assertIn("cr_outside_diff=0+", out)
+        self.assertIn("REVIEWS TRUNCATED", out)
+
     def test_every_finding_in_a_multi_finding_section_is_captured(self) -> None:
         """The shape a lazy `<details>` pairing loses: PR #1053's own round nests a per-finding
         "Prompt for AI Agents" block, and a second finding sitting after that nested block's own
@@ -1013,9 +1034,9 @@ class TestCodeRabbitOutsideDiff(GqlCase):
 
 # Trimmed from Qodo's own "Code Review by Qodo" comment on ptr727/ProjectTemplate PR #1062, one numbered finding rather than the two the live comment carried.
 # Its nested Description/Code/Relevance/Evidence/Agent-prompt sub-summaries are kept, since those are exactly what a naive `<summary>` scan would miscount as findings of their own.
-# Its badge's check mark is dropped, since `QODO_BADGE` matches the word rather than the glyph and this file's own charset rule keeps its literal source ASCII.
+# The badge's check mark is escaped (U+2713) rather than typed literally, keeping this file's own literal source inside the ASCII charset rule that governs the repository.
 def qodo_review_body(resolved: bool = False, heading: str = "Bad naming") -> str:
-    badge = " <code>Resolved</code>" if resolved else ""
+    badge = " <code>\u2713 Resolved</code>" if resolved else ""
     label = f"<s>{heading}</s>" if resolved else heading
     return (
         "<h3>Code Review by Qodo</h3>\n\n"
@@ -1034,9 +1055,7 @@ def qodo_review_body(resolved: bool = False, heading: str = "Bad naming") -> str
 
 
 class TestQodoOpenFindings(GqlCase):
-    """Qodo's own comment-only findings: its formal review carries an empty body on every review
-    checked, so the numbered findings this reads live in a PR-level comment instead (#1058).
-    """
+    """Qodo's own comment-only findings, its formal review carrying an empty body on every round."""
 
     def test_an_open_finding_counts_and_prints_without_its_nested_subsections(self) -> None:
         self.answer(
@@ -1124,6 +1143,29 @@ class TestQodoOpenFindings(GqlCase):
         self.answer(payload([review()], comments=full, older=False))
         out, _ = pr_review.digest("o", "r", 7)
         self.assertNotIn("qodo_open", out)
+
+    def test_qodo_open_is_unknown_where_only_the_paired_summary_comment_is_in_view(self) -> None:
+        """A visible `PR Summary by Qodo` clears plain `window_blind`, which settles for any of
+        Qodo's own comments, but says nothing about the findings comment specifically: an older
+        `Code Review by Qodo` can still be the one that fell out of the window."""
+        summary = "<h3>PR Summary by Qodo</h3>\n\nAdds a thing.\n"
+        full = [comment(login="ptr727") for _ in range(pr_review.WINDOW - 1)] + [
+            comment(login="qodo-code-review", body=summary)
+        ]
+        self.answer(payload([review()], comments=full, older=True))
+        out, _ = pr_review.digest("o", "r", 7)
+        self.assertIn("qodo_open=unknown", out)
+
+    def test_a_finding_titled_with_the_bare_badge_word_and_no_glyph_is_not_read_as_the_badge(
+        self,
+    ) -> None:
+        """`QODO_BADGE` requires the check mark or cross Qodo's own badge carries, not just the
+        word: a finding's own title quoting `<code>Resolved</code>` with no glyph is not Qodo's
+        badge, only something adjacent enough to be mistaken for it on the word alone."""
+        body = qodo_review_body(heading="<code>Resolved</code> flag ignored on retry")
+        self.answer(payload([review()], comments=[comment(login="qodo-code-review", body=body)]))
+        out, _ = pr_review.digest("o", "r", 7)
+        self.assertIn("qodo_open=1", out)
 
 
 class TestRefusal(GqlCase):
@@ -3724,17 +3766,16 @@ class TestContract(unittest.TestCase):
         self.assertIn("Exit 0 = no Copilot review covers the head yet", pr_review.__doc__ or "")
 
     def test_status_documents_review_on_head_as_copilot_scoped(self) -> None:
-        """The exact confusion #1066 was filed over: `review_on_head=NO` alongside a genuine
-        `other_reviewed` head is a scoping fact, not a coverage gap."""
+        """`review_on_head=NO` alongside a genuine `other_reviewed` head is a scoping fact, not
+        a coverage gap, the exact confusion that reached this docstring as a filed issue."""
         doc = pr_review.__doc__ or ""
-        self.assertIn('never "no review of any kind covers this head" (#1066)', doc)
+        self.assertIn('never "no review of any kind covers this head"', doc)
         self.assertIn("not a gap", doc)
 
     def test_status_documents_the_coderabbit_and_qodo_finding_fields(self) -> None:
         doc = pr_review.__doc__ or ""
         self.assertIn("cr_outside_diff=N (on_head=X earlier=Y)", doc)
         self.assertIn("qodo_open=N", doc)
-        self.assertIn("(#1058)", doc)
 
     def test_the_runbook_bootstraps_the_review_skill(self) -> None:
         """Copilot reaches the provider-independent review contract from its always-on file."""

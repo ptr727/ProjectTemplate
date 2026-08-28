@@ -52,7 +52,7 @@ visible comments, routinely still carries a finding nobody has answered. Treatin
    alone reports a clean pass while they stand. The same holds for CodeRabbit's own
    "outside diff range" comments (`cr_outside_diff` in `pr_review.py`'s digest) and for Qodo's
    comment-only findings (`qodo_open`): neither opens a `reviewThreads` entry either, so
-   triage each one the low-confidence findings above already get (#1058). Qodo's own
+   give each one the same triage the low-confidence findings above already get (#1058). Qodo's own
    `Resolved`/`Dismissed` self-tracked badge is a fast pre-triage signal, not a substitute for
    reading the finding, spot-verify against `gh pr diff` rather than trusting it outright.
 4. Nothing in the review was a shape the tooling could not read (an unrecognized heading, a moved
