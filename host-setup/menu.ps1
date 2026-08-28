@@ -126,6 +126,14 @@ function Get-ForwardedArgument {
     return , $forward
 }
 
+# The same array Get-ForwardedArgument returns, rendered as one pasteable command-line string rather than split into argv elements: a flag name is never quoted, and a value is always single-quoted with its own embedded quotes doubled, since a bare value carrying a space or a PowerShell metacharacter would otherwise split apart or be reinterpreted as syntax the moment a person pastes it.
+function Format-ForwardedArgumentForDisplay {
+    $parts = foreach ($token in (Get-ForwardedArgument)) {
+        if ($token -match '^-[A-Za-z]+$') { $token } else { "'" + ($token -replace "'", "''") + "'" }
+    }
+    return ($parts -join ' ')
+}
+
 function Invoke-PwshHandoff {
     $pwshPath = Resolve-Pwsh
     if (-not $pwshPath) { $pwshPath = Install-Pwsh }
@@ -514,8 +522,8 @@ function Resolve-Directory {
 function Show-DownloadAndRunRemedy {
     info '  [Net.ServicePointManager]::SecurityProtocol = [Net.ServicePointManager]::SecurityProtocol -bor [Net.SecurityProtocolType]::Tls12'
     info "  Invoke-WebRequest -UseBasicParsing -Uri https://raw.githubusercontent.com/$script:HUB_REPO/$script:DEFAULT_REF/host-setup/menu.ps1 -OutFile menu.ps1"
-    # Reuses Get-ForwardedArgument rather than a second implementation: the original invocation's own flags (-DryRun among them) belong on the re-run this remedy is telling the caller to make.
-    $forwarded = (Get-ForwardedArgument) -join ' '
+    # Reuses Format-ForwardedArgumentForDisplay rather than a second implementation: the original invocation's own flags (-DryRun among them) belong on the re-run this remedy is telling the caller to make.
+    $forwarded = Format-ForwardedArgumentForDisplay
     $suffix = if ($forwarded) { " $forwarded" } else { '' }
     info "  powershell -ExecutionPolicy Bypass -File menu.ps1$suffix"
 }
