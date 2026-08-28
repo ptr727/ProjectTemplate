@@ -1497,7 +1497,8 @@ def marker_blocks(body: str, marker: re.Pattern[str], strip_blockquote: bool = F
     blocks = []
     for region in regions:
         raw_lines = region.splitlines()
-        # Scanned line by line rather than read from a wrapper's own summary, since the heading can sit in the wrapper's body instead of its summary, where reading only the summary would miss it entirely.
+        # Scanned line by line rather than read from a wrapper's own summary.
+        # A heading can sit in the wrapper's body instead, where reading only the summary would miss it.
         scan_lines = [BLOCKQUOTE.sub("", ln) for ln in raw_lines] if strip_blockquote else raw_lines
         for i, line in enumerate(scan_lines):
             if marker.search(line) and (HEADING.match(line) or COUNT.search(line)):
