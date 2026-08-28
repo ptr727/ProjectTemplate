@@ -171,10 +171,17 @@ function Get-ForwardedArgument {
     return , $forward
 }
 
-# The same array Get-ForwardedArgument returns, rendered as one pasteable command-line string rather than split into argv elements: a flag name is never quoted, and a value is always single-quoted with its own embedded quotes doubled, since a bare value carrying a space or a PowerShell metacharacter would otherwise split apart or be reinterpreted as syntax the moment a person pastes it.
+# The same parameters Get-ForwardedArgument forwards, rendered as one pasteable command-line string rather than split into argv elements.
+# Classified by SCRIPT_BOUND_PARAMETERS's own type rather than by a value's shape: a value that happens to look like a flag (-Ref '-Yes') would otherwise print unquoted and bind as its own switch when pasted, which is exactly the bug guessing from shape produced here before.
 function Format-ForwardedArgumentForDisplay {
-    $parts = foreach ($token in (Get-ForwardedArgument)) {
-        if ($token -match '^-[A-Za-z]+$') { $token } else { "'" + ($token -replace "'", "''") + "'" }
+    $parts = foreach ($key in $script:SCRIPT_BOUND_PARAMETERS.Keys) {
+        $value = $script:SCRIPT_BOUND_PARAMETERS[$key]
+        if ($value -is [switch]) {
+            if ($value.IsPresent) { "-$key" }
+        } else {
+            "-$key"
+            "'" + ("$value" -replace "'", "''") + "'"
+        }
     }
     return ($parts -join ' ')
 }
