@@ -40,7 +40,7 @@ import re
 import shlex
 import subprocess
 import sys
-from urllib.parse import quote
+from urllib.parse import quote, urlsplit
 
 # --- What counts as a GitHub write -------------------------------------------------------------------
 # The gh subcommands that mutate.
@@ -530,17 +530,42 @@ def _gh_write_targets(cmd):
                     targets.append((o.lower(), r.lower()))
                 i += 1
                 continue
-            m = _REPOS_PATH_TOKEN.match(t)
-            if m and "<" not in t:
+            # A full URL (`gh api https://api.github.com/repos/o/r/...` works exactly like the bare path form) is normalized the same way `_gh_api_path` normalizes it, so a URL-wrapped cross-owner target is not missed.
+            # The placeholder check runs on the normalized path, not the raw token: a real URL's own query string or fragment (discarded by normalization) can carry a `<` with no bearing on whether the path itself is a real target.
+            normalized = _normalize_api_path(t)
+            m = _REPOS_PATH_TOKEN.match(normalized)
+            if m and "<" not in normalized:
                 targets.append((m.group("owner").lower(), m.group("repo").lower()))
             i += 1
     return targets
 
 
+def _normalize_api_path(raw):
+    """A `gh api` endpoint argument reduced to its bare API path, in every accepted spelling.
+
+    `gh api` accepts a full absolute URL in place of a bare path (`gh api https://api.github.com/graphql`
+    works exactly like `gh api graphql`); the scheme, host, query string, and fragment are all stripped
+    via `urlsplit`, since `gh` drops a `#fragment` before the request reaches the wire regardless of
+    whether it was given as part of a URL or appended straight onto a bare endpoint (verified live for
+    both), and a raw prefix strip alone leaves it attached, silently defeating an exact `path ==
+    "graphql"` comparison.
+
+    A GitHub Enterprise Server host additionally prefixes REST paths with `/api/v3/` and the GraphQL
+    endpoint with `/api/graphql`, so both prefixes are reduced to the same bare form `api.github.com`
+    uses, after which the rest of this parser treats every host identically.
+    """
+    path = urlsplit(raw).path.lstrip("/")
+    if path == "api/graphql":
+        return "graphql"
+    if path.startswith("api/v3/"):
+        return path[len("api/v3/") :]
+    return path
+
+
 def _gh_api_path(args):
-    """The positional API path argument of a `gh api <path> ...` invocation's own argv, or None. Skips
-    the invocation's own value-taking flags first (`-X POST`, `-f k=v`, ...) so their values are never
-    mistaken for the path positional.
+    """The positional API path argument of a `gh api <path> ...` invocation's own argv, normalized via
+    `_normalize_api_path`, or None. Skips the invocation's own value-taking flags first (`-X POST`,
+    `-f k=v`, ...) so their values are never mistaken for the path positional.
     """
     if not args or args[0] != "api":
         return None
@@ -554,7 +579,7 @@ def _gh_api_path(args):
         if t.startswith("-"):
             i += 1
             continue
-        return t
+        return _normalize_api_path(t)
     return None
 
 
@@ -1294,6 +1319,30 @@ _SCOPE_CASES = [
         "deny",
         "a decoy -f query=... alongside --input does not hide an uninspectable body (CodeRabbit)",
     ),
+    (
+        "gh api https://api.github.com/graphql -f query='mutation{resolveReviewThread(input:{threadId:$t}){thread{isResolved}}}' -F t=\"$TID\"",
+        {},
+        "deny",
+        "a full-URL graphql endpoint still resolves to the resolve mutation (CodeRabbit)",
+    ),
+    (
+        "gh api 'https://api.github.com/graphql#x' -f query='mutation{resolveReviewThread(input:{threadId:$t}){thread{isResolved}}}' -F t=\"$TID\"",
+        {},
+        "deny",
+        "a quoted URL fragment does not hide the resolve mutation (qodo)",
+    ),
+    (
+        "gh api 'graphql#x' -f query='mutation{resolveReviewThread(input:{threadId:$t}){thread{isResolved}}}' -F t=\"$TID\"",
+        {},
+        "deny",
+        "a fragment appended straight onto the bare graphql endpoint is caught too, matching gh's own live behavior",
+    ),
+    (
+        "gh api https://github.example.com/api/graphql -f query='mutation{resolveReviewThread(input:{threadId:$t}){thread{isResolved}}}' -F t=\"$TID\"",
+        {},
+        "deny",
+        "a GitHub Enterprise Server /api/graphql endpoint still resolves to the resolve mutation (CodeRabbit)",
+    ),
 ]
 
 _SCOPE_CASES_MORE: list[tuple[str, dict[str, str], str, str]] = [
@@ -1340,6 +1389,30 @@ _SCOPE_CASES_MORE: list[tuple[str, dict[str, str], str, str]] = [
         {},
         "allow",
         "-F stays value-taking (--body-file) on pr create, so a body-file path is not misread as an API target (qodo)",
+    ),
+    (
+        "gh api https://api.github.com/repos/esphome/esphome/issues -f title=x",
+        {},
+        "deny",
+        "a full-URL REST path still resolves to the foreign-owner target (CodeRabbit)",
+    ),
+    (
+        "gh api https://github.example.com/api/v3/repos/esphome/esphome/issues -f title=x",
+        {},
+        "deny",
+        "a GitHub Enterprise Server /api/v3/ REST prefix still resolves to the foreign-owner target (CodeRabbit)",
+    ),
+    (
+        "gh api 'https://api.github.com/repos/esphome/esphome/issues?x=<x>' -f title=y",
+        {},
+        "deny",
+        "a stray < in the query string, discarded by normalization, does not hide the real target (CodeRabbit)",
+    ),
+    (
+        "gh api 'https://api.github.com/repos/esphome/esphome/issues#<x>' -f title=y",
+        {},
+        "deny",
+        "a stray < in the fragment, discarded by normalization, does not hide the real target (CodeRabbit)",
     ),
 ]
 
