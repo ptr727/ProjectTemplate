@@ -43,6 +43,7 @@ $DOWNSTREAM_ROOT = ''
 $DOWNSTREAM_NAME = ''
 $PWSH_PATH = ''
 $QUIT = $false
+$BAD_CHOICE = $false
 
 # --- Output ---
 
@@ -208,6 +209,8 @@ function Invoke-FetchHubLocked {
         Remove-Item -Force (Get-MarkerPath) -ErrorAction SilentlyContinue
         return $false
     }
+    # Set the moment the clone lands, whatever -Ref still has to do: Invoke-Cleanup is gated on this, and a later ref-specific failure below must still remove the tree this step already created.
+    $script:HUB_FETCHED = $true
     if ($script:REF -ne $script:DEFAULT_REF) {
         & git -C $hubPath fetch --quiet origin $script:REF | Out-Host
         if ($LASTEXITCODE -ne 0) {
@@ -221,7 +224,6 @@ function Invoke-FetchHubLocked {
         }
     }
     $script:HUB_ROOT = $hubPath
-    $script:HUB_FETCHED = $true
     info "Cloned to $script:HUB_ROOT"
     return $true
 }
@@ -462,7 +464,8 @@ function Invoke-Dispatch {
         { $_ -in @('q', 'Q') } { $script:QUIT = $true; return 0 }
         default {
             warn 'Not one of the choices'
-            return 2
+            $script:BAD_CHOICE = $true
+            return 0
         }
     }
 }
@@ -472,10 +475,11 @@ function Invoke-InteractiveMenu {
         Show-Menu
         $choice = Read-Host 'Choose'
         $script:QUIT = $false
+        $script:BAD_CHOICE = $false
         $rc = Invoke-Dispatch $choice
         if ($script:QUIT) { break }
-        # An unrecognized choice is rc 2, already warned by Invoke-Dispatch, so this loops straight back rather than reading a pointless confirmation.
-        if ($rc -eq 2) { continue }
+        # A dedicated flag rather than a reserved return code: every dispatched task's own exit code passes through unchanged, and a tool that happens to exit 2 for its own reason (scripts/carry.py's "not uniquely registered", for one) must not be misread as an unrecognized choice.
+        if ($script:BAD_CHOICE) { continue }
         if ($rc -eq 0) {
             step 'Done'
         } else {
@@ -506,10 +510,24 @@ function Resolve-Directory {
     return $trimmed
 }
 
+# The lines a piped-in run is told to paste instead, shared by both places that print them: the handoff below needs a real file to hand off to pwsh, and Test-Interactive needs a real console to ask on, and a run with neither reaches this the same way.
+function Show-DownloadAndRunRemedy {
+    info '  [Net.ServicePointManager]::SecurityProtocol = [Net.ServicePointManager]::SecurityProtocol -bor [Net.SecurityProtocolType]::Tls12'
+    info "  Invoke-WebRequest -UseBasicParsing -Uri https://raw.githubusercontent.com/$script:HUB_REPO/$script:DEFAULT_REF/host-setup/menu.ps1 -OutFile menu.ps1"
+    info '  powershell -ExecutionPolicy Bypass -File menu.ps1'
+}
+
 function main {
     if ($script:WANT_HELP) { usage; exit 0 }
 
     if ($PSVersionTable.PSVersion.Major -lt 7) {
+        # $PSCommandPath is empty for a script read through Invoke-Expression or a similar pipe, and the handoff below needs a real path to re-invoke under pwsh, so this cannot wait for Test-Interactive to say the same thing for a different reason.
+        if (-not $PSCommandPath) {
+            warn 'This needs a real file to hand off to PowerShell 7, and a piped-in script has none.'
+            info 'Download the file and run it, rather than piping it:'
+            Show-DownloadAndRunRemedy
+            exit 0
+        }
         Invoke-PwshHandoff
     }
 
@@ -520,9 +538,7 @@ function main {
     if (-not (Test-Interactive)) {
         warn 'No console to ask on, so there is no menu to show'
         info 'Download the file and run it, rather than piping it, to reach the menu:'
-        info '  [Net.ServicePointManager]::SecurityProtocol = [Net.ServicePointManager]::SecurityProtocol -bor [Net.SecurityProtocolType]::Tls12'
-        info "  Invoke-WebRequest -UseBasicParsing -Uri https://raw.githubusercontent.com/$script:HUB_REPO/$script:DEFAULT_REF/host-setup/menu.ps1 -OutFile menu.ps1"
-        info '  powershell -ExecutionPolicy Bypass -File menu.ps1'
+        Show-DownloadAndRunRemedy
         exit 0
     }
 
