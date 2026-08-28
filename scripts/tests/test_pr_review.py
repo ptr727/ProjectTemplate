@@ -1156,6 +1156,23 @@ class TestQodoOpenFindings(GqlCase):
         out, _ = pr_review.digest("o", "r", 7)
         self.assertIn("qodo_open=unknown", out)
 
+    def test_a_summary_comment_mentioning_the_findings_heading_in_prose_is_not_selected(
+        self,
+    ) -> None:
+        """`QODO_REVIEW_HEADING` is anchored to the `<h3>` tag the real heading wears, not a
+        bare substring: a `PR Summary by Qodo` comment whose own prose happens to mention
+        "Code Review by Qodo" must not be mistaken for the findings comment itself, which
+        would read a genuinely hidden findings comment as `qodo_open=0` rather than
+        `unknown`."""
+        summary = "<h3>PR Summary by Qodo</h3>\n\nA Code Review by Qodo will follow shortly.\n"
+        full = [comment(login="ptr727") for _ in range(pr_review.WINDOW - 1)] + [
+            comment(login="qodo-code-review", body=summary)
+        ]
+        self.answer(payload([review()], comments=full, older=True))
+        out, _ = pr_review.digest("o", "r", 7)
+        self.assertIn("qodo_open=unknown", out)
+        self.assertNotIn("qodo_open=0 ", out)
+
     def test_a_finding_titled_with_the_bare_badge_word_and_no_glyph_is_not_read_as_the_badge(
         self,
     ) -> None:

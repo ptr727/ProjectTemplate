@@ -219,7 +219,8 @@ RATE_LIMITED = re.compile(r"auto-generated comment:\s*rate limited by\s*(\S+?)\s
 # Qodo's formal review object carries an empty body on every review checked, confirmed across roughly 60.
 # Its findings ride a PR-level comment instead.
 # Two are posted per round, "PR Summary by Qodo" (an overview, no findings) and this one, told apart by its own heading.
-QODO_REVIEW_HEADING = re.compile(r"Code Review by Qodo", re.IGNORECASE)
+# Anchored to the `<h3>` tag the heading itself wears, not a bare substring: the summary comment's own prose can mention the phrase without being the comment it names.
+QODO_REVIEW_HEADING = re.compile(r"<h3>\s*Code Review by Qodo\s*</h3>", re.IGNORECASE)
 # Qodo nests a Description/Code/Relevance/Evidence/Agent-prompt `<summary>` under each of its own numbered findings.
 # Only the numbered heading itself is a finding, told apart from those by starting with `N.` the way none of the nested ones do.
 QODO_FINDING = re.compile(r"\s*\d+\.\s")
