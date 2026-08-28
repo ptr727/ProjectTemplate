@@ -950,8 +950,6 @@ def cr_outside_diff_body_multi(findings: list[str], path: str = "a.py") -> str:
 
 
 class TestCodeRabbitOutsideDiff(GqlCase):
-    """CodeRabbit's own equivalent of the blind spot `TestSuppressed` covers for Copilot."""
-
     def cr_review(self, oid: str = HEAD, body: str = "") -> dict:
         return {
             "author": {"login": "coderabbitai"},
@@ -1055,8 +1053,6 @@ def qodo_review_body(resolved: bool = False, heading: str = "Bad naming") -> str
 
 
 class TestQodoOpenFindings(GqlCase):
-    """Qodo's own comment-only findings, its formal review carrying an empty body on every round."""
-
     def test_an_open_finding_counts_and_prints_without_its_nested_subsections(self) -> None:
         self.answer(
             payload(
@@ -1120,8 +1116,9 @@ class TestQodoOpenFindings(GqlCase):
         self.assertIn("qodo_open=0", out)
 
     def test_a_finding_titled_about_the_badge_word_itself_is_not_read_as_carrying_it(self) -> None:
-        """An unanchored match previously read this script's own `isResolved` identifier, quoted
-        in a finding's title, as the badge, closing an open finding on its own title."""
+        """The required glyph, not the bare word, keeps this script's own `isResolved`
+        identifier, quoted in a finding's title, from being read as the badge and closing an
+        open finding on its title."""
         body = qodo_review_body(heading="isResolved handling is inconsistent")
         self.answer(payload([review()], comments=[comment(login="qodo-code-review", body=body)]))
         out, _ = pr_review.digest("o", "r", 7)
