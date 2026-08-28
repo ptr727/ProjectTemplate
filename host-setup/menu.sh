@@ -112,14 +112,16 @@ fetch_hub_locked() {
     step "Fetching $HUB_REPO at $REF"
     remove_unowned_hub_check || return 1
     rm -rf "$DIR/hub"
+    # Marked as ours before git can create anything under $DIR/hub, not only once the clone also succeeds: git can leave a partial directory behind on a failed or interrupted clone, and an unmarked one would then block every retry until removed by hand.
+    touch "$(marker_path)"
     # A full clone of the default branch first, whatever $REF names: spec/audit.py walks the hub's own history to judge whether a carried copy is trailing the file it was copied from, and a shallow clone would read every file as changed at the truncation boundary and misreport every repo as stale.
     git clone --quiet --branch "$DEFAULT_REF" --single-branch "$HUB_URL" "$DIR/hub" ||
         {
             fail "Could not clone $HUB_REPO. Check that this host reaches github.com."
+            # The marker goes with the directory it marked: an orphaned one left behind would grant false ownership to whatever unrelated directory a person later puts at this same path.
+            rm -rf "$DIR/hub" "$(marker_path)"
             return 1
         }
-    # Marked as ours the moment the clone lands rather than only once every later step also succeeds, so a failure below still leaves a tree remove_unowned_hub_check will clean up on the next run instead of blocking every retry as somebody else's.
-    touch "$(marker_path)"
     # A branch name is already checked out by the clone above.
     # A tag, a pull request ref, or a commit needs an explicit fetch and checkout, since "git clone --branch" only takes a branch or a tag, not an arbitrary commit.
     if [[ $REF != "$DEFAULT_REF" ]]; then
@@ -155,24 +157,41 @@ detect_hub_root() {
     return 0
 }
 
+# Whether HUB_ROOT is clean and sitting on $DEFAULT_REF, with no assumption that it agrees with origin.
+# A failed git command must never read the same as its emptiest possible success, so each one's own exit status is captured rather than only its output.
+hub_root_clean_on_default_ref() {
+    local status branch
+    status=$(git -C "$HUB_ROOT" status --porcelain) || return 1
+    [[ -z $status ]] || return 1
+    branch=$(git -C "$HUB_ROOT" rev-parse --abbrev-ref HEAD) || return 1
+    [[ $branch == "$DEFAULT_REF" ]]
+}
+
 # Confirms a tentative local HUB_ROOT still matches a clean, freshly fetched origin/main before any tool reads it, checked here rather than at startup so opening the menu costs no network call until a hub-dependent task actually runs.
 # A local checkout that has moved on (a feature branch, a commit behind, an uncommitted edit) falls back to a real fetch rather than being trusted, the same freshness and cleanliness carry.py's own verify_hub already requires of its own hub argument.
 ensure_hub_root() {
-    # The freshness check below itself fetches, which updates FETCH_HEAD and the remote-tracking ref even though it touches no working file, so it is as much a change as fetch_hub's own clone and is refused for the same reason.
+    if [[ -n $HUB_ROOT ]]; then
+        if [[ $DRY_RUN == true ]]; then
+            # No network call, since confirming freshness against origin means fetching, which --dry-run does not do, but this still confirms the checkout is clean and actually on main: detect_hub_root checked only origin identity, and a dirty or feature-branch checkout must not be read as the hub's main either.
+            hub_root_clean_on_default_ref && return 0
+            HUB_ROOT=""
+        else
+            # The freshness check below itself fetches, which updates FETCH_HEAD and the remote-tracking ref even though it touches no working file, so it is as much a change as fetch_hub's own clone.
+            local status head origin_head
+            if git -C "$HUB_ROOT" fetch --quiet origin "$DEFAULT_REF" &&
+                status=$(git -C "$HUB_ROOT" status --porcelain) && [[ -z $status ]] &&
+                head=$(git -C "$HUB_ROOT" rev-parse HEAD) &&
+                origin_head=$(git -C "$HUB_ROOT" rev-parse "origin/$DEFAULT_REF") &&
+                [[ $head == "$origin_head" ]]; then
+                return 0
+            fi
+            HUB_ROOT=""
+        fi
+    fi
     [[ $DRY_RUN == true ]] && {
-        fail "This task needs to confirm the hub checkout is fresh, and confirming it means fetching, which --dry-run does not do. Run without --dry-run."
+        fail "This task needs a fetched hub checkout, and fetching one is itself a change --dry-run does not make. Run without --dry-run, or from inside a clean hub checkout already on $DEFAULT_REF."
         return 1
     }
-    if [[ -z $HUB_ROOT ]]; then
-        fetch_hub
-        return
-    fi
-    if git -C "$HUB_ROOT" fetch --quiet origin "$DEFAULT_REF" &&
-        [[ -z $(git -C "$HUB_ROOT" status --porcelain) ]] &&
-        [[ $(git -C "$HUB_ROOT" rev-parse HEAD) == "$(git -C "$HUB_ROOT" rev-parse "origin/$DEFAULT_REF")" ]]; then
-        return 0
-    fi
-    HUB_ROOT=""
     fetch_hub
 }
 
@@ -190,7 +209,9 @@ detect_downstream_root() {
 cleanup() {
     [[ $KEEP == true || $HUB_FETCHED == false ]] && return 0
     [[ -e "$(marker_path)" ]] || return 0
-    rm -rf "$DIR/hub" "$(marker_path)"
+    # The marker is removed only once the directory it marks is actually gone, rather than unconditionally alongside it: a suppressed removal failure must not leave a leftover hub with no marker to explain it.
+    rm -rf "$DIR/hub"
+    [[ -e "$DIR/hub" ]] || rm -f "$(marker_path)"
 }
 
 # --- Running a tool ---

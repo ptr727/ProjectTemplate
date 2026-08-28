@@ -74,6 +74,15 @@ pwsh -NoProfile -File ..\bootstrap.ps1 -Help
 ..\bootstrap.ps1 -Report -DryRun
 ```
 
+## menu.ps1
+
+[`menu.ps1`][menu-ps1] sits beside [`menu.sh`][menu] at the top of [`host-setup/`][host-setup-readme] for the same reason `bootstrap.ps1` sits beside `bootstrap.sh`: it fronts this registry's scripts rather than joining it, and [`host-setup/README.md`][host-setup-readme] "The Human Menu" carries its full contract. It shares `bootstrap.ps1`'s PowerShell 5.1 to `pwsh` handoff, and it adds one entry with no Linux peer, `setup-wsl.ps1 -Status`, since WSL is a Windows-side concern.
+
+```powershell
+pwsh -NoProfile -File ..\menu.ps1 -Help
+..\menu.ps1 -DryRun
+```
+
 ## Docker Desktop and WSL
 
 `setup-wsl.ps1` **reports** the Docker Desktop integration and never writes it. Docker holds those settings in memory and rewrites its settings file from that copy while it runs, so an edit made here is discarded at Docker's next save and an edit made while it is stopped is undone by the next start. Change it in Docker Desktop under Settings, Resources, WSL integration.
@@ -146,6 +155,8 @@ The scripts are checked by `PSScriptAnalyzer`, which runs in CI as the peer of t
 [host-setup]: ../../docs/host-setup.md
 [host-setup-readme]: ../README.md
 [install-tools]: ./install-tools.ps1
+[menu]: ../menu.sh
+[menu-ps1]: ../menu.ps1
 [setup-github]: ./setup-github.ps1
 [setup-wsl]: ./setup-wsl.ps1
 [test-bootstrap]: ../../scripts/tests/test_bootstrap.py
