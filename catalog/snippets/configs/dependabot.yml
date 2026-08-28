@@ -9,6 +9,9 @@
 # Because develop is strictly forward-only, each branch absorbs its own PRs.
 # Security (CVE) PRs always target the default branch regardless of target-branch.
 # Keep only the ecosystems the repo actually ships.
+#
+# Exclude-patterns keeps the fleet's toolchain packages out of the catch-all bump.
+# A tool's own version bump can flag previously-compliant code, blocking the whole group over it.
 version: 2
 updates:
 
@@ -21,6 +24,10 @@ updates:
       nuget-deps:
         patterns:
           - "*"
+        exclude-patterns:
+          - "csharpier"
+          - "husky"
+          - "dotnet-outdated-tool"
 
   - package-ecosystem: "nuget"
     target-branch: "develop"
@@ -31,6 +38,10 @@ updates:
       nuget-deps:
         patterns:
           - "*"
+        exclude-patterns:
+          - "csharpier"
+          - "husky"
+          - "dotnet-outdated-tool"
 
   - package-ecosystem: "github-actions"
     target-branch: "main"
@@ -63,6 +74,10 @@ updates:
       pypi-deps:
         patterns:
           - "*"
+        exclude-patterns:
+          - "ruff"
+          - "pyright"
+          - "mypy"
 
   - package-ecosystem: "uv"
     target-branch: "develop"
@@ -73,3 +88,7 @@ updates:
       pypi-deps:
         patterns:
           - "*"
+        exclude-patterns:
+          - "ruff"
+          - "pyright"
+          - "mypy"
