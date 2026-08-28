@@ -10,10 +10,8 @@
 # Security (CVE) PRs always target the default branch regardless of target-branch.
 # Keep only the ecosystems the repo actually ships.
 #
-# Each group's exclude-patterns keeps the fleet's own lint/format toolchain packages out of the catch-all bump.
-# A formatter or linter version bump can change its own output or rule set and start flagging previously-compliant code it never touched.
-# Grouping it with unrelated dependency bumps would then block all of them together on one tool's reformat/relint debt.
-# Excluded packages instead get their own individual PR, diagnosed and merged (or held) on its own.
+# Exclude-patterns keeps the fleet's toolchain packages out of the catch-all bump.
+# A tool's own version bump can flag previously-compliant code, blocking the whole group over it.
 version: 2
 updates:
 
