@@ -531,8 +531,10 @@ def _gh_write_targets(cmd):
                 i += 1
                 continue
             # A full URL (`gh api https://api.github.com/repos/o/r/...` works exactly like the bare path form) is normalized the same way `_gh_api_path` normalizes it, so a URL-wrapped cross-owner target is not missed.
-            m = _REPOS_PATH_TOKEN.match(_normalize_api_path(t))
-            if m and "<" not in t:
+            # The placeholder check runs on the normalized path, not the raw token: a real URL's own query string or fragment (discarded by normalization) can carry a `<` with no bearing on whether the path itself is a real target.
+            normalized = _normalize_api_path(t)
+            m = _REPOS_PATH_TOKEN.match(normalized)
+            if m and "<" not in normalized:
                 targets.append((m.group("owner").lower(), m.group("repo").lower()))
             i += 1
     return targets
@@ -1399,6 +1401,18 @@ _SCOPE_CASES_MORE: list[tuple[str, dict[str, str], str, str]] = [
         {},
         "deny",
         "a GitHub Enterprise Server /api/v3/ REST prefix still resolves to the foreign-owner target (CodeRabbit)",
+    ),
+    (
+        "gh api 'https://api.github.com/repos/esphome/esphome/issues?x=<x>' -f title=y",
+        {},
+        "deny",
+        "a stray < in the query string, discarded by normalization, does not hide the real target (CodeRabbit)",
+    ),
+    (
+        "gh api 'https://api.github.com/repos/esphome/esphome/issues#<x>' -f title=y",
+        {},
+        "deny",
+        "a stray < in the fragment, discarded by normalization, does not hide the real target (CodeRabbit)",
     ),
 ]
 
