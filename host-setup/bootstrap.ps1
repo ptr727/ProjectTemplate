@@ -171,6 +171,21 @@ function Get-ForwardedArgument {
     return , $forward
 }
 
+# The same parameters Get-ForwardedArgument forwards, rendered as one pasteable command-line string rather than split into argv elements.
+# Classified by SCRIPT_BOUND_PARAMETERS's own type rather than by a value's shape: a value that happens to look like a flag (-Ref '-Yes') would otherwise print unquoted and bind as its own switch when pasted, which is exactly the bug guessing from shape produced here before.
+function Format-ForwardedArgumentForDisplay {
+    $parts = foreach ($key in $script:SCRIPT_BOUND_PARAMETERS.Keys) {
+        $value = $script:SCRIPT_BOUND_PARAMETERS[$key]
+        if ($value -is [switch]) {
+            if ($value.IsPresent) { "-$key" }
+        } else {
+            "-$key"
+            "'" + ("$value" -replace "'", "''") + "'"
+        }
+    }
+    return ($parts -join ' ')
+}
+
 function Invoke-PwshHandoff {
     $pwshPath = Resolve-Pwsh
     if (-not $pwshPath) { $pwshPath = Install-Pwsh }
@@ -381,10 +396,27 @@ function Resolve-Mode {
     return $given[0]
 }
 
+# The lines a piped-in run is told to paste instead, shared by both places that print them: the handoff below needs a real file to hand off to pwsh, and Test-Interactive needs a real console to ask on, and a run with neither reaches this the same way.
+function Show-DownloadAndRunRemedy {
+    info '  [Net.ServicePointManager]::SecurityProtocol = [Net.ServicePointManager]::SecurityProtocol -bor [Net.SecurityProtocolType]::Tls12'
+    info "  Invoke-WebRequest -UseBasicParsing -Uri https://raw.githubusercontent.com/$script:REPO/$script:DEFAULT_REF/host-setup/bootstrap.ps1 -OutFile bootstrap.ps1"
+    # Reuses Format-ForwardedArgumentForDisplay rather than a second implementation: the original invocation's own action and flags belong on the re-run this remedy is telling the caller to make.
+    $forwarded = Format-ForwardedArgumentForDisplay
+    $suffix = if ($forwarded) { " $forwarded" } else { '' }
+    info "  powershell -ExecutionPolicy Bypass -File bootstrap.ps1$suffix"
+}
+
 function main {
     if ($script:WANT_HELP) { usage; exit 0 }
 
     if ($PSVersionTable.PSVersion.Major -lt 7) {
+        # $PSCommandPath is empty for a script read through Invoke-Expression or a similar pipe, and the handoff below needs a real path to re-invoke under pwsh, so this cannot wait for Test-Interactive to say the same thing for a different reason.
+        if (-not $PSCommandPath) {
+            warn 'This needs a real file to hand off to PowerShell 7, and a piped-in script has none.'
+            info 'Download the file and run it, rather than piping it:'
+            Show-DownloadAndRunRemedy
+            exit 0
+        }
         Invoke-PwshHandoff
     }
 
@@ -403,9 +435,7 @@ function main {
             $script:MODE = 'report'
             warn 'No action given and no console to ask on, so this is a report'
             info 'Download the file and run it, rather than piping it, to reach the menu:'
-            info '  [Net.ServicePointManager]::SecurityProtocol = [Net.ServicePointManager]::SecurityProtocol -bor [Net.SecurityProtocolType]::Tls12'
-            info "  Invoke-WebRequest -UseBasicParsing -Uri https://raw.githubusercontent.com/$script:REPO/$script:DEFAULT_REF/host-setup/bootstrap.ps1 -OutFile bootstrap.ps1"
-            info '  powershell -ExecutionPolicy Bypass -File bootstrap.ps1'
+            Show-DownloadAndRunRemedy
         }
     }
 
