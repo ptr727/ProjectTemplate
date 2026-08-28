@@ -73,7 +73,7 @@ _GIT_PUSH = re.compile(r"\bgit\b.*?\bpush\b", re.DOTALL)
 _PROTECTED_DEFAULT_ORDER = ("main", "master", "develop")
 _PROTECTED_DEFAULT = set(_PROTECTED_DEFAULT_ORDER)
 # `gh pr merge --admin` overrides required reviews/status checks with admin power.
-_GH_ADMIN_MERGE = re.compile(r"\bgh\s+pr\s+merge\b[^\n|&;]*(?:^|\s)--admin\b")
+_GH_ADMIN_MERGE = re.compile(r"\bgh(?:\.exe)?\s+pr\s+merge\b[^\n|&;]*(?:^|\s)--admin\b")
 
 # --- Risk-pattern detectors --------------------------------------------------------------------------
 # Output-discard and force-success tails.
@@ -155,13 +155,16 @@ def _is_gh_write(cmd):
             continue
         path = _gh_api_path(args)
         if path == "graphql":
+            # --input checked before trusting any -f/-F query=... value.
+            # A -f/-F field becomes a URL query-string parameter rather than a body field whenever --input is also present.
+            # A harmless-looking inline query alongside --input therefore has no effect on the actual request, and the real body is the uninspectable input file.
+            if _gh_has_input(args):
+                return True  # uninspectable body; treat cautiously so rules 1-5 can look closer
             q = _gh_graphql_query(args)
             if q:
                 if _MUTATION.search(q):
                     return True
                 continue  # a genuine read-only query, not a mutation
-            if _gh_has_input(args):
-                return True  # uninspectable body; treat cautiously so rules 1-5 can look closer
             continue
         if _gh_effective_method(args) != "GET":
             return True
@@ -832,6 +835,16 @@ def _check_reply_resolve_helper(cmd, environ):
     for args in _all_gh_arg_lists(cmd):
         path = _gh_api_path(args)
         if path == "graphql":
+            # --input checked before trusting any -f/-F query=... value, matching `_is_gh_write`.
+            # A harmless decoy query alongside --input has no effect on gh's actual request.
+            if _gh_has_input(args):
+                if granted:
+                    continue
+                return "deny", (
+                    "This gh api graphql call supplies its body via --input, which cannot be inspected "
+                    "for a resolveReviewThread mutation, so it is denied by the same rule as an inline "
+                    "one. " + helper
+                )
             q = _gh_graphql_query(args)
             if q and _MUTATION.search(q) and _RESOLVE_THREAD_MUTATION.search(q):
                 if granted:
@@ -840,14 +853,6 @@ def _check_reply_resolve_helper(cmd, environ):
                     "This resolves a review thread directly through `gh api graphql` instead of the "
                     "helper that captures the reply and the resolve in one call, so a reply can be left "
                     "unresolved across a push and a re-request. " + helper
-                )
-            if not q and _gh_has_input(args):
-                if granted:
-                    continue
-                return "deny", (
-                    "This gh api graphql call supplies its body via --input, which cannot be inspected "
-                    "for a resolveReviewThread mutation, so it is denied by the same rule as an inline "
-                    "one. " + helper
                 )
         if path and _REPLY_ENDPOINT_PATH.search(path) and _gh_effective_method(args) == "POST":
             m = _REPOS_PATH_TOKEN.match(path)
@@ -1287,6 +1292,12 @@ _SCOPE_CASES = [
         "allow",
         "an uninspectable --input GraphQL body is permitted under a cross-owner grant, like the inline case",
     ),
+    (
+        "gh api graphql --input mutation.json -f query='{viewer{login}}'",
+        {},
+        "deny",
+        "a decoy -f query=... alongside --input does not hide an uninspectable body (CodeRabbit)",
+    ),
 ]
 
 _SCOPE_CASES_MORE: list[tuple[str, dict[str, str], str, str]] = [
@@ -1499,6 +1510,13 @@ _GIT_CASES = [
         {},
         "deny",
         "line-continued gh pr merge --admin still caught",
+    ),
+    (
+        "gh.exe pr merge 5 --admin --squash",
+        None,
+        {},
+        "deny",
+        "gh.exe pr merge --admin still caught (CodeRabbit)",
     ),
     (
         "git commit -m 'mention --no-verify in the message'",
