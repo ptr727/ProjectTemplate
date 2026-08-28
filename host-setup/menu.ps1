@@ -514,7 +514,10 @@ function Resolve-Directory {
 function Show-DownloadAndRunRemedy {
     info '  [Net.ServicePointManager]::SecurityProtocol = [Net.ServicePointManager]::SecurityProtocol -bor [Net.SecurityProtocolType]::Tls12'
     info "  Invoke-WebRequest -UseBasicParsing -Uri https://raw.githubusercontent.com/$script:HUB_REPO/$script:DEFAULT_REF/host-setup/menu.ps1 -OutFile menu.ps1"
-    info '  powershell -ExecutionPolicy Bypass -File menu.ps1'
+    # Reuses Get-ForwardedArgument rather than a second implementation: the original invocation's own flags (-DryRun among them) belong on the re-run this remedy is telling the caller to make.
+    $forwarded = (Get-ForwardedArgument) -join ' '
+    $suffix = if ($forwarded) { " $forwarded" } else { '' }
+    info "  powershell -ExecutionPolicy Bypass -File menu.ps1$suffix"
 }
 
 function main {
