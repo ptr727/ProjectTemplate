@@ -237,24 +237,35 @@ function Test-HubCheckout {
     if ($script:REF -eq $script:DEFAULT_REF) { $script:HUB_ROOT = $top }
 }
 
+# Whether HUB_ROOT is clean and sitting on $DEFAULT_REF, with no assumption that it agrees with origin.
+# A failed git call must never read the same as its emptiest possible success, so $LASTEXITCODE is checked after each one rather than only its output.
+function Test-HubCleanOnDefaultRef {
+    $status = & git -C $script:HUB_ROOT status --porcelain
+    if ($LASTEXITCODE -ne 0 -or $status) { return $false }
+    $branch = & git -C $script:HUB_ROOT rev-parse --abbrev-ref HEAD
+    if ($LASTEXITCODE -ne 0) { return $false }
+    return ("$branch".Trim() -eq $script:DEFAULT_REF)
+}
+
 # Confirms a tentative local HUB_ROOT still matches a clean, freshly fetched origin/main before any tool reads it.
 # A local checkout that has moved on falls back to a real fetch rather than being trusted.
 function Confirm-HubRoot {
     if ($script:HUB_ROOT) {
         if ($script:DRY_RUN) {
             # No network call, since confirming freshness against origin means fetching, which -DryRun does not do, but this still confirms the checkout is clean and actually on main: Test-HubCheckout checked only origin identity, and a dirty or feature-branch checkout must not be read as the hub's main either.
-            $status = & git -C $script:HUB_ROOT status --porcelain
-            $branch = "$(& git -C $script:HUB_ROOT rev-parse --abbrev-ref HEAD)".Trim()
-            if ((-not $status) -and ($branch -eq $script:DEFAULT_REF)) { return $true }
+            if (Test-HubCleanOnDefaultRef) { return $true }
             $script:HUB_ROOT = ''
         } else {
             & git -C $script:HUB_ROOT fetch --quiet origin $script:DEFAULT_REF | Out-Host
             if ($LASTEXITCODE -eq 0) {
                 $status = & git -C $script:HUB_ROOT status --porcelain
-                if (-not $status) {
-                    $head = "$(& git -C $script:HUB_ROOT rev-parse HEAD)".Trim()
-                    $originHead = "$(& git -C $script:HUB_ROOT rev-parse "origin/$script:DEFAULT_REF")".Trim()
-                    if ($head -eq $originHead) { return $true }
+                if ($LASTEXITCODE -eq 0 -and -not $status) {
+                    $head = & git -C $script:HUB_ROOT rev-parse HEAD
+                    $headOk = ($LASTEXITCODE -eq 0)
+                    if ($headOk) {
+                        $originHead = & git -C $script:HUB_ROOT rev-parse "origin/$script:DEFAULT_REF"
+                        if ($LASTEXITCODE -eq 0 -and "$head".Trim() -eq "$originHead".Trim()) { return $true }
+                    }
                 }
             }
             $script:HUB_ROOT = ''

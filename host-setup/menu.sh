@@ -157,22 +157,32 @@ detect_hub_root() {
     return 0
 }
 
+# Whether HUB_ROOT is clean and sitting on $DEFAULT_REF, with no assumption that it agrees with origin.
+# A failed git command must never read the same as its emptiest possible success, so each one's own exit status is captured rather than only its output.
+hub_root_clean_on_default_ref() {
+    local status branch
+    status=$(git -C "$HUB_ROOT" status --porcelain) || return 1
+    [[ -z $status ]] || return 1
+    branch=$(git -C "$HUB_ROOT" rev-parse --abbrev-ref HEAD) || return 1
+    [[ $branch == "$DEFAULT_REF" ]]
+}
+
 # Confirms a tentative local HUB_ROOT still matches a clean, freshly fetched origin/main before any tool reads it, checked here rather than at startup so opening the menu costs no network call until a hub-dependent task actually runs.
 # A local checkout that has moved on (a feature branch, a commit behind, an uncommitted edit) falls back to a real fetch rather than being trusted, the same freshness and cleanliness carry.py's own verify_hub already requires of its own hub argument.
 ensure_hub_root() {
     if [[ -n $HUB_ROOT ]]; then
         if [[ $DRY_RUN == true ]]; then
             # No network call, since confirming freshness against origin means fetching, which --dry-run does not do, but this still confirms the checkout is clean and actually on main: detect_hub_root checked only origin identity, and a dirty or feature-branch checkout must not be read as the hub's main either.
-            if [[ -z $(git -C "$HUB_ROOT" status --porcelain) ]] &&
-                [[ $(git -C "$HUB_ROOT" rev-parse --abbrev-ref HEAD) == "$DEFAULT_REF" ]]; then
-                return 0
-            fi
+            hub_root_clean_on_default_ref && return 0
             HUB_ROOT=""
         else
             # The freshness check below itself fetches, which updates FETCH_HEAD and the remote-tracking ref even though it touches no working file, so it is as much a change as fetch_hub's own clone.
+            local status head origin_head
             if git -C "$HUB_ROOT" fetch --quiet origin "$DEFAULT_REF" &&
-                [[ -z $(git -C "$HUB_ROOT" status --porcelain) ]] &&
-                [[ $(git -C "$HUB_ROOT" rev-parse HEAD) == "$(git -C "$HUB_ROOT" rev-parse "origin/$DEFAULT_REF")" ]]; then
+                status=$(git -C "$HUB_ROOT" status --porcelain) && [[ -z $status ]] &&
+                head=$(git -C "$HUB_ROOT" rev-parse HEAD) &&
+                origin_head=$(git -C "$HUB_ROOT" rev-parse "origin/$DEFAULT_REF") &&
+                [[ $head == "$origin_head" ]]; then
                 return 0
             fi
             HUB_ROOT=""
