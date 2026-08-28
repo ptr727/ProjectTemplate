@@ -55,7 +55,8 @@ promotion PR once the fix lands, is the early exit this skill exists to prevent.
 ## The Drive Loop
 
 1. Isolate into a worktree per repo-worktree, based on develop, before the first edit.
-2. Push the branch and open the feature -> develop PR if it does not exist yet.
+2. Run `local-strict-review` against the branch's current diff, then push the branch and open
+   the feature -> develop PR if it does not exist yet.
 3. Drive pr-review-conduct's review loop on it to the Merge Gate, disposing of every finding per
    "Disposing of Every Finding" below.
 4. Capture the branch's own tip before merging, `gh pr view [number] --json headRefOid --jq
@@ -101,7 +102,8 @@ promotion PR once the fix lands, is the early exit this skill exists to prevent.
 
 pr-review-conduct's five outcomes are the actual rule, this is the mapping to use while driving:
 
-- Real, so fix it. Push the fix, reply with its commit SHA (outcome 1).
+- Real, so fix it. Run `local-strict-review` against the branch's current diff, push it, reply
+  with its commit SHA (outcome 1).
 - Not real, or real but out of scope here, so decline in the thread with evidence: the command
   and its output, the code path, or the rule that governs it. An assertion never closes a finding
   on its own (outcome 2).
