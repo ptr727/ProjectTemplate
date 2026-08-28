@@ -126,6 +126,21 @@ function Get-ForwardedArgument {
     return , $forward
 }
 
+# The same parameters Get-ForwardedArgument forwards, rendered as one pasteable command-line string rather than split into argv elements.
+# Classified by SCRIPT_BOUND_PARAMETERS's own type rather than by a value's shape: a value that happens to look like a flag (-Ref '-Yes') would otherwise print unquoted and bind as its own switch when pasted, which is exactly the bug guessing from shape produced here before.
+function Format-ForwardedArgumentForDisplay {
+    $parts = foreach ($key in $script:SCRIPT_BOUND_PARAMETERS.Keys) {
+        $value = $script:SCRIPT_BOUND_PARAMETERS[$key]
+        if ($value -is [switch]) {
+            if ($value.IsPresent) { "-$key" }
+        } else {
+            "-$key"
+            "'" + ("$value" -replace "'", "''") + "'"
+        }
+    }
+    return ($parts -join ' ')
+}
+
 function Invoke-PwshHandoff {
     $pwshPath = Resolve-Pwsh
     if (-not $pwshPath) { $pwshPath = Install-Pwsh }
@@ -514,7 +529,10 @@ function Resolve-Directory {
 function Show-DownloadAndRunRemedy {
     info '  [Net.ServicePointManager]::SecurityProtocol = [Net.ServicePointManager]::SecurityProtocol -bor [Net.SecurityProtocolType]::Tls12'
     info "  Invoke-WebRequest -UseBasicParsing -Uri https://raw.githubusercontent.com/$script:HUB_REPO/$script:DEFAULT_REF/host-setup/menu.ps1 -OutFile menu.ps1"
-    info '  powershell -ExecutionPolicy Bypass -File menu.ps1'
+    # Reuses Format-ForwardedArgumentForDisplay rather than a second implementation: the original invocation's own flags (-DryRun among them) belong on the re-run this remedy is telling the caller to make.
+    $forwarded = Format-ForwardedArgumentForDisplay
+    $suffix = if ($forwarded) { " $forwarded" } else { '' }
+    info "  powershell -ExecutionPolicy Bypass -File menu.ps1$suffix"
 }
 
 function main {
