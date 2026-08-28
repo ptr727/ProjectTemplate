@@ -57,10 +57,10 @@ _GH_WRITE_SUB = re.compile(
     re.VERBOSE,
 )
 _GH_API = re.compile(r"\bgh\s+api\b")
-# `-X`/`--method` accept both a separate value (`-X POST`) and an attached one (`-XPOST`,
-# `--method=POST`), so this must match either spelling, matching how `_gh_effective_method` reads it.
+# `-X`/`--method` accept a separate value (`-X POST`), an attached one (`-XPOST`), and an equals-attached one (`-X=POST`, `--method=POST`).
+# This must match every spelling, matching how `_gh_effective_method` reads it.
 _EXPLICIT_WRITE_METHOD = re.compile(
-    r"(?:--method[= ]|-X)\s*(?:POST|PUT|PATCH|DELETE)\b", re.IGNORECASE
+    r"(?:--method[= ]|-X[= ]?)\s*(?:POST|PUT|PATCH|DELETE)\b", re.IGNORECASE
 )
 # A gh api call with a field flag defaults to POST even without -X, so it is a write.
 # `-f`/`-F` also accept an attached value (`-fbody=x`), so no trailing `\b` is required after them.
@@ -543,11 +543,12 @@ def _gh_api_path(args):
 def _gh_field_value(tok):
     """The `name=value` field text carried by one token, in every field-flag spelling `gh` accepts: a
     bare `-f`/`-F`/`--field`/`--raw-field` (the caller reads the next token as the value), the
-    equals-attached long form (`--field=name=value`/`--raw-field=name=value`), or the attached short form
-    (`-fname=value`/`-Fname=value`, no separator). Returns None for a bare flag, whose value is the next
-    token rather than part of this one.
+    equals-attached long form (`--field=name=value`/`--raw-field=name=value`), the equals-attached short
+    form (`-f=name=value`/`-F=name=value`), or the fully attached short form (`-fname=value`/
+    `-Fname=value`, no separator at all). Returns None for a bare flag, whose value is the next token
+    rather than part of this one.
     """
-    for pfx in ("--field=", "--raw-field="):
+    for pfx in ("--field=", "--raw-field=", "-f=", "-F="):
         if tok.startswith(pfx):
             return tok[len(pfx) :]
     if tok.startswith(("-f", "-F")) and len(tok) > 2 and tok[2] != "=":
@@ -601,7 +602,7 @@ def _gh_effective_method(args):
             i += 1
             continue
         if t.startswith("-X") and len(t) > 2:
-            method = t[2:].upper()
+            method = t[3:].upper() if t[2] == "=" else t[2:].upper()
             i += 1
             continue
         if t in ("-f", "-F", "--field", "--raw-field") or _gh_field_value(t) is not None:
@@ -1205,6 +1206,30 @@ _SCOPE_CASES = [
         {},
         "deny",
         "the attached -XPOST form still enters the write gate (self-found companion to CodeRabbit's -f finding)",
+    ),
+    (
+        "gh api repos/ptr727/PlexCleaner/pulls/5/comments/9/replies -f=body=fixed",
+        {},
+        "deny",
+        "the equals-attached -f=body=fixed form is still caught (CodeRabbit)",
+    ),
+    (
+        "gh api graphql -F=query='mutation{resolveReviewThread(input:{threadId:$t}){thread{isResolved}}}' -F t=\"$TID\"",
+        {},
+        "deny",
+        "the equals-attached -F=query=... form is still caught (CodeRabbit)",
+    ),
+    (
+        "gh api repos/ptr727/PlexCleaner/pulls/5/comments/9/replies -X=GET -f page=1",
+        {},
+        "allow",
+        "the equals-attached -X=GET form is still read as a read (CodeRabbit)",
+    ),
+    (
+        "gh api repos/ptr727/PlexCleaner/pulls/5/comments/9/replies -X=POST",
+        {},
+        "deny",
+        "the equals-attached -X=POST form still enters the write gate (CodeRabbit)",
     ),
 ]
 
