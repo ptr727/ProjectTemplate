@@ -22,7 +22,7 @@ A coding agent that finishes a unit of work, judges it ready, and opens the pull
 
 ## What It Does
 
-Dispatches one read-only subagent against this branch's full diff since it forked from its target branch, `develop` unless `repo-worktree`'s base-branch rule put this branch on `main` instead: fetch the target first, `git fetch origin develop`, then diff against the merge-base, `git diff "$(git merge-base origin/develop HEAD)"`. Naming the target branch explicitly matters: the branch's own `@{u}` tracking ref points at the branch's own remote once it has been pushed, not at the branch it targets, so anchoring there silently narrows a later run to only the diff since the last push instead of the full accumulated diff. That merge-base diff covers every commit already on the branch plus whatever is currently staged or unstaged, so it is never empty and never reviews only the latest increment, at any of the moments this skill is invoked from. A fresh review of the full accumulated diff is what catches what per-push review misses, the exact evidence this skill exists to act on.
+Dispatches one read-only subagent against this branch's full diff since it forked from its target branch. Resolve `<target>` once, `develop` unless `repo-worktree`'s base-branch rule put this branch on `main` instead, then fetch it, `git fetch origin <target>`, and diff against the merge-base, `git diff "$(git merge-base origin/<target> HEAD)"`. Use the same resolved `<target>` in every command below, never a literal `develop` alongside it. Naming the target branch explicitly matters: the branch's own `@{u}` tracking ref points at the branch's own remote once it has been pushed, not at the branch it targets, so anchoring there silently narrows a later run to only the diff since the last push instead of the full accumulated diff. That merge-base diff covers every commit already on the branch plus whatever is currently staged or unstaged, so it is never empty and never reviews only the latest increment, at any of the moments this skill is invoked from. A fresh review of the full accumulated diff is what catches what per-push review misses, the exact evidence this skill exists to act on.
 
 `git diff` never reports a path `git add` has not touched, so a newly created file sitting untracked would otherwise go unread. List it explicitly, `git ls-files --others --exclude-standard`, and read each result in full alongside the diff, the same as any other file the diff touches.
 
@@ -37,7 +37,7 @@ Follow `AGENTS.md` "Context and Delegation Discipline"'s subagent briefing shape
 ```text
 Task: adversarial review of this branch's diff against its merge-base with its target branch,
   read full surrounding files where the diff hunks alone do not give enough context.
-Paths: the files `git diff --name-only "$(git merge-base origin/develop HEAD)"` and
+Paths: the files `git diff --name-only "$(git merge-base origin/<target> HEAD)"` and
   `git ls-files --others --exclude-standard` list, mandatory floor. Reading a specific
   unchanged caller or consumer beyond that list is in bounds only where a candidate finding's
   proof actually depends on it, per code-review's own "follow data and control flow beyond the
