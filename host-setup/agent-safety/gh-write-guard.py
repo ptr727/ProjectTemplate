@@ -530,17 +530,23 @@ def _gh_write_targets(cmd):
                     targets.append((o.lower(), r.lower()))
                 i += 1
                 continue
-            m = _REPOS_PATH_TOKEN.match(t)
+            # A full URL (`gh api https://api.github.com/repos/o/r/...` works exactly like the bare path form) is normalized the same way `_gh_api_path` normalizes it, so a URL-wrapped cross-owner target is not missed.
+            m = _REPOS_PATH_TOKEN.match(_URL_SCHEME_HOST.sub("", t, count=1))
             if m and "<" not in t:
                 targets.append((m.group("owner").lower(), m.group("repo").lower()))
             i += 1
     return targets
 
 
+# `gh api` also accepts a full absolute URL in place of a bare path (`gh api https://api.github.com/graphql` works exactly like `gh api graphql`).
+# The scheme and host are stripped before either Rule 3 or Rule 5 inspects the result, or a URL-wrapped mutation or REST target passes both unrecognized.
+_URL_SCHEME_HOST = re.compile(r"^https?://[^/]+/", re.IGNORECASE)
+
+
 def _gh_api_path(args):
-    """The positional API path argument of a `gh api <path> ...` invocation's own argv, or None. Skips
-    the invocation's own value-taking flags first (`-X POST`, `-f k=v`, ...) so their values are never
-    mistaken for the path positional.
+    """The positional API path argument of a `gh api <path> ...` invocation's own argv, normalized to a
+    bare path even when given as a full URL, or None. Skips the invocation's own value-taking flags first
+    (`-X POST`, `-f k=v`, ...) so their values are never mistaken for the path positional.
     """
     if not args or args[0] != "api":
         return None
@@ -554,7 +560,7 @@ def _gh_api_path(args):
         if t.startswith("-"):
             i += 1
             continue
-        return t
+        return _URL_SCHEME_HOST.sub("", t, count=1)
     return None
 
 
@@ -1294,6 +1300,12 @@ _SCOPE_CASES = [
         "deny",
         "a decoy -f query=... alongside --input does not hide an uninspectable body (CodeRabbit)",
     ),
+    (
+        "gh api https://api.github.com/graphql -f query='mutation{resolveReviewThread(input:{threadId:$t}){thread{isResolved}}}' -F t=\"$TID\"",
+        {},
+        "deny",
+        "a full-URL graphql endpoint still resolves to the resolve mutation (CodeRabbit)",
+    ),
 ]
 
 _SCOPE_CASES_MORE: list[tuple[str, dict[str, str], str, str]] = [
@@ -1340,6 +1352,12 @@ _SCOPE_CASES_MORE: list[tuple[str, dict[str, str], str, str]] = [
         {},
         "allow",
         "-F stays value-taking (--body-file) on pr create, so a body-file path is not misread as an API target (qodo)",
+    ),
+    (
+        "gh api https://api.github.com/repos/esphome/esphome/issues -f title=x",
+        {},
+        "deny",
+        "a full-URL REST path still resolves to the foreign-owner target (CodeRabbit)",
     ),
 ]
 
