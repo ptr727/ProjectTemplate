@@ -902,6 +902,38 @@ def cr_outside_diff_body(count: int = 1, path: str = "a.py", finding: str = "Off
     )
 
 
+# Two findings under one file, each nested one level deeper in its own "Prompt for AI Agents" `<details>` block, the exact shape PR #1053's own round carries.
+# A lazy `<details>` pairing loses everything after: it stops at the first finding's own nested block, not the file's close.
+def cr_outside_diff_body_multi(findings: list[str], path: str = "a.py") -> str:
+    entries = "".join(
+        f"> `{line}-{line}`: **{text}**\n"
+        "> \n"
+        "> <details>\n"
+        "> <summary>Prompt for AI Agents</summary>\n"
+        "> \n"
+        "> ```\n"
+        f"> Fix: {text}\n"
+        "> ```\n"
+        "> \n"
+        "> </details>\n"
+        "> \n"
+        for line, text in enumerate(findings, start=12)
+    )
+    return (
+        f"{OVERVIEW}\n"
+        "> <details>\n"
+        f"> <summary>Outside diff range comments ({len(findings)})</summary><blockquote>\n"
+        "> \n"
+        "> <details>\n"
+        f"> <summary>{path} ({len(findings)})</summary><blockquote>\n"
+        "> \n"
+        f"{entries}"
+        "> </blockquote></details>\n"
+        "> \n"
+        "> </blockquote></details>\n"
+    )
+
+
 class TestCodeRabbitOutsideDiff(GqlCase):
     """CodeRabbit's own outside-diff-range findings, the identical blind spot `TestSuppressed`
     covers for Copilot: collapsed into the review body rather than raised as an inline review
@@ -956,6 +988,28 @@ class TestCodeRabbitOutsideDiff(GqlCase):
         out, _ = pr_review.digest("o", "r", 7)
         self.assertNotIn("cr_outside_diff", out)
 
+    def test_every_finding_in_a_multi_finding_section_is_captured(self) -> None:
+        """The shape a lazy `<details>` pairing loses: PR #1053's own round nests a per-finding
+        "Prompt for AI Agents" block, and a second finding sitting after that nested block's own
+        close used to fall outside the captured region entirely, `cr_outside_diff=2` printing
+        only the first."""
+        body = cr_outside_diff_body_multi(["First off-by-one.", "Second off-by-one."])
+        self.answer(payload([review(), self.cr_review(body=body)]))
+        out, _ = pr_review.digest("o", "r", 7)
+        self.assertIn("cr_outside_diff=2 (on_head=2 earlier=0)", out)
+        self.assertIn("First off-by-one.", out)
+        self.assertIn("Second off-by-one.", out)
+
+    def test_a_finding_quoting_shell_redirects_is_not_corrupted_by_the_blockquote_strip(
+        self,
+    ) -> None:
+        """`BLOCKQUOTE` is read on a copy for detection only, never on the returned block: a
+        naive strip once turned `>&2 echo` into `&2 echo` in the printed finding."""
+        body = cr_outside_diff_body(finding="Missing >&2 echo failed on error.")
+        self.answer(payload([review(), self.cr_review(body=body)]))
+        out, _ = pr_review.digest("o", "r", 7)
+        self.assertIn(">&2 echo failed", out)
+
 
 # Trimmed from Qodo's own "Code Review by Qodo" comment on ptr727/ProjectTemplate PR #1062, one numbered finding rather than the two the live comment carried.
 # Its nested Description/Code/Relevance/Evidence/Agent-prompt sub-summaries are kept, since those are exactly what a naive `<summary>` scan would miscount as findings of their own.
@@ -973,6 +1027,8 @@ def qodo_review_body(resolved: bool = False, heading: str = "Bad naming") -> str
         ">The name does not describe what the function does.\n></pre>\n></details>\n\n"
         "> <details>\n><summary>Code</summary>\n><br/>\n>\n"
         "><code>a.py[12]</code>\n></details>\n\n"
+        "> <details>\n><summary>Relevance</summary>\n><br/>\n>\n"
+        "><pre>Recent history accepts naming corrections.</pre>\n></details>\n\n"
         "<hr/>\n</details>\n"
     )
 
@@ -1043,6 +1099,31 @@ class TestQodoOpenFindings(GqlCase):
         )
         out, _ = pr_review.digest("o", "r", 7)
         self.assertIn("qodo_open=0", out)
+
+    def test_a_finding_titled_about_the_badge_word_itself_is_not_read_as_carrying_it(self) -> None:
+        """An unanchored match previously read this script's own `isResolved` identifier, quoted
+        in a finding's title, as the badge, closing an open finding on its own title."""
+        body = qodo_review_body(heading="isResolved handling is inconsistent")
+        self.answer(payload([review()], comments=[comment(login="qodo-code-review", body=body)]))
+        out, _ = pr_review.digest("o", "r", 7)
+        self.assertIn("qodo_open=1", out)
+        self.assertIn("isResolved handling is inconsistent", out)
+
+    def test_qodo_open_is_unknown_rather_than_absent_where_its_comment_can_be_behind_the_window(
+        self,
+    ) -> None:
+        """`qodo_open` absent means "never commented", and a window with no Qodo comment in view
+        cannot tell that from Qodo's own comment simply sitting behind it."""
+        full = [comment(login="ptr727") for _ in range(pr_review.WINDOW)]
+        self.answer(payload([review()], comments=full, older=True))
+        out, _ = pr_review.digest("o", "r", 7)
+        self.assertIn("qodo_open=unknown", out)
+
+    def test_qodo_open_is_absent_rather_than_unknown_once_the_window_is_not_blind(self) -> None:
+        full = [comment(login="ptr727") for _ in range(pr_review.WINDOW)]
+        self.answer(payload([review()], comments=full, older=False))
+        out, _ = pr_review.digest("o", "r", 7)
+        self.assertNotIn("qodo_open", out)
 
 
 class TestRefusal(GqlCase):

@@ -69,9 +69,12 @@ Subcommands
            badge: Qodo's formal review carries an empty body on every round observed, so its
            findings are read from its "Code Review by Qodo" PR-level comment instead, not
            head-scoped since a comment carries no commit. Printed as `0` once Qodo has posted
-           that comment at all, since a `0` is itself a reading, and absent where it never has.
-           Qodo's own badge is a fast pre-triage signal, not a substitute for reading the
-           finding: spot-verify against `gh pr diff` rather than trusting it outright.
+           that comment at all, since a `0` is itself a reading, `unknown` where the newest 100
+           comments carry none of Qodo's own and older ones exist so its silence cannot be told
+           from it never having commented, and absent only where the window is not blind and it
+           genuinely never has. Qodo's own badge is a fast pre-triage signal, not a substitute
+           for reading the finding: spot-verify against `gh pr diff` rather than trusting it
+           outright.
   reply    Answer one thread selected by its text, and resolve it on request. Exists
            because the hand-run form keeps failing the same way: a node id typed into a
            mutation, which resolves globally and so writes to a real thread somewhere
@@ -149,13 +152,15 @@ from pathlib import Path
 
 REVIEWER = "copilot-pull-request-reviewer"
 # Other review bots this repository has trialed alongside Copilot.
-# Tracked at the identity level only, login and commit oid, never body prose.
-# No coverage parsing, no refusal reading, no wait/request support here.
-# Each of those writes its own findings in its own format, and doing that well is a separate task per bot.
+# Tracked at the identity level only, login and commit oid, never body prose, except where a reader below names one explicitly (CodeRabbit's outside-diff blocks, Qodo's comment-only findings, #1058).
+# Each format read here is its own reader, and doing that well is a separate task per bot.
 # What generalizes without reading any of their prose is thread resolution.
 # An open thread blocks a ruleset-gated merge whoever opened it, and `status`'s `unresolved=0` once silently hid a CodeRabbit/qodo thread that did block one (PR #915, ptr727/ProjectTemplate).
 # Login spellings are read off this repository's own history (`gh pr view --json reviews,comments`) rather than guessed.
-OTHER_REVIEWERS = ("coderabbitai", "qodo-code-review")
+CODERABBIT_LOGIN = "coderabbitai"
+QODO_LOGIN = "qodo-code-review"
+# Named rather than inlined at each of their own readers below, so a login rename updates one spelling instead of silently leaving a hardcoded copy matching nothing (#1058).
+OTHER_REVIEWERS = (CODERABBIT_LOGIN, QODO_LOGIN)
 KNOWN_REVIEWERS = (REVIEWER, *OTHER_REVIEWERS)
 
 # A check dispatched to a runner and not begun, in the spellings a CheckRun carries.
@@ -222,7 +227,9 @@ QODO_FINDING = re.compile(r"\s*\d+\.\s")
 # A fast pre-triage signal per the runbook, not a substitute for reading the finding: spot-verify against `gh pr diff` rather than trusting it outright.
 # Matched on the word rather than the check mark or cross Qodo prefixes it with in its own `<code>` tag, the way `SUPPRESSED` and `REFUSAL` above match their own marker's stable text and leave its decorative glyph unanchored.
 # That also keeps this source inside the ASCII charset rule that governs the repository.
-QODO_BADGE = re.compile(r"<code>[^<]*(?:Resolved|Dismissed)</code>")
+# Word-boundaried rather than a bare substring, since an unanchored match reads a finding titled about this script's own `isResolved` identifier as carrying the badge.
+# That closes an open finding on the strength of its own title.
+QODO_BADGE = re.compile(r"<code>[^<]*\b(?:Resolved|Dismissed)\b[^<]*</code>")
 # A round states how much of the diff it read on a line of its own.
 # A round that read part of it is the clean pass elsewhere, same commit and threads and digest.
 # Five such rounds landed across three merged pull requests here.
@@ -334,7 +341,6 @@ READS_AS_REVIEWER = re.compile(r"copilot.*review", re.IGNORECASE)
 # It is a literal rather than the pull request's own repository.
 # That one is where the shape was seen, not where the reader failing on it lives.
 HUB = "ptr727/ProjectTemplate"
-DETAILS = re.compile(r"<details>(.*?)</details>", re.DOTALL | re.IGNORECASE)
 SUMMARY = re.compile(r"<summary>(.*?)</summary>", re.DOTALL | re.IGNORECASE)
 TAGS = re.compile(r"</?(?:details|summary)>", re.IGNORECASE)
 COUNT = re.compile(r"\((\d+)\)")
@@ -745,18 +751,22 @@ def answered_outside_review(pr: dict) -> dict | None:
     return newest if (newest.get("createdAt") or "") > latest_review else None
 
 
-def window_blind(pr: dict, field: str) -> bool:
-    """True where the reviewer's own nodes can sit behind the window, so the view cannot decide.
+def window_blind(pr: dict, field: str, login: str = REVIEWER) -> bool:
+    """True where this login's own nodes can sit behind the window, so the view cannot decide.
 
-    Each query reads the newest nodes rather than the reviewer's, so ordinary traffic is what
+    `login` defaults to the fully-modeled reviewer, so every existing caller keeps reading
+    Copilot's own blind spot unchanged. A caller reading another known reviewer's own window,
+    Qodo's `comments` connection carrying its findings comment, passes it explicitly (#1058).
+
+    Each query reads the newest nodes rather than this login's, so ordinary traffic is what
     pushes theirs out of reach. Nodes arrive in creation order, so anything behind the window is
-    older than everything inside it: one of the reviewer's in view bounds every hidden one as
+    older than everything inside it: one of this login's in view bounds every hidden one as
     older still, which settles the question rather than leaving it open. `hasPreviousPage` is
     what says anything is back there at all, since a full window and a window holding the lot
     are the same length.
     """
     older = ((pr.get(field) or {}).get("pageInfo") or {}).get("hasPreviousPage")
-    return bool(older) and not reviewer_nodes(pr, field)
+    return bool(older) and not reviewer_nodes(pr, field, login)
 
 
 def threads_truncated(pr: dict) -> bool:
@@ -1423,11 +1433,44 @@ def heading_of(block: str) -> str:
 
 # A blockquote marker (`>` per line, Markdown's own quoting convention) sits in front of every line CodeRabbit wraps its outside-diff section in.
 # `HEADING`'s `\s*` does not match `>`, so a heading under one reads as prose without this stripped first.
-# Copilot's own shapes carry no such prefix, so stripping it is a no-op there.
+# Copilot's own shapes carry no such prefix, so this is only ever asked of CodeRabbit's own marker below, never of `SUPPRESSED`.
 BLOCKQUOTE = re.compile(r"^>+\s?")
+# `<details>(.*?)</details>` lazily pairs each open with the *next* close, which is the innermost one once a shape nests, silently losing everything the outer wrapper still carries after it.
+# CodeRabbit's outside-diff section does exactly that: a file wrapper nested inside the section heading, itself wrapping a per-finding "Prompt for AI Agents" block three levels deep (#1058).
+DETAILS_TAG = re.compile(r"<details(?:\s[^>]*)?>|</details>", re.IGNORECASE)
 
 
-def marker_blocks(body: str, marker: re.Pattern[str]) -> list[str]:
+def details_regions(body: str) -> tuple[list[str], str]:
+    """Every top-level `<details>...</details>` region's own content, matched by counting open
+    and close tags rather than pairing each open with the first close a lazy regex meets, plus
+    what is left once every top-level region is removed whole.
+
+    A nested shape needs the count, per `DETAILS_TAG`'s own reasoning above. Counting still
+    reduces to the lazy reading on a shape with no nesting at all, since the first open then
+    pairs with the very next close regardless of which way it is matched.
+    """
+    regions: list[str] = []
+    leftover: list[str] = []
+    depth = 0
+    region_start = 0
+    cursor = 0
+    for m in DETAILS_TAG.finditer(body):
+        opening = not m.group().startswith("</")
+        if opening:
+            if depth == 0:
+                leftover.append(body[cursor : m.start()])
+                region_start = m.end()
+            depth += 1
+        elif depth > 0:
+            depth -= 1
+            if depth == 0:
+                regions.append(body[region_start : m.start()])
+                cursor = m.end()
+    leftover.append(body[cursor:])
+    return regions, "".join(leftover)
+
+
+def marker_blocks(body: str, marker: re.Pattern[str], strip_blockquote: bool = False) -> list[str]:
     """Return the review body's sections whose own heading matches `marker`, each sliced from
     that heading through to the end of its own region.
 
@@ -1447,18 +1490,26 @@ def marker_blocks(body: str, marker: re.Pattern[str]) -> list[str]:
     The heading carries the match rather than the body text, since a review whose prose discusses
     the marker's own wording is not itself carrying a block. A region ends the block, so a
     section is not read on into the file table that follows it.
+
+    `strip_blockquote` is read on a copy used only to find the heading line, never on what is
+    returned: CodeRabbit's own outside-diff section wraps its lines in a Markdown blockquote,
+    which `BLOCKQUOTE` strips for detection, but a finding quoting code (`>&2 echo`, `>> $LOG`)
+    would otherwise be corrupted by that same strip once it landed in the printed digest (#1058).
+    Left off by default, so `suppressed_blocks` reads exactly as it always has.
     """
     if not body:
         return []
     # Each wrapper's contents, plus what is left outside them all, so a heading is found anywhere.
-    # The regions do not overlap, since what the sub deletes is exactly what the findall keeps.
-    regions = DETAILS.findall(body) + [DETAILS.sub("", body)]
+    # The regions do not overlap, since `details_regions` removes exactly what it returns.
+    regions, leftover = details_regions(body)
+    regions = [*regions, leftover]
     blocks = []
     for region in regions:
-        lines = [BLOCKQUOTE.sub("", ln) for ln in region.splitlines()]
-        for i, line in enumerate(lines):
+        raw_lines = region.splitlines()
+        scan_lines = [BLOCKQUOTE.sub("", ln) for ln in raw_lines] if strip_blockquote else raw_lines
+        for i, line in enumerate(scan_lines):
             if marker.search(line) and (HEADING.match(line) or COUNT.search(line)):
-                blocks.append("\n".join(lines[i:]))
+                blocks.append("\n".join(raw_lines[i:]))
                 break
     return blocks
 
@@ -1476,14 +1527,14 @@ def outside_diff_blocks(body: str) -> list[str]:
     request's changed hunks, which GitHub cannot attach as an inline review comment, so
     CodeRabbit collapses it into the review body instead. Observed corpus, ptr727/ProjectTemplate
     PR #1053: a `<summary>...Outside diff range comments (N)</summary>` heading, nested one
-    file-level `<details>` deep, wrapped in the review's own blockquote (#1058).
+    file-level `<details>` deep in turn nesting a per-finding "Prompt for AI Agents" block,
+    wrapped in the review's own blockquote (#1058).
 
-    Reads one file's worth of nesting reliably, the shape every observed sample carries. A
-    section spanning more than one file collapses at the first file's own closing tag, the same
-    lazy-nesting limit `marker_blocks` already accepts for the `Review details` wrapper: fail
-    toward undercounting a shape nothing has seen yet rather than guessing at its structure.
+    Reads a section spanning several files or several findings in one file just as reliably as a
+    single finding, since `details_regions` counts the nesting rather than pairing the first
+    open it meets with the first close.
     """
-    return marker_blocks(body, CR_OUTSIDE_DIFF)
+    return marker_blocks(body, CR_OUTSIDE_DIFF, strip_blockquote=True)
 
 
 def finding_count(block: str) -> int:
@@ -1503,7 +1554,7 @@ def qodo_review_comment(pr: dict) -> dict | None:
     """
     comments = [
         c
-        for c in reviewer_nodes(pr, "comments", "qodo-code-review")
+        for c in reviewer_nodes(pr, "comments", QODO_LOGIN)
         if QODO_REVIEW_HEADING.search(c.get("body") or "")
     ]
     return max(comments, key=lambda c: c.get("createdAt") or "", default=None)
@@ -1638,7 +1689,7 @@ def digest(
     # CodeRabbit's own outside-diff-range findings, the identical blind spot `blocks` above reads for Copilot.
     # A real finding collapsed into the review body rather than raised as an inline review comment opens no `reviewThreads` entry either (#1058).
     # Read every round, not only the head, for the same reason `blocks` is: a finding nobody replied to must not drop out of the digest the moment a later push supersedes its own round.
-    cr_revs = reviewer_nodes(pr, "reviews", "coderabbitai")
+    cr_revs = reviewer_nodes(pr, "reviews", CODERABBIT_LOGIN)
     cr_blocks = [(n, b) for n in cr_revs for b in outside_diff_blocks(n.get("body") or "")]
     cr_on_head_blocks = [b for n, b in cr_blocks if (n.get("commit") or {}).get("oid") == head]
     cr_stale = sum(finding_count(b) for n, b in cr_blocks) - sum(
@@ -1692,8 +1743,13 @@ def digest(
         )
         # Present once Qodo has posted a `Code Review by Qodo` comment at all, `0` included.
         # A `0` here is itself a reading, Qodo reviewed and left nothing open, rather than silence about whether it reviewed.
-        # Absent entirely where it never has.
-        + (f"qodo_open={len(qodo_open)} " if qodo_comment else "")
+        # `unknown` where the newest 100 comments carry none of Qodo's own and older ones exist, so its silence here cannot be told apart from it never having commented.
+        # Absent only where the window is not blind and it genuinely never has.
+        + (
+            f"qodo_open={len(qodo_open)} "
+            if qodo_comment
+            else ("qodo_open=unknown " if window_blind(pr, "comments", QODO_LOGIN) else "")
+        )
         + f"answered_outside_review={answered} "
         f"requested={'yes' if reviewer_requested(pr) else 'no'} "
         f"merge={pr.get('mergeStateStatus')} "
