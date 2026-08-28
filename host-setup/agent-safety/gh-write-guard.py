@@ -57,9 +57,15 @@ _GH_WRITE_SUB = re.compile(
     re.VERBOSE,
 )
 _GH_API = re.compile(r"\bgh\s+api\b")
-_EXPLICIT_WRITE_METHOD = re.compile(r"(?:--method|-X)\s+(?:POST|PUT|PATCH|DELETE)\b", re.IGNORECASE)
+# `-X`/`--method` accept both a separate value (`-X POST`) and an attached one (`-XPOST`,
+# `--method=POST`), so this must match either spelling, matching how `_gh_effective_method` reads it.
+_EXPLICIT_WRITE_METHOD = re.compile(
+    r"(?:--method[= ]|-X)\s*(?:POST|PUT|PATCH|DELETE)\b", re.IGNORECASE
+)
 # A gh api call with a field flag defaults to POST even without -X, so it is a write.
-_API_FIELD_FLAG = re.compile(r"(?:^|\s)(?:-f|-F|--field|--raw-field|--input)\b")
+# `-f`/`-F` also accept an attached value (`-fbody=x`), so no trailing `\b` is required after them.
+# It is required after the long-form spellings, where one legitimately separates the flag from the next word.
+_API_FIELD_FLAG = re.compile(r"(?:^|\s)(?:-f|-F)|(?:^|\s)(?:--field|--raw-field|--input)\b")
 _GRAPHQL = re.compile(r"\bgh\s+api\b.*\bgraphql\b", re.DOTALL)
 _MUTATION = re.compile(r"\bmutation\b")
 # Loose pre-filter only: matches `git` before `push` even with global options between them
@@ -125,6 +131,10 @@ _GH_TEXT_VALUE_FLAGS = {
     "--header",
     "--method",
     "-X",
+    "--cache",
+    "--hostname",
+    "-p",
+    "--preview",
 }
 
 
@@ -427,12 +437,20 @@ def _embedded_wrapper_commands(cmd, _depth=0):
     while i < n:
         if _is_shell_wrapper_exe(toks[i]):
             args, k = _collect_arglist(toks, i + 1)
-            if "-c" in args:
-                ci = args.index("-c")
-                if ci + 1 < len(args):
-                    inner = args[ci + 1]
-                    out.append(inner)
-                    out.extend(_embedded_wrapper_commands(inner, _depth + 1))
+            # `-c` may be clustered with other short options (`bash -lc`, `sh -ec`), the command string still the next argv token.
+            # A form left out here is a silent bypass of every rule below, the same shape a bare `-c` closes.
+            ci = next(
+                (
+                    x
+                    for x, a in enumerate(args)
+                    if a.startswith("-") and not a.startswith("--") and a.endswith("c")
+                ),
+                None,
+            )
+            if ci is not None and ci + 1 < len(args):
+                inner = args[ci + 1]
+                out.append(inner)
+                out.extend(_embedded_wrapper_commands(inner, _depth + 1))
             i = k
         else:
             i += 1
@@ -781,7 +799,8 @@ def _check_reply_resolve_helper(cmd, environ):
         "GitHub Copilot PR reviews'."
     )
     for args in _all_gh_arg_lists(cmd):
-        if len(args) >= 2 and args[0] == "api" and args[1] == "graphql":
+        path = _gh_api_path(args)
+        if path == "graphql":
             q = _gh_graphql_query(args)
             if q and _MUTATION.search(q) and _RESOLVE_THREAD_MUTATION.search(q):
                 if granted:
@@ -791,7 +810,6 @@ def _check_reply_resolve_helper(cmd, environ):
                     "helper that captures the reply and the resolve in one call, so a reply can be left "
                     "unresolved across a push and a re-request. " + helper
                 )
-        path = _gh_api_path(args)
         if path and _REPLY_ENDPOINT_PATH.search(path) and _gh_effective_method(args) == "POST":
             m = _REPOS_PATH_TOKEN.match(path)
             if m:
@@ -1157,6 +1175,36 @@ _SCOPE_CASES = [
         {},
         "deny",
         "a cross-owner target hidden behind sh -c is still caught (#757 review)",
+    ),
+    (
+        "bash -lc 'gh api repos/ptr727/PlexCleaner/pulls/5/comments/9/replies -f body=fixed'",
+        {},
+        "deny",
+        "a REST reply behind a clustered bash -lc is still caught (CodeRabbit)",
+    ),
+    (
+        "gh api --hostname github.com repos/ptr727/PlexCleaner/pulls/5/comments/9/replies -f body=fixed",
+        {},
+        "deny",
+        "a value-taking flag before the path does not hide the reply endpoint (CodeRabbit)",
+    ),
+    (
+        "gh api -X POST graphql -f query='mutation{resolveReviewThread(input:{threadId:$t}){thread{isResolved}}}' -F t=\"$TID\"",
+        {},
+        "deny",
+        "-X POST preceding graphql does not hide the mutation (CodeRabbit)",
+    ),
+    (
+        "gh api repos/ptr727/PlexCleaner/pulls/5/comments/9/replies -fbody=fixed",
+        {},
+        "deny",
+        "the attached -fbody=fixed form still enters the write gate (CodeRabbit)",
+    ),
+    (
+        "gh api repos/ptr727/PlexCleaner/pulls/5/comments/9/replies -XPOST",
+        {},
+        "deny",
+        "the attached -XPOST form still enters the write gate (self-found companion to CodeRabbit's -f finding)",
     ),
 ]
 
