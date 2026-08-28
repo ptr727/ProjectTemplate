@@ -122,6 +122,8 @@ fetch_hub_locked() {
             rm -rf "$DIR/hub" "$(marker_path)"
             return 1
         }
+    # Set the moment the clone lands, whatever $REF still has to do: cleanup is gated on this, and a later ref-specific failure below must still remove the tree this step already created.
+    HUB_FETCHED=true
     # A branch name is already checked out by the clone above.
     # A tag, a pull request ref, or a commit needs an explicit fetch and checkout, since "git clone --branch" only takes a branch or a tag, not an arbitrary commit.
     if [[ $REF != "$DEFAULT_REF" ]]; then
@@ -137,7 +139,6 @@ fetch_hub_locked() {
             }
     fi
     HUB_ROOT="$DIR/hub"
-    HUB_FETCHED=true
     info "Cloned to $HUB_ROOT"
 }
 
@@ -340,6 +341,7 @@ print_menu() {
 
 # A failing task (a real install error, a network hiccup) is reported and returns to the menu rather than ending the session, so dispatch's own exit status cannot double as "quit": QUIT is a separate flag the q/Q case sets, read by the loop after every dispatch regardless of whether the task it ran succeeded.
 QUIT=false
+BAD_CHOICE=false
 
 dispatch() {
     case "$1" in
@@ -366,7 +368,7 @@ dispatch() {
     q | Q) QUIT=true ;;
     *)
         warn "Not one of the choices"
-        return 2
+        BAD_CHOICE=true
         ;;
     esac
 }
@@ -377,11 +379,12 @@ interactive_menu() {
         print_menu
         read -r -p "Choose: " choice
         QUIT=false
+        BAD_CHOICE=false
         rc=0
         dispatch "$choice" || rc=$?
         [[ $QUIT == true ]] && break
-        # An unrecognized choice is rc 2, already warned by dispatch, so this loops straight back rather than reading a pointless confirmation.
-        ((rc == 2)) && continue
+        # A dedicated flag rather than a reserved return code: every dispatched task's own exit code passes through unchanged, and a tool that happens to exit 2 for its own reason (scripts/carry.py's "not uniquely registered", for one) must not be misread as an unrecognized choice.
+        [[ $BAD_CHOICE == true ]] && continue
         if ((rc == 0)); then
             step "Done"
         else
