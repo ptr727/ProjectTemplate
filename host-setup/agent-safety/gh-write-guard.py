@@ -23,6 +23,13 @@ maintainer's admin bypass. The denied shapes:
      is blocked, or an explicit-bypass flag (`gh pr merge --admin`, `git commit/push --no-verify`). The
      branch's live rules are the judge, so a code-style develop is denied and a config-style develop is
      allowed with no hardcoded repo list.
+  5. a hand-rolled reply/resolve for a review thread - a `resolveReviewThread` mutation via `gh api
+     graphql`, or a POST to the review-comment replies endpoint - where `scripts/pr_review.py reply ...
+     --resolve` is the documented one-call path. Splitting the two into separate hand-run acts is what
+     let a reply sit unresolved across a push and a re-request, reading as untriaged to a maintainer
+     skimming the pull request (the incident behind this rule). Permitted only under the same
+     GH_WRITE_GUARD_ALLOW grant rule 3 reads, since the helper refuses a cross-owner pull request outright
+     and the hand-run GraphQL form is then the documented fallback, not a footgun.
 
 Run `gh-write-guard.py --selftest` to verify the decision matrix without Claude Code.
 """
@@ -89,18 +96,36 @@ _FIELD_ASSIGN = re.compile(
     r"""(?:-F|-f|--field|--raw-field)\s+[A-Za-z_][\w]*=(?P<v>'[^']*'|"[^"]*"|\S+)"""
 )
 # Every spelling gh accepts for the target flag, being `--repo x`, `--repo=x`, `-R x`, `-R=x`, and the attached short form `-Rx`.
-# A form left out is not a near-miss, it is a silent bypass of the whole repository scope, so the separator is matched rather than assumed to be a space.
-# The look-behind requires the flag to start a shell token, meaning whitespace before it or the string start, which is where a real flag always sits.
-# A value that opens a quoted span, as in `--title "-Rowner/repo"`, is therefore not read as a target.
-# A mention inside prose, as in `--title "use -Rowner/repo"`, is still read as a target and still denies.
-# A space precedes it exactly as one precedes a real flag, so no look-behind can separate the two.
-# Telling a flag from text needs argv-position parsing, the way _push_targets does it for git push.
-_EXPLICIT_REPO = re.compile(
-    r"(?<![^\s])(?:--repo[=\s]+|-R[=\s]*)(?P<q>['\"]?)(?P<r>[^\s'\"]+)(?P=q)"
-)
-_API_REPO_PATH = re.compile(
-    r"\bgh\s+api\b[^\n|]*?\brepos/(?P<owner>[A-Za-z0-9_.\-]+)/(?P<repo>[A-Za-z0-9_.\-]+)"
-)
+# A form left out is not a near-miss, it is a silent bypass of the whole repository scope, so each is read by argv position below (`_gh_write_targets`) rather than assumed to be a space-separated pair.
+_REPO_FLAG_BARE = {"--repo", "-R"}
+_REPOS_PATH_TOKEN = re.compile(r"^repos/(?P<owner>[A-Za-z0-9_.\-]+)/(?P<repo>[A-Za-z0-9_.\-]+)")
+# Flags whose own value is opaque text - a PR/issue title or body, a GraphQL field, a jq/template expression, a header - and so is skipped whole rather than pattern-matched for a repo target.
+# Without this, a --body describing a `--repo <owner>/<repo>` doc line, or a commit message quoting the same convention, reads as a real flag.
+# The incident this closes denied an ordinary `git commit` whose message body merely quoted the fleet's own `--repo owner/repo` example text.
+_GH_TEXT_VALUE_FLAGS = {
+    "--title",
+    "-t",
+    "--body",
+    "-b",
+    "--body-file",
+    "--notes",
+    "--notes-file",
+    "--message",
+    "-m",
+    "--desc",
+    "-f",
+    "-F",
+    "--field",
+    "--raw-field",
+    "--input",
+    "--jq",
+    "--template",
+    "-q",
+    "-H",
+    "--header",
+    "--method",
+    "-X",
+}
 
 
 def _is_gh_write(cmd):
@@ -288,6 +313,43 @@ def _is_git_exe(tok):
     return base in ("git", "git.exe")
 
 
+def _is_gh_exe(tok):
+    """True if the token invokes gh, including an absolute/relative path or a .exe suffix - the same
+    recognition `_is_git_exe` gives git, so an invocation named only inside a quoted --body forms no
+    such token and is never mistaken for a real gh call.
+    """
+    base = tok.rsplit("/", 1)[-1].rsplit("\\", 1)[-1].lower()
+    return base in ("gh", "gh.exe")
+
+
+def _collect_arglist(toks, start):
+    """Collect argv tokens from `start` up to the next shell separator (|, &&, ;, newline), skipping a
+    redirection operator and the file-descriptor number or target token attached to it. Shared by
+    `_git_subcommand_arglists` and `_gh_arg_lists` so a command's own argv - not text living inside an
+    unrelated --body/--title/-f value elsewhere in the line - is what either scans for a target.
+
+    Returns (args, index_after_this_invocation).
+    """
+    n = len(toks)
+    k = start
+    args = []
+    while k < n:
+        t = toks[k]
+        if _is_separator(t):
+            break  # a command separator ends this invocation
+        if t.isdigit() and k + 1 < n and _is_redir_op(toks[k + 1]):
+            k += 1  # a file-descriptor number before a redirection is shell syntax, not argv
+            continue
+        if _is_redir_op(t):
+            k += 1  # skip the redirection operator and its target token; args continue after it
+            if k < n and not _is_shell_op(toks[k]):
+                k += 1
+            continue
+        args.append(t)
+        k += 1
+    return args, k
+
+
 def _git_subcommand_arglists(cmd, sub):
     """Every `git [global-options] <sub>` in the command, each as the argv up to the next shell operator.
 
@@ -311,27 +373,125 @@ def _git_subcommand_arglists(cmd, sub):
             else:
                 j += 1
         if j < n and toks[j] == sub:
-            k = j + 1
-            args = []
-            while k < n:
-                t = toks[k]
-                if _is_separator(t):
-                    break  # a command separator (|, &&, ;, newline) ends this git invocation
-                if t.isdigit() and k + 1 < n and _is_redir_op(toks[k + 1]):
-                    k += 1  # a file-descriptor number before a redirection is shell syntax, not git argv
-                    continue
-                if _is_redir_op(t):
-                    k += 1  # skip the redirection operator and its target token; args continue after it
-                    if k < n and not _is_shell_op(toks[k]):
-                        k += 1
-                    continue
-                args.append(t)
-                k += 1
+            args, k = _collect_arglist(toks, j + 1)
             out.append(args)
             i = k
         else:
             i += 1  # this `git` was a different subcommand; keep scanning
     return out
+
+
+def _gh_arg_lists(cmd):
+    """Every `gh [args...]` invocation's own argv, from the token after `gh` up to the next shell
+    separator - the same argv-position parsing `_git_subcommand_arglists` gives git, so a `--repo`/`-R`
+    flag, a `repos/<owner>/<repo>` API path, or a GraphQL query field is read only from where a real gh
+    argument sits, never from text carried inside an unrelated flag value elsewhere in the command.
+    """
+    toks = _shell_tokens(cmd)
+    n = len(toks)
+    out = []
+    i = 0
+    while i < n:
+        if not _is_gh_exe(toks[i]):
+            i += 1
+            continue
+        args, k = _collect_arglist(toks, i + 1)
+        out.append(args)
+        i = k
+    return out
+
+
+def _repo_flag_value(tok):
+    """The value carried by a `--repo=value`/`-R=value`/`-Rvalue` (attached-short-form) token, or None
+    when tok is not one of those - a bare `--repo`/`-R` is handled separately since its value is the next
+    token rather than part of this one.
+    """
+    if tok.startswith("--repo="):
+        return tok[len("--repo=") :]
+    if tok.startswith("-R="):
+        return tok[len("-R=") :]
+    if tok.startswith("-R") and len(tok) > 2 and tok[2] != "=":
+        return tok[2:]
+    return None
+
+
+def _gh_write_targets(cmd):
+    """Every explicit owner/repo target named in an actual `gh` invocation's own argv: a `--repo`/`-R`
+    flag value, or a `repos/<owner>/<repo>` API path token. Argv-position parsing, the way `_push_targets`
+    reads a git push target, rather than a substring search over the whole command text - the shape that
+    previously read a `--repo owner/repo` doc example or API path quoted in an unrelated --body or commit
+    message as a real write target, denying a command that made no such write at all.
+    """
+    targets = []
+    for args in _gh_arg_lists(cmd):
+        n = len(args)
+        i = 0
+        while i < n:
+            t = args[i]
+            if t in _GH_TEXT_VALUE_FLAGS and "=" not in t:
+                i += 2  # this flag's own value is opaque text, never a repo target
+                continue
+            if t in _REPO_FLAG_BARE:
+                if i + 1 < n:
+                    val = args[i + 1]
+                    if "/" in val and "<" not in val:
+                        o, r = val.split("/", 1)
+                        targets.append((o.lower(), r.lower()))
+                i += 2
+                continue
+            val = _repo_flag_value(t)
+            if val is not None:
+                if "/" in val and "<" not in val:
+                    o, r = val.split("/", 1)
+                    targets.append((o.lower(), r.lower()))
+                i += 1
+                continue
+            m = _REPOS_PATH_TOKEN.match(t)
+            if m and "<" not in t:
+                targets.append((m.group("owner").lower(), m.group("repo").lower()))
+            i += 1
+    return targets
+
+
+def _gh_api_path(args):
+    """The positional API path argument of a `gh api <path> ...` invocation's own argv, or None. Skips
+    the invocation's own value-taking flags first (`-X POST`, `-f k=v`, ...) so their values are never
+    mistaken for the path positional.
+    """
+    if not args or args[0] != "api":
+        return None
+    n = len(args)
+    i = 1
+    while i < n:
+        t = args[i]
+        if t in _GH_TEXT_VALUE_FLAGS and "=" not in t:
+            i += 2
+            continue
+        if t.startswith("-"):
+            i += 1
+            continue
+        return t
+    return None
+
+
+def _gh_graphql_query(args):
+    """The GraphQL query text carried by this `gh api graphql` invocation's own `-f`/`-F query=...` field
+    argument, or None. `gh` takes the query as the argv token immediately following the flag, so this
+    reads only that token's own content rather than searching the whole command for the mutation's name -
+    a --body or PR description merely describing the mutation is not read as one issuing it.
+    """
+    n = len(args)
+    i = 0
+    while i < n:
+        t = args[i]
+        if t in ("-f", "-F", "--field", "--raw-field") and i + 1 < n:
+            v = args[i + 1]
+            if v.startswith("query="):
+                return v[len("query=") :]
+            i += 2
+            continue
+        i += 1
+    return None
 
 
 def _push_arg_lists(cmd):
@@ -487,6 +647,55 @@ def _check_push_bypass(cmd, cwd, origin, current_branch=None, rules_lookup=None)
     return "allow", ""
 
 
+# The GraphQL mutation resolving a review thread - denied when hand-rolled (see `_check_reply_resolve_helper`).
+_RESOLVE_THREAD_MUTATION = re.compile(r"\bresolveReviewThread\b")
+# The REST endpoint the incident's reply half hand-rolled: `POST /repos/{owner}/{repo}/pulls/{n}/comments/{id}/replies`.
+# Distinct from the `addPullRequestReviewThreadReply` GraphQL mutation, which stays allowed as the documented cross-owner fallback (.github/copilot-instructions.md) and is not matched here.
+_REPLY_ENDPOINT_PATH = re.compile(r"\bpulls/\d+/comments/\d+/replies\b")
+
+
+def _check_reply_resolve_helper(cmd, environ):
+    """Deny a hand-rolled `resolveReviewThread` mutation or a raw POST to the review-comment replies
+    endpoint - the two-step shape that let a reply sit unresolved across a push and a re-request, reading
+    as untriaged to a maintainer skimming the pull request. `scripts/pr_review.py reply ... --resolve`
+    captures the thread id from a live query and posts the reply and the resolve as one call; that is the
+    documented path either way.
+
+    Scoped to the query text or API path an actual `gh api graphql`/`gh api` invocation's own argv
+    carries (via `_gh_graphql_query`/`_gh_api_path`), never a substring search over the whole command, so
+    a --body or PR description merely describing the mutation or the endpoint - as this fix's own commit
+    message and pull request body do - is not misread as a real call.
+
+    Permitted when the maintainer has already granted a cross-owner target this session
+    (GH_WRITE_GUARD_ALLOW non-empty): the helper refuses a cross-owner pull request outright, so the
+    hand-run GraphQL form is then the documented fallback, not a footgun.
+    """
+    if _granted_targets(environ):
+        return "allow", ""
+    helper = (
+        'Use `scripts/pr_review.py reply <N> --repo <owner>/<repo> --match "<words from the finding>" '
+        '--body "<answer>" --resolve` instead, which captures the thread id from a live query and posts '
+        "the reply and the resolve as one call. See .github/copilot-instructions.md 'Interacting with "
+        "GitHub Copilot PR reviews'."
+    )
+    for args in _gh_arg_lists(cmd):
+        if len(args) >= 2 and args[0] == "api" and args[1] == "graphql":
+            q = _gh_graphql_query(args)
+            if q and _MUTATION.search(q) and _RESOLVE_THREAD_MUTATION.search(q):
+                return "deny", (
+                    "This resolves a review thread directly through `gh api graphql` instead of the "
+                    "helper that captures the reply and the resolve in one call, so a reply can be left "
+                    "unresolved across a push and a re-request. " + helper
+                )
+        path = _gh_api_path(args)
+        if path and _REPLY_ENDPOINT_PATH.search(path):
+            return "deny", (
+                "This posts a review-comment reply directly to the REST replies endpoint instead of the "
+                "helper that captures the reply and the resolve in one call. " + helper
+            )
+    return "allow", ""
+
+
 def classify(cmd, cwd=None, origin=None, current_branch=None, rules_lookup=None, environ=None):
     """Return (decision, reason). decision is 'allow' or 'deny'.
 
@@ -544,17 +753,9 @@ def classify(cmd, cwd=None, origin=None, current_branch=None, rules_lookup=None,
     # 3. Explicit target outside the origin's owner
     if origin is None:
         origin = _origin_owner_repo(cwd)
-    targets = []
-    # Every occurrence is read rather than the first, since a compound command carries one target per invocation.
-    # Reading only the first checks the harmless one while the write after `&&` goes unexamined.
-    for mr in _EXPLICIT_REPO.finditer(cmd):
-        val = mr.group("r")
-        if "/" in val and "<" not in val:
-            o, r = val.split("/", 1)
-            targets.append((o.lower(), r.lower()))
-    for m in _API_REPO_PATH.finditer(cmd):
-        if "<" not in m.group("owner"):
-            targets.append((m.group("owner").lower(), m.group("repo").lower()))
+    # `_gh_write_targets` reads argv position within each real `gh` invocation, so a compound command carrying one target per invocation still has every one read (the write after `&&` is not skipped).
+    # A --repo/repos/<owner>/<repo> mention living inside an unrelated --body/--title/-f value, or in a non-gh command entirely, is not read as a target.
+    targets = _gh_write_targets(cmd)
     # This only runs when origin resolves, meaning a git checkout, since with no project context there is nothing to compare an explicit target against, so the check is skipped and rules 1 and 2 still apply.
     # A node-id target is invisible here regardless, which is what rule 2 guards.
     if origin:
@@ -572,6 +773,11 @@ def classify(cmd, cwd=None, origin=None, current_branch=None, rules_lookup=None,
                     "Safety', or the same section of the user-level CLAUDE.md where the repo has no "
                     "GOVERNANCE.md."
                 )
+
+    # 5. Hand-rolled reply/resolve for a review thread, bypassing scripts/pr_review.py's one-call helper.
+    dec, reason = _check_reply_resolve_helper(cmd, environ)
+    if dec == "deny":
+        return dec, reason
 
     return "allow", ""
 
@@ -591,8 +797,8 @@ _CASES = [
     ),
     (
         "gh api graphql -f query='mutation($t:ID!){resolveReviewThread(input:{threadId:$t}){thread{isResolved}}}' -F t=\"$TID\"",
-        "allow",
-        "mutation with captured $TID",
+        "deny",
+        "captured $TID still denied: resolve is reserved for the pr_review.py helper (#757)",
     ),
     (
         'gh issue comment 5 -R mankatcheung/job-finder --body "hi"',
@@ -658,8 +864,50 @@ _CASES = [
     ),
     (
         "gh api graphql -f query='mutation{resolveReviewThread(input:{threadId:$t}){thread{isResolved}}}' -F t=\"TODO_fixit\"",
+        "deny",
+        "not a node id, but still a hand-rolled resolve: denied by rule 5",
+    ),
+]
+
+# Rule-5 cases, covering the hand-rolled reply/resolve denial and its cross-owner grant escape.
+# Each carries the environment the grant is read from, matching the _SCOPE_CASES convention below.
+_REPLY_RESOLVE_CASES = [
+    # (command, environ, expected_decision, label)
+    (
+        "gh api graphql -f query='mutation($t:ID!){resolveReviewThread(input:{threadId:$t}){thread{isResolved}}}' -F t=\"$TID\"",
+        {},
+        "deny",
+        "hand-rolled resolve with no grant",
+    ),
+    (
+        'gh api repos/ptr727/PlexCleaner/pulls/5/comments/9/replies -f body="fixed"',
+        {},
+        "deny",
+        "hand-rolled REST reply with no grant",
+    ),
+    (
+        "gh api graphql -f query='mutation($t:ID!){resolveReviewThread(input:{threadId:$t}){thread{isResolved}}}' -F t=\"$TID\"",
+        {_ALLOW_ENV: "esphome/esphome"},
         "allow",
-        "short all-caps token is not a node id",
+        "cross-owner grant present: hand-run resolve is the documented fallback",
+    ),
+    (
+        'gh api repos/ptr727/PlexCleaner/pulls/5/comments/9/replies -f body="fixed"',
+        {_ALLOW_ENV: "esphome/esphome"},
+        "allow",
+        "cross-owner grant present: hand-run REST reply is permitted too",
+    ),
+    (
+        'gh api graphql -f query=\'mutation($t:ID!,$b:String!){addPullRequestReviewThreadReply(input:{pullRequestReviewThreadId:$t,body:$b}){comment{id}}}\' -F t="$TID" -F b="Fixed in abc123: summary."',
+        {},
+        "allow",
+        "addPullRequestReviewThreadReply mutation is the documented fallback shape, not denied",
+    ),
+    (
+        'gh pr create --title "Guard hand-rolled resolve" --body "Denies a POST to the review-comment replies endpoint and a resolveReviewThread mutation, per #757."',
+        {},
+        "allow",
+        "a --body merely describing the mutation/endpoint is not read as issuing one",
     ),
 ]
 
@@ -744,6 +992,18 @@ _SCOPE_CASES = [
         {},
         "allow",
         "a value opening a quoted span is not a flag",
+    ),
+    (
+        'git commit -m "Without --repo owner/repo, gh run list/view resolve wrong." && git push origin feature/x',
+        {},
+        "allow",
+        "the incident: a commit message quoting --repo owner/repo is not a gh invocation at all",
+    ),
+    (
+        'gh pr comment 5 --body "See the docs on --repo owner/repo and repos/owner/repo usage"',
+        {},
+        "allow",
+        "a --body describing --repo/repos path syntax is opaque text, not a real flag or API path",
     ),
 ]
 
@@ -1146,6 +1406,18 @@ def _selftest():
             ok = False
         print(f"  {mark} [{got:5}] want={want:5} {label}")
     for cmd, env, want, label in _SCOPE_CASES:
+        got, _ = classify(
+            cmd,
+            origin=origin,
+            current_branch="feature/x",
+            rules_lookup=lambda br: set(),
+            environ=env,
+        )
+        mark = "ok  " if got == want else "FAIL"
+        if got != want:
+            ok = False
+        print(f"  {mark} [{got:5}] want={want:5} {label}")
+    for cmd, env, want, label in _REPLY_RESOLVE_CASES:
         got, _ = classify(
             cmd,
             origin=origin,
