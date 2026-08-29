@@ -66,8 +66,11 @@ Subcommands
            poll alone cannot see. `cr_outside_diff=N (on_head=X earlier=Y)` counts
            CodeRabbit's own "outside diff range" findings, collapsed into the review body rather
            than raised as an inline review comment because the finding sits on a line outside
-           the pull request's changed hunks. Printed only once CodeRabbit has raised one, on any
-           round, so a repository not trialing it stays silent. `qodo_open=N` counts Qodo's own
+           the pull request's changed hunks. Printed once CodeRabbit has raised one, on any
+           round, or once the reviews window is truncated, since an older round could then
+           still carry one unseen (`cr_outside_diff=0+`). Stays silent otherwise, whether that
+           silence means no finding was raised or CodeRabbit was never trialed at all.
+           `qodo_open=N` counts Qodo's own
            numbered findings that carry neither its `Resolved` nor `Dismissed` self-tracked
            badge: Qodo's formal review carries an empty body on every round observed, so its
            findings are read from its "Code Review by Qodo" PR-level comment instead, not
@@ -216,19 +219,12 @@ QUOTA = re.compile(r"reached (?:their|its|his|her|your|my) quota limit", re.IGNO
 # The service name is captured rather than assumed.
 # A second bot using the same auto-generated-comment convention is read without a new pattern, and one that does not use it stays unread rather than guessed at.
 RATE_LIMITED = re.compile(r"auto-generated comment:\s*rate limited by\s*(\S+?)\s*-->")
-# Qodo's formal review object carries an empty body on every review checked, confirmed across roughly 60.
-# Its findings ride a PR-level comment instead.
-# Two are posted per round, "PR Summary by Qodo" (an overview, no findings) and this one, told apart by its own heading.
-# Anchored to the `<h3>` tag the heading itself wears, not a bare substring: the summary comment's own prose can mention the phrase without being the comment it names.
+# Anchored to the `<h3>` tag rather than a bare substring, since prose elsewhere can mention the phrase without being the comment it names.
 QODO_REVIEW_HEADING = re.compile(r"<h3>\s*Code Review by Qodo\s*</h3>", re.IGNORECASE)
-# Qodo nests a Description/Code/Relevance/Evidence/Agent-prompt `<summary>` under each of its own numbered findings.
-# Only the numbered heading itself is a finding, told apart from those by starting with `N.` the way none of the nested ones do.
+# Only the numbered heading counts as a finding, told apart from Qodo's own nested sub-summaries by starting with a number and a period (`1.`, `2.`, ...).
 QODO_FINDING = re.compile(r"\s*\d+\.\s")
-# Qodo's own self-tracked disposition, re-checked against the current head on its own schedule.
-# Present on a finding it has re-verified as addressed or intentionally dismissed, absent on one still open.
-# A fast pre-triage signal per the runbook, not a substitute for reading the finding: spot-verify against `gh pr diff` rather than trusting it outright.
-# The glyph is required rather than left unanchored, since a bare word match reads any finding whose own title quotes the identifier `Resolved` or `Dismissed` in its own `<code>` tag as carrying the badge, closing an open finding on the strength of its own title.
-# Escaped rather than typed literally (check mark U+2713, ballot x U+2717), keeping this source inside the ASCII charset rule that governs the repository.
+# A finding's own title can quote `Resolved`/`Dismissed` without carrying the badge, so the glyph is required rather than just the word.
+# Escaped (U+2713, U+2717) rather than typed literally, per the repository's ASCII charset rule.
 QODO_BADGE = re.compile(r"<code>[^<]*(?:\u2713 Resolved|\u2717 Dismissed)[^<]*</code>")
 # A round states how much of the diff it read on a line of its own.
 # A round that read part of it is the clean pass elsewhere, same commit and threads and digest.
