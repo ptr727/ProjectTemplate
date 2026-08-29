@@ -241,7 +241,32 @@ This setting grants filesystem writes only under the worktree parent. It does no
 
 ### Claude Code Worktree Access
 
-Claude Code does not read Codex's `config.toml`. Keep its permission mode in Claude Code's user-level configuration. Its sessions must be allowed to create and edit the same host-specific worktree parent.
+Claude Code does not read Codex's `config.toml`. Keep its permission mode in Claude Code's user-level configuration.
+
+**The one-time approval prompt on `EnterWorktree` into the fleet's worktree parent is expected, and not eliminable through permission rules.** Claude Code's own `EnterWorktree` tool defaults to `.claude/worktrees/<name>/` under the repository root. Entering a path outside that directory (the fleet's own `~/repos/worktrees/<Repo>-<task-slug>` convention always is) asks for approval first, because the move relocates the session's working directory, write access, and project configuration. Neither an `EnterWorktree(...)` permission rule nor "don't ask again" suppresses this specific prompt -- only `defaultMode: "bypassPermissions"` does, which is not recommended as a standing setting. Stop trying to permission this prompt away. It fires once per worktree entered, by design.
+
+Separately, ordinary `Bash(...)` rules do stop the *follow-up* command prompts once inside the worktree, as long as the pattern matches what actually runs there. A command executed after Claude has moved into the worktree (via `cd`, or via `EnterWorktree` itself) runs with no `-C`/prefix naming the worktree, so a rule scoped to `Bash(git -C <worktree-parent>:*)` does not match it -- match the bare command instead:
+
+```json
+{
+  "permissions": {
+    "allow": [
+      "Bash(git worktree add:*)",
+      "Bash(git worktree list:*)",
+      "Bash(git add:*)",
+      "Bash(git commit:*)",
+      "Bash(git push:*)"
+    ],
+    "additionalDirectories": [
+      "/absolute/path/to/repos/worktrees"
+    ]
+  }
+}
+```
+
+`additionalDirectories` grants filesystem read/write scope under that path. It does not itself suppress a Bash or `EnterWorktree` confirmation, so it is necessary alongside the rules above, not a substitute for them.
+
+**Call `EnterWorktree` after `git worktree add`, not just `cd`.** The `repo-worktree` skill already documents this (`git worktree add`, then attach with `EnterWorktree` `path:`), and it is worth the one extra approval: Claude Code tracks a session as "isolated in a worktree" only once `EnterWorktree` (or the `--worktree` launch flag) has actually run, and while a session is tracked that way it gets a further, built-in enforcement layer with no configuration at all -- blocking a file edit that targets the main checkout, a Bash/PowerShell/Monitor command whose working directory resolves to (or can't be verified to stay outside) the main checkout, a git redirect into the main checkout (`git -C`, `--git-dir`, `GIT_DIR`/`GIT_WORK_TREE`, or a `cd` into the main checkout before running git), and any command shape it can't verify stays inside the worktree at all. A `cd` alone, with no `EnterWorktree` call, gets none of this: the session's own bookkeeping never marked it as isolated, so these checks never engage, and only `host-setup/agent-safety/claude/gh-write-guard.py`'s own rule 6 stands between the session and a mutating command run back in the main checkout by mistake.
 
 ### opencode Worktree Access
 
