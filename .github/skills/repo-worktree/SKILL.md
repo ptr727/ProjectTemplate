@@ -61,6 +61,13 @@ from `develop` unless the task is explicitly about `main`-only content, per `GOV
 "Branching Model". Fetch immediately before creating and base on the remote ref, because a clone
 is whatever it last fetched rather than the branch it names.
 
+The base clone is a fetch source only. `fetch` and `worktree add` run against it, and nothing
+else does: never `checkout`, `pull`, `reset`, `commit`, or any other command that mutates its own
+working tree, index, or HEAD. That distinction is the one a real incident missed, reusing a
+primary checkout as the working directory itself rather than only as the source a worktree is
+created from. On Claude Code this is now also a hard mechanical stop, and it is the only
+enforcement for any other agent, so it holds regardless of which agent is running.
+
 ## Creating a Worktree
 
 The fleet layout convention keeps every base clone and every in-flight task visible in one
