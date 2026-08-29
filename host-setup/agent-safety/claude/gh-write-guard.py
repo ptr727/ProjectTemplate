@@ -34,8 +34,9 @@ harm there is a silent success under the maintainer's admin bypass. The denied s
      GH_WRITE_GUARD_ALLOW grant rule 3 reads, since the helper refuses a cross-owner pull request outright
      and the hand-run GraphQL form is then the documented fallback, not a footgun.
   6. a mutating git operation (checkout/switch/pull/reset/rebase/merge/cherry-pick/revert/restore/stash
-     (anything but list/show)/clean -f/add/commit/rm/apply/am/push/worktree remove -f) run directly
-     against a primary checkout, not a linked worktree - the harm behind a separate incident, where an
+     (anything but list/show)/clean -f/add/commit/rm/mv/apply/am/push/worktree remove -f) run
+     directly against a primary checkout, not a linked worktree - the harm behind a separate
+     incident, where an
      agent reused the maintainer's own primary checkout instead of a worktree twice despite having read the
      prose rule against it. A "primary checkout" is decided by comparing `git rev-parse --git-dir`
      against `--git-common-dir`, never a `.git`-is-a-directory guess (a submodule's `.git` is a file
@@ -344,6 +345,10 @@ def _shell_tokens(cmd):
     try:
         lex = shlex.shlex(cmd, posix=True, punctuation_chars=_PUNCTUATION_CHARS)
         lex.whitespace_split = True
+        # `shlex.shlex`'s own default keeps `#` as a comment starter, unlike `shlex.split()` below (and the fallback branch, since it calls that same function), which explicitly clears it.
+        # Confirmed live: left at the default, a `#` anywhere in the command, even mid-word, silently drops everything after it through the next newline, fusing `git fetch origin   # refresh\ngit reset --hard origin/main` into one `git fetch` invocation carrying the whole `reset --hard` as extra argv, hiding the second command from every tokenizer-based rule.
+        # A comment truncating visibility into a real subsequent command is a far worse failure mode for a security-relevant hook than the reverse (an ordinary bash `# comment` becoming literal trailing argv words instead of being dropped), so this is cleared unconditionally rather than attempting bash's own quoted-vs-unquoted, start-of-word-only comment semantics, which `shlex`'s single `commenters` string cannot express and unquoted-only detection over an already-tokenized stream cannot recover.
+        lex.commenters = ""
         lex.whitespace = lex.whitespace.replace(
             "\n", ""
         )  # A newline is an operator above rather than a gap between words.
@@ -866,6 +871,7 @@ _ALWAYS_DENY_SUBS = {
     "add",
     "commit",
     "rm",
+    "mv",
     "apply",
     "am",
     # A push doesn't mutate the local working tree or HEAD the way the rest of this set does, but it publishes whatever is there, and no documented fleet workflow ever pushes from a primary checkout: every push runs from a task's own worktree instead.
@@ -1038,24 +1044,42 @@ def _check_primary_checkout_mutation(
     grant_value = environ.get("GH_WRITE_GUARD_ALLOW_PRIMARY_CHECKOUT", "").strip().lower()
     if grant_value not in _FALSY_ENV_VALUES:
         return "allow", ""
-    resolved_cache = {}
+    # Two independent caches, deliberately never merged into one: an identity-dimension key and a file-dimension key can coincide as the same literal string while needing different test methods (--git-dir=X directly versus ordinary -C X discovery), and a single shared cache keyed only by that string would silently reuse one method's answer for the other's lookup.
+    identity_cache = {}
+    file_cache = {}
     for c_dirs, work_tree, git_dir, inline_aliases, sub, args, leading_cd in _all_git_invocations(
         cmd
     ):
         resolved = _resolve_target_dir(c_dirs, work_tree, leading_cd, cwd)
         repo_git_dir = _resolve_repo_dir(git_dir, c_dirs, leading_cd, cwd)
-        # The key this rule tests for primary-checkout-ness is the explicit --git-dir/GIT_DIR= value when one was given, not the mutation target: an explicit --git-dir names the repository actually mutated independent of where --work-tree/cwd point, confirmed live to diverge from the mutation target when the two are given together and point at different trees.
-        repo_key = repo_git_dir if repo_git_dir is not None else resolved
+        # This rule tests two independent dimensions of "does this touch a primary checkout", since git's own --work-tree/--git-dir split lets a single invocation mutate one repository's index/refs/HEAD while writing working-tree files into an entirely different directory.
+        # The identity dimension is the repository whose index, refs, and HEAD actually change: the explicit --git-dir/GIT_DIR= value when one was given (independent of where --work-tree/cwd point, confirmed live to diverge from the mutation target when the two are given together and point at different trees), or, absent one, the repository ordinary ancestor search discovers from the effective cwd (the -C/leading-cd chain) -- never from --work-tree, which only ever redirects where working-tree files are read/written, not where the index, refs, or HEAD live.
+        # The file dimension is `resolved` itself, the same mutation target already used everywhere else (work-tree when given, else the effective cwd): confirmed live that `git --work-tree=<other-checkout> reset --hard HEAD~1`, with no --git-dir override, run from inside a primary checkout with a staged change, moves the *primary's own* branch pointer back a commit and discards the primary's own staged index entry (the identity dimension), even though the command's working-tree-file side effects (the file dimension) land in `<other-checkout>` instead -- either dimension resolving primary is enough to deny, since either is a real, distinct way this invocation can destroy a primary checkout's own state.
+        identity_key = (
+            repo_git_dir if repo_git_dir is not None else _effective_cwd(c_dirs, leading_cd, cwd)
+        )
+        file_key = resolved
         # Whether this even targets a primary checkout is checked before the subcommand/argv verdict, not after.
         # The verdict for `checkout`/`switch` can need its own live git call to disambiguate a ref from a pathspec, and skipping straight past that for the ordinary case (a checkout in a worktree, or targeting no git repository at all) avoids paying for it where the answer would be "allow" regardless.
-        if repo_key not in resolved_cache:
+        if identity_key not in identity_cache:
             if primary_checkout_lookup is not None:
-                resolved_cache[repo_key] = primary_checkout_lookup(repo_key)
+                identity_cache[identity_key] = primary_checkout_lookup(identity_key)
             elif repo_git_dir is not None:
-                resolved_cache[repo_key] = _is_primary_checkout(resolved, git_dir=repo_git_dir)
+                identity_cache[identity_key] = _is_primary_checkout(
+                    identity_key, git_dir=repo_git_dir
+                )
             else:
-                resolved_cache[repo_key] = _is_primary_checkout(repo_key)
-        if not resolved_cache[repo_key]:
+                identity_cache[identity_key] = _is_primary_checkout(identity_key)
+        if file_key not in file_cache:
+            file_cache[file_key] = (
+                primary_checkout_lookup(file_key)
+                if primary_checkout_lookup is not None
+                else _is_primary_checkout(file_key)
+            )
+        is_identity_primary = identity_cache[identity_key]
+        is_file_primary = file_cache[file_key]
+        repo_key = identity_key if is_identity_primary else file_key
+        if not is_identity_primary and not is_file_primary:
             continue
         verdict = _primary_checkout_verdict(sub, args, resolved, ref_resolver)
         if verdict is None:
@@ -2677,6 +2701,14 @@ _PRIMARY_CHECKOUT_CASES = [
         "git rm deletes working-tree files exactly as unconditionally as add/commit mutate them",
     ),
     (
+        "git mv a.txt b.txt",
+        "/primary",
+        {"/primary": True},
+        None,
+        "deny",
+        "git mv renames a tracked file and stages the change exactly as unconditionally as rm deletes one",
+    ),
+    (
         "git apply patch.diff",
         "/primary",
         {"/primary": True},
@@ -2987,6 +3019,29 @@ _PRIMARY_CHECKOUT_CASES = [
         "a bash -c wrapper is expanded the same way the GitHub-write rules already expand one, so it does not hide the mutation from this rule either",
     ),
     (
+        "git fetch origin   # refresh the base\ngit reset --hard origin/main",
+        "/primary",
+        {"/primary": True},
+        None,
+        "deny",
+        (
+            "a mid-line # is not a comment starter left uncleared on the tokenizer's own shlex "
+            "instance, confirmed live to silently swallow everything through the next newline "
+            "and fuse the two lines into one `git fetch` invocation carrying the whole `reset "
+            "--hard` as extra argv, hiding it from every tokenizer-based rule; a genuine # is "
+            "now read as an ordinary character rather than a comment, so the newline separator "
+            "and the second git invocation both survive"
+        ),
+    ),
+    (
+        "echo a#b && git -C /primary reset --hard origin/main",
+        "/somewhere-else",
+        {"/primary": True, "/somewhere-else": False},
+        None,
+        "deny",
+        "a literal mid-word # (which real bash never treats as a comment starter either) no longer truncates the rest of the command and hides the mutation after it",
+    ),
+    (
         "git -C ~/repos/primary reset --hard origin/main",
         "/somewhere-else",
         {os.path.expanduser("~/repos/primary"): True, "/somewhere-else": False},
@@ -3050,6 +3105,22 @@ _PRIMARY_CHECKOUT_CASES = [
             "confirmed live with the exact reproduction script CodeRabbit supplied -- so keying "
             "the primary-checkout test on --git-dir rather than the resolved --work-tree value is "
             "what catches this instead of failing open on the unresolvable work-tree"
+        ),
+    ),
+    (
+        "git --work-tree=/other-checkout reset --hard HEAD",
+        "/primary",
+        {"/primary": True, "/other-checkout": False},
+        None,
+        "deny",
+        (
+            "the mirror gap a local-strict-review pass found: --work-tree given with no "
+            "--git-dir resolves as a linked worktree (or unresolvable), but real git still "
+            "discovers the repository from the effective cwd with no --git-dir override, "
+            "confirmed live to move the primary's own branch pointer back a commit and discard "
+            "its own staged index entry even though the working-tree-file side effects land in "
+            "the other checkout -- the identity dimension (effective cwd) catches this even "
+            "though the file dimension (the resolved --work-tree value) alone would not"
         ),
     ),
 ]
@@ -3265,12 +3336,19 @@ def _main():
     try:
         data = json.load(sys.stdin)
     # The hook must never crash on input it does not recognize.
-    except Exception:  # noqa: BLE001
+    except Exception:  # noqa: BLE001 - malformed JSON on stdin is exactly the "not our event shape" case this guards, not a defect to propagate as a hook-crashing traceback.
         sys.exit(0)  # not our event shape - do not interfere
-    if data.get("tool_name") != "Bash":
+    # Valid JSON that is not a dict (a bare string, number, or list), or a `tool_input`/`command` value of the wrong type, is the same "not our event shape" case the JSON-parse guard above already handles, confirmed to otherwise raise AttributeError/TypeError uncaught and exit non-zero rather than the documented deny/allow shape.
+    # A non-zero exit is a hook error, not a decision, and a PreToolUse hook erroring lets the tool call proceed exactly as if this hook had allowed it, so failing open here on a malformed shape matches what an uncaught crash would do anyway, deliberately rather than by accident.
+    if not isinstance(data, dict) or data.get("tool_name") != "Bash":
         sys.exit(0)
-    cmd = (data.get("tool_input") or {}).get("command", "")
+    tool_input = data.get("tool_input")
+    cmd = tool_input.get("command", "") if isinstance(tool_input, dict) else ""
+    if not isinstance(cmd, str):
+        cmd = ""
     cwd = data.get("cwd") or os.getcwd()
+    if not isinstance(cwd, str):
+        cwd = os.getcwd()
     decision, reason = classify(cmd, cwd)
     if decision == "deny":
         # Documented PreToolUse deny contract (confirm field names against current docs before shipping).
