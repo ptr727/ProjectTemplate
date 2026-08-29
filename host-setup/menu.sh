@@ -95,7 +95,11 @@ remove_unowned_hub_check() {
 hub_read_lock_acquire() {
     [[ $DRY_RUN == true ]] && return 0
     mkdir -p "$DIR"
-    exec {HUB_READ_LOCK_FD}>"$DIR/hub.lock"
+    # Checked explicitly, not left to fail silently into the flock call below: this function is always called as `hub_read_lock_acquire || ...`, and set -e is suspended for a callee's own body in that shape, confirmed live, so an unwritable $DIR would otherwise leave HUB_READ_LOCK_FD unset and surface only flock's own confusing error about a missing fd.
+    if ! exec {HUB_READ_LOCK_FD}>"$DIR/hub.lock"; then
+        fail "Could not open $DIR/hub.lock for locking (permission, or the directory is not writable)"
+        return 1
+    fi
     # A quick non-blocking probe first, so a session that has to wait says so instead of looking hung: another session's fetch_hub or host_tool can hold the exclusive lock for as long as a full clone or a long OS package upgrade takes.
     # A busy lock's own failure is silent (confirmed live), so any stderr this specific call produces is a real error (a missing flock, a bad fd), not contention, and prints as one instead of the misleading "waiting" framing below.
     local probe_err
