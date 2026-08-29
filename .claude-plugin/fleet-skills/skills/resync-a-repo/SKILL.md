@@ -58,12 +58,13 @@ Preserve the evidence RESYNC.md section 2 requires, and do not leave the finding
    still leaves that provider unconfigured. **Before touching `AGENTS.md`, `GOVERNANCE.md`,
    `CODESTYLE.md`, or `WORKFLOW.md` in this step, run the `carried-instruction-file-guard`
    skill's distinctive-phrase probe against the target file, every time, without exception,
-   regardless of whether the update is a verbatim re-vendor or an intent-fidelity edit.** This is not advisory language to weigh against how routine
-   the diff looks, a diff that looks routine is exactly the shape the AGENTS.md-overwrite
-   incident took. Do not proceed to the re-vendor until the probe has run and any local addition
-   it finds has a destination, per that skill's own procedure. `CLAUDE.md` is outside that
-   guard's scope: it carries no mixed or repo-specific content by design, so its re-vendor is an
-   ordinary verbatim-fidelity copy, no probe needed.
+   regardless of whether the update is a verbatim re-vendor or an intent-fidelity edit.**
+   This is not advisory language to weigh against how routine the diff looks, a diff that looks
+   routine is exactly the shape the AGENTS.md-overwrite incident took. Do not proceed to the
+   re-vendor until the probe has run and any local addition it finds has a destination, per that
+   skill's own procedure. `CLAUDE.md` is outside that guard's scope: it carries no mixed or
+   repo-specific content by design, so its re-vendor is an ordinary verbatim-fidelity copy, no
+   probe needed.
 2. **Deletions second, before any re-vendor.** Only a `retire` disposition in
    `spec/divergences.json` authorizes removing a file, and the removal is swept tree-wide, per
    RESYNC.md section 4, before the deletion counts as done.
