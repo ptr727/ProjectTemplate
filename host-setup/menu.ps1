@@ -185,7 +185,8 @@ function Get-HubMutexName {
 function Invoke-WithHubLock {
     # The single lock over $script:DIR\hub, shared by every writer (Invoke-FetchHub, Invoke-Cleanup) and every reader (Invoke-HostTool, and each action's Confirm-HubRoot-then-Invoke-HubPython span) alike.
     # Unlike menu.sh's flock, which gives readers a genuine shared mode, a named .NET Mutex has no such mode, and building a correct cross-process reader count on top of one (a shared counter, itself needing its own guard) is real complexity for a rarely-hit race in a low-traffic interactive tool.
-    # Every caller here takes the same exclusive lock instead, trading reader concurrency (two menu.ps1 sessions reading the hub at once now serialize briefly) for a locking scheme simple enough to get right.
+    # Every caller here takes the same exclusive lock instead, trading reader concurrency for a locking scheme simple enough to get right.
+    # That trade is not always brief: Invoke-HostTool holds this lock for its entire spawned tool run, which can be a long OS package upgrade, so a second session waiting here can wait as long as that run takes, not just for a quick read.
     # It still closes the actual TOCTOU: a concurrent Invoke-FetchHub's Remove-Item can no longer land between a reader confirming $HUB_ROOT is fresh and that reader actually using it, since both now hold this same lock for that whole span, not just around the read's own final call.
     # ArgumentList is forwarded to the scriptblock positionally (its own param() block names them), rather than relying on the scriptblock closing over the caller's variables directly.
     # Passed this way, PSScriptAnalyzer's PSReviewUnusedParameter sees the caller's own parameters referenced at the call site, where a bare closure reads as an unused parameter to it, since the rule does not trace a variable read inside a nested scriptblock back to the enclosing function's own param() block.
@@ -194,7 +195,13 @@ function Invoke-WithHubLock {
     $acquired = $false
     try {
         try {
-            $acquired = $mutex.WaitOne()
+            # A quick non-blocking probe first, so a session that has to wait says so instead of blocking with no output, matching Invoke-Cleanup's own pattern.
+            if (-not $mutex.WaitOne(0)) {
+                info "Waiting for another session using $script:DIR\hub..."
+                $acquired = $mutex.WaitOne()
+            } else {
+                $acquired = $true
+            }
         } catch [System.Threading.AbandonedMutexException] {
             # A prior holder crashed mid-operation, which leaves whatever it was doing in a bad state rather than the lock itself, so ownership passes to this run.
             $acquired = $true

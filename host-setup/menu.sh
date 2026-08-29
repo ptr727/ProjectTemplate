@@ -91,7 +91,9 @@ remove_unowned_hub_check() {
 # Acquires the reader half of the fetch/use lock, held from immediately before ensure_hub_root's own freshness check through the caller's entire use of $HUB_ROOT.
 # Scoping it to only a final tool invocation would leave ensure_hub_root's own git reads unlocked, the same interleaving one call frame up from the read this lock exists to close: a concurrent fetch_hub's rm -rf could still land between ensure_hub_root confirming $HUB_ROOT is fresh and the caller actually reading a file under it.
 # Shared (flock -s) rather than exclusive, since concurrent reads don't conflict with each other, only with a writer, so this only blocks behind an in-progress fetch_hub or cleanup.
+# A no-op in --dry-run: dry-run's own branch in ensure_hub_root never fetches and never reads $DIR/hub (it resolves HUB_ROOT from cwd or fails outright), so there is nothing here for it to protect, and --dry-run must not create $DIR or a lock file where neither existed, since fetching is documented as the one real host change this script makes.
 hub_read_lock_acquire() {
+    [[ $DRY_RUN == true ]] && return 0
     mkdir -p "$DIR"
     exec {HUB_READ_LOCK_FD}>"$DIR/hub.lock"
     if ! flock -s "$HUB_READ_LOCK_FD"; then
@@ -110,27 +112,28 @@ hub_read_lock_release() {
     HUB_READ_LOCK_FD=""
 }
 
-# The lock lives only here, in the wrapper, so the locked body below can use its ordinary fail/return pattern with no awareness of it.
-# A RETURN trap was tried and dropped: bash does not scope one to the function that set it, so it re-fires (against an already-unset local by then) on whatever function returns next, which surfaced as this script's own "unbound variable" crash on the very next return up the call chain.
+# `ensure_hub_root` is `fetch_hub`'s only caller, and it only ever runs inside a `hub_read_lock_acquire` span (`host_tool_locked`, `audit_repo`, `check_skills_dist`, `carry_action` all acquire it first), so $HUB_READ_LOCK_FD is always already open here.
+# Escalating that same fd from shared to exclusive, rather than opening a second fd on the same lock file, is what makes this safe: flock treats two different fds on one file as independent lock holders even within one process, so a second fd's blocking exclusive wait would deadlock against the first fd's own shared hold forever, verified by reproducing exactly that hang before this fix.
+# `flock` changes an already-held fd's own lock type in place with no such deadlock, since the kernel recognizes it as the same holder taking a different mode, not a second competing one.
+# Downgraded back to shared once the fetch itself is done, restoring reader concurrency for the rest of the caller's own read-and-use span, rather than holding exclusive (which would still be correct, only more conservative than necessary).
 fetch_hub() {
     # --dry-run promises to change nothing, and fetching is the one real change this whole script makes to the host.
     [[ $DRY_RUN == true ]] && {
         fail "This task needs a fetched hub checkout, and fetching one is itself a change --dry-run does not make. Run without --dry-run, or from inside a hub checkout already on $DEFAULT_REF."
         return 1
     }
+    [[ -n $HUB_READ_LOCK_FD ]] || {
+        fail "fetch_hub run with no reader lock held (internal error, expected hub_read_lock_acquire first)"
+        return 1
+    }
     mkdir -p "$DIR"
-    # Held for the rest of this fetch, so a second menu.sh sharing this --dir blocks here instead of passing remove_unowned_hub_check and deleting the tree this one is still cloning into, and so a concurrent reader's hub_read_lock_acquire blocks here too rather than reading a half-deleted tree.
-    # Closed unconditionally on the way out, success or failure, rather than left open for the rest of this process: interactive_menu's loop keeps it alive well past this one fetch otherwise, and a lock nothing ever releases blocks every other menu.sh sharing this --dir until this session quits.
-    local lock_fd rc
-    exec {lock_fd}>"$DIR/hub.lock"
-    if ! flock "$lock_fd"; then
+    if ! flock "$HUB_READ_LOCK_FD"; then
         fail "Could not lock $DIR/hub.lock"
-        exec {lock_fd}>&-
         return 1
     fi
-    rc=0
+    local rc=0
     fetch_hub_locked || rc=$?
-    exec {lock_fd}>&-
+    flock -s "$HUB_READ_LOCK_FD" || true # best-effort downgrade; holding exclusive a little longer on failure is safe, just more conservative
     return "$rc"
 }
 
@@ -236,8 +239,10 @@ detect_downstream_root() {
 cleanup() {
     [[ $KEEP == true || $HUB_FETCHED == false ]] && return 0
     [[ -e "$(marker_path)" ]] || return 0
+    # Released first and unconditionally, even though a normal exit has already released it: an interrupt (Ctrl-C) fires this EXIT trap with $HUB_READ_LOCK_FD still open mid-dispatch, and this process's own still-held shared lock would otherwise deadlock the exclusive wait below against itself, reproduced and confirmed before this fix.
+    # The read that fd was protecting is being abandoned along with the rest of this process, so releasing it here costs nothing.
+    hub_read_lock_release
     # Exclusive, the same writer half fetch_hub takes, so this waits out a concurrent reader still mid-use rather than deleting the tree out from under it.
-    # By the time cleanup fires, this process holds no lock of its own, since fetch_hub's fd closes before it returns and a shared acquire/release elsewhere in this process is already synchronous around one foreground dispatch, so there is no self-deadlock, only ever a wait on another process.
     local lock_fd
     exec {lock_fd}>"$DIR/hub.lock"
     if ! flock -n "$lock_fd" 2>/dev/null; then
