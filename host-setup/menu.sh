@@ -97,9 +97,14 @@ hub_read_lock_acquire() {
     mkdir -p "$DIR"
     exec {HUB_READ_LOCK_FD}>"$DIR/hub.lock"
     # A quick non-blocking probe first, so a session that has to wait says so instead of looking hung: another session's fetch_hub or host_tool can hold the exclusive lock for as long as a full clone or a long OS package upgrade takes.
-    # Stderr is not suppressed here: a busy lock's own failure is silent (confirmed live), so a message on this specific call is a real error (a missing flock, a bad fd), not contention, and must not be hidden behind a misleading "waiting" message.
-    if ! flock -sn "$HUB_READ_LOCK_FD"; then
-        info "Waiting for another session using $DIR/hub..."
+    # A busy lock's own failure is silent (confirmed live), so any stderr this specific call produces is a real error (a missing flock, a bad fd), not contention, and prints as one instead of the misleading "waiting" framing below.
+    local probe_err
+    if ! probe_err=$(flock -sn "$HUB_READ_LOCK_FD" 2>&1); then
+        if [[ -n $probe_err ]]; then
+            fail "flock -sn reported: $probe_err"
+        else
+            info "Waiting for another session using $DIR/hub..."
+        fi
         if ! flock -s "$HUB_READ_LOCK_FD"; then
             fail "Could not lock $DIR/hub.lock"
             exec {HUB_READ_LOCK_FD}>&-
@@ -318,6 +323,10 @@ hub_python() {
 # No current caller nests, and this guard is what keeps it that way rather than a rule to remember.
 with_hub_read_lock() {
     # 2, not 1, for every failure of this wrapper's own preconditions: check_skills_dist's own caller reads 1 as scripts/build_dist.py --check's "stale" result, so a wrapper-level failure must not collide with the wrapped command's own exit code, the same reasoning Invoke-CheckSkillsDist's own Confirm-HubRoot fix already applies on the PowerShell side.
+    (($# > 0)) || {
+        fail "with_hub_read_lock called with no command (internal error)"
+        return 2
+    }
     [[ -z $HUB_READ_LOCK_FD ]] || {
         fail "with_hub_read_lock nested (internal error)"
         return 2
