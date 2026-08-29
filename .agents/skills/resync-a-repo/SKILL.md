@@ -37,8 +37,15 @@ anything else. The finding kind names the procedure the repo is owed.
 ## Reach the hub and measure before changing anything
 
 Fetch a hub checkout of your own immediately before reading it, per RESYNC.md section 1, since a
-stale clone answers confidently instead of failing, and verify the host with
-`python3 scripts/host_gate.py --repo <path-to-target-checkout>`. Then run the audit end to end,
+stale clone answers confidently instead of failing. Never operate against an existing checkout
+already present at a known or shared path, the maintainer's own primary checkout included, even
+one that looks current -- always fetch into a private worktree of your own, per `repo-worktree`.
+On Claude Code this is now also a mechanical stop for most such commands (a `PreToolUse` hook
+denies a mutating git operation run directly in a primary checkout), though this prose is still
+the only enforcement for a non-Claude-Code agent, and for the narrow shapes the hook itself
+exempts, so following it here is not optional even where no hook can catch a lapse. Verify the
+host with `python3 scripts/host_gate.py --repo <path-to-target-checkout>`. Then run the audit end
+to end,
 RESYNC.md section 2, against the target's `main` branch, never `develop`. A finding is a snapshot,
 so quote the run stamp in anything derived from it and re-run before acting on a finding read
 earlier in the session.

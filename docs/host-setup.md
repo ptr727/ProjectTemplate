@@ -185,65 +185,32 @@ Choose the SSH key generated above when prompted.
 
 Host-level write safety is required where an agent runs with the maintainer's `gh` credentials. Each provider's implementation stays in its own subsection.
 
+The requirements every agent's kit is built and audited against, agent-agnostic, are in
+[`host-setup/agent-safety/README.md`][agent-safety], the spec. Each agent's own implementation
+detail lives one level down, following the same contract-vs-implementation split this file uses
+for [`host-setup/`][host-setup-dir]'s own per-platform subdirectories: this file states the
+requirement, the per-agent `README.md` owns the how-to.
+
 ### Claude Code Write Safety
 
-The Claude Code safety kit is the first agent-specific control to deploy on a new system. Install it from this repo. The installer is idempotent and safe to re-run:
-
-```shell
-host-setup/agent-safety/install.sh        # Linux, WSL, macOS
-```
-
-```powershell
-.\host-setup\agent-safety\install.ps1     # Windows, and the .\ prefix is required
-```
-
-Both wrap one `install.py`, so every platform runs the same tested path. Restart Claude Code sessions on the machine afterward so the hook and the `CLAUDE.md` block load. Details, verification, and scope limits are in [`host-setup/agent-safety/README.md`][agent-safety].
-
-This is a **host** control, not a repo one. The carried `GOVERNANCE.md` rules reach fleet repos only, while the hook and the `CLAUDE.md` block cover every session on the machine, including ad-hoc work in no project at all, which is where the incident behind the kit happened.
-
-#### Granting a Write the Guard Denies
-
-The guard denies a `gh` write whose explicit target sits under an owner other than the checkout's `origin` owner, and the denial names `GH_WRITE_GUARD_ALLOW` as the way past it. That grant is the maintainer's to make, and making it is a deliberate act taken outside the session rather than something an agent does for itself once blocked.
-
-**The case that raises it is usually a fork.** `origin` is your own fork under your own owner, and `upstream` is the project it was forked from under someone else's. Everything aimed at the fork is in scope and never denies, and only the half that leaves the owner stops: filing an issue on the upstream, opening a pull request against it, or commenting on one there. The grant therefore names the upstream alone, and the fork needs no grant at all. That asymmetry is what a reader hits first, since half the session's writes succeed and the other half do not.
-
-**The grant goes in the checkout's `.claude/settings.local.json`, as an `env` block:**
-
-```json
-{
-  "env": {
-    "GH_WRITE_GUARD_ALLOW": "upstream-owner/upstream-repo second-owner/other-repo third-owner/*"
-  }
-}
-```
-
-**The value is one string holding every grant, never a JSON array**, since the hook reads an environment variable and an environment variable is a string. The three tokens above are three separate grants: two naming one repository each, and `third-owner/*` granting every repository under that owner.
-
-Tokens are separated by **any run of whitespace or commas**, so `a/b c/d`, `a/b,c/d`, and `a/b, c/d` all parse to the same two grants and the choice is cosmetic. A token carrying no `/` is ignored, so a malformed entry grants nothing rather than granting everything, and it also fails silently, which is why the confirmation step below is worth running. Grant the narrowest thing that unblocks the work, since a repository grant does not extend to that owner's other repositories and that containment is the property worth keeping.
-
-**The grant is per checkout, not per host.** `.claude/settings.local.json` lives in the working tree and is git-ignored, so it applies to sessions started in that checkout and does not follow the agent into another repository's sessions. That is the intended scope: a grant made to file one upstream issue from one fork does not quietly become a standing permission everywhere.
-
-**Restart the session afterward.** The hook reads the value from the environment the session was launched with, which is what makes the channel one an agent cannot use on itself, and it is equally why a grant added to a live session does nothing until that session restarts.
-
-**Two forms look right and leave the write denied.** An inline `GH_WRITE_GUARD_ALLOW=owner/repo gh ...` prefix sets the environment of the `gh` process, and an `export` inside a shell call sets the environment of that shell. The hook runs as its own process and sees neither, so the write stays denied with nothing to explain the difference. [`gh-write-guard.py`][write-guard] asserts the inline-prefix case in its own self-test, so this is settled behavior rather than a quirk to work around.
-
-**Confirm the grant loaded before relying on it**, since inferring it from a write that no longer denies means learning the answer by making the write. In a restarted session in that checkout, read the variable the hook reads:
-
-```shell
-printenv GH_WRITE_GUARD_ALLOW
-```
-
-Run it bare, with no `VAR=value` prefix of its own, which would report a value the hook never sees. An empty result means the grant did not load, and the fix is the file location or the restart rather than the token. Feeding the hook a synthetic payload is not a usable probe from inside a session, because the payload text carries the very write shape the guard matches and the guard denies the probe command itself.
-
-Withdraw a grant by deleting the `env` entry and restarting. Nothing expires it, so a grant left in place stays live for every later session in that checkout, which is the reason to remove it once the work that needed it is done.
+The Claude Code safety kit is the first agent-specific control to deploy on a new system, and the
+only one implemented today. Install, verify, scope limits, and the cross-owner write grant
+mechanism are all in [`host-setup/agent-safety/claude/README.md`][agent-safety-claude]. This is a
+**host** control, not a repo one: the carried `GOVERNANCE.md` rules reach fleet repos only, while
+the hook and the `CLAUDE.md` block cover every session on the machine, including ad-hoc work in no
+project at all, which is where the incident behind the kit happened.
 
 ### Codex Write Safety
 
-No equivalent host write hook ships yet for Codex. Keep Codex's sandbox and execution policies enabled. The carried repository rules remain the behavioral layer in a fleet checkout. [Issue #781][issue-781] tracks the missing hook.
+No equivalent host write hook ships yet for Codex. Keep Codex's sandbox and execution policies
+enabled meanwhile. [`host-setup/agent-safety/codex/README.md`][agent-safety-codex] states the gap
+and what implementing against the spec would look like. [Issue #781][issue-781] tracks it.
 
 ### opencode Write Safety
 
-No equivalent host write hook ships yet for opencode. Keep opencode's own permission model enabled. The carried repository rules remain the behavioral layer in a fleet checkout. [Issue #781][issue-781] tracks the missing hook.
+No equivalent host write hook ships yet for opencode. Keep opencode's own permission model enabled
+meanwhile. [`host-setup/agent-safety/opencode/README.md`][agent-safety-opencode] states the gap and
+what implementing against the spec would look like. [Issue #781][issue-781] tracks it.
 
 ## Agent Worktree Access
 
@@ -274,7 +241,34 @@ This setting grants filesystem writes only under the worktree parent. It does no
 
 ### Claude Code Worktree Access
 
-Claude Code does not read Codex's `config.toml`. Keep its permission mode in Claude Code's user-level configuration. Its sessions must be allowed to create and edit the same host-specific worktree parent.
+Claude Code does not read Codex's `config.toml`. Keep its permission mode in Claude Code's user-level configuration.
+
+**The one-time approval prompt on `EnterWorktree` into the fleet's worktree parent is expected, and not eliminable through permission rules.** Claude Code's own `EnterWorktree` tool defaults to `.claude/worktrees/<name>/` under the repository root. Entering a path outside that directory (the fleet's own `~/repos/worktrees/<Repo>-<task-slug>` convention always is) asks for approval first, because the move relocates the session's working directory, write access, and project configuration. Neither an `EnterWorktree(...)` permission rule nor "don't ask again" suppresses this specific prompt -- only bypassPermissions mode does, whether set as a standing default (the nested `defaultMode` key under `permissions` in `settings.json`, set to `"bypassPermissions"`) or a one-time session override (`--permission-mode bypassPermissions`, or its `--dangerously-skip-permissions` alias), none of which is recommended as a standing setting. Stop trying to permission this prompt away. It fires once per worktree entered, by design.
+
+Separately, ordinary `Bash(...)` rules do stop the *follow-up* command prompts once inside the worktree, as long as the pattern matches what actually runs there. A command executed after Claude has moved into the worktree (via `cd`, or via `EnterWorktree` itself) runs with no `-C`/prefix naming the worktree, so a rule scoped to `Bash(git -C <worktree-parent>:*)` does not match it -- match the bare command instead:
+
+```json
+{
+  "permissions": {
+    "allow": [
+      "Bash(git worktree add:*)",
+      "Bash(git worktree list:*)",
+      "Bash(git add:*)",
+      "Bash(git commit:*)",
+      "Bash(git push:*)"
+    ],
+    "additionalDirectories": [
+      "/absolute/path/to/repos/worktrees"
+    ]
+  }
+}
+```
+
+`additionalDirectories` grants filesystem read/write scope under that path. It does not itself suppress a Bash or `EnterWorktree` confirmation, so it is necessary alongside the rules above, not a substitute for them.
+
+**These `:*` rules are a confirmation-prompt convenience, not a safety boundary, and admit destructive variants of the same commands** (`git add -A`, `git commit -a`, `git worktree add --force`). Claude Code's permission layer decides whether a prompt appears before a command runs, it does not decide whether the command itself is safe -- that is `git-commit-conventions`' "stage by explicit path, never `git add -A`" prose discipline for staging, and `gh-write-guard.py`'s own rule 6 for a mutation aimed at the primary checkout specifically, neither of which this permission block replaces or narrows. A worktree the agent's own task owns is exactly where these ordinary forms are expected to run, so the trade is deliberate: broader, prompt-free convenience for routine work inside a task's own worktree, resting on the agent's documented discipline rather than a mechanical block, the same posture Claude Code's permission system takes everywhere else.
+
+**Call `EnterWorktree` after `git worktree add`, not just `cd`.** The `repo-worktree` skill already documents this (`git worktree add`, then attach with `EnterWorktree` `path:`), and it is worth the one extra approval: Claude Code tracks a session as "isolated in a worktree" only once `EnterWorktree` (or the `--worktree` launch flag) has actually run, and while a session is tracked that way it gets a further, built-in enforcement layer with no configuration at all -- blocking a file edit that targets the main checkout, a Bash/PowerShell/Monitor command whose working directory resolves to (or can't be verified to stay outside) the main checkout, a git redirect into the main checkout (`git -C`, `--git-dir`, `GIT_DIR`/`GIT_WORK_TREE`, or a `cd` into the main checkout before running git), and any command shape it can't verify stays inside the worktree at all. A `cd` alone, with no `EnterWorktree` call, gets none of this: the session's own bookkeeping never marked it as isolated, so these checks never engage, and `host-setup/agent-safety/claude/gh-write-guard.py`'s own rule 6 is what remains -- covering the same `-C`/`--git-dir`/`GIT_DIR`/`GIT_WORK_TREE`/`--work-tree` redirect shapes and a `sh -c`/`bash -c` wrapper, but, unlike Claude Code's own layer, deliberately not a `checkout`/`switch` of an actual ref carrying no force flag, or a fast-forward-only `pull` (the documented base-clone cleanup step needs exactly those, though a `checkout` of something that is not a ref, such as `git checkout .`, is still denied), and silently inert on a git old enough to lack `rev-parse --path-format`. Its own `claude/README.md` "Scope and Limits" states these precisely.
 
 ### opencode Worktree Access
 
@@ -362,6 +356,9 @@ A host that fails any row is not ready for the procedure that row names, and the
 <!-- Repo -->
 
 [agent-safety]: ../host-setup/agent-safety/README.md
+[agent-safety-claude]: ../host-setup/agent-safety/claude/README.md
+[agent-safety-codex]: ../host-setup/agent-safety/codex/README.md
+[agent-safety-opencode]: ../host-setup/agent-safety/opencode/README.md
 [audit]: ../AUDIT.md
 [bootstrap]: ../host-setup/bootstrap.sh
 [bootstrap-ps1]: ../host-setup/bootstrap.ps1
@@ -379,7 +376,6 @@ A host that fails any row is not ready for the procedure that row names, and the
 [spec-dir]: ../spec/
 [ssh-signing]: ./ssh-signing.md
 [standup]: ../STANDUP.md
-[write-guard]: ../host-setup/agent-safety/gh-write-guard.py
 
 <!-- External -->
 

@@ -61,6 +61,18 @@ from `develop` unless the task is explicitly about `main`-only content, per `GOV
 "Branching Model". Fetch immediately before creating and base on the remote ref, because a clone
 is whatever it last fetched rather than the branch it names.
 
+The base clone is a fetch source, not a place to do task work. `fetch` and `worktree add` run
+against it for that purpose, and outside "Listing and Cleanup"'s own terminal step below, nothing
+else does: never `checkout`, `pull`, `reset`, `commit`, or any other command that mutates its own
+working tree, index, or HEAD while a task is in progress. That distinction is the one a real
+incident missed, reusing a primary checkout as the working directory itself rather than only as
+the source a worktree is created from. On Claude Code this is also a mechanical stop for most
+of that list. `merge --ff-only`/`pull --ff-only` and a `checkout <ref>`/`switch <ref>` carrying no
+force flag stay exempt even there, matching this skill's own cleanup step below, which needs
+exactly those.
+Prose remains the only enforcement for a non-Claude-Code agent, and for the shapes the hook itself
+exempts.
+
 ## Creating a Worktree
 
 The fleet layout convention keeps every base clone and every in-flight task visible in one
@@ -122,6 +134,13 @@ temporary root. Name it `<temporary-root>/<Repo>-<task-slug>`, fetch immediately
 task branch from `origin/develop`. A standalone clone keeps its worktree and Git administrative
 directory under the same writable root. It therefore supports edits, explicit-path staging,
 commits, and branch updates without sharing the base clone's index.
+
+On Claude Code, a standalone clone is structurally a primary checkout to `gh-write-guard.py`'s own
+rule 6 test (`--git-dir` equals `--git-common-dir` there too, since it is not a linked worktree of
+anything), so the hook denies the very commits/edits this fallback exists to make. Set
+`GH_WRITE_GUARD_ALLOW_PRIMARY_CHECKOUT` for the session before using one -- the same escape hatch
+`host-setup/agent-safety/README.md`'s requirement 6 already documents -- since this fallback is
+exactly the narrow, already-approval-gated case that grant exists for.
 
 A temporary standalone clone is a degraded handoff, not an equivalent location. The base clone
 does not register it, `git worktree list` does not show it, and an IDE opened on the base clone

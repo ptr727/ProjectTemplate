@@ -1,15 +1,18 @@
 #!/usr/bin/env python3
-"""PreToolUse guard: deny the GitHub-write footguns behind the cross-repo comment incident.
+"""PreToolUse guard: deny the GitHub-write footguns and the primary-checkout mutation behind two incidents.
 
 Registered as a Claude Code PreToolUse hook on the Bash tool. It reads the tool-input JSON on stdin,
 classifies the command, and DENIES (with a reason shown to the agent) when a command is a GitHub *write*
-matching a known-dangerous pattern. Reads and everything that is not a clear write pass through.
+matching a known-dangerous pattern, or a mutating git operation run directly against a primary checkout.
+Reads and everything that is not a clear write pass through. See host-setup/agent-safety/README.md for
+the requirements this implements, stated once, agent-agnostic, and for how to audit this file against
+them.
 
-Precision over recall for the write-footgun shapes (1-3): they deny the specific shapes that caused the
-incident, not everything unparseable - a false deny would break the agent, and a miss still falls under
-the GOVERNANCE.md "Repository Boundaries and Write Safety" prose rules. The branch-bypass rule (4) instead
-fails CLOSED on the protected-by-default branches, because the harm there is a silent success under the
-maintainer's admin bypass. The denied shapes:
+Precision over recall for the write-footgun shapes (1-3) and the primary-checkout shape (6): they deny
+the specific shapes that caused an incident, not everything unparseable, since a false deny would break the
+agent, and a miss still falls under the GOVERNANCE.md "Repository Boundaries and Write Safety" prose
+rules. The branch-bypass rule (4) instead fails CLOSED on the protected-by-default branches, because the
+harm there is a silent success under the maintainer's admin bypass. The denied shapes:
 
   1. a state-changing gh call whose output is discarded or forced to success
      (>/dev/null, 2>/dev/null, &>/dev/null, || true, || :, || echo)
@@ -30,6 +33,46 @@ maintainer's admin bypass. The denied shapes:
      skimming the pull request (the incident behind this rule). Permitted only under the same
      GH_WRITE_GUARD_ALLOW grant rule 3 reads, since the helper refuses a cross-owner pull request outright
      and the hand-run GraphQL form is then the documented fallback, not a footgun.
+  6. a mutating git operation (checkout/switch/pull/reset/rebase/merge/cherry-pick/revert/restore/stash
+     (anything but list/show)/clean -f/add/commit/rm/mv/apply/am/push/worktree remove -f) run
+     directly against a primary checkout, not a linked worktree. This is the harm behind a
+     separate incident, where an agent reused the maintainer's own primary checkout instead of a
+     worktree twice despite having read the prose rule against it. A "primary checkout" is decided
+     by comparing `git rev-parse --git-dir` against `--git-common-dir`, never a `.git`-is-a-directory
+     guess (a submodule's `.git` is a file and is still primary). The target directory follows real
+     git's own priority rather than a last-option-wins scan: any `-C <dir>` options on the
+     invocation compose sequentially onto a leading `cd` (inside a `sh -c`/`bash -c` wrapper too) or
+     the session's own cwd, then an explicit `--work-tree`/`GIT_WORK_TREE=` value, when given, wins
+     over that result regardless of `-C`, and `--git-dir`/`GIT_DIR=` alone never relocates that
+     reported target, matching git's own fallback. A leading `export GIT_WORK_TREE=x GIT_DIR=y &&`
+     prefix is read the same way an inline `VAR=x git ...` prefix already is, since a real shell
+     export persists into the following command exactly as effectively, confirmed live to discard a
+     tracked local modification with no redirect at all on the git invocation itself, a shape the
+     inline-prefix scan alone cannot see.
+     Whether the invocation is primary-checkout at all is a separate question from the mutation target,
+     though: an explicit `--git-dir`/`GIT_DIR=` is resolved and tested for primary-checkout-ness
+     directly, regardless of `--work-tree`, since `--git-dir` names the repository actually mutated,
+     confirmed live that `--git-dir=<primary>/.git --work-tree=<empty-dir>` mutates `<primary>` even
+     though `<empty-dir>` resolves as no git repository at all, which testing the work-tree value alone
+     would fail open on. `~`/`$HOME` is expanded throughout and a relative value is joined against the
+     running result. Checkout/switch force flags (`-b`/`-B` for checkout, `-c`/`-C` for switch,
+     `-f`/`--force`/`--discard-changes`/`--orphan` for either) are recognized bundled or attached into a
+     short-option cluster (`-qf`, `-Bname`, `-Cother`), not only as an exact token. A subcommand this
+     rule does not recognize is resolved through a bounded chain of git aliases (inline `-c
+     alias.<name>=`, then the target's own persisted config) before falling through to allow. A
+     `!`-prefixed shell alias is denied outright rather than interpreted. Exempt: `worktree
+     add/list/prune` and an unforced `worktree remove` (the
+     documented way to use a primary checkout at all), `merge --ff-only`/`pull --ff-only` (can never
+     discard anything), and a `checkout <ref>`/`switch <ref>` carrying no force-oriented flag whose
+     argument actually resolves as a ref, verified live (git's own ref-switch path refuses to carry a
+     local modification, but its pathspec-restore fallback for an argument that is not a ref, such as
+     `checkout .` or `checkout -- <path>`, carries no such check and is denied). A non-force flag such
+     as `--detach`/`-q` alongside the ref stays exempt too, since it changes nothing about git's own
+     overwrite-refusal, verified live, so admitting it widens no actual safety hole, only the exemption's
+     literal shape, matching the documented base-clone cleanup step in the repo-worktree skill. Granted
+     only by GH_WRITE_GUARD_ALLOW_PRIMARY_CHECKOUT (a recognized falsy
+     value such as "0"/"false" reads as not granted, not as any-non-empty-string-is-truthy), the same
+     channel shape as GH_WRITE_GUARD_ALLOW.
 
 Run `gh-write-guard.py --selftest` to verify the decision matrix without Claude Code.
 """
@@ -302,6 +345,9 @@ def _shell_tokens(cmd):
     try:
         lex = shlex.shlex(cmd, posix=True, punctuation_chars=_PUNCTUATION_CHARS)
         lex.whitespace_split = True
+        # `shlex.shlex`'s own default keeps `#` as a comment starter, unlike `shlex.split()`, which explicitly clears it, and confirmed live to otherwise fuse `git fetch origin # x\ngit reset --hard` into one invocation, hiding the second command from every tokenizer-based rule.
+        # Cleared unconditionally: a truncated command is a far worse failure than an ordinary `#` becoming literal trailing argv words instead.
+        lex.commenters = ""
         lex.whitespace = lex.whitespace.replace(
             "\n", ""
         )  # A newline is an operator above rather than a gap between words.
@@ -405,6 +451,670 @@ def _git_subcommand_arglists(cmd, sub):
         else:
             i += 1  # this `git` was a different subcommand; keep scanning
     return out
+
+
+# --- Rule 6: a mutating git op against a primary checkout ---------------------------------------------
+# `-C <dir>`, `--work-tree <dir>`/`--work-tree=<dir>`, and a `GIT_WORK_TREE=` command-text prefix are the options this rule resolves the mutation target directory from, following real git's own priority rather than a last-one-wins scan across all three.
+# `--work-tree`/`GIT_WORK_TREE` name the working tree a mutating command like `reset --hard`/`clean -f` actually writes into, and win regardless of where `-C` points or how many `-C` options preceded it.
+# Multiple `-C` options compose sequentially, each resolved against the previous one exactly as git's own "run as if git was started in <path>" describes, an absolute value replacing the running directory outright and a relative one joining onto it.
+# `--git-dir`/`GIT_DIR=` alone, with no `--work-tree`/`GIT_WORK_TREE` given anywhere on the same invocation, does not relocate the mutation target at all -- per git's own documented fallback, the working tree stays the effective directory reached by any `-C` chain (or the session's cwd, with none), so this rule never reads `--git-dir`/`GIT_DIR=` as a target-setting option for that purpose.
+# An explicit `--git-dir`/`GIT_DIR=` is still read and resolved separately, though, for a different purpose: deciding whether the invocation is primary-checkout or not.
+# When `--git-dir` and `--work-tree` are both given and point at different trees, the repository actually mutated is the one `--git-dir` names, not whatever `--work-tree` happens to be -- confirmed live (`git --git-dir=<primary>/.git --work-tree=<empty-dir> commit` mutates `<primary>`, even though `<empty-dir>` resolves as no git repository at all) -- so testing the resolved `--work-tree` value alone for primary-checkout-ness would fail open exactly there.
+# Every other value-taking global option is skipped like `_git_subcommand_arglists` already does, since none of the others name a directory this rule reads.
+_GIT_ENV_WORK_TREE_VAR = "GIT_WORK_TREE"
+_GIT_ENV_GIT_DIR_VAR = "GIT_DIR"
+
+
+_ENV_ASSIGN_RE = re.compile(r"^([A-Za-z_][A-Za-z0-9_]*)=(.*)$")
+
+
+def _env_prefix_dirs(toks, git_index):
+    """The values of a `GIT_WORK_TREE=`/`GIT_DIR=` assignment immediately preceding the git
+    invocation at `toks[git_index]`, in the shape `GIT_WORK_TREE=x GIT_DIR=y git ...`, as a
+    `(work_tree, git_dir)` pair, either of which may be `None`. Scans backward only through
+    consecutive `NAME=value`-shaped tokens, stopping at the first token that is not one (a shell
+    separator, another command, or the start of the string), so this never reads an assignment
+    belonging to an earlier, unrelated command in the same compound line. Read from the command's
+    own text, not a real process environment: an inline assignment here genuinely does redirect
+    the invocation it prefixes, unlike the `GH_WRITE_GUARD_ALLOW=x gh ...` shape documented
+    elsewhere in this file, which never reaches the hook's own environment.
+    """
+    found = {}
+    k = git_index - 1
+    while k >= 0:
+        m = _ENV_ASSIGN_RE.match(toks[k])
+        if not m:
+            break
+        found.setdefault(m.group(1), m.group(2))
+        k -= 1
+    return found.get(_GIT_ENV_WORK_TREE_VAR), found.get(_GIT_ENV_GIT_DIR_VAR)
+
+
+_INLINE_ALIAS_RE = re.compile(r"^alias\.(\S+)=(.*)$")
+
+
+def _git_invocations(cmd):
+    """Every `git [global-options] <sub> [args...]` invocation in the command, as
+    `(c_dirs, work_tree, git_dir, inline_aliases, sub, args)` tuples. `c_dirs` is the list of
+    `-C <dir>` values on this specific invocation, in argv order, since real git composes multiple
+    `-C` options sequentially rather than having only the last one take effect. `work_tree` is the
+    value of a `--work-tree` global option on this invocation, or a `GIT_WORK_TREE=` prefix
+    immediately before it when no `--work-tree` flag is given, or `None` when neither is given, in
+    which case the caller resolves the mutation target from the `-C` chain alone. `git_dir` is the
+    same shape for `--git-dir`/`GIT_DIR=`: never used to relocate the mutation target on its own
+    (matching real git's "no relocation without `--work-tree`" fallback), but read and resolved
+    separately, since a `--git-dir` explicitly naming a different tree than `--work-tree` is the
+    tree actually mutated, not the one `--work-tree` names. `inline_aliases` is a `name ->
+    expansion` dict of every `-c alias.<name>=<value>` override on this invocation, in argv order
+    (a later `-c` for the same name wins, matching real git's own repeated `-c` semantics), read
+    here since an inline alias is exactly as effective at hiding a mutating command behind an
+    unrecognized name as a persisted one, per requirement 6's alias-resolution rule.
+    """
+    # Shares its tokenizing and global-option skipping with `_git_subcommand_arglists`, generalized to read every subcommand rather than one named subcommand, and to capture the directory-naming and alias-defining options along the way.
+    toks = _shell_tokens(cmd)
+    n = len(toks)
+    out = []
+    i = 0
+    while i < n:
+        if not _is_git_exe(toks[i]):
+            i += 1
+            continue
+        j = i + 1
+        c_dirs = []
+        work_tree = None
+        git_dir = None
+        inline_aliases = {}
+        while j < n and toks[j].startswith("-"):
+            opt = toks[j]
+            if opt == "-C":
+                if j + 1 < n:
+                    c_dirs.append(toks[j + 1])
+                    j += 2
+                else:
+                    j += 1
+            elif opt.startswith("--work-tree="):
+                work_tree = opt.split("=", 1)[1]
+                j += 1
+            elif opt == "--work-tree":
+                if j + 1 < n:
+                    work_tree = toks[j + 1]
+                    j += 2
+                else:
+                    j += 1
+            elif opt.startswith("--git-dir="):
+                git_dir = opt.split("=", 1)[1]
+                j += 1
+            elif opt == "--git-dir":
+                if j + 1 < n:
+                    git_dir = toks[j + 1]
+                    j += 2
+                else:
+                    j += 1
+            elif opt == "-c":
+                if j + 1 < n:
+                    m = _INLINE_ALIAS_RE.match(toks[j + 1])
+                    if m:
+                        inline_aliases[m.group(1)] = m.group(2)
+                    j += 2
+                else:
+                    j += 1
+            elif opt in _GIT_GLOBAL_VALUE_OPTS and "=" not in opt:
+                j += 2
+            else:
+                j += 1
+        env_work_tree, env_git_dir = _env_prefix_dirs(toks, i)
+        if work_tree is None:
+            work_tree = env_work_tree
+        if git_dir is None:
+            git_dir = env_git_dir
+        if j < n and not _is_shell_op(toks[j]):
+            sub = toks[j]
+            args, k = _collect_arglist(toks, j + 1)
+            out.append((c_dirs, work_tree, git_dir, inline_aliases, sub, args))
+            i = k
+        else:
+            i = j if j > i else i + 1  # a bare `git` with no subcommand at all; keep scanning
+    return out
+
+
+def _all_git_invocations(cmd):
+    """`_git_invocations` for `cmd` itself, plus for every command string a `sh -c`/`bash -c`-style
+    wrapper embeds in it, the same expansion `_all_gh_arg_lists` gives the GitHub-write rules, so a
+    mutating git command hidden behind such a wrapper is scanned exactly like a bare one. Each
+    tuple carries a seventh element, the leading-`cd` directory in effect for the exact command
+    string (outer or inner) it came from -- a `cd` embedded inside a wrapper's own command string
+    (`bash -c 'cd /x && git ...'`) is invisible to a leading-`cd` check run only against the outer
+    command, and the outer command's own leading `cd` (`cd /x && bash -c 'git ...'`) takes effect
+    inside the wrapper too, via the shell's own inherited cwd, when the wrapped string carries no
+    leading `cd` of its own to override it. A leading `export GIT_WORK_TREE=x GIT_DIR=y &&` prefix
+    is folded into `work_tree`/`git_dir` themselves the same way, whenever the invocation's own
+    flags or inline `VAR=x git ...` prefix leave either unset, since an exported assignment
+    persists into a following command exactly as effectively as either of those, and this rule
+    must not fail open just because the redirect came from `export` rather than from `-C`, an
+    inline prefix, or a flag.
+    """
+    outer_leading_cd = _leading_cd_dir(cmd)
+    outer_export_wt, outer_export_gd = _leading_export_dirs(cmd)
+    out = []
+    for c_dirs, work_tree, git_dir, inline_aliases, sub, args in _git_invocations(cmd):
+        work_tree = work_tree if work_tree is not None else outer_export_wt
+        git_dir = git_dir if git_dir is not None else outer_export_gd
+        out.append((c_dirs, work_tree, git_dir, inline_aliases, sub, args, outer_leading_cd))
+    for inner in _embedded_wrapper_commands(cmd):
+        leading_cd = _leading_cd_dir(inner) or outer_leading_cd
+        inner_export_wt, inner_export_gd = _leading_export_dirs(inner)
+        export_wt = inner_export_wt if inner_export_wt is not None else outer_export_wt
+        export_gd = inner_export_gd if inner_export_gd is not None else outer_export_gd
+        for c_dirs, work_tree, git_dir, inline_aliases, sub, args in _git_invocations(inner):
+            work_tree = work_tree if work_tree is not None else export_wt
+            git_dir = git_dir if git_dir is not None else export_gd
+            out.append((c_dirs, work_tree, git_dir, inline_aliases, sub, args, leading_cd))
+    return out
+
+
+_HOME_VAR_RE = re.compile(r"\$\{HOME\}|\$HOME(?![A-Za-z0-9_])")
+
+
+def _expand_dir(value):
+    """Expand a leading `~`/`~user` the same way a shell would, plus a literal `$HOME`/`${HOME}`
+    reference, both resolvable without executing anything -- `~/repos/<Repo>` is the fleet's own
+    documented primary-checkout path convention, so leaving it unexpanded would fail open on the
+    single most common way to spell the path this rule exists to catch. The `${HOME}` form is
+    always exact, its closing brace delimits the name, but a bare `$HOME` is matched only when not
+    immediately followed by another identifier character, so this never matches only a prefix of
+    an unrelated variable such as `$HOMEPATH` or `$HOMEDRIVE`. Any other `$VAR` is left as is and
+    resolves nowhere real via a plain `-C`, which is this rule's documented fail-open case
+    already, not a new one: a hook cannot see a shell variable's runtime value without executing
+    something, and it never does.
+    """
+    if value is None:
+        return None
+    value = os.path.expanduser(value)
+    return _HOME_VAR_RE.sub(lambda _m: os.environ.get("HOME", ""), value)
+
+
+def _join_relative(base, value):
+    """Expand `~`/`$HOME` in `value`, then join it onto `base` when it is relative and `base` is
+    known, or return the expanded value as-is when it is already absolute or there is no base to
+    join onto -- the one join rule every directory-naming option (`-C`, a leading `cd`,
+    `--work-tree`, `--git-dir`) resolves a relative value with, so a relative spelling always
+    resolves against the session's own reported cwd rather than wherever the hook process's own
+    OS-level working directory happens to be, which the two are never guaranteed to share.
+    """
+    v = _expand_dir(value)
+    if base and not os.path.isabs(v):
+        return os.path.normpath(os.path.join(base, v))
+    return v
+
+
+def _effective_cwd(c_dirs, leading_cd, cwd):
+    """The directory git treats as its own current working directory for this invocation, after
+    folding a leading `cd` prefix and then any `-C` chain onto the hook's own reported `cwd`, in
+    that order -- the same base both `--work-tree` and `--git-dir` resolve a relative value
+    against. Multiple `-C` options compose sequentially, each resolved against the previous one
+    exactly as git's own "run as if git was started in <path>" describes for a repeated `-C`, an
+    absolute value replacing the running directory outright and a relative one joining onto it.
+    """
+    base = _expand_dir(cwd) if cwd is not None else None
+    if leading_cd is not None:
+        base = _join_relative(base, leading_cd)
+    for c in c_dirs:
+        base = _join_relative(base, c)
+    return base
+
+
+def _resolve_target_dir(c_dirs, work_tree, leading_cd, cwd):
+    """The mutation target directory for this invocation, following real git's own priority
+    rather than a last-option-wins scan across `-C`/`--work-tree`: the effective directory reached
+    by a leading `cd` and any `-C` chain (see `_effective_cwd`), with an explicit
+    `--work-tree`/`GIT_WORK_TREE=` value, when given, winning over that result regardless of how
+    many `-C` options preceded it, matching how `--work-tree`/`GIT_WORK_TREE` name the actual
+    mutation target independent of where `-C` points. A relative `work_tree` still resolves
+    against the effective directory, the same as git resolves a relative `--work-tree` against its
+    own effective directory.
+    """
+    base = _effective_cwd(c_dirs, leading_cd, cwd)
+    if work_tree is not None:
+        return _join_relative(base, work_tree)
+    return base
+
+
+def _resolve_repo_dir(git_dir, c_dirs, leading_cd, cwd):
+    """The explicit `--git-dir`/`GIT_DIR=` value on this invocation, resolved the same way a
+    `--work-tree` value is (joined onto the effective directory reached by a leading `cd` and any
+    `-C` chain, see `_effective_cwd`), or `None` when no explicit git-dir was given on this
+    invocation at all -- in which case the caller falls back to ordinary ancestor-based repository
+    discovery from the resolved mutation target instead, exactly as real git itself does absent an
+    explicit `--git-dir`.
+    """
+    if git_dir is None:
+        return None
+    return _join_relative(_effective_cwd(c_dirs, leading_cd, cwd), git_dir)
+
+
+# A single leading `cd <dir> &&`/`cd <dir> ;` prefix, and no more, a narrow, tractable parse rather than tracking shell execution state.
+# `git status && cd x && git pull` still resolves the second invocation's target from cwd, a materially smaller gap than an entirely unresolved one.
+_CD_CHAIN_SEPS = ("&&", ";")
+
+
+def _leading_cd_dir(cmd):
+    """The directory a command starts with `cd <dir> &&` or `cd <dir> ;`, or `None`."""
+    toks = _shell_tokens(cmd)
+    if (
+        len(toks) >= 3
+        and toks[0] == "cd"
+        and not toks[1].startswith("-")
+        and toks[2] in _CD_CHAIN_SEPS
+    ):
+        return toks[1]
+    return None
+
+
+def _leading_export_dirs(cmd):
+    """The `GIT_WORK_TREE`/`GIT_DIR` values from a single leading `export NAME=value ... &&`/`;`
+    prefix, as a `(work_tree, git_dir)` pair, either of which may be `None` -- the same narrow,
+    tractable scope `_leading_cd_dir` already takes (only a leading prefix is read, one appearing
+    after the first command in a chain is the accepted gap), extended to the one other shell shape
+    that redirects a git invocation carrying no `-C`/`--work-tree`/`--git-dir`/inline-prefix of its
+    own: a real shell `export` makes an assignment persist into every later command in the same
+    session, unlike the inline `VAR=x git ...` prefix `_env_prefix_dirs` already reads, which
+    redirects only the one command it immediately precedes. Confirmed live: `export
+    GIT_DIR=<primary>/.git GIT_WORK_TREE=<primary> && git reset --hard` discards a tracked local
+    modification in `<primary>`, with no redirect at all on the `git` invocation itself, a shape
+    `_env_prefix_dirs` alone cannot see. Bails to `(None, None)` on anything but a clean run of
+    `NAME=value` tokens between `export` and the first separator, rather than guessing at a
+    non-assignment `export` form (`export -p`, `export EXISTING_VAR` with no `=`).
+    """
+    toks = _shell_tokens(cmd)
+    n = len(toks)
+    if not toks or toks[0] != "export":
+        return None, None
+    work_tree = git_dir = None
+    i = 1
+    while i < n and not _is_shell_op(toks[i]):
+        m = _ENV_ASSIGN_RE.match(toks[i])
+        if not m:
+            return None, None
+        if m.group(1) == _GIT_ENV_WORK_TREE_VAR:
+            work_tree = m.group(2)
+        elif m.group(1) == _GIT_ENV_GIT_DIR_VAR:
+            git_dir = m.group(2)
+        i += 1
+    if i >= n or i == 1 or toks[i] not in _CD_CHAIN_SEPS:
+        return None, None
+    return work_tree, git_dir
+
+
+def _is_primary_checkout(target_dir, git_dir=None):
+    """`True` when the repository this invocation targets is a primary (non-worktree) git
+    checkout, `False` when it is a linked worktree, `None` when no git repository resolves at all
+    (the caller fails open on `None`, matching this rule's own precision-over-recall stance).
+
+    The test is a `rev-parse` comparison, not a filesystem-shape guess: `--git-dir` equals
+    `--git-common-dir` for a primary checkout and differs for a linked worktree. A `.git`-is-a-
+    directory heuristic is deliberately not used instead, since a plain submodule's `.git` is a
+    file while it is still a primary working tree that can lose uncommitted work, and that
+    heuristic would wrongly exempt it. `--path-format=absolute` must precede the two paths in
+    argv, verified silently ineffective (relative paths, no error) in the other order, which would
+    misclassify a primary checkout as a worktree the moment a command runs from one of its
+    subdirectories.
+
+    When `git_dir` is given (an explicit `--git-dir`/`GIT_DIR=` was resolved on the invocation),
+    the check runs against that value directly (`git --git-dir=<git_dir> rev-parse ...`, no `-C`
+    at all) rather than against `target_dir` via ordinary ancestor discovery, since `--git-dir`
+    names the repository actually mutated independent of where `--work-tree`/cwd point, confirmed
+    live: `git --git-dir=<primary>/.git --work-tree=<empty-dir> commit` mutates `<primary>` even
+    though `<empty-dir>` resolves as no git repository at all. Testing `target_dir` in that case
+    would fail open exactly there.
+    """
+    if git_dir is not None:
+        argv = ["git", f"--git-dir={git_dir}"]
+    else:
+        argv = ["git", "-C", target_dir or "."]
+    argv += ["rev-parse", "--path-format=absolute", "--git-dir", "--git-common-dir"]
+    try:
+        r = subprocess.run(
+            argv,
+            capture_output=True,
+            text=True,
+            timeout=5,
+            check=False,
+        )
+    except Exception:  # noqa: BLE001 - a crashed/absent git binary is treated as "unresolvable", the same fail-open outcome a non-zero exit already produces below, not a defect to propagate as a hook-crashing traceback.
+        return None
+    if r.returncode != 0:
+        return None
+    lines = r.stdout.strip().splitlines()
+    if len(lines) != 2:
+        return None
+    return lines[0].strip() == lines[1].strip()
+
+
+# Flags that turn an otherwise-denied `checkout`/`switch` into a real branch-creating or force-discarding operation, the cases git itself does not already refuse on its own.
+# `-b`/`-B` are checkout's own create/force-create spellings; `-c`/`-C` are switch's (switch has no `-b`/`-B`, checkout has no `-c`/`-C`), and both pairs mean the same thing to their own subcommand, confirmed live: `git switch -C <existing-branch>` resets that branch to the current HEAD, discarding any commits unique to it, with no dirty-tree warning at all since it is not a working-tree overwrite.
+_CHECKOUT_FORCE_FLAGS = {
+    "-b",
+    "-B",
+    "-c",
+    "-C",
+    "--force",
+    "-f",
+    "--discard-changes",
+    "--orphan",
+    "--create",
+    "--force-create",
+}
+# The single-character short forms above, checked against every character of a short-option token, not just an exact-token match: git bundles boolean short flags together (`-qf` is `-q`+`-f`) and attaches a short flag's own value with no space (`-Bname` is `-B name`), and in both shapes the exact-token check below never sees a bare `-f`/`-B`/`-c`/`-C` to match against.
+# `-b`/`-B`/`-c`/`-C` are the only checkout/switch short options that take an attached value at all, so this scan cannot mistake an unrelated flag's attached argument for a force flag.
+# Neither subcommand has any other flag using these letters, checked directly against each subcommand's own `-h` output, so this scan produces no false positive on either.
+_CHECKOUT_FORCE_CHARS = {"b", "B", "c", "C", "f"}
+# Flags that make `git clean` an actual deletion rather than the dry-run it defaults to.
+_CLEAN_FORCE_FLAGS = {"-f", "--force"}
+# `-n`/`--dry-run` always wins over `-f`/`--force`, confirmed live regardless of which order the two are given in or how many times `-f` repeats: `git clean -f -n`, `-n -f`, and `--dry-run -f` all print "Would remove" and delete nothing.
+_CLEAN_DRY_RUN_FLAGS = {"-n", "--dry-run"}
+
+
+def _args_before_double_dash(args):
+    """`args` truncated at the first bare `--`, or `args` unchanged when there is none -- every
+    argument from `--` onward is an unconditional pathspec to git, never a flag, confirmed live:
+    `git clean -f -- -n` deletes a file literally named `-n` rather than behaving as a dry run,
+    and `git clean -- -f` (with no real `-f` before the `--`) names a file rather than forcing
+    anything. Flag detection must never scan past this boundary.
+    """
+    if "--" in args:
+        return args[: args.index("--")]
+    return args
+
+
+def _has_clean_dry_run_flag(args):
+    """Whether `args` carries `-n`/`--dry-run`, bundled into a short-option cluster (`-nfd`) or
+    not, the same bundled-cluster scan `_has_checkout_force_flag` already gives checkout/switch's
+    own force flags -- a real, confirmed usability gap this rule's `git clean` case would
+    otherwise have: `-nfd` denies the exact same harmless dry run `-n` alone does not, purely
+    because it also carries an `f` character the force-flag scan below reads on its own.
+    """
+    for a in _args_before_double_dash(args):
+        if a in _CLEAN_DRY_RUN_FLAGS:
+            return True
+        if a.startswith("--"):
+            continue
+        if a.startswith("-") and len(a) > 1 and "n" in a[1:]:
+            return True
+    return False
+
+
+def _has_checkout_force_flag(args):
+    """Whether `args` carries a checkout/switch force flag, as an exact token
+    (`--force`/`--orphan`/`--discard-changes`, or a lone `-f`/`-b`/`-B`) or bundled/attached into a
+    short-option cluster (`-qf`, `-Bname`, `-qBname`). A long-option token (`--...`) is never
+    scanned character-by-character, only matched exactly, since `--discard-changes` legitimately
+    contains an `f`.
+    """
+    for a in args:
+        if a in _CHECKOUT_FORCE_FLAGS:
+            return True
+        if a.startswith("--"):
+            continue
+        if a.startswith("-") and len(a) > 1 and any(c in _CHECKOUT_FORCE_CHARS for c in a[1:]):
+            return True
+    return False
+
+
+# Subcommands denied unconditionally in a primary checkout, no flag or argv shape exempts them.
+_ALWAYS_DENY_SUBS = {
+    "reset",
+    "rebase",
+    "cherry-pick",
+    "revert",
+    "restore",
+    "add",
+    "commit",
+    "rm",
+    "mv",
+    "apply",
+    "am",
+    # A push doesn't mutate the local working tree or HEAD the way the rest of this set does, but it publishes whatever is there, and no documented fleet workflow ever pushes from a primary checkout: every push runs from a task's own worktree instead.
+    # Rule 4's own branch-rule checks (_check_push_bypass) already run before this rule and can deny a push on their own grounds, so this is an added, independent reason to deny, not a replacement for that check.
+    "push",
+}
+
+
+def _resolves_as_ref(target_dir, ref, verify=None):
+    """Whether `ref` resolves as a real ref (branch, tag, or commit-ish) in `target_dir`'s
+    repository -- the same test git itself uses to decide whether a bare `checkout`/`switch`
+    argument names something it safety-checks (a ref switch, refused when it would overwrite a
+    local modification) or falls back to treating the argument as a pathspec restore, which
+    carries no such safety check at all. `verify`, when given, stands in for the live subprocess
+    call so the self-test runs deterministically.
+    """
+    if verify is not None:
+        return verify(target_dir, ref)
+    try:
+        r = subprocess.run(
+            ["git", "-C", target_dir or ".", "rev-parse", "--verify", "--quiet", ref + "^{commit}"],
+            capture_output=True,
+            text=True,
+            timeout=5,
+            check=False,
+        )
+    except Exception:  # noqa: BLE001 - a crashed/absent git binary is treated as "does not resolve as a ref", the safer of the two branches this call disambiguates, not a defect to propagate as a hook-crashing traceback.
+        return False
+    return r.returncode == 0
+
+
+# A subcommand name this rule does not recognize could be a git alias rather than an unrelated tool invocation this rule has no reason to inspect, so resolution stops once this many aliases have been chased, rather than looping forever on a self-referential or absurdly deep alias chain.
+_MAX_ALIAS_DEPTH = 5
+
+
+def _config_alias(target_dir, name, config_lookup=None):
+    """The expansion text of the git alias named `name` in `target_dir`'s own config (merged
+    local/global/system, the same precedence `git config --get` itself reads), or `None` when no
+    such alias is defined. `config_lookup`, when given, stands in for the live subprocess call so
+    the self-test runs deterministically offline.
+    """
+    if config_lookup is not None:
+        return config_lookup(target_dir, name)
+    try:
+        r = subprocess.run(
+            ["git", "-C", target_dir or ".", "config", "--get", f"alias.{name}"],
+            capture_output=True,
+            text=True,
+            timeout=5,
+            check=False,
+        )
+    except Exception:  # noqa: BLE001 - a crashed/absent git binary is treated the same as "no alias defined", the caller's existing fall-through-to-allow case, not a defect to propagate as a hook-crashing traceback.
+        return None
+    if r.returncode != 0:
+        return None
+    return r.stdout.strip() or None
+
+
+def _resolve_alias(sub, args, inline_aliases, target_dir, config_lookup=None):
+    """Expand `sub` through a chain of git aliases -- an inline `-c alias.<name>=<value>` override
+    on this invocation first, then the target checkout's own persisted config, matching real
+    git's own override order -- up to `_MAX_ALIAS_DEPTH` levels, so a subcommand this rule does
+    not otherwise recognize is not silently allowed just because it is spelled as a custom alias
+    rather than the built-in name it actually expands to. Returns `(sub, args, opaque)`: `opaque`
+    is `True` the moment any alias in the chain is a `!`-prefixed shell command rather than a git
+    subcommand alias, since that shape hands git an arbitrary shell string this function does not
+    and must not execute to interpret -- the caller denies that shape outright against a primary
+    checkout rather than either running it or letting it fall through to an ordinary allow, the
+    one place this rule departs from its usual fail-open stance, because the alias definition
+    itself is concrete, positive evidence of an attempt to run something via git in exactly the
+    directory this rule exists to protect.
+    """
+    seen = set()
+    depth = 0
+    while depth < _MAX_ALIAS_DEPTH and sub not in seen:
+        seen.add(sub)
+        expansion = inline_aliases.get(sub)
+        if expansion is None:
+            expansion = _config_alias(target_dir, sub, config_lookup)
+        if expansion is None:
+            return sub, args, False
+        if expansion.startswith("!"):
+            return sub, args, True
+        try:
+            expanded = shlex.split(expansion)
+        except ValueError:
+            # Malformed alias text (unbalanced quotes): treat it as unresolvable rather than crashing the hook on a config value neither the agent nor this rule controls.
+            return sub, args, False
+        if not expanded:
+            return sub, args, False
+        sub, args = expanded[0], expanded[1:] + args
+        depth += 1
+    return sub, args, False
+
+
+def _primary_checkout_verdict(sub, args, target_dir=None, ref_resolver=None):
+    """Whether this `(subcommand, args)` pair is a mutating operation requirement 6 denies against
+    a primary checkout: `True` (deny), `False` (exempt, explicitly allowed), or `None` (not a
+    subcommand this rule concerns itself with, allowed by falling through). `target_dir` and
+    `ref_resolver` are used only by the `checkout`/`switch` case, to disambiguate a bare argument
+    from a live git call; every other case is pure text/argv classification.
+    """
+    if sub == "worktree":
+        # `add`/`list`/`prune` are always allowed, the documented way to use a primary checkout from an agent session.
+        # `remove` is allowed too unless forced: git itself already refuses to remove a worktree carrying uncommitted changes without --force, so only the forced form reproduces the harm this rule exists to catch.
+        # `-f` is bundled the same way checkout/switch's own force flags already are: git requires `-f` given twice to remove a locked worktree, and `-ff` satisfies that, confirmed live.
+        # Scanned before any `--`, the same cutoff `clean`'s own force scan already applies: confirmed live that `git worktree remove -- -f` reads `-f` as a worktree path argument (erroring since none is literally named that), not a force flag.
+        if not args or args[0] != "remove":
+            return None
+        return any(
+            a in ("-f", "--force") or (a.startswith("-") and not a.startswith("--") and "f" in a)
+            for a in _args_before_double_dash(args[1:])
+        )
+    if sub in ("checkout", "switch"):
+        # `--` unambiguously means every following argument is a pathspec, not a ref: `checkout -- <path>`/`checkout <ref> -- <path>` restores that path from the index unconditionally, with none of the "would overwrite a local modification" safety check a ref switch gets.
+        if "--" in args:
+            return True
+        if _has_checkout_force_flag(args):
+            return True
+        # A bare `-` is itself a real, git-recognized ref (the previous branch), not a flag, even though it starts with the same character every flag does.
+        positional = [a for a in args if a == "-" or not a.startswith("-")]
+        # More than one bare positional with no `--` is the same ambiguous/pathspec-leaning shape (`checkout <ref> <path>`), denied rather than guessed at.
+        # Exactly one is the case that needs disambiguating live, below.
+        if len(positional) != 1:
+            return True
+        # A bare `-` is exempt outright rather than live-checked: it is porcelain shorthand for "the previous branch" that only `checkout`/`switch` themselves understand, and `git rev-parse` (what the live check below runs) does not resolve it as a ref at all, which would otherwise misread this exact safe case as a pathspec.
+        if positional[0] == "-":
+            return False
+        # `checkout <ref>`/`switch <ref>`, with any non-force flag also allowed alongside it (already filtered out of `positional` above), is exempt only when `<ref>` actually resolves as a ref.
+        # Git's own ref-switch path refuses to overwrite a local modification regardless of a non-force flag like --detach/-q, but its pathspec-restore fallback (what git runs when the argument is not a ref, such as `git checkout .`) carries no such check, so denying it is exactly as safe as denying the `--` form above.
+        # This is the one case in this rule that needs a live git call to decide.
+        return not _resolves_as_ref(target_dir, positional[0], ref_resolver)
+    if sub in ("merge", "pull"):
+        # `--ff-only` can never discard a commit or a local change, failing cleanly instead of mutating when a fast-forward is not possible.
+        return "--ff-only" not in args
+    if sub in _ALWAYS_DENY_SUBS:
+        return True
+    if sub == "stash":
+        # `list`/`show` only read the stash; everything else, bare `stash`/`push`/`save` included, mutates the working tree the same way `pop`/`apply`/`drop` obviously do.
+        return not args or args[0] not in ("list", "show")
+    if sub == "clean":
+        # -n/--dry-run always wins over -f/--force, confirmed live: `-nfd` deletes nothing, so denying it would add no safety while breaking a genuinely harmless, read-only preview of what a later, real `clean -fd` would remove.
+        if _has_clean_dry_run_flag(args):
+            return False
+        # Scanned before any `--`: everything from `--` onward is an unconditional pathspec, confirmed live that `git clean -f -- -n` deletes a file literally named `-n` rather than reading as a dry run, and `git clean -- -f` names a file rather than forcing anything with no real `-f` before the `--`.
+        return any(
+            a in _CLEAN_FORCE_FLAGS or (a.startswith("-") and not a.startswith("--") and "f" in a)
+            for a in _args_before_double_dash(args)
+        )
+    return None
+
+
+# Values of GH_WRITE_GUARD_ALLOW_PRIMARY_CHECKOUT read as not granted, the same convention a shell boolean env var commonly uses, so setting it to "0"/"false"/"no" to turn the grant *off* actually does.
+# The bare `environ.get(...)` truthiness this replaces read any non-empty string, that one included, as granted.
+_FALSY_ENV_VALUES = {"", "0", "false", "no", "off"}
+
+
+def _check_primary_checkout_mutation(
+    cmd, cwd, environ=None, primary_checkout_lookup=None, ref_resolver=None, config_lookup=None
+):
+    """Rule 6: deny a mutating git operation run directly against a primary (non-worktree)
+    checkout. `environ` is a test seam, the same shape rules 3 and 5 already take.
+    `primary_checkout_lookup`, when given, stands in for `_is_primary_checkout` so the self-test
+    runs deterministically offline instead of resolving a real checkout on the machine running it.
+    `ref_resolver` is the same kind of seam for `_resolves_as_ref`, and `config_lookup` the same
+    kind of seam for `_config_alias`.
+
+    Fails open (allow) when no git repository resolves at the target at all, matching the
+    footgun rules' precision-over-recall stance rather than rule 4's fail-closed one: the harm
+    here needs a positively-identified primary checkout to fire on, and a hard fail-closed would
+    deny unrelated Bash work in any non-git directory.
+    """
+    environ = environ if environ is not None else os.environ
+    # Read the same way GH_WRITE_GUARD_ALLOW is: from the environment the session was launched with, never a channel the agent itself can set (an inline `VAR=x cmd` prefix or an `export` inside the same call must not satisfy this).
+    grant_value = environ.get("GH_WRITE_GUARD_ALLOW_PRIMARY_CHECKOUT", "").strip().lower()
+    if grant_value not in _FALSY_ENV_VALUES:
+        return "allow", ""
+    # Two independent caches, deliberately never merged into one: an identity-dimension key and a file-dimension key can coincide as the same literal string while needing different test methods (--git-dir=X directly versus ordinary -C X discovery), and a single shared cache keyed only by that string would silently reuse one method's answer for the other's lookup.
+    identity_cache = {}
+    file_cache = {}
+    for c_dirs, work_tree, git_dir, inline_aliases, sub, args, leading_cd in _all_git_invocations(
+        cmd
+    ):
+        resolved = _resolve_target_dir(c_dirs, work_tree, leading_cd, cwd)
+        repo_git_dir = _resolve_repo_dir(git_dir, c_dirs, leading_cd, cwd)
+        # This rule tests two independent dimensions of "does this touch a primary checkout", since git's own --work-tree/--git-dir split lets a single invocation mutate one repository's index/refs/HEAD while writing working-tree files into an entirely different directory.
+        # The identity dimension is the repository whose index, refs, and HEAD actually change: the explicit --git-dir/GIT_DIR= value when one was given (independent of where --work-tree/cwd point, confirmed live to diverge from the mutation target when the two are given together and point at different trees), or, absent one, the repository ordinary ancestor search discovers from the effective cwd (the -C/leading-cd chain) -- never from --work-tree, which only ever redirects where working-tree files are read/written, not where the index, refs, or HEAD live.
+        # The file dimension is `resolved` itself, the same mutation target already used everywhere else (work-tree when given, else the effective cwd): confirmed live that `git --work-tree=<other-checkout> reset --hard HEAD~1`, with no --git-dir override, run from inside a primary checkout with a staged change, moves the *primary's own* branch pointer back a commit and discards the primary's own staged index entry (the identity dimension), even though the command's working-tree-file side effects (the file dimension) land in `<other-checkout>` instead -- either dimension resolving primary is enough to deny, since either is a real, distinct way this invocation can destroy a primary checkout's own state.
+        identity_key = (
+            repo_git_dir if repo_git_dir is not None else _effective_cwd(c_dirs, leading_cd, cwd)
+        )
+        file_key = resolved
+        # Whether this even targets a primary checkout is checked before the subcommand/argv verdict, not after.
+        # The verdict for `checkout`/`switch` can need its own live git call to disambiguate a ref from a pathspec, and skipping straight past that for the ordinary case (a checkout in a worktree, or targeting no git repository at all) avoids paying for it where the answer would be "allow" regardless.
+        if identity_key not in identity_cache:
+            if primary_checkout_lookup is not None:
+                identity_cache[identity_key] = primary_checkout_lookup(identity_key)
+            elif repo_git_dir is not None:
+                identity_cache[identity_key] = _is_primary_checkout(
+                    identity_key, git_dir=repo_git_dir
+                )
+            else:
+                identity_cache[identity_key] = _is_primary_checkout(identity_key)
+        if file_key not in file_cache:
+            file_cache[file_key] = (
+                primary_checkout_lookup(file_key)
+                if primary_checkout_lookup is not None
+                else _is_primary_checkout(file_key)
+            )
+        is_identity_primary = identity_cache[identity_key]
+        is_file_primary = file_cache[file_key]
+        repo_key = identity_key if is_identity_primary else file_key
+        if not is_identity_primary and not is_file_primary:
+            continue
+        verdict = _primary_checkout_verdict(sub, args, resolved, ref_resolver)
+        if verdict is None:
+            # `sub` is not one of this rule's own recognized names -- it may be a git alias (inline `-c alias.<name>=...`, or one persisted in the target checkout's own config) expanding to one of them, which is exactly as effective a way to hide a mutating command as spelling it out directly.
+            sub, args, opaque = _resolve_alias(
+                sub, args, inline_aliases, repo_git_dir or resolved, config_lookup
+            )
+            if opaque:
+                return "deny", (
+                    f"This `git {sub}` resolves to a `!`-prefixed shell alias in a primary "
+                    f"checkout ({repo_key}), which this rule cannot safely inspect. Denied "
+                    "conservatively rather than risking an unreviewed shell command against a "
+                    "checkout a mutating git operation there could destroy another task's "
+                    "uncommitted work in. Create or use a worktree instead (`git worktree add "
+                    "...`), per GOVERNANCE.md 'Repository Boundaries and Write Safety' and the "
+                    "repo-worktree skill. If this primary checkout is genuinely the intended "
+                    "target, ask the maintainer to set GH_WRITE_GUARD_ALLOW_PRIMARY_CHECKOUT "
+                    "before the session starts."
+                )
+            verdict = _primary_checkout_verdict(sub, args, resolved, ref_resolver)
+        if not verdict:
+            continue
+        return "deny", (
+            f"This `git {sub}` runs directly against a primary checkout ({repo_key}), not a "
+            "linked worktree. A mutating git operation there can destroy another task's "
+            "uncommitted work. Create or use a worktree instead (`git worktree add ...`), per "
+            "GOVERNANCE.md 'Repository Boundaries and Write Safety' and the repo-worktree "
+            "skill. If this primary checkout is genuinely the intended target, ask the "
+            "maintainer to set GH_WRITE_GUARD_ALLOW_PRIMARY_CHECKOUT before the session starts."
+        )
+    return "allow", ""
 
 
 def _gh_arg_lists(cmd):
@@ -890,14 +1600,29 @@ def _check_reply_resolve_helper(cmd, environ):
     return "allow", ""
 
 
-def classify(cmd, cwd=None, origin=None, current_branch=None, rules_lookup=None, environ=None):
+def classify(
+    cmd,
+    cwd=None,
+    origin=None,
+    current_branch=None,
+    rules_lookup=None,
+    environ=None,
+    primary_checkout_lookup=None,
+    ref_resolver=None,
+    config_lookup=None,
+):
     """Return (decision, reason). decision is 'allow' or 'deny'.
 
     origin, when given, is a (owner, repo) tuple used instead of resolving from cwd - the self-test
-    passes it for a deterministic, offline run. current_branch, rules_lookup and environ are likewise
-    test seams: current_branch stands in for the git resolution of a bare push, rules_lookup(branch)
-    stands in for the live branch-rules query, and environ stands in for the process environment the
-    maintainer's grant is read from.
+    passes it for a deterministic, offline run. current_branch, rules_lookup, environ,
+    primary_checkout_lookup, ref_resolver and config_lookup are likewise test seams:
+    current_branch stands in for the git resolution of a bare push, rules_lookup(branch) stands in
+    for the live branch-rules query, environ stands in for the process environment the
+    maintainer's grant is read from, primary_checkout_lookup(dir) stands in for resolving a real
+    checkout's primary-vs-worktree status on the machine running the self-test, ref_resolver(dir,
+    ref) stands in for the live check that disambiguates a bare `checkout`/`switch` argument as a
+    ref rather than a pathspec, and config_lookup(dir, name) stands in for the live git-config
+    read that resolves a persisted (non-inline) alias.
     """
     # Fold shell line-continuations so a multi-line Bash invocation, such as `gh pr merge 5 \<newline> --admin`, parses as one command.
     # Only backslash-newline is joined, so a real newline between commands still separates them.
@@ -913,6 +1638,12 @@ def classify(cmd, cwd=None, origin=None, current_branch=None, rules_lookup=None,
         dec, reason = _check_push_bypass(cmd, cwd, origin, current_branch, rules_lookup)
         if dec == "deny":
             return dec, reason
+    # Rule 6 covers a mutating git operation against a primary checkout, also not a GitHub write, so it is checked here too, before the gh-write gate below would otherwise skip past it.
+    dec, reason = _check_primary_checkout_mutation(
+        cmd, cwd, environ, primary_checkout_lookup, ref_resolver, config_lookup
+    )
+    if dec == "deny":
+        return dec, reason
 
     if not _is_gh_write(cmd):
         return "allow", ""
@@ -1803,12 +2534,633 @@ _GIT_CASES = [
     ),
 ]
 
+# (command, cwd, {dir: is_primary_or_None}, {(dir, ref): resolves_as_ref} or None, expected_decision, label) -- is_primary is True (a primary checkout), False (a linked worktree), or None (unresolved, for example when no repository exists or the git query itself fails, such as on a pre-2.31 git lacking `rev-parse --path-format`).
+# A None ref-map means every ref-check in the case resolves True (an ordinary branch name), the common case; only the pathspec-disambiguation cases below need a real map.
+_PRIMARY_CHECKOUT_CASES = [
+    (
+        "git reset --hard origin/main",
+        "/primary",
+        {"/primary": True},
+        None,
+        "deny",
+        "a git reset --hard in a primary checkout is exactly the GOVERNANCE.md-named harm",
+    ),
+    (
+        "git reset --hard origin/main",
+        "/worktree",
+        {"/worktree": False},
+        None,
+        "allow",
+        "the same command in a linked worktree is allowed",
+    ),
+    (
+        "git checkout main",
+        "/primary",
+        {"/primary": True},
+        {("/primary", "main"): True},
+        "allow",
+        (
+            "a flagless checkout of a real ref is exempt even in a primary checkout, an accepted "
+            "scope boundary: the #1073 incident's own literal commands (checkout, then --ff-only "
+            "pull) are this exact shape, and the concurrent-access hazard they still carried is "
+            "the prose rule's job, not this mechanically decidable one's"
+        ),
+    ),
+    (
+        "git checkout .",
+        "/primary",
+        {"/primary": True},
+        {("/primary", "."): False},
+        "deny",
+        (
+            "a single bare argument that does not resolve as a ref falls back to git's own "
+            "pathspec-restore path, which carries none of the ref-switch safety check the "
+            "flagless exemption relies on"
+        ),
+    ),
+    (
+        "git checkout -- .",
+        "/primary",
+        {"/primary": True},
+        None,
+        "deny",
+        "-- unambiguously means every following argument is a pathspec, denied with no ref check",
+    ),
+    (
+        "git checkout HEAD -- src/",
+        "/primary",
+        {"/primary": True},
+        None,
+        "deny",
+        "a ref plus -- pathspec is still the unconditional pathspec-restore form",
+    ),
+    (
+        "git checkout main src/",
+        "/primary",
+        {"/primary": True},
+        None,
+        "deny",
+        "two positional arguments with no -- is the same ambiguous/pathspec-leaning shape, denied rather than guessed at",
+    ),
+    (
+        "git switch feature/x",
+        "/primary",
+        {"/primary": True},
+        {("/primary", "feature/x"): True},
+        "allow",
+        "switch gets the same ref-verified flagless exemption as checkout",
+    ),
+    (
+        "git switch -C other",
+        "/primary",
+        {"/primary": True},
+        None,
+        "deny",
+        (
+            "switch -C force-resets an existing branch to the current HEAD with no dirty-tree "
+            "warning at all, empirically confirmed; -c/-C are switch's own create/force-create "
+            "spellings, distinct from checkout's -b/-B, and neither subcommand has any other flag "
+            "using those letters"
+        ),
+    ),
+    (
+        "git switch -c newbranch",
+        "/primary",
+        {"/primary": True},
+        None,
+        "deny",
+        "switch -c creates a new branch, the same branch-creating class as checkout -b",
+    ),
+    (
+        "git pull",
+        "/primary",
+        {"/primary": True},
+        None,
+        "deny",
+        "a bare pull in a primary checkout is denied",
+    ),
+    (
+        "git pull --ff-only",
+        "/primary",
+        {"/primary": True},
+        None,
+        "allow",
+        "--ff-only can never discard anything, exempt even in a primary checkout",
+    ),
+    (
+        "git merge --ff-only origin/develop",
+        "/primary",
+        {"/primary": True},
+        None,
+        "allow",
+        "the documented base-clone cleanup step (repo-worktree 'Listing and Cleanup')",
+    ),
+    (
+        "git worktree add ../x origin/develop",
+        "/primary",
+        {"/primary": True},
+        None,
+        "allow",
+        "creating a worktree from the primary checkout is the documented, intended use",
+    ),
+    (
+        "git fetch origin develop",
+        "/primary",
+        {"/primary": True},
+        None,
+        "allow",
+        "a read is never denied, even in a primary checkout",
+    ),
+    (
+        "git status",
+        "/primary",
+        {"/primary": True},
+        None,
+        "allow",
+        "status is not even a subcommand this rule inspects",
+    ),
+    (
+        "git commit -m x",
+        "/primary",
+        {"/primary": True},
+        None,
+        "deny",
+        "commit has no flag-based exemption, denied unconditionally in a primary checkout",
+    ),
+    (
+        "git add -A",
+        "/primary",
+        {"/primary": True},
+        None,
+        "deny",
+        "a blanket add in a primary checkout is exactly the #1073 incident class",
+    ),
+    (
+        "git rm -rf .",
+        "/primary",
+        {"/primary": True},
+        None,
+        "deny",
+        "git rm deletes working-tree files exactly as unconditionally as add/commit mutate them",
+    ),
+    (
+        "git mv a.txt b.txt",
+        "/primary",
+        {"/primary": True},
+        None,
+        "deny",
+        "git mv renames a tracked file and stages the change exactly as unconditionally as rm deletes one",
+    ),
+    (
+        "git apply patch.diff",
+        "/primary",
+        {"/primary": True},
+        None,
+        "deny",
+        "git apply mutates the working tree",
+    ),
+    (
+        "git am 0001-fix.patch",
+        "/primary",
+        {"/primary": True},
+        None,
+        "deny",
+        "git am mutates the working tree",
+    ),
+    (
+        "git push origin feature/x",
+        "/primary",
+        {"/primary": True},
+        None,
+        "deny",
+        (
+            "a push does not mutate the local working tree the way the rest of this rule's ops "
+            "do, but no documented fleet workflow ever pushes from a primary checkout, so it is "
+            "denied unconditionally there too, independent of rule 4's own branch-rule checks"
+        ),
+    ),
+    (
+        "git push origin feature/x",
+        "/worktree",
+        {"/worktree": False},
+        None,
+        "allow",
+        "the same push from a linked worktree, where every documented push actually happens, is allowed",
+    ),
+    (
+        "git stash",
+        "/primary",
+        {"/primary": True},
+        None,
+        "deny",
+        "bare stash mutates the working tree exactly as push/pop/apply/drop do",
+    ),
+    (
+        "git stash push -m wip",
+        "/primary",
+        {"/primary": True},
+        None,
+        "deny",
+        "stash push is the same mutation as bare stash, spelled out",
+    ),
+    (
+        "git stash list",
+        "/primary",
+        {"/primary": True},
+        None,
+        "allow",
+        "stash list only reads the stash, denying it would add no safety",
+    ),
+    (
+        "git clean -fd",
+        "/primary",
+        {"/primary": True},
+        None,
+        "deny",
+        "an ordinary forced clean deletes untracked files/directories, the harm this rule guards against",
+    ),
+    (
+        "git clean -nfd",
+        "/primary",
+        {"/primary": True},
+        None,
+        "allow",
+        (
+            "-n/--dry-run always wins over -f/--force, confirmed live regardless of order: "
+            "-nfd deletes nothing, only previews what a later -fd would remove, so denying it "
+            "would add no safety while breaking a genuinely harmless preview"
+        ),
+    ),
+    (
+        "git clean --dry-run --force",
+        "/primary",
+        {"/primary": True},
+        None,
+        "allow",
+        "the long-flag spelling of the same dry-run-wins-over-force exemption",
+    ),
+    (
+        "git clean -f -- -n",
+        "/primary",
+        {"/primary": True},
+        None,
+        "deny",
+        (
+            "-n after -- is an unconditional pathspec (a file literally named -n), not the "
+            "--dry-run flag, confirmed live: this deletes that file despite the -n-shaped token, "
+            "so scanning for a dry-run flag anywhere in args rather than only before -- would "
+            "have wrongly exempted a real, forced deletion"
+        ),
+    ),
+    (
+        "git clean -- -f",
+        "/primary",
+        {"/primary": True},
+        None,
+        "allow",
+        (
+            "-f after -- is a pathspec (a file literally named -f), not a real force flag, so "
+            "with no actual -f/--force before --, git itself refuses to run at all"
+        ),
+    ),
+    (
+        "git checkout -b feature/x",
+        "/primary",
+        {"/primary": True},
+        None,
+        "deny",
+        "checkout -b is branch-creating, not the exempt ref-switch form",
+    ),
+    (
+        "git checkout --detach main",
+        "/primary",
+        {"/primary": True},
+        {("/primary", "main"): True},
+        "allow",
+        (
+            "a non-force flag alongside a real ref stays exempt too: --detach changes nothing "
+            "about git's own overwrite-refusal on a dirty tracked file, empirically confirmed, so "
+            "the exemption is a real-ref-with-no-force-flag test, not a strictly zero-flags one"
+        ),
+    ),
+    (
+        "git checkout -qf other",
+        "/primary",
+        {"/primary": True},
+        {("/primary", "other"): True},
+        "deny",
+        (
+            "-qf bundles -q (quiet) and -f (force) into one short-option cluster; an exact-token "
+            "check never sees a bare -f to match, but real git still forces the checkout through, "
+            "empirically confirmed to discard a dirty tracked file"
+        ),
+    ),
+    (
+        "git checkout -Bnewbranch",
+        "/primary",
+        {"/primary": True},
+        None,
+        "deny",
+        (
+            "-Bnewbranch attaches -B's mandatory branch-name value with no space, the same "
+            "force-creating operation as -B newbranch as two tokens, empirically confirmed to work"
+        ),
+    ),
+    (
+        "git checkout -qt main",
+        "/primary",
+        {"/primary": True},
+        {("/primary", "main"): True},
+        "allow",
+        "a bundled cluster with no b/B/f character (-q quiet, -t track) is not a force flag",
+    ),
+    (
+        "git worktree remove --force ../x",
+        "/primary",
+        {"/primary": True},
+        None,
+        "deny",
+        "a forced worktree remove reproduces the harm this rule guards against",
+    ),
+    (
+        "git worktree remove -ff ../x",
+        "/primary",
+        {"/primary": True},
+        None,
+        "deny",
+        (
+            "-ff bundles force twice, exactly the -f -f git itself requires to remove a locked "
+            "worktree, confirmed live to forcibly remove one with uncommitted content, which an "
+            "exact-token check alone misses since remove has no other short option -f could "
+            "combine with"
+        ),
+    ),
+    (
+        "git worktree remove -- -f",
+        "/primary",
+        {"/primary": True},
+        None,
+        "allow",
+        (
+            "-f after -- is a worktree path argument, not a force flag, confirmed live: git "
+            "reads it as a literal worktree name (erroring since none is named that) rather than "
+            "forcing anything, the same -- cutoff clean's own force scan already applies"
+        ),
+    ),
+    (
+        "git worktree remove ../x",
+        "/primary",
+        {"/primary": True},
+        None,
+        "allow",
+        "an unforced worktree remove is exempt: git itself refuses one carrying local changes",
+    ),
+    (
+        "git -C /worktree reset --hard origin/main",
+        "/primary",
+        {"/primary": True, "/worktree": False},
+        None,
+        "allow",
+        "-C overrides cwd: a worktree named explicitly is allowed even though cwd is the primary",
+    ),
+    (
+        "git -C /primary reset --hard origin/main",
+        "/worktree",
+        {"/primary": True, "/worktree": False},
+        None,
+        "deny",
+        "-C overrides cwd the other way: the primary named explicitly is denied from a worktree",
+    ),
+    (
+        "git --work-tree /primary reset --hard",
+        "/worktree",
+        {"/primary": True, "/worktree": False},
+        None,
+        "deny",
+        "--work-tree redirects the mutation the same way -C does, and is read the same way",
+    ),
+    (
+        "GIT_WORK_TREE=/primary GIT_DIR=/primary/.git git reset --hard",
+        "/worktree",
+        {"/primary/.git": True, "/worktree": False},
+        None,
+        "deny",
+        (
+            "a GIT_WORK_TREE=/GIT_DIR= prefix in the command's own text redirects the "
+            "invocation, unlike a real env var the hook process never sees; the primary-checkout "
+            "test itself keys on the resolved GIT_DIR= value, since that is what --git-dir/GIT_DIR "
+            "name for repository identity"
+        ),
+    ),
+    (
+        "export GIT_DIR=/primary/.git GIT_WORK_TREE=/primary && git reset --hard",
+        "/somewhere-else",
+        {"/primary/.git": True, "/somewhere-else": False},
+        None,
+        "deny",
+        (
+            "a leading export makes the assignment persist into the following command exactly "
+            "as a real shell would, confirmed live to discard a tracked local modification with "
+            "no redirect at all on the git invocation itself -- a shape an inline VAR=x git ... "
+            "prefix scan alone cannot see, since export and the git invocation are separate "
+            "commands joined by &&, not one command with a prefix"
+        ),
+    ),
+    (
+        "git status && export GIT_DIR=/primary/.git && git reset --hard",
+        "/somewhere-else",
+        {"/primary/.git": True, "/somewhere-else": False},
+        None,
+        "allow",
+        (
+            "only a leading export is read, matching the same accepted-gap scope leading cd "
+            "already has: export here is not the first token of the command (git status is), so "
+            "it has no effect under this rule's narrow scope even though a real shell would still "
+            "apply it to the following reset --hard"
+        ),
+    ),
+    (
+        "git --git-dir=/primary/.git --work-tree=/primary -C /worktree reset --hard",
+        "/somewhere-else",
+        {"/primary/.git": True, "/worktree": False},
+        None,
+        "deny",
+        (
+            "--work-tree wins over -C regardless of argv order for the mutation target message, "
+            "and the primary-checkout test itself keys on --git-dir's own resolved value: real "
+            "git mutates /primary here, not /worktree, even though -C is the option nearer the "
+            "subcommand"
+        ),
+    ),
+    (
+        "git -C /a -C /worktree reset --hard origin/main",
+        "/primary",
+        {"/a": True, "/worktree": False},
+        None,
+        "allow",
+        "multiple -C options compose sequentially, the last (absolute) one replacing the running directory outright, matching real git's own repeated -C semantics",
+    ),
+    (
+        "git -C /repos -C sub/primary reset --hard origin/main",
+        "/somewhere-else",
+        {"/repos/sub/primary": True, "/somewhere-else": False},
+        None,
+        "deny",
+        "a relative -C after an earlier -C resolves against that earlier -C's own (absolute) result, not the session cwd",
+    ),
+    (
+        "git --git-dir=/primary/.git reset --hard",
+        "/worktree",
+        {"/primary/.git": True, "/worktree": False},
+        None,
+        "deny",
+        (
+            "--git-dir alone, with no --work-tree, never relocates the mutation-target message "
+            "(git's own fallback keeps the working tree at the effective cwd, here the linked "
+            "worktree), but the primary-checkout test itself always keys on an explicit --git-dir "
+            "when one is given, confirmed live: it names the repository actually mutated "
+            "regardless of where the working tree files live"
+        ),
+    ),
+    (
+        "cd /primary && git reset --hard origin/main",
+        "/somewhere-else",
+        {"/primary": True, "/somewhere-else": False},
+        None,
+        "deny",
+        "a leading cd resolves the target when the hook's own cwd points elsewhere entirely",
+    ),
+    (
+        "git status && cd /primary && git reset --hard origin/main",
+        "/somewhere-else",
+        {"/primary": True, "/somewhere-else": False},
+        None,
+        "allow",
+        "only a leading cd is read; one appearing after the first command is the accepted gap",
+    ),
+    (
+        "bash -c 'cd /primary && git reset --hard origin/main'",
+        "/somewhere-else",
+        {"/primary": True, "/somewhere-else": False},
+        None,
+        "deny",
+        "a bash -c wrapper is expanded the same way the GitHub-write rules already expand one, so it does not hide the mutation from this rule either",
+    ),
+    (
+        "git fetch origin   # refresh the base\ngit reset --hard origin/main",
+        "/primary",
+        {"/primary": True},
+        None,
+        "deny",
+        (
+            "a mid-line # is not a comment starter left uncleared on the tokenizer's own shlex "
+            "instance, confirmed live to silently swallow everything through the next newline "
+            "and fuse the two lines into one `git fetch` invocation carrying the whole `reset "
+            "--hard` as extra argv, hiding it from every tokenizer-based rule; a genuine # is "
+            "now read as an ordinary character rather than a comment, so the newline separator "
+            "and the second git invocation both survive"
+        ),
+    ),
+    (
+        "echo a#b && git -C /primary reset --hard origin/main",
+        "/somewhere-else",
+        {"/primary": True, "/somewhere-else": False},
+        None,
+        "deny",
+        "a literal mid-word # (which real bash never treats as a comment starter either) no longer truncates the rest of the command and hides the mutation after it",
+    ),
+    (
+        "git -C ~/repos/primary reset --hard origin/main",
+        "/somewhere-else",
+        {os.path.expanduser("~/repos/primary"): True, "/somewhere-else": False},
+        None,
+        "deny",
+        "a ~-prefixed target expands the same way a shell would, since ~/repos/<Repo> is the fleet's own documented primary-checkout path convention",
+    ),
+    (
+        "git -C /opt/$HOMEPATH/primary reset --hard origin/main",
+        "/somewhere-else",
+        {"/opt/$HOMEPATH/primary": True, "/somewhere-else": False},
+        None,
+        "deny",
+        "$HOMEPATH is left unexpanded, matching this rule's own documented fail-open stance for a $VAR it cannot resolve, not misread as a prefix match on $HOME",
+    ),
+    (
+        "git -C ../primary reset --hard origin/main",
+        "/repos/worktree-task",
+        {"/repos/primary": True, "/repos/worktree-task": False},
+        None,
+        "deny",
+        "a relative -C (../primary) resolves against the session's own cwd (/repos/worktree-task -> /repos/primary), not wherever the hook process's own cwd happens to be",
+    ),
+    (
+        "cd ../primary && git reset --hard origin/main",
+        "/repos/worktree-task",
+        {"/repos/primary": True, "/repos/worktree-task": False},
+        None,
+        "deny",
+        (
+            "a relative leading cd (../primary) is joined against the session's own cwd exactly "
+            "like a relative -C is, not left unjoined and resolved against wherever the hook "
+            "process's own OS-level cwd happens to be"
+        ),
+    ),
+    (
+        "git reset --hard origin/main",
+        "/primary/.git",
+        {"/primary/.git": True},
+        None,
+        "deny",
+        "cwd inside .git itself still resolves as the primary checkout",
+    ),
+    (
+        "git reset --hard origin/main",
+        "/not-a-repo",
+        {"/not-a-repo": None},
+        None,
+        "allow",
+        "an unresolvable target fails open, precision over recall like every rule but 4",
+    ),
+    (
+        "git --git-dir=/primary/.git --work-tree=/safe commit --allow-empty -m probe",
+        "/safe",
+        {"/primary/.git": True, "/safe": None},
+        None,
+        "deny",
+        (
+            "the CodeRabbit-reported gap: --work-tree names a directory that resolves as no git "
+            "repository at all, but real git still mutates the repository --git-dir names -- "
+            "confirmed live with the exact reproduction script CodeRabbit supplied -- so keying "
+            "the primary-checkout test on --git-dir rather than the resolved --work-tree value is "
+            "what catches this instead of failing open on the unresolvable work-tree"
+        ),
+    ),
+    (
+        "git --work-tree=/other-checkout reset --hard HEAD",
+        "/primary",
+        {"/primary": True, "/other-checkout": False},
+        None,
+        "deny",
+        (
+            "the mirror gap a local-strict-review pass found: --work-tree given with no "
+            "--git-dir resolves as a linked worktree (or unresolvable), but real git still "
+            "discovers the repository from the effective cwd with no --git-dir override, "
+            "confirmed live to move the primary's own branch pointer back a commit and discard "
+            "its own staged index entry even though the working-tree-file side effects land in "
+            "the other checkout -- the identity dimension (effective cwd) catches this even "
+            "though the file dimension (the resolved --work-tree value) alone would not"
+        ),
+    ),
+]
+
 
 def _selftest():
     # A deterministic offline run, pinning origin to ptr727/PlexCleaner, the incident repo, so the cross-origin case resolves without touching a real checkout.
     # The gh-write cases inject empty rules and a feature current-branch so no case reaches the live branch-rules query.
     origin = ("ptr727", "plexcleaner")
     ok = True
+    # Every existing loop below pins primary_checkout_lookup to a constant False (never a primary checkout), so rule 6 stays inert for every case that predates it.
+    # Without this, a mutating subcommand incidental to a case testing a different rule (git commit, in a few of them) would fall through to the real _is_primary_checkout and resolve against wherever the self-test process actually runs, which is a primary checkout in CI, silently changing what those cases test.
     for cmd, want, label in _CASES:
         got, _ = classify(
             cmd,
@@ -1816,6 +3168,7 @@ def _selftest():
             current_branch="feature/x",
             rules_lookup=lambda br: set(),
             environ={},
+            primary_checkout_lookup=lambda d: False,
         )
         mark = "ok  " if got == want else "FAIL"
         if got != want:
@@ -1828,6 +3181,7 @@ def _selftest():
             current_branch="feature/x",
             rules_lookup=lambda br: set(),
             environ=env,
+            primary_checkout_lookup=lambda d: False,
         )
         mark = "ok  " if got == want else "FAIL"
         if got != want:
@@ -1840,6 +3194,7 @@ def _selftest():
             current_branch="feature/x",
             rules_lookup=lambda br: set(),
             environ=env,
+            primary_checkout_lookup=lambda d: False,
         )
         mark = "ok  " if got == want else "FAIL"
         if got != want:
@@ -1852,6 +3207,149 @@ def _selftest():
             current_branch=cur,
             rules_lookup=lambda br, _m=rmap: _m.get(br),
             environ={},
+            primary_checkout_lookup=lambda d: False,
+        )
+        mark = "ok  " if got == want else "FAIL"
+        if got != want:
+            ok = False
+        print(f"  {mark} [{got:5}] want={want:5} {label}")
+    for cmd, cwd, pmap, refmap, want, label in _PRIMARY_CHECKOUT_CASES:
+        # A None refmap means every ref-check resolves True (an ordinary branch name).
+        # A real map defaults a pair it does not name to True too, since only the pathspec-disambiguation cases care about a False answer.
+        if refmap is None:
+            ref_resolver = lambda _d, _r: True
+        else:
+            ref_resolver = lambda d, r, _m=refmap: _m.get((d, r), True)
+        got, _ = classify(
+            cmd,
+            cwd=cwd,
+            origin=origin,
+            current_branch="feature/x",
+            rules_lookup=lambda br: set(),
+            environ={},
+            primary_checkout_lookup=lambda d, _m=pmap: _m.get(d),
+            ref_resolver=ref_resolver,
+            # No persisted alias resolves for any of these cases; only the dedicated alias table below exercises `_config_alias`.
+            config_lookup=lambda _d, _n: None,
+        )
+        mark = "ok  " if got == want else "FAIL"
+        if got != want:
+            ok = False
+        print(f"  {mark} [{got:5}] want={want:5} {label}")
+    # Git-alias resolution (requirement 6, finding 11): (cmd, cwd, pmap, config_map, want, label).
+    # `config_map` stands in for the target checkout's own persisted `alias.<name>` config; an inline `-c alias.<name>=...` on the command itself needs no seam, it is read straight from the command text.
+    for cmd, cwd, pmap, config_map, want, label in (
+        (
+            "git -c alias.wipe='reset --hard' wipe",
+            "/primary",
+            {"/primary": True},
+            {},
+            "deny",
+            "an inline alias expanding to reset --hard is exactly as denied as spelling reset --hard out directly",
+        ),
+        (
+            "git wipe",
+            "/primary",
+            {"/primary": True},
+            {"wipe": "reset --hard"},
+            "deny",
+            "a persisted (non-inline) alias in the target checkout's own config resolves the same way",
+        ),
+        (
+            "git wipe",
+            "/worktree",
+            {"/worktree": False},
+            {"wipe": "reset --hard"},
+            "allow",
+            "the same alias in a linked worktree is allowed, rule 6 stays inert there regardless of alias resolution",
+        ),
+        (
+            "git -c alias.wipe='!rm -rf .' wipe",
+            "/primary",
+            {"/primary": True},
+            {},
+            "deny",
+            "a !-prefixed shell alias is opaque and denied conservatively rather than executed or allowed through",
+        ),
+        (
+            "git peek",
+            "/primary",
+            {"/primary": True},
+            {"peek": "status"},
+            "allow",
+            "an alias expanding to a read-only builtin is allowed, exactly as the builtin itself would be",
+        ),
+        (
+            "git wipe",
+            "/primary",
+            {"/primary": True},
+            {"wipe": "alsowipe", "alsowipe": "reset --hard"},
+            "deny",
+            "a chained alias (wipe -> alsowipe -> reset --hard) is followed through more than one hop",
+        ),
+        (
+            "git nonexistent-alias",
+            "/primary",
+            {"/primary": True},
+            {},
+            "allow",
+            "a subcommand this rule does not recognize and that resolves to no alias at all falls through to allow, matching the rule's stance for any other unrecognized subcommand",
+        ),
+        (
+            'git -c alias.wipe="reset --hard \'unterminated" wipe',
+            "/primary",
+            {"/primary": True},
+            {},
+            "allow",
+            (
+                "a malformed alias expansion (unbalanced quotes) fails to parse as shell words; "
+                "this is treated as unresolvable rather than raising ValueError and crashing the "
+                "hook on a config value neither the agent nor this rule controls"
+            ),
+        ),
+    ):
+        got, _ = classify(
+            cmd,
+            cwd=cwd,
+            origin=origin,
+            current_branch="feature/x",
+            rules_lookup=lambda br: set(),
+            environ={},
+            primary_checkout_lookup=lambda d, _m=pmap: _m.get(d),
+            config_lookup=lambda _d, n, _m=config_map: _m.get(n),
+        )
+        mark = "ok  " if got == want else "FAIL"
+        if got != want:
+            ok = False
+        print(f"  {mark} [{got:5}] want={want:5} {label}")
+    # The GH_WRITE_GUARD_ALLOW_PRIMARY_CHECKOUT escape hatch, checked once here rather than folded into the table above, since these are the cases needing a non-empty environ alongside a primary_checkout_lookup.
+    # "git reset --hard", not a flagless checkout, since checkout is exempt anyway and would pass identically with the grant check deleted, the exact vacuous-test gap a review caught here.
+    for env, want, label in (
+        (
+            {"GH_WRITE_GUARD_ALLOW_PRIMARY_CHECKOUT": "1"},
+            "allow",
+            "the escape hatch allows even a denied shape when granted",
+        ),
+        (
+            {"GH_WRITE_GUARD_ALLOW_PRIMARY_CHECKOUT": "0"},
+            "deny",
+            "a value of 0 reads as not granted, not as any-non-empty-string-is-truthy",
+        ),
+        (
+            {"GH_WRITE_GUARD_ALLOW_PRIMARY_CHECKOUT": "false"},
+            "deny",
+            "a value of false reads as not granted either",
+        ),
+        ({}, "deny", "no grant at all is the ordinary denied case"),
+    ):
+        got, _ = classify(
+            "git reset --hard",
+            cwd="/primary",
+            origin=origin,
+            current_branch="feature/x",
+            rules_lookup=lambda br: set(),
+            environ=env,
+            primary_checkout_lookup=lambda d: {"/primary": True}.get(d),
         )
         mark = "ok  " if got == want else "FAIL"
         if got != want:
@@ -1866,12 +3364,19 @@ def _main():
     try:
         data = json.load(sys.stdin)
     # The hook must never crash on input it does not recognize.
-    except Exception:  # noqa: BLE001
+    except Exception:  # noqa: BLE001 - malformed JSON on stdin is exactly the "not our event shape" case this guards, not a defect to propagate as a hook-crashing traceback.
         sys.exit(0)  # not our event shape - do not interfere
-    if data.get("tool_name") != "Bash":
+    # Valid JSON that is not a dict (a bare string, number, or list), or a `tool_input`/`command` value of the wrong type, is the same "not our event shape" case the JSON-parse guard above already handles, confirmed to otherwise raise AttributeError/TypeError uncaught and exit non-zero rather than the documented deny/allow shape.
+    # A non-zero exit is a hook error, not a decision, and a PreToolUse hook erroring lets the tool call proceed exactly as if this hook had allowed it, so failing open here on a malformed shape matches what an uncaught crash would do anyway, deliberately rather than by accident.
+    if not isinstance(data, dict) or data.get("tool_name") != "Bash":
         sys.exit(0)
-    cmd = (data.get("tool_input") or {}).get("command", "")
+    tool_input = data.get("tool_input")
+    cmd = tool_input.get("command", "") if isinstance(tool_input, dict) else ""
+    if not isinstance(cmd, str):
+        cmd = ""
     cwd = data.get("cwd") or os.getcwd()
+    if not isinstance(cwd, str):
+        cwd = os.getcwd()
     decision, reason = classify(cmd, cwd)
     if decision == "deny":
         # Documented PreToolUse deny contract (confirm field names against current docs before shipping).

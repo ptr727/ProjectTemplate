@@ -236,13 +236,13 @@ The tool validates the registry identity, target origin, feature-branch worktree
 
 ## `skills_install.py`
 
-Installs the fleet's Skills for the current machine, cross-platform and idempotent, mirroring [`host-setup/agent-safety/install.py`][agent-safety-install]'s shape: `skills_install.sh` and `skills_install.ps1` are thin wrappers that locate a Python 3 interpreter and hand off, so every OS runs one tested code path. Two independent things happen on a run, since the three tools this fleet targets discover skills differently: `.agents/skills/` is materialized (not symlinked) to `$HOME/.agents/skills/`, so Codex and opencode's global scan covers every repo on the machine rather than only the one that happens to be open, and this repo's marketplace is registered with the `claude` CLI (`claude plugin marketplace add`, `claude plugin install`) so Claude Code loads the same content the other two read directly. The marketplace/plugin registration goes through the `claude` CLI's own commands rather than writing its internal `known_marketplaces.json` by hand, because that file's shape is the CLI's state, not a documented contract, and a hand-written copy risks drifting from what the CLI expects on its next release.
+Installs the fleet's Skills for the current machine, cross-platform and idempotent, mirroring [`host-setup/agent-safety/claude/install.py`][agent-safety-install]'s shape: `skills_install.sh` and `skills_install.ps1` are thin wrappers that locate a Python 3 interpreter and hand off, so every OS runs one tested code path. Two independent things happen on a run, since the three tools this fleet targets discover skills differently: `.agents/skills/` is materialized (not symlinked) to `$HOME/.agents/skills/`, so Codex and opencode's global scan covers every repo on the machine rather than only the one that happens to be open, and this repo's marketplace is registered with the `claude` CLI (`claude plugin marketplace add`, `claude plugin install`) so Claude Code loads the same content the other two read directly. The marketplace/plugin registration goes through the `claude` CLI's own commands rather than writing its internal `known_marketplaces.json` by hand, because that file's shape is the CLI's state, not a documented contract, and a hand-written copy risks drifting from what the CLI expects on its next release.
 
 `--report` reads the stamp a prior run wrote (`$HOME/.agents/skills-install-stamp.json`, naming the hub commit installed) against the current checkout and says whether the machine is current, without installing anything. A repository whose `AGENTS.md` keeps needing a rule restated is usually this: the machine was never installed, or was installed from an older commit.
 
 <!-- Internal -->
 
-[agent-safety-install]: ../host-setup/agent-safety/install.py
+[agent-safety-install]: ../host-setup/agent-safety/claude/install.py
 [agents-skills]: ../.agents/skills/README.md
 [audit]: ../spec/audit.py
 [copilot-instructions]: ../.github/copilot-instructions.md
