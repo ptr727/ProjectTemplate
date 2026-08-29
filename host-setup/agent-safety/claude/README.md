@@ -103,7 +103,13 @@ Withdraw a grant by deleting the `env` entry and restarting. Nothing expires it,
 
 ## Manual settings.json Shape (for Reference)
 
-The installer writes this. It is here so you can inspect or hand-place it:
+The installer writes this. It is here so you can inspect it, not as a template to hand-place: the
+literal `"python3"` shown for `command` is what the installer writes when a `python3` launcher is
+available, but it substitutes `sys.executable`'s own absolute path instead when it is not (a
+Windows host with no `python3` shim, most commonly), while `permissions.allow`'s own
+`Bash(python3 scripts/pr_review.py:*)` rule always names `python3` literally regardless, since it
+matches the command Claude Code itself runs `pr_review.py` under, not the hook's own launcher.
+Run the installer rather than hand-copying this block on a host where the two might differ.
 
 ```json
 {
