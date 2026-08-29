@@ -760,6 +760,18 @@ _CLEAN_FORCE_FLAGS = {"-f", "--force"}
 _CLEAN_DRY_RUN_FLAGS = {"-n", "--dry-run"}
 
 
+def _args_before_double_dash(args):
+    """`args` truncated at the first bare `--`, or `args` unchanged when there is none -- every
+    argument from `--` onward is an unconditional pathspec to git, never a flag, confirmed live:
+    `git clean -f -- -n` deletes a file literally named `-n` rather than behaving as a dry run,
+    and `git clean -- -f` (with no real `-f` before the `--`) names a file rather than forcing
+    anything. Flag detection must never scan past this boundary.
+    """
+    if "--" in args:
+        return args[: args.index("--")]
+    return args
+
+
 def _has_clean_dry_run_flag(args):
     """Whether `args` carries `-n`/`--dry-run`, bundled into a short-option cluster (`-nfd`) or
     not, the same bundled-cluster scan `_has_checkout_force_flag` already gives checkout/switch's
@@ -767,7 +779,7 @@ def _has_clean_dry_run_flag(args):
     otherwise have: `-nfd` denies the exact same harmless dry run `-n` alone does not, purely
     because it also carries an `f` character the force-flag scan below reads on its own.
     """
-    for a in args:
+    for a in _args_before_double_dash(args):
         if a in _CLEAN_DRY_RUN_FLAGS:
             return True
         if a.startswith("--"):
@@ -943,9 +955,10 @@ def _primary_checkout_verdict(sub, args, target_dir=None, ref_resolver=None):
         # -n/--dry-run always wins over -f/--force, confirmed live: `-nfd` deletes nothing, so denying it would add no safety while breaking a genuinely harmless, read-only preview of what a later, real `clean -fd` would remove.
         if _has_clean_dry_run_flag(args):
             return False
+        # Scanned before any `--`: everything from `--` onward is an unconditional pathspec, confirmed live that `git clean -f -- -n` deletes a file literally named `-n` rather than reading as a dry run, and `git clean -- -f` names a file rather than forcing anything with no real `-f` before the `--`.
         return any(
             a in _CLEAN_FORCE_FLAGS or (a.startswith("-") and not a.startswith("--") and "f" in a)
-            for a in args
+            for a in _args_before_double_dash(args)
         )
     return None
 
@@ -2700,6 +2713,30 @@ _PRIMARY_CHECKOUT_CASES = [
         None,
         "allow",
         "the long-flag spelling of the same dry-run-wins-over-force exemption",
+    ),
+    (
+        "git clean -f -- -n",
+        "/primary",
+        {"/primary": True},
+        None,
+        "deny",
+        (
+            "-n after -- is an unconditional pathspec (a file literally named -n), not the "
+            "--dry-run flag, confirmed live: this deletes that file despite the -n-shaped token, "
+            "so scanning for a dry-run flag anywhere in args rather than only before -- would "
+            "have wrongly exempted a real, forced deletion"
+        ),
+    ),
+    (
+        "git clean -- -f",
+        "/primary",
+        {"/primary": True},
+        None,
+        "allow",
+        (
+            "-f after -- is a pathspec (a file literally named -f), not a real force flag, so "
+            "with no actual -f/--force before --, git itself refuses to run at all"
+        ),
     ),
     (
         "git checkout -b feature/x",
