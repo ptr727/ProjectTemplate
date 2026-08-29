@@ -117,7 +117,8 @@ hub_read_lock_release() {
 # `flock` changes an already-held fd's own lock type in place with no such deadlock, since the kernel recognizes it as the same holder taking a different mode, not a second competing one.
 # Downgraded back to shared once the fetch itself is done, restoring reader concurrency for the rest of the caller's own read-and-use span, rather than holding exclusive (which would still be correct, only more conservative than necessary).
 fetch_hub() {
-    # --dry-run promises to change nothing, and fetching is the one real change this whole script makes to the host.
+    # --dry-run promises to change nothing, and this clone (or re-clone) is the one real change this function itself makes to the host.
+    # The reader lock's own directory and lock-file creation (hub_read_lock_acquire) runs regardless of --dry-run for an ordinary reused-checkout read, but respects it here since a fetch is a materially bigger change than a lock file.
     [[ $DRY_RUN == true ]] && {
         fail "This task needs a fetched hub checkout, and fetching one is itself a change --dry-run does not make. Run without --dry-run, or from inside a hub checkout already on $DEFAULT_REF."
         return 1
