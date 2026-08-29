@@ -9,7 +9,7 @@ the requirements this implements, stated once, agent-agnostic, and for how to au
 them.
 
 Precision over recall for the write-footgun shapes (1-3) and the primary-checkout shape (6): they deny
-the specific shapes that caused an incident, not everything unparseable - a false deny would break the
+the specific shapes that caused an incident, not everything unparseable, since a false deny would break the
 agent, and a miss still falls under the GOVERNANCE.md "Repository Boundaries and Write Safety" prose
 rules. The branch-bypass rule (4) instead fails CLOSED on the protected-by-default branches, because the
 harm there is a silent success under the maintainer's admin bypass. The denied shapes:
@@ -35,23 +35,23 @@ harm there is a silent success under the maintainer's admin bypass. The denied s
      and the hand-run GraphQL form is then the documented fallback, not a footgun.
   6. a mutating git operation (checkout/switch/pull/reset/rebase/merge/cherry-pick/revert/restore/stash
      (anything but list/show)/clean -f/add/commit/rm/mv/apply/am/push/worktree remove -f) run
-     directly against a primary checkout, not a linked worktree - the harm behind a separate
-     incident, where an
-     agent reused the maintainer's own primary checkout instead of a worktree twice despite having read the
-     prose rule against it. A "primary checkout" is decided by comparing `git rev-parse --git-dir`
-     against `--git-common-dir`, never a `.git`-is-a-directory guess (a submodule's `.git` is a file
-     and is still primary). The target directory follows real git's own priority rather than a
-     last-option-wins scan: any `-C <dir>` options on the invocation compose sequentially onto a leading
-     `cd` (inside a `sh -c`/`bash -c` wrapper too) or the session's own cwd, then an explicit
-     `--work-tree`/`GIT_WORK_TREE=` value, when given, wins over that result regardless of `-C`;
-     `--git-dir`/`GIT_DIR=` alone never relocates that reported target, matching git's own fallback. A
-     leading `export GIT_WORK_TREE=x GIT_DIR=y &&` prefix is read the same way an inline `VAR=x git ...`
-     prefix already is, since a real shell export persists into the following command exactly as
-     effectively - confirmed live to discard a tracked local modification with no redirect at all on the
-     git invocation itself, a shape the inline-prefix scan alone cannot see.
+     directly against a primary checkout, not a linked worktree. This is the harm behind a
+     separate incident, where an agent reused the maintainer's own primary checkout instead of a
+     worktree twice despite having read the prose rule against it. A "primary checkout" is decided
+     by comparing `git rev-parse --git-dir` against `--git-common-dir`, never a `.git`-is-a-directory
+     guess (a submodule's `.git` is a file and is still primary). The target directory follows real
+     git's own priority rather than a last-option-wins scan: any `-C <dir>` options on the
+     invocation compose sequentially onto a leading `cd` (inside a `sh -c`/`bash -c` wrapper too) or
+     the session's own cwd, then an explicit `--work-tree`/`GIT_WORK_TREE=` value, when given, wins
+     over that result regardless of `-C`, and `--git-dir`/`GIT_DIR=` alone never relocates that
+     reported target, matching git's own fallback. A leading `export GIT_WORK_TREE=x GIT_DIR=y &&`
+     prefix is read the same way an inline `VAR=x git ...` prefix already is, since a real shell
+     export persists into the following command exactly as effectively, confirmed live to discard a
+     tracked local modification with no redirect at all on the git invocation itself, a shape the
+     inline-prefix scan alone cannot see.
      Whether the invocation is primary-checkout at all is a separate question from the mutation target,
      though: an explicit `--git-dir`/`GIT_DIR=` is resolved and tested for primary-checkout-ness
-     directly, regardless of `--work-tree`, since `--git-dir` names the repository actually mutated -
+     directly, regardless of `--work-tree`, since `--git-dir` names the repository actually mutated,
      confirmed live that `--git-dir=<primary>/.git --work-tree=<empty-dir>` mutates `<primary>` even
      though `<empty-dir>` resolves as no git repository at all, which testing the work-tree value alone
      would fail open on. `~`/`$HOME` is expanded throughout and a relative value is joined against the
@@ -59,7 +59,7 @@ harm there is a silent success under the maintainer's admin bypass. The denied s
      `-f`/`--force`/`--discard-changes`/`--orphan` for either) are recognized bundled or attached into a
      short-option cluster (`-qf`, `-Bname`, `-Cother`), not only as an exact token. A subcommand this
      rule does not recognize is resolved through a bounded chain of git aliases (inline `-c
-     alias.<name>=`, then the target's own persisted config) before falling through to allow; a
+     alias.<name>=`, then the target's own persisted config) before falling through to allow. A
      `!`-prefixed shell alias is denied outright rather than interpreted. Exempt: `worktree
      add/list/prune` and an unforced `worktree remove` (the
      documented way to use a primary checkout at all), `merge --ff-only`/`pull --ff-only` (can never
@@ -67,9 +67,9 @@ harm there is a silent success under the maintainer's admin bypass. The denied s
      argument actually resolves as a ref, verified live (git's own ref-switch path refuses to carry a
      local modification, but its pathspec-restore fallback for an argument that is not a ref, such as
      `checkout .` or `checkout -- <path>`, carries no such check and is denied). A non-force flag such
-     as `--detach`/`-q` alongside the ref stays exempt too - it changes nothing about git's own
+     as `--detach`/`-q` alongside the ref stays exempt too, since it changes nothing about git's own
      overwrite-refusal, verified live, so admitting it widens no actual safety hole, only the exemption's
-     literal shape - matching the documented base-clone cleanup step in the repo-worktree skill. Granted
+     literal shape, matching the documented base-clone cleanup step in the repo-worktree skill. Granted
      only by GH_WRITE_GUARD_ALLOW_PRIMARY_CHECKOUT (a recognized falsy
      value such as "0"/"false" reads as not granted, not as any-non-empty-string-is-truthy), the same
      channel shape as GH_WRITE_GUARD_ALLOW.
@@ -345,9 +345,8 @@ def _shell_tokens(cmd):
     try:
         lex = shlex.shlex(cmd, posix=True, punctuation_chars=_PUNCTUATION_CHARS)
         lex.whitespace_split = True
-        # `shlex.shlex`'s own default keeps `#` as a comment starter, unlike `shlex.split()` below (and the fallback branch, since it calls that same function), which explicitly clears it.
-        # Confirmed live: left at the default, a `#` anywhere in the command, even mid-word, silently drops everything after it through the next newline, fusing `git fetch origin   # refresh\ngit reset --hard origin/main` into one `git fetch` invocation carrying the whole `reset --hard` as extra argv, hiding the second command from every tokenizer-based rule.
-        # A comment truncating visibility into a real subsequent command is a far worse failure mode for a security-relevant hook than the reverse (an ordinary bash `# comment` becoming literal trailing argv words instead of being dropped), so this is cleared unconditionally rather than attempting bash's own quoted-vs-unquoted, start-of-word-only comment semantics, which `shlex`'s single `commenters` string cannot express and unquoted-only detection over an already-tokenized stream cannot recover.
+        # `shlex.shlex`'s own default keeps `#` as a comment starter, unlike `shlex.split()`, which explicitly clears it, and confirmed live to otherwise fuse `git fetch origin # x\ngit reset --hard` into one invocation, hiding the second command from every tokenizer-based rule.
+        # Cleared unconditionally: a truncated command is a far worse failure than an ordinary `#` becoming literal trailing argv words instead.
         lex.commenters = ""
         lex.whitespace = lex.whitespace.replace(
             "\n", ""
@@ -977,9 +976,14 @@ def _primary_checkout_verdict(sub, args, target_dir=None, ref_resolver=None):
     if sub == "worktree":
         # `add`/`list`/`prune` are always allowed, the documented way to use a primary checkout from an agent session.
         # `remove` is allowed too unless forced: git itself already refuses to remove a worktree carrying uncommitted changes without --force, so only the forced form reproduces the harm this rule exists to catch.
+        # `-f` is bundled the same way checkout/switch's own force flags already are: git requires `-f` given twice to remove a locked worktree, and `-ff` satisfies that, confirmed live.
+        # Scanned before any `--`, the same cutoff `clean`'s own force scan already applies: confirmed live that `git worktree remove -- -f` reads `-f` as a worktree path argument (erroring since none is literally named that), not a force flag.
         if not args or args[0] != "remove":
             return None
-        return any(a in ("-f", "--force") for a in args[1:])
+        return any(
+            a in ("-f", "--force") or (a.startswith("-") and not a.startswith("--") and "f" in a)
+            for a in _args_before_double_dash(args[1:])
+        )
     if sub in ("checkout", "switch"):
         # `--` unambiguously means every following argument is a pathspec, not a ref: `checkout -- <path>`/`checkout <ref> -- <path>` restores that path from the index unconditionally, with none of the "would overwrite a local modification" safety check a ref switch gets.
         if "--" in args:
@@ -2878,6 +2882,31 @@ _PRIMARY_CHECKOUT_CASES = [
         None,
         "deny",
         "a forced worktree remove reproduces the harm this rule guards against",
+    ),
+    (
+        "git worktree remove -ff ../x",
+        "/primary",
+        {"/primary": True},
+        None,
+        "deny",
+        (
+            "-ff bundles force twice, exactly the -f -f git itself requires to remove a locked "
+            "worktree, confirmed live to forcibly remove one with uncommitted content, which an "
+            "exact-token check alone misses since remove has no other short option -f could "
+            "combine with"
+        ),
+    ),
+    (
+        "git worktree remove -- -f",
+        "/primary",
+        {"/primary": True},
+        None,
+        "allow",
+        (
+            "-f after -- is a worktree path argument, not a force flag, confirmed live: git "
+            "reads it as a literal worktree name (erroring since none is named that) rather than "
+            "forcing anything, the same -- cutoff clean's own force scan already applies"
+        ),
     ),
     (
         "git worktree remove ../x",
