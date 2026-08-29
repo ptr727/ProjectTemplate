@@ -1,6 +1,12 @@
 # Claude Code Write-Safety Kit
 
-These per-machine, user-account-scoped Claude Code guards cover two action classes. The first is a mis-targeted GitHub **write** under the maintainer's identity. The second is a **git operation that bypasses a branch rule or required check**. That class includes a forbidden push, force-push, or delete. It also includes an override flag such as `--admin` or `--no-verify`. Deploy the kit first on any system where Claude Code uses the maintainer's `gh` credentials. Linux, WSL, macOS, and Windows are supported. This kit does not configure Codex or opencode. Their host-specific controls live in [`docs/host-setup.md` "Agent Write-Safety"][host-setup-write-safety], and [issue #781][issue-781] tracks their missing hooks.
+This is the Claude Code implementation of the write-safety spec at [`../README.md`][spec] --
+per-machine, user-account-scoped guards, deployed first on any system where Claude Code uses the
+maintainer's `gh` credentials. Linux, WSL, macOS, and Windows are supported. See the spec for the
+requirements this kit satisfies and why each exists. What follows here is Claude-Code-specific
+installation and operational detail. Codex and opencode have no equivalent hook yet -- see
+[`../codex/README.md`][codex] and [`../opencode/README.md`][opencode] for their status, tracked at
+[issue #781][issue-781].
 
 ## What It Installs
 
@@ -12,18 +18,19 @@ Into `~/.claude/` (or `%USERPROFILE%\.claude\` on Windows):
   - The `fleet-bootstrap` block carries `Fleet Governance Entry Point`, which names the template repository and routes by the state a repository is actually in. It is separate precisely because it enables rather than restricts, and the safety block's own text says nothing in it widens a permission, so merging the two would contradict that. It is host-wide rather than per repository because the repositories that most need it are the ones carrying no instruction set to point the way, and it mirrors the byte-locked `AGENTS.md` "Fleet Bootstrap" section that a conformant repository carries.
 - **The permission rules this kit owns, merged into `settings.json`** beside the hook registration. Each is declared as a prefix and a rule, and a re-run drops every rule the prefix owns before adding the current one, so a rule whose spelling changes updates in place rather than accumulating beside the version it replaced. Ownership requires a rule-syntax delimiter after the prefix, since the prefix ends at the script name and a bare prefix test would also claim a longer path such as `pr_review.py-custom`, so a rule written by hand for a different script is never touched. These widen rather than restrict, which is why they are their own component for the same reason the `fleet-bootstrap` block is separate from the `agent-safety` one. Today the list holds one rule, for `scripts/pr_review.py`, the review loop's reply and resolve. Driving that loop by hand needs a raw GraphQL mutation carrying a node id, which is the shape that reached a stranger's repository, where the script queries the id itself and takes no argument an id fits in. What the rule decides is which command runs without a prompt, and it matches the command text rather than the directory the command runs in, so it reaches a `scripts/pr_review.py` in any checkout that carries one. An absolute path would not narrow that, since the hub is reached as a checkout of the caller's own and its location differs per task, so pinning one path would name a checkout the next task does not use. What bounds it is the rule that an agent reaches the hub as a checkout of its own, fetched immediately before it is read, rather than a copy it happens to find on disk, which the `fleet-bootstrap` block beside this carries and [`GOVERNANCE.md`][governance] "Hub-Hosted Tooling" states in full.
 
-The hook is the mechanical backstop. The CLAUDE.md rules and the carried GOVERNANCE.md rules are the behavioral layer. Prose alone is not enough, since the incident happened under prose rules, so both ship. The GitHub write rules have a hook behind them, as do the git operations that bypass a repository protection, while which checkout a command belongs in, the data a line of text quotes, and how an authorization is recorded are prose only, since no hook can see any of the three.
+See [`../README.md`][spec] "Requirements" for which of these each rule implements, and "Auditing an
+Implementation Against This Spec" for how to check this hook still satisfies them after a change.
 
 ## Install (Idempotent, Safe to Re-Run to Update)
 
 ```sh
 # Linux / WSL / macOS
-host-setup/agent-safety/install.sh
+host-setup/agent-safety/claude/install.sh
 ```
 
 ```powershell
 # Windows - the .\ prefix is required, PowerShell does not run a script from a relative path without it
-.\host-setup\agent-safety\install.ps1
+.\host-setup\agent-safety\claude\install.ps1
 ```
 
 Both are thin wrappers around `install.py`, so every OS runs one tested code path. The installer self-tests the hook before registering it, merges the settings.json hook entry and the permission rules without clobbering other keys, and updates each CLAUDE.md block in place by its own markers rather than duplicating it, so the two blocks move independently. The settings file is read once and written once, so the hook and the permission rules land together or not at all.
@@ -98,8 +105,10 @@ Every other key in the file is left as it stands, `permissions.allow` included, 
 - **Not a credential control.** A fine-grained PAT limited to owned repositories is a separate, stronger structural guard (a hard `403` on any non-owned repo) and is left to per-machine credential setup, out of this kit.
 
 <!-- Repo -->
-[governance]: ../../GOVERNANCE.md
-[host-setup-grant]: ../../docs/host-setup.md#granting-a-write-the-guard-denies
-[host-setup-write-safety]: ../../docs/host-setup.md#agent-write-safety
+[spec]: ../README.md
+[codex]: ../codex/README.md
+[opencode]: ../opencode/README.md
+[governance]: ../../../GOVERNANCE.md
+[host-setup-grant]: ../../../docs/host-setup.md#granting-a-write-the-guard-denies
 [issue-365]: https://github.com/ptr727/ProjectTemplate/issues/365
 [issue-781]: https://github.com/ptr727/ProjectTemplate/issues/781
