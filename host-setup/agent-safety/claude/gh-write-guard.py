@@ -756,6 +756,25 @@ _CHECKOUT_FORCE_FLAGS = {
 _CHECKOUT_FORCE_CHARS = {"b", "B", "c", "C", "f"}
 # Flags that make `git clean` an actual deletion rather than the dry-run it defaults to.
 _CLEAN_FORCE_FLAGS = {"-f", "--force"}
+# `-n`/`--dry-run` always wins over `-f`/`--force`, confirmed live regardless of which order the two are given in or how many times `-f` repeats: `git clean -f -n`, `-n -f`, and `--dry-run -f` all print "Would remove" and delete nothing.
+_CLEAN_DRY_RUN_FLAGS = {"-n", "--dry-run"}
+
+
+def _has_clean_dry_run_flag(args):
+    """Whether `args` carries `-n`/`--dry-run`, bundled into a short-option cluster (`-nfd`) or
+    not, the same bundled-cluster scan `_has_checkout_force_flag` already gives checkout/switch's
+    own force flags -- a real, confirmed usability gap this rule's `git clean` case would
+    otherwise have: `-nfd` denies the exact same harmless dry run `-n` alone does not, purely
+    because it also carries an `f` character the force-flag scan below reads on its own.
+    """
+    for a in args:
+        if a in _CLEAN_DRY_RUN_FLAGS:
+            return True
+        if a.startswith("--"):
+            continue
+        if a.startswith("-") and len(a) > 1 and "n" in a[1:]:
+            return True
+    return False
 
 
 def _has_checkout_force_flag(args):
@@ -921,6 +940,9 @@ def _primary_checkout_verdict(sub, args, target_dir=None, ref_resolver=None):
         # `list`/`show` only read the stash; everything else, bare `stash`/`push`/`save` included, mutates the working tree the same way `pop`/`apply`/`drop` obviously do.
         return not args or args[0] not in ("list", "show")
     if sub == "clean":
+        # -n/--dry-run always wins over -f/--force, confirmed live: `-nfd` deletes nothing, so denying it would add no safety while breaking a genuinely harmless, read-only preview of what a later, real `clean -fd` would remove.
+        if _has_clean_dry_run_flag(args):
+            return False
         return any(
             a in _CLEAN_FORCE_FLAGS or (a.startswith("-") and not a.startswith("--") and "f" in a)
             for a in args
@@ -2650,6 +2672,34 @@ _PRIMARY_CHECKOUT_CASES = [
         None,
         "allow",
         "stash list only reads the stash, denying it would add no safety",
+    ),
+    (
+        "git clean -fd",
+        "/primary",
+        {"/primary": True},
+        None,
+        "deny",
+        "an ordinary forced clean deletes untracked files/directories, the harm this rule guards against",
+    ),
+    (
+        "git clean -nfd",
+        "/primary",
+        {"/primary": True},
+        None,
+        "allow",
+        (
+            "-n/--dry-run always wins over -f/--force, confirmed live regardless of order: "
+            "-nfd deletes nothing, only previews what a later -fd would remove, so denying it "
+            "would add no safety while breaking a genuinely harmless preview"
+        ),
+    ),
+    (
+        "git clean --dry-run --force",
+        "/primary",
+        {"/primary": True},
+        None,
+        "allow",
+        "the long-flag spelling of the same dry-run-wins-over-force exemption",
     ),
     (
         "git checkout -b feature/x",

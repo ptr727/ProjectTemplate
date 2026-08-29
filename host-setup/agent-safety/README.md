@@ -84,7 +84,10 @@ hook or approval-gate API, not tied to Claude Code's `PreToolUse` JSON shape.
    not mutate the local working tree or HEAD the way the rest of this list does: no documented
    fleet workflow ever pushes from a primary checkout, every push runs from a task's own worktree,
    and rule 4's own branch-rule checks already run before this rule and can deny a push on their
-   own separate grounds regardless. A `checkout`/`switch` force flag (`-b`/`-B` for checkout,
+   own separate grounds regardless. `clean` is exempt when `-n`/`--dry-run` is given anywhere on
+   it (bundled or not, e.g. `-nfd`), confirmed live to always win over `-f`/`--force` regardless of
+   order or repetition: it deletes nothing, only previews what a later, real forced clean would
+   remove, so denying it adds no safety. A `checkout`/`switch` force flag (`-b`/`-B` for checkout,
    `-c`/`-C`/`--create`/`--force-create` for switch, `-f`/`--force`/`--discard-changes`/`--orphan`
    for either -- switch has no `-b`/`-B` and checkout has no `-c`/`-C`, confirmed against each
    subcommand's own `-h` output, so neither letter pair collides with an unrelated flag on the
