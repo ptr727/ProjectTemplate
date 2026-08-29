@@ -84,11 +84,16 @@ hook or approval-gate API, not tied to Claude Code's `PreToolUse` JSON shape.
    not mutate the local working tree or HEAD the way the rest of this list does: no documented
    fleet workflow ever pushes from a primary checkout, every push runs from a task's own worktree,
    and rule 4's own branch-rule checks already run before this rule and can deny a push on their
-   own separate grounds regardless. A `checkout`/`switch` force flag
-   (`-b`/`-B`/`-f`/`--force`/`--discard-changes`/`--orphan`) is recognized bundled into a
-   short-option cluster or attached to `-b`/`-B`'s own value with no space (`-qf`, `-Bname`), not
-   only as an exact argv token -- an exact-token check alone lets `-qf`/`-Bname` reach the ref-switch
-   exemption below while still forcing the checkout through. Allow `worktree add|list|prune`, a
+   own separate grounds regardless. A `checkout`/`switch` force flag (`-b`/`-B` for checkout,
+   `-c`/`-C`/`--create`/`--force-create` for switch, `-f`/`--force`/`--discard-changes`/`--orphan`
+   for either -- switch has no `-b`/`-B` and checkout has no `-c`/`-C`, confirmed against each
+   subcommand's own `-h` output, so neither letter pair collides with an unrelated flag on the
+   other) is recognized bundled into a short-option cluster or attached to its own value with no
+   space (`-qf`, `-Bname`, `-Cother`), not only as an exact argv token -- an exact-token check
+   alone lets `-qf`/`-Bname` reach the ref-switch exemption below while still forcing the checkout
+   through, and would equally have let `switch -C <existing-branch>` through, confirmed live to
+   reset that branch to the current HEAD with no dirty-tree warning at all, since it is not a
+   working-tree overwrite. Allow `worktree add|list|prune`, a
    plain `worktree remove` with no force flag, any read, `merge --ff-only`/`pull --ff-only` (git's
    own semantics mean neither can discard anything), a bare `-` as a `checkout`/`switch` argument
    (porcelain shorthand for the previous branch, which only those two subcommands themselves

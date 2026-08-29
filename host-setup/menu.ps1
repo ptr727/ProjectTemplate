@@ -342,28 +342,13 @@ function Test-DownstreamCheckout {
 function Invoke-Cleanup {
     if ($script:KEEP -or -not $script:HUB_FETCHED) { return }
     if (-not (Test-Path (Get-MarkerPath))) { return }
-    # Same exclusive lock every reader and writer takes, so this waits out another session still mid-use rather than deleting the tree out from under it.
-    # A quick non-blocking probe first, so a session that has to wait says so instead of hanging with no output.
-    $mutex = New-Object System.Threading.Mutex($false, (Get-HubMutexName))
-    $acquired = $false
-    try {
-        try {
-            if (-not $mutex.WaitOne(0)) {
-                info "Waiting for another session using $script:DIR\hub..."
-                $acquired = $mutex.WaitOne()
-            } else {
-                $acquired = $true
-            }
-        } catch [System.Threading.AbandonedMutexException] {
-            $acquired = $true
-        }
+    # Same exclusive lock every reader and writer takes, via Invoke-WithHubLock, so this waits out another session still mid-use rather than deleting the tree out from under it.
+    # No -ArgumentList needed: the scriptblock only reads script-scoped state ($script:DIR, Get-MarkerPath), not a local parameter of this function, so there is nothing for PSReviewUnusedParameter to flag here the way Invoke-HostTool's own $Tool/$Arguments needed forwarding.
+    Invoke-WithHubLock -ScriptBlock {
         $hubPath = Join-Path $script:DIR 'hub'
         # The marker is removed only once the directory it marks is actually gone, rather than unconditionally alongside it: a suppressed removal failure must not leave a leftover hub with no marker to explain it.
         Remove-Item -Recurse -Force $hubPath -ErrorAction SilentlyContinue
         if (-not (Test-Path $hubPath)) { Remove-Item -Force (Get-MarkerPath) -ErrorAction SilentlyContinue }
-    } finally {
-        if ($acquired) { $mutex.ReleaseMutex() }
-        $mutex.Dispose()
     }
 }
 

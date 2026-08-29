@@ -605,8 +605,13 @@ def _resolve_target_dir(c_dirs, work_tree, leading_cd, cwd):
     against the session's own reported cwd rather than wherever the hook process's own OS-level
     working directory happens to be, which the two are never guaranteed to share.
     """
-    base = leading_cd if leading_cd is not None else cwd
-    base = _expand_dir(base) if base is not None else None
+    base = _expand_dir(cwd) if cwd is not None else None
+    if leading_cd is not None:
+        lead = _expand_dir(leading_cd)
+        if base and not os.path.isabs(lead):
+            base = os.path.normpath(os.path.join(base, lead))
+        else:
+            base = lead
     for c in c_dirs:
         c = _expand_dir(c)
         if base and not os.path.isabs(c):
@@ -680,9 +685,23 @@ def _is_primary_checkout(target_dir):
 
 
 # Flags that turn an otherwise-denied `checkout`/`switch` into a real branch-creating or force-discarding operation, the cases git itself does not already refuse on its own.
-_CHECKOUT_FORCE_FLAGS = {"-b", "-B", "--force", "-f", "--discard-changes", "--orphan"}
-# The single-character short forms above, checked against every character of a short-option token, not just an exact-token match: git bundles boolean short flags together (`-qf` is `-q`+`-f`) and attaches a short flag's own value with no space (`-Bname` is `-B name`), and in both shapes the exact-token check below never sees a bare `-f`/`-B` to match against. `-b`/`-B` are the only checkout/switch short options that take an attached value at all, so this scan cannot mistake an unrelated flag's attached argument for a force flag.
-_CHECKOUT_FORCE_CHARS = {"b", "B", "f"}
+# `-b`/`-B` are checkout's own create/force-create spellings; `-c`/`-C` are switch's (switch has no `-b`/`-B`, checkout has no `-c`/`-C`), and both pairs mean the same thing to their own subcommand, confirmed live: `git switch -C <existing-branch>` resets that branch to the current HEAD, discarding any commits unique to it, with no dirty-tree warning at all since it is not a working-tree overwrite.
+_CHECKOUT_FORCE_FLAGS = {
+    "-b",
+    "-B",
+    "-c",
+    "-C",
+    "--force",
+    "-f",
+    "--discard-changes",
+    "--orphan",
+    "--create",
+    "--force-create",
+}
+# The single-character short forms above, checked against every character of a short-option token, not just an exact-token match: git bundles boolean short flags together (`-qf` is `-q`+`-f`) and attaches a short flag's own value with no space (`-Bname` is `-B name`), and in both shapes the exact-token check below never sees a bare `-f`/`-B`/`-c`/`-C` to match against.
+# `-b`/`-B`/`-c`/`-C` are the only checkout/switch short options that take an attached value at all, so this scan cannot mistake an unrelated flag's attached argument for a force flag.
+# Neither subcommand has any other flag using these letters, checked directly against each subcommand's own `-h` output, so this scan produces no false positive on either.
+_CHECKOUT_FORCE_CHARS = {"b", "B", "c", "C", "f"}
 # Flags that make `git clean` an actual deletion rather than the dry-run it defaults to.
 _CLEAN_FORCE_FLAGS = {"-f", "--force"}
 
@@ -797,7 +816,11 @@ def _resolve_alias(sub, args, inline_aliases, target_dir, config_lookup=None):
             return sub, args, False
         if expansion.startswith("!"):
             return sub, args, True
-        expanded = shlex.split(expansion)
+        try:
+            expanded = shlex.split(expansion)
+        except ValueError:
+            # Malformed alias text (unbalanced quotes): treat it as unresolvable rather than crashing the hook on a config value neither the agent nor this rule controls.
+            return sub, args, False
         if not expanded:
             return sub, args, False
         sub, args = expanded[0], expanded[1:] + args
@@ -2415,6 +2438,27 @@ _PRIMARY_CHECKOUT_CASES = [
         "switch gets the same ref-verified flagless exemption as checkout",
     ),
     (
+        "git switch -C other",
+        "/primary",
+        {"/primary": True},
+        None,
+        "deny",
+        (
+            "switch -C force-resets an existing branch to the current HEAD with no dirty-tree "
+            "warning at all, empirically confirmed; -c/-C are switch's own create/force-create "
+            "spellings, distinct from checkout's -b/-B, and neither subcommand has any other flag "
+            "using those letters"
+        ),
+    ),
+    (
+        "git switch -c newbranch",
+        "/primary",
+        {"/primary": True},
+        None,
+        "deny",
+        "switch -c creates a new branch, the same branch-creating class as checkout -b",
+    ),
+    (
         "git pull",
         "/primary",
         {"/primary": True},
@@ -2729,6 +2773,18 @@ _PRIMARY_CHECKOUT_CASES = [
         "a relative -C (../primary) resolves against the session's own cwd (/repos/worktree-task -> /repos/primary), not wherever the hook process's own cwd happens to be",
     ),
     (
+        "cd ../primary && git reset --hard origin/main",
+        "/repos/worktree-task",
+        {"/repos/primary": True, "/repos/worktree-task": False},
+        None,
+        "deny",
+        (
+            "a relative leading cd (../primary) is joined against the session's own cwd exactly "
+            "like a relative -C is, not left unjoined and resolved against wherever the hook "
+            "process's own OS-level cwd happens to be"
+        ),
+    ),
+    (
         "git reset --hard origin/main",
         "/primary/.git",
         {"/primary/.git": True},
@@ -2887,6 +2943,18 @@ def _selftest():
             {},
             "allow",
             "a subcommand this rule does not recognize and that resolves to no alias at all falls through to allow, matching the rule's stance for any other unrecognized subcommand",
+        ),
+        (
+            'git -c alias.wipe="reset --hard \'unterminated" wipe',
+            "/primary",
+            {"/primary": True},
+            {},
+            "allow",
+            (
+                "a malformed alias expansion (unbalanced quotes) fails to parse as shell words; "
+                "this is treated as unresolvable rather than raising ValueError and crashing the "
+                "hook on a config value neither the agent nor this rule controls"
+            ),
         ),
     ):
         got, _ = classify(
