@@ -97,7 +97,8 @@ hub_read_lock_acquire() {
     mkdir -p "$DIR"
     exec {HUB_READ_LOCK_FD}>"$DIR/hub.lock"
     # A quick non-blocking probe first, so a session that has to wait says so instead of looking hung: another session's fetch_hub or host_tool can hold the exclusive lock for as long as a full clone or a long OS package upgrade takes.
-    if ! flock -sn "$HUB_READ_LOCK_FD" 2>/dev/null; then
+    # Stderr is not suppressed here: a busy lock's own failure is silent (confirmed live), so a message on this specific call is a real error (a missing flock, a bad fd), not contention, and must not be hidden behind a misleading "waiting" message.
+    if ! flock -sn "$HUB_READ_LOCK_FD"; then
         info "Waiting for another session using $DIR/hub..."
         if ! flock -s "$HUB_READ_LOCK_FD"; then
             fail "Could not lock $DIR/hub.lock"
@@ -316,13 +317,18 @@ hub_python() {
 # Not reentrant: hub_read_lock_acquire's exec unconditionally overwrites HUB_READ_LOCK_FD, so a nested call would leak the outer fd and silently drop the lock it represented.
 # No current caller nests, and this guard is what keeps it that way rather than a rule to remember.
 with_hub_read_lock() {
+    # 2, not 1, for every failure of this wrapper's own preconditions: check_skills_dist's own caller reads 1 as scripts/build_dist.py --check's "stale" result, so a wrapper-level failure must not collide with the wrapped command's own exit code, the same reasoning Invoke-CheckSkillsDist's own Confirm-HubRoot fix already applies on the PowerShell side.
     [[ -z $HUB_READ_LOCK_FD ]] || {
         fail "with_hub_read_lock nested (internal error)"
-        return 1
+        return 2
     }
-    hub_read_lock_acquire || return 1
+    hub_read_lock_acquire || return 2
+    if ! ensure_hub_root; then
+        hub_read_lock_release
+        return 2
+    fi
     local rc=0
-    ensure_hub_root && "$@" || rc=$?
+    "$@" || rc=$?
     hub_read_lock_release
     return "$rc"
 }
