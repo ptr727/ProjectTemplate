@@ -96,11 +96,15 @@ hub_read_lock_acquire() {
     [[ $DRY_RUN == true ]] && return 0
     mkdir -p "$DIR"
     exec {HUB_READ_LOCK_FD}>"$DIR/hub.lock"
-    if ! flock -s "$HUB_READ_LOCK_FD"; then
-        fail "Could not lock $DIR/hub.lock"
-        exec {HUB_READ_LOCK_FD}>&-
-        HUB_READ_LOCK_FD=""
-        return 1
+    # A quick non-blocking probe first, so a session that has to wait says so instead of looking hung: another session's fetch_hub or host_tool can hold the exclusive lock for as long as a full clone or a long OS package upgrade takes.
+    if ! flock -sn "$HUB_READ_LOCK_FD" 2>/dev/null; then
+        info "Waiting for another session using $DIR/hub..."
+        if ! flock -s "$HUB_READ_LOCK_FD"; then
+            fail "Could not lock $DIR/hub.lock"
+            exec {HUB_READ_LOCK_FD}>&-
+            HUB_READ_LOCK_FD=""
+            return 1
+        fi
     fi
 }
 
@@ -115,6 +119,7 @@ hub_read_lock_release() {
 # `ensure_hub_root` is `fetch_hub`'s only caller, and it only ever runs inside a `hub_read_lock_acquire` span (`host_tool`, `audit_repo`, `check_skills_dist`, `carry_action` all acquire it first), so $HUB_READ_LOCK_FD is always already open here.
 # Escalating that same fd from shared to exclusive, rather than opening a second fd on the same lock file, is what makes this safe: flock treats two different fds on one file as independent lock holders even within one process, so a second fd's blocking exclusive wait would deadlock against the first fd's own shared hold forever, verified by reproducing exactly that hang before this fix.
 # `flock` changes an already-held fd's own lock type in place with no such deadlock, since the kernel recognizes it as the same holder taking a different mode, not a second competing one.
+# The conversion itself is not atomic (flock(2): the shared lock is dropped before the exclusive one is granted), so another session's own conversion could win the gap and clone first, but fetch_hub_locked's own remove_unowned_hub_check re-verifies ownership before removing or recloning, so that race costs a redundant clone at worst, never a torn one.
 # Downgraded back to shared once the fetch itself is done, restoring reader concurrency for the rest of the caller's own read-and-use span, rather than holding exclusive (which would still be correct, only more conservative than necessary).
 fetch_hub() {
     # --dry-run promises to change nothing, and this clone (or re-clone) is the one real change this function itself makes to the host.
@@ -307,6 +312,21 @@ hub_python() {
     python3 "$HUB_ROOT/$script" "$@"
 }
 
+# The single reader-lock span for a task that needs ensure_hub_root plus one hub_python call, matching host_tool's own wrapper/locked-body split.
+# Not reentrant: hub_read_lock_acquire's exec unconditionally overwrites HUB_READ_LOCK_FD, so a nested call would leak the outer fd and silently drop the lock it represented.
+# No current caller nests, and this guard is what keeps it that way rather than a rule to remember.
+with_hub_read_lock() {
+    [[ -z $HUB_READ_LOCK_FD ]] || {
+        fail "with_hub_read_lock nested (internal error)"
+        return 1
+    }
+    hub_read_lock_acquire || return 1
+    local rc=0
+    ensure_hub_root && "$@" || rc=$?
+    hub_read_lock_release
+    return "$rc"
+}
+
 # --- Actions ---
 
 audit_repo() {
@@ -315,28 +335,14 @@ audit_repo() {
     local name
     read -r -p "Repo to audit [$default]: " name
     name="${name:-$default}"
-    hub_read_lock_acquire || return 1
-    if ! ensure_hub_root; then
-        hub_read_lock_release
-        return 1
-    fi
-    local rc=0
-    hub_python spec/audit.py "$name" || rc=$?
-    hub_read_lock_release
-    return "$rc"
+    with_hub_read_lock hub_python spec/audit.py "$name"
 }
 
 check_skills_dist() {
-    hub_read_lock_acquire || return 1
-    if ! ensure_hub_root; then
-        hub_read_lock_release
-        return 1
-    fi
     local rc=0
-    hub_python scripts/build_dist.py --check || rc=$?
-    hub_read_lock_release
+    with_hub_read_lock hub_python scripts/build_dist.py --check || rc=$?
     # Only 0 (clean) and 1 (stale) are outcomes scripts/build_dist.py --check documents for itself, so only those two read as a check result.
-    # Anything else, 127 included, is hub_python or the tool itself failing to run rather than a finding, and is reported as the task error it is.
+    # Anything else, 127 included, is with_hub_read_lock, hub_python, or the tool itself failing to run rather than a finding, and is reported as the task error it is.
     case "$rc" in
     0) info "Every generated Skills distribution matches .agents/skills/" ;;
     1) info "A generated Skills distribution is stale. This menu does not regenerate it from a fetched checkout, since the result has to be committed in the hub itself." ;;
@@ -365,15 +371,7 @@ carry_action() {
     local name
     read -r -p "Repo name as cataloged in registry/repos.json [$default]: " name
     name="${name:-$default}"
-    hub_read_lock_acquire || return 1
-    if ! ensure_hub_root; then
-        hub_read_lock_release
-        return 1
-    fi
-    local rc=0
-    hub_python scripts/carry.py "$mode" "$name" --target "$DOWNSTREAM_ROOT" || rc=$?
-    hub_read_lock_release
-    return "$rc"
+    with_hub_read_lock hub_python scripts/carry.py "$mode" "$name" --target "$DOWNSTREAM_ROOT"
 }
 
 # --- Menu ---
