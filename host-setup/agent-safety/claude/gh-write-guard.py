@@ -830,7 +830,7 @@ def _resolves_as_ref(target_dir, ref, verify=None):
             timeout=5,
             check=False,
         )
-    except Exception:  # noqa: BLE001
+    except Exception:  # noqa: BLE001 - a crashed/absent git binary is treated as "does not resolve as a ref", the safer of the two branches this call disambiguates, not a defect to propagate as a hook-crashing traceback.
         return False
     return r.returncode == 0
 
@@ -855,7 +855,7 @@ def _config_alias(target_dir, name, config_lookup=None):
             timeout=5,
             check=False,
         )
-    except Exception:  # noqa: BLE001
+    except Exception:  # noqa: BLE001 - a crashed/absent git binary is treated the same as "no alias defined", the caller's existing fall-through-to-allow case, not a defect to propagate as a hook-crashing traceback.
         return None
     if r.returncode != 0:
         return None
