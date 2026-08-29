@@ -101,10 +101,13 @@ hub_read_lock_acquire() {
     local probe_err
     if ! probe_err=$(flock -sn "$HUB_READ_LOCK_FD" 2>&1); then
         if [[ -n $probe_err ]]; then
+            # A real error, not contention: retrying via the blocking call below would not help and risks a second, more confusing failure (or a hang, if the failure mode is one blocking mode does not handle the same way), so this fails immediately instead of falling through to it.
             fail "flock -sn reported: $probe_err"
-        else
-            info "Waiting for another session using $DIR/hub..."
+            exec {HUB_READ_LOCK_FD}>&-
+            HUB_READ_LOCK_FD=""
+            return 1
         fi
+        info "Waiting for another session using $DIR/hub..."
         if ! flock -s "$HUB_READ_LOCK_FD"; then
             fail "Could not lock $DIR/hub.lock"
             exec {HUB_READ_LOCK_FD}>&-
