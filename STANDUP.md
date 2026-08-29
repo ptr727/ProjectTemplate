@@ -127,7 +127,8 @@ This is the same shape as step 0. Signing has to be live before the first commit
 
 Carry these before writing any repo content of your own:
 
-- [`AGENTS.md`][agents], [`GOVERNANCE.md`][governance], [`CODESTYLE.md`][codestyle], [`WORKFLOW.md`][workflow] and [`AUDIT.md`][audit], adapted rather than cloned for the ones that describe a repo.
+- [`CLAUDE.md`][claude-md], [`AGENTS.md`][agents], [`GOVERNANCE.md`][governance], [`CODESTYLE.md`][codestyle], [`WORKFLOW.md`][workflow] and [`AUDIT.md`][audit], adapted rather than cloned for the ones that describe a repo.
+- **`CLAUDE.md` is not optional decoration.** Claude Code reads `CLAUDE.md`, not `AGENTS.md`, so a repo carrying `AGENTS.md` alone never gets it into a Claude Code session's context at all, only into whatever an agent chooses to read on its own initiative mid-task, which is exactly the reliability gap that motivates carrying this file. It is a fixed, `verbatim`, whole-file carry with no repo-specific content. See `CLAUDE.md` itself for what belongs in it and what does not.
 - **`.markdownlint-cli2.jsonc` and `cspell.json`**, which are the mechanical half. A rule nothing checks drifts silently, so a repo that carries the prose authorities without the linter configs has guidance and no gate. Scope a linter's **file set in the workflow** rather than relaxing either config, since `.markdownlint-cli2.jsonc` is carried `verbatim`.
 
 Then **read** `CODESTYLE.md` and the `GOVERNANCE.md` documentation-style rules, rather than only placing the files. Comment shape, one sentence per line, US spelling and the character rules all govern the code and config you are about to write, and none of them are recoverable cheaply afterwards.
@@ -240,6 +241,7 @@ The same [`AUDIT.md`][audit] run is the on-demand audit for any known repo, and 
 
 [agents]: ./AGENTS.md
 [audit]: ./AUDIT.md
+[claude-md]: ./CLAUDE.md
 [codestyle]: ./CODESTYLE.md
 [content-import]: ./docs/content-import.md
 [divergences]: ./spec/divergences.json

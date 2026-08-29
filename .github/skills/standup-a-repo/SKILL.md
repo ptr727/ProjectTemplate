@@ -51,10 +51,13 @@ maintainer can supply what section 0A lists.
    section 2, then write or repair its `registry/repos.json` entry and confirm it with
    `spec/validate.py`.
 
-4. **The instruction set, before authoring anything.** STANDUP.md section 1A: carry `AGENTS.md`,
-   `GOVERNANCE.md`, `CODESTYLE.md`, `WORKFLOW.md` and `AUDIT.md`, adapted rather than cloned for
-   the ones that describe a repo, plus `.markdownlint-cli2.jsonc` and `cspell.json`. Read
-   `CODESTYLE.md` and the `GOVERNANCE.md` documentation-style rules before writing any repo
+4. **The instruction set, before authoring anything.** STANDUP.md section 1A: carry `CLAUDE.md`,
+   `AGENTS.md`, `GOVERNANCE.md`, `CODESTYLE.md`, `WORKFLOW.md` and `AUDIT.md`, adapted rather
+   than cloned for the ones that describe a repo, plus `.markdownlint-cli2.jsonc` and
+   `cspell.json`. `CLAUDE.md` is the fixed, verbatim `@AGENTS.md`-import file that gets
+   `AGENTS.md` into a Claude Code session's context at all, a separate baseline entry from
+   `AGENTS.md` itself, so carrying one without the other still leaves that provider unconfigured.
+   Read `CODESTYLE.md` and the `GOVERNANCE.md` documentation-style rules before writing any repo
    content of your own, the same window-closes shape as signing in step 1.
 
 5. **Capture the source, if one exists.** STANDUP.md section 1B, only when the repo's content
