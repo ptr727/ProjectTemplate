@@ -68,8 +68,8 @@ Subcommands
            than raised as an inline review comment because the finding sits on a line outside
            the pull request's changed hunks. Printed once CodeRabbit has raised one, on any
            round, or once the reviews window is truncated, since an older round could then
-           still carry one unseen (`cr_outside_diff=0+`). Stays silent otherwise, on an
-           untruncated window where a repository is not trialing CodeRabbit at all.
+           still carry one unseen (`cr_outside_diff=0+`). Stays silent otherwise, whether that
+           silence means no finding was raised or CodeRabbit was never trialed at all.
            `qodo_open=N` counts Qodo's own
            numbered findings that carry neither its `Resolved` nor `Dismissed` self-tracked
            badge: Qodo's formal review carries an empty body on every round observed, so its

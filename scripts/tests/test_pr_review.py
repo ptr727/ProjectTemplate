@@ -598,7 +598,7 @@ class TestOtherReviewers(GqlCase):
     """
 
     def other_review(self, login: str, oid: str = HEAD, body: str = "") -> dict:
-        """A minimal review node for a tracked non-Copilot reviewer: identity and commit only."""
+        """A review node for a tracked non-Copilot reviewer, `body` empty unless a case needs it."""
         return {
             "author": {"login": login},
             "state": "COMMENTED",
