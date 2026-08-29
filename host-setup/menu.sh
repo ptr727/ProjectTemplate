@@ -133,7 +133,9 @@ fetch_hub() {
     fi
     local rc=0
     fetch_hub_locked || rc=$?
-    flock -s "$HUB_READ_LOCK_FD" || true # best-effort downgrade; holding exclusive a little longer on failure is safe, just more conservative
+    # Best-effort downgrade.
+    # Holding exclusive a little longer on failure is safe, just more conservative.
+    flock -s "$HUB_READ_LOCK_FD" || true
     return "$rc"
 }
 

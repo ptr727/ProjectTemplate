@@ -66,7 +66,7 @@ against it for that purpose, and outside "Listing and Cleanup"'s own terminal st
 else does: never `checkout`, `pull`, `reset`, `commit`, or any other command that mutates its own
 working tree, index, or HEAD while a task is in progress. That distinction is the one a real
 incident missed, reusing a primary checkout as the working directory itself rather than only as
-the source a worktree is created from. On Claude Code this is now also a mechanical stop for most
+the source a worktree is created from. On Claude Code this is also a mechanical stop for most
 of that list. `merge --ff-only`/`pull --ff-only` and a `checkout <ref>`/`switch <ref>` carrying no
 force flag stay exempt even there, matching this skill's own cleanup step below, which needs
 exactly those.

@@ -500,11 +500,9 @@ def _git_invocations(cmd):
     expansion` dict of every `-c alias.<name>=<value>` override on this invocation, in argv order
     (a later `-c` for the same name wins, matching real git's own repeated `-c` semantics), read
     here since an inline alias is exactly as effective at hiding a mutating command behind an
-    unrecognized name as a persisted one, per requirement 6's alias-resolution rule. Shares its
-    tokenizing and global-option skipping with `_git_subcommand_arglists`, generalized to read
-    every subcommand rather than one named subcommand, and to capture the directory-naming and
-    alias-defining options along the way.
+    unrecognized name as a persisted one, per requirement 6's alias-resolution rule.
     """
+    # Shares its tokenizing and global-option skipping with `_git_subcommand_arglists`, generalized to read every subcommand rather than one named subcommand, and to capture the directory-naming and alias-defining options along the way.
     toks = _shell_tokens(cmd)
     n = len(toks)
     out = []
