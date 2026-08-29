@@ -48,9 +48,9 @@ Rules that bind this task: quote `code-review`'s "Review the Change" section int
   the Return line below, not a PR comment or a coverage marker.
 Return: one finding per line, file:line, the concrete failure scenario, no severity theater.
 Bounds: read-only. No edit, no stage, no commit, no push, no PR-hosted write of any kind.
+Close with the unresolved-rule closing line from `AGENTS.md` "Context and Delegation
+  Discipline", referenced rather than restated here.
 ```
-
-Close the brief with the same unresolved-rule line as `AGENTS.md`'s own template, quoted from there rather than restated here.
 
 **Model tier:** the strongest tier this session can reach, per `AGENTS.md` "Match the model tier to the judgment" and "Never tier down the seat holding the judgment", applied here to the reviewer rather than the author. Run the pass on the same tier that authored the change when only one tier is reachable, a second, adversarially-prompted look still catches what the authoring pass's own "looks ready" judgment did not.
 
