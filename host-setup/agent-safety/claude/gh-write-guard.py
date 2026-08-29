@@ -976,7 +976,7 @@ def _primary_checkout_verdict(sub, args, target_dir=None, ref_resolver=None):
     if sub == "worktree":
         # `add`/`list`/`prune` are always allowed, the documented way to use a primary checkout from an agent session.
         # `remove` is allowed too unless forced: git itself already refuses to remove a worktree carrying uncommitted changes without --force, so only the forced form reproduces the harm this rule exists to catch.
-        # `-f` is bundled the same way checkout/switch's own force flags already are, since `remove` has no other short option `-f` could combine with: git requires `-f` given *twice* to remove a locked worktree, and confirmed live that the bundled `-ff` spelling satisfies that requirement exactly as `-f -f` does, forcibly removing a locked worktree's uncommitted content, which an exact-token check alone would miss entirely.
+        # `-f` is bundled the same way checkout/switch's own force flags already are: git requires `-f` given twice to remove a locked worktree, and `-ff` satisfies that, confirmed live.
         # Scanned before any `--`, the same cutoff `clean`'s own force scan already applies: confirmed live that `git worktree remove -- -f` reads `-f` as a worktree path argument (erroring since none is literally named that), not a force flag.
         if not args or args[0] != "remove":
             return None
