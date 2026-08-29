@@ -79,8 +79,12 @@ hook or approval-gate API, not tied to Claude Code's `PreToolUse` JSON shape.
    checkout and unequal paths for a linked worktree. A `.git`-is-a-directory heuristic is wrong (a
    submodule's `.git` is a file yet is still a primary working tree that can lose uncommitted
    work). Deny `checkout`/`switch`/`pull`/`reset`/`rebase`/`merge`/`cherry-pick`/`revert`/`restore`/
-   `stash` (anything but `list`/`show`)/`clean -f|-fd`/`add`/`commit`/`rm`/`apply`/`am`/
-   `worktree remove -f|--force` there. A `checkout`/`switch` force flag
+   `stash` (anything but `list`/`show`)/`clean -f|-fd`/`add`/`commit`/`rm`/`apply`/`am`/`push`/
+   `worktree remove -f|--force` there. `push` is denied unconditionally too, even though it does
+   not mutate the local working tree or HEAD the way the rest of this list does: no documented
+   fleet workflow ever pushes from a primary checkout, every push runs from a task's own worktree,
+   and rule 4's own branch-rule checks already run before this rule and can deny a push on their
+   own separate grounds regardless. A `checkout`/`switch` force flag
    (`-b`/`-B`/`-f`/`--force`/`--discard-changes`/`--orphan`) is recognized bundled into a
    short-option cluster or attached to `-b`/`-B`'s own value with no space (`-qf`, `-Bname`), not
    only as an exact argv token -- an exact-token check alone lets `-qf`/`-Bname` reach the ref-switch

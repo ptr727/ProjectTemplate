@@ -135,6 +135,13 @@ task branch from `origin/develop`. A standalone clone keeps its worktree and Git
 directory under the same writable root. It therefore supports edits, explicit-path staging,
 commits, and branch updates without sharing the base clone's index.
 
+On Claude Code, a standalone clone is structurally a primary checkout to `gh-write-guard.py`'s own
+rule 6 test (`--git-dir` equals `--git-common-dir` there too, since it is not a linked worktree of
+anything), so the hook denies the very commits/edits this fallback exists to make. Set
+`GH_WRITE_GUARD_ALLOW_PRIMARY_CHECKOUT` for the session before using one -- the same escape hatch
+`host-setup/agent-safety/README.md`'s requirement 6 already documents -- since this fallback is
+exactly the narrow, already-approval-gated case that grant exists for.
+
 A temporary standalone clone is a degraded handoff, not an equivalent location. The base clone
 does not register it, `git worktree list` does not show it, and an IDE opened on the base clone
 does not discover its changes. The maintainer must navigate to it manually, and the operating

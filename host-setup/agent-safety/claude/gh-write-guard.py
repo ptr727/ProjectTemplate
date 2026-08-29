@@ -34,9 +34,9 @@ harm there is a silent success under the maintainer's admin bypass. The denied s
      GH_WRITE_GUARD_ALLOW grant rule 3 reads, since the helper refuses a cross-owner pull request outright
      and the hand-run GraphQL form is then the documented fallback, not a footgun.
   6. a mutating git operation (checkout/switch/pull/reset/rebase/merge/cherry-pick/revert/restore/stash
-     (anything but list/show)/clean -f/add/commit/rm/apply/am/worktree remove -f) run directly against
-     a primary checkout, not a linked worktree - the harm behind a separate incident, where an agent
-     reused the maintainer's own primary checkout instead of a worktree twice despite having read the
+     (anything but list/show)/clean -f/add/commit/rm/apply/am/push/worktree remove -f) run directly
+     against a primary checkout, not a linked worktree - the harm behind a separate incident, where an
+     agent reused the maintainer's own primary checkout instead of a worktree twice despite having read the
      prose rule against it. A "primary checkout" is decided by comparing `git rev-parse --git-dir`
      against `--git-common-dir`, never a `.git`-is-a-directory guess (a submodule's `.git` is a file
      and is still primary). The target directory follows real git's own priority rather than a
@@ -716,6 +716,9 @@ _ALWAYS_DENY_SUBS = {
     "rm",
     "apply",
     "am",
+    # A push doesn't mutate the local working tree or HEAD the way the rest of this set does, but it publishes whatever is there, and no documented fleet workflow ever pushes from a primary checkout: every push runs from a task's own worktree instead.
+    # Rule 4's own branch-rule checks (_check_push_bypass) already run before this rule and can deny a push on their own grounds, so this is an added, independent reason to deny, not a replacement for that check.
+    "push",
 }
 
 
@@ -2498,6 +2501,26 @@ _PRIMARY_CHECKOUT_CASES = [
         None,
         "deny",
         "git am mutates the working tree",
+    ),
+    (
+        "git push origin feature/x",
+        "/primary",
+        {"/primary": True},
+        None,
+        "deny",
+        (
+            "a push does not mutate the local working tree the way the rest of this rule's ops "
+            "do, but no documented fleet workflow ever pushes from a primary checkout, so it is "
+            "denied unconditionally there too, independent of rule 4's own branch-rule checks"
+        ),
+    ),
+    (
+        "git push origin feature/x",
+        "/worktree",
+        {"/worktree": False},
+        None,
+        "allow",
+        "the same push from a linked worktree, where every documented push actually happens, is allowed",
     ),
     (
         "git stash",
