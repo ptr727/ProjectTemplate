@@ -223,7 +223,7 @@ A rule that cannot be diverged from is a rule people work around silently, which
 
 The guard denies a `gh` write whose explicit target sits under an owner other than the checkout's `origin` owner, which is the shape that once put a stray comment on a stranger's repository. Sibling repositories under the same owner are allowed, so the denial appears only on a write that leaves the owner, and the common case that raises it is a fork, where `origin` is yours and `upstream` is the project you forked from.
 
-The only way past it is a grant the maintainer makes **outside the session**, in `GH_WRITE_GUARD_ALLOW`. It is deliberately not something an agent can do for itself once blocked, so an inline `GH_WRITE_GUARD_ALLOW=owner/repo gh ...` prefix and an `export` inside a shell call both leave the write denied. The worked example, the file the grant goes in, and how to confirm one took effect are in [`host-setup/agent-safety/claude/README.md` "Granting a Write the Guard Denies"][agent-safety-claude-grant].
+The only way past it is a grant the maintainer makes **outside the session**, in `GH_WRITE_GUARD_ALLOW`. It is deliberately not something an agent can do for itself once blocked, so an inline `GH_WRITE_GUARD_ALLOW=owner/repo gh ...` prefix and an `export` inside a shell call both leave the write denied. The worked example, the file the grant goes in, and how to confirm one took effect are in [`host-setup/agent-safety/claude/README.md` "Granting a Write That the Guard Denies"][agent-safety-claude-grant].
 
 ## Rules
 
@@ -346,7 +346,7 @@ Licensed under the [MIT License][license]\
 
 [agent-safety]: ./host-setup/agent-safety/README.md
 [agent-safety-claude]: ./host-setup/agent-safety/claude/README.md
-[agent-safety-claude-grant]: ./host-setup/agent-safety/claude/README.md#granting-a-write-the-guard-denies
+[agent-safety-claude-grant]: ./host-setup/agent-safety/claude/README.md#granting-a-write-that-the-guard-denies
 [agent-safety-codex]: ./host-setup/agent-safety/codex/README.md
 [agent-safety-opencode]: ./host-setup/agent-safety/opencode/README.md
 [agents]: ./AGENTS.md

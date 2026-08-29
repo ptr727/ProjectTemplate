@@ -24,19 +24,28 @@ hook or approval-gate API, not tied to Claude Code's `PreToolUse` JSON shape.
    `gh`/API call piped to `>/dev/null`, `2>/dev/null`, `&>/dev/null`, `|| true`, `|| :`, or `|| echo`
    hides the one signal that tells a client-reported failure apart from a server-side success. Deny
    the write, then allow it once run so its real result is read.
-2. **A GraphQL mutation carrying a literal GitHub node id is denied. A captured variable is
-   trusted.** Node ids resolve globally, so a fabricated, stale, or hand-typed id can land on a real
-   object in a different repository. A `-F name="$VAR"` value captured from a live query in the same
-   session is allowed. A literal id in the same position, such as one prefixed `PR_`, `PRRT_`,
-   `IC_`, or `BOT_` (an uppercase-letter prefix followed by an underscore and a long body, or the
-   legacy `MD`-prefixed base64 form), is denied.
+2. **A GraphQL mutation carrying a literal GitHub node id is denied.** Node ids resolve globally,
+   so a fabricated, stale, or hand-typed id can land on a real object in a different repository. A
+   literal id, such as one prefixed `PR_`, `PRRT_`, `IC_`, or `BOT_` (an uppercase-letter prefix
+   followed by an underscore and a long body, or the legacy `MD`-prefixed base64 form), is denied. A
+   `-F name="$VAR"` value in the same position is allowed instead of being pattern-matched, **not**
+   because the hook has verified where `$VAR`'s value came from -- a static, pre-execution hook
+   cannot see a shell variable's runtime binding, only the command text -- but because this rule's
+   job is to catch the literal-id mistake specifically, and a captured-variable convention is what
+   the fleet's own prose rule (`GOVERNANCE.md` "Repository Boundaries and Write Safety") requires
+   agent behavior to uphold. Enforcing that the value genuinely came from a live query is
+   behavioral, not something this decidable-from-text-alone rule can check.
 3. **A GitHub write with an explicit target outside the checkout's own owner is denied, unless the
    maintainer granted it.** Compare the write's explicit `-R`/`--repo`/`repos/<owner>/<repo>` target
-   against the checkout's own `origin` owner. A sibling repository under the same owner is allowed
-   with no grant, since the harm this guards is reaching a stranger's repository, not working across
-   one maintainer's own fleet. A different owner is allowed only when named in a grant read from the
-   environment the session was launched with -- never a channel the agent itself can set (an inline
-   `VAR=x cmd` prefix or an `export` inside the same call must not satisfy this).
+   against the checkout's own `origin` owner, when an `origin` resolves at all. A sibling repository
+   under the same owner is allowed with no grant, since the harm this guards is reaching a
+   stranger's repository, not working across one maintainer's own fleet. A different owner is
+   allowed only when named in a grant read from the environment the session was launched with --
+   never a channel the agent itself can set (an inline `VAR=x cmd` prefix or an `export` inside the
+   same call must not satisfy this). **When no `origin` resolves at all** (a non-git directory, or a
+   checkout whose remote can't be read), this requirement has nothing to compare the target against
+   and does not fire -- requirements 1 and 2 still apply regardless, and this is the same
+   precision-over-recall stance every requirement but 4 takes.
 4. **A git operation that would only succeed by bypassing an active branch rule is denied**: a
    direct push to a branch whose rules require a pull request, a force-push where history is
    protected, a delete where deletion is blocked, or an explicit-bypass flag (`--admin` on a merge,
@@ -51,10 +60,18 @@ hook or approval-gate API, not tied to Claude Code's `PreToolUse` JSON shape.
    dangerous shape, since a hook that fails closed on an unrelated resolution failure blocks
    legitimate work far more often than it catches a real bypass.
 5. **A hand-rolled reply or resolve on a review thread, bypassing the one-call helper, is denied
-   (where a helper exists) or flagged.** Splitting a reply and a resolve into two separate hand-run
-   API calls is what let a reply sit unresolved across a push, reading as untriaged. Where the agent's
-   fleet ships a single documented helper for this (this repo's `scripts/pr_review.py reply --resolve`),
-   a raw mutation reaching the same endpoint is denied in favor of it.
+   (where a helper exists) unless the maintainer's cross-owner grant already covers it.** Splitting
+   a reply and a resolve into two separate hand-run API calls is what let a reply sit unresolved
+   across a push, reading as untriaged. Where the agent's fleet ships a single documented helper for
+   this (this repo's `scripts/pr_review.py reply --resolve`), a raw mutation reaching the same
+   endpoint is denied in favor of it. The one exception is a target the maintainer has already
+   granted this session: the helper itself refuses a cross-owner pull request outright, so the
+   hand-run form is then the documented fallback for that specific repository, and this is allowed
+   through the same grant channel requirement 3 reads rather than a separate one. A REST reply's own
+   URL can be checked against the grant. A `resolveReviewThread` mutation's thread id is opaque, so
+   any active grant is the only signal available there, a coarser check than a REST reply gets and a
+   residual gap this requirement accepts rather than blocking every grant-holding session's replies
+   on an unrelated target.
 
 **Not yet implemented anywhere, tracked at [issue #1073][issue-1073]:** a mutating git operation run
 directly against a primary (non-worktree) checkout should be denied the same way. This spec is
