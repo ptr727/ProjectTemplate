@@ -2534,7 +2534,7 @@ _GIT_CASES = [
     ),
 ]
 
-# (command, cwd, {dir: is_primary_or_None}, {(dir, ref): resolves_as_ref} or None, expected_decision, label) -- is_primary is True (a primary checkout), False (a linked worktree), or None (unresolved, no git repository there at all).
+# (command, cwd, {dir: is_primary_or_None}, {(dir, ref): resolves_as_ref} or None, expected_decision, label) -- is_primary is True (a primary checkout), False (a linked worktree), or None (unresolved, for example when no repository exists or the git query itself fails, such as on a pre-2.31 git lacking `rev-parse --path-format`).
 # A None ref-map means every ref-check in the case resolves True (an ordinary branch name), the common case; only the pathspec-disambiguation cases below need a real map.
 _PRIMARY_CHECKOUT_CASES = [
     (
