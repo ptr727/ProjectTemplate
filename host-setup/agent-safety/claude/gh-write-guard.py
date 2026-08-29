@@ -1,15 +1,18 @@
 #!/usr/bin/env python3
-"""PreToolUse guard: deny the GitHub-write footguns behind the cross-repo comment incident.
+"""PreToolUse guard: deny the GitHub-write footguns and the primary-checkout mutation behind two incidents.
 
 Registered as a Claude Code PreToolUse hook on the Bash tool. It reads the tool-input JSON on stdin,
 classifies the command, and DENIES (with a reason shown to the agent) when a command is a GitHub *write*
-matching a known-dangerous pattern. Reads and everything that is not a clear write pass through.
+matching a known-dangerous pattern, or a mutating git operation run directly against a primary checkout.
+Reads and everything that is not a clear write pass through. See host-setup/agent-safety/README.md for
+the requirements this implements, stated once, agent-agnostic, and for how to audit this file against
+them.
 
-Precision over recall for the write-footgun shapes (1-3): they deny the specific shapes that caused the
-incident, not everything unparseable - a false deny would break the agent, and a miss still falls under
-the GOVERNANCE.md "Repository Boundaries and Write Safety" prose rules. The branch-bypass rule (4) instead
-fails CLOSED on the protected-by-default branches, because the harm there is a silent success under the
-maintainer's admin bypass. The denied shapes:
+Precision over recall for the write-footgun shapes (1-3) and the primary-checkout shape (6): they deny
+the specific shapes that caused an incident, not everything unparseable - a false deny would break the
+agent, and a miss still falls under the GOVERNANCE.md "Repository Boundaries and Write Safety" prose
+rules. The branch-bypass rule (4) instead fails CLOSED on the protected-by-default branches, because the
+harm there is a silent success under the maintainer's admin bypass. The denied shapes:
 
   1. a state-changing gh call whose output is discarded or forced to success
      (>/dev/null, 2>/dev/null, &>/dev/null, || true, || :, || echo)
@@ -30,6 +33,17 @@ maintainer's admin bypass. The denied shapes:
      skimming the pull request (the incident behind this rule). Permitted only under the same
      GH_WRITE_GUARD_ALLOW grant rule 3 reads, since the helper refuses a cross-owner pull request outright
      and the hand-run GraphQL form is then the documented fallback, not a footgun.
+  6. a mutating git operation (checkout/switch/pull/reset/rebase/merge/cherry-pick/revert/restore/stash
+     pop|apply|drop/clean -f/add/commit/worktree remove -f) run directly against a primary checkout, not
+     a linked worktree - the harm behind a separate incident, where an agent reused the maintainer's own
+     primary checkout instead of a worktree twice despite having read the prose rule against it. A
+     "primary checkout" is decided by comparing `git rev-parse --git-dir` against `--git-common-dir`,
+     never a `.git`-is-a-directory guess (a submodule's `.git` is a file and is still primary). Exempt:
+     `worktree add/list/prune` and an unforced `worktree remove` (the documented way to use a primary
+     checkout at all), `merge --ff-only`/`pull --ff-only` (can never discard anything), and a flagless
+     `checkout <ref>`/`switch <ref>` (git itself already refuses that form when it would carry a local
+     modification) - matching the documented base-clone cleanup step in the repo-worktree skill. Granted
+     only by GH_WRITE_GUARD_ALLOW_PRIMARY_CHECKOUT, the same channel shape as GH_WRITE_GUARD_ALLOW.
 
 Run `gh-write-guard.py --selftest` to verify the decision matrix without Claude Code.
 """
@@ -405,6 +419,184 @@ def _git_subcommand_arglists(cmd, sub):
         else:
             i += 1  # this `git` was a different subcommand; keep scanning
     return out
+
+
+# --- Rule 6: a mutating git op against a primary checkout ---------------------------------------------
+# `-C <dir>`/`--git-dir <dir>`/`--git-dir=<dir>` are the global options this rule resolves a target directory from.
+# Every other value-taking global option, `--work-tree` included, is skipped like `_git_subcommand_arglists` already does, since none of the others name a directory this rule reads.
+_GIT_DIR_OPTS = ("-C", "--git-dir")
+
+
+def _git_invocations(cmd):
+    """Every `git [global-options] <sub> [args...]` invocation in the command, as
+    `(target_dir, sub, args)` tuples. `target_dir` is the value of a `-C`/`--git-dir` global option
+    on this specific invocation, or `None` when neither is given, in which case the caller falls
+    back to a leading `cd` prefix or the hook's own cwd. Shares its tokenizing and global-option
+    skipping with `_git_subcommand_arglists`, generalized to read every subcommand rather than one
+    named subcommand, and to capture the directory-naming options along the way.
+    """
+    toks = _shell_tokens(cmd)
+    n = len(toks)
+    out = []
+    i = 0
+    while i < n:
+        if not _is_git_exe(toks[i]):
+            i += 1
+            continue
+        j = i + 1
+        target_dir = None
+        while j < n and toks[j].startswith("-"):
+            opt = toks[j]
+            if "=" in opt and opt.split("=", 1)[0] in _GIT_DIR_OPTS:
+                target_dir = opt.split("=", 1)[1]
+                j += 1
+            elif opt in _GIT_DIR_OPTS:
+                if j + 1 < n:
+                    target_dir = toks[j + 1]
+                j += 2
+            elif opt in _GIT_GLOBAL_VALUE_OPTS and "=" not in opt:
+                j += 2
+            else:
+                j += 1
+        if j < n and not _is_shell_op(toks[j]):
+            sub = toks[j]
+            args, k = _collect_arglist(toks, j + 1)
+            out.append((target_dir, sub, args))
+            i = k
+        else:
+            i = j if j > i else i + 1  # a bare `git` with no subcommand at all; keep scanning
+    return out
+
+
+# A single leading `cd <dir> &&`/`cd <dir> ;` prefix, and no more, a narrow, tractable parse rather than tracking shell execution state.
+# `git status && cd x && git pull` still resolves the second invocation's target from cwd, a materially smaller gap than an entirely unresolved one.
+_CD_CHAIN_SEPS = ("&&", ";")
+
+
+def _leading_cd_dir(cmd):
+    """The directory a command starts with `cd <dir> &&` or `cd <dir> ;`, or `None`."""
+    toks = _shell_tokens(cmd)
+    if (
+        len(toks) >= 3
+        and toks[0] == "cd"
+        and not toks[1].startswith("-")
+        and toks[2] in _CD_CHAIN_SEPS
+    ):
+        return toks[1]
+    return None
+
+
+def _is_primary_checkout(target_dir):
+    """`True` when `target_dir` resolves to a primary (non-worktree) git checkout, `False` when it
+    resolves to a linked worktree, `None` when no git repository resolves there at all (the caller
+    fails open on `None`, matching this rule's own precision-over-recall stance).
+
+    The test is a `rev-parse` comparison, not a filesystem-shape guess: `--git-dir` equals
+    `--git-common-dir` for a primary checkout and differs for a linked worktree. A `.git`-is-a-
+    directory heuristic is deliberately not used instead, since a plain submodule's `.git` is a
+    file while it is still a primary working tree that can lose uncommitted work, and that
+    heuristic would wrongly exempt it. `--path-format=absolute` must precede the two paths in
+    argv, verified silently ineffective (relative paths, no error) in the other order, which would
+    misclassify a primary checkout as a worktree the moment a command runs from one of its
+    subdirectories.
+    """
+    try:
+        r = subprocess.run(
+            [
+                "git",
+                "-C",
+                target_dir or ".",
+                "rev-parse",
+                "--path-format=absolute",
+                "--git-dir",
+                "--git-common-dir",
+            ],
+            capture_output=True,
+            text=True,
+            timeout=5,
+            check=False,
+        )
+    except Exception:  # noqa: BLE001
+        return None
+    if r.returncode != 0:
+        return None
+    lines = r.stdout.strip().splitlines()
+    if len(lines) != 2:
+        return None
+    return lines[0].strip() == lines[1].strip()
+
+
+# Flags that turn an otherwise-denied `checkout`/`switch` into a real branch-creating or force-discarding operation, the cases git itself does not already refuse on its own.
+_CHECKOUT_FORCE_FLAGS = {"-b", "-B", "--force", "-f", "--discard-changes", "--orphan"}
+# Flags that make `git clean` an actual deletion rather than the dry-run it defaults to.
+_CLEAN_FORCE_FLAGS = {"-f", "--force"}
+
+
+def _primary_checkout_verdict(sub, args):
+    """Whether this `(subcommand, args)` pair is a mutating operation requirement 6 denies against
+    a primary checkout: `True` (deny), `False` (exempt, explicitly allowed), or `None` (not a
+    subcommand this rule concerns itself with, allowed by falling through).
+    """
+    if sub == "worktree":
+        # `add`/`list`/`prune` are always allowed, the documented way to use a primary checkout from an agent session.
+        # `remove` is allowed too unless forced: git itself already refuses to remove a worktree carrying uncommitted changes without --force, so only the forced form reproduces the harm this rule exists to catch.
+        if not args or args[0] != "remove":
+            return None
+        return any(a in ("-f", "--force") for a in args[1:])
+    if sub in ("checkout", "switch"):
+        # A flagless `checkout <ref>`/`switch <ref>` is exempt: git already refuses this exact form when it would overwrite a local modification, so denying it adds no safety while breaking the documented cleanup step that returns a base clone to its own working branch.
+        return any(a in _CHECKOUT_FORCE_FLAGS for a in args)
+    if sub in ("merge", "pull"):
+        # `--ff-only` can never discard a commit or a local change, failing cleanly instead of mutating when a fast-forward is not possible.
+        return "--ff-only" not in args
+    if sub in ("reset", "rebase", "cherry-pick", "revert", "restore", "add", "commit"):
+        return True
+    if sub == "stash":
+        return bool(args) and args[0] in ("pop", "apply", "drop")
+    if sub == "clean":
+        return any(
+            a in _CLEAN_FORCE_FLAGS or (a.startswith("-") and not a.startswith("--") and "f" in a)
+            for a in args
+        )
+    return None
+
+
+def _check_primary_checkout_mutation(cmd, cwd, environ=None, primary_checkout_lookup=None):
+    """Rule 6: deny a mutating git operation run directly against a primary (non-worktree)
+    checkout. `environ` is a test seam, the same shape rules 3 and 5 already take.
+    `primary_checkout_lookup`, when given, stands in for `_is_primary_checkout` so the self-test
+    runs deterministically offline instead of resolving a real checkout on the machine running it.
+
+    Fails open (allow) when no git repository resolves at the target at all, matching the
+    footgun rules' precision-over-recall stance rather than rule 4's fail-closed one: the harm
+    here needs a positively-identified primary checkout to fire on, and a hard fail-closed would
+    deny unrelated Bash work in any non-git directory.
+    """
+    environ = environ if environ is not None else os.environ
+    lookup = (
+        primary_checkout_lookup if primary_checkout_lookup is not None else _is_primary_checkout
+    )
+    # Read the same way GH_WRITE_GUARD_ALLOW is: from the environment the session was launched with, never a channel the agent itself can set (an inline `VAR=x cmd` prefix or an `export` inside the same call must not satisfy this).
+    if environ.get("GH_WRITE_GUARD_ALLOW_PRIMARY_CHECKOUT"):
+        return "allow", ""
+    leading_cd = _leading_cd_dir(cmd)
+    resolved_cache = {}
+    for target_dir, sub, args in _git_invocations(cmd):
+        if not _primary_checkout_verdict(sub, args):
+            continue
+        resolved = target_dir or leading_cd or cwd
+        if resolved not in resolved_cache:
+            resolved_cache[resolved] = lookup(resolved)
+        if resolved_cache[resolved]:
+            return "deny", (
+                f"This `git {sub}` runs directly against a primary checkout ({resolved}), not a "
+                "linked worktree. A mutating git operation there can destroy another task's "
+                "uncommitted work. Create or use a worktree instead (`git worktree add ...`), per "
+                "GOVERNANCE.md 'Repository Boundaries and Write Safety' and the repo-worktree "
+                "skill. If this primary checkout is genuinely the intended target, ask the "
+                "maintainer to set GH_WRITE_GUARD_ALLOW_PRIMARY_CHECKOUT before the session starts."
+            )
+    return "allow", ""
 
 
 def _gh_arg_lists(cmd):
@@ -890,14 +1082,24 @@ def _check_reply_resolve_helper(cmd, environ):
     return "allow", ""
 
 
-def classify(cmd, cwd=None, origin=None, current_branch=None, rules_lookup=None, environ=None):
+def classify(
+    cmd,
+    cwd=None,
+    origin=None,
+    current_branch=None,
+    rules_lookup=None,
+    environ=None,
+    primary_checkout_lookup=None,
+):
     """Return (decision, reason). decision is 'allow' or 'deny'.
 
     origin, when given, is a (owner, repo) tuple used instead of resolving from cwd - the self-test
-    passes it for a deterministic, offline run. current_branch, rules_lookup and environ are likewise
-    test seams: current_branch stands in for the git resolution of a bare push, rules_lookup(branch)
-    stands in for the live branch-rules query, and environ stands in for the process environment the
-    maintainer's grant is read from.
+    passes it for a deterministic, offline run. current_branch, rules_lookup, environ and
+    primary_checkout_lookup are likewise test seams: current_branch stands in for the git
+    resolution of a bare push, rules_lookup(branch) stands in for the live branch-rules query,
+    environ stands in for the process environment the maintainer's grant is read from, and
+    primary_checkout_lookup(dir) stands in for resolving a real checkout's primary-vs-worktree
+    status on the machine running the self-test.
     """
     # Fold shell line-continuations so a multi-line Bash invocation, such as `gh pr merge 5 \<newline> --admin`, parses as one command.
     # Only backslash-newline is joined, so a real newline between commands still separates them.
@@ -913,6 +1115,10 @@ def classify(cmd, cwd=None, origin=None, current_branch=None, rules_lookup=None,
         dec, reason = _check_push_bypass(cmd, cwd, origin, current_branch, rules_lookup)
         if dec == "deny":
             return dec, reason
+    # Rule 6 covers a mutating git operation against a primary checkout, also not a GitHub write, so it is checked here too, before the gh-write gate below would otherwise skip past it.
+    dec, reason = _check_primary_checkout_mutation(cmd, cwd, environ, primary_checkout_lookup)
+    if dec == "deny":
+        return dec, reason
 
     if not _is_gh_write(cmd):
         return "allow", ""
@@ -1803,12 +2009,163 @@ _GIT_CASES = [
     ),
 ]
 
+# (command, cwd, {dir: is_primary_or_None}, expected_decision, label) -- is_primary is True (a primary checkout), False (a linked worktree), or None (unresolved, no git repository there at all).
+_PRIMARY_CHECKOUT_CASES = [
+    (
+        "git reset --hard origin/main",
+        "/primary",
+        {"/primary": True},
+        "deny",
+        "a git reset --hard in a primary checkout is exactly the GOVERNANCE.md-named harm",
+    ),
+    (
+        "git reset --hard origin/main",
+        "/worktree",
+        {"/worktree": False},
+        "allow",
+        "the same command in a linked worktree is allowed",
+    ),
+    (
+        "git checkout main",
+        "/primary",
+        {"/primary": True},
+        "allow",
+        (
+            "a flagless checkout is exempt even in a primary checkout, an accepted scope "
+            "boundary: the #1073 incident's own literal commands (checkout, then --ff-only "
+            "pull) are this exact shape, and the concurrent-access hazard they still carried "
+            "is the prose rule's job, not this mechanically decidable one's"
+        ),
+    ),
+    (
+        "git pull",
+        "/primary",
+        {"/primary": True},
+        "deny",
+        "a bare pull in a primary checkout is denied",
+    ),
+    (
+        "git pull --ff-only",
+        "/primary",
+        {"/primary": True},
+        "allow",
+        "--ff-only can never discard anything, exempt even in a primary checkout",
+    ),
+    (
+        "git merge --ff-only origin/develop",
+        "/primary",
+        {"/primary": True},
+        "allow",
+        "the documented base-clone cleanup step (repo-worktree 'Listing and Cleanup')",
+    ),
+    (
+        "git worktree add ../x origin/develop",
+        "/primary",
+        {"/primary": True},
+        "allow",
+        "creating a worktree from the primary checkout is the documented, intended use",
+    ),
+    (
+        "git fetch origin develop",
+        "/primary",
+        {"/primary": True},
+        "allow",
+        "a read is never denied, even in a primary checkout",
+    ),
+    (
+        "git status",
+        "/primary",
+        {"/primary": True},
+        "allow",
+        "status is not even a subcommand this rule inspects",
+    ),
+    (
+        "git commit -m x",
+        "/primary",
+        {"/primary": True},
+        "deny",
+        "commit has no flag-based exemption, denied unconditionally in a primary checkout",
+    ),
+    (
+        "git add -A",
+        "/primary",
+        {"/primary": True},
+        "deny",
+        "a blanket add in a primary checkout is exactly the #1073 incident class",
+    ),
+    (
+        "git checkout -b feature/x",
+        "/primary",
+        {"/primary": True},
+        "deny",
+        "checkout -b is branch-creating, not the exempt flagless form",
+    ),
+    (
+        "git worktree remove --force ../x",
+        "/primary",
+        {"/primary": True},
+        "deny",
+        "a forced worktree remove reproduces the harm this rule guards against",
+    ),
+    (
+        "git worktree remove ../x",
+        "/primary",
+        {"/primary": True},
+        "allow",
+        "an unforced worktree remove is exempt: git itself refuses one carrying local changes",
+    ),
+    (
+        "git -C /worktree reset --hard origin/main",
+        "/primary",
+        {"/primary": True, "/worktree": False},
+        "allow",
+        "-C overrides cwd: a worktree named explicitly is allowed even though cwd is the primary",
+    ),
+    (
+        "git -C /primary reset --hard origin/main",
+        "/worktree",
+        {"/primary": True, "/worktree": False},
+        "deny",
+        "-C overrides cwd the other way: the primary named explicitly is denied from a worktree",
+    ),
+    (
+        "cd /primary && git reset --hard origin/main",
+        "/somewhere-else",
+        {"/primary": True, "/somewhere-else": False},
+        "deny",
+        "a leading cd resolves the target when the hook's own cwd points elsewhere entirely",
+    ),
+    (
+        "git status && cd /primary && git reset --hard origin/main",
+        "/somewhere-else",
+        {"/primary": True, "/somewhere-else": False},
+        "allow",
+        "only a leading cd is read; one appearing after the first command is the accepted gap",
+    ),
+    (
+        "git reset --hard origin/main",
+        "/primary/.git",
+        {"/primary/.git": True},
+        "deny",
+        "cwd inside .git itself still resolves as the primary checkout",
+    ),
+    (
+        "git reset --hard origin/main",
+        "/not-a-repo",
+        {"/not-a-repo": None},
+        "allow",
+        "an unresolvable target fails open, precision over recall like every rule but 4",
+    ),
+]
+
 
 def _selftest():
     # A deterministic offline run, pinning origin to ptr727/PlexCleaner, the incident repo, so the cross-origin case resolves without touching a real checkout.
     # The gh-write cases inject empty rules and a feature current-branch so no case reaches the live branch-rules query.
     origin = ("ptr727", "plexcleaner")
     ok = True
+    # Every existing loop below pins primary_checkout_lookup to a constant False (never a primary checkout), so rule 6 stays inert for every case that predates it.
+    # Without this, a mutating subcommand incidental to a case testing a different rule (git commit, in a few of them) would fall through to the real _is_primary_checkout and resolve against wherever the self-test process actually runs, which is a primary checkout in CI, silently changing what those cases test.
     for cmd, want, label in _CASES:
         got, _ = classify(
             cmd,
@@ -1816,6 +2173,7 @@ def _selftest():
             current_branch="feature/x",
             rules_lookup=lambda br: set(),
             environ={},
+            primary_checkout_lookup=lambda d: False,
         )
         mark = "ok  " if got == want else "FAIL"
         if got != want:
@@ -1828,6 +2186,7 @@ def _selftest():
             current_branch="feature/x",
             rules_lookup=lambda br: set(),
             environ=env,
+            primary_checkout_lookup=lambda d: False,
         )
         mark = "ok  " if got == want else "FAIL"
         if got != want:
@@ -1840,6 +2199,7 @@ def _selftest():
             current_branch="feature/x",
             rules_lookup=lambda br: set(),
             environ=env,
+            primary_checkout_lookup=lambda d: False,
         )
         mark = "ok  " if got == want else "FAIL"
         if got != want:
@@ -1852,11 +2212,43 @@ def _selftest():
             current_branch=cur,
             rules_lookup=lambda br, _m=rmap: _m.get(br),
             environ={},
+            primary_checkout_lookup=lambda d: False,
         )
         mark = "ok  " if got == want else "FAIL"
         if got != want:
             ok = False
         print(f"  {mark} [{got:5}] want={want:5} {label}")
+    for cmd, cwd, pmap, want, label in _PRIMARY_CHECKOUT_CASES:
+        got, _ = classify(
+            cmd,
+            cwd=cwd,
+            origin=origin,
+            current_branch="feature/x",
+            rules_lookup=lambda br: set(),
+            environ={},
+            primary_checkout_lookup=lambda d, _m=pmap: _m.get(d),
+        )
+        mark = "ok  " if got == want else "FAIL"
+        if got != want:
+            ok = False
+        print(f"  {mark} [{got:5}] want={want:5} {label}")
+    # The GH_WRITE_GUARD_ALLOW_PRIMARY_CHECKOUT escape hatch, checked once here rather than folded into the table above, since it is the one case needing a non-empty environ alongside a primary_checkout_lookup.
+    got, _ = classify(
+        "git checkout main",
+        cwd="/primary",
+        origin=origin,
+        current_branch="feature/x",
+        rules_lookup=lambda br: set(),
+        environ={"GH_WRITE_GUARD_ALLOW_PRIMARY_CHECKOUT": "1"},
+        primary_checkout_lookup=lambda d: {"/primary": True}.get(d),
+    )
+    want = "allow"
+    mark = "ok  " if got == want else "FAIL"
+    if got != want:
+        ok = False
+    print(
+        f"  {mark} [{got:5}] want={want:5} the escape hatch allows even a denied shape when granted"
+    )
     print("SELFTEST PASS" if ok else "SELFTEST FAIL")
     return 0 if ok else 1
 
