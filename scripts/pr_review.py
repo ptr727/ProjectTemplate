@@ -1485,28 +1485,8 @@ def marker_blocks(body: str, marker: re.Pattern[str], strip_blockquote: bool = F
     """Return the review body's sections whose own heading matches `marker`, each sliced from
     that heading through to the end of its own region.
 
-    Shared by `suppressed_blocks` (Copilot's low-confidence findings) and `outside_diff_blocks`
-    (CodeRabbit's outside-diff-range findings): both are a review body collapsing real
-    findings into a block that raises no `reviewThreads` entry, so a thread poll alone reports a
-    clean pass over either.
-
-    The section has worn three shapes so far, all against `SUPPRESSED`: its own `<details>`
-    wrapper, a bare heading in the body, and a Markdown heading nested inside the `Review
-    details` wrapper. The wrapper is the part that keeps moving, so each region is scanned line
-    by line for the heading rather than read for a wrapper's summary: a nested heading is not a
-    summary, and stripping the wrappers to look for it outside deletes the very region it sits
-    in. That is the pair that reported `suppressed=0` over a body carrying `### Suppressed
-    comments (2)`.
-
-    The heading carries the match rather than the body text, since a review whose prose discusses
-    the marker's own wording is not itself carrying a block. A region ends the block, so a
-    section is not read on into the file table that follows it.
-
-    `strip_blockquote` is read on a copy used only to find the heading line, never on what is
-    returned: CodeRabbit's own outside-diff section wraps its lines in a Markdown blockquote,
-    which `BLOCKQUOTE` strips for detection, but a finding quoting code (`>&2 echo`, `>> $LOG`)
-    would otherwise be corrupted by that same strip once it landed in the printed digest.
-    Left off by default, so `suppressed_blocks` reads exactly as it always has.
+    Shared by `suppressed_blocks` and `outside_diff_blocks`. `strip_blockquote` affects heading
+    detection only, never the returned content.
     """
     if not body:
         return []
@@ -1517,6 +1497,8 @@ def marker_blocks(body: str, marker: re.Pattern[str], strip_blockquote: bool = F
     blocks = []
     for region in regions:
         raw_lines = region.splitlines()
+        # Scanned line by line rather than read from a wrapper's own summary.
+        # A heading can sit in the wrapper's body instead, where reading only the summary would miss it.
         scan_lines = [BLOCKQUOTE.sub("", ln) for ln in raw_lines] if strip_blockquote else raw_lines
         for i, line in enumerate(scan_lines):
             if marker.search(line) and (HEADING.match(line) or COUNT.search(line)):
@@ -1528,7 +1510,7 @@ def marker_blocks(body: str, marker: re.Pattern[str], strip_blockquote: bool = F
 def suppressed_blocks(body: str) -> list[str]:
     """Copilot's own low-confidence findings, collapsed rather than raised as inline threads.
 
-    See `marker_blocks` for the shared reading and the shape history behind it.
+    See `marker_blocks` for the shared reading.
     """
     return marker_blocks(body, SUPPRESSED)
 
