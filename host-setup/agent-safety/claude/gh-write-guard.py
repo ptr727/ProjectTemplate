@@ -43,7 +43,11 @@ harm there is a silent success under the maintainer's admin bypass. The denied s
      last-option-wins scan: any `-C <dir>` options on the invocation compose sequentially onto a leading
      `cd` (inside a `sh -c`/`bash -c` wrapper too) or the session's own cwd, then an explicit
      `--work-tree`/`GIT_WORK_TREE=` value, when given, wins over that result regardless of `-C`;
-     `--git-dir`/`GIT_DIR=` alone never relocates that reported target, matching git's own fallback.
+     `--git-dir`/`GIT_DIR=` alone never relocates that reported target, matching git's own fallback. A
+     leading `export GIT_WORK_TREE=x GIT_DIR=y &&` prefix is read the same way an inline `VAR=x git ...`
+     prefix already is, since a real shell export persists into the following command exactly as
+     effectively - confirmed live to discard a tracked local modification with no redirect at all on the
+     git invocation itself, a shape the inline-prefix scan alone cannot see.
      Whether the invocation is primary-checkout at all is a separate question from the mutation target,
      though: an explicit `--git-dir`/`GIT_DIR=` is resolved and tested for primary-checkout-ness
      directly, regardless of `--work-tree`, since `--git-dir` names the repository actually mutated -
@@ -578,15 +582,28 @@ def _all_git_invocations(cmd):
     (`bash -c 'cd /x && git ...'`) is invisible to a leading-`cd` check run only against the outer
     command, and the outer command's own leading `cd` (`cd /x && bash -c 'git ...'`) takes effect
     inside the wrapper too, via the shell's own inherited cwd, when the wrapped string carries no
-    leading `cd` of its own to override it.
+    leading `cd` of its own to override it. A leading `export GIT_WORK_TREE=x GIT_DIR=y &&` prefix
+    is folded into `work_tree`/`git_dir` themselves the same way, whenever the invocation's own
+    flags or inline `VAR=x git ...` prefix leave either unset, since an exported assignment
+    persists into a following command exactly as effectively as either of those, and this rule
+    must not fail open just because the redirect came from `export` rather than from `-C`, an
+    inline prefix, or a flag.
     """
     outer_leading_cd = _leading_cd_dir(cmd)
+    outer_export_wt, outer_export_gd = _leading_export_dirs(cmd)
     out = []
     for c_dirs, work_tree, git_dir, inline_aliases, sub, args in _git_invocations(cmd):
+        work_tree = work_tree if work_tree is not None else outer_export_wt
+        git_dir = git_dir if git_dir is not None else outer_export_gd
         out.append((c_dirs, work_tree, git_dir, inline_aliases, sub, args, outer_leading_cd))
     for inner in _embedded_wrapper_commands(cmd):
         leading_cd = _leading_cd_dir(inner) or outer_leading_cd
+        inner_export_wt, inner_export_gd = _leading_export_dirs(inner)
+        export_wt = inner_export_wt if inner_export_wt is not None else outer_export_wt
+        export_gd = inner_export_gd if inner_export_gd is not None else outer_export_gd
         for c_dirs, work_tree, git_dir, inline_aliases, sub, args in _git_invocations(inner):
+            work_tree = work_tree if work_tree is not None else export_wt
+            git_dir = git_dir if git_dir is not None else export_gd
             out.append((c_dirs, work_tree, git_dir, inline_aliases, sub, args, leading_cd))
     return out
 
@@ -687,6 +704,41 @@ def _leading_cd_dir(cmd):
     ):
         return toks[1]
     return None
+
+
+def _leading_export_dirs(cmd):
+    """The `GIT_WORK_TREE`/`GIT_DIR` values from a single leading `export NAME=value ... &&`/`;`
+    prefix, as a `(work_tree, git_dir)` pair, either of which may be `None` -- the same narrow,
+    tractable scope `_leading_cd_dir` already takes (only a leading prefix is read, one appearing
+    after the first command in a chain is the accepted gap), extended to the one other shell shape
+    that redirects a git invocation carrying no `-C`/`--work-tree`/`--git-dir`/inline-prefix of its
+    own: a real shell `export` makes an assignment persist into every later command in the same
+    session, unlike the inline `VAR=x git ...` prefix `_env_prefix_dirs` already reads, which
+    redirects only the one command it immediately precedes. Confirmed live: `export
+    GIT_DIR=<primary>/.git GIT_WORK_TREE=<primary> && git reset --hard` discards a tracked local
+    modification in `<primary>`, with no redirect at all on the `git` invocation itself, a shape
+    `_env_prefix_dirs` alone cannot see. Bails to `(None, None)` on anything but a clean run of
+    `NAME=value` tokens between `export` and the first separator, rather than guessing at a
+    non-assignment `export` form (`export -p`, `export EXISTING_VAR` with no `=`).
+    """
+    toks = _shell_tokens(cmd)
+    n = len(toks)
+    if not toks or toks[0] != "export":
+        return None, None
+    work_tree = git_dir = None
+    i = 1
+    while i < n and not _is_shell_op(toks[i]):
+        m = _ENV_ASSIGN_RE.match(toks[i])
+        if not m:
+            return None, None
+        if m.group(1) == _GIT_ENV_WORK_TREE_VAR:
+            work_tree = m.group(2)
+        elif m.group(1) == _GIT_ENV_GIT_DIR_VAR:
+            git_dir = m.group(2)
+        i += 1
+    if i >= n or i == 1 or toks[i] not in _CD_CHAIN_SEPS:
+        return None, None
+    return work_tree, git_dir
 
 
 def _is_primary_checkout(target_dir, git_dir=None):
@@ -2838,6 +2890,33 @@ _PRIMARY_CHECKOUT_CASES = [
             "invocation, unlike a real env var the hook process never sees; the primary-checkout "
             "test itself keys on the resolved GIT_DIR= value, since that is what --git-dir/GIT_DIR "
             "name for repository identity"
+        ),
+    ),
+    (
+        "export GIT_DIR=/primary/.git GIT_WORK_TREE=/primary && git reset --hard",
+        "/somewhere-else",
+        {"/primary/.git": True, "/somewhere-else": False},
+        None,
+        "deny",
+        (
+            "a leading export makes the assignment persist into the following command exactly "
+            "as a real shell would, confirmed live to discard a tracked local modification with "
+            "no redirect at all on the git invocation itself -- a shape an inline VAR=x git ... "
+            "prefix scan alone cannot see, since export and the git invocation are separate "
+            "commands joined by &&, not one command with a prefix"
+        ),
+    ),
+    (
+        "git status && export GIT_DIR=/primary/.git && git reset --hard",
+        "/somewhere-else",
+        {"/primary/.git": True, "/somewhere-else": False},
+        None,
+        "allow",
+        (
+            "only a leading export is read, matching the same accepted-gap scope leading cd "
+            "already has: export here is not the first token of the command (git status is), so "
+            "it has no effect under this rule's narrow scope even though a real shell would still "
+            "apply it to the following reset --hard"
         ),
     ),
     (

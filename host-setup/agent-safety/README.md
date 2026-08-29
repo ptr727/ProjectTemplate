@@ -140,8 +140,13 @@ hook or approval-gate API, not tied to Claude Code's `PreToolUse` JSON shape.
    `--work-tree`/`GIT_WORK_TREE=` value, when given anywhere on the invocation, then wins over that
    `-C`-chain result regardless of how many `-C` options preceded it, matching how `--work-tree`
    names the actual mutation target independent of where `-C` points, and a relative `--work-tree`
-   value still resolves against the `-C` chain's own result. `--git-dir`/`GIT_DIR=` alone, with no
-   `--work-tree`/`GIT_WORK_TREE=` anywhere on the same invocation, never relocates that reported
+   value still resolves against the `-C` chain's own result. A leading `export FOO=x BAR=y &&`
+   prefix (`GIT_WORK_TREE`/`GIT_DIR` in place of `FOO`/`BAR`, a bare `;` in place of `&&` too)
+   redirects the invocation the same way an inline `VAR=x git ...` prefix already does, since a
+   real shell export persists into the following command exactly as effectively, confirmed live
+   with a real reset that discards a tracked local modification with no redirect at all on the `git`
+   invocation itself, a shape an inline-prefix scan alone cannot see. `--git-dir`/`GIT_DIR=` alone,
+   with no `--work-tree`/`GIT_WORK_TREE=` anywhere on the same invocation, never relocates that reported
    target, matching git's own documented fallback.
 
    Whether the invocation targets a primary checkout at all is a separate question from that
