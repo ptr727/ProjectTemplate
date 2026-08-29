@@ -585,15 +585,16 @@ class TestDigest(GqlCase):
 
 
 class TestOtherReviewers(GqlCase):
-    """Thread resolution and head-presence, generalized past Copilot to the other review bots
-    this repository has trialed: identity and commit only, no prose parsed for either one here.
+    """Thread resolution, head-presence, and the rate-limit marker's own structural pattern,
+    generalized past Copilot to the other review bots this repository has trialed. Free-text
+    prose parsing for CodeRabbit's outside-diff findings and Qodo's comment-only findings lives
+    in `TestCodeRabbitOutsideDiff` and `TestQodoOpenFindings` below, not here.
 
     `status`'s `unresolved=0` used to hide a CodeRabbit/qodo thread that still blocked a
     ruleset-gated merge (PR #915, ptr727/ProjectTemplate), since only Copilot's own threads
     counted. Coverage and refusal reading stay Copilot-only: `review_on_head` above names
     Copilot's own coverage specifically, the reviewer this script requests and waits for, not
-    "no review of any kind covers this head" (#1066). CodeRabbit's outside-diff-range findings
-    and Qodo's comment-only findings are each read too, in their own shape, by `TestCodeRabbitOutsideDiff` and `TestQodoOpenFindings` below (#1058).
+    "no review of any kind covers this head" (#1066).
     """
 
     def other_review(self, login: str, oid: str = HEAD, body: str = "") -> dict:
