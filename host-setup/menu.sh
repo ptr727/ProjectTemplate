@@ -136,7 +136,8 @@ hub_read_lock_release() {
 # Downgraded back to shared once the fetch itself is done, restoring reader concurrency for the rest of the caller's own read-and-use span, rather than holding exclusive (which would still be correct, only more conservative than necessary).
 fetch_hub() {
     # --dry-run promises to change nothing, and this clone (or re-clone) is the one real change this function itself makes to the host.
-    # The reader lock's own directory and lock-file creation (hub_read_lock_acquire) runs regardless of --dry-run for an ordinary reused-checkout read, but respects it here since a fetch is a materially bigger change than a lock file.
+    # The reader lock (hub_read_lock_acquire) already no-ops under --dry-run, never opening a lock at all, so without this check fetch_hub would instead fail on its own "no reader lock held" internal-error message below.
+    # This check exists to give the clearer, task-specific diagnostic first.
     [[ $DRY_RUN == true ]] && {
         fail "This task needs a fetched hub checkout, and fetching one is itself a change --dry-run does not make. Run without --dry-run, or from inside a hub checkout already on $DEFAULT_REF."
         return 1
@@ -265,8 +266,19 @@ cleanup() {
     hub_read_lock_release
     # Exclusive, the same writer half fetch_hub takes, so this waits out a concurrent reader still mid-use rather than deleting the tree out from under it.
     local lock_fd
-    exec {lock_fd}>"$DIR/hub.lock"
-    if ! flock -n "$lock_fd" 2>/dev/null; then
+    # Checked explicitly, the same reasoning hub_read_lock_acquire's own open already applies: cleanup runs from an EXIT trap, not a plain top-level statement, so an unwritable $DIR here would otherwise leave lock_fd unset and surface only flock's own confusing error about a missing fd.
+    if ! exec {lock_fd}>"$DIR/hub.lock"; then
+        fail "Could not open $DIR/hub.lock for locking (permission, or the directory is not writable)"
+        return 1
+    fi
+    local probe_err
+    if ! probe_err=$(flock -n "$lock_fd" 2>&1); then
+        if [[ -n $probe_err ]]; then
+            # A real error, not contention, the same distinction hub_read_lock_acquire's own probe already makes: retrying via the blocking call below would not help and risks a second, more confusing failure.
+            fail "flock -n reported: $probe_err"
+            exec {lock_fd}>&-
+            return 1
+        fi
         info "Waiting for another session using $DIR/hub..."
         flock "$lock_fd" || {
             fail "Could not lock $DIR/hub.lock"
