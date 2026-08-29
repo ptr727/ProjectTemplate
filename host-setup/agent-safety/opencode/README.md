@@ -15,19 +15,19 @@ in an opencode session.
 
 [`../README.md`][spec] states each requirement as an agent-agnostic decision rule, not tied to any
 one hook API. [`../claude/gh-write-guard.py`][claude-hook] is a worked reference implementation of
-all six requirements against Claude Code's `PreToolUse` hook, including its tokenizer, its
-self-test matrix (`--selftest`), and its documented fail-open/fail-closed choices per requirement
--- useful as a model for argv parsing and edge cases, not as something to port line for line, since
-opencode's own permission-model extension points differ from Claude Code's hook shape. Whatever
-mechanism opencode offers for intercepting or gating a command before it runs is the place to
-implement requirements 1-6. If opencode offers no such extension point at all, that finding belongs
-on [issue #781][issue-781], not silently worked around.
+the spec's currently-implemented requirements against Claude Code's `PreToolUse` hook, including
+its tokenizer, its self-test matrix (`--selftest`), and its documented fail-open/fail-closed
+choices per requirement -- useful as a model for argv parsing and edge cases, not as something to
+port line for line, since opencode's own permission-model extension points differ from Claude
+Code's hook shape. Whatever mechanism opencode offers for intercepting or gating a command before
+it runs is the place to implement the spec's requirements. If opencode offers no such extension
+point at all, that finding belongs on [issue #781][issue-781], not silently worked around.
 
 ## Auditing
 
 Once an opencode-side implementation exists, audit it the way [`../README.md`][spec] "Auditing an
-Implementation Against This Spec" describes: run its own self-test and check every case against the
-six requirements, not against `gh-write-guard.py`'s source.
+Implementation Against This Spec" describes: run its own self-test and check every case against
+the spec's requirements list, not against `gh-write-guard.py`'s source.
 
 <!-- Repo -->
 [spec]: ../README.md

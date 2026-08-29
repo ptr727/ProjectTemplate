@@ -27,8 +27,9 @@ hook or approval-gate API, not tied to Claude Code's `PreToolUse` JSON shape.
 2. **A GraphQL mutation carrying a literal GitHub node id is denied. A captured variable is
    trusted.** Node ids resolve globally, so a fabricated, stale, or hand-typed id can land on a real
    object in a different repository. A `-F name="$VAR"` value captured from a live query in the same
-   session is allowed. A literal id in the same position, prefixed `PR_`, `PRRT_`, `IC_`, or `BOT_`,
-   is denied.
+   session is allowed. A literal id in the same position, such as one prefixed `PR_`, `PRRT_`,
+   `IC_`, or `BOT_` (an uppercase-letter prefix followed by an underscore and a long body, or the
+   legacy `MD`-prefixed base64 form), is denied.
 3. **A GitHub write with an explicit target outside the checkout's own owner is denied, unless the
    maintainer granted it.** Compare the write's explicit `-R`/`--repo`/`repos/<owner>/<repo>` target
    against the checkout's own `origin` owner. A sibling repository under the same owner is allowed
@@ -41,46 +42,32 @@ hook or approval-gate API, not tied to Claude Code's `PreToolUse` JSON shape.
    protected, a delete where deletion is blocked, or an explicit-bypass flag (`--admin` on a merge,
    `--no-verify` on a commit/push). Judge branch-rule cases against that branch's *live* rules, so a
    code-style `develop` denies and a config-style `develop` allows with no per-repo configuration.
-   **This one fails closed**: when the branch's rules cannot be determined at all (network
-   unreachable, origin unresolvable), deny rather than allow, because the harm is a silent success
-   under the maintainer's own admin bypass. Every other requirement here instead favors precision
-   over recall, denying only a positively-identified dangerous shape, since a hook that fails closed
-   on an unrelated resolution failure blocks legitimate work far more often than it catches a real
-   bypass.
+   **This one fails closed, but only for a branch protected by default** (`main`, `master`,
+   `develop`): when that branch's rules cannot be determined at all (network unreachable, origin
+   unresolvable), deny rather than allow, because the harm is a silent success under the
+   maintainer's own admin bypass. A push to any other branch whose rules cannot be determined
+   passes this requirement instead, since there is nothing yet on record to bypass. Every other
+   requirement here favors precision over recall throughout, denying only a positively-identified
+   dangerous shape, since a hook that fails closed on an unrelated resolution failure blocks
+   legitimate work far more often than it catches a real bypass.
 5. **A hand-rolled reply or resolve on a review thread, bypassing the one-call helper, is denied
    (where a helper exists) or flagged.** Splitting a reply and a resolve into two separate hand-run
    API calls is what let a reply sit unresolved across a push, reading as untriaged. Where the agent's
    fleet ships a single documented helper for this (this repo's `scripts/pr_review.py reply --resolve`),
    a raw mutation reaching the same endpoint is denied in favor of it.
-6. **A mutating git operation run directly against a primary checkout is denied.** "Primary" means:
-   not a linked worktree. The decidable test is a comparison, not a filesystem-shape guess -- `git
-   rev-parse --path-format=absolute --git-dir --git-common-dir` (or the equivalent call in whatever
-   VCS API the agent's runtime exposes) returns equal paths for a primary checkout and unequal paths
-   for a linked worktree. A `.git`-is-a-directory heuristic is wrong (a submodule's `.git` is a file
-   yet is still a primary working tree that can lose uncommitted work). Deny `checkout`/`switch`/
-   `pull`/`reset`/`rebase`/`merge`/`cherry-pick`/`revert`/`restore`/`stash pop|apply|drop`/`clean
-   -f|-fd`/`add`/`commit`/`worktree remove -f|--force` there. Allow `worktree add|list|prune`, a plain
-   `worktree remove` with no force flag, any read, `merge --ff-only`/`pull --ff-only` (git's own
-   semantics mean neither can discard anything), and a flagless `checkout <ref>`/`switch <ref>` (git
-   itself already refuses that form when it would overwrite a local modification) -- these are the
-   normal, documented way an agent uses a primary checkout as a fetch source and returns it to a base
-   branch afterward, and denying them adds no safety while breaking routine, correct work. Resolve the
-   target directory from an explicit `-C`/`--git-dir` argument, else a single leading `cd <dir> &&`
-   prefix (or the same with a bare command-separator instead of `&&`) on the same command, else the
-   invocation's own working directory. Fail
-   open (allow) when no git repository resolves at all, matching this requirement's own
-   precision-over-recall stance, not requirement 4's fail-closed one -- the harm here needs a
-   positively-identified primary checkout to fire on.
+
+**Not yet implemented anywhere, tracked at [issue #1073][issue-1073]:** a mutating git operation run
+directly against a primary (non-worktree) checkout should be denied the same way. This spec is
+updated with that requirement's exact decision rule in the same change that adds it to the Claude
+Code hook, so a reader here always sees what is actually enforced, not what is merely planned.
 
 ## Decision Flow
 
 ```mermaid
 flowchart TD
     cmd["Tool call: a shell/git/gh command"] --> isgit{"A git operation\nthat bypasses a\nbranch rule\nor a bypass flag?"}
-    isgit -- yes --> deny4["DENY - requirement 4\n(fails closed on unresolved rules)"]
-    isgit -- no --> isprimary{"A mutating git op\ntargeting a primary\ncheckout? (req. 6)"}
-    isprimary -- yes, not exempt --> deny6["DENY - requirement 6"]
-    isprimary -- no / exempt op --> isghwrite{"A GitHub-write\ncommand at all?"}
+    isgit -- yes --> deny4["DENY - requirement 4\n(fails closed for a\nprotected-default branch\nwith undeterminable rules)"]
+    isgit -- no --> isghwrite{"A GitHub-write\ncommand at all?"}
     isghwrite -- no --> allow["ALLOW"]
     isghwrite -- yes --> suppressed{"Output discarded or\nforced to success?"}
     suppressed -- yes --> deny1["DENY - requirement 1"]
@@ -113,15 +100,16 @@ The first diagram is this spec's actual decision flow, generalized from `claude/
 reached the session at all is a loading bug, fixed the way PR #1081 fixed `local-strict-review`'s
 missed trigger, by wiring `CLAUDE.md` to import `AGENTS.md`. A rule that reached the session and
 was still not followed, where the trigger is mechanically decidable and the harm is destructive,
-is promoted to a hook (requirement 6 below is the worked example). A rule whose violation can only
-be judged, not mechanically decided (was a review finding actually evidence-backed?), stays prose
-and a chained Skill trigger, since a hook there could only nag, never decide.
+is promoted to a hook ([issue #1073][issue-1073]'s primary-checkout guard, above, is the worked
+example once it lands). A rule whose violation can only be judged, not mechanically decided (was a
+review finding actually evidence-backed?), stays prose and a chained Skill trigger, since a hook
+there could only nag, never decide.
 
 ## Per-Agent Status
 
 | Agent | Status | Implementation |
 | --- | --- | --- |
-| Claude Code | All 6 requirements, via a `PreToolUse` hook | [`claude/README.md`][claude] |
+| Claude Code | Requirements 1-5, via a `PreToolUse` hook | [`claude/README.md`][claude] |
 | Codex | No hook yet -- tracked at [issue #781][issue-781] | [`codex/README.md`][codex] |
 | opencode | No hook yet -- tracked at [issue #781][issue-781] | [`opencode/README.md`][opencode] |
 
@@ -144,3 +132,4 @@ spec": point the agent at this file's requirements, not at another agent's sourc
 [opencode]: ./opencode/README.md
 [governance]: ../../GOVERNANCE.md
 [issue-781]: https://github.com/ptr727/ProjectTemplate/issues/781
+[issue-1073]: https://github.com/ptr727/ProjectTemplate/issues/1073
