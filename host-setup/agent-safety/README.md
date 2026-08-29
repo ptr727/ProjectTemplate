@@ -159,7 +159,10 @@ hook or approval-gate API, not tied to Claude Code's `PreToolUse` JSON shape.
    resolves at all, matching this requirement's own
    precision-over-recall stance, not requirement 4's fail-closed one -- the harm here needs a
    positively-identified primary checkout to fire on. Granted only by
-   `GH_WRITE_GUARD_ALLOW_PRIMARY_CHECKOUT`, read the same way `GH_WRITE_GUARD_ALLOW` is.
+   `GH_WRITE_GUARD_ALLOW_PRIMARY_CHECKOUT`, read from the same session-start-environment channel
+   `GH_WRITE_GUARD_ALLOW` is, though interpreted differently: `GH_WRITE_GUARD_ALLOW` is an
+   `owner/repo` allowlist, while this one is a boolean escape hatch, granted by any non-falsy value
+   and withheld by a recognized falsy one ("0"/"false"/"no"/"off"/empty), not by list membership.
 
 ## Decision Flow
 
