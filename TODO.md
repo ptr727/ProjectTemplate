@@ -578,4 +578,4 @@ Regenerate [reports/divergences.md][divergences-report] before using it as the w
 [validate-task]: ./.github/workflows/validate-task.yml
 [workflow]: ./WORKFLOW.md
 [workflow-reuse-report]: ./reports/workflow-reuse.md
-[write-guard]: ./host-setup/agent-safety/gh-write-guard.py
+[write-guard]: ./host-setup/agent-safety/claude/gh-write-guard.py

@@ -65,15 +65,41 @@ Live end-to-end (in any repo): attempt a discarded-output write and confirm the 
 gh api graphql -f query='mutation{noop}' -F t="PRRT_x" >/dev/null 2>&1 || true   # blocked by the hook
 ```
 
-## Granting a Cross-Owner Write
+## Granting a Write the Guard Denies
 
-The cross-origin rule is the one denial a maintainer has to act on, because it is the only one with a grant behind it. The others name a shape to stop using, while this one names a target that may be entirely legitimate.
+The guard denies a `gh` write whose explicit target sits under an owner other than the checkout's `origin` owner, and the denial names `GH_WRITE_GUARD_ALLOW` as the way past it. That grant is the maintainer's to make, and making it is a deliberate act taken outside the session rather than something an agent does for itself once blocked. This is the one denial a maintainer has to act on, because it is the only one with a grant behind it -- the others name a shape to stop using, while this one names a target that may be entirely legitimate.
 
-`GH_WRITE_GUARD_ALLOW` is one string holding every grant, since it is an environment variable, and it is split into `owner/repo` tokens on any run of whitespace or commas, so `a/b c/d` and `a/b, c/d` are the same two grants. `owner/*` grants a whole owner. A token carrying no `/` is ignored, so a malformed grant grants nothing, and a repository grant does not extend to that owner's other repositories.
+**The case that raises it is usually a fork.** `origin` is your own fork under your own owner, and `upstream` is the project it was forked from under someone else's. Everything aimed at the fork is in scope and never denies, and only the half that leaves the owner stops: filing an issue on the upstream, opening a pull request against it, or commenting on one there. The grant therefore names the upstream alone, and the fork needs no grant at all. That asymmetry is what a reader hits first, since half the session's writes succeed and the other half do not.
 
-The hook reads it from the environment the session was launched with, which is the one channel an agent cannot use on itself: the hook runs as its own process, so an inline `VAR=x cmd` prefix and an `export` inside a Bash call both leave the write denied. Granting is therefore a deliberate act taken outside the session, and a blocked agent asks rather than unblocks itself.
+**The grant goes in the checkout's `.claude/settings.local.json`, as an `env` block:**
 
-The channel that works is an `env` block in the checkout's `.claude/settings.local.json`, which scopes the grant to sessions started in that checkout, followed by a session restart. The worked example, the fork case that raises this most often, and how to confirm a grant loaded without making the write are in [`docs/host-setup.md` "Granting a Write the Guard Denies"][host-setup-grant].
+```json
+{
+  "env": {
+    "GH_WRITE_GUARD_ALLOW": "upstream-owner/upstream-repo second-owner/other-repo third-owner/*"
+  }
+}
+```
+
+**The value is one string holding every grant, never a JSON array**, since the hook reads an environment variable and an environment variable is a string. The three tokens above are three separate grants: two naming one repository each, and `third-owner/*` granting every repository under that owner.
+
+Tokens are separated by **any run of whitespace or commas**, so `a/b c/d`, `a/b,c/d`, and `a/b, c/d` all parse to the same two grants and the choice is cosmetic. A token carrying no `/` is ignored, so a malformed entry grants nothing rather than granting everything, and it also fails silently, which is why the confirmation step below is worth running. Grant the narrowest thing that unblocks the work, since a repository grant does not extend to that owner's other repositories and that containment is the property worth keeping.
+
+**The grant is per checkout, not per host.** `.claude/settings.local.json` lives in the working tree and is git-ignored, so it applies to sessions started in that checkout and does not follow the agent into another repository's sessions. That is the intended scope: a grant made to file one upstream issue from one fork does not quietly become a standing permission everywhere.
+
+**Restart the session afterward.** The hook reads the value from the environment the session was launched with, which is what makes the channel one an agent cannot use on itself, and it is equally why a grant added to a live session does nothing until that session restarts.
+
+**Two forms look right and leave the write denied.** An inline `GH_WRITE_GUARD_ALLOW=owner/repo gh ...` prefix sets the environment of the `gh` process, and an `export` inside a shell call sets the environment of that shell. The hook runs as its own process and sees neither, so the write stays denied with nothing to explain the difference. [`gh-write-guard.py`][write-guard] asserts the inline-prefix case in its own self-test, so this is settled behavior rather than a quirk to work around.
+
+**Confirm the grant loaded before relying on it**, since inferring it from a write that no longer denies means learning the answer by making the write. In a restarted session in that checkout, read the variable the hook reads:
+
+```shell
+printenv GH_WRITE_GUARD_ALLOW
+```
+
+Run it bare, with no `VAR=value` prefix of its own, which would report a value the hook never sees. An empty result means the grant did not load, and the fix is the file location or the restart rather than the token. Feeding the hook a synthetic payload is not a usable probe from inside a session, because the payload text carries the very write shape the guard matches and the guard denies the probe command itself.
+
+Withdraw a grant by deleting the `env` entry and restarting. Nothing expires it, so a grant left in place stays live for every later session in that checkout, which is the reason to remove it once the work that needed it is done.
 
 ## Manual settings.json Shape (for Reference)
 
@@ -109,6 +135,6 @@ Every other key in the file is left as it stands, `permissions.allow` included, 
 [codex]: ../codex/README.md
 [opencode]: ../opencode/README.md
 [governance]: ../../../GOVERNANCE.md
-[host-setup-grant]: ../../../docs/host-setup.md#granting-a-write-the-guard-denies
+[write-guard]: ./gh-write-guard.py
 [issue-365]: https://github.com/ptr727/ProjectTemplate/issues/365
 [issue-781]: https://github.com/ptr727/ProjectTemplate/issues/781

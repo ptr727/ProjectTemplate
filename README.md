@@ -163,21 +163,24 @@ Four things are deployed from here, and they land in different places. The host 
 
 The guardrails are **host state rather than repository content**, because they have to cover ad-hoc sessions in no project at all. Each provider's implementation stays separate:
 
-- **Claude Code:** the installable safety kit denies a mis-targeted GitHub write under your identity. It also denies a git operation that would bypass a branch rule.
-- **Codex:** no equivalent host hook ships yet. The carried repository rules and Codex's own sandbox and execution policies remain active. [Issue #781][issue-781] tracks the missing hook.
-- **opencode:** no equivalent host hook ships yet. The carried repository rules and opencode's own permission model remain active. [Issue #781][issue-781] tracks the missing hook.
+- **Claude Code:** the installable safety kit denies a mis-targeted GitHub write under your identity. It also denies a git operation that would bypass a branch rule or run directly against a primary checkout. [`host-setup/agent-safety/claude/README.md`][agent-safety-claude] has the details.
+- **Codex:** no equivalent host hook ships yet. The carried repository rules and Codex's own sandbox and execution policies remain active. [Issue #781][issue-781] tracks the missing hook, and [`host-setup/agent-safety/codex/README.md`][agent-safety-codex] states the gap.
+- **opencode:** no equivalent host hook ships yet. The carried repository rules and opencode's own permission model remain active. [Issue #781][issue-781] tracks the missing hook, and [`host-setup/agent-safety/opencode/README.md`][agent-safety-opencode] states the gap.
+
+The requirements every agent's kit is built and audited against, agent-agnostic, are in
+[`host-setup/agent-safety/README.md`][agent-safety].
 
 #### Claude Code
 
 ```shell
-host-setup/agent-safety/install.sh        # Linux, WSL, macOS
+host-setup/agent-safety/claude/install.sh        # Linux, WSL, macOS
 ```
 
 ```powershell
-.\host-setup\agent-safety\install.ps1     # Windows, and the .\ prefix is required
+.\host-setup\agent-safety\claude\install.ps1     # Windows, and the .\ prefix is required
 ```
 
-Restart Claude Code sessions on the machine afterward so the hook and the `CLAUDE.md` blocks load. The installer is idempotent, so re-running it is also how a machine picks up an upstream change to the guard. What it installs, how to verify it, and what it deliberately does not catch are in [`host-setup/agent-safety/README.md`][agent-safety]. The surrounding host prerequisites are in [`docs/host-setup.md`][host-setup].
+Restart Claude Code sessions on the machine afterward so the hook and the `CLAUDE.md` blocks load. The installer is idempotent, so re-running it is also how a machine picks up an upstream change to the guard. What it installs, how to verify it, and what it deliberately does not catch are in [`host-setup/agent-safety/claude/README.md`][agent-safety-claude]. The surrounding host prerequisites are in [`docs/host-setup.md`][host-setup].
 
 ### Install the Fleet Skills
 
@@ -342,6 +345,9 @@ Licensed under the [MIT License][license]\
 <!-- Repo -->
 
 [agent-safety]: ./host-setup/agent-safety/README.md
+[agent-safety-claude]: ./host-setup/agent-safety/claude/README.md
+[agent-safety-codex]: ./host-setup/agent-safety/codex/README.md
+[agent-safety-opencode]: ./host-setup/agent-safety/opencode/README.md
 [agents]: ./AGENTS.md
 [audit]: ./AUDIT.md
 [catalog]: ./catalog/
