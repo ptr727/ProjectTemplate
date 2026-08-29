@@ -182,6 +182,30 @@ function Get-HubMutexName {
     return "ProjectTemplateHostSetupMenu_$safe"
 }
 
+function Invoke-WithHubLock {
+    # The single lock over $script:DIR\hub, shared by every writer (Invoke-FetchHub, Invoke-Cleanup) and every reader (Invoke-HostTool, and each action's Confirm-HubRoot-then-Invoke-HubPython span) alike.
+    # Unlike menu.sh's flock, which gives readers a genuine shared mode, a named .NET Mutex has no such mode, and building a correct cross-process reader count on top of one (a shared counter, itself needing its own guard) is real complexity for a rarely-hit race in a low-traffic interactive tool.
+    # Every caller here takes the same exclusive lock instead, trading reader concurrency (two menu.ps1 sessions reading the hub at once now serialize briefly) for a locking scheme simple enough to get right.
+    # It still closes the actual TOCTOU: a concurrent Invoke-FetchHub's Remove-Item can no longer land between a reader confirming $HUB_ROOT is fresh and that reader actually using it, since both now hold this same lock for that whole span, not just around the read's own final call.
+    # ArgumentList is forwarded to the scriptblock positionally (its own param() block names them), rather than relying on the scriptblock closing over the caller's variables directly.
+    # Passed this way, PSScriptAnalyzer's PSReviewUnusedParameter sees the caller's own parameters referenced at the call site, where a bare closure reads as an unused parameter to it, since the rule does not trace a variable read inside a nested scriptblock back to the enclosing function's own param() block.
+    param([Parameter(Mandatory)][scriptblock]$ScriptBlock, [object[]]$ArgumentList = @())
+    $mutex = New-Object System.Threading.Mutex($false, (Get-HubMutexName))
+    $acquired = $false
+    try {
+        try {
+            $acquired = $mutex.WaitOne()
+        } catch [System.Threading.AbandonedMutexException] {
+            # A prior holder crashed mid-operation, which leaves whatever it was doing in a bad state rather than the lock itself, so ownership passes to this run.
+            $acquired = $true
+        }
+        & $ScriptBlock @ArgumentList
+    } finally {
+        if ($acquired) { $mutex.ReleaseMutex() }
+        $mutex.Dispose()
+    }
+}
+
 function Invoke-FetchHub {
     # -DryRun promises to change nothing, and fetching is the one real change this whole script makes to the host.
     if ($script:DRY_RUN) {
@@ -201,7 +225,7 @@ function Invoke-FetchHub {
         return (Invoke-FetchHubLocked)
     } finally {
         # Released here, once the fetch itself finishes, rather than held for the rest of this session: Invoke-InteractiveMenu's loop keeps a session alive well past its one fetch, and holding the lock that long would block every other menu.ps1 sharing this -Dir until this session quits.
-        # A second session starting its own fetch while this one is still reading the tree it just cloned is the accepted residual race left by that choice, the same one menu.sh's own flock accepts for the same reason.
+        # A second session starting its own fetch while this one is still reading the tree it just cloned is not a residual race: every read (Invoke-HostTool, and each action's Confirm-HubRoot-then-Invoke-HubPython span) takes this same lock itself, via Invoke-WithHubLock, for its own whole span.
         if ($acquired) { $mutex.ReleaseMutex() }
         $mutex.Dispose()
     }
@@ -311,10 +335,29 @@ function Test-DownstreamCheckout {
 function Invoke-Cleanup {
     if ($script:KEEP -or -not $script:HUB_FETCHED) { return }
     if (-not (Test-Path (Get-MarkerPath))) { return }
-    $hubPath = Join-Path $script:DIR 'hub'
-    # The marker is removed only once the directory it marks is actually gone, rather than unconditionally alongside it: a suppressed removal failure must not leave a leftover hub with no marker to explain it.
-    Remove-Item -Recurse -Force $hubPath -ErrorAction SilentlyContinue
-    if (-not (Test-Path $hubPath)) { Remove-Item -Force (Get-MarkerPath) -ErrorAction SilentlyContinue }
+    # Same exclusive lock every reader and writer takes, so this waits out another session still mid-use rather than deleting the tree out from under it.
+    # A quick non-blocking probe first, so a session that has to wait says so instead of hanging with no output.
+    $mutex = New-Object System.Threading.Mutex($false, (Get-HubMutexName))
+    $acquired = $false
+    try {
+        try {
+            if (-not $mutex.WaitOne(0)) {
+                info "Waiting for another session using $script:DIR\hub..."
+                $acquired = $mutex.WaitOne()
+            } else {
+                $acquired = $true
+            }
+        } catch [System.Threading.AbandonedMutexException] {
+            $acquired = $true
+        }
+        $hubPath = Join-Path $script:DIR 'hub'
+        # The marker is removed only once the directory it marks is actually gone, rather than unconditionally alongside it: a suppressed removal failure must not leave a leftover hub with no marker to explain it.
+        Remove-Item -Recurse -Force $hubPath -ErrorAction SilentlyContinue
+        if (-not (Test-Path $hubPath)) { Remove-Item -Force (Get-MarkerPath) -ErrorAction SilentlyContinue }
+    } finally {
+        if ($acquired) { $mutex.ReleaseMutex() }
+        $mutex.Dispose()
+    }
 }
 
 # --- Running a tool ---
@@ -323,18 +366,22 @@ function Invoke-Cleanup {
 # Spawned as its own pwsh process rather than dot-sourced, since every host-setup\windows script ends its own main with exit, which would otherwise end this menu too.
 function Invoke-HostTool {
     param([Parameter(Mandatory)][string]$Tool, [Parameter(ValueFromRemainingArguments)][string[]]$Arguments)
-    if (-not (Confirm-HubRoot)) { return 1 }
-    $path = Join-Path $script:HUB_ROOT 'host-setup\windows' | Join-Path -ChildPath $Tool
-    if (-not (Test-Path $path)) {
-        fail "$script:HUB_ROOT carries no $Tool at host-setup\windows, so this ref is not one to run tasks from"
-        return 1
-    }
-    $flags = @()
-    if ($script:ASSUME_YES) { $flags += '-Yes' }
-    if ($script:DRY_RUN) { $flags += '-DryRun' }
-    # Out-Host again, for the same reason as the git calls above: bare, this would join the exit code below into one leaked return value.
-    & $script:PWSH_PATH -NoProfile -ExecutionPolicy Bypass -File $path @Arguments @flags | Out-Host
-    return $LASTEXITCODE
+    # The whole body runs inside Invoke-WithHubLock, Confirm-HubRoot included, not just the final invocation, since locking only around the last call would still leave Confirm-HubRoot's own reads unlocked, the same gap menu.sh's equivalent fix closes.
+    return (Invoke-WithHubLock -ArgumentList @($Tool, $Arguments) -ScriptBlock {
+            param($Tool, $Arguments)
+            if (-not (Confirm-HubRoot)) { return 1 }
+            $path = Join-Path $script:HUB_ROOT 'host-setup\windows' | Join-Path -ChildPath $Tool
+            if (-not (Test-Path $path)) {
+                fail "$script:HUB_ROOT carries no $Tool at host-setup\windows, so this ref is not one to run tasks from"
+                return 1
+            }
+            $flags = @()
+            if ($script:ASSUME_YES) { $flags += '-Yes' }
+            if ($script:DRY_RUN) { $flags += '-DryRun' }
+            # Out-Host again, for the same reason as the git calls above: bare, this would join the exit code below into one leaked return value.
+            & $script:PWSH_PATH -NoProfile -ExecutionPolicy Bypass -File $path @Arguments @flags | Out-Host
+            return $LASTEXITCODE
+        })
 }
 
 # The first candidate that is a Python 3.7+, the same probe install-skills.ps1 uses: none of py, python3 or python guarantees that version by construction on Windows.
@@ -373,15 +420,20 @@ function Invoke-AuditRepo {
     $default = $default.Split('/')[-1]
     $name = Read-Host "Repo to audit [$default]"
     if (-not $name) { $name = $default }
-    if (-not (Confirm-HubRoot)) { return 1 }
-    return (Invoke-HubPython -ScriptPath 'spec/audit.py' -Arguments $name)
+    # Confirm-HubRoot and the Invoke-HubPython call it gates both run inside the same Invoke-WithHubLock span, matching Invoke-HostTool, so nothing reads $HUB_ROOT unlocked.
+    return (Invoke-WithHubLock {
+            if (-not (Confirm-HubRoot)) { return 1 }
+            return (Invoke-HubPython -ScriptPath 'spec/audit.py' -Arguments $name)
+        })
 }
 
 function Invoke-CheckSkillsDist {
-    if (-not (Confirm-HubRoot)) { return 1 }
-    $rc = Invoke-HubPython -ScriptPath 'scripts/build_dist.py' -Arguments '--check'
+    $rc = Invoke-WithHubLock {
+        if (-not (Confirm-HubRoot)) { return 1 }
+        return (Invoke-HubPython -ScriptPath 'scripts/build_dist.py' -Arguments '--check')
+    }
     # Only 0 (clean) and 1 (stale) are outcomes scripts\build_dist.py --check documents for itself, so only those two read as a check result.
-    # Anything else is this task failing to run rather than a finding.
+    # Anything else is this task failing to run rather than a finding, Confirm-HubRoot's own 1 included.
     switch ($rc) {
         0 { info 'Every generated Skills distribution matches .agents/skills/'; return 0 }
         1 { info 'A generated Skills distribution is stale. This menu does not regenerate it from a fetched checkout, since the result has to be committed in the hub itself.'; return 0 }
@@ -406,8 +458,11 @@ function Invoke-CarryAction {
     $default = $script:DOWNSTREAM_NAME
     $name = Read-Host "Repo name as cataloged in registry/repos.json [$default]"
     if (-not $name) { $name = $default }
-    if (-not (Confirm-HubRoot)) { return 1 }
-    return (Invoke-HubPython -ScriptPath 'scripts/carry.py' -Arguments $Mode, $name, '--target', $script:DOWNSTREAM_ROOT)
+    return (Invoke-WithHubLock -ArgumentList @($Mode, $name) -ScriptBlock {
+            param($Mode, $name)
+            if (-not (Confirm-HubRoot)) { return 1 }
+            return (Invoke-HubPython -ScriptPath 'scripts/carry.py' -Arguments $Mode, $name, '--target', $script:DOWNSTREAM_ROOT)
+        })
 }
 
 # --- Menu ---
