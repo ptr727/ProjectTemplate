@@ -300,6 +300,7 @@ Every repo's GitHub repository details (the About panel) follow a fixed conventi
 ## Repository Layout
 
 - [`AGENTS.md`](./AGENTS.md): the agent entry point, carrying context and delegation rules plus the map to the sections below.
+- [`CLAUDE.md`](./CLAUDE.md): imports `AGENTS.md`, since Claude Code reads `CLAUDE.md` and never `AGENTS.md` on its own. Carries no rule of its own.
 - [`GOVERNANCE.md`](./GOVERNANCE.md), [`CODESTYLE.md`](./CODESTYLE.md), [`WORKFLOW.md`](./WORKFLOW.md), [`AUDIT.md`](./AUDIT.md): the governance and audit docs. This file is the cross-cutting-rules authority.
 - [`spec/`](./spec/): the machine-readable ground truth, covering project-type requirements, the file/section baseline, secrets, the host tool contract and its floors, and the preferred README structure.
 - [`registry/repos.json`](./registry/repos.json): the fleet registry, holding every project, its type(s), and its status.
