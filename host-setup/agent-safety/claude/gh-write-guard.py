@@ -575,7 +575,7 @@ def _all_git_invocations(cmd):
     """`_git_invocations` for `cmd` itself, plus for every command string a `sh -c`/`bash -c`-style
     wrapper embeds in it, the same expansion `_all_gh_arg_lists` gives the GitHub-write rules, so a
     mutating git command hidden behind such a wrapper is scanned exactly like a bare one. Each
-    tuple carries a sixth element, the leading-`cd` directory in effect for the exact command
+    tuple carries a seventh element, the leading-`cd` directory in effect for the exact command
     string (outer or inner) it came from -- a `cd` embedded inside a wrapper's own command string
     (`bash -c 'cd /x && git ...'`) is invisible to a leading-`cd` check run only against the outer
     command, and the outer command's own leading `cd` (`cd /x && bash -c 'git ...'`) takes effect

@@ -421,11 +421,13 @@ function Invoke-AuditRepo {
 
 function Invoke-CheckSkillsDist {
     $rc = Invoke-WithHubLock {
-        if (-not (Confirm-HubRoot)) { return 1 }
+        # 2, not 1: scripts\build_dist.py --check documents 1 as its own "stale" result, and the switch below reads that value as a genuine check outcome.
+        # A Confirm-HubRoot failure must not collide with it, or a failed confirmation reports as "stale" with exit code 0 instead of the failure it actually is.
+        if (-not (Confirm-HubRoot)) { return 2 }
         return (Invoke-HubPython -ScriptPath 'scripts/build_dist.py' -Arguments '--check')
     }
     # Only 0 (clean) and 1 (stale) are outcomes scripts\build_dist.py --check documents for itself, so only those two read as a check result.
-    # Anything else is this task failing to run rather than a finding, Confirm-HubRoot's own 1 included.
+    # Anything else is this task failing to run rather than a finding, Confirm-HubRoot's own failure (2) included.
     switch ($rc) {
         0 { info 'Every generated Skills distribution matches .agents/skills/'; return 0 }
         1 { info 'A generated Skills distribution is stale. This menu does not regenerate it from a fetched checkout, since the result has to be committed in the hub itself.'; return 0 }
