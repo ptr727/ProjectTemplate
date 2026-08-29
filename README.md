@@ -163,7 +163,7 @@ Four things are deployed from here, and they land in different places. The host 
 
 The guardrails are **host state rather than repository content**, because they have to cover ad-hoc sessions in no project at all. Each provider's implementation stays separate:
 
-- **Claude Code:** the installable safety kit denies a mis-targeted GitHub write under your identity. It also denies a git operation that would bypass a branch rule. [`host-setup/agent-safety/claude/README.md`][agent-safety-claude] has the details.
+- **Claude Code:** the installable safety kit denies a mis-targeted GitHub write under your identity. It also denies a git operation that would bypass a branch rule, or run directly against a primary checkout. [`host-setup/agent-safety/claude/README.md`][agent-safety-claude] has the details.
 - **Codex:** no equivalent host hook ships yet. The carried repository rules and Codex's own sandbox and execution policies remain active. [Issue #781][issue-781] tracks the missing hook, and [`host-setup/agent-safety/codex/README.md`][agent-safety-codex] states the gap.
 - **opencode:** no equivalent host hook ships yet. The carried repository rules and opencode's own permission model remain active. [Issue #781][issue-781] tracks the missing hook, and [`host-setup/agent-safety/opencode/README.md`][agent-safety-opencode] states the gap.
 

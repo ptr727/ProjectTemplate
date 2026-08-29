@@ -73,10 +73,103 @@ hook or approval-gate API, not tied to Claude Code's `PreToolUse` JSON shape.
    residual gap this requirement accepts rather than blocking every grant-holding session's replies
    on an unrelated target.
 
-**Not yet implemented anywhere, tracked at [issue #1073][issue-1073]:** a mutating git operation run
-directly against a primary (non-worktree) checkout should be denied the same way. This spec is
-updated with that requirement's exact decision rule in the same change that adds it to the Claude
-Code hook, so a reader here always sees what is actually enforced, not what is merely planned.
+6. **A mutating git operation run directly against a primary checkout is denied.** "Primary" means
+   not a linked worktree. The decidable test is a comparison, not a filesystem-shape guess: `git
+   rev-parse --path-format=absolute --git-dir --git-common-dir` returns equal paths for a primary
+   checkout and unequal paths for a linked worktree. A `.git`-is-a-directory heuristic is wrong (a
+   submodule's `.git` is a file yet is still a primary working tree that can lose uncommitted
+   work). Deny `checkout`/`switch`/`pull`/`reset`/`rebase`/`merge`/`cherry-pick`/`revert`/`restore`/
+   `stash` (anything but `list`/`show`)/`clean -f|-fd`/`add`/`commit`/`rm`/`mv`/`apply`/`am`/`push`/
+   `worktree remove -f|--force` there. `push` is denied unconditionally too, even though it does
+   not mutate the local working tree or HEAD the way the rest of this list does: no documented
+   fleet workflow ever pushes from a primary checkout, every push runs from a task's own worktree,
+   and rule 4's own branch-rule checks already run before this rule and can deny a push on their
+   own separate grounds regardless. `clean` is exempt when `-n`/`--dry-run` is given before any
+   `--` (bundled or not, e.g. `-nfd`, since a `-n` after `--` is an unconditional pathspec instead
+   naming a real file, confirmed live), and confirmed live to always win over `-f`/`--force`
+   regardless of order or repetition: it deletes nothing, only previews what a later, real forced
+   clean would remove, so denying it adds no safety. A `checkout`/`switch`
+   force flag (`-b`/`-B` for checkout,
+   `-c`/`-C`/`--create`/`--force-create` for switch, `-f`/`--force`/`--discard-changes`/`--orphan`
+   for either -- switch has no `-b`/`-B` and checkout has no `-c`/`-C`, confirmed against each
+   subcommand's own `-h` output, so neither letter pair collides with an unrelated flag on the
+   other) is recognized bundled into a short-option cluster or attached to its own value with no
+   space (`-qf`, `-Bname`, `-Cother`), not only as an exact argv token -- an exact-token check
+   alone lets `-qf`/`-Bname` reach the ref-switch exemption below while still forcing the checkout
+   through, and would equally have let `switch -C <existing-branch>` through, confirmed live to
+   reset that branch to the current HEAD with no dirty-tree warning at all, since it is not a
+   working-tree overwrite. Allow `worktree add|list|prune`, a
+   plain `worktree remove` with no force flag, any read, `merge --ff-only`/`pull --ff-only` (git's
+   own semantics mean neither can discard anything), a bare `-` as a `checkout`/`switch` argument
+   (porcelain shorthand for the previous branch, which only those two subcommands themselves
+   understand, so it is exempt outright rather than checked), and a `checkout <ref>`/`switch <ref>`
+   carrying no force flag whose argument verifiably resolves as a ref -- checked live (`git rev-parse
+   --verify --quiet <ref>^{commit}`), since git's own ref-switch path refuses to overwrite a local
+   modification but its pathspec-restore fallback for an argument that does not resolve as a ref
+   (`git checkout .`, `checkout -- <path>`, `checkout <ref> -- <path>`, more than one bare
+   positional) carries no such check and is denied. A non-force flag alongside the ref, such as
+   `--detach`/`-q`, stays exempt too -- verified live, it changes nothing about git's own
+   overwrite-refusal, so this is a real-ref-with-no-force-flag test, not a strictly zero-flags one,
+   despite reading as "flagless" at a glance. These exemptions are the normal, documented way an
+   agent uses a primary checkout as a fetch source and returns it to a base branch afterward, and
+   denying them adds no safety while breaking routine, correct work. The ref-checkout exemption is a
+   deliberate, validated scope boundary worth naming explicitly: the incident behind this requirement
+   (#1073) ran exactly this shape (an unforced `checkout` then an `--ff-only` pull), so this
+   requirement does not deny that incident's own literal commands. The concurrent-access hazard those
+   commands still carried either way -- switching HEAD or fast-forwarding a checkout another task
+   might be relying on, whether or not the working tree was dirty -- is not decidable from the
+   command text alone, so it stays the prose rule's job (`GOVERNANCE.md` "Repository Boundaries and
+   Write Safety", `repo-worktree`), not this one's.
+
+   A subcommand name this requirement does not otherwise recognize is resolved through a chain of
+   git aliases before being allowed to fall through -- an inline `-c alias.<name>=<value>` override
+   on the same invocation first, then the target checkout's own persisted config (`git config --get
+   alias.<name>`), matching real git's own override order, up to a bounded number of hops -- so a
+   custom alias that expands to a denied builtin (`git -c alias.wipe='reset --hard' wipe`, or the
+   same `wipe` alias persisted in the checkout's own config) is denied exactly as the builtin itself
+   would be. A `!`-prefixed alias hands git an arbitrary shell string rather than naming another git
+   subcommand, and this requirement does not and cannot safely interpret one, so it denies that
+   shape outright against a primary checkout, the one place this requirement departs from its own
+   fail-open stance, because the alias definition itself is concrete evidence of an attempt to run
+   something via git in exactly the directory this requirement protects.
+
+   Resolve the target directory the way real git itself does, not by a last-option-wins scan across
+   every directory-naming option: any `-C <dir>` options on the invocation compose sequentially (an
+   absolute value replaces the running directory outright, a relative one joins onto the previous
+   result) onto a leading `cd <dir> &&`/`cd <dir> ;` prefix on the same command -- read inside a
+   `sh -c`/`bash -c` wrapper too, and inherited from an outer leading `cd` when a wrapped string
+   carries none of its own -- or, absent one, the invocation's own working directory. An explicit
+   `--work-tree`/`GIT_WORK_TREE=` value, when given anywhere on the invocation, then wins over that
+   `-C`-chain result regardless of how many `-C` options preceded it, matching how `--work-tree`
+   names the actual mutation target independent of where `-C` points, and a relative `--work-tree`
+   value still resolves against the `-C` chain's own result. A leading `export FOO=x BAR=y &&`
+   prefix (`GIT_WORK_TREE`/`GIT_DIR` in place of `FOO`/`BAR`, a bare `;` in place of `&&` too)
+   redirects the invocation the same way an inline `VAR=x git ...` prefix already does, since a
+   real shell export persists into the following command exactly as effectively, confirmed live
+   with a real reset that discards a tracked local modification with no redirect at all on the `git`
+   invocation itself, a shape an inline-prefix scan alone cannot see. `--git-dir`/`GIT_DIR=` alone,
+   with no `--work-tree`/`GIT_WORK_TREE=` anywhere on the same invocation, never relocates that reported
+   target, matching git's own documented fallback.
+
+   Whether the invocation targets a primary checkout at all is a separate question from that
+   reported target, though. An explicit `--git-dir`/`GIT_DIR=` is resolved and tested for
+   primary-checkout-ness directly (`git --git-dir=<value> rev-parse ...`, no `-C`), independent of
+   `--work-tree`, since `--git-dir` names the repository actually mutated regardless of where
+   `--work-tree`/cwd point -- confirmed live: `git --git-dir=<primary>/.git --work-tree=<empty-dir>
+   commit` mutates `<primary>` even though `<empty-dir>` resolves as no git repository at all, which
+   testing the resolved `--work-tree` value alone fails open on. Absent an explicit `--git-dir`, the
+   test falls back to ordinary ancestor-based discovery from the reported target, exactly as real git
+   itself does. `~`/`$HOME` is expanded throughout (a bare `$HOME` only when not immediately followed
+   by another identifier character, so `$HOMEPATH`/`$HOMEDRIVE` are left alone rather than misread as
+   a `$HOME` prefix), and a relative value is joined against the running result rather than wherever
+   the hook process's own OS-level cwd happens to be. Fail open (allow) when no git repository
+   resolves at all, matching this requirement's own
+   precision-over-recall stance, not requirement 4's fail-closed one -- the harm here needs a
+   positively-identified primary checkout to fire on. Granted only by
+   `GH_WRITE_GUARD_ALLOW_PRIMARY_CHECKOUT`, read from the same session-start-environment channel
+   `GH_WRITE_GUARD_ALLOW` is, though interpreted differently: `GH_WRITE_GUARD_ALLOW` is an
+   `owner/repo` allowlist, while this one is a boolean escape hatch, granted by any non-falsy value
+   and withheld by a recognized falsy one ("0"/"false"/"no"/"off"/empty), not by list membership.
 
 ## Decision Flow
 
@@ -84,7 +177,9 @@ Code hook, so a reader here always sees what is actually enforced, not what is m
 flowchart TD
     cmd["Tool call: a shell/git/gh command"] --> isgit{"A git operation\nthat bypasses a\nbranch rule\nor a bypass flag?"}
     isgit -- yes --> deny4["DENY - requirement 4\n(fails closed for a\nprotected-default branch\nwith undeterminable rules)"]
-    isgit -- no --> isghwrite{"A GitHub-write\ncommand at all?"}
+    isgit -- no --> isprimary{"A mutating git op\ntargeting a primary\ncheckout, not exempt?"}
+    isprimary -- yes --> deny6["DENY - requirement 6"]
+    isprimary -- no --> isghwrite{"A GitHub-write\ncommand at all?"}
     isghwrite -- no --> allow["ALLOW"]
     isghwrite -- yes --> suppressed{"Output discarded or\nforced to success?"}
     suppressed -- yes --> deny1["DENY - requirement 1"]
@@ -117,8 +212,8 @@ The first diagram is this spec's actual decision flow, generalized from `claude/
 reached the session at all is a loading bug, fixed the way PR #1081 fixed `local-strict-review`'s
 missed trigger, by wiring `CLAUDE.md` to import `AGENTS.md`. A rule that reached the session and
 was still not followed, where the trigger is mechanically decidable and the harm is destructive,
-is promoted to a hook ([issue #1073][issue-1073]'s primary-checkout guard, above, is the worked
-example once it lands). A rule whose violation can only be judged, not mechanically decided (was a
+is promoted to a hook (requirement 6, above, tracked at [issue #1073][issue-1073], is the worked
+example). A rule whose violation can only be judged, not mechanically decided (was a
 review finding actually evidence-backed?), stays prose and a chained Skill trigger, since a hook
 there could only nag, never decide.
 
@@ -126,7 +221,7 @@ there could only nag, never decide.
 
 | Agent | Status | Implementation |
 | --- | --- | --- |
-| Claude Code | Requirements 1-5, via a `PreToolUse` hook | [`claude/README.md`][claude] |
+| Claude Code | All 6 requirements, via a `PreToolUse` hook | [`claude/README.md`][claude] |
 | Codex | No hook yet -- tracked at [issue #781][issue-781] | [`codex/README.md`][codex] |
 | opencode | No hook yet -- tracked at [issue #781][issue-781] | [`opencode/README.md`][opencode] |
 

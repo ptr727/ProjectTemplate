@@ -23,6 +23,10 @@ HUB_FETCHED=false
 DOWNSTREAM_ROOT=""
 DOWNSTREAM_NAME=""
 
+# The reader half of the fetch/use reader-writer lock over $DIR/hub, the writer half being fetch_hub's own exclusive flock, unchanged.
+# Global rather than function-local: the fd is opened by hub_read_lock_acquire in one function and closed by hub_read_lock_release in a later, separate call in the same caller, so it has to survive the return in between.
+HUB_READ_LOCK_FD=""
+
 # --- Output ---
 
 log() { printf '%s\n' "$*"; }
@@ -84,27 +88,55 @@ remove_unowned_hub_check() {
     return 1
 }
 
-# The lock lives only here, in the wrapper, so the locked body below can use its ordinary fail/return pattern with no awareness of it.
-# A RETURN trap was tried and dropped: bash does not scope one to the function that set it, so it re-fires (against an already-unset local by then) on whatever function returns next, which surfaced as this script's own "unbound variable" crash on the very next return up the call chain.
+# Acquires the reader half of the fetch/use lock, held from immediately before ensure_hub_root's own freshness check through the caller's entire use of $HUB_ROOT.
+# Scoping it to only a final tool invocation would leave ensure_hub_root's own git reads unlocked, the same interleaving one call frame up from the read this lock exists to close: a concurrent fetch_hub's rm -rf could still land between ensure_hub_root confirming $HUB_ROOT is fresh and the caller actually reading a file under it.
+# Shared (flock -s) rather than exclusive, since concurrent reads don't conflict with each other, only with a writer, so this only blocks behind an in-progress fetch_hub or cleanup.
+# A no-op in --dry-run: dry-run's own branch in ensure_hub_root never fetches and never reads $DIR/hub (it resolves HUB_ROOT from cwd or fails outright), so there is nothing here for it to protect, and --dry-run must not create $DIR or a lock file where neither existed, since fetching is documented as the one real host change this script makes.
+hub_read_lock_acquire() {
+    [[ $DRY_RUN == true ]] && return 0
+    mkdir -p "$DIR"
+    exec {HUB_READ_LOCK_FD}>"$DIR/hub.lock"
+    if ! flock -s "$HUB_READ_LOCK_FD"; then
+        fail "Could not lock $DIR/hub.lock"
+        exec {HUB_READ_LOCK_FD}>&-
+        HUB_READ_LOCK_FD=""
+        return 1
+    fi
+}
+
+# Releases the fd hub_read_lock_acquire opened.
+# Safe to call even when acquire failed or was never called, so a caller's cleanup path never has to track whether it actually holds the lock.
+hub_read_lock_release() {
+    [[ -n $HUB_READ_LOCK_FD ]] || return 0
+    exec {HUB_READ_LOCK_FD}>&-
+    HUB_READ_LOCK_FD=""
+}
+
+# `ensure_hub_root` is `fetch_hub`'s only caller, and it only ever runs inside a `hub_read_lock_acquire` span (`host_tool`, `audit_repo`, `check_skills_dist`, `carry_action` all acquire it first), so $HUB_READ_LOCK_FD is always already open here.
+# Escalating that same fd from shared to exclusive, rather than opening a second fd on the same lock file, is what makes this safe: flock treats two different fds on one file as independent lock holders even within one process, so a second fd's blocking exclusive wait would deadlock against the first fd's own shared hold forever, verified by reproducing exactly that hang before this fix.
+# `flock` changes an already-held fd's own lock type in place with no such deadlock, since the kernel recognizes it as the same holder taking a different mode, not a second competing one.
+# Downgraded back to shared once the fetch itself is done, restoring reader concurrency for the rest of the caller's own read-and-use span, rather than holding exclusive (which would still be correct, only more conservative than necessary).
 fetch_hub() {
-    # --dry-run promises to change nothing, and fetching is the one real change this whole script makes to the host.
+    # --dry-run promises to change nothing, and this clone (or re-clone) is the one real change this function itself makes to the host.
+    # The reader lock's own directory and lock-file creation (hub_read_lock_acquire) runs regardless of --dry-run for an ordinary reused-checkout read, but respects it here since a fetch is a materially bigger change than a lock file.
     [[ $DRY_RUN == true ]] && {
         fail "This task needs a fetched hub checkout, and fetching one is itself a change --dry-run does not make. Run without --dry-run, or from inside a hub checkout already on $DEFAULT_REF."
         return 1
     }
+    [[ -n $HUB_READ_LOCK_FD ]] || {
+        fail "fetch_hub run with no reader lock held (internal error, expected hub_read_lock_acquire first)"
+        return 1
+    }
     mkdir -p "$DIR"
-    # Held for the rest of this fetch, so a second menu.sh sharing this --dir blocks here instead of passing remove_unowned_hub_check and deleting the tree this one is still cloning into.
-    # Closed unconditionally on the way out, success or failure, rather than left open for the rest of this process: interactive_menu's loop keeps it alive well past this one fetch otherwise, and a lock nothing ever releases blocks every other menu.sh sharing this --dir until this session quits.
-    local lock_fd rc
-    exec {lock_fd}>"$DIR/hub.lock"
-    if ! flock "$lock_fd"; then
+    if ! flock "$HUB_READ_LOCK_FD"; then
         fail "Could not lock $DIR/hub.lock"
-        exec {lock_fd}>&-
         return 1
     fi
-    rc=0
+    local rc=0
     fetch_hub_locked || rc=$?
-    exec {lock_fd}>&-
+    # Best-effort downgrade.
+    # Holding exclusive a little longer on failure is safe, just more conservative.
+    flock -s "$HUB_READ_LOCK_FD" || true
     return "$rc"
 }
 
@@ -210,16 +242,41 @@ detect_downstream_root() {
 cleanup() {
     [[ $KEEP == true || $HUB_FETCHED == false ]] && return 0
     [[ -e "$(marker_path)" ]] || return 0
+    # Released first and unconditionally, even though a normal exit has already released it: an interrupt (Ctrl-C) fires this EXIT trap with $HUB_READ_LOCK_FD still open mid-dispatch, and this process's own still-held shared lock would otherwise deadlock the exclusive wait below against itself, reproduced and confirmed before this fix.
+    # The read that fd was protecting is being abandoned along with the rest of this process, so releasing it here costs nothing.
+    hub_read_lock_release
+    # Exclusive, the same writer half fetch_hub takes, so this waits out a concurrent reader still mid-use rather than deleting the tree out from under it.
+    local lock_fd
+    exec {lock_fd}>"$DIR/hub.lock"
+    if ! flock -n "$lock_fd" 2>/dev/null; then
+        info "Waiting for another session using $DIR/hub..."
+        flock "$lock_fd" || {
+            fail "Could not lock $DIR/hub.lock"
+            exec {lock_fd}>&-
+            return 1
+        }
+    fi
     # The marker is removed only once the directory it marks is actually gone, rather than unconditionally alongside it: a suppressed removal failure must not leave a leftover hub with no marker to explain it.
     rm -rf "$DIR/hub"
     [[ -e "$DIR/hub" ]] || rm -f "$(marker_path)"
+    exec {lock_fd}>&-
 }
 
 # --- Running a tool ---
 
+# The reader-lock wrapper, matching fetch_hub's own wrapper/locked-body split.
+# The lock lives only here, so host_tool_locked below can use its ordinary fail/return pattern with no awareness of it.
+host_tool() {
+    hub_read_lock_acquire || return 1
+    local rc=0
+    host_tool_locked "$@" || rc=$?
+    hub_read_lock_release
+    return "$rc"
+}
+
 # Every host tool runs from inside the hub tree, and this is the only place a path inside it is named, matching bootstrap.sh's run_tool.
 # Resolves the hub root itself rather than assuming a caller already did: a host task must work standalone, off a downstream checkout, or off no checkout at all, none of which set HUB_ROOT on their own.
-host_tool() {
+host_tool_locked() {
     local tool="$1"
     shift
     ensure_hub_root || return 1
@@ -238,6 +295,8 @@ host_tool() {
 # The Python tools under scripts/ and spec/ resolve their own root from __file__ rather than the working directory, so they are called by absolute path from wherever this script runs and need no cd.
 # Checked here rather than upfront in main, the same reasoning host-setup/linux/install-skills.sh already carries: a host with no interpreter yet can still use every host action, and only the actions that need one name it as their own prerequisite.
 # The prerequisite failure returns 127, bash's own "command not found" convention, so a caller reading a specific exit code from the tool itself (build_dist.py's 0-clean/1-stale contract) can tell "python3 never ran" apart from "python3 ran and returned 1".
+# Callers hold the reader lock themselves, hub_read_lock_acquire before their own ensure_hub_root call, rather than this function taking it.
+# Every caller pairs this with ensure_hub_root and the lock has to cover both, so taking it only here would still leave ensure_hub_root's own reads unlocked, the gap this whole reader-half addition exists to close.
 hub_python() {
     command -v python3 >/dev/null || {
         fail "python3 is required for this task. host-setup/linux/install-tools.sh provides it."
@@ -256,14 +315,26 @@ audit_repo() {
     local name
     read -r -p "Repo to audit [$default]: " name
     name="${name:-$default}"
-    ensure_hub_root || return 1
-    hub_python spec/audit.py "$name"
+    hub_read_lock_acquire || return 1
+    if ! ensure_hub_root; then
+        hub_read_lock_release
+        return 1
+    fi
+    local rc=0
+    hub_python spec/audit.py "$name" || rc=$?
+    hub_read_lock_release
+    return "$rc"
 }
 
 check_skills_dist() {
-    ensure_hub_root || return 1
+    hub_read_lock_acquire || return 1
+    if ! ensure_hub_root; then
+        hub_read_lock_release
+        return 1
+    fi
     local rc=0
     hub_python scripts/build_dist.py --check || rc=$?
+    hub_read_lock_release
     # Only 0 (clean) and 1 (stale) are outcomes scripts/build_dist.py --check documents for itself, so only those two read as a check result.
     # Anything else, 127 included, is hub_python or the tool itself failing to run rather than a finding, and is reported as the task error it is.
     case "$rc" in
@@ -294,8 +365,15 @@ carry_action() {
     local name
     read -r -p "Repo name as cataloged in registry/repos.json [$default]: " name
     name="${name:-$default}"
-    ensure_hub_root || return 1
-    hub_python scripts/carry.py "$mode" "$name" --target "$DOWNSTREAM_ROOT"
+    hub_read_lock_acquire || return 1
+    if ! ensure_hub_root; then
+        hub_read_lock_release
+        return 1
+    fi
+    local rc=0
+    hub_python scripts/carry.py "$mode" "$name" --target "$DOWNSTREAM_ROOT" || rc=$?
+    hub_read_lock_release
+    return "$rc"
 }
 
 # --- Menu ---
