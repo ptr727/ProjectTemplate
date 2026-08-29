@@ -41,11 +41,20 @@ visible comments, routinely still carries a finding nobody has answered. Treatin
 2. A review is confirmed on the **current head SHA**, matched by commit SHA rather than assumed
    from a green merge-state. A push makes checks go green *before* the re-review lands, and the
    matched review is **read**, not just counted. A review can carry the head SHA and still decline
-   the PR outright, or say it read only part of the changed files.
+   the PR outright, or say it read only part of the changed files. `pr_review.py`'s
+   `review_on_head` names Copilot's own coverage specifically, the currently required reviewer,
+   not "no review of any kind covers this head": a trialed advisory reviewer (CodeRabbit,
+   Qodo) carrying the exact head under `other_reviewed`, with an empty review body and no new
+   threads, is its own ordinary "reviewed, nothing to flag" shape, not a missing review (#1066).
 3. **Every** finding on that head SHA is closed: threads resolved, issue-level comments (which
    have no resolve action) triaged and replied to, **and** the low-confidence findings collapsed
    in the review body investigated and answered. Those appear in no thread, so polling threads
-   alone reports a clean pass while they stand.
+   alone reports a clean pass while they stand. The same holds for CodeRabbit's own
+   "outside diff range" comments (`cr_outside_diff` in `pr_review.py`'s digest) and for Qodo's
+   comment-only findings (`qodo_open`): neither opens a `reviewThreads` entry either, so
+   give each one the same triage the low-confidence findings above already get (#1058). Qodo's own
+   `Resolved`/`Dismissed` self-tracked badge is a fast pre-triage signal, not a substitute for
+   reading the finding, spot-verify against `gh pr diff` rather than trusting it outright.
 4. Nothing in the review was a shape the tooling could not read (an unrecognized heading, a moved
    section, an unfamiliar coverage wording). An unrecognized shape blocks the gate on its own.
    File an issue naming it and quoting the body, rather than guessing what the new wording
@@ -68,6 +77,8 @@ that says only "open a PR" is not such an instruction.
 
 Run every `scripts/pr_review.py` command below from a hub checkout. The script is hosted there and
 is never carried into a downstream repository.
+
+Run `local-strict-review` against the branch's current diff before step 1's push, and again before any fix push under outcome 1 below.
 
 1. Push changes to the PR branch and open the pull request when it does not exist.
 2. Run `scripts/pr_review.py status` once in the foreground and read its output.
@@ -94,7 +105,8 @@ After an authorized merge, run the `repo-worktree` post-merge cleanup procedure 
 
 ## Every finding ends in one of five outcomes
 
-1. **Real, so fix it.** Reply with the fixing commit SHA. For a finding on platform-specific code
+1. **Real, so fix it.** Run `local-strict-review` against the branch's current diff before pushing
+   the fix, then reply with the fixing commit SHA. For a finding on platform-specific code
    (PowerShell, a macOS- or WSL-only path), "fixed" means executed on that platform, per
    `agent-conduct` "Before Claiming Done": a fix reasoned out by analogy to a tested equivalent
    elsewhere is not yet fixed, and the reply says so rather than claiming the SHA closes it.

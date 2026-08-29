@@ -17,6 +17,7 @@
     "./skills/drive-pr",
     "./skills/fleet-conformance-check",
     "./skills/git-commit-conventions",
+    "./skills/local-strict-review",
     "./skills/merge-and-release",
     "./skills/operational-vs-release-workflow",
     "./skills/pr-review-conduct",
