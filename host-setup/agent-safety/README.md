@@ -98,8 +98,12 @@ hook or approval-gate API, not tied to Claude Code's `PreToolUse` JSON shape.
    alone lets `-qf`/`-Bname` reach the ref-switch exemption below while still forcing the checkout
    through, and would equally have let `switch -C <existing-branch>` through, confirmed live to
    reset that branch to the current HEAD with no dirty-tree warning at all, since it is not a
-   working-tree overwrite. Allow `worktree add|list|prune`, a
-   plain `worktree remove` with no force flag, any read, `merge --ff-only`/`pull --ff-only` (git's
+   working-tree overwrite. A `worktree remove`'s own `-f` is bundled the same way, since `remove`
+   has no other short option `-f` could combine with: git requires `-f` given twice to remove a
+   locked worktree, and the bundled `-ff` spelling satisfies that exactly as `-f -f` does,
+   confirmed live to forcibly remove a locked worktree's uncommitted content. Allow
+   `worktree add|list|prune`, a plain `worktree remove` with no force flag, any read, `merge
+   --ff-only`/`pull --ff-only` (git's
    own semantics mean neither can discard anything), a bare `-` as a `checkout`/`switch` argument
    (porcelain shorthand for the previous branch, which only those two subcommands themselves
    understand, so it is exempt outright rather than checked), and a `checkout <ref>`/`switch <ref>`

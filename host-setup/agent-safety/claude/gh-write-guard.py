@@ -977,9 +977,13 @@ def _primary_checkout_verdict(sub, args, target_dir=None, ref_resolver=None):
     if sub == "worktree":
         # `add`/`list`/`prune` are always allowed, the documented way to use a primary checkout from an agent session.
         # `remove` is allowed too unless forced: git itself already refuses to remove a worktree carrying uncommitted changes without --force, so only the forced form reproduces the harm this rule exists to catch.
+        # `-f` is bundled the same way checkout/switch's own force flags already are, since `remove` has no other short option `-f` could combine with: git requires `-f` given *twice* to remove a locked worktree, and confirmed live that the bundled `-ff` spelling satisfies that requirement exactly as `-f -f` does, forcibly removing a locked worktree's uncommitted content, which an exact-token check alone would miss entirely.
         if not args or args[0] != "remove":
             return None
-        return any(a in ("-f", "--force") for a in args[1:])
+        return any(
+            a in ("-f", "--force") or (a.startswith("-") and not a.startswith("--") and "f" in a)
+            for a in args[1:]
+        )
     if sub in ("checkout", "switch"):
         # `--` unambiguously means every following argument is a pathspec, not a ref: `checkout -- <path>`/`checkout <ref> -- <path>` restores that path from the index unconditionally, with none of the "would overwrite a local modification" safety check a ref switch gets.
         if "--" in args:
@@ -2878,6 +2882,19 @@ _PRIMARY_CHECKOUT_CASES = [
         None,
         "deny",
         "a forced worktree remove reproduces the harm this rule guards against",
+    ),
+    (
+        "git worktree remove -ff ../x",
+        "/primary",
+        {"/primary": True},
+        None,
+        "deny",
+        (
+            "-ff bundles force twice, exactly the -f -f git itself requires to remove a locked "
+            "worktree, confirmed live to forcibly remove one with uncommitted content; an "
+            "exact-token check alone misses this since remove has no other short option -f could "
+            "combine with"
+        ),
     ),
     (
         "git worktree remove ../x",
