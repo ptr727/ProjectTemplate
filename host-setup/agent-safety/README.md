@@ -138,12 +138,22 @@ hook or approval-gate API, not tied to Claude Code's `PreToolUse` JSON shape.
    `-C`-chain result regardless of how many `-C` options preceded it, matching how `--work-tree`
    names the actual mutation target independent of where `-C` points, and a relative `--work-tree`
    value still resolves against the `-C` chain's own result. `--git-dir`/`GIT_DIR=` alone, with no
-   `--work-tree`/`GIT_WORK_TREE=` anywhere on the same invocation, never relocates the target at all,
-   matching git's own documented fallback -- `~`/`$HOME` is expanded throughout (a bare `$HOME` only
-   when not immediately followed by another identifier character, so `$HOMEPATH`/`$HOMEDRIVE` are
-   left alone rather than misread as a `$HOME` prefix), and a relative value is joined against the
-   running result rather than wherever the hook process's own OS-level cwd happens to be. Fail open
-   (allow) when no git repository resolves at all, matching this requirement's own
+   `--work-tree`/`GIT_WORK_TREE=` anywhere on the same invocation, never relocates that reported
+   target, matching git's own documented fallback.
+
+   Whether the invocation targets a primary checkout at all is a separate question from that
+   reported target, though. An explicit `--git-dir`/`GIT_DIR=` is resolved and tested for
+   primary-checkout-ness directly (`git --git-dir=<value> rev-parse ...`, no `-C`), independent of
+   `--work-tree`, since `--git-dir` names the repository actually mutated regardless of where
+   `--work-tree`/cwd point -- confirmed live: `git --git-dir=<primary>/.git --work-tree=<empty-dir>
+   commit` mutates `<primary>` even though `<empty-dir>` resolves as no git repository at all, which
+   testing the resolved `--work-tree` value alone fails open on. Absent an explicit `--git-dir`, the
+   test falls back to ordinary ancestor-based discovery from the reported target, exactly as real git
+   itself does. `~`/`$HOME` is expanded throughout (a bare `$HOME` only when not immediately followed
+   by another identifier character, so `$HOMEPATH`/`$HOMEDRIVE` are left alone rather than misread as
+   a `$HOME` prefix), and a relative value is joined against the running result rather than wherever
+   the hook process's own OS-level cwd happens to be. Fail open (allow) when no git repository
+   resolves at all, matching this requirement's own
    precision-over-recall stance, not requirement 4's fail-closed one -- the harm here needs a
    positively-identified primary checkout to fire on. Granted only by
    `GH_WRITE_GUARD_ALLOW_PRIMARY_CHECKOUT`, read the same way `GH_WRITE_GUARD_ALLOW` is.

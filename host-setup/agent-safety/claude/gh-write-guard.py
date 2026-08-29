@@ -43,10 +43,19 @@ harm there is a silent success under the maintainer's admin bypass. The denied s
      last-option-wins scan: any `-C <dir>` options on the invocation compose sequentially onto a leading
      `cd` (inside a `sh -c`/`bash -c` wrapper too) or the session's own cwd, then an explicit
      `--work-tree`/`GIT_WORK_TREE=` value, when given, wins over that result regardless of `-C`;
-     `--git-dir`/`GIT_DIR=` alone never relocates the target, matching git's own fallback. `~`/`$HOME` is
-     expanded throughout and a relative value is joined against the running result. Checkout/switch force
-     flags (`-b`/`-B`/`-f`/`--force`/`--discard-changes`/`--orphan`) are recognized bundled or attached
-     into a short-option cluster (`-qf`, `-Bname`), not only as an exact token. Exempt: `worktree
+     `--git-dir`/`GIT_DIR=` alone never relocates that reported target, matching git's own fallback.
+     Whether the invocation is primary-checkout at all is a separate question from the mutation target,
+     though: an explicit `--git-dir`/`GIT_DIR=` is resolved and tested for primary-checkout-ness
+     directly, regardless of `--work-tree`, since `--git-dir` names the repository actually mutated -
+     confirmed live that `--git-dir=<primary>/.git --work-tree=<empty-dir>` mutates `<primary>` even
+     though `<empty-dir>` resolves as no git repository at all, which testing the work-tree value alone
+     would fail open on. `~`/`$HOME` is expanded throughout and a relative value is joined against the
+     running result. Checkout/switch force flags (`-b`/`-B` for checkout, `-c`/`-C` for switch,
+     `-f`/`--force`/`--discard-changes`/`--orphan` for either) are recognized bundled or attached into a
+     short-option cluster (`-qf`, `-Bname`, `-Cother`), not only as an exact token. A subcommand this
+     rule does not recognize is resolved through a bounded chain of git aliases (inline `-c
+     alias.<name>=`, then the target's own persisted config) before falling through to allow; a
+     `!`-prefixed shell alias is denied outright rather than interpreted. Exempt: `worktree
      add/list/prune` and an unforced `worktree remove` (the
      documented way to use a primary checkout at all), `merge --ff-only`/`pull --ff-only` (can never
      discard anything), and a `checkout <ref>`/`switch <ref>` carrying no force-oriented flag whose
@@ -437,39 +446,40 @@ def _git_subcommand_arglists(cmd, sub):
 
 
 # --- Rule 6: a mutating git op against a primary checkout ---------------------------------------------
-# `-C <dir>`, `--work-tree <dir>`/`--work-tree=<dir>`, and a `GIT_WORK_TREE=` command-text prefix are the options this rule resolves a target directory from, following real git's own priority rather than a last-one-wins scan across all three.
+# `-C <dir>`, `--work-tree <dir>`/`--work-tree=<dir>`, and a `GIT_WORK_TREE=` command-text prefix are the options this rule resolves the mutation target directory from, following real git's own priority rather than a last-one-wins scan across all three.
 # `--work-tree`/`GIT_WORK_TREE` name the working tree a mutating command like `reset --hard`/`clean -f` actually writes into, and win regardless of where `-C` points or how many `-C` options preceded it.
 # Multiple `-C` options compose sequentially, each resolved against the previous one exactly as git's own "run as if git was started in <path>" describes, an absolute value replacing the running directory outright and a relative one joining onto it.
-# `--git-dir`/`GIT_DIR=` alone, with no `--work-tree`/`GIT_WORK_TREE` given anywhere on the same invocation, does not relocate the mutation target at all -- per git's own documented fallback, the working tree stays the effective directory reached by any `-C` chain (or the session's cwd, with none), so this rule never reads `--git-dir`/`GIT_DIR=` as a target-setting option.
+# `--git-dir`/`GIT_DIR=` alone, with no `--work-tree`/`GIT_WORK_TREE` given anywhere on the same invocation, does not relocate the mutation target at all -- per git's own documented fallback, the working tree stays the effective directory reached by any `-C` chain (or the session's cwd, with none), so this rule never reads `--git-dir`/`GIT_DIR=` as a target-setting option for that purpose.
+# An explicit `--git-dir`/`GIT_DIR=` is still read and resolved separately, though, for a different purpose: deciding whether the invocation is primary-checkout or not.
+# When `--git-dir` and `--work-tree` are both given and point at different trees, the repository actually mutated is the one `--git-dir` names, not whatever `--work-tree` happens to be -- confirmed live (`git --git-dir=<primary>/.git --work-tree=<empty-dir> commit` mutates `<primary>`, even though `<empty-dir>` resolves as no git repository at all) -- so testing the resolved `--work-tree` value alone for primary-checkout-ness would fail open exactly there.
 # Every other value-taking global option is skipped like `_git_subcommand_arglists` already does, since none of the others name a directory this rule reads.
 _GIT_ENV_WORK_TREE_VAR = "GIT_WORK_TREE"
+_GIT_ENV_GIT_DIR_VAR = "GIT_DIR"
 
 
 _ENV_ASSIGN_RE = re.compile(r"^([A-Za-z_][A-Za-z0-9_]*)=(.*)$")
 
 
-def _env_prefix_work_tree(toks, git_index):
-    """The value of a `GIT_WORK_TREE=` assignment immediately preceding the git invocation at
-    `toks[git_index]`, in the shape `GIT_WORK_TREE=x git ...`, or `None`. Scans backward only
-    through consecutive `NAME=value`-shaped tokens, stopping at the first token that is not one (a
-    shell separator, another command, or the start of the string), so this never reads an
-    assignment belonging to an earlier, unrelated command in the same compound line. `GIT_DIR=` is
-    deliberately not read here at all: by itself, with no `GIT_WORK_TREE=`/`--work-tree` anywhere
-    on the same invocation, it does not relocate the mutation target, per the module comment above
-    `_GIT_ENV_WORK_TREE_VAR`. Read from the command's own text, not a real process environment: an
-    inline assignment here genuinely does redirect the invocation it prefixes, unlike the
-    `GH_WRITE_GUARD_ALLOW=x gh ...` shape documented elsewhere in this file, which never reaches
-    the hook's own environment.
+def _env_prefix_dirs(toks, git_index):
+    """The values of a `GIT_WORK_TREE=`/`GIT_DIR=` assignment immediately preceding the git
+    invocation at `toks[git_index]`, in the shape `GIT_WORK_TREE=x GIT_DIR=y git ...`, as a
+    `(work_tree, git_dir)` pair, either of which may be `None`. Scans backward only through
+    consecutive `NAME=value`-shaped tokens, stopping at the first token that is not one (a shell
+    separator, another command, or the start of the string), so this never reads an assignment
+    belonging to an earlier, unrelated command in the same compound line. Read from the command's
+    own text, not a real process environment: an inline assignment here genuinely does redirect
+    the invocation it prefixes, unlike the `GH_WRITE_GUARD_ALLOW=x gh ...` shape documented
+    elsewhere in this file, which never reaches the hook's own environment.
     """
+    found = {}
     k = git_index - 1
     while k >= 0:
         m = _ENV_ASSIGN_RE.match(toks[k])
         if not m:
             break
-        if m.group(1) == _GIT_ENV_WORK_TREE_VAR:
-            return m.group(2)
+        found.setdefault(m.group(1), m.group(2))
         k -= 1
-    return None
+    return found.get(_GIT_ENV_WORK_TREE_VAR), found.get(_GIT_ENV_GIT_DIR_VAR)
 
 
 _INLINE_ALIAS_RE = re.compile(r"^alias\.(\S+)=(.*)$")
@@ -477,21 +487,23 @@ _INLINE_ALIAS_RE = re.compile(r"^alias\.(\S+)=(.*)$")
 
 def _git_invocations(cmd):
     """Every `git [global-options] <sub> [args...]` invocation in the command, as
-    `(c_dirs, work_tree, inline_aliases, sub, args)` tuples. `c_dirs` is the list of `-C <dir>`
-    values on this specific invocation, in argv order, since real git composes multiple `-C`
-    options sequentially rather than having only the last one take effect. `work_tree` is the
+    `(c_dirs, work_tree, git_dir, inline_aliases, sub, args)` tuples. `c_dirs` is the list of
+    `-C <dir>` values on this specific invocation, in argv order, since real git composes multiple
+    `-C` options sequentially rather than having only the last one take effect. `work_tree` is the
     value of a `--work-tree` global option on this invocation, or a `GIT_WORK_TREE=` prefix
     immediately before it when no `--work-tree` flag is given, or `None` when neither is given, in
-    which case the caller resolves the target from the `-C` chain alone. `--git-dir`/`GIT_DIR=`
-    are recognized only to skip past them correctly, never to set a target, matching real git's
-    own "no relocation without `--work-tree`" fallback. `inline_aliases` is a `name -> expansion`
-    dict of every `-c alias.<name>=<value>` override on this invocation, in argv order (a later
-    `-c` for the same name wins, matching real git's own repeated `-c` semantics), read here since
-    an inline alias is exactly as effective at hiding a mutating command behind an unrecognized
-    name as a persisted one, per requirement 6's alias-resolution rule. Shares its tokenizing and
-    global-option skipping with `_git_subcommand_arglists`, generalized to read every subcommand
-    rather than one named subcommand, and to capture the directory-naming and alias-defining
-    options along the way.
+    which case the caller resolves the mutation target from the `-C` chain alone. `git_dir` is the
+    same shape for `--git-dir`/`GIT_DIR=`: never used to relocate the mutation target on its own
+    (matching real git's "no relocation without `--work-tree`" fallback), but read and resolved
+    separately, since a `--git-dir` explicitly naming a different tree than `--work-tree` is the
+    tree actually mutated, not the one `--work-tree` names. `inline_aliases` is a `name ->
+    expansion` dict of every `-c alias.<name>=<value>` override on this invocation, in argv order
+    (a later `-c` for the same name wins, matching real git's own repeated `-c` semantics), read
+    here since an inline alias is exactly as effective at hiding a mutating command behind an
+    unrecognized name as a persisted one, per requirement 6's alias-resolution rule. Shares its
+    tokenizing and global-option skipping with `_git_subcommand_arglists`, generalized to read
+    every subcommand rather than one named subcommand, and to capture the directory-naming and
+    alias-defining options along the way.
     """
     toks = _shell_tokens(cmd)
     n = len(toks)
@@ -504,6 +516,7 @@ def _git_invocations(cmd):
         j = i + 1
         c_dirs = []
         work_tree = None
+        git_dir = None
         inline_aliases = {}
         while j < n and toks[j].startswith("-"):
             opt = toks[j]
@@ -522,6 +535,15 @@ def _git_invocations(cmd):
                     j += 2
                 else:
                     j += 1
+            elif opt.startswith("--git-dir="):
+                git_dir = opt.split("=", 1)[1]
+                j += 1
+            elif opt == "--git-dir":
+                if j + 1 < n:
+                    git_dir = toks[j + 1]
+                    j += 2
+                else:
+                    j += 1
             elif opt == "-c":
                 if j + 1 < n:
                     m = _INLINE_ALIAS_RE.match(toks[j + 1])
@@ -534,12 +556,15 @@ def _git_invocations(cmd):
                 j += 2
             else:
                 j += 1
+        env_work_tree, env_git_dir = _env_prefix_dirs(toks, i)
         if work_tree is None:
-            work_tree = _env_prefix_work_tree(toks, i)
+            work_tree = env_work_tree
+        if git_dir is None:
+            git_dir = env_git_dir
         if j < n and not _is_shell_op(toks[j]):
             sub = toks[j]
             args, k = _collect_arglist(toks, j + 1)
-            out.append((c_dirs, work_tree, inline_aliases, sub, args))
+            out.append((c_dirs, work_tree, git_dir, inline_aliases, sub, args))
             i = k
         else:
             i = j if j > i else i + 1  # a bare `git` with no subcommand at all; keep scanning
@@ -550,7 +575,7 @@ def _all_git_invocations(cmd):
     """`_git_invocations` for `cmd` itself, plus for every command string a `sh -c`/`bash -c`-style
     wrapper embeds in it, the same expansion `_all_gh_arg_lists` gives the GitHub-write rules, so a
     mutating git command hidden behind such a wrapper is scanned exactly like a bare one. Each
-    tuple carries a fifth element, the leading-`cd` directory in effect for the exact command
+    tuple carries a sixth element, the leading-`cd` directory in effect for the exact command
     string (outer or inner) it came from -- a `cd` embedded inside a wrapper's own command string
     (`bash -c 'cd /x && git ...'`) is invisible to a leading-`cd` check run only against the outer
     command, and the outer command's own leading `cd` (`cd /x && bash -c 'git ...'`) takes effect
@@ -559,12 +584,12 @@ def _all_git_invocations(cmd):
     """
     outer_leading_cd = _leading_cd_dir(cmd)
     out = []
-    for c_dirs, work_tree, inline_aliases, sub, args in _git_invocations(cmd):
-        out.append((c_dirs, work_tree, inline_aliases, sub, args, outer_leading_cd))
+    for c_dirs, work_tree, git_dir, inline_aliases, sub, args in _git_invocations(cmd):
+        out.append((c_dirs, work_tree, git_dir, inline_aliases, sub, args, outer_leading_cd))
     for inner in _embedded_wrapper_commands(cmd):
         leading_cd = _leading_cd_dir(inner) or outer_leading_cd
-        for c_dirs, work_tree, inline_aliases, sub, args in _git_invocations(inner):
-            out.append((c_dirs, work_tree, inline_aliases, sub, args, leading_cd))
+        for c_dirs, work_tree, git_dir, inline_aliases, sub, args in _git_invocations(inner):
+            out.append((c_dirs, work_tree, git_dir, inline_aliases, sub, args, leading_cd))
     return out
 
 
@@ -589,41 +614,63 @@ def _expand_dir(value):
     return _HOME_VAR_RE.sub(lambda _m: os.environ.get("HOME", ""), value)
 
 
-def _resolve_target_dir(c_dirs, work_tree, leading_cd, cwd):
-    """Combine a `-C` chain, an explicit `--work-tree`/`GIT_WORK_TREE=` value, a leading `cd`
-    prefix, and the hook's own `cwd` into one directory to test, following real git's own
-    priority rather than a last-option-wins scan: fold the `-C` chain onto the starting directory
-    (`leading_cd`, or `cwd` when there is none) in argv order, each absolute value replacing the
-    running directory outright and each relative one joining onto the previous result, exactly as
-    git's own "run as if git was started in <path>" describes for a repeated `-C`. `work_tree`,
-    when given, wins over the `-C` chain's own result regardless of how many `-C` options preceded
-    it, matching how `--work-tree`/`GIT_WORK_TREE` name the actual mutation target independent of
-    where `-C` points; a relative `work_tree` still resolves against the `-C` chain's result, the
-    same as git resolves a relative `--work-tree` against its own effective directory. `~`/`$HOME`
-    is expanded in every value along the way, and each relative join happens against the
-    already-expanded previous result, so a relative `-C ../other` or `cd ../other` resolves
-    against the session's own reported cwd rather than wherever the hook process's own OS-level
-    working directory happens to be, which the two are never guaranteed to share.
+def _join_relative(base, value):
+    """Expand `~`/`$HOME` in `value`, then join it onto `base` when it is relative and `base` is
+    known, or return the expanded value as-is when it is already absolute or there is no base to
+    join onto -- the one join rule every directory-naming option (`-C`, a leading `cd`,
+    `--work-tree`, `--git-dir`) resolves a relative value with, so a relative spelling always
+    resolves against the session's own reported cwd rather than wherever the hook process's own
+    OS-level working directory happens to be, which the two are never guaranteed to share.
+    """
+    v = _expand_dir(value)
+    if base and not os.path.isabs(v):
+        return os.path.normpath(os.path.join(base, v))
+    return v
+
+
+def _effective_cwd(c_dirs, leading_cd, cwd):
+    """The directory git treats as its own current working directory for this invocation, after
+    folding a leading `cd` prefix and then any `-C` chain onto the hook's own reported `cwd`, in
+    that order -- the same base both `--work-tree` and `--git-dir` resolve a relative value
+    against. Multiple `-C` options compose sequentially, each resolved against the previous one
+    exactly as git's own "run as if git was started in <path>" describes for a repeated `-C`, an
+    absolute value replacing the running directory outright and a relative one joining onto it.
     """
     base = _expand_dir(cwd) if cwd is not None else None
     if leading_cd is not None:
-        lead = _expand_dir(leading_cd)
-        if base and not os.path.isabs(lead):
-            base = os.path.normpath(os.path.join(base, lead))
-        else:
-            base = lead
+        base = _join_relative(base, leading_cd)
     for c in c_dirs:
-        c = _expand_dir(c)
-        if base and not os.path.isabs(c):
-            base = os.path.normpath(os.path.join(base, c))
-        else:
-            base = c
-    if work_tree is not None:
-        wt = _expand_dir(work_tree)
-        if base and not os.path.isabs(wt):
-            return os.path.normpath(os.path.join(base, wt))
-        return wt
+        base = _join_relative(base, c)
     return base
+
+
+def _resolve_target_dir(c_dirs, work_tree, leading_cd, cwd):
+    """The mutation target directory for this invocation, following real git's own priority
+    rather than a last-option-wins scan across `-C`/`--work-tree`: the effective directory reached
+    by a leading `cd` and any `-C` chain (see `_effective_cwd`), with an explicit
+    `--work-tree`/`GIT_WORK_TREE=` value, when given, winning over that result regardless of how
+    many `-C` options preceded it, matching how `--work-tree`/`GIT_WORK_TREE` name the actual
+    mutation target independent of where `-C` points. A relative `work_tree` still resolves
+    against the effective directory, the same as git resolves a relative `--work-tree` against its
+    own effective directory.
+    """
+    base = _effective_cwd(c_dirs, leading_cd, cwd)
+    if work_tree is not None:
+        return _join_relative(base, work_tree)
+    return base
+
+
+def _resolve_repo_dir(git_dir, c_dirs, leading_cd, cwd):
+    """The explicit `--git-dir`/`GIT_DIR=` value on this invocation, resolved the same way a
+    `--work-tree` value is (joined onto the effective directory reached by a leading `cd` and any
+    `-C` chain, see `_effective_cwd`), or `None` when no explicit git-dir was given on this
+    invocation at all -- in which case the caller falls back to ordinary ancestor-based repository
+    discovery from the resolved mutation target instead, exactly as real git itself does absent an
+    explicit `--git-dir`.
+    """
+    if git_dir is None:
+        return None
+    return _join_relative(_effective_cwd(c_dirs, leading_cd, cwd), git_dir)
 
 
 # A single leading `cd <dir> &&`/`cd <dir> ;` prefix, and no more, a narrow, tractable parse rather than tracking shell execution state.
@@ -644,10 +691,10 @@ def _leading_cd_dir(cmd):
     return None
 
 
-def _is_primary_checkout(target_dir):
-    """`True` when `target_dir` resolves to a primary (non-worktree) git checkout, `False` when it
-    resolves to a linked worktree, `None` when no git repository resolves there at all (the caller
-    fails open on `None`, matching this rule's own precision-over-recall stance).
+def _is_primary_checkout(target_dir, git_dir=None):
+    """`True` when the repository this invocation targets is a primary (non-worktree) git
+    checkout, `False` when it is a linked worktree, `None` when no git repository resolves at all
+    (the caller fails open on `None`, matching this rule's own precision-over-recall stance).
 
     The test is a `rev-parse` comparison, not a filesystem-shape guess: `--git-dir` equals
     `--git-common-dir` for a primary checkout and differs for a linked worktree. A `.git`-is-a-
@@ -657,24 +704,29 @@ def _is_primary_checkout(target_dir):
     argv, verified silently ineffective (relative paths, no error) in the other order, which would
     misclassify a primary checkout as a worktree the moment a command runs from one of its
     subdirectories.
+
+    When `git_dir` is given (an explicit `--git-dir`/`GIT_DIR=` was resolved on the invocation),
+    the check runs against that value directly (`git --git-dir=<git_dir> rev-parse ...`, no `-C`
+    at all) rather than against `target_dir` via ordinary ancestor discovery, since `--git-dir`
+    names the repository actually mutated independent of where `--work-tree`/cwd point, confirmed
+    live: `git --git-dir=<primary>/.git --work-tree=<empty-dir> commit` mutates `<primary>` even
+    though `<empty-dir>` resolves as no git repository at all. Testing `target_dir` in that case
+    would fail open exactly there.
     """
+    if git_dir is not None:
+        argv = ["git", f"--git-dir={git_dir}"]
+    else:
+        argv = ["git", "-C", target_dir or "."]
+    argv += ["rev-parse", "--path-format=absolute", "--git-dir", "--git-common-dir"]
     try:
         r = subprocess.run(
-            [
-                "git",
-                "-C",
-                target_dir or ".",
-                "rev-parse",
-                "--path-format=absolute",
-                "--git-dir",
-                "--git-common-dir",
-            ],
+            argv,
             capture_output=True,
             text=True,
             timeout=5,
             check=False,
         )
-    except Exception:  # noqa: BLE001
+    except Exception:  # noqa: BLE001 - a crashed/absent git binary is treated as "unresolvable", the same fail-open outcome a non-zero exit already produces below, not a defect to propagate as a hook-crashing traceback.
         return None
     if r.returncode != 0:
         return None
@@ -897,30 +949,39 @@ def _check_primary_checkout_mutation(
     deny unrelated Bash work in any non-git directory.
     """
     environ = environ if environ is not None else os.environ
-    lookup = (
-        primary_checkout_lookup if primary_checkout_lookup is not None else _is_primary_checkout
-    )
     # Read the same way GH_WRITE_GUARD_ALLOW is: from the environment the session was launched with, never a channel the agent itself can set (an inline `VAR=x cmd` prefix or an `export` inside the same call must not satisfy this).
     grant_value = environ.get("GH_WRITE_GUARD_ALLOW_PRIMARY_CHECKOUT", "").strip().lower()
     if grant_value not in _FALSY_ENV_VALUES:
         return "allow", ""
     resolved_cache = {}
-    for c_dirs, work_tree, inline_aliases, sub, args, leading_cd in _all_git_invocations(cmd):
+    for c_dirs, work_tree, git_dir, inline_aliases, sub, args, leading_cd in _all_git_invocations(
+        cmd
+    ):
         resolved = _resolve_target_dir(c_dirs, work_tree, leading_cd, cwd)
+        repo_git_dir = _resolve_repo_dir(git_dir, c_dirs, leading_cd, cwd)
+        # The key this rule tests for primary-checkout-ness is the explicit --git-dir/GIT_DIR= value when one was given, not the mutation target: an explicit --git-dir names the repository actually mutated independent of where --work-tree/cwd point, confirmed live to diverge from the mutation target when the two are given together and point at different trees.
+        repo_key = repo_git_dir if repo_git_dir is not None else resolved
         # Whether this even targets a primary checkout is checked before the subcommand/argv verdict, not after.
         # The verdict for `checkout`/`switch` can need its own live git call to disambiguate a ref from a pathspec, and skipping straight past that for the ordinary case (a checkout in a worktree, or targeting no git repository at all) avoids paying for it where the answer would be "allow" regardless.
-        if resolved not in resolved_cache:
-            resolved_cache[resolved] = lookup(resolved)
-        if not resolved_cache[resolved]:
+        if repo_key not in resolved_cache:
+            if primary_checkout_lookup is not None:
+                resolved_cache[repo_key] = primary_checkout_lookup(repo_key)
+            elif repo_git_dir is not None:
+                resolved_cache[repo_key] = _is_primary_checkout(resolved, git_dir=repo_git_dir)
+            else:
+                resolved_cache[repo_key] = _is_primary_checkout(repo_key)
+        if not resolved_cache[repo_key]:
             continue
         verdict = _primary_checkout_verdict(sub, args, resolved, ref_resolver)
         if verdict is None:
             # `sub` is not one of this rule's own recognized names -- it may be a git alias (inline `-c alias.<name>=...`, or one persisted in the target checkout's own config) expanding to one of them, which is exactly as effective a way to hide a mutating command as spelling it out directly.
-            sub, args, opaque = _resolve_alias(sub, args, inline_aliases, resolved, config_lookup)
+            sub, args, opaque = _resolve_alias(
+                sub, args, inline_aliases, repo_git_dir or resolved, config_lookup
+            )
             if opaque:
                 return "deny", (
                     f"This `git {sub}` resolves to a `!`-prefixed shell alias in a primary "
-                    f"checkout ({resolved}), which this rule cannot safely inspect. Denied "
+                    f"checkout ({repo_key}), which this rule cannot safely inspect. Denied "
                     "conservatively rather than risking an unreviewed shell command against a "
                     "checkout a mutating git operation there could destroy another task's "
                     "uncommitted work in. Create or use a worktree instead (`git worktree add "
@@ -933,7 +994,7 @@ def _check_primary_checkout_mutation(
         if not verdict:
             continue
         return "deny", (
-            f"This `git {sub}` runs directly against a primary checkout ({resolved}), not a "
+            f"This `git {sub}` runs directly against a primary checkout ({repo_key}), not a "
             "linked worktree. A mutating git operation there can destroy another task's "
             "uncommitted work. Create or use a worktree instead (`git worktree add ...`), per "
             "GOVERNANCE.md 'Repository Boundaries and Write Safety' and the repo-worktree "
@@ -2684,20 +2745,27 @@ _PRIMARY_CHECKOUT_CASES = [
     (
         "GIT_WORK_TREE=/primary GIT_DIR=/primary/.git git reset --hard",
         "/worktree",
-        {"/primary": True, "/worktree": False},
+        {"/primary/.git": True, "/worktree": False},
         None,
         "deny",
-        "a GIT_WORK_TREE=/GIT_DIR= prefix in the command's own text redirects the invocation, unlike a real env var the hook process never sees",
+        (
+            "a GIT_WORK_TREE=/GIT_DIR= prefix in the command's own text redirects the "
+            "invocation, unlike a real env var the hook process never sees; the primary-checkout "
+            "test itself keys on the resolved GIT_DIR= value, since that is what --git-dir/GIT_DIR "
+            "name for repository identity"
+        ),
     ),
     (
         "git --git-dir=/primary/.git --work-tree=/primary -C /worktree reset --hard",
         "/somewhere-else",
-        {"/primary": True, "/worktree": False},
+        {"/primary/.git": True, "/worktree": False},
         None,
         "deny",
         (
-            "--work-tree wins over -C regardless of argv order: real git mutates /primary here, "
-            "not /worktree, even though -C is the option nearer the subcommand"
+            "--work-tree wins over -C regardless of argv order for the mutation target message, "
+            "and the primary-checkout test itself keys on --git-dir's own resolved value: real "
+            "git mutates /primary here, not /worktree, even though -C is the option nearer the "
+            "subcommand"
         ),
     ),
     (
@@ -2719,10 +2787,16 @@ _PRIMARY_CHECKOUT_CASES = [
     (
         "git --git-dir=/primary/.git reset --hard",
         "/worktree",
-        {"/primary": True, "/worktree": False},
+        {"/primary/.git": True, "/worktree": False},
         None,
-        "allow",
-        "--git-dir alone, with no --work-tree, never relocates the target: git's own fallback keeps the working tree at the effective cwd, here the linked worktree",
+        "deny",
+        (
+            "--git-dir alone, with no --work-tree, never relocates the mutation-target message "
+            "(git's own fallback keeps the working tree at the effective cwd, here the linked "
+            "worktree), but the primary-checkout test itself always keys on an explicit --git-dir "
+            "when one is given, confirmed live: it names the repository actually mutated "
+            "regardless of where the working tree files live"
+        ),
     ),
     (
         "cd /primary && git reset --hard origin/main",
@@ -2799,6 +2873,20 @@ _PRIMARY_CHECKOUT_CASES = [
         None,
         "allow",
         "an unresolvable target fails open, precision over recall like every rule but 4",
+    ),
+    (
+        "git --git-dir=/primary/.git --work-tree=/safe commit --allow-empty -m probe",
+        "/safe",
+        {"/primary/.git": True, "/safe": None},
+        None,
+        "deny",
+        (
+            "the CodeRabbit-reported gap: --work-tree names a directory that resolves as no git "
+            "repository at all, but real git still mutates the repository --git-dir names -- "
+            "confirmed live with the exact reproduction script CodeRabbit supplied -- so keying "
+            "the primary-checkout test on --git-dir rather than the resolved --work-tree value is "
+            "what catches this instead of failing open on the unresolvable work-tree"
+        ),
     ),
 ]
 
