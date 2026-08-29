@@ -512,14 +512,20 @@ def _all_git_invocations(cmd):
     """`_git_invocations` for `cmd` itself, plus for every command string a `sh -c`/`bash -c`-style
     wrapper embeds in it, the same expansion `_all_gh_arg_lists` gives the GitHub-write rules, so a
     mutating git command hidden behind such a wrapper is scanned exactly like a bare one. Each
-    tuple carries a fourth element, the leading-`cd` directory of the exact command string (outer
-    or inner) it came from, since a `cd` embedded inside a wrapper's own command string (`bash -c
-    'cd /x && git ...'`) is invisible to a leading-`cd` check run only against the outer command.
+    tuple carries a fourth element, the leading-`cd` directory in effect for the exact command
+    string (outer or inner) it came from -- a `cd` embedded inside a wrapper's own command string
+    (`bash -c 'cd /x && git ...'`) is invisible to a leading-`cd` check run only against the outer
+    command, and the outer command's own leading `cd` (`cd /x && bash -c 'git ...'`) takes effect
+    inside the wrapper too, via the shell's own inherited cwd, when the wrapped string carries no
+    leading `cd` of its own to override it.
     """
+    outer_leading_cd = _leading_cd_dir(cmd)
     out = []
-    for source in (cmd, *_embedded_wrapper_commands(cmd)):
-        leading_cd = _leading_cd_dir(source)
-        for target_dir, sub, args in _git_invocations(source):
+    for target_dir, sub, args in _git_invocations(cmd):
+        out.append((target_dir, sub, args, outer_leading_cd))
+    for inner in _embedded_wrapper_commands(cmd):
+        leading_cd = _leading_cd_dir(inner) or outer_leading_cd
+        for target_dir, sub, args in _git_invocations(inner):
             out.append((target_dir, sub, args, leading_cd))
     return out
 
@@ -675,11 +681,15 @@ def _primary_checkout_verdict(sub, args, target_dir=None, ref_resolver=None):
             return True
         if any(a in _CHECKOUT_FORCE_FLAGS for a in args):
             return True
-        positional = [a for a in args if not a.startswith("-")]
+        # A bare `-` is itself a real, git-recognized ref (the previous branch), not a flag, even though it starts with the same character every flag does.
+        positional = [a for a in args if a == "-" or not a.startswith("-")]
         # More than one bare positional with no `--` is the same ambiguous/pathspec-leaning shape (`checkout <ref> <path>`), denied rather than guessed at.
         # Exactly one is the case that needs disambiguating live, below.
         if len(positional) != 1:
             return True
+        # A bare `-` is exempt outright rather than live-checked: it is porcelain shorthand for "the previous branch" that only `checkout`/`switch` themselves understand, and `git rev-parse` (what the live check below runs) does not resolve it as a ref at all, which would otherwise misread this exact safe case as a pathspec.
+        if positional[0] == "-":
+            return False
         # A flagless `checkout <ref>`/`switch <ref>` is exempt only when `<ref>` actually resolves as a ref.
         # Git's own ref-switch path refuses to overwrite a local modification, but its pathspec-restore fallback (what git runs when the argument is not a ref, such as `git checkout .`) carries no such check, so denying it is exactly as safe as denying the `--` form above.
         # This is the one case in this rule that needs a live git call to decide.

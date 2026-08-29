@@ -44,8 +44,8 @@ On Claude Code this is now also a mechanical stop for most such commands (a `Pre
 denies a mutating git operation run directly in a primary checkout), though this prose is still
 the only enforcement for a non-Claude-Code agent, and for the narrow shapes the hook itself
 exempts, so following it here is not optional even where no hook can catch a lapse. Verify the
-host with
-`python3 scripts/host_gate.py --repo <path-to-target-checkout>`. Then run the audit end to end,
+host with `python3 scripts/host_gate.py --repo <path-to-target-checkout>`. Then run the audit end
+to end,
 RESYNC.md section 2, against the target's `main` branch, never `develop`. A finding is a snapshot,
 so quote the run stamp in anything derived from it and re-run before acting on a finding read
 earlier in the session.

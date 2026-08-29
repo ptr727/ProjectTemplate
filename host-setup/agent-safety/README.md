@@ -79,24 +79,34 @@ hook or approval-gate API, not tied to Claude Code's `PreToolUse` JSON shape.
    checkout and unequal paths for a linked worktree. A `.git`-is-a-directory heuristic is wrong (a
    submodule's `.git` is a file yet is still a primary working tree that can lose uncommitted
    work). Deny `checkout`/`switch`/`pull`/`reset`/`rebase`/`merge`/`cherry-pick`/`revert`/`restore`/
-   `stash pop|apply|drop`/`clean -f|-fd`/`add`/`commit`/`worktree remove -f|--force` there. Allow
-   `worktree add|list|prune`, a plain `worktree remove` with no force flag, any read, `merge
-   --ff-only`/`pull --ff-only` (git's own semantics mean neither can discard anything), and a
-   flagless `checkout <ref>`/`switch <ref>` (git itself already refuses that form when it would
-   overwrite a local modification) -- these are the normal, documented way an agent uses a primary
+   `stash` (anything but `list`/`show`)/`clean -f|-fd`/`add`/`commit`/`rm`/`apply`/`am`/
+   `worktree remove -f|--force` there. Allow `worktree add|list|prune`, a plain `worktree remove`
+   with no force flag, any read, `merge --ff-only`/`pull --ff-only` (git's own semantics mean
+   neither can discard anything), a bare `-` as a `checkout`/`switch` argument (porcelain shorthand
+   for the previous branch, which only those two subcommands themselves understand, so it is exempt
+   outright rather than checked), and a flagless `checkout <ref>`/`switch <ref>` whose argument
+   verifiably resolves as a ref -- checked live (`git rev-parse --verify --quiet <ref>^{commit}`),
+   since git's own ref-switch path refuses to overwrite a local modification but its
+   pathspec-restore fallback for an argument that does not resolve as a ref (`git checkout .`,
+   `checkout -- <path>`, `checkout <ref> -- <path>`, more than one bare positional) carries no such
+   check and is denied. These exemptions are the normal, documented way an agent uses a primary
    checkout as a fetch source and returns it to a base branch afterward, and denying them adds no
-   safety while breaking routine, correct work. The flagless-checkout exemption is a deliberate,
+   safety while breaking routine, correct work. The flagless-ref-checkout exemption is a deliberate,
    validated scope boundary worth naming explicitly: the incident behind this requirement (#1073)
    ran exactly this shape (a flagless `checkout` then an `--ff-only` pull), so this requirement does
    not deny that incident's own literal commands. The concurrent-access hazard those commands still
    carried either way -- switching HEAD or fast-forwarding a checkout another task might be relying
    on, whether or not the working tree was dirty -- is not decidable from the command text alone, so
    it stays the prose rule's job (`GOVERNANCE.md` "Repository Boundaries and Write Safety",
-   `repo-worktree`), not this one's. Resolve the target directory from an explicit `-C`/`--git-dir`
-   argument, else a single leading `cd <dir> &&` prefix (or the same with a bare command-separator
-   instead of `&&`) on the same command, else the invocation's own working directory. Fail open
-   (allow) when no git repository resolves at all, matching this requirement's own
-   precision-over-recall stance, not requirement 4's fail-closed one -- the harm here needs a
+   `repo-worktree`), not this one's. Resolve the target directory from an explicit `-C`/`--git-dir`/
+   `--work-tree` argument, a `GIT_WORK_TREE=`/`GIT_DIR=` prefix in the command's own text, else a
+   single leading `cd <dir> &&` prefix (or the same with a bare command-separator instead of `&&`)
+   on the same command -- read inside a `sh -c`/`bash -c` wrapper too, and inherited from an outer
+   leading `cd` when a wrapped string carries none of its own -- else the invocation's own working
+   directory, with `~`/`$HOME` expanded and a relative value joined against that directory rather
+   than wherever the hook process's own OS-level cwd happens to be. Fail open (allow) when no git
+   repository resolves at all, matching this requirement's own precision-over-recall stance, not
+   requirement 4's fail-closed one -- the harm here needs a
    positively-identified primary checkout to fire on. Granted only by
    `GH_WRITE_GUARD_ALLOW_PRIMARY_CHECKOUT`, read the same way `GH_WRITE_GUARD_ALLOW` is.
 
