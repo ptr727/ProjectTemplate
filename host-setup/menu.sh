@@ -112,7 +112,7 @@ hub_read_lock_release() {
     HUB_READ_LOCK_FD=""
 }
 
-# `ensure_hub_root` is `fetch_hub`'s only caller, and it only ever runs inside a `hub_read_lock_acquire` span (`host_tool_locked`, `audit_repo`, `check_skills_dist`, `carry_action` all acquire it first), so $HUB_READ_LOCK_FD is always already open here.
+# `ensure_hub_root` is `fetch_hub`'s only caller, and it only ever runs inside a `hub_read_lock_acquire` span (`host_tool`, `audit_repo`, `check_skills_dist`, `carry_action` all acquire it first), so $HUB_READ_LOCK_FD is always already open here.
 # Escalating that same fd from shared to exclusive, rather than opening a second fd on the same lock file, is what makes this safe: flock treats two different fds on one file as independent lock holders even within one process, so a second fd's blocking exclusive wait would deadlock against the first fd's own shared hold forever, verified by reproducing exactly that hang before this fix.
 # `flock` changes an already-held fd's own lock type in place with no such deadlock, since the kernel recognizes it as the same holder taking a different mode, not a second competing one.
 # Downgraded back to shared once the fetch itself is done, restoring reader concurrency for the rest of the caller's own read-and-use span, rather than holding exclusive (which would still be correct, only more conservative than necessary).
