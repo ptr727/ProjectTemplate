@@ -163,21 +163,24 @@ Four things are deployed from here, and they land in different places. The host 
 
 The guardrails are **host state rather than repository content**, because they have to cover ad-hoc sessions in no project at all. Each provider's implementation stays separate:
 
-- **Claude Code:** the installable safety kit denies a mis-targeted GitHub write under your identity. It also denies a git operation that would bypass a branch rule.
-- **Codex:** no equivalent host hook ships yet. The carried repository rules and Codex's own sandbox and execution policies remain active. [Issue #781][issue-781] tracks the missing hook.
-- **opencode:** no equivalent host hook ships yet. The carried repository rules and opencode's own permission model remain active. [Issue #781][issue-781] tracks the missing hook.
+- **Claude Code:** the installable safety kit denies a mis-targeted GitHub write under your identity. It also denies a git operation that would bypass a branch rule. [`host-setup/agent-safety/claude/README.md`][agent-safety-claude] has the details.
+- **Codex:** no equivalent host hook ships yet. The carried repository rules and Codex's own sandbox and execution policies remain active. [Issue #781][issue-781] tracks the missing hook, and [`host-setup/agent-safety/codex/README.md`][agent-safety-codex] states the gap.
+- **opencode:** no equivalent host hook ships yet. The carried repository rules and opencode's own permission model remain active. [Issue #781][issue-781] tracks the missing hook, and [`host-setup/agent-safety/opencode/README.md`][agent-safety-opencode] states the gap.
+
+The requirements every agent's kit is built and audited against, agent-agnostic, are in
+[`host-setup/agent-safety/README.md`][agent-safety].
 
 #### Claude Code
 
 ```shell
-host-setup/agent-safety/install.sh        # Linux, WSL, macOS
+host-setup/agent-safety/claude/install.sh        # Linux, WSL, macOS
 ```
 
 ```powershell
-.\host-setup\agent-safety\install.ps1     # Windows, and the .\ prefix is required
+.\host-setup\agent-safety\claude\install.ps1     # Windows, and the .\ prefix is required
 ```
 
-Restart Claude Code sessions on the machine afterward so the hook and the `CLAUDE.md` blocks load. The installer is idempotent, so re-running it is also how a machine picks up an upstream change to the guard. What it installs, how to verify it, and what it deliberately does not catch are in [`host-setup/agent-safety/README.md`][agent-safety]. The surrounding host prerequisites are in [`docs/host-setup.md`][host-setup].
+Restart Claude Code sessions on the machine afterward so the hook and the `CLAUDE.md` blocks load. The installer is idempotent, so re-running it is also how a machine picks up an upstream change to the guard. What it installs, how to verify it, and what it deliberately does not catch are in [`host-setup/agent-safety/claude/README.md`][agent-safety-claude]. The surrounding host prerequisites are in [`docs/host-setup.md`][host-setup].
 
 ### Install the Fleet Skills
 
@@ -220,7 +223,7 @@ A rule that cannot be diverged from is a rule people work around silently, which
 
 The guard denies a `gh` write whose explicit target sits under an owner other than the checkout's `origin` owner, which is the shape that once put a stray comment on a stranger's repository. Sibling repositories under the same owner are allowed, so the denial appears only on a write that leaves the owner, and the common case that raises it is a fork, where `origin` is yours and `upstream` is the project you forked from.
 
-The only way past it is a grant the maintainer makes **outside the session**, in `GH_WRITE_GUARD_ALLOW`. It is deliberately not something an agent can do for itself once blocked, so an inline `GH_WRITE_GUARD_ALLOW=owner/repo gh ...` prefix and an `export` inside a shell call both leave the write denied. The worked example, the file the grant goes in, and how to confirm one took effect are in [`docs/host-setup.md` "Granting a Write the Guard Denies"][host-setup-granting-a-write-the-guard-denies].
+The only way past it is a grant the maintainer makes **outside the session**, in `GH_WRITE_GUARD_ALLOW`. It is deliberately not something an agent can do for itself once blocked, so an inline `GH_WRITE_GUARD_ALLOW=owner/repo gh ...` prefix and an `export` inside a shell call both leave the write denied. The worked example, the file the grant goes in, and how to confirm one took effect are in [`host-setup/agent-safety/claude/README.md` "Granting a Write That the Guard Denies"][agent-safety-claude-grant].
 
 ## Rules
 
@@ -342,6 +345,10 @@ Licensed under the [MIT License][license]\
 <!-- Repo -->
 
 [agent-safety]: ./host-setup/agent-safety/README.md
+[agent-safety-claude]: ./host-setup/agent-safety/claude/README.md
+[agent-safety-claude-grant]: ./host-setup/agent-safety/claude/README.md#granting-a-write-that-the-guard-denies
+[agent-safety-codex]: ./host-setup/agent-safety/codex/README.md
+[agent-safety-opencode]: ./host-setup/agent-safety/opencode/README.md
 [agents]: ./AGENTS.md
 [audit]: ./AUDIT.md
 [catalog]: ./catalog/
@@ -364,7 +371,6 @@ Licensed under the [MIT License][license]\
 [history]: ./HISTORY.md
 [host-setup]: ./docs/host-setup.md
 [host-setup-dir]: ./host-setup/
-[host-setup-granting-a-write-the-guard-denies]: ./docs/host-setup.md#granting-a-write-the-guard-denies
 [issue-781]: https://github.com/ptr727/ProjectTemplate/issues/781
 [license]: ./LICENSE
 [matrix]: ./reports/conformance-matrix.md

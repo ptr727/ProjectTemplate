@@ -25,9 +25,9 @@ host-setup\windows\setup-wsl.ps1 -Status
 
 **winget**, which arrives with App Installer from the Microsoft Store.
 
-**Script execution.** A `git clone` carries no mark of the web, so these run under the default `RemoteSigned` policy. A browser-downloaded zip does carry one, and is blocked until `Unblock-File` clears the mark. The `.\` prefix is required when running a script from the current directory, exactly as it is for [`agent-safety/install.ps1`][agent-safety].
+**Script execution.** A `git clone` carries no mark of the web, so these run under the default `RemoteSigned` policy. A browser-downloaded zip does carry one, and is blocked until `Unblock-File` clears the mark. The `.\` prefix is required when running a script from the current directory, exactly as it is for [`agent-safety/claude/install.ps1`][agent-safety].
 
-`pwsh -File .\install-tools.ps1` answers the `.\` rule and **not** the policy, which still applies to it: on a marked file under `RemoteSigned` it fails with a `SecurityError` naming the file as unsigned. The form that runs whatever the policy says is `pwsh -ExecutionPolicy Bypass -File .\install-tools.ps1`, which is what [`docs/host-setup.md`][host-setup] already gives for the write-safety installer. Prefer clearing the mark with `Unblock-File` over bypassing, since the bypass covers every script that run touches.
+`pwsh -File .\install-tools.ps1` answers the `.\` rule and **not** the policy, which still applies to it: on a marked file under `RemoteSigned` it fails with a `SecurityError` naming the file as unsigned. The form that gets past the mark is `pwsh -ExecutionPolicy Bypass -File .\install-tools.ps1`, the same shape [`agent-safety/claude/README.md`][agent-safety-claude-readme] gives for the write-safety installer -- `-ExecutionPolicy Bypass` sets only the process scope, which a machine- or user-level policy set by Group Policy still overrides. Prefer clearing the mark with `Unblock-File` over bypassing, since the bypass covers every script that run touches and does not universally guarantee the run.
 
 ## Why winget Is the Only Source
 
@@ -148,7 +148,8 @@ The scripts are checked by `PSScriptAnalyzer`, which runs in CI as the peer of t
 
 <!-- Repo -->
 
-[agent-safety]: ../agent-safety/install.ps1
+[agent-safety]: ../agent-safety/claude/install.ps1
+[agent-safety-claude-readme]: ../agent-safety/claude/README.md
 [bootstrap]: ../bootstrap.sh
 [bootstrap-ps1]: ../bootstrap.ps1
 [governance]: ../../GOVERNANCE.md

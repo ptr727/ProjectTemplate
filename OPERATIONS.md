@@ -23,8 +23,8 @@ uvx ruff@latest format --check .
 uvx mypy@latest
 uvx coverage@latest run --source=scripts,spec,host-setup -m unittest discover -s scripts/tests
 uvx coverage@latest run --source=scripts,spec,host-setup --append spec/audit.py --selftest
-uvx coverage@latest run --source=scripts,spec,host-setup --append host-setup/agent-safety/gh-write-guard.py --selftest
-uvx coverage@latest run --source=scripts,spec,host-setup --append host-setup/agent-safety/test_install.py
+uvx coverage@latest run --source=scripts,spec,host-setup --append host-setup/agent-safety/claude/gh-write-guard.py --selftest
+uvx coverage@latest run --source=scripts,spec,host-setup --append host-setup/agent-safety/claude/test_install.py
 uvx coverage@latest report
 python3 scripts/build_dist.py --check
 python3 scripts/repo_gate.py
