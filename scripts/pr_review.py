@@ -221,7 +221,7 @@ QUOTA = re.compile(r"reached (?:their|its|his|her|your|my) quota limit", re.IGNO
 RATE_LIMITED = re.compile(r"auto-generated comment:\s*rate limited by\s*(\S+?)\s*-->")
 # Anchored to the `<h3>` tag rather than a bare substring, since prose elsewhere can mention the phrase without being the comment it names.
 QODO_REVIEW_HEADING = re.compile(r"<h3>\s*Code Review by Qodo\s*</h3>", re.IGNORECASE)
-# Only the numbered heading counts as a finding, told apart from Qodo's own nested sub-summaries by starting with `N.`
+# Only the numbered heading counts as a finding, told apart from Qodo's own nested sub-summaries by starting with a number and a period (`1.`, `2.`, ...).
 QODO_FINDING = re.compile(r"\s*\d+\.\s")
 # A finding's own title can quote `Resolved`/`Dismissed` without carrying the badge, so the glyph is required rather than just the word.
 # Escaped (U+2713, U+2717) rather than typed literally, per the repository's ASCII charset rule.
