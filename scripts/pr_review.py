@@ -297,7 +297,7 @@ COVERAGE_FIELD = {UNVETTED: "UNVETTED", PARTIAL: "PARTIAL", FULL: "full", UNSTAT
 # A heading this script has no spelling for is a section it will not find, reported as absent.
 # That is the shape of all three failures already on record here, each caught after it landed.
 # The lists are small because the output is regular: 9 headings, 6 summaries and 3 labels.
-# Counts are normalized to `(N)` and non-ASCII is dropped before comparing.
+# Counts are normalized to `(N)` and non-ASCII is dropped before comparing, and `unvetted` folds letter case at the comparison itself.
 # The verdict headings carry a colored circle, so the emoji is what would drift most cheaply.
 # Dropping it also keeps this file inside the charset rule that governs the repository.
 VETTED_HEADINGS = {
@@ -1083,13 +1083,34 @@ def table_against_diff(pr: dict, counts: tuple[int, int] | None) -> str:
 
 
 def normal(text: str) -> str:
-    """A marker reduced to what a vetted list compares: ASCII, single spaces, counts as `(N)`.
+    """A marker reduced toward what a vetted list compares: ASCII, single spaces, counts as `(N)`.
+
+    Letter case is not reduced here and is folded at the membership test in `unvetted` instead,
+    so this value keeps the case the reviewer wrote while the comparison ignores it.
 
     The verdict headings carry a colored circle and the suppressed heading carries its finding
     count, so both drift on every review without the section having changed at all.
     """
     ascii_only = "".join(c for c in text if ord(c) < 128)
     return re.sub(r"\s+", " ", re.sub(r"\(\d+\)", "(N)", ascii_only)).strip()
+
+
+def unvetted(marker: str, vetted: set[str]) -> bool:
+    """Whether `marker` is absent from `vetted`, comparing without regard to letter case.
+
+    Case carries no meaning in any of these markers, and the reviewer has drifted one: a review
+    body carrying `### Reviewed Changes` reported as a shape this script had never seen while
+    `### Reviewed changes` sat in the vetted list, which blocked a review loop over a letter. A
+    vetting list whose entries stop matching for a reason that means nothing is the silent
+    narrowing the verification rules name, arriving loudly rather than quietly and still wrong.
+
+    Folded here rather than in `normal`, whose value the report strings also carry. A reported
+    shape's remedy names the shape beside the body it quotes, so a folded name would not match the
+    body printed next to it. Case is the one reduction with no reason to apply: the emoji and the
+    count are dropped because they drift on every review without the section having changed, and
+    case has drifted the same way once.
+    """
+    return marker.casefold() not in {v.casefold() for v in vetted}
 
 
 def unrecognized_in(body: str) -> list[str]:
@@ -1112,13 +1133,15 @@ def unrecognized_in(body: str) -> list[str]:
     plain = FENCE.sub("", body or "")
     headings = [normal(ln) for ln in plain.splitlines() if MARKDOWN_HEADING.match(ln)]
     labels = [normal(m.group(1)) for m in map(LABEL_LINE.match, plain.splitlines()) if m]
-    found = [f"heading: {h}" for h in dict.fromkeys(headings) if h not in VETTED_HEADINGS]
+    found = [f"heading: {h}" for h in dict.fromkeys(headings) if unvetted(h, VETTED_HEADINGS)]
     found += [
         f"summary: {normal(s)}"
         for s in dict.fromkeys(SUMMARY.findall(plain))
-        if normal(s) not in VETTED_SUMMARIES
+        if unvetted(normal(s), VETTED_SUMMARIES)
     ]
-    found += [f"metadata label: {la}" for la in dict.fromkeys(labels) if la not in VETTED_LABELS]
+    found += [
+        f"metadata label: {la}" for la in dict.fromkeys(labels) if unvetted(la, VETTED_LABELS)
+    ]
     found += [
         f"coverage line: {ln}" for ln in coverage_statements(body) if read_coverage(ln) is None
     ]
