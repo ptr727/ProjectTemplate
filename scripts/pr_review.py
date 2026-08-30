@@ -1123,9 +1123,10 @@ def unrecognized_in(body: str) -> list[str]:
     labels = [normal(m.group(1)) for m in map(LABEL_LINE.match, plain.splitlines()) if m]
     found = [f"heading: {h}" for h in dict.fromkeys(headings) if unvetted(h, VETTED_HEADINGS)]
     found += [
-        f"summary: {normal(s)}"
-        for s in dict.fromkeys(SUMMARY.findall(plain))
-        if unvetted(normal(s), VETTED_SUMMARIES)
+        f"summary: {marker}"
+        # Deduplicated on the raw text before normalizing, which is what it did before the hoist.
+        for marker in (normal(s) for s in dict.fromkeys(SUMMARY.findall(plain)))
+        if unvetted(marker, VETTED_SUMMARIES)
     ]
     found += [
         f"metadata label: {la}" for la in dict.fromkeys(labels) if unvetted(la, VETTED_LABELS)
