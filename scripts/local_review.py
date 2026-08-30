@@ -550,6 +550,11 @@ def _write_pass_locked(
     return out
 
 
+def untracked_in(root: Path) -> list[str]:
+    """The non-ignored untracked paths, which the receipt's own scope includes."""
+    return _zsplit(git("ls-files", "--others", "--exclude-standard", "-z", root=root))
+
+
 def run_coderabbit(base: str, root: Path) -> tuple[int, str]:
     """Run the CodeRabbit CLI over this branch's diff and return the findings count and an error.
 
@@ -571,6 +576,21 @@ def run_coderabbit(base: str, root: Path) -> tuple[int, str]:
     exe = shutil.which("coderabbit")
     if not exe:
         raise CannotRun("the coderabbit CLI is not installed, so this backend cannot run")
+    # The receipt's scope includes non-ignored untracked files.
+    # A `--base` review covers the tracked diff instead.
+    # Recording a pass over a changed set holding untracked paths would claim coverage of files the CLI never read.
+    # The CLI documents `--include-untracked` alongside `--uncommitted`.
+    # Whether that composes with `--base` is unverified, since this host carries no CLI to run it against.
+    # Asserting a tool's behavior that was never executed is what `agent-conduct` forbids.
+    # So the case is refused rather than guessed at.
+    # Lifting this restriction needs a real CLI and a test that drives it.
+    untracked = untracked_in(root)
+    if untracked:
+        raise CannotRun(
+            f"{len(untracked)} untracked path(s) are in the review scope, and this backend's"
+            " coverage of them is unverified. Commit or stage them, or use the agent-skill"
+            f" backend. First: {untracked[0]}"
+        )
     try:
         proc = subprocess.run(
             [exe, "review", "--agent", "--base", base],

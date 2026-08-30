@@ -99,6 +99,10 @@ class RepoCase(unittest.TestCase):
         base, digest, _ = local_review.current_state(t, self.tmp)
         return local_review.write_pass(self.tmp, t, base, digest, reviewer, findings)
 
+    def commit_all(self, message: str) -> None:
+        run(self.tmp, "add", "-A")
+        run(self.tmp, "commit", "-m", message)
+
     def main_quiet(self, argv: list[str]) -> int:
         """Run the CLI with its diagnostics captured, for a case asserting only the exit code."""
         with contextlib.redirect_stderr(io.StringIO()), contextlib.redirect_stdout(io.StringIO()):
@@ -717,6 +721,7 @@ class BackendCase(RepoCase):
         """The whole cmd_run path, including the digest re-check and the receipt write."""
         self.fake_cli('{"type":"finding"}\n{"type":"complete"}\n')
         (self.tmp / "new.py").write_text("print('x')\n", encoding="utf-8")
+        self.commit_all("new")
         self.assertEqual(
             self.main_quiet(["run", "--backend", "coderabbit-cli", "--target", self.target]), 0
         )
@@ -734,6 +739,7 @@ class BackendCase(RepoCase):
         argv_log = self.outside / "argv.txt"
         self.fake_cli('{"type":"complete"}\n', argv_log=argv_log)
         (self.tmp / "a.py").write_text("x\n", encoding="utf-8")
+        self.commit_all("a")
         base, _, _ = local_review.current_state(self.target, self.tmp)
         self.assertEqual(
             self.main_quiet(["run", "--backend", "coderabbit-cli", "--target", self.target]), 0
@@ -748,10 +754,34 @@ class BackendCase(RepoCase):
         marker = self.tmp / "moved.py"
         self.fake_cli('{"type":"complete"}\n', also=f"open({str(marker)!r}, 'w').write('later\\n')")
         (self.tmp / "a.py").write_text("x\n", encoding="utf-8")
+        self.commit_all("a")
         self.assertEqual(
             self.main_quiet(["run", "--backend", "coderabbit-cli", "--target", self.target]), 1
         )
         self.assertEqual(self.main_quiet(["check", "--target", self.target]), 1)
+
+    def test_the_cli_backend_refuses_a_scope_it_may_not_cover(self) -> None:
+        """The receipt scope includes untracked files, and a --base review covers the tracked diff.
+
+        Recording a pass over a changed set holding untracked paths would claim coverage of files
+        the CLI never read. Whether the CLI's own untracked flag composes with --base is unverified
+        on this host, so the case is refused rather than assumed either way.
+        """
+        self.fake_cli('{"type":"complete"}\n')
+        (self.tmp / "untracked.py").write_text("print('x')\n", encoding="utf-8")
+        self.assertEqual(
+            self.main_quiet(["run", "--backend", "coderabbit-cli", "--target", self.target]), 2
+        )
+        self.assertEqual(self.main_quiet(["check", "--target", self.target]), 1)
+
+    def test_the_cli_backend_runs_once_nothing_is_untracked(self) -> None:
+        self.fake_cli('{"type":"complete"}\n')
+        (self.tmp / "tracked.py").write_text("print('x')\n", encoding="utf-8")
+        run(self.tmp, "add", "tracked.py")
+        run(self.tmp, "commit", "-m", "tracked")
+        self.assertEqual(
+            self.main_quiet(["run", "--backend", "coderabbit-cli", "--target", self.target]), 0
+        )
 
     def test_a_missing_binary_is_a_boundary_through_main(self) -> None:
         prev = os.environ.get("PATH", "")
