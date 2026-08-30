@@ -280,7 +280,9 @@ def alternate_entry(path: Path) -> str:
 
     The variable holds a list separated by the platform's path separator, so a repository checked
     out under a path containing one would otherwise split into two directories that do not exist.
-    Git reads a double-quoted entry as a single path.
+    Git reads a double-quoted entry as a single path, which was verified rather than assumed: under
+    an object directory holding a colon, the unquoted form fails with "object directory /tmp/... does
+    not exist" while the quoted form resolves the object.
     """
     text = str(path)
     return f'"{text}"' if os.pathsep in text else text

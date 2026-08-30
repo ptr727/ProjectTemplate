@@ -305,9 +305,18 @@ class ContentKeyCase(RepoCase):
         """
         (self.tmp / ".env").write_text("TOKEN=constructed-not-real\n", encoding="utf-8")
         objects = local_review.git_dir(self.tmp) / "objects"
-        before = sorted(p.name for p in objects.rglob("*") if p.is_file())
+
+        # Relative paths rather than bare names.
+        # Two loose objects in different two-hex directories can share the same 38-hex filename.
+        # A name-only snapshot can therefore match while new objects were in fact written.
+        def snapshot() -> list[str]:
+            return sorted(
+                q.relative_to(objects).as_posix() for q in objects.rglob("*") if q.is_file()
+            )
+
+        before = snapshot()
         states = local_review.worktree_states(self.tmp)
-        after = sorted(p.name for p in objects.rglob("*") if p.is_file())
+        after = snapshot()
         self.assertEqual(before, after, "staging leaked objects into the real database")
         oid = next(iter(states[".env"])).split(":")[-1]
         probe = subprocess.run(
