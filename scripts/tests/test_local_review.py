@@ -561,6 +561,29 @@ class ReceiptCase(RepoCase):
         )
         self.assertEqual(self.main_quiet(["check", "--target", self.target]), 1)
 
+    def test_the_check_failure_prints_a_command_that_actually_runs(self) -> None:
+        """The remedy line is the one actionable thing the failure emits.
+
+        It has to carry every required flag and the real digest, or following it lands the reader
+        on a usage error instead of a recorded pass.
+        """
+        (self.tmp / "a.py").write_text("x\n", encoding="utf-8")
+        err = io.StringIO()
+        with contextlib.redirect_stderr(err), contextlib.redirect_stdout(io.StringIO()):
+            self.assertEqual(local_review.main(["check", "--target", self.target]), 1)
+        printed = err.getvalue()
+        digest = self.digest()
+        self.assertIn("--expect-digest", printed)
+        self.assertIn(digest, printed, "the remedy carries an abbreviated digest, so it will fail")
+        # Run the command the failure printed, and confirm it records rather than erroring.
+        line = next(l for l in printed.splitlines() if "local_review.py record" in l)
+        argv = line.split()[2:]
+        argv = [a for a in argv if a != "<n>"]
+        argv[argv.index("--findings")] = "--findings"
+        argv.insert(argv.index("--findings") + 1, "0")
+        self.assertEqual(self.main_quiet(argv), 0, f"the printed command failed: {argv}")
+        self.assertEqual(self.main_quiet(["check", "--target", self.target]), 0)
+
     def test_record_requires_the_digest_the_review_saw(self) -> None:
         """An optional guard is the one a caller in a hurry omits.
 

@@ -754,10 +754,12 @@ def cmd_check(args: argparse.Namespace) -> int:
         )
     for problem in problems:
         print(f"  receipt       {problem}", file=sys.stderr)
+    # The digest is printed in full rather than abbreviated, so the command below runs as it stands.
+    # Abbreviating it, or omitting the required --expect-digest, makes this line a usage error.
     print(
         "\nRun the local-strict-review pass over this diff, then record it:\n"
         "  python3 scripts/local_review.py record --reviewer agent-skill"
-        f" --target {target} --findings <n>",
+        f" --target {target} --findings <n> --expect-digest {digest}",
         file=sys.stderr,
     )
     return EXIT_NOT_COVERED
