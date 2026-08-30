@@ -36,16 +36,25 @@ if [ "$pushes_a_stranger" = yes ]; then
 fi
 
 # A push delivers HEAD while the engine's key covers the index and the working tree.
+# Plumbing rather than `git diff`, which consults diff drivers.
+# A lossy textconv makes differing content compare equal, and off-switches fail open on the next driver.
+# --refresh first, since diff-index reads stat information and a touched file otherwise reads dirty.
 # --ignore-submodules=none because diff.ignoreSubmodules would otherwise hide a differing gitlink.
 # 1 is a real difference, and any other status is git failing, which is a boundary rather than a verdict.
+refresh_status=0
+git update-index -q --refresh || refresh_status=$?
 tree_status=0
-git diff --quiet --ignore-submodules=none HEAD -- || tree_status=$?
+git diff-index --quiet --ignore-submodules=none HEAD -- || tree_status=$?
 if [ "$tree_status" -eq 1 ]; then
     echo "pre-push: this worktree holds tracked content that differs from HEAD, so the gate cannot speak for the push." >&2
     echo "pre-push: commit what is being pushed, then run the pass and record it, then push." >&2
+    # A refresh that did not complete leaves stat information that reads dirty on unchanged content.
+    if [ "$refresh_status" -ne 0 ]; then
+        echo "pre-push: 'git update-index --refresh' exited $refresh_status, so run 'git status' and retry before believing this." >&2
+    fi
     exit 1
 elif [ "$tree_status" -ne 0 ]; then
-    echo "pre-push: 'git diff --quiet HEAD' failed with $tree_status, so the gate did not run." >&2
+    echo "pre-push: 'git diff-index --quiet --ignore-submodules=none HEAD --' failed with $tree_status, so the gate did not run." >&2
     exit 1
 fi
 

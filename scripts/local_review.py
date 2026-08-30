@@ -448,10 +448,13 @@ def fingerprints(base: str, root: Path) -> dict[str, str]:
     differs, with no per-case handling and no rename detection to disable.
 
     HEAD decides membership and contributes nothing to the mark, which is what callers can rely on
-    in both directions. An ordinary commit does not move a path's mark, so a pass recorded over
-    uncommitted work still covers it afterwards. And a path in the set only because HEAD disagrees
-    with the base leaves the set when that undo is committed, so the key does move there, correctly,
-    since a push delivered the change before that commit and delivers the undo after it.
+    in both directions. A path already differing from the base by its index and working-tree state
+    keeps its mark once HEAD holds that state too, so `git commit` alone never moves the key. That
+    is `git commit` alone: `git add` on a modified tracked file does move it, by collapsing a mark
+    that named the index separately, so the invisible-commit property covers untracked work rather
+    than every edit. And a path in the set only because HEAD disagrees with the base leaves the set
+    when that undo is committed, so the key does move there, correctly, since a push delivered the
+    change before that commit and delivers the undo after it.
 
     What this is not is the content a push would deliver, which is HEAD's alone. It moves where a
     push would carry nothing new, staging a modified tracked file being the plainest example, and it
