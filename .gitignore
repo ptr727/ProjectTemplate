@@ -20,7 +20,7 @@ dist/
 .pyright/
 .mypy_cache/
 
-# Coverage output (dotnet XPlat/coverlet, Python coverage.py)
+# Coverage output (dotnet Microsoft.Testing.Extensions.CodeCoverage, Python coverage.py)
 coverage/
 [Tt]est[Rr]esults/
 *.cobertura.xml
