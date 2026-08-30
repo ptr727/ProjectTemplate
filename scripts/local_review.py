@@ -447,30 +447,21 @@ def fingerprints(base: str, root: Path) -> dict[str, str]:
     listing means renames, deletions, mode changes, and submodule bumps are all just a state that
     differs, with no per-case handling and no rename detection to disable.
 
-    HEAD decides membership and contributes nothing to the mark. Reading it at all is what stops
-    content committed and then undone in the working tree from leaving the changed set: `git rm` a
-    committed file, and index, working tree, and merge base all agree it is absent while the commit
-    that would be pushed still carries it, so without HEAD the path drops out and, where it is the
-    only one, the whole change set empties. Keeping HEAD out of the mark is what leaves the ordinary
-    commit invisible: a path already differing from the base by its index and working-tree state
-    keeps the same mark once HEAD holds that state too, so a review recorded over uncommitted work
-    still covers it after the commit.
+    HEAD decides membership and contributes nothing to the mark, which is what callers can rely on
+    in both directions. An ordinary commit does not move a path's mark, so a pass recorded over
+    uncommitted work still covers it afterwards. And a path in the set only because HEAD disagrees
+    with the base leaves the set when that undo is committed, so the key does move there, correctly,
+    since a push delivered the change before that commit and delivers the undo after it.
 
-    That invisibility is a property of the ordinary commit rather than of every commit, and the
-    difference is worth stating because it looks like a violation and is not. A path sitting in the
-    set only because HEAD disagrees with the base, meaning the branch committed a change and the
-    tree has since put it back, leaves the set when that undo is itself committed, and the key
-    moves. It should: before that commit a push delivers the change, and after it a push delivers
-    the undo, so the content under review genuinely differs between the two.
-
-    That is the reasoning for this case and not an invariant this key implements. It is not the
-    content a push would deliver, which is HEAD's alone, and it does not try to be: it moves where
-    a push would deliver nothing new, staging a modified tracked file being the plainest example,
-    and it holds still while HEAD's own content changes under a fixed index and working tree. A
-    caller gating a push is what closes that second gap, by testing the working tree against HEAD
-    before trusting this key to describe the push at all.
+    What this is not is the content a push would deliver, which is HEAD's alone. It moves where a
+    push would carry nothing new, staging a modified tracked file being the plainest example, and it
+    holds still while HEAD's own content changes under a fixed index and working tree. A caller
+    gating a push closes that second gap itself, by testing the working tree against HEAD.
     """
     at_base = base_states(base, root)
+    # HEAD is read so content committed and then undone in the tree cannot leave the changed set.
+    # `git rm` a committed file and the other three sides all agree it is absent.
+    # The commit a push delivers still carries it, emptying the set where it was the only path.
     at_head = base_states("HEAD", root)
     at_index = index_states(root)
     at_work = worktree_states(root)
@@ -892,6 +883,9 @@ def cmd_check(args: argparse.Namespace) -> int:
     root = repo_root()
     target = resolve_target(args.target)
     base, digest, changed = current_state(target, root)
+    # Read before the empty-change answer below, so an unreadable receipt still reports the boundary.
+    # Skipping it into a verdict would report covered for a check that never ran.
+    receipt, problems = read_receipt(root)
     # A branch holding no net content against its target introduces nothing for a review to read.
     # The digest is then over the empty set, and a receipt against it would attest to nothing.
     # Gating that would demand a review of an empty diff before a push git has nothing to reject.
@@ -900,7 +894,6 @@ def cmd_check(args: argparse.Namespace) -> int:
     if changed == 0:
         emit(f"No net content against {target}, so there is nothing for a local review to cover.")
         return EXIT_COVERED
-    receipt, problems = read_receipt(root)
     if covering_passes(receipt, base, digest, target):
         return EXIT_COVERED
     emit(

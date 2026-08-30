@@ -78,7 +78,7 @@ that says only "open a PR" is not such an instruction.
 Run every `scripts/pr_review.py` command below from a hub checkout. The script is hosted there and
 is never carried into a downstream repository.
 
-Run `local-strict-review` against the branch's current diff before step 1's push, and again before any fix push under outcome 1 below. Commit before recording, since a push delivers the commit while a pass recorded over an uncommitted tree covers something else. Record each pass with `scripts/local_review.py`, which is what a capture point such as this repository's `pre-push` hook reads. A push that hook refuses is the gate working rather than an obstacle to route around. The remedy is usually the pass it is asking for, and several of its refusal shapes are not a missing pass at all, so read the refusal rather than assuming which one it is. `local-strict-review` carries the one table of them and what each needs.
+Run `local-strict-review` against the branch's current diff before step 1's push, and again before any fix push under outcome 1 below. Follow that skill's own ordering and record each pass, which is what a capture point such as this repository's `pre-push` hook reads. A push that hook refuses is the gate working rather than an obstacle to route around, and that skill's refusal table says what each refusal means and what clears it.
 
 1. Push changes to the PR branch and open the pull request when it does not exist.
 2. Run `scripts/pr_review.py status` once in the foreground and read its output.
@@ -105,8 +105,8 @@ After an authorized merge, run the `repo-worktree` post-merge cleanup procedure 
 
 ## Every finding ends in one of five outcomes
 
-1. **Real, so fix it.** Commit the fix, run `local-strict-review` against the branch's current
-   diff, record the pass, push, then reply with the fixing commit SHA. A branch already reviewed once
+1. **Real, so fix it.** Take the fix through `local-strict-review` the same way step 1's push
+   went, then reply with the fixing commit SHA. A branch already reviewed once
    has not been reviewed for the fix, which is the round this gets dropped on and the churn
    `local-strict-review` exists to stop. For a finding on platform-specific code
    (PowerShell, a macOS- or WSL-only path), "fixed" means executed on that platform, per

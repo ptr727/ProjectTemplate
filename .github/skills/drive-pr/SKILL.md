@@ -55,14 +55,10 @@ promotion PR once the fix lands, is the early exit this skill exists to prevent.
 ## The Drive Loop
 
 1. Isolate into a worktree per repo-worktree, based on develop, before the first edit.
-2. Commit the work, then run `local-strict-review` against the branch's current diff, then record
-   the pass with `scripts/local_review.py`, then push the branch and open the feature -> develop PR
-   if it does not exist yet. That order is not interchangeable: a push delivers the commit, and a
-   pass recorded over an uncommitted tree covers something else, which the `pre-push` hook refuses.
-   A push it refuses for want of a recorded pass is that gate working, and the response is to run
-   the pass rather than to route around it. Read what the refusal itself says first, since several
-   of its shapes are not a missing pass at all and re-running the pass at one of those does
-   nothing. `local-strict-review` carries the one table of them, with what each needs.
+2. Commit the work, run `local-strict-review` and record its pass in the order that skill gives,
+   then push the branch and open the feature -> develop PR if it does not exist yet. A push the
+   `pre-push` hook refuses is that gate working rather than an obstacle to route around, and that
+   skill's refusal table says what each refusal means and what clears it.
 3. Drive pr-review-conduct's review loop on it to the Merge Gate, disposing of every finding per
    "Disposing of Every Finding" below.
 4. Capture the branch's own tip before merging, `gh pr view [number] --json headRefOid --jq
@@ -108,10 +104,10 @@ promotion PR once the fix lands, is the early exit this skill exists to prevent.
 
 pr-review-conduct's five outcomes are the actual rule, this is the mapping to use while driving:
 
-- Real, so fix it. Commit the fix, run `local-strict-review` against the branch's current diff,
-  record the pass, push, reply with the fixing commit SHA (outcome 1). This is the round the rule
-  is most often skipped on, since the fix looks small and the branch was already reviewed once, and
-  a fix push carries content no pass has read exactly as the first push did.
+- Real, so fix it, then step 2's own order again before replying with the fixing commit SHA
+  (outcome 1). This is the round the pass is most often skipped on, since the fix looks small and
+  the branch was already reviewed once, and a fix push carries content no pass has read exactly as
+  the first push did.
 - Not real, or real but out of scope here, so decline in the thread with evidence: the command
   and its output, the code path, or the rule that governs it. An assertion never closes a finding
   on its own (outcome 2).

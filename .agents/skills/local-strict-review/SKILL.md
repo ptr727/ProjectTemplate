@@ -60,10 +60,13 @@ Bounds: read-only. No edit, no stage, no commit, no push, no PR-hosted write of 
 Commit first, then read the digest, then dispatch the subagent, then hand that same value back. Nothing may change the tree between the read and the record, and a commit is a change: it moves the digest for any modified tracked file, so a digest read before one cannot be recorded after it.
 
 ```sh
-python3 scripts/local_review.py status --target <target>   # JSON, take contentDigest
+engine=<hub-checkout>/scripts/local_review.py     # in the hub itself, scripts/local_review.py
+python3 "$engine" status --target <target>        # JSON, take contentDigest
 # run the pass above, then:
-python3 scripts/local_review.py record --reviewer agent-skill --target <target> --expect-digest <digest> [--findings N]
+python3 "$engine" record --reviewer agent-skill --target <target> --expect-digest <digest> [--findings N]
 ```
+
+Both commands run with the repository under review as the working directory, whichever repository that is. The engine takes no `--repo` and reads whichever repository it is run in, so the path names where the script lives and the working directory names what it measures.
 
 `<target>` is the same branch "What It Does" resolved for the review, passed to both commands. Leaving it off defaults them to `develop`, and on a `main`-based branch that computes the digest against a merge base the reviewer never read, so the receipt would attest to a change set nobody looked at. A receipt is only valid against the target it names, so the two have to agree.
 
@@ -73,7 +76,7 @@ Record the pass whatever it found, including nothing. The key covers the net con
 
 **Why the commit comes first**, rather than being an ordering that could equally run the other way. A push delivers the commit, so a receipt recorded over uncommitted work describes something else, and a capture point gating a push refuses on exactly that. Two smaller reasons point the same way: staging a modified tracked file moves the key even though its content did not change, and a commit made after the record can carry content the pass never read. Reviewing earlier than this is still worth doing as ordinary diligence, and it does not substitute for the recorded pass: the digest read and the record bracket a window in which the tree holds still, and a commit inside that window ends it.
 
-The engine is hub-hosted per `GOVERNANCE.md` "Hub-Hosted Tooling", so a downstream repository reaches it as a hub checkout's copy run with that repository's own worktree as the working directory, `python3 <hub-checkout>/scripts/local_review.py status`, rather than by carrying it. Unlike `scripts/pr_review.py` it takes no `--repo`: it reads whichever repository the working directory sits in.
+The engine is hub-hosted per `GOVERNANCE.md` "Hub-Hosted Tooling", so a downstream repository reaches a hub checkout's copy rather than carrying one, which is what the path above is for.
 
 ## Disposing of Findings
 

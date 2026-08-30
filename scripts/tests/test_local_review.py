@@ -562,6 +562,23 @@ class ReceiptCase(RepoCase):
         self.assertEqual(reported["changedPaths"], 0)
         self.assertFalse(reported["covered"], "status counts recorded passes, and none was")
 
+    def test_an_unreadable_receipt_reports_the_boundary_even_with_nothing_to_gate(self) -> None:
+        """A receipt that cannot be read off disk is the check not running, whatever the change set.
+
+        The empty-change answer is a verdict, so reaching it without having tried to read the
+        receipt would convert an execution boundary into a cheerful covered, which is the one
+        reading a gate must never take.
+        """
+        self.assertEqual(len(self.marks()), 0, "the fixture branch already carries content")
+        path = local_review.receipt_path(self.tmp)
+        path.write_text("{}", encoding="utf-8")
+        path.chmod(0o000)
+        self.addCleanup(path.unlink)
+        self.addCleanup(path.chmod, 0o600)
+        if os.access(path, os.R_OK):
+            self.skipTest("this user reads a mode 000 file, so the boundary cannot be provoked")
+        self.assertEqual(self.main_quiet(["check", "--target", self.target]), 2)
+
     def test_the_empty_change_set_exemption_is_the_only_reason_that_push_passes(self) -> None:
         """Proves the case above by the one byte that separates it from a gated branch.
 
