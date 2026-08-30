@@ -297,7 +297,7 @@ COVERAGE_FIELD = {UNVETTED: "UNVETTED", PARTIAL: "PARTIAL", FULL: "full", UNSTAT
 # A heading this script has no spelling for is a section it will not find, reported as absent.
 # That is the shape of all three failures already on record here, each caught after it landed.
 # The lists are small because the output is regular: 9 headings, 6 summaries and 3 labels.
-# Counts are normalized to `(N)` and non-ASCII is dropped before comparing.
+# Counts are normalized to `(N)` and non-ASCII is dropped before comparing, and `unvetted` folds letter case at the comparison itself.
 # The verdict headings carry a colored circle, so the emoji is what would drift most cheaply.
 # Dropping it also keeps this file inside the charset rule that governs the repository.
 VETTED_HEADINGS = {
@@ -1083,13 +1083,22 @@ def table_against_diff(pr: dict, counts: tuple[int, int] | None) -> str:
 
 
 def normal(text: str) -> str:
-    """A marker reduced to what a vetted list compares: ASCII, single spaces, counts as `(N)`.
+    """A marker reduced toward what a vetted list compares: ASCII, single spaces, counts as `(N)`.
+
+    Letter case survives, and `unvetted` folds it at the membership test instead.
 
     The verdict headings carry a colored circle and the suppressed heading carries its finding
     count, so both drift on every review without the section having changed at all.
     """
     ascii_only = "".join(c for c in text if ord(c) < 128)
     return re.sub(r"\s+", " ", re.sub(r"\(\d+\)", "(N)", ascii_only)).strip()
+
+
+def unvetted(marker: str, vetted: set[str]) -> bool:
+    """Whether `marker` is absent from `vetted`, compared without regard to letter case."""
+    # Folded here rather than in `normal`, whose value the report strings also carry.
+    # A report naming a folded shape would not match the body it asks the reader to quote beside it.
+    return marker.casefold() not in {v.casefold() for v in vetted}
 
 
 def unrecognized_in(body: str) -> list[str]:
@@ -1112,13 +1121,16 @@ def unrecognized_in(body: str) -> list[str]:
     plain = FENCE.sub("", body or "")
     headings = [normal(ln) for ln in plain.splitlines() if MARKDOWN_HEADING.match(ln)]
     labels = [normal(m.group(1)) for m in map(LABEL_LINE.match, plain.splitlines()) if m]
-    found = [f"heading: {h}" for h in dict.fromkeys(headings) if h not in VETTED_HEADINGS]
+    found = [f"heading: {h}" for h in dict.fromkeys(headings) if unvetted(h, VETTED_HEADINGS)]
     found += [
-        f"summary: {normal(s)}"
-        for s in dict.fromkeys(SUMMARY.findall(plain))
-        if normal(s) not in VETTED_SUMMARIES
+        f"summary: {marker}"
+        # Deduplicated on the raw text before normalizing, which is what it did before the hoist.
+        for marker in (normal(s) for s in dict.fromkeys(SUMMARY.findall(plain)))
+        if unvetted(marker, VETTED_SUMMARIES)
     ]
-    found += [f"metadata label: {la}" for la in dict.fromkeys(labels) if la not in VETTED_LABELS]
+    found += [
+        f"metadata label: {la}" for la in dict.fromkeys(labels) if unvetted(la, VETTED_LABELS)
+    ]
     found += [
         f"coverage line: {ln}" for ln in coverage_statements(body) if read_coverage(ln) is None
     ]

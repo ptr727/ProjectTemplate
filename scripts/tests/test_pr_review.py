@@ -1594,6 +1594,42 @@ class TestUnrecognizedShapes(GqlCase):
         out, _ = pr_review.digest("o", "r", 7)
         return out
 
+    def test_a_vetted_marker_survives_a_change_of_letter_case(self) -> None:
+        """Case carries no meaning in these markers, and the reviewer has drifted one.
+
+        A body carrying `### Reviewed Changes` reported as a shape never seen while
+        `### Reviewed changes` sat in the vetted list, which blocked a review loop over one letter
+        on a round every reader had parsed correctly.
+        """
+        for vetted in ("### Reviewed changes", "## Pull request overview"):
+            drifted = vetted.title()
+            self.assertNotEqual(drifted, vetted, "this case pair no longer differs")
+            self.assertEqual(
+                [], pr_review.unrecognized_in(OVERVIEW + "\n" + drifted), f"blocked on {drifted}"
+            )
+        # One case per vetted list, since a one-arm revert would otherwise stay green.
+        # Not the files-reviewed label, which is also read as a coverage line and judged separately.
+        self.assertEqual([], pr_review.unrecognized_in(OVERVIEW + "\n- **comments generated:** 2"))
+        self.assertEqual(
+            [],
+            pr_review.unrecognized_in(OVERVIEW + "\n<details><summary>Review Details</summary>"),
+        )
+
+    def test_a_genuinely_unknown_marker_is_still_reported(self) -> None:
+        """The floor under the case above, since folding could have turned the check off.
+
+        A vetting list that stops reporting is indistinguishable from a body with nothing to
+        report, which is the failure the list exists to make loud.
+        """
+        for shape, unknown in (
+            ("heading", "### Reviewed Chances"),
+            ("metadata label", "- **Review depth level:** deep"),
+        ):
+            found = pr_review.unrecognized_in(OVERVIEW + "\n" + unknown)
+            self.assertTrue(
+                any(f.startswith(shape) for f in found), f"{unknown!r} passed as vetted: {found}"
+            )
+
     def test_every_vetted_marker_together_reads_as_recognized(self) -> None:
         """The corpus shape in one body, so the lists are held against what they were built from."""
         self.assertEqual([], pr_review.unrecognized_in(nested()))
