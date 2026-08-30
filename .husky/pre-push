@@ -1,0 +1,137 @@
+#!/bin/sh
+# Local pre-push gate for this repository: a local review pass has to have covered what is being pushed.
+# Enable it per clone with `git config core.hooksPath .husky`, the same setting the pre-commit hook needs.
+# A clone carries no hooks path, so this file does nothing until that is set.
+# It deliberately does not source `_/husky.sh`, for the reason the pre-commit hook states.
+#
+# `AGENTS.md` and the `local-strict-review` skill hold the rule about when a review is owed.
+# This hook is one of that rule's capture points rather than a second copy of it.
+# The prose layer stays primary and agent-agnostic, and this is a backstop under it.
+# It is a backstop rather than a seal, and several routes past it exist by construction.
+# `--no-verify` is the documented one, the way out of a pickle, and it is not the only one.
+# Closing them here is not possible: a hook cannot police the invocation that decides whether it runs.
+#
+# The check reads the merge base, the commit at HEAD, the index, and the working tree.
+# That is the engine's own scope, per `scripts/local_review.py`, and it covers this checkout only.
+# Content staged or unreviewed in the tree moves the key even where the push would not carry it.
+# A ref pushed from a commit this worktree is not sitting on is content the check never read.
+# So the refs are compared against HEAD below, and a push this hook cannot speak for is refused.
+set -e
+
+# Git runs a hook from the top level, and the relative paths below depend on that.
+# This is belt and braces for an invocation that does not come from git, matching the pre-commit hook.
+cd "$(git rev-parse --show-toplevel)"
+
+# Fire only for a branch update, so a tag push and a branch delete pass straight through.
+# A delete carries the all-zero object id, which is what the case below tests for.
+# The object id length differs between a SHA-1 and a SHA-256 repository, so the test is on content.
+# Reading stdin without a pipeline keeps the flags below in this shell rather than in a subshell.
+#
+# A branch update whose object id is not this worktree's HEAD is the case that has to be refused.
+# `git push origin other-branch` from a worktree sitting elsewhere is the ordinary way to reach it.
+# The engine keys on this worktree, so it would answer for content that push never carries.
+# Exempting it instead would let an unreviewed branch through while the gate reported success.
+head_oid="$(git rev-parse HEAD)"
+pushes_a_branch=no
+pushes_a_stranger=no
+while read -r _ local_oid remote_ref _; do
+    case "$remote_ref" in
+    refs/heads/*) ;;
+    *) continue ;;
+    esac
+    case "$local_oid" in
+    *[!0]*) ;;
+    *) continue ;;
+    esac
+    pushes_a_branch=yes
+    if [ "$local_oid" != "$head_oid" ]; then
+        pushes_a_stranger=yes
+    fi
+done
+if [ "$pushes_a_branch" = no ]; then
+    exit 0
+fi
+if [ "$pushes_a_stranger" = yes ]; then
+    echo "pre-push: this push carries a commit that is not this worktree's HEAD, so the gate cannot speak for it." >&2
+    echo "pre-push: the local review engine reads the checkout it runs in, not an arbitrary pushed ref." >&2
+    echo "pre-push: check out the branch being pushed, in its own worktree, and push from there." >&2
+    exit 1
+fi
+
+# The push delivers HEAD, and the engine's key records the index and the working tree.
+# Those coincide in the ordinary case, and this is the check that they actually do.
+# Where they do not, a recorded pass attests to content that is not what this push carries.
+# The dangerous direction is HEAD holding content the tree has since replaced.
+# Fix a file, stage it, push without committing, and a reviewer reads the fix while the push delivers what it replaced.
+# Untracked files are deliberately outside this test, since they are in the key and not in the push.
+# That asks for more review than the push needs rather than less, which is the safe direction.
+# 1 is a real difference, and anything else is git failing, which is a boundary rather than a verdict.
+tree_status=0
+git diff --quiet HEAD -- || tree_status=$?
+if [ "$tree_status" -eq 1 ]; then
+    echo "pre-push: this worktree holds tracked content that differs from HEAD, so the gate cannot speak for the push." >&2
+    echo "pre-push: a push delivers HEAD, while a recorded pass covers the index and the working tree." >&2
+    echo "pre-push: commit what is being pushed, then run the pass and record it, then push." >&2
+    exit 1
+elif [ "$tree_status" -ne 0 ]; then
+    echo "pre-push: 'git diff --quiet HEAD' failed with $tree_status, so the gate did not run." >&2
+    exit 1
+fi
+
+# The interpreter is chosen by running the probes spec/host-tools.json declares, in its order.
+# The pre-commit hook states why a presence test picks the wrong name on native Windows.
+# The chosen name is echoed on a refusal, since the remedy the engine prints hard-codes `python3`.
+if python3 --version >/dev/null 2>&1; then
+    run_py() { python3 "$@"; }
+    py_name=python3
+elif py -3 --version >/dev/null 2>&1; then
+    run_py() { py -3 "$@"; }
+    py_name="py -3"
+else
+    echo "pre-push: neither 'python3 --version' nor 'py -3 --version' ran, so the review gate did not run." >&2
+    echo "pre-push: see docs/host-setup.md 'What a Host Must Provide'." >&2
+    exit 1
+fi
+
+# The target is fixed at the engine's own default rather than read from the environment.
+# An environment variable is set inline on the very command being gated, by whoever is gated.
+# Naming the pushed branch as its own target collapses the change set to nothing and passes.
+# That is the same inline-grant hazard `host-setup/agent-safety/README.md` requirement 3 rules out.
+#
+# The cost is a branch based on `main` rather than `develop`, which this gate measures wrongly.
+# It is measured against `develop` rather than refused, so the refusal it gives is not a verdict about it.
+# Nothing here can tell such a branch from an ordinary one, so the refusal reads identically.
+# The engine's own message carries the caveat, and withholds its record line once a pass names another target.
+# On a first push there is no pass to disagree with, so the caveat is all there is.
+# `--no-verify` is the documented answer there, this gate having nothing true to say about that branch.
+
+# The engine separates a verdict from a boundary, so this hook has to as well.
+# 1 is the gate finding no recorded pass covers the content, and the engine says why itself.
+# It prints a record command for the ordinary case and deliberately withholds one for a scope disagreement.
+# So the lines below point at that message rather than restating a remedy that is not always offered.
+# 2 is the check not having run, which is neither answer, so it is reported as its own thing.
+# Both block: a gate that waves a push through when it could not run is a gate that stopped gating.
+status=0
+run_py scripts/local_review.py check || status=$?
+if [ "$status" -eq 0 ]; then
+    exit 0
+fi
+if [ "$status" -eq 1 ]; then
+    echo "" >&2
+    # Only on this path, since it is the only one whose text above names an interpreter.
+    # The boundary path below prints the engine's own failure, which names none.
+    if [ "$py_name" != python3 ]; then
+        echo "pre-push: this host runs the engine as '$py_name', so read any 'python3' above as '$py_name'." >&2
+    fi
+    echo "pre-push: this push is blocked because no recorded review pass covers it, which is the gate working." >&2
+    echo "pre-push: read the engine message above for which case this is, since not every one is a missing pass." >&2
+    echo "pre-push: where it is, run the local-strict-review pass, record it as directed, then push again." >&2
+    echo "pre-push: a finding it raises is advisory and blocks nothing, per the skill's own disposition rules." >&2
+    echo "pre-push: '--no-verify' bypasses this hook, for a genuine pickle rather than for an unread diff." >&2
+    exit 1
+fi
+echo "" >&2
+echo "pre-push: the local review gate could not run, which is not a verdict either way." >&2
+echo "pre-push: fix what it reported above, most often a target branch this checkout cannot resolve." >&2
+echo "pre-push: 'git fetch origin develop' is the usual remedy, this gate reading 'develop' and nothing else." >&2
+exit 1

@@ -8,9 +8,11 @@ skill step, a session about to claim done) asks whether a receipt still covers w
 be pushed.
 
 The key is over the content of the changed paths, plus the merge-base commit that fixes what
-"changed" means. It is deliberately not over the diff text and not over HEAD, which is what lets a
-review run before the commit while the check runs at the push: reviewing untracked work and then
-committing it unchanged leaves the key identical, while changing one byte moves it.
+"changed" means. It is deliberately not over the diff text. Which paths count is read from three
+sides, the commit at HEAD, the real index, and the staged working tree, and each path's recorded
+state is read from the last two alone. That split is what lets a review run before the commit while
+the check runs at the push: reviewing untracked work and then committing it unchanged leaves the key
+identical, while changing one byte moves it.
 
 Every identity in the key is computed by git rather than reconstructed here, which is the point
 worth stating plainly, because reconstructing one is where this went wrong twice. A blob id read
@@ -27,7 +29,21 @@ one's. When they agree the set collapses to one member, which is what makes `git
 `git commit` invisible to the key. When they diverge, because content is staged that the working
 tree no longer holds, or because a mode changed, the set has more than one member and the key
 moves. Reading the real index rather than the working tree alone is what stops content being
-committed that the key never saw.
+staged that the key never saw.
+
+That invisibility is a property of an untracked file rather than of `git add` in general. Staging a
+**modified tracked** file collapses a state that named the index separately, since the index held
+the base content and now holds the working tree's, so the key moves although no content changed.
+The consequence for a caller is an ordering one: record a pass over what is already committed, and
+staging can no longer move the key underneath it.
+
+HEAD is read for membership only, and never for a path's state. Without it, content already
+committed and then undone in the tree leaves the changed set entirely, since the index, the working
+tree, and the merge base then all agree the path is absent or unchanged while the commit a push
+delivers still carries it. `git rm` a file the branch added is the shortest way there, and where it
+was the only changed path the whole set empties. Keeping HEAD out of the state is what leaves the
+ordinary commit invisible: a path already in the set through its index and working-tree state keeps
+the same recorded state once HEAD holds that state too.
 
 What the key covers is the net content this branch introduces against its target, not the series
 of commits that produced it, and the difference is worth stating plainly because two consequences
@@ -42,11 +58,22 @@ reviewer reads. Commit messages are governed by `git-commit-conventions` rather 
 review. But a capture point built on this must not be described as covering the commit series, and
 a reviewer who needs to see intermediate churn has to read the range itself.
 
-Two known cases move the key though nothing that would be pushed changed, both erring toward
+Three known cases move the key though nothing that would be pushed changed, all erring toward
 demanding another review rather than skipping one. An intent-to-add entry (`git add -N`, which
 some tooling issues implicitly) sits in the real index as the empty blob while the throwaway index
-holds the real content. And a new untracked file that `.gitignore` does not cover enters the
-changed set, since a file not yet added is exactly what a review has to read.
+holds the real content. A new untracked file that `.gitignore` does not cover enters the changed
+set, since a file not yet added is exactly what a review has to read. And staging a modified tracked
+file moves the key for the reason the paragraph above gives.
+
+What this key does not do, and what a push-time caller has to add for itself, is tie the content it
+describes to the commit a push delivers. It reads the index and the working tree, and a push carries
+HEAD, so the two describe the same content only while the working tree agrees with HEAD. Where they
+disagree, HEAD can hold content the tree has since replaced, which a pass over the tree never read.
+Membership puts that path in the digest and stops there, and a pass recorded in that state is
+recorded over that same digest and covers it, so `check` answers covered and nothing here refuses.
+Closing it is the caller's own test, not a better message from this one: `.husky/pre-push` compares
+the working tree against HEAD and refuses the push itself, and a capture point that skips that test
+has no protection against this whatever `check` says.
 
 This script holds no review logic. It drives backends: `agent-skill` is the `local-strict-review`
 subagent pass, which only a live agent session can run, so the engine records it rather than
@@ -63,7 +90,8 @@ Usage: python3 scripts/local_review.py status [--target <branch>]
            record that <id> reviewed the content `status` reported as <digest>, refusing when the
            content has moved since.
        python3 scripts/local_review.py check [--target <branch>]
-           exit 0 covered, 1 not covered, 2 could not run.
+           exit 0 covered, 1 not covered, 2 could not run. A branch holding no net content
+           against its target is covered, there being nothing for a review to read.
        python3 scripts/local_review.py run --backend coderabbit-cli [--target <branch>]
            execute a headless backend and record its pass.
 
@@ -414,20 +442,45 @@ def state_mark(index: set[str], work: set[str]) -> str:
 def fingerprints(base: str, root: Path) -> dict[str, str]:
     """Every changed path and the state it is in.
 
-    A path is changed when either side, the real index or the staged working tree, disagrees with
-    the merge base. Comparing states rather than reading a diff listing means renames, deletions,
-    mode changes, and submodule bumps are all just a state that differs, with no per-case handling
-    and no rename detection to disable.
+    A path is changed when any of three sides, the commit at HEAD, the real index, or the staged
+    working tree, disagrees with the merge base. Comparing states rather than reading a diff
+    listing means renames, deletions, mode changes, and submodule bumps are all just a state that
+    differs, with no per-case handling and no rename detection to disable.
+
+    HEAD decides membership and contributes nothing to the mark. Reading it at all is what stops
+    content committed and then undone in the working tree from leaving the changed set: `git rm` a
+    committed file, and index, working tree, and merge base all agree it is absent while the commit
+    that would be pushed still carries it, so without HEAD the path drops out and, where it is the
+    only one, the whole change set empties. Keeping HEAD out of the mark is what leaves the ordinary
+    commit invisible: a path already differing from the base by its index and working-tree state
+    keeps the same mark once HEAD holds that state too, so a review recorded over uncommitted work
+    still covers it after the commit.
+
+    That invisibility is a property of the ordinary commit rather than of every commit, and the
+    difference is worth stating because it looks like a violation and is not. A path sitting in the
+    set only because HEAD disagrees with the base, meaning the branch committed a change and the
+    tree has since put it back, leaves the set when that undo is itself committed, and the key
+    moves. It should: before that commit a push delivers the change, and after it a push delivers
+    the undo, so the content under review genuinely differs between the two.
+
+    That is the reasoning for this case and not an invariant this key implements. It is not the
+    content a push would deliver, which is HEAD's alone, and it does not try to be: it moves where
+    a push would deliver nothing new, staging a modified tracked file being the plainest example,
+    and it holds still while HEAD's own content changes under a fixed index and working tree. A
+    caller gating a push is what closes that second gap, by testing the working tree against HEAD
+    before trusting this key to describe the push at all.
     """
     at_base = base_states(base, root)
+    at_head = base_states("HEAD", root)
     at_index = index_states(root)
     at_work = worktree_states(root)
     out = {}
-    for path in {*at_base, *at_index, *at_work}:
+    for path in {*at_base, *at_head, *at_index, *at_work}:
         base_state = {at_base[path]} if path in at_base else set()
+        head_state = {at_head[path]} if path in at_head else set()
         index = at_index.get(path, set())
         work = at_work.get(path, set())
-        if index == work == base_state:
+        if index == work == base_state == head_state:
             continue
         out[path] = state_mark(index, work)
     return out
@@ -839,6 +892,14 @@ def cmd_check(args: argparse.Namespace) -> int:
     root = repo_root()
     target = resolve_target(args.target)
     base, digest, changed = current_state(target, root)
+    # A branch holding no net content against its target introduces nothing for a review to read.
+    # The digest is then over the empty set, and a receipt against it would attest to nothing.
+    # Gating that would demand a review of an empty diff before a push git has nothing to reject.
+    # `status` keeps counting recorded passes only, so it reports covered false with changedPaths 0.
+    # The two are consistent, since `status` says what is recorded and this says what is left to gate.
+    if changed == 0:
+        emit(f"No net content against {target}, so there is nothing for a local review to cover.")
+        return EXIT_COVERED
     receipt, problems = read_receipt(root)
     if covering_passes(receipt, base, digest, target):
         return EXIT_COVERED
@@ -857,6 +918,25 @@ def cmd_check(args: argparse.Namespace) -> int:
         )
     for problem in problems:
         emit(f"  receipt       {problem}", sys.stderr)
+    # A receipt naming another branch is a scope disagreement, not a missing pass.
+    # The reviewer read a diff against the branch the receipt names, and this check measured another.
+    # Printing the ordinary remedy here hands over a line that records a pass over content nobody read.
+    # It runs, it succeeds, it replaces the correctly scoped receipt, and the next check passes.
+    # So the remedy is withheld and the disagreement is named, since only the caller knows which is right.
+    if receipt and not same_target(str(receipt.get("target")), target):
+        emit(
+            f"\nThe recorded pass was run against {receipt['target']} and this check measured"
+            f" {target}, so one of the two is the wrong scope.\n"
+            "No record command is offered here on purpose: recording this check's scope would"
+            " attest to a change set the review never read.\n"
+            f"If this branch does target {target}, the pass was run against the wrong base, and one"
+            f" more pass over the diff against {target}, recorded with --target"
+            f" {shlex.quote(target)}, clears this.\n"
+            f"If it does not target {target}, this check cannot judge it at all, and a caller that"
+            " gates on this exit code has to be bypassed rather than satisfied.",
+            sys.stderr,
+        )
+        return EXIT_NOT_COVERED
     # Printed so it runs exactly as it stands.
     # That means the full digest rather than the abbreviated form above, the required
     # --expect-digest present, and no placeholder left to substitute.
@@ -865,11 +945,18 @@ def cmd_check(args: argparse.Namespace) -> int:
     # The target is quoted because git permits a ref name to hold shell metacharacters.
     # Confirmed against a real repository for a semicolon, a command substitution, and an ampersand.
     # Interpolating one raw into a line the reader is invited to paste would let a branch name run commands.
+    # The caveat rides with the command rather than sitting in a doc, because this is the moment.
+    # Nothing here knows which branch the work targets, only which one this invocation measured.
+    # A branch based on anything else has a change set this scope does not describe.
+    # The line below would then record a pass over paths no reviewer was shown.
     emit(
         "\nRun the local-strict-review pass over this diff, then record it:\n"
         f"  python3 scripts/local_review.py record --reviewer agent-skill"
         f" --target {shlex.quote(target)} --expect-digest {shlex.quote(digest)}\n"
-        "Add --findings <count> to record how many it raised.",
+        "Add --findings <count> to record how many it raised.\n"
+        f"That line records a pass against {target}, which is the branch this check measured rather"
+        " than one it discovered. Where the review read this branch against a different base, that"
+        " is the wrong scope and the line records content nobody looked at.",
         sys.stderr,
     )
     return EXIT_NOT_COVERED

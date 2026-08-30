@@ -53,9 +53,31 @@ Bounds: read-only. No edit, no stage, no commit, no push, no PR-hosted write of 
 
 **Model tier:** the strongest tier this session can reach, per `AGENTS.md` "Match the model tier to the judgment" and "Never tier down the seat holding the judgment", applied here to the reviewer rather than the author. Run the pass on the same tier that authored the change when only one tier is reachable, a second, adversarially-prompted look still catches what the authoring pass's own "looks ready" judgment did not.
 
+## Recording the Pass
+
+`scripts/local_review.py` is what makes this rule checkable rather than something each session has to remember. It holds no review logic: the pass above is the review, and the engine records that it happened, keyed on the content the reviewer actually saw. That receipt is what a capture point reads, this repository's `.husky/pre-push` hook being the first of them.
+
+Commit first, then read the digest, then dispatch the subagent, then hand that same value back. Nothing may change the tree between the read and the record, and a commit is a change: it moves the digest for any modified tracked file, so a digest read before one cannot be recorded after it.
+
+```sh
+python3 scripts/local_review.py status --target <target>   # JSON, take contentDigest
+# run the pass above, then:
+python3 scripts/local_review.py record --reviewer agent-skill --target <target> --expect-digest <digest> [--findings N]
+```
+
+`<target>` is the same branch "What It Does" resolved for the review, passed to both commands. Leaving it off defaults them to `develop`, and on a `main`-based branch that computes the digest against a merge base the reviewer never read, so the receipt would attest to a change set nobody looked at. A receipt is only valid against the target it names, so the two have to agree.
+
+`--expect-digest` is required rather than optional, and binding it to the earlier read is the whole point. A format-on-save or a hook autofix between the review and the record would otherwise be stamped as reviewed by a pass that never saw it. A refusal there is the content having moved, so the answer is another pass over the current content rather than another read of the digest.
+
+Record the pass whatever it found, including nothing. The key covers the net content the branch introduces against its target rather than the commit series, so an interactive rebase that leaves the tree alone keeps the receipt valid, and changing one byte invalidates it.
+
+**Why the commit comes first**, rather than being an ordering that could equally run the other way. A push delivers the commit, so a receipt recorded over uncommitted work describes something else, and a capture point gating a push refuses on exactly that. Two smaller reasons point the same way: staging a modified tracked file moves the key even though its content did not change, and a commit made after the record can carry content the pass never read. Reviewing earlier than this is still worth doing as ordinary diligence, and it does not substitute for the recorded pass: the digest read and the record bracket a window in which the tree holds still, and a commit inside that window ends it.
+
+The engine is hub-hosted per `GOVERNANCE.md` "Hub-Hosted Tooling", so a downstream repository reaches it as a hub checkout's copy run with that repository's own worktree as the working directory, `python3 <hub-checkout>/scripts/local_review.py status`, rather than by carrying it. Unlike `scripts/pr_review.py` it takes no `--repo`: it reads whichever repository the working directory sits in.
+
 ## Disposing of Findings
 
-Every finding maps to one of `pr-review-conduct`'s five outcomes before the pull request opens: fixed, evidence-disproven, filed as a deferred issue, escalated to the maintainer for an explicit call, or, if it keeps recurring, taken as a signal to fix the class. A finding this pass raised and not fixed is never the agent's own call to just leave. Per outcome 3, that decision needs the maintainer's explicit answer, the same way a PR-hosted finding would. Running this pass is expected before every push toward a pull request, per `agent-conduct`. Its findings stay advisory: a finding it raises does not by itself block `git commit` or `gh pr create`, the disposition above is what closes it, the same posture local lint holds today. It posts nothing to GitHub, it only reports to the session driving the work. A finding raised here and not fixed is not thereby resolved: the same finding shape reaching a PR-hosted reviewer later still gets its own fresh disposition, per `pr-review-conduct`'s "a disposition decided on one PR does not carry to the next."
+Every finding maps to one of `pr-review-conduct`'s five outcomes before the pull request opens: fixed, evidence-disproven, filed as a deferred issue, escalated to the maintainer for an explicit call, or, if it keeps recurring, taken as a signal to fix the class. A finding this pass raised and not fixed is never the agent's own call to just leave. Per outcome 3, that decision needs the maintainer's explicit answer, the same way a PR-hosted finding would. Running this pass is required before every push toward a pull request, per `agent-conduct`. Two claims sit next to each other here and they point opposite ways, so they are stated apart rather than in one sentence. **The pass is mandatory**, and where a capture point enforces it, a push carrying content no recorded pass covers is refused. That refusal is the gate working rather than a fault to route around. **The findings stay advisory**, and the count a pass raises gates nothing at all, since a pass records that a review ran and never that the content is clean. The disposition above is what closes each finding, the same posture local lint holds today. It posts nothing to GitHub, it only reports to the session driving the work. A finding raised here and not fixed is not thereby resolved: the same finding shape reaching a PR-hosted reviewer later still gets its own fresh disposition, per `pr-review-conduct`'s "a disposition decided on one PR does not carry to the next."
 
 ## When to Run It
 
@@ -63,9 +85,23 @@ Every finding maps to one of `pr-review-conduct`'s five outcomes before the pull
 - Before pushing a fix for a reviewer finding, the same self-review blind spot applies to a fix as to the original diff (`drive-pr`'s "Disposing of Every Finding", `pr-review-conduct`'s outcome 1).
 - Whenever `agent-conduct`'s "about to claim work is done, verified, green, or fixed" trigger fires for work that will become, or already is, a pull request.
 
+This repository's `.husky/pre-push` hook checks the receipt at the push itself, so the moments above are where the pass is run rather than the only places it is noticed. A blocked push usually means one of them was skipped. The hook is a backstop under this skill and not a replacement for it: it fires only in a clone that enabled `core.hooksPath`, it says nothing about a repository that carries no such hook, and it is bypassable by design, `--no-verify` being the documented route for a genuine pickle rather than for a diff nobody read.
+
+**Not every refusal is a missing pass, and re-running the pass at one of these does nothing.** Read the refusal itself, which names its own case. Some of these the hook decides before the engine runs, so there is no engine message under them, and the rows below say where each one's detail comes from.
+
+| The refusal says | What it means | What clears it |
+| --- | --- | --- |
+| Tracked content differs from HEAD | A push delivers HEAD while a receipt covers the index and working tree, so the receipt does not describe this push | Commit what is being pushed, then the pass, then the record |
+| The commit is not this worktree's HEAD | `git push origin some-other-branch` from a checkout sitting elsewhere, and the engine reads the checkout it runs in | Check the pushed branch out in its own worktree, per `repo-worktree` |
+| Any wording saying the gate did not or could not run | An execution boundary rather than a verdict, which blocks because a gate that waves a push through when it could not run has stopped gating. The cause is named in that same message or in the engine error printed above it, and it is a missing Python interpreter, an unresolvable target, an unreadable receipt, a git command that failed, or any unexpected failure | Whatever the message names, most often installing an interpreter per `docs/host-setup.md` or fetching the target branch. Never another pass |
+| A recorded pass names a branch the check did not measure | The hook reads `develop` and nothing else, so a branch based elsewhere is measured against `develop` whatever the pass targeted, and the engine deliberately prints no record command, since the one it would print records a pass over a diff nobody read | One more pass against the branch this work actually targets, where it does target the measured one. Where it does not, the gate cannot judge the branch at all and the bypass is its answer |
+
+This table is the fleet's one enumeration of these, and every other surface states the principle and routes here rather than listing shapes or counting them. That is deliberate: through this skill's own review the count went from two to four, and every round left at least one restatement behind.
+
 ## Mechanics Live Elsewhere
 
 - Review criteria: `code-review`.
 - Delegation shape and model-tier discipline: `AGENTS.md` "Context and Delegation Discipline".
 - Branch base rule (`develop` unless the task is explicitly `main`-only): `repo-worktree`.
 - Finding disposition once a pull request exists, the Merge Gate, `scripts/pr_review.py`: `pr-review-conduct`, `drive-pr`.
+- The receipt's key, its backends, and the three-valued exit contract a capture point folds: `scripts/README.md` "`local_review.py`".
