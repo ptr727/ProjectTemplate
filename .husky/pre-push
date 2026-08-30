@@ -47,10 +47,15 @@ tree_status=0
 git diff-index --quiet --ignore-submodules=none HEAD -- || tree_status=$?
 if [ "$tree_status" -eq 1 ]; then
     echo "pre-push: this worktree holds tracked content that differs from HEAD, so the gate cannot speak for the push." >&2
-    echo "pre-push: commit what is being pushed, then run the pass and record it, then push." >&2
-    # A refresh that did not complete leaves stat information that reads dirty on unchanged content.
-    if [ "$refresh_status" -ne 0 ]; then
-        echo "pre-push: 'git update-index --refresh' exited $refresh_status, so run 'git status' and retry before believing this." >&2
+    # An unresolved merge exits the refresh 1 with the refresh having worked, so it is read here rather than doubted below.
+    if [ -n "$(git ls-files --unmerged)" ]; then
+        echo "pre-push: this worktree has an unresolved merge, so resolve and commit it before pushing." >&2
+    else
+        echo "pre-push: commit what is being pushed, then run the pass and record it, then push." >&2
+        # Past 1 the refresh did not complete, leaving stat information that reads dirty on unchanged content.
+        if [ "$refresh_status" -gt 1 ]; then
+            echo "pre-push: 'git update-index --refresh' exited $refresh_status, so run 'git status' and retry before believing this." >&2
+        fi
     fi
     exit 1
 elif [ "$tree_status" -ne 0 ]; then
