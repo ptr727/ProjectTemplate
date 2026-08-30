@@ -1085,8 +1085,7 @@ def table_against_diff(pr: dict, counts: tuple[int, int] | None) -> str:
 def normal(text: str) -> str:
     """A marker reduced toward what a vetted list compares: ASCII, single spaces, counts as `(N)`.
 
-    Letter case is not reduced here and is folded at the membership test in `unvetted` instead,
-    so this value keeps the case the reviewer wrote while the comparison ignores it.
+    Letter case survives, and `unvetted` folds it at the membership test instead.
 
     The verdict headings carry a colored circle and the suppressed heading carries its finding
     count, so both drift on every review without the section having changed at all.
@@ -1096,20 +1095,9 @@ def normal(text: str) -> str:
 
 
 def unvetted(marker: str, vetted: set[str]) -> bool:
-    """Whether `marker` is absent from `vetted`, comparing without regard to letter case.
-
-    Case carries no meaning in any of these markers, and the reviewer has drifted one: a review
-    body carrying `### Reviewed Changes` reported as a shape this script had never seen while
-    `### Reviewed changes` sat in the vetted list, which blocked a review loop over a letter. A
-    vetting list whose entries stop matching for a reason that means nothing is the silent
-    narrowing the verification rules name, arriving loudly rather than quietly and still wrong.
-
-    Folded here rather than in `normal`, whose value the report strings also carry. A reported
-    shape's remedy names the shape beside the body it quotes, so a folded name would not match the
-    body printed next to it. Case is the one reduction with no reason to apply: the emoji and the
-    count are dropped because they drift on every review without the section having changed, and
-    case has drifted the same way once.
-    """
+    """Whether `marker` is absent from `vetted`, compared without regard to letter case."""
+    # Folded here rather than in `normal`, whose value the report strings also carry.
+    # A report naming a folded shape would not match the body it asks the reader to quote beside it.
     return marker.casefold() not in {v.casefold() for v in vetted}
 
 

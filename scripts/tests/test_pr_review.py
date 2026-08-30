@@ -1607,8 +1607,7 @@ class TestUnrecognizedShapes(GqlCase):
             self.assertEqual(
                 [], pr_review.unrecognized_in(OVERVIEW + "\n" + drifted), f"blocked on {drifted}"
             )
-        # One case per vetted list, since each arm folds separately.
-        # A one-arm revert would otherwise stay green while that arm blocks a loop on the next drift.
+        # One case per vetted list, since a one-arm revert would otherwise stay green.
         # Not the files-reviewed label, which is also read as a coverage line and judged separately.
         self.assertEqual([], pr_review.unrecognized_in(OVERVIEW + "\n- **comments generated:** 2"))
         self.assertEqual(
