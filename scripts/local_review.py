@@ -201,14 +201,36 @@ def receipt_path(root: Path) -> Path:
     return git_dir(root) / RECEIPT_NAME
 
 
-def target_ref(target: str) -> str:
-    """The remote-tracking ref a target name means.
+def ref_exists(ref: str, root: Path) -> bool:
+    """Whether `ref` resolves to a commit in this checkout."""
+    try:
+        git("rev-parse", "--verify", "--quiet", f"{ref}^{{commit}}", root=root)
+    except CannotRun:
+        return False
+    return True
 
-    A bare name is the ordinary fleet case and resolves under `origin`. A value already carrying a
-    slash is used as written, so a fork-based flow can name an upstream remote's branch rather
-    than being told the engine understands only one remote.
+
+def target_ref(target: str, root: Path) -> str:
+    """The ref a target name means, preferring the remote-tracking one.
+
+    `origin/<target>` is tried first and used whenever it resolves, so an ordinary fleet branch
+    name works and so does one holding a slash. Treating any slash as "already a full ref", which
+    an earlier version did, silently measured a target such as `release/v1` against the local
+    branch of that name rather than the remote one, and a local branch that has moved on then
+    defines the review scope with no error at all.
+
+    A value that resolves only as written is used as written, which is what lets a fork-based flow
+    name another remote's branch.
     """
-    return target if "/" in target else f"origin/{target}"
+    remote = f"origin/{target}"
+    if ref_exists(remote, root):
+        return remote
+    if ref_exists(target, root):
+        return target
+    raise CannotRun(
+        f"neither {remote} nor {target} resolves in this checkout,"
+        " so the review scope cannot be determined"
+    )
 
 
 def merge_base(target: str, root: Path) -> str:
@@ -216,14 +238,7 @@ def merge_base(target: str, root: Path) -> str:
 
     A merge-base is a fork point rather than a tip, so fetching a newer target does not move it.
     """
-    ref = target_ref(target)
-    try:
-        git("rev-parse", "--verify", "--quiet", f"{ref}^{{commit}}", root=root)
-    except CannotRun as e:
-        raise CannotRun(
-            f"{ref} does not resolve in this checkout, so the review scope cannot be determined"
-        ) from e
-    return git("merge-base", ref, "HEAD", root=root).strip()
+    return git("merge-base", target_ref(target, root), "HEAD", root=root).strip()
 
 
 def _zsplit(out: str) -> list[str]:
@@ -465,17 +480,28 @@ def current_state(target: str, root: Path) -> tuple[str, str, int]:
     return base, content_digest(base, marks), len(marks)
 
 
+def same_target(a: str, b: str) -> bool:
+    """Whether two target names mean the same branch.
+
+    A pure name comparison rather than a ref lookup, since this runs on a receipt that may name a
+    branch no longer present. Only the `origin/` prefix is optional, matching what `target_ref`
+    treats as the default remote, so `develop` and `origin/develop` agree while `main` and
+    `upstream/main` stay distinct.
+    """
+    return a.removeprefix("origin/") == b.removeprefix("origin/")
+
+
 def covering_passes(receipt: dict | None, base: str, digest: str, target: str) -> list[dict]:
     """The passes in `receipt` that actually cover the current content, which may be none.
 
     A pass covers the content only when the receipt agrees on all three of target, merge base, and
     digest. The target is checked because a review against one branch says nothing about the same
-    branch retargeted at another, where the diff under review is a different one. It is compared
-    as the ref it resolves to, so naming the same branch two ways is not a mismatch.
+    branch retargeted at another, where the diff under review is a different one. Its optional
+    `origin/` prefix is ignored, so naming the same branch two ways is not a mismatch.
     """
     if not receipt:
         return []
-    if target_ref(str(receipt.get("target"))) != target_ref(target):
+    if not same_target(str(receipt.get("target")), target):
         return []
     if receipt.get("mergeBase") != base or receipt.get("contentDigest") != digest:
         return []
@@ -872,7 +898,14 @@ def main(argv: list[str] | None = None) -> int:
     p_run.set_defaults(func=cmd_run)
 
     for p in (p_status, p_record, p_check, p_run):
-        p.add_argument("--target", default=None, help=f"target branch (default {DEFAULT_TARGET})")
+        p.add_argument(
+            "--target",
+            default=None,
+            help=(
+                f"target branch (default {DEFAULT_TARGET}). Resolved as origin/<value> where that"
+                " exists, else as written, so another remote's branch can be named directly"
+            ),
+        )
 
     args = parser.parse_args(argv)
     # Holds the boundary code until a verdict is actually produced.
