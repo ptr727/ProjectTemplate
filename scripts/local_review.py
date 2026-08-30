@@ -550,11 +550,6 @@ def _write_pass_locked(
     return out
 
 
-def untracked_in(root: Path) -> list[str]:
-    """The non-ignored untracked paths, which the receipt's own scope includes."""
-    return _zsplit(git("ls-files", "--others", "--exclude-standard", "-z", root=root))
-
-
 def run_coderabbit(base: str, root: Path) -> tuple[int, str]:
     """Run the CodeRabbit CLI over this branch's diff and return the findings count and an error.
 
@@ -563,9 +558,20 @@ def run_coderabbit(base: str, root: Path) -> tuple[int, str]:
     moment the target moves: reviewing against the tip would cover the reverse of every commit the
     target gained since this branch forked, which is not what the receipt claims.
 
+    The base is passed as `--base-commit`, which the CLI documents as taking a commit hash, rather
+    than `--base`, which it documents as taking a branch name. Handing a merge-base sha to the
+    branch flag was the earlier mistake here. `--include-untracked` is passed because the CLI
+    excludes untracked files by default while this receipt's own scope includes them, so without
+    it a pass would claim coverage of files the run never read.
+
     A completion event is required rather than assumed. A CLI build that does not understand
     `--agent`, or a run truncated part way, emits no findings and exits zero, which would
-    otherwise be recorded as a clean review of content nothing read. A rate-limited or errored run
+    otherwise be recorded as a clean review of content nothing read. A completion reporting
+    `review_skipped` is refused for the same reason: it is the CLI saying it looked at nothing.
+
+    None of this has been executed against a real CLI on this host, so the invocation follows the
+    vendor's documented flag semantics rather than observed behavior, and the backend stays opt-in
+    until someone runs it. A rate-limited or errored run
     likewise returns an error and the caller records no pass, since the CLI shares its hourly
     budget with this account's pull request reviews and a budget exhaustion must never look like a
     review.
@@ -576,24 +582,9 @@ def run_coderabbit(base: str, root: Path) -> tuple[int, str]:
     exe = shutil.which("coderabbit")
     if not exe:
         raise CannotRun("the coderabbit CLI is not installed, so this backend cannot run")
-    # The receipt's scope includes non-ignored untracked files.
-    # A `--base` review covers the tracked diff instead.
-    # Recording a pass over a changed set holding untracked paths would claim coverage of files the CLI never read.
-    # The CLI documents `--include-untracked` alongside `--uncommitted`.
-    # Whether that composes with `--base` is unverified, since this host carries no CLI to run it against.
-    # Asserting a tool's behavior that was never executed is what `agent-conduct` forbids.
-    # So the case is refused rather than guessed at.
-    # Lifting this restriction needs a real CLI and a test that drives it.
-    untracked = untracked_in(root)
-    if untracked:
-        raise CannotRun(
-            f"{len(untracked)} untracked path(s) are in the review scope, and this backend's"
-            " coverage of them is unverified. Commit or stage them, or use the agent-skill"
-            f" backend. First: {untracked[0]}"
-        )
     try:
         proc = subprocess.run(
-            [exe, "review", "--agent", "--base", base],
+            [exe, "review", "--agent", "--base-commit", base, "--include-untracked"],
             cwd=str(root),
             # The same redirects the rest of the engine refuses to inherit.
             # Run from a hook that sets GIT_INDEX_FILE, the CLI would review the wrong tree.
@@ -623,7 +614,13 @@ def run_coderabbit(base: str, root: Path) -> tuple[int, str]:
         if kind == "finding":
             findings += 1
         elif kind == "complete":
-            complete = True
+            # A run that found nothing to look at also completes, reporting review_skipped.
+            # Counting that as a review records a clean pass over content nothing read.
+            # That is the same false clean the missing-completion case below guards against.
+            if str(event.get("status") or "") == "review_skipped":
+                error = "the CLI reported review_skipped, so no content was actually reviewed"
+            else:
+                complete = True
         elif kind == "error":
             error = str(event.get("message") or "the CLI reported an error event")
     if proc.returncode != 0 and not error:

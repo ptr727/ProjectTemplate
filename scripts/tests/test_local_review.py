@@ -721,7 +721,6 @@ class BackendCase(RepoCase):
         """The whole cmd_run path, including the digest re-check and the receipt write."""
         self.fake_cli('{"type":"finding"}\n{"type":"complete"}\n')
         (self.tmp / "new.py").write_text("print('x')\n", encoding="utf-8")
-        self.commit_all("new")
         self.assertEqual(
             self.main_quiet(["run", "--backend", "coderabbit-cli", "--target", self.target]), 0
         )
@@ -748,6 +747,10 @@ class BackendCase(RepoCase):
         self.assertIn("--agent", argv)
         self.assertIn(base, argv, f"the backend was not given the merge base: {argv}")
         self.assertNotIn("origin/develop", argv, "the backend was given the target tip")
+        # The flag name matters as much as the value.
+        # The CLI documents --base as taking a branch and --base-commit as taking a commit hash.
+        # A sha handed to --base is the wrong call even though the sha itself is right.
+        self.assertEqual(argv[argv.index(base) - 1], "--base-commit", argv)
 
     def test_content_changing_during_a_run_is_a_verdict(self) -> None:
         """The review covered content that no longer exists, which is an answer, not a boundary."""
@@ -760,28 +763,30 @@ class BackendCase(RepoCase):
         )
         self.assertEqual(self.main_quiet(["check", "--target", self.target]), 1)
 
-    def test_the_cli_backend_refuses_a_scope_it_may_not_cover(self) -> None:
-        """The receipt scope includes untracked files, and a --base review covers the tracked diff.
+    def test_the_backend_is_asked_to_include_untracked_files(self) -> None:
+        """The receipt scope includes them and the CLI excludes them by default.
 
-        Recording a pass over a changed set holding untracked paths would claim coverage of files
-        the CLI never read. Whether the CLI's own untracked flag composes with --base is unverified
-        on this host, so the case is refused rather than assumed either way.
+        Without the flag a pass would claim coverage of files the run never read, and a changed
+        set of only untracked files would record a clean review of nothing.
         """
-        self.fake_cli('{"type":"complete"}\n')
+        argv_log = self.outside / "argv2.txt"
+        self.fake_cli('{"type":"complete"}\n', argv_log=argv_log)
         (self.tmp / "untracked.py").write_text("print('x')\n", encoding="utf-8")
-        self.assertEqual(
-            self.main_quiet(["run", "--backend", "coderabbit-cli", "--target", self.target]), 2
-        )
-        self.assertEqual(self.main_quiet(["check", "--target", self.target]), 1)
-
-    def test_the_cli_backend_runs_once_nothing_is_untracked(self) -> None:
-        self.fake_cli('{"type":"complete"}\n')
-        (self.tmp / "tracked.py").write_text("print('x')\n", encoding="utf-8")
-        run(self.tmp, "add", "tracked.py")
-        run(self.tmp, "commit", "-m", "tracked")
         self.assertEqual(
             self.main_quiet(["run", "--backend", "coderabbit-cli", "--target", self.target]), 0
         )
+        self.assertIn("--include-untracked", argv_log.read_text(encoding="utf-8").split("\n"))
+
+    def test_a_skipped_review_is_not_a_review(self) -> None:
+        """The CLI completes with review_skipped when it found nothing to look at.
+
+        Counting that as a review records a clean pass over content nothing read, which is the
+        same false clean the missing-completion case guards against.
+        """
+        self.fake_cli('{"type":"complete","status":"review_skipped","findings":0}\n')
+        (self.tmp / "a.py").write_text("x\n", encoding="utf-8")
+        _, error = local_review.run_coderabbit("HEAD", self.tmp)
+        self.assertIn("review_skipped", error)
 
     def test_a_missing_binary_is_a_boundary_through_main(self) -> None:
         prev = os.environ.get("PATH", "")
