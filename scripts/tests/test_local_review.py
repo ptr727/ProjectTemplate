@@ -17,6 +17,7 @@ import contextlib
 import io
 import json
 import os
+import shlex
 import subprocess
 import sys
 import tempfile
@@ -583,6 +584,50 @@ class ReceiptCase(RepoCase):
         self.assertNotIn("<n>", argv, "the printed command carries a placeholder, so it cannot run")
         self.assertEqual(self.main_quiet(argv), 0, f"the printed command failed: {argv}")
         self.assertEqual(self.main_quiet(["check", "--target", self.target]), 0)
+
+    def test_the_remedy_quotes_a_target_holding_shell_metacharacters(self) -> None:
+        """git permits them in a ref name, confirmed for `;`, `$(...)`, `&`, and a quote.
+
+        Interpolating one raw into a line the reader is invited to paste would let a branch name
+        run commands, so the printed value has to survive a shell round trip as one argument.
+        """
+        name = "feat;echo-pwned"
+        run(self.tmp, "branch", name)
+        run(self.tmp, "update-ref", f"refs/remotes/origin/{name}", "HEAD")
+        (self.tmp / "a.py").write_text("x\n", encoding="utf-8")
+        err = io.StringIO()
+        with contextlib.redirect_stderr(err), contextlib.redirect_stdout(io.StringIO()):
+            self.assertEqual(local_review.main(["check", "--target", name]), 1)
+        line = next(l for l in err.getvalue().splitlines() if "local_review.py record" in l)
+        # The decisive assertion is that the quoted form is what was printed.
+        # Splitting with shlex alone is not enough, since it does not treat `;` as an operator.
+        # The raw name survives as one token there whether or not it was quoted.
+        self.assertIn(shlex.quote(name), line, f"the target was interpolated raw: {line}")
+        self.assertIn(name, shlex.split(line), "the target did not survive as one argument")
+
+    def test_a_closed_reader_reports_the_verdict_it_reached(self) -> None:
+        """A reader that exits first is not this check failing to run.
+
+        The command produced an answer, so that answer is what gets reported rather than the
+        boundary code, which a gate would read as tooling trouble.
+        """
+        (self.tmp / "a.py").write_text("x\n", encoding="utf-8")
+
+        class ClosedPipe(io.StringIO):
+            def flush(self) -> None:
+                raise BrokenPipeError(32, "Broken pipe")
+
+        saved = os.dup(1)
+        try:
+            with (
+                contextlib.redirect_stdout(ClosedPipe()),
+                contextlib.redirect_stderr(io.StringIO()),
+            ):
+                code = local_review.main(["status", "--target", self.target])
+        finally:
+            os.dup2(saved, 1)
+            os.close(saved)
+        self.assertEqual(code, 0, "a closed reader turned a completed status into a boundary")
 
     def test_record_requires_the_digest_the_review_saw(self) -> None:
         """An optional guard is the one a caller in a hurry omits.

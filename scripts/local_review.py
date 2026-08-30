@@ -80,6 +80,7 @@ import argparse
 import hashlib
 import json
 import os
+import shlex
 import shutil
 import subprocess
 import sys
@@ -791,10 +792,13 @@ def cmd_check(args: argparse.Namespace) -> int:
     # --expect-digest present, and no placeholder left to substitute.
     # --findings is optional, so it is left out rather than shown as something to fill in.
     # A placeholder would make the one actionable line here a command nobody can paste.
+    # The target is quoted because git permits a ref name to hold shell metacharacters.
+    # Confirmed against a real repository for a semicolon, a command substitution, and an ampersand.
+    # Interpolating one raw into a line the reader is invited to paste would let a branch name run commands.
     print(
         "\nRun the local-strict-review pass over this diff, then record it:\n"
-        f"  python3 scripts/local_review.py record --reviewer agent-skill --target {target}"
-        f" --expect-digest {digest}\n"
+        f"  python3 scripts/local_review.py record --reviewer agent-skill"
+        f" --target {shlex.quote(target)} --expect-digest {shlex.quote(digest)}\n"
         "Add --findings <count> to record how many it raised.",
         file=sys.stderr,
     )
@@ -871,6 +875,9 @@ def main(argv: list[str] | None = None) -> int:
         p.add_argument("--target", default=None, help=f"target branch (default {DEFAULT_TARGET})")
 
     args = parser.parse_args(argv)
+    # Holds the boundary code until a verdict is actually produced.
+    # A reader that closes before the command finished then reports that nothing was decided.
+    code = EXIT_CANNOT_RUN
     try:
         code = int(args.func(args))
         # Flushed inside the guarded region on purpose.
@@ -887,8 +894,23 @@ def main(argv: list[str] | None = None) -> int:
     except BrokenPipeError:
         # Redirected so the interpreter's own shutdown flush has somewhere to go.
         # Letting it raise again is what turns this into an exit outside the contract.
-        os.dup2(os.open(os.devnull, os.O_WRONLY), sys.stdout.fileno())
-        return EXIT_CANNOT_RUN
+        # The descriptor is closed after the duplicate is installed, since dup2 leaves it open.
+        # This module is importable into a long-lived process, where that would accumulate.
+        # Guarded because stdout is not always a real file.
+        # Embedded in another process, or under a test that replaces it, there is no descriptor.
+        # The redirect that exists to stop a second failure would then raise one itself.
+        try:
+            devnull = os.open(os.devnull, os.O_WRONLY)
+            try:
+                os.dup2(devnull, sys.stdout.fileno())
+            finally:
+                os.close(devnull)
+        except (OSError, ValueError):
+            pass
+        # A reader closing the pipe is not this check failing to run.
+        # Where a verdict was already produced, that verdict is what gets reported.
+        # Where the failure came first, `code` still holds the boundary it started as.
+        return code
     # A crash is the check not having run, so it reports the boundary code.
     # Falling through to the interpreter's own exit 1 would read as the not-covered verdict.
     except Exception as e:  # noqa: BLE001
