@@ -22,6 +22,8 @@ import os
 import subprocess
 import sys
 import tempfile
+import threading
+import time
 import unittest
 from pathlib import Path
 
@@ -203,80 +205,54 @@ class ContentKeyCase(RepoCase):
         (self.tmp / "new.py").write_text("print('x')\n", encoding="utf-8")
         self.assertEqual(sorted(self.marks()), ["new.py"])
 
-    def test_the_key_depends_on_the_merge_base(self) -> None:
-        """Without this, a build whose digest ignored the base would pass every other case."""
+    def test_current_state_uses_the_real_merge_base(self) -> None:
+        """One half of the claim: the base in the key is the fork point git computes."""
         (self.tmp / "new.py").write_text("print('x')\n", encoding="utf-8")
-        # Drive current_state against two real and different bases.
-        # Passing a made-up base straight to content_digest is passed by any hash that mixes its first argument.
-        run(self.tmp, "add", "-A")
-        run(self.tmp, "commit", "-m", "on task")
-        run(
-            self.tmp,
-            "update-ref",
-            "refs/remotes/origin/main",
-            run(self.tmp, "rev-parse", "HEAD").strip(),
-        )
-        self.assertNotEqual(
-            local_review.merge_base("develop", self.tmp), local_review.merge_base("main", self.tmp)
-        )
-        (self.tmp / "after.py").write_text("print('a')\n", encoding="utf-8")
-        self.assertNotEqual(self.digest("develop"), self.digest("main"))
+        base, _, _ = local_review.current_state(self.target, self.tmp)
+        self.assertEqual(base, run(self.tmp, "merge-base", "origin/develop", "HEAD").strip())
 
-    def test_an_unmerged_path_keeps_every_stage(self) -> None:
-        """Keeping only the last stage reduces a conflicted index to one side of the conflict.
+    def test_the_digest_mixes_the_merge_base(self) -> None:
+        """The other half: two different bases over one identical mark set differ.
 
-        A pass recorded mid-conflict would then carry the same key as the resolved tree, so it
-        would cover a resolution nobody reviewed.
+        Asserting only that two targets give different digests is weaker than it looks, since the
+        changed-path sets usually differ too and the digest would move on that alone.
         """
-        clean = self.digest()
-        run(self.tmp, "checkout", "-b", "side")
-        (self.tmp / "c.txt").write_text("theirs\n", encoding="utf-8")
-        run(self.tmp, "add", "c.txt")
-        run(self.tmp, "commit", "-m", "theirs")
-        run(self.tmp, "checkout", "task")
-        (self.tmp / "c.txt").write_text("ours\n", encoding="utf-8")
-        run(self.tmp, "add", "c.txt")
-        run(self.tmp, "commit", "-m", "ours")
-        subprocess.run(
-            ["git", "merge", "side"], cwd=str(self.tmp), capture_output=True, check=False
-        )
-        states = local_review.index_states(self.tmp)["c.txt"]
-        self.assertGreaterEqual(len(states), 2, f"stages collapsed to {states}")
-        # The property that matters is the digest rather than the parse.
-        # A conflicted tree must not carry the key of any resolution of it.
-        # Otherwise a pass taken mid-conflict covers the resolution nobody reviewed.
-        conflicted = self.digest()
-        run(self.tmp, "checkout", "--theirs", "--", "c.txt")
-        run(self.tmp, "add", "c.txt")
-        self.assertNotEqual(
-            self.digest(), conflicted, "resolving the conflict did not move the key"
-        )
-        self.assertNotEqual(self.digest(), clean)
+        (self.tmp / "new.py").write_text("print('x')\n", encoding="utf-8")
+        base, digest, _ = local_review.current_state(self.target, self.tmp)
+        marks = local_review.fingerprints(base, self.tmp)
+        other = local_review.content_digest("0" * 40, marks)
+        self.assertNotEqual(digest, other)
 
-    def test_a_symlink_is_keyed_by_its_target_not_its_content(self) -> None:
-        """Reading through a link would fold bytes from outside the reviewed tree into the key."""
+    def test_a_symlink_is_keyed_as_a_link_not_as_its_pointee(self) -> None:
+        """git stores a link as its target path, so the key must not follow it out of the tree."""
         outside = self.outside / "outside.txt"
         outside.write_text("secret\n", encoding="utf-8")
         try:
             (self.tmp / "link").symlink_to(outside)
         except (OSError, NotImplementedError):
             self.skipTest("this platform does not permit creating a symlink")
+        mark = self.marks().get("link", "")
+        if "120000:" not in mark:
+            self.skipTest(f"this checkout does not store links as links: {mark}")
         before = self.digest()
-        self.assertIn("120000:", self.marks()["link"])
-        # Rewriting the bytes at the far end must not move the key.
-        # Those bytes are outside the tree and were never under review.
         outside.write_text("different content entirely\n", encoding="utf-8")
-        self.assertEqual(self.digest(), before, "the key followed the link")
+        self.assertEqual(self.digest(), before, "the key followed the link out of the tree")
 
-    def test_a_non_ascii_path_is_keyed_under_its_real_name(self) -> None:
-        """git quotes such a path by default, so the key could carry a name that is not on disk."""
-        # Escaped rather than literal so this source file stays ASCII.
-        # The name on disk is still non-ASCII, which is the property under test.
-        name = "docs/caf\u00e9.md"
+    def test_a_path_that_is_not_valid_utf8_is_keyed_under_its_real_name(self) -> None:
+        """A name holding a raw high byte is what exercises the decoding, and a valid one is not.
+
+        A merely non-ASCII name such as an accented one is valid UTF-8, so it round-trips under a
+        strict decoder and proves nothing about the surrogateescape handling the engine relies on.
+        """
+        raw = b"docs/broken-\xff-name.md"
         (self.tmp / "docs").mkdir()
-        (self.tmp / name).write_text("x\n", encoding="utf-8")
+        try:
+            (self.tmp / os.fsdecode(raw)).write_bytes(b"x\n")
+        except (OSError, UnicodeError):
+            self.skipTest("this filesystem does not accept a non-UTF-8 name")
+        name = os.fsdecode(raw)
         self.assertIn(name, self.marks())
-        run(self.tmp, "add", "--", name)
+        run(self.tmp, "add", "-A")
         run(self.tmp, "commit", "-m", "add")
         self.assertIn(name, self.marks())
 
@@ -305,7 +281,17 @@ class ContentKeyCase(RepoCase):
         # Adding a submodule is not bumping one, and only the bump exercises the gitlink state.
         (sub / "f.txt").write_text("moved on\n", encoding="utf-8")
         run(sub, "commit", "-am", "advance")
-        run(self.tmp / "sub", "pull", "--ff-only", str(sub), "main")
+        # The same file-protocol allowance the add above needed.
+        # Without it this call fails outright on a git that disables the protocol by default.
+        run(
+            self.tmp / "sub",
+            "-c",
+            "protocol.file.allow=always",
+            "pull",
+            "--ff-only",
+            str(sub),
+            "main",
+        )
         self.assertNotEqual(self.digest(), before, "a submodule bump did not move the key")
 
     def test_staging_the_worktree_writes_nothing_into_the_object_database(self) -> None:
@@ -326,6 +312,27 @@ class ContentKeyCase(RepoCase):
             ["git", "cat-file", "-e", oid], cwd=str(self.tmp), capture_output=True, check=False
         )
         self.assertNotEqual(probe.returncode, 0, "the untracked file is readable from the repo")
+
+    def test_the_object_store_resolves_inside_a_linked_worktree(self) -> None:
+        """The fleet runs every task in a linked worktree, whose git directory holds no objects.
+
+        The store lives in the common directory there, so joining `objects` onto the worktree's own
+        git directory names a path that does not exist and attaches nothing as an alternate. The
+        containment case above cannot catch this: its fixture is a primary checkout, where the
+        joined path happens to be right.
+        """
+        linked = self.outside / "linked-tree"
+        run(self.tmp, "worktree", "add", "-b", "linked-task", str(linked))
+        self.addCleanup(run, self.tmp, "worktree", "remove", "--force", str(linked))
+        self.assertFalse(
+            (local_review.git_dir(linked) / "objects").exists(),
+            "fixture is not the case: this worktree has its own objects directory",
+        )
+        store = local_review.objects_dir(linked)
+        self.assertTrue(store.is_dir(), f"the object store did not resolve: {store}")
+        # And the read still works from inside it, which a broken alternate would not guarantee.
+        (linked / "new.py").write_text("print('x')\n", encoding="utf-8")
+        self.assertIn("new.py", local_review.worktree_states(linked))
 
     def test_staging_leaves_no_throwaway_paths_behind(self) -> None:
         (self.tmp / "new.py").write_text("print('x')\n", encoding="utf-8")
@@ -490,6 +497,19 @@ class ReceiptCase(RepoCase):
         self.assertTrue(problems)
         self.assertEqual(self.main_quiet(["check", "--target", self.target]), 1)
 
+    def test_a_non_utf8_receipt_is_a_verdict_not_a_boundary(self) -> None:
+        """Unusable content is a real answer about coverage, unlike a file that cannot be read.
+
+        Decoding inside the block guarding the disk read raises UnicodeDecodeError past both
+        handlers, so the boundary code is reported for a receipt that was read perfectly well.
+        """
+        (self.tmp / "new.py").write_text("print('x')\n", encoding="utf-8")
+        local_review.receipt_path(self.tmp).write_bytes(b"\xff\xfe not utf-8 at all")
+        receipt, problems = local_review.read_receipt(self.tmp)
+        self.assertIsNone(receipt)
+        self.assertTrue(any("parse" in p for p in problems), problems)
+        self.assertEqual(self.main_quiet(["check", "--target", self.target]), 1)
+
     def test_a_malformed_pass_entry_is_caught_before_it_is_formatted(self) -> None:
         """A non-string reviewer name would otherwise reach a formatting line and raise."""
         problems = local_review.receipt_problems(
@@ -513,6 +533,99 @@ class ReceiptCase(RepoCase):
         if os.access(path, os.R_OK):
             self.skipTest("this process can read a mode-000 file, so the case cannot be built")
         self.assertEqual(self.main_quiet(["check", "--target", self.target]), 2)
+
+    def test_record_refuses_content_that_moved_since_the_review(self) -> None:
+        """The load-bearing path: a pass must attest to what a reviewer actually saw.
+
+        Nothing binds the moment the review finished to the moment it is recorded, so a
+        format-on-save or a hook autofix in between would otherwise be stamped as reviewed.
+        """
+        (self.tmp / "a.py").write_text("reviewed content\n", encoding="utf-8")
+        reviewed = self.digest()
+        (self.tmp / "a.py").write_text("something else entirely\n", encoding="utf-8")
+        self.assertEqual(
+            self.main_quiet(["record", "--reviewer", "agent-skill", "--expect-digest", reviewed]),
+            2,
+        )
+        self.assertEqual(self.main_quiet(["check", "--target", self.target]), 1)
+
+    def test_record_accepts_the_digest_the_review_saw(self) -> None:
+        (self.tmp / "a.py").write_text("reviewed content\n", encoding="utf-8")
+        reviewed = self.digest()
+        self.assertEqual(
+            self.main_quiet(["record", "--reviewer", "agent-skill", "--expect-digest", reviewed]),
+            0,
+        )
+
+    def test_record_will_not_forge_a_headless_backend(self) -> None:
+        """Recording one by hand bypasses the completion check that makes its pass mean anything."""
+        (self.tmp / "a.py").write_text("x\n", encoding="utf-8")
+        self.assertEqual(self.main_quiet(["record", "--reviewer", "coderabbit-cli"]), 2)
+
+    def test_concurrent_records_do_not_drop_a_pass(self) -> None:
+        """Accumulation is a read, a merge, and a replace, so it needs more than an atomic write."""
+        (self.tmp / "a.py").write_text("x\n", encoding="utf-8")
+        base, digest, _ = local_review.current_state(self.target, self.tmp)
+        real = local_review._write_pass_locked
+
+        def slow(*args: object, **kwargs: object) -> dict:
+            # Widen the read-modify-write window the lock exists to close.
+            time.sleep(0.2)
+            return real(*args, **kwargs)  # type: ignore[arg-type]
+
+        local_review._write_pass_locked = slow  # type: ignore[assignment]
+        self.addCleanup(setattr, local_review, "_write_pass_locked", real)
+        done: list[dict] = []
+        threads = [
+            threading.Thread(
+                target=lambda r=r: done.append(
+                    local_review.write_pass(self.tmp, self.target, base, digest, r, 0)
+                )
+            )
+            for r in ("agent-skill", "coderabbit-cli")
+        ]
+        for t in threads:
+            t.start()
+        for t in threads:
+            t.join()
+        receipt, problems = local_review.read_receipt(self.tmp)
+        self.assertEqual(problems, [])
+        assert receipt is not None
+        self.assertEqual(
+            sorted(p["reviewer"] for p in receipt["passes"]),
+            ["agent-skill", "coderabbit-cli"],
+            "a concurrent record dropped the other pass",
+        )
+
+    def test_an_ignored_file_stays_out_of_the_key(self) -> None:
+        """Otherwise build output would demand a review, and the docstring claims it does not."""
+        (self.tmp / ".gitignore").write_text("build/\n", encoding="utf-8")
+        run(self.tmp, "add", ".gitignore")
+        run(self.tmp, "commit", "-m", "ignore build")
+        before = self.digest()
+        (self.tmp / "build").mkdir()
+        (self.tmp / "build" / "out.o").write_text("junk\n", encoding="utf-8")
+        self.assertEqual(self.digest(), before, "an ignored file entered the key")
+
+    def test_adding_then_deleting_a_file_keeps_the_key(self) -> None:
+        """The documented scope boundary: the key follows net content, not the commit series.
+
+        Asserted rather than left implicit, because it is the property a reader is most likely to
+        assume the other way round.
+        """
+        before = self.digest()
+        (self.tmp / "temp.py").write_text("print('x')\n", encoding="utf-8")
+        run(self.tmp, "add", "temp.py")
+        run(self.tmp, "commit", "-m", "add temp")
+        self.assertNotEqual(self.digest(), before)
+        run(self.tmp, "rm", "-q", "temp.py")
+        run(self.tmp, "commit", "-m", "remove temp")
+        self.assertEqual(self.digest(), before, "the net-content scope is not what is documented")
+
+    def test_two_staging_runs_over_unchanged_content_agree(self) -> None:
+        """Recording then checking stages the same content twice, so the read has to be stable."""
+        (self.tmp / "a.py").write_text("x\n", encoding="utf-8")
+        self.assertEqual(self.digest(), self.digest())
 
     def test_a_future_receipt_version_reads_as_unusable(self) -> None:
         problems = local_review.receipt_problems(
@@ -544,14 +657,19 @@ class ReceiptCase(RepoCase):
 class BackendCase(RepoCase):
     """Drives run_coderabbit against a stand-in binary, so the parsing contract is tested."""
 
-    def fake_cli(self, stdout: str, code: int = 0) -> None:
+    def fake_cli(
+        self, stdout: str, code: int = 0, argv_log: Path | None = None, also: str = ""
+    ) -> None:
         bin_dir = self.outside / "fakebin"
         bin_dir.mkdir(exist_ok=True)
         script = bin_dir / "coderabbit"
-        script.write_text(
-            f"#!/usr/bin/env python3\nimport sys\nsys.stdout.write({stdout!r})\nsys.exit({code})\n",
-            encoding="utf-8",
-        )
+        body = "#!/usr/bin/env python3\nimport sys\n"
+        if argv_log is not None:
+            body += f"open({str(argv_log)!r}, 'w').write(chr(10).join(sys.argv[1:]))\n"
+        if also:
+            body += also + "\n"
+        body += f"sys.stdout.write({stdout!r})\nsys.exit({code})\n"
+        script.write_text(body, encoding="utf-8")
         script.chmod(0o755)
         prev = os.environ.get("PATH", "")
         os.environ["PATH"] = f"{bin_dir}{os.pathsep}{prev}"
@@ -606,6 +724,34 @@ class BackendCase(RepoCase):
         receipt, _ = local_review.read_receipt(self.tmp)
         assert receipt is not None
         self.assertEqual(receipt["passes"][0]["findings"], 1)
+
+    def test_the_backend_is_given_the_merge_base_not_the_target_tip(self) -> None:
+        """The two differ the moment the target moves, and only one is what the receipt claims.
+
+        The fake CLI records its own argv, since asserting on the exit code alone would let the
+        argument contract drift back to the tip with nothing objecting.
+        """
+        argv_log = self.outside / "argv.txt"
+        self.fake_cli('{"type":"complete"}\n', argv_log=argv_log)
+        (self.tmp / "a.py").write_text("x\n", encoding="utf-8")
+        base, _, _ = local_review.current_state(self.target, self.tmp)
+        self.assertEqual(
+            self.main_quiet(["run", "--backend", "coderabbit-cli", "--target", self.target]), 0
+        )
+        argv = argv_log.read_text(encoding="utf-8").split("\n")
+        self.assertIn("--agent", argv)
+        self.assertIn(base, argv, f"the backend was not given the merge base: {argv}")
+        self.assertNotIn("origin/develop", argv, "the backend was given the target tip")
+
+    def test_content_changing_during_a_run_is_a_verdict(self) -> None:
+        """The review covered content that no longer exists, which is an answer, not a boundary."""
+        marker = self.tmp / "moved.py"
+        self.fake_cli('{"type":"complete"}\n', also=f"open({str(marker)!r}, 'w').write('later\\n')")
+        (self.tmp / "a.py").write_text("x\n", encoding="utf-8")
+        self.assertEqual(
+            self.main_quiet(["run", "--backend", "coderabbit-cli", "--target", self.target]), 1
+        )
+        self.assertEqual(self.main_quiet(["check", "--target", self.target]), 1)
 
     def test_a_missing_binary_is_a_boundary_through_main(self) -> None:
         prev = os.environ.get("PATH", "")

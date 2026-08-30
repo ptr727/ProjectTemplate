@@ -51,7 +51,7 @@ changed set, since a file not yet added is exactly what a review has to read.
 
 This script holds no review logic. It drives backends: `agent-skill` is the `local-strict-review`
 subagent pass, which only a live agent session can run, so the engine records it rather than
-invoking it; `coderabbit-cli` is headless and is the one backend a git hook can execute by itself.
+invoking it. `coderabbit-cli` is headless and is the one backend a git hook can execute by itself.
 
 A recorded pass means a review ran over exactly this content. It never means the content is clean.
 Disposing of what a review found is judgment, per `pr-review-conduct`'s five outcomes, so a pass is
@@ -85,6 +85,7 @@ import shutil
 import subprocess
 import sys
 import tempfile
+import time
 from datetime import UTC, datetime
 from pathlib import Path
 
@@ -174,6 +175,19 @@ def git_dir(root: Path) -> Path:
     return Path(git("rev-parse", "--absolute-git-dir", root=root).strip())
 
 
+def objects_dir(root: Path) -> Path:
+    """The object store this worktree actually reads and writes.
+
+    Asked of git rather than joined onto the git directory. A linked worktree's own git directory
+    holds no `objects` at all, since the store lives in the common directory shared with every
+    other worktree, and the fleet runs every task in a linked worktree. Joining the path by hand
+    names a directory that does not exist there, which silently attaches nothing as an alternate.
+    """
+    return Path(
+        git("rev-parse", "--path-format=absolute", "--git-path", "objects", root=root).strip()
+    )
+
+
 def receipt_path(root: Path) -> Path:
     """Where this worktree's receipt lives.
 
@@ -258,6 +272,17 @@ def index_states(root: Path) -> dict[str, set[str]]:
     return _ls_files_states(git("ls-files", "-s", "-z", root=root))
 
 
+def alternate_entry(path: Path) -> str:
+    """One entry for GIT_ALTERNATE_OBJECT_DIRECTORIES, quoted where it has to be.
+
+    The variable holds a list separated by the platform's path separator, so a repository checked
+    out under a path containing one would otherwise split into two directories that do not exist.
+    Git reads a double-quoted entry as a single path.
+    """
+    text = str(path)
+    return f'"{text}"' if os.pathsep in text else text
+
+
 def worktree_states(root: Path) -> dict[str, set[str]]:
     """Every path as git would stage it right now, read by actually staging it.
 
@@ -267,8 +292,8 @@ def worktree_states(root: Path) -> dict[str, set[str]]:
     keeps git's cached stat information, so the scan is a refresh rather than a full re-hash.
 
     Staging writes objects, and those writes are redirected into a throwaway object directory with
-    the real one as an alternate, so git can still read every existing object while writing none
-    of its own. Without that redirection this read would permanently deposit the content of every
+    the real store attached as an alternate, so git can still read every existing object, and
+    every alternate that store itself chains to, while writing none of its own. Without that redirection this read would permanently deposit the content of every
     untracked file into the repository, an unignored `.env` or key file among them, recoverable
     long afterwards from a command the caller had every reason to believe only looked.
 
@@ -291,7 +316,7 @@ def worktree_states(root: Path) -> dict[str, set[str]]:
         env = {
             "GIT_INDEX_FILE": staging,
             "GIT_OBJECT_DIRECTORY": objects,
-            "GIT_ALTERNATE_OBJECT_DIRECTORIES": str(gd / "objects"),
+            "GIT_ALTERNATE_OBJECT_DIRECTORIES": alternate_entry(objects_dir(root)),
         }
         git("add", "-A", "--", ".", root=root, env=env)
         return _ls_files_states(git("ls-files", "-s", "-z", root=root, env=env))
@@ -412,13 +437,15 @@ def read_receipt(root: Path) -> tuple[dict | None, list[str]]:
     try:
         if not path.is_file():
             return None, []
-        text = path.read_text(encoding="utf-8")
+        raw = path.read_bytes()
     except OSError as e:
         raise CannotRun(f"the receipt at {path} could not be read ({e})") from e
+    # Decoding belongs with parsing rather than with reading.
+    # A non-UTF-8 receipt is unusable content, which is a verdict, not a file this process failed to read.
+    # Decoding inside the block above would raise UnicodeDecodeError past both handlers and report the boundary code.
     try:
-        data = json.loads(text or "{}")
+        data = json.loads(raw.decode("utf-8") or "{}")
     # ValueError rather than JSONDecodeError, since it also covers UnicodeDecodeError.
-    # A partially written or non-UTF-8 file raises that before the JSON parser is reached.
     except ValueError as e:
         return None, [f"the receipt does not parse ({e})"]
     problems = receipt_problems(data)
@@ -449,6 +476,27 @@ def covering_passes(receipt: dict | None, base: str, digest: str, target: str) -
     return [p for p in receipt.get("passes", []) if isinstance(p, dict) and p.get("reviewer")]
 
 
+def held_lock(path: Path, timeout: float = 10.0) -> int:
+    """Take an exclusive lock beside the receipt, or raise once waiting has gone on too long.
+
+    Recording is a read, a merge, and a replace. The replace is atomic on its own, but two
+    backends recording concurrently over one unchanged diff would both read a receipt without the
+    other's pass and the second write would drop it, which is exactly the accumulation this file
+    promises. The lock is what makes the promise true rather than usually true.
+    """
+    lock = Path(str(path) + ".lock")
+    deadline = time.monotonic() + timeout
+    while True:
+        try:
+            return os.open(lock, os.O_CREAT | os.O_EXCL | os.O_WRONLY, 0o600)
+        except FileExistsError:
+            if time.monotonic() >= deadline:
+                raise CannotRun(f"another process holds {lock} and did not release it") from None
+            time.sleep(0.05)
+        except OSError as e:
+            raise CannotRun(f"{lock} could not be created ({e})") from e
+
+
 def write_pass(
     root: Path, target: str, base: str, digest: str, reviewer: str, findings: int | None
 ) -> dict:
@@ -461,6 +509,19 @@ def write_pass(
     The file is replaced rather than rewritten in place, so a reader never observes a half-written
     receipt and a process killed mid-write leaves the previous one intact.
     """
+    path = receipt_path(root)
+    fd_lock = held_lock(path)
+    try:
+        return _write_pass_locked(root, target, base, digest, reviewer, findings)
+    finally:
+        os.close(fd_lock)
+        Path(str(path) + ".lock").unlink(missing_ok=True)
+
+
+def _write_pass_locked(
+    root: Path, target: str, base: str, digest: str, reviewer: str, findings: int | None
+) -> dict:
+    """The read, merge, and replace that `write_pass` holds the lock around."""
     receipt, _ = read_receipt(root)
     kept = [p for p in covering_passes(receipt, base, digest, target) if p["reviewer"] != reviewer]
     kept.append(
@@ -504,13 +565,19 @@ def run_coderabbit(base: str, root: Path) -> tuple[int, str]:
     budget with this account's pull request reviews and a budget exhaustion must never look like a
     review.
     """
-    exe = shutil.which("coderabbit") or shutil.which("cr")
+    # Only the documented binary name.
+    # A bare `cr` is a common short name for unrelated tools.
+    # Running whichever one is on PATH with a 900 second budget is not a fallback worth having.
+    exe = shutil.which("coderabbit")
     if not exe:
         raise CannotRun("the coderabbit CLI is not installed, so this backend cannot run")
     try:
         proc = subprocess.run(
             [exe, "review", "--agent", "--base", base],
             cwd=str(root),
+            # The same redirects the rest of the engine refuses to inherit.
+            # Run from a hook that sets GIT_INDEX_FILE, the CLI would review the wrong tree.
+            env={k: v for k, v in os.environ.items() if k not in INHERITED_REDIRECTS},
             capture_output=True,
             check=False,
             timeout=BACKEND_TIMEOUT,
@@ -590,13 +657,35 @@ def cmd_status(args: argparse.Namespace) -> int:
 
 
 def cmd_record(args: argparse.Namespace) -> int:
-    if args.reviewer not in BACKENDS:
+    backend = BACKENDS.get(args.reviewer)
+    if backend is None:
         known = ", ".join(sorted(BACKENDS))
         print(f"unknown reviewer '{args.reviewer}'. Known backends: {known}", file=sys.stderr)
+        return EXIT_CANNOT_RUN
+    if backend["headless"]:
+        print(
+            f"'{args.reviewer}' is headless, so it is recorded by running it rather than by hand."
+            f" Use: run --backend {args.reviewer}",
+            file=sys.stderr,
+        )
         return EXIT_CANNOT_RUN
     root = repo_root()
     target = resolve_target(args.target)
     base, digest, changed = current_state(target, root)
+    # The digest is read now, and the review finished some time earlier.
+    # A format-on-save or a hook autofix in between would otherwise be stamped as reviewed.
+    # That is content no reviewer saw, and attesting to it is the one claim this receipt makes.
+    # The caller passes back what `status` reported before the pass ran.
+    # A mismatch is the content having moved rather than an answer about coverage.
+    if args.expect_digest and args.expect_digest != digest:
+        print(
+            "the content changed between the review and this record, so nothing was recorded.\n"
+            f"  reviewed  {args.expect_digest[:12]}\n"
+            f"  now       {digest[:12]}\n"
+            "Re-run the review over the current content.",
+            file=sys.stderr,
+        )
+        return EXIT_CANNOT_RUN
     out = write_pass(root, target, base, digest, args.reviewer, args.findings)
     reviewers = ", ".join(p["reviewer"] for p in out["passes"])
     print(
@@ -689,6 +778,11 @@ def main(argv: list[str] | None = None) -> int:
         "--reviewer", required=True, help=f"one of: {', '.join(sorted(BACKENDS))}"
     )
     p_record.add_argument("--findings", type=int, default=None, help="how many findings it raised")
+    p_record.add_argument(
+        "--expect-digest",
+        default=None,
+        help="the contentDigest the review was run against, refusing to record if it has moved",
+    )
     p_record.set_defaults(func=cmd_record)
 
     p_check = sub.add_parser("check", help="exit 0 covered, 1 not covered, 2 could not run")
@@ -703,15 +797,22 @@ def main(argv: list[str] | None = None) -> int:
 
     args = parser.parse_args(argv)
     try:
-        return int(args.func(args))
+        code = int(args.func(args))
+        # Flushed inside the guarded region on purpose.
+        # Piping into a reader that exits first leaves the payload sitting in a block buffer.
+        # That buffer only fails during interpreter shutdown, which reports 120.
+        # The handler below is never reached at all without this flush.
+        sys.stdout.flush()
+        return code
     except CannotRun as e:
         print(f"local_review: {e}", file=sys.stderr)
         return EXIT_CANNOT_RUN
     # A reader that closes early, `| head -1` being the ordinary case, otherwise raises here.
     # It then raises again during the interpreter's own shutdown flush, which exits 120, outside the contract.
     except BrokenPipeError:
-        devnull = os.open(os.devnull, os.O_WRONLY)
-        os.dup2(devnull, sys.stdout.fileno())
+        # Redirected so the interpreter's own shutdown flush has somewhere to go.
+        # Letting it raise again is what turns this into an exit outside the contract.
+        os.dup2(os.open(os.devnull, os.O_WRONLY), sys.stdout.fileno())
         return EXIT_CANNOT_RUN
     # A crash is the check not having run, so it reports the boundary code.
     # Falling through to the interpreter's own exit 1 would read as the not-covered verdict.
