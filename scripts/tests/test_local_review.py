@@ -552,6 +552,33 @@ class ReceiptCase(RepoCase):
         )
         self.assertEqual(self.main_quiet(["check", "--target", self.target]), 1)
 
+    def test_record_requires_the_digest_the_review_saw(self) -> None:
+        """An optional guard is the one a caller in a hurry omits.
+
+        The omission would then look exactly like a pass that was properly bound to its review.
+        """
+        with contextlib.redirect_stderr(io.StringIO()), self.assertRaises(SystemExit) as caught:
+            local_review.main(["record", "--reviewer", "agent-skill"])
+        self.assertNotEqual(caught.exception.code, 0)
+
+    def test_a_negative_finding_count_is_refused(self) -> None:
+        """It would otherwise land in the receipt and mean nothing to whoever reads it."""
+        (self.tmp / "a.py").write_text("x\n", encoding="utf-8")
+        self.assertEqual(
+            self.main_quiet(
+                [
+                    "record",
+                    "--reviewer",
+                    "agent-skill",
+                    "--findings",
+                    "-1",
+                    "--expect-digest",
+                    self.digest(),
+                ]
+            ),
+            2,
+        )
+
     def test_record_accepts_the_digest_the_review_saw(self) -> None:
         (self.tmp / "a.py").write_text("reviewed content\n", encoding="utf-8")
         reviewed = self.digest()
@@ -563,7 +590,9 @@ class ReceiptCase(RepoCase):
     def test_record_will_not_forge_a_headless_backend(self) -> None:
         """Recording one by hand bypasses the completion check that makes its pass mean anything."""
         (self.tmp / "a.py").write_text("x\n", encoding="utf-8")
-        self.assertEqual(self.main_quiet(["record", "--reviewer", "coderabbit-cli"]), 2)
+        self.assertEqual(
+            self.main_quiet(["record", "--reviewer", "coderabbit-cli", "--expect-digest", "x"]), 2
+        )
 
     def test_concurrent_records_do_not_drop_a_pass(self) -> None:
         """Accumulation is a read, a merge, and a replace, so it needs more than an atomic write."""
@@ -603,6 +632,27 @@ class ReceiptCase(RepoCase):
             ["agent-skill", "coderabbit-cli"],
             "a concurrent record dropped the other pass",
         )
+
+    def test_a_stale_lock_does_not_wedge_the_tool(self) -> None:
+        """A process killed while holding it would otherwise block every later record forever."""
+        (self.tmp / "a.py").write_text("x\n", encoding="utf-8")
+        lock = Path(str(local_review.receipt_path(self.tmp)) + ".lock")
+        lock.write_text("", encoding="utf-8")
+        old = time.time() - local_review.STALE_LOCK_SECONDS - 60
+        os.utime(lock, (old, old))
+        base, digest, _ = local_review.current_state(self.target, self.tmp)
+        out = local_review.write_pass(self.tmp, self.target, base, digest, "agent-skill", 0)
+        self.assertEqual([p["reviewer"] for p in out["passes"]], ["agent-skill"])
+
+    def test_a_fresh_lock_is_respected(self) -> None:
+        """Otherwise the staleness escape hatch would defeat the lock it exists to rescue."""
+        (self.tmp / "a.py").write_text("x\n", encoding="utf-8")
+        lock = Path(str(local_review.receipt_path(self.tmp)) + ".lock")
+        lock.write_text("", encoding="utf-8")
+        self.addCleanup(lock.unlink, True)
+        # Driving held_lock directly, with a short budget, so the case does not spend the real wait.
+        with self.assertRaises(local_review.CannotRun):
+            local_review.held_lock(local_review.receipt_path(self.tmp), timeout=0.2)
 
     def test_an_ignored_file_stays_out_of_the_key(self) -> None:
         """Otherwise build output would demand a review, and the docstring claims it does not."""
@@ -804,7 +854,10 @@ class ExitCodeCase(RepoCase):
     def test_an_unknown_reviewer_is_a_boundary_not_a_finding(self) -> None:
         """2 says the check did not run, which a gate must not read as either verdict."""
         self.assertEqual(
-            self.main_quiet(["record", "--reviewer", "nope", "--target", self.target]), 2
+            self.main_quiet(
+                ["record", "--reviewer", "nope", "--target", self.target, "--expect-digest", "x"]
+            ),
+            2,
         )
 
     def test_an_agent_backend_cannot_be_run_headlessly(self) -> None:
@@ -860,7 +913,17 @@ class ExitCodeCase(RepoCase):
         (self.tmp / "new.py").write_text("print('x')\n", encoding="utf-8")
         buf = io.StringIO()
         with contextlib.redirect_stdout(buf):
-            code = local_review.main(["record", "--reviewer", "agent-skill", "--findings", "2"])
+            code = local_review.main(
+                [
+                    "record",
+                    "--reviewer",
+                    "agent-skill",
+                    "--findings",
+                    "2",
+                    "--expect-digest",
+                    self.digest(),
+                ]
+            )
         self.assertEqual(code, 0)
         self.assertIn("agent-skill", buf.getvalue())
         receipt, problems = local_review.read_receipt(self.tmp)

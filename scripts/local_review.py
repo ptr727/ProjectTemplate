@@ -58,8 +58,10 @@ recorded whether the pass raised findings or none.
 
 Usage: python3 scripts/local_review.py status [--target <branch>]
            what the current content digest is, and which backends hold a pass on it.
-       python3 scripts/local_review.py record --reviewer <id> [--target <branch>] [--findings N]
-           record that <id> reviewed the current content.
+       python3 scripts/local_review.py record --reviewer <id> --expect-digest <digest>
+                                             [--target <branch>] [--findings N]
+           record that <id> reviewed the content `status` reported as <digest>, refusing when the
+           content has moved since.
        python3 scripts/local_review.py check [--target <branch>]
            exit 0 covered, 1 not covered, 2 could not run.
        python3 scripts/local_review.py run --backend coderabbit-cli [--target <branch>]
@@ -100,6 +102,9 @@ EXIT_CANNOT_RUN = 2
 # Bounded so a hung git or CLI fails the capture point loudly instead of hanging a push forever.
 # Staging the whole working tree is the slowest call here, which is why the git bound is generous.
 GIT_TIMEOUT = 300
+# Past this, a lock is an abandoned one rather than a held one.
+# Longer than any single record, and short enough that a crash does not wedge the tool.
+STALE_LOCK_SECONDS = 300
 BACKEND_TIMEOUT = 900
 
 # `headless` says whether a hook can run this backend with no agent session attached.
@@ -179,9 +184,11 @@ def objects_dir(root: Path) -> Path:
     other worktree, and the fleet runs every task in a linked worktree. Joining the path by hand
     names a directory that does not exist there, which silently attaches nothing as an alternate.
     """
-    return Path(
-        git("rev-parse", "--path-format=absolute", "--git-path", "objects", root=root).strip()
-    )
+    # `--git-path` alone, without `--path-format=absolute`, because that option needs git 2.31 and
+    # `spec/host-tools.json` declares no floor on git at all.
+    # The result is relative in a primary checkout and absolute in a linked worktree.
+    # Joining an absolute path onto the root yields that absolute path unchanged.
+    return root / git("rev-parse", "--git-path", "objects", root=root).strip()
 
 
 def receipt_path(root: Path) -> Path:
@@ -486,6 +493,16 @@ def held_lock(path: Path, timeout: float = 10.0) -> int:
         try:
             return os.open(lock, os.O_CREAT | os.O_EXCL | os.O_WRONLY, 0o600)
         except FileExistsError:
+            # A process killed while holding the lock would block every later record permanently.
+            # Nothing would say why, and the only way out would be deleting a file by hand.
+            # A lock older than any plausible record is treated as abandoned rather than held.
+            try:
+                age = time.time() - lock.stat().st_mtime
+            except OSError:
+                age = 0.0
+            if age > STALE_LOCK_SECONDS:
+                lock.unlink(missing_ok=True)
+                continue
             if time.monotonic() >= deadline:
                 raise CannotRun(f"another process holds {lock} and did not release it") from None
             time.sleep(0.05)
@@ -682,6 +699,9 @@ def cmd_record(args: argparse.Namespace) -> int:
             file=sys.stderr,
         )
         return EXIT_CANNOT_RUN
+    if args.findings is not None and args.findings < 0:
+        print(f"--findings cannot be negative, got {args.findings}", file=sys.stderr)
+        return EXIT_CANNOT_RUN
     root = repo_root()
     target = resolve_target(args.target)
     base, digest, changed = current_state(target, root)
@@ -690,7 +710,9 @@ def cmd_record(args: argparse.Namespace) -> int:
     # That is content no reviewer saw, and attesting to it is the one claim this receipt makes.
     # The caller passes back what `status` reported before the pass ran.
     # A mismatch is the content having moved rather than an answer about coverage.
-    if args.expect_digest and args.expect_digest != digest:
+    # The flag is required rather than optional, since an optional guard is the one a caller omits.
+    # That omission looks exactly like a pass that was properly bound to its review.
+    if args.expect_digest != digest:
         print(
             "the content changed between the review and this record, so nothing was recorded.\n"
             f"  reviewed  {args.expect_digest[:12]}\n"
@@ -793,7 +815,7 @@ def main(argv: list[str] | None = None) -> int:
     p_record.add_argument("--findings", type=int, default=None, help="how many findings it raised")
     p_record.add_argument(
         "--expect-digest",
-        default=None,
+        required=True,
         help="the contentDigest the review was run against, refusing to record if it has moved",
     )
     p_record.set_defaults(func=cmd_record)
