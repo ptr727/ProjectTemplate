@@ -116,6 +116,50 @@ BACKENDS = {
 }
 
 
+def silence(stream: object) -> None:
+    """Point a stream's descriptor at the null device, so a later flush cannot raise.
+
+    Guarded because a stream is not always backed by a descriptor: embedded in another process, or
+    under a test that replaces it, there is nothing to redirect, and the guard against a second
+    failure would raise one itself. The descriptor is closed once the duplicate is installed,
+    since dup2 leaves the original open and this module is importable into a long-lived process.
+    """
+    try:
+        fd = os.open(os.devnull, os.O_WRONLY)
+        try:
+            # Suppressing attr-defined here: the parameter is deliberately typed as object.
+            # The guard below is what handles a stream carrying no descriptor.
+            os.dup2(fd, stream.fileno())  # type: ignore[attr-defined]
+        finally:
+            os.close(fd)
+    except (OSError, ValueError, AttributeError):
+        pass
+
+
+def emit(text: str, stream: object = None) -> None:
+    """Write a line, tolerating a reader that closed the pipe before it arrived.
+
+    Every subcommand does its work and then reports, so a reader exiting first has not made the
+    command fail. Letting the error propagate would replace a real verdict with a boundary, or,
+    once the exit code is already decided, escape as a shutdown flush that exits 120.
+
+    Absorbing it here rather than at the top level is what keeps each verdict its own. A blanket
+    "no verdict yet, so report success" would turn a broken pipe on the diagnostics `check` writes
+    into an exit 0, which reads as covered, for a branch that is not.
+    """
+    target = sys.stdout if stream is None else stream
+    try:
+        # Suppressing arg-type and union-attr here for the same reason.
+        # The stream is typed as object so any writable stand-in is accepted.
+        # The guards below are what cover a stand-in that is not writable.
+        print(text, file=target)  # type: ignore[arg-type]
+        target.flush()  # type: ignore[union-attr]
+    except BrokenPipeError:
+        silence(target)
+    except (OSError, ValueError):
+        pass
+
+
 class CannotRun(Exception):
     """The check could not be performed, as distinct from being performed and failing.
 
@@ -729,7 +773,7 @@ def cmd_status(args: argparse.Namespace) -> int:
     base, digest, changed = current_state(target, root)
     receipt, problems = read_receipt(root)
     passes = covering_passes(receipt, base, digest, target)
-    print(
+    emit(
         json.dumps(
             {
                 "target": target,
@@ -751,17 +795,17 @@ def cmd_record(args: argparse.Namespace) -> int:
     backend = BACKENDS.get(args.reviewer)
     if backend is None:
         known = ", ".join(sorted(BACKENDS))
-        print(f"unknown reviewer '{args.reviewer}'. Known backends: {known}", file=sys.stderr)
+        emit(f"unknown reviewer '{args.reviewer}'. Known backends: {known}", sys.stderr)
         return EXIT_CANNOT_RUN
     if backend["headless"]:
-        print(
+        emit(
             f"'{args.reviewer}' is headless, so it is recorded by running it rather than by hand."
             f" Use: run --backend {args.reviewer}",
-            file=sys.stderr,
+            sys.stderr,
         )
         return EXIT_CANNOT_RUN
     if args.findings is not None and args.findings < 0:
-        print(f"--findings cannot be negative, got {args.findings}", file=sys.stderr)
+        emit(f"--findings cannot be negative, got {args.findings}", sys.stderr)
         return EXIT_CANNOT_RUN
     root = repo_root()
     target = resolve_target(args.target)
@@ -774,17 +818,17 @@ def cmd_record(args: argparse.Namespace) -> int:
     # The flag is required rather than optional, since an optional guard is the one a caller omits.
     # That omission looks exactly like a pass that was properly bound to its review.
     if args.expect_digest != digest:
-        print(
+        emit(
             "the content changed between the review and this record, so nothing was recorded.\n"
             f"  reviewed  {args.expect_digest[:12]}\n"
             f"  now       {digest[:12]}\n"
             "Re-run the review over the current content.",
-            file=sys.stderr,
+            sys.stderr,
         )
         return EXIT_CANNOT_RUN
     out = write_pass(root, target, base, digest, args.reviewer, args.findings)
     reviewers = ", ".join(p["reviewer"] for p in out["passes"])
-    print(
+    emit(
         f"recorded {args.reviewer} over {changed} changed path(s) against {target}"
         f" at {digest[:12]}. Passes now: {reviewers}"
     )
@@ -798,21 +842,21 @@ def cmd_check(args: argparse.Namespace) -> int:
     receipt, problems = read_receipt(root)
     if covering_passes(receipt, base, digest, target):
         return EXIT_COVERED
-    print(
+    emit(
         "No local review covers this branch's current content.\n"
         f"  target        {target}\n"
         f"  changed paths {changed}\n"
         f"  digest        {digest[:12]}",
-        file=sys.stderr,
+        sys.stderr,
     )
     if receipt:
-        print(
+        emit(
             f"  receipt       covers {receipt['target']} at {receipt['contentDigest'][:12]},"
             " which is not this content",
-            file=sys.stderr,
+            sys.stderr,
         )
     for problem in problems:
-        print(f"  receipt       {problem}", file=sys.stderr)
+        emit(f"  receipt       {problem}", sys.stderr)
     # Printed so it runs exactly as it stands.
     # That means the full digest rather than the abbreviated form above, the required
     # --expect-digest present, and no placeholder left to substitute.
@@ -821,12 +865,12 @@ def cmd_check(args: argparse.Namespace) -> int:
     # The target is quoted because git permits a ref name to hold shell metacharacters.
     # Confirmed against a real repository for a semicolon, a command substitution, and an ampersand.
     # Interpolating one raw into a line the reader is invited to paste would let a branch name run commands.
-    print(
+    emit(
         "\nRun the local-strict-review pass over this diff, then record it:\n"
         f"  python3 scripts/local_review.py record --reviewer agent-skill"
         f" --target {shlex.quote(target)} --expect-digest {shlex.quote(digest)}\n"
         "Add --findings <count> to record how many it raised.",
-        file=sys.stderr,
+        sys.stderr,
     )
     return EXIT_NOT_COVERED
 
@@ -835,13 +879,13 @@ def cmd_run(args: argparse.Namespace) -> int:
     backend = BACKENDS.get(args.backend)
     if backend is None:
         known = ", ".join(sorted(k for k, v in BACKENDS.items() if v["headless"]))
-        print(f"unknown backend '{args.backend}'. Headless backends: {known}", file=sys.stderr)
+        emit(f"unknown backend '{args.backend}'. Headless backends: {known}", sys.stderr)
         return EXIT_CANNOT_RUN
     if not backend["headless"]:
-        print(
+        emit(
             f"'{args.backend}' is {backend['why']}, which only a live agent session can run."
             " Run the pass, then record it with the record subcommand.",
-            file=sys.stderr,
+            sys.stderr,
         )
         return EXIT_CANNOT_RUN
     root = repo_root()
@@ -849,22 +893,22 @@ def cmd_run(args: argparse.Namespace) -> int:
     base, digest, _ = current_state(target, root)
     findings, error = run_coderabbit(base, root)
     if error:
-        print(f"{args.backend} did not complete, so no pass was recorded: {error}", file=sys.stderr)
+        emit(f"{args.backend} did not complete, so no pass was recorded: {error}", sys.stderr)
         return EXIT_CANNOT_RUN
     # Re-read the content the backend actually finished against.
     # An edit during a run that takes minutes would otherwise be recorded as reviewed.
     after_base, after_digest, _ = current_state(target, root)
     if (after_base, after_digest) != (base, digest):
-        print(
+        emit(
             f"{args.backend} finished but the content changed during the run,"
             " so no pass was recorded. Re-run it.",
-            file=sys.stderr,
+            sys.stderr,
         )
         # The check ran and the honest answer is that nothing covers the content now.
         # Reporting the boundary code would let a gate that warns and continues on 2 wave it through.
         return EXIT_NOT_COVERED
     write_pass(root, target, base, digest, args.backend, findings)
-    print(
+    emit(
         f"recorded {args.backend} against {target} at {digest[:12]}, {findings} finding(s)."
         " A pass records that a review ran, never that the content is clean."
     )
@@ -920,34 +964,22 @@ def main(argv: list[str] | None = None) -> int:
         sys.stdout.flush()
         return code
     except CannotRun as e:
-        print(f"local_review: {e}", file=sys.stderr)
+        emit(f"local_review: {e}", sys.stderr)
         return EXIT_CANNOT_RUN
     # A reader that closes early, `| head -1` being the ordinary case, otherwise raises here.
     # It then raises again during the interpreter's own shutdown flush, which exits 120, outside the contract.
     except BrokenPipeError:
-        # Redirected so the interpreter's own shutdown flush has somewhere to go.
-        # Letting it raise again is what turns this into an exit outside the contract.
-        # The descriptor is closed after the duplicate is installed, since dup2 leaves it open.
-        # This module is importable into a long-lived process, where that would accumulate.
-        # Guarded because stdout is not always a real file.
-        # Embedded in another process, or under a test that replaces it, there is no descriptor.
-        # The redirect that exists to stop a second failure would then raise one itself.
-        try:
-            devnull = os.open(os.devnull, os.O_WRONLY)
-            try:
-                os.dup2(devnull, sys.stdout.fileno())
-            finally:
-                os.close(devnull)
-        except (OSError, ValueError):
-            pass
-        # A reader closing the pipe is not this check failing to run.
-        # Where a verdict was already produced, that verdict is what gets reported.
-        # Where the failure came first, `code` still holds the boundary it started as.
+        # A backstop only, since `emit` absorbs a closed reader at the point of writing.
+        # Reaching here means the failure came from somewhere that does not report through it.
+        # Whatever verdict was reached is still the honest answer.
+        # Both streams are silenced so the shutdown flush cannot raise on top of it.
+        silence(sys.stdout)
+        silence(sys.stderr)
         return code
     # A crash is the check not having run, so it reports the boundary code.
     # Falling through to the interpreter's own exit 1 would read as the not-covered verdict.
     except Exception as e:  # noqa: BLE001
-        print(f"local_review: unexpected failure ({type(e).__name__}: {e})", file=sys.stderr)
+        emit(f"local_review: unexpected failure ({type(e).__name__}: {e})", sys.stderr)
         return EXIT_CANNOT_RUN
 
 

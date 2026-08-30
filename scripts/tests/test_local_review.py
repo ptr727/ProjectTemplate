@@ -27,7 +27,8 @@ import unittest
 import unittest.mock
 from pathlib import Path
 
-sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
+SCRIPT = Path(__file__).resolve().parent.parent / "local_review.py"
+sys.path.insert(0, str(SCRIPT.parent))
 import local_review
 
 
@@ -639,29 +640,42 @@ class ReceiptCase(RepoCase):
         self.assertIn(shlex.quote(name), line, f"the target was interpolated raw: {line}")
         self.assertIn(name, shlex.split(line), "the target did not survive as one argument")
 
-    def test_a_closed_reader_reports_the_verdict_it_reached(self) -> None:
-        """A reader that exits first is not this check failing to run.
+    def run_piped(self, args: list[str], shell: str) -> int:
+        """Run the CLI for real with its output piped into a reader that exits first.
 
-        The command produced an answer, so that answer is what gets reported rather than the
-        boundary code, which a gate would read as tooling trouble.
+        Driven through a shell rather than in process, because the failure being tested is a
+        genuine EPIPE on a descriptor, and the exit code being tested includes the one the
+        interpreter produces during its own shutdown flush, which no in-process case can reach.
+        """
+        script = f"python3 {SCRIPT} {' '.join(args)} {shell}"
+        proc = subprocess.run(
+            ["bash", "-c", f"{script}; exit ${{PIPESTATUS[0]}}"],
+            cwd=str(self.tmp),
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+        return proc.returncode
+
+    def test_a_closed_stdout_reader_does_not_break_the_exit_contract(self) -> None:
+        """`status | head -1` has to stay inside 0, 1, 2 rather than exiting 120."""
+        (self.tmp / "a.py").write_text("x\n", encoding="utf-8")
+        self.assertEqual(self.run_piped(["status", "--target", self.target], "| head -1"), 0)
+
+    def test_a_reader_that_takes_nothing_still_reports_the_verdict(self) -> None:
+        """The work completed, so a reader exiting before any of it arrived is not a failure."""
+        (self.tmp / "a.py").write_text("x\n", encoding="utf-8")
+        self.assertEqual(self.run_piped(["status", "--target", self.target], "| head -0"), 0)
+
+    def test_a_closed_stderr_reader_still_reports_not_covered(self) -> None:
+        """The case that rules out reporting a blanket success when no verdict was returned yet.
+
+        `check` writes its diagnostics to stderr before returning, so a pipe closing there would
+        leave the verdict unreturned. Treating that as success reports covered for a branch that
+        is not, which is the one wrong answer a gate must never give.
         """
         (self.tmp / "a.py").write_text("x\n", encoding="utf-8")
-
-        class ClosedPipe(io.StringIO):
-            def flush(self) -> None:
-                raise BrokenPipeError(32, "Broken pipe")
-
-        saved = os.dup(1)
-        try:
-            with (
-                contextlib.redirect_stdout(ClosedPipe()),
-                contextlib.redirect_stderr(io.StringIO()),
-            ):
-                code = local_review.main(["status", "--target", self.target])
-        finally:
-            os.dup2(saved, 1)
-            os.close(saved)
-        self.assertEqual(code, 0, "a closed reader turned a completed status into a boundary")
+        self.assertEqual(self.run_piped(["check", "--target", self.target], "2>&1 | head -0"), 1)
 
     def test_record_requires_the_digest_the_review_saw(self) -> None:
         """An optional guard is the one a caller in a hurry omits.
