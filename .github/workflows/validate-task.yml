@@ -276,12 +276,8 @@ jobs:
         with:
           dotnet-version: 10.x
 
-      # On the .NET 10 SDK and later an MTP-based test project refuses to run through the VSTest target at all, so the --collect:"XPlat Code Coverage" form this step used to carry fails the job outright rather than degrading, which is what a caller hits the moment a dependency bump (xunit.v3 4.0.0 and later, in practice) makes its test project MTP-based.
-      # --coverage drives Microsoft.Testing.Extensions.CodeCoverage, which writes one report per test project into --results-directory, so the Cobertura XML still lands in ./coverage for the upload step below.
-      # --coverage-output is deliberately not set, because it pins one filename for every test project in the solution and a caller with more than one then keeps only whichever ran last, passing green on half its coverage.
-      # The default name it writes instead, <guid>.cobertura.xml, is one codecov-cli's own finder does not match (its patterns are *coverage*.* and an exact cobertura.xml), so the reports are prefixed rather than renamed outright, keeping the guid that makes them unique.
-      # Both halves are load-bearing: pinning the name loses a report, and leaving the name alone uploads nothing at all, and neither reds this job.
-      # The caller supplies the MTP opt-in and the coverage package itself, in its own root global.json and its own test project, neither of which a reusable workflow can place for it, so a caller that bumps its pin to this commit before migrating is the one failure this step cannot absorb (WORKFLOW.md D1.6).
+      # --coverage-output stays unset because pinning one filename gives every test project in the solution the same path, and the last to finish overwrites the rest.
+      # The default <guid>.cobertura.xml written instead is a name codecov-cli's finder does not match, so each report is prefixed rather than renamed, keeping the guid that makes it unique.
       - name: Run unit tests step
         if: hashFiles('**/*Tests*.csproj') != ''
         run: |
