@@ -23,6 +23,7 @@ import tempfile
 import threading
 import time
 import unittest
+import unittest.mock
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
@@ -575,12 +576,11 @@ class ReceiptCase(RepoCase):
         digest = self.digest()
         self.assertIn("--expect-digest", printed)
         self.assertIn(digest, printed, "the remedy carries an abbreviated digest, so it will fail")
-        # Run the command the failure printed, and confirm it records rather than erroring.
+        # Run the printed command verbatim.
+        # Repairing it here, by dropping or filling a placeholder, would hide the defect.
         line = next(l for l in printed.splitlines() if "local_review.py record" in l)
         argv = line.split()[2:]
-        argv = [a for a in argv if a != "<n>"]
-        argv[argv.index("--findings")] = "--findings"
-        argv.insert(argv.index("--findings") + 1, "0")
+        self.assertNotIn("<n>", argv, "the printed command carries a placeholder, so it cannot run")
         self.assertEqual(self.main_quiet(argv), 0, f"the printed command failed: {argv}")
         self.assertEqual(self.main_quiet(["check", "--target", self.target]), 0)
 
@@ -675,6 +675,51 @@ class ReceiptCase(RepoCase):
         base, digest, _ = local_review.current_state(self.target, self.tmp)
         out = local_review.write_pass(self.tmp, self.target, base, digest, "agent-skill", 0)
         self.assertEqual([p["reviewer"] for p in out["passes"]], ["agent-skill"])
+
+    def test_breaking_a_stale_lock_does_not_remove_a_fresh_one(self) -> None:
+        """Checking staleness and then unlinking is a race the breaker lock exists to close.
+
+        The observing process can be descheduled between the two, the holder can release, and
+        another process can take a fresh lock, which the unlink would then remove.
+        """
+        lock = Path(str(local_review.receipt_path(self.tmp)) + ".lock")
+        lock.write_text("", encoding="utf-8")
+        old = time.time() - local_review.STALE_LOCK_SECONDS - 60
+        os.utime(lock, (old, old))
+        real_unlink = Path.unlink
+
+        def racing_stat(self_path: Path) -> os.stat_result:
+            # Stand in for the holder releasing and a fresh lock being taken in the window.
+            if self_path == lock:
+                os.utime(lock, None)
+            return os.stat(self_path)
+
+        with unittest.mock.patch.object(Path, "stat", racing_stat):
+            broke = local_review.break_stale_lock(lock)
+        self.assertFalse(broke, "a lock that became fresh was still broken")
+        self.assertTrue(lock.exists(), "the fresh lock was removed")
+        real_unlink(lock)
+
+    def test_the_breaker_leaves_nothing_behind(self) -> None:
+        lock = Path(str(local_review.receipt_path(self.tmp)) + ".lock")
+        lock.write_text("", encoding="utf-8")
+        old = time.time() - local_review.STALE_LOCK_SECONDS - 60
+        os.utime(lock, (old, old))
+        self.assertTrue(local_review.break_stale_lock(lock))
+        self.assertFalse(Path(str(lock) + ".break").exists())
+        self.assertFalse(lock.exists())
+
+    def test_a_breaker_already_held_defers_rather_than_racing(self) -> None:
+        lock = Path(str(local_review.receipt_path(self.tmp)) + ".lock")
+        lock.write_text("", encoding="utf-8")
+        old = time.time() - local_review.STALE_LOCK_SECONDS - 60
+        os.utime(lock, (old, old))
+        breaker = Path(str(lock) + ".break")
+        breaker.write_text("", encoding="utf-8")
+        self.addCleanup(breaker.unlink, True)
+        self.addCleanup(lock.unlink, True)
+        self.assertFalse(local_review.break_stale_lock(lock))
+        self.assertTrue(lock.exists(), "the lock was broken while another breaker held it")
 
     def test_a_fresh_lock_is_respected(self) -> None:
         """Otherwise the staleness escape hatch would defeat the lock it exists to rescue."""

@@ -481,6 +481,39 @@ def covering_passes(receipt: dict | None, base: str, digest: str, target: str) -
     return [p for p in receipt.get("passes", []) if isinstance(p, dict) and p.get("reviewer")]
 
 
+def break_stale_lock(lock: Path) -> bool:
+    """Remove `lock` if it is abandoned, reporting whether anything was removed.
+
+    Breaking is done under a second lock of its own, and the staleness is re-read after that
+    exclusive claim rather than before it. A plain check-then-unlink races: the observing process
+    can be descheduled between the two, the holder can release, another process can take a fresh
+    lock, and the unlink then removes a lock that is legitimately held. Re-reading under the
+    breaker means the file being removed is still the same abandoned one that was observed, since
+    a lock taken in between is not old enough to qualify.
+    """
+    breaker = Path(str(lock) + ".break")
+    try:
+        fd = os.open(breaker, os.O_CREAT | os.O_EXCL | os.O_WRONLY, 0o600)
+    except FileExistsError:
+        # Another process is already breaking it, so this one waits rather than racing alongside.
+        return False
+    except OSError:
+        return False
+    try:
+        try:
+            stat = lock.stat()
+        except OSError:
+            # Already gone, which is the outcome this function exists to produce.
+            return True
+        if time.time() - stat.st_mtime <= STALE_LOCK_SECONDS:
+            return False
+        lock.unlink(missing_ok=True)
+        return True
+    finally:
+        os.close(fd)
+        breaker.unlink(missing_ok=True)
+
+
 def held_lock(path: Path, timeout: float = 10.0) -> int:
     """Take an exclusive lock beside the receipt, or raise once waiting has gone on too long.
 
@@ -498,12 +531,7 @@ def held_lock(path: Path, timeout: float = 10.0) -> int:
             # A process killed while holding the lock would block every later record permanently.
             # Nothing would say why, and the only way out would be deleting a file by hand.
             # A lock older than any plausible record is treated as abandoned rather than held.
-            try:
-                age = time.time() - lock.stat().st_mtime
-            except OSError:
-                age = 0.0
-            if age > STALE_LOCK_SECONDS:
-                lock.unlink(missing_ok=True)
+            if break_stale_lock(lock):
                 continue
             if time.monotonic() >= deadline:
                 raise CannotRun(f"another process holds {lock} and did not release it") from None
@@ -594,9 +622,13 @@ def run_coderabbit(base: str, root: Path) -> tuple[int, str]:
     # Only the documented binary name.
     # A bare `cr` is a common short name for unrelated tools.
     # Running whichever one is on PATH with a 900 second budget is not a fallback worth having.
-    exe = shutil.which("coderabbit")
-    if not exe:
+    found = shutil.which("coderabbit")
+    if not found:
         raise CannotRun("the coderabbit CLI is not installed, so this backend cannot run")
+    # Resolved to an absolute path here, where the lookup happened.
+    # The child runs with its working directory set to the repository root instead.
+    # A relative PATH entry would otherwise resolve against one directory and execute in another.
+    exe = str(Path(found).resolve())
     try:
         proc = subprocess.run(
             [exe, "review", "--agent", "--base-commit", base, "--include-untracked"],
@@ -754,12 +786,16 @@ def cmd_check(args: argparse.Namespace) -> int:
         )
     for problem in problems:
         print(f"  receipt       {problem}", file=sys.stderr)
-    # The digest is printed in full rather than abbreviated, so the command below runs as it stands.
-    # Abbreviating it, or omitting the required --expect-digest, makes this line a usage error.
+    # Printed so it runs exactly as it stands.
+    # That means the full digest rather than the abbreviated form above, the required
+    # --expect-digest present, and no placeholder left to substitute.
+    # --findings is optional, so it is left out rather than shown as something to fill in.
+    # A placeholder would make the one actionable line here a command nobody can paste.
     print(
         "\nRun the local-strict-review pass over this diff, then record it:\n"
-        "  python3 scripts/local_review.py record --reviewer agent-skill"
-        f" --target {target} --findings <n> --expect-digest {digest}",
+        f"  python3 scripts/local_review.py record --reviewer agent-skill --target {target}"
+        f" --expect-digest {digest}\n"
+        "Add --findings <count> to record how many it raised.",
         file=sys.stderr,
     )
     return EXIT_NOT_COVERED
