@@ -13,8 +13,6 @@ Run as `python3 scripts/tests/test_local_review.py`, or under
 `python3 -m unittest discover -s scripts/tests`.
 """
 
-from __future__ import annotations
-
 import contextlib
 import io
 import json
@@ -361,6 +359,7 @@ class ContentKeyCase(RepoCase):
                 seen.add(env["GIT_INDEX_FILE"])
             return real_git(*args, **kwargs)  # type: ignore[arg-type]
 
+        # Suppressing assignment here: the wrapper's signature is intentionally wider.
         local_review.git = capture  # type: ignore[assignment]
         self.addCleanup(setattr, local_review, "git", real_git)
         local_review.worktree_states(self.tmp)
@@ -575,8 +574,12 @@ class ReceiptCase(RepoCase):
         def slow(*args: object, **kwargs: object) -> dict:
             # Widen the read-modify-write window the lock exists to close.
             time.sleep(0.2)
+            # Suppressing arg-type here: the captured original is typed by its own signature.
+            # This deliberately generic forwarding wrapper cannot restate that signature.
             return real(*args, **kwargs)  # type: ignore[arg-type]
 
+        # Suppressing assignment here: rebinding a module function to a stand-in is the case.
+        # The stand-in cannot match the original's exact signature.
         local_review._write_pass_locked = slow  # type: ignore[assignment]
         self.addCleanup(setattr, local_review, "_write_pass_locked", real)
         done: list[dict] = []
@@ -832,6 +835,7 @@ class ExitCodeCase(RepoCase):
         def boom(*_args: object, **_kwargs: object) -> tuple[str, str, int]:
             raise RuntimeError("something nobody anticipated")
 
+        # Suppressing assignment here: the stand-in raises rather than returning.
         local_review.current_state = boom  # type: ignore[assignment]
         self.addCleanup(setattr, local_review, "current_state", original)
         self.assertEqual(self.main_quiet(["check", "--target", self.target]), 2)

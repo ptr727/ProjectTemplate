@@ -1,12 +1,11 @@
 #!/usr/bin/env python3
 """Record and verify that a local review pass covered this branch's current content.
 
-The fleet's rule is that PR-bound work gets an adversarial local review before it is pushed, and
-again before every fix push, so a PR-hosted reviewer is not used as the first reviewer. That rule
-was already written in three skills and still went unfollowed, so this script gives it something
-mechanically checkable: a review pass records a receipt keyed on the content it reviewed, and a
-capture point (a git pre-push hook, a skill step, a session about to claim done) asks whether a
-receipt still covers what is about to be pushed.
+`AGENTS.md` and the `local-strict-review` skill hold the rule about when a local review is owed.
+This script is what makes that rule checkable rather than a second copy of it: a review pass
+records a receipt keyed on the content it reviewed, and a capture point (a git pre-push hook, a
+skill step, a session about to claim done) asks whether a receipt still covers what is about to
+be pushed.
 
 The key is over the content of the changed paths, plus the merge-base commit that fixes what
 "changed" means. It is deliberately not over the diff text and not over HEAD, which is what lets a
@@ -75,8 +74,6 @@ covered. `status` reports rather than gating, so it is 0 whether or not the cont
 and 2 only when it could not run at all.
 """
 
-from __future__ import annotations
-
 import argparse
 import hashlib
 import json
@@ -105,9 +102,8 @@ EXIT_CANNOT_RUN = 2
 GIT_TIMEOUT = 300
 BACKEND_TIMEOUT = 900
 
-# The backends the engine knows, and whether it can execute one itself.
-# An agent-driven backend is recorded by the session that ran it, since no script spawns an agent.
-# A headless backend is one a hook can run with no session attached.
+# `headless` says whether a hook can run this backend with no agent session attached.
+# An agent-driven one is recorded by the session that ran it, since no script can spawn an agent.
 BACKENDS = {
     "agent-skill": {"headless": False, "why": "the local-strict-review subagent pass"},
     "coderabbit-cli": {"headless": True, "why": "coderabbit review --agent, structured JSON"},
