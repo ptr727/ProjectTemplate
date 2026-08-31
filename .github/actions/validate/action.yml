@@ -66,8 +66,11 @@ runs:
         python3 scripts/canonical_review.py check --target "$BASE_SHA"
 
     # Read-only: fails where the committed burn-down no longer describes the ledger and the tree.
-    # Unconditional, unlike the step above, because staleness is a property of the commit rather than of a comparison against a base.
+    # Runs on every event, unlike the step above, because staleness is a property of the commit rather than of a comparison against a base.
+    # `!cancelled()` so an earlier failing step does not skip it, since a run that names one reason and hides the next costs a whole round to discover the second, which is the reason .husky/pre-push runs both gates before reading either verdict.
+    # Not `always()`, which also runs after a cancellation, where nothing is waiting for the answer.
     - name: Check the canonical review burn-down is current step
+      if: ${{ !cancelled() }}
       shell: bash
       run: python3 scripts/canonical_review.py report --check
 
