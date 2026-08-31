@@ -47,6 +47,8 @@ Usage:
 import argparse
 import hashlib
 import json
+import os
+import pathlib
 import subprocess
 import sys
 from collections.abc import Callable
@@ -94,7 +96,7 @@ TREE_FIDELITY = frozenset({"verbatim-tree"})
 # `spec/divergences.json`'s own unit key delimiter, so one vocabulary names a section across the fidelity ledger, this one, and any finding written against either.
 SECTION_DELIM = " > "
 # The region before a document's first level-two heading is content a carrier reads like any other, so it is a unit rather than a gap between them.
-# The name cannot collide with a heading, since a heading carrying these bytes would have to be written `## (preamble)`.
+# A literal `## (preamble)` heading would collide with it, which file_units then refuses as a duplicate rather than resolving, since only one of the two is a section.
 PREAMBLE = "(preamble)"
 
 # The generator's own source-to-distribution mapping, read from it rather than restated here.
@@ -226,18 +228,38 @@ def parse_manifest(rel: str, data: bytes) -> dict[str, Any]:
     return payload
 
 
-def select_carried(
-    manifest: dict[str, Any],
-    exists: Callable[[str], bool],
-    tree_files: Callable[[str, list[str]], list[str] | None],
-) -> tuple[dict[str, list[str] | None], list[str]]:
-    """What a manifest declares carried, over whichever tree the two callbacks describe.
+def tracked_files(root: Path, commit: str | None = None) -> set[str]:
+    """Every path git tracks, in this working tree or at `commit`.
 
-    Parameterized rather than reading the working tree directly, because the base side of a
+    Git's view rather than the filesystem's, on both sides, because they disagree in ways that
+    matter here. A filesystem walk of a carried tree picks up whatever happens to be sitting in it,
+    so a gitignored `.DS_Store` or an editor backup becomes canonical content: the first fails the
+    UTF-8 decode and takes every subcommand to exit 2, blocking every push from that clone, and the
+    second becomes a unit the gate demands a review pass for and `record` writes into the ledger
+    forever. Neither is content any repository carries. Reading the base side from git's tree while
+    reading this side from disk also compares two different notions of membership, which is the
+    kind of asymmetry that reports a change nobody made.
+    """
+    if commit is None:
+        # Tracked plus untracked-and-not-ignored, rather than tracked alone.
+        # A carried file this branch has created but not staged is content a carrier will receive, and dropping it would narrow the gate exactly where a new canonical is added.
+        # Ignored paths stay out, which is what keeps a stray .DS_Store or build artifact from becoming canonical content.
+        listing = git("ls-files", "-z", "--cached", "--others", "--exclude-standard", root=root)
+    else:
+        listing = git("ls-tree", "-r", "--name-only", "-z", commit, root=root)
+    return {path for path in listing.split("\0") if path}
+
+
+def select_carried(
+    manifest: dict[str, Any], tracked: set[str]
+) -> tuple[dict[str, list[str] | None], list[str]]:
+    """What a manifest declares carried over `tracked`, and what it declares that is not there.
+
+    Parameterized on the path set rather than reading one tree directly, because the base side of a
     comparison has to be resolved against the base commit's own manifest and its own tree. Reading
-    one manifest against two trees is the defect this shape exists to prevent: a branch that adds
-    an already-present file to the manifest makes content newly carried without changing a byte of
-    it, and a single-manifest comparison scores that as no change at all.
+    one manifest against two trees is the defect this shape exists to prevent: a branch that adds an
+    already-present file to the manifest makes content newly carried without changing a byte of it,
+    and a single-manifest comparison scores that as no change at all.
 
     Each value is the section list that path's carry is restricted to, or None where the whole file
     carries. A declared path the tree does not hold is reported rather than skipped quietly, being
@@ -250,7 +272,9 @@ def select_carried(
         if entry.get("fidelity") not in AUTHORED_FIDELITY:
             continue
         rel = str(entry.get("path", ""))
-        if not exists(rel):
+        if rel.startswith("/") or ".." in pathlib.PurePosixPath(rel).parts:
+            raise CannotRun(f"{MANIFEST} declares a path that is not repository-relative: {rel}")
+        if rel not in tracked:
             if rel not in absent:
                 absent.append(rel)
             continue
@@ -264,56 +288,34 @@ def select_carried(
     for entry in manifest.get("trees", []):
         if entry.get("fidelity") not in TREE_FIDELITY:
             continue
-        source = authored_source(entry)
-        found = tree_files(source, list(entry.get("include", ["**/*"])))
-        if found is None:
-            absent.append(source)
+        # Membership comes from the tree a repository actually receives, and the key from the tree a fix is allowed to edit.
+        # Taking both from the authored side would demand a carrier's read of a file no carrier ever gets, which `.agents/skills/README.md` is: it exists only on the authored side and `build_dist.py` copies nothing of it into the distribution.
+        declared = str(entry.get("source", ""))
+        authored = authored_source(entry)
+        patterns = list(entry.get("include", ["**/*"]))
+        prefix = f"{declared}/"
+        found = sorted(
+            path[len(prefix) :]
+            for path in tracked
+            if path.startswith(prefix) and carry.included(path[len(prefix) :], patterns)
+        )
+        if not found:
+            absent.append(declared)
             continue
         for rel in found:
-            carried[f"{source}/{rel}"] = None
+            carried[f"{authored}/{rel}"] = None
     return carried, sorted(absent)
 
 
 def carried_paths(root: Path) -> tuple[dict[str, list[str] | None], list[str]]:
-    """What the working tree's own manifest declares carried, over the working tree.
-
-    The tree half reads through `scripts/carry.py`'s own inventory, so the set reviewed here is the
-    set that tool copies, include patterns and symlink refusal and all. Deriving it a second way
-    would let the two disagree about what is carried, and the copy would win. A baseline path goes
-    through that same module's containment check, so one half of the set is not stricter than the
-    other.
-    """
-
-    def exists(rel: str) -> bool:
-        try:
-            return carry.relative_root(root, rel).is_file()
-        except carry.CarryError as exc:
-            raise CannotRun(f"{MANIFEST} declares an unusable path: {exc}") from exc
-
-    def tree_files(source: str, patterns: list[str]) -> list[str] | None:
-        if not (root / source).is_dir():
-            return None
-        try:
-            return sorted(carry.inventory(root / source, patterns).files)
-        except carry.CarryError as exc:
-            raise CannotRun(f"cannot inventory {source}: {exc}") from exc
-
+    """What this working tree's own manifest declares carried, over what git tracks here."""
     reader = disk_reader(root)
     data = reader(MANIFEST)
     if data is None:
         raise CannotRun(
             f"this working tree holds no {MANIFEST}, so nothing describes what it carries"
         )
-    return select_carried(parse_manifest(MANIFEST, data), exists, tree_files)
-
-
-def tracked_at(root: Path, commit: str) -> set[str]:
-    """Every path the tree at `commit` tracks."""
-    return {
-        path
-        for path in git("ls-tree", "-r", "--name-only", "-z", commit, root=root).split("\0")
-        if path
-    }
+    return select_carried(parse_manifest(MANIFEST, data), tracked_files(root))
 
 
 def carried_at(root: Path, commit: str) -> dict[str, list[str] | None]:
@@ -321,28 +323,12 @@ def carried_at(root: Path, commit: str) -> dict[str, list[str] | None]:
 
     A commit holding no manifest carried nothing, which is the honest answer for a base that
     predates the manifest and makes every unit on this branch a first read.
-
-    The tree half filters `commit`'s tracked paths through `carry.included` rather than through
-    `carry.inventory`, which walks a filesystem that does not exist for a past commit. The include
-    semantics are that module's either way, and its symlink refusal has nothing to act on here,
-    since a tree entry is read for its path rather than followed.
     """
     blobs = blobs_at(root, commit, [MANIFEST])
     if MANIFEST not in blobs:
         return {}
-    tracked = tracked_at(root, commit)
-
-    def tree_files(source: str, patterns: list[str]) -> list[str] | None:
-        prefix = f"{source}/"
-        found = [
-            path[len(prefix) :]
-            for path in tracked
-            if path.startswith(prefix) and carry.included(path[len(prefix) :], patterns)
-        ]
-        return sorted(found) if found else None
-
     carried, _ = select_carried(
-        parse_manifest(MANIFEST, blobs[MANIFEST]), lambda rel: rel in tracked, tree_files
+        parse_manifest(MANIFEST, blobs[MANIFEST]), tracked_files(root, commit)
     )
     return carried
 
@@ -369,12 +355,19 @@ def build_units(
         if sections is None:
             units.update(found)
             continue
+        # Case-folded, matching spec/audit.py's own heading match, so one re-cased declaration cannot make a section silently stop being a unit while the fidelity check still hashes it.
+        # The key is the document's heading rather than the manifest's spelling, so what `check` prints is what the file holds.
+        by_heading = {
+            key.split(SECTION_DELIM, 1)[1].strip().lower(): key
+            for key in found
+            if SECTION_DELIM in key
+        }
         for name in sections:
-            key = f"{rel}{SECTION_DELIM}{name}"
-            if key in found:
-                units[key] = found[key]
+            key = by_heading.get(name.strip().lower())
+            if key is None:
+                missing.append(f"{rel}{SECTION_DELIM}{name}")
             else:
-                missing.append(key)
+                units[key] = found[key]
     return units, sorted(set(missing))
 
 
@@ -386,7 +379,10 @@ def disk_reader(root: Path) -> Callable[[str], bytes | None]:
     """
 
     def read(rel: str) -> bytes | None:
-        path = root / rel
+        try:
+            path = carry.relative_root(root, rel)
+        except carry.CarryError as exc:
+            raise CannotRun(f"{MANIFEST} declares an unusable path: {exc}") from exc
         if not path.is_file():
             return None
         try:
@@ -423,10 +419,15 @@ def blobs_at(root: Path, commit: str, rels: list[str]) -> dict[str, bytes]:
         raise CannotRun(
             f"a carried path holds a line ending in its name, which git cat-file --batch cannot be asked for: {newlined[0]!r}"
         )
-    request = "".join(f"{commit}:{rel}\n" for rel in rels).encode("utf-8")
+    # Encoded with surrogateescape, matching how local_review.git decodes a path, so a name holding a non-UTF-8 byte round-trips instead of raising on the way back out.
+    request = "".join(f"{commit}:{rel}\n" for rel in rels).encode("utf-8", "surrogateescape")
+    # The same redirects local_review.git strips from every call it makes.
+    # Inherited, GIT_OBJECT_DIRECTORY points this read at a store that does not hold the base commit's blobs, which reads as a base that carried nothing and refuses the push naming every unit in the tree as newly carried.
+    env = {k: v for k, v in os.environ.items() if k not in local_review.INHERITED_REDIRECTS}
     proc = subprocess.run(
         ["git", "-c", "core.quotePath=false", "cat-file", "--batch"],
         cwd=str(root),
+        env=env,
         input=request,
         capture_output=True,
         check=False,
@@ -445,17 +446,19 @@ def blobs_at(root: Path, commit: str, rels: list[str]) -> dict[str, bytes]:
                 f"git cat-file --batch stopped before answering for {rel},"
                 " so the base content is unknown rather than absent"
             )
-        header = buffer[position:end].decode("utf-8", "replace").split(" ")
+        header = buffer[position:end].decode("utf-8", "replace")
         position = end + 1
-        # `missing`, `ambiguous` and `dangling` all answer "no blob here", and none of them is followed by a payload to skip over.
-        if len(header) < 3:
+        fields = header.split(" ")
+        # An answer is either `<oid> <type> <size>` or the request echoed back with a status word.
+        # Keyed on the last field rather than the third, because git echoes the request verbatim and a path holding a space pushes a digit into third place.
+        # `HEAD:a b 12 c.md missing` parsed as a 12-byte object and took the next answer's header as this path's content.
+        if fields[-1] in ("missing", "ambiguous", "dangling"):
             continue
-        try:
-            size = int(header[2])
-        except ValueError as exc:
+        if len(fields) != 3 or not fields[2].isdigit():
             raise CannotRun(
-                f"git cat-file --batch returned an unreadable header for {rel}"
-            ) from exc
+                f"git cat-file --batch answered for {rel!r} with a header this cannot read: {header!r}"
+            )
+        size = int(fields[2])
         out[rel] = buffer[position : position + size]
         # The payload is followed by a newline the header's size does not count.
         position += size + 1
@@ -815,8 +818,25 @@ def write_report(root: Path) -> int:
 
 
 def cmd_report(args: argparse.Namespace) -> int:
-    emit(f"wrote {REPORT} over {write_report(local_review.repo_root())} unit(s).")
-    return EXIT_COVERED
+    root = local_review.repo_root()
+    if not args.check:
+        emit(f"wrote {REPORT} over {write_report(root)} unit(s).")
+        return EXIT_COVERED
+    # Read-only, on `build_dist.py --check`'s contract, because a burn-down nothing verifies is current only by accident.
+    # Deleting a unit outright changes no recorded pass, so `check` stays covered while the committed report still counts and lists the unit that is gone.
+    current, absent = units(root)
+    want = render_report(current, read_ledger(root), absent)
+    path = root / REPORT
+    have = path.read_bytes().decode("utf-8") if path.is_file() else None
+    if have == want:
+        emit(f"{REPORT} is current over {len(current)} unit(s).")
+        return EXIT_COVERED
+    emit(
+        f"{REPORT} does not describe the ledger and the tree."
+        f"\nRun: python3 scripts/canonical_review.py report",
+        sys.stderr,
+    )
+    return EXIT_NOT_COVERED
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -849,6 +869,11 @@ def main(argv: list[str] | None = None) -> int:
     p_record.set_defaults(handler=cmd_record)
 
     p_report = sub.add_parser("report", help=f"write {REPORT}")
+    p_report.add_argument(
+        "--check",
+        action="store_true",
+        help="read-only: exit 0 where the report is current, 1 where it is not",
+    )
     p_report.set_defaults(handler=cmd_report)
 
     p_check.add_argument(
@@ -875,8 +900,7 @@ def main(argv: list[str] | None = None) -> int:
         return code
     # A crash is the check not having run, so it reports the boundary code.
     # Falling through to the interpreter's own exit 1 would read as the not-covered verdict, and a capture point folding that reports an execution boundary as a gate finding.
-    # `blobs_at` is the reachable case: it runs git with a timeout and catches neither OSError nor
-    # TimeoutExpired, both of which a loaded host can produce.
+    # `blobs_at` is the reachable case: it runs git with a timeout and catches neither OSError nor TimeoutExpired, both of which a loaded host can produce.
     except Exception as exc:  # noqa: BLE001
         emit(f"canonical-review: unexpected failure ({type(exc).__name__}: {exc})", sys.stderr)
         return EXIT_CANNOT_RUN

@@ -65,6 +65,12 @@ runs:
         fi
         python3 scripts/canonical_review.py check --target "$BASE_SHA"
 
+    # Read-only: fails where the committed burn-down no longer describes the ledger and the tree.
+    # Unconditional, unlike the step above, because staleness is a property of the commit rather than of a comparison against a base.
+    - name: Check the canonical review burn-down is current step
+      shell: bash
+      run: python3 scripts/canonical_review.py report --check
+
     # Warn-only, and visible rather than absent: an unrun check is one nobody acts on.
     # A finding here names a character no tier covers, and classifying it is a fleet-law edit rather than a prose fix.
     - name: Report unclassified characters step

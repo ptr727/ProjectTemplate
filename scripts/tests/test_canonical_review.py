@@ -166,12 +166,16 @@ class RepoCase(unittest.TestCase):
         )
         self.write("DOC.md", "intro\n\n## Alpha\n\na body\n\n## Beta\n\nb body\n")
         self.write("CONF.json", '{"a": 1}\n')
+        self.write(".gitignore", ".DS_Store\n")
         self.write("IFACE.yml", "on: push\n")
         self.write("OWN.md", "## Mine\n\nlocal\n")
         self.write(
             "SECT.md", "intro\n\n## Carried\n\na\n\n## Also Carried\n\nb\n\n## Hub Only\n\nc\n"
         )
         self.write(f"{cr.AUTHORED_SKILLS}/demo/SKILL.md", "# Demo\n\n## Use It\n\nhow\n")
+        self.write(f"{cr.GENERATED_SKILLS}/demo/SKILL.md", "# Demo\n\n## Use It\n\nhow\n")
+        # Authored-side only, the shape .agents/skills/README.md has: no repository receives it.
+        self.write(f"{cr.AUTHORED_SKILLS}/README.md", "# Skills\n\n## About\n\nlocal\n")
         run(self.tmp, "add", "-A")
         run(self.tmp, "commit", "-m", "base")
         head = run(self.tmp, "rev-parse", "HEAD").strip()
@@ -218,6 +222,9 @@ class RepoCase(unittest.TestCase):
         current, _ = cr.units(self.tmp)
         return current
 
+    def manifest(self) -> dict:
+        return json.loads((self.tmp / "spec/files.json").read_bytes().decode("utf-8"))
+
     def record(self, unit: str, findings: int = 0) -> int:
         return self.quiet(
             [
@@ -240,6 +247,42 @@ class ManifestCase(RepoCase):
         self.assertIn("CONF.json", units)
         self.assertNotIn("IFACE.yml", units)
         self.assertNotIn("OWN.md > Mine", units)
+
+    def test_a_file_only_on_the_authored_side_is_not_a_unit(self) -> None:
+        """No repository receives it, so demanding a carrier's read of it invents an obligation."""
+        stem = f"{cr.AUTHORED_SKILLS}/README.md"
+        offending = [u for u in self.units() if u == stem or u.startswith(stem + cr.SECTION_DELIM)]
+        self.assertEqual(offending, [], "a file no repository receives became canonical content")
+
+    def test_an_ignored_file_in_a_carried_tree_is_not_canonical_content(self) -> None:
+        """A filesystem walk took whatever sat in the tree. The undecodable case is the loud one:
+        it takes every subcommand to exit 2, which blocks every push from that clone until someone
+        finds the file, and no repository carries it."""
+        for tree in (cr.GENERATED_SKILLS, cr.AUTHORED_SKILLS):
+            (self.tmp / tree / "demo" / ".DS_Store").write_bytes(b"\xff\xfe\x00rubbish")
+        units = self.units()
+        self.assertNotIn(f"{cr.AUTHORED_SKILLS}/demo/.DS_Store", units)
+        self.assertIn(f"{cr.AUTHORED_SKILLS}/demo/SKILL.md > Use It", units)
+
+    def test_a_new_unstaged_carried_file_is_still_a_unit(self) -> None:
+        """It is content a carrier will receive, so dropping it would narrow the gate exactly where
+        a new canonical is added."""
+        self.write(f"{cr.GENERATED_SKILLS}/fresh/SKILL.md", "# F\n\n## One\n\na\n")
+        self.write(f"{cr.AUTHORED_SKILLS}/fresh/SKILL.md", "# F\n\n## One\n\na\n")
+        self.assertIn(f"{cr.AUTHORED_SKILLS}/fresh/SKILL.md > One", self.units())
+
+    def test_a_declared_section_matches_the_heading_case_insensitively(self) -> None:
+        """spec/audit.py matches case-folded, so matching exactly here would silently stop gating a
+        section the fidelity check still hashes, and report it as not held at all."""
+        spec = self.manifest()
+        for entry in spec["baseline"]:
+            if entry["path"] == "SECT.md":
+                entry["sections"] = ["carried", "ALSO CARRIED"]
+        self.write("spec/files.json", json.dumps(spec, indent=2) + "\n")
+        units, absent = cr.units(self.tmp)
+        self.assertIn("SECT.md > Carried", units, "a re-cased declaration stopped gating a section")
+        self.assertIn("SECT.md > Also Carried", units)
+        self.assertNotIn("SECT.md > carried", absent)
 
     def test_the_skills_tree_is_read_at_its_authored_path(self) -> None:
         """The manifest declares the generated tree, and the unit names the file a fix may edit."""
@@ -311,14 +354,12 @@ class GateCase(RepoCase):
 
     def test_a_file_this_branch_adds_owes_every_one_of_its_units(self) -> None:
         """Which is exactly what a first carrier of it faces."""
+        self.write(f"{cr.GENERATED_SKILLS}/fresh/SKILL.md", "# F\n\n## One\n\na\n\n## Two\n\nb\n")
         self.write(f"{cr.AUTHORED_SKILLS}/fresh/SKILL.md", "# F\n\n## One\n\na\n\n## Two\n\nb\n")
         code, output = self.loud(["check"])
         self.assertEqual(code, cr.EXIT_NOT_COVERED)
         self.assertIn("fresh/SKILL.md > One", output)
         self.assertIn("fresh/SKILL.md > Two", output)
-
-    def manifest(self) -> dict:
-        return json.loads((self.tmp / "spec/files.json").read_bytes().decode("utf-8"))
 
     def test_newly_carrying_an_existing_file_is_a_changed_unit(self) -> None:
         """The branch changes nothing in the file and everything about who reads it.
@@ -517,7 +558,39 @@ class BoundaryCase(RepoCase):
             self.assertIn("unexpected failure", output)
 
 
+class BatchReaderCase(RepoCase):
+    def test_a_path_holding_spaces_is_not_answered_with_another_path_s_content(self) -> None:
+        """git echoes the request on a `missing` line, so `HEAD:a b 12 c.md missing` splits into
+        fields whose third parses as a size, and the next answer's header was read as this path's
+        content. Keyed on the last field instead."""
+        got = cr.blobs_at(self.tmp, "HEAD", ["a b 12 c.md", "DOC.md"])
+        self.assertNotIn("a b 12 c.md", got, "content was fabricated for an absent path")
+        self.assertIn("DOC.md", got)
+        self.assertTrue(got["DOC.md"].startswith(b"intro"))
+
+    def test_a_redirected_object_store_is_not_read_as_an_empty_base(self) -> None:
+        """Inherited, GIT_OBJECT_DIRECTORY points the read at a store without the base's blobs,
+        which reads as a base that carried nothing and refuses every unit as newly carried."""
+        empty = self.outside / "objects"
+        empty.mkdir()
+        prev = os.environ.get("GIT_OBJECT_DIRECTORY")
+        os.environ["GIT_OBJECT_DIRECTORY"] = str(empty)
+        self.addCleanup(self.restore_env, "GIT_OBJECT_DIRECTORY", prev)
+        self.assertIn("DOC.md", cr.blobs_at(self.tmp, "HEAD", ["DOC.md"]))
+
+
 class ReportCase(RepoCase):
+    def test_report_check_catches_a_burn_down_that_no_longer_describes_the_tree(self) -> None:
+        """A deleted unit changes no recorded pass, so `check` stays covered while the committed
+        report still counts and lists a unit that is gone."""
+        self.quiet(["report"])
+        self.assertEqual(self.quiet(["report", "--check"]), cr.EXIT_COVERED)
+        self.write("DOC.md", "intro\n\n## Alpha\n\na body\n")
+        self.assertEqual(self.quiet(["check"]), cr.EXIT_COVERED, "the premise moved")
+        self.assertEqual(self.quiet(["report", "--check"]), cr.EXIT_NOT_COVERED)
+        self.quiet(["report"])
+        self.assertEqual(self.quiet(["report", "--check"]), cr.EXIT_COVERED)
+
     def test_recording_rewrites_the_burn_down(self) -> None:
         """A ledger and a report that disagree are two answers about the same coverage."""
         self.record("DOC.md > Alpha")

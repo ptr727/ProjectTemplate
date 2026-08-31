@@ -6,16 +6,12 @@ A unit is what a reviewer reads whole, decided by the carry manifest rather than
 
 ## Coverage
 
-- units: 289
+- units: 288
 - covered: 7
 - stale: 0
-- never read here: 282
+- never read here: 281
 
 ## Burn-down
-
-### .agents/skills/README.md
-
-- **(whole file)** - never
 
 ### .agents/skills/add-host-tool/SKILL.md
 
