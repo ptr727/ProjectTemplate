@@ -107,12 +107,14 @@ flowchart TD
   start["session start"] -->|"restated-rule symptom"| stale["skills_install --report, per the documented cadence"]
   start --> work["work: codestyle, commit, and doc skills fire by trigger"]
   work --> gates["pre-commit gates: prose lint, eol"]
-  gates --> pr["pull request"]
+  gates --> review1["local-strict-review, recorded via local_review.py"]
+  review1 --> push["push, gated by pre-push in the hub"]
+  push --> pr["pull request"]
   pr --> review["Copilot loop via pr_review.py"]
   review --> merge["merge per registry workflowModel"]
 ```
 
-Owned by the per-language sections of [`CODESTYLE.md`][codestyle] and the conduct skills. The gates node is the [`OPERATIONS.md`][operations] "Run the gates the way CI runs them" section, and the review node runs through [`scripts/pr_review.py`][pr-review]. No open gaps sit on this path: G6, the unwired staleness check, and G7, the operational direct-commit allowance, are closed and their rows record the resolutions.
+Owned by the per-language sections of [`CODESTYLE.md`][codestyle] and the conduct skills. The gates node is the [`OPERATIONS.md`][operations] "Run the gates the way CI runs them" section, the local review node is the `local-strict-review` skill recorded through `scripts/local_review.py`, and the review node runs through [`scripts/pr_review.py`][pr-review]. The push node's gate is the hub's own `.husky/pre-push`, so on a downstream repo that edge is prose alone until a catalog snippet carries the hook. One open gap sits on this path: G13, the local review gate reaching the hub only, which is why the push node's own edge reads as prose on every other repository. G6, the unwired staleness check, and G7, the operational direct-commit allowance, are closed and their rows record the resolutions.
 
 ### Hub-Side Operations
 
@@ -162,6 +164,7 @@ Four wiring points close the model, and each is in place:
 | G10 | The skill lifecycle itself has no skill | skill | closed |
 | G11 | Peer messaging is live but undeclared | doc | closed |
 | G12 | General conduct rules have no skill | skill | closed |
+| G13 | The local review gate reaches the hub only | script + doc | open |
 
 Each gap's handoff below states who detects it, what closes it, and the test that proves it closed. The handoff sentence is the contract the closing pull request implements.
 
@@ -241,6 +244,12 @@ flowchart LR
 
 - **Gap** - The conduct layer (ask when unsure, never assume, verification before claiming done, delegation and token discipline) lived in carried [`AGENTS.md`][agents] sections and doc-only GOVERNANCE sections, with no skill firing at the moments those rules are violated.
 - **Resolution** - The `agent-conduct` skill ships with the narrow decision-moment triggers the proposal specifies (about to claim done, about to assume, a failure just surfaced a lesson), summarizing `Verification Discipline`, `Communicating with the User`, and `Durable Knowledge and Self-Improvement`, which keep the full rules and carry the surfacing pointer, while the carried AGENTS.md sections stay the always-on layer.
+
+### G13: The Local Review Gate Reaches the Hub Only (Open)
+
+- **Gap** - `GOVERNANCE.md` "Verification Discipline" requires a recorded local review pass before every push toward a pull request, and only the hub carries the [`.husky/pre-push`][pre-push] hook that checks the receipt. Every other repository has the prose layer and no capture point, which is the layering working as designed but leaves the mechanical half unbuilt where most of the work happens.
+- **Handoff** - `scripts/local_review.py` is hub-hosted and takes no `--repo`, reading whichever repository the working directory sits in, so a downstream repo reaches it as a hub checkout's copy run from its own worktree. Closing this means a `catalog/snippets/` pre-push companion to the existing pre-commit snippets, reaching the engine the way those reach the doc gates. The closing test is a downstream repo whose unreviewed push is refused and whose recorded push is not.
+- **Known limits the snippet inherits** - The hook refuses rather than guesses in several states it cannot speak for, and every one of those is deliberate rather than incidental, so a snippet reproduces them rather than re-deciding them. The `local-strict-review` Skill's refusal table is the enumeration, kept in one place on purpose. Two of them read as shortcomings a snippet should fix and are not, so they are named here with the reason. **The refusal while the working tree holds tracked content differing from HEAD** reads as an unrelated cleanliness check: a push delivers HEAD while the engine's key covers the index and the working tree, so without it a fix staged over an unreviewed commit passes the gate while the push delivers the commit. **The fixed `develop` target, with no environment override**, reads as a gap to close for a repo whose working branch differs. Adding one reopens a measured bypass, since the variable is set inline on the very command being gated, by whoever is being gated, and naming the pushed branch as its own target collapses the change set to nothing and exits 0. A snippet needing another branch hard-codes it rather than reading it from the environment.
 
 ## Proposed Skills
 
@@ -327,6 +336,7 @@ Design-doc first: this doc merges, then each unchecked item becomes an issue lin
 
 ### P4: Steady State
 
+- [ ] Local review gate carried to the fleet as a `catalog/snippets/` pre-push companion, closing G13
 - [ ] Refresh cadence observed in practice, revisited if the manual cadence fails
 - [ ] Register rows retired as they close, per the maintenance rule
 - [ ] Peer-messaging promotion re-evaluated after cross-host verification
@@ -358,6 +368,7 @@ Design-doc first: this doc merges, then each unchecked item becomes an issue lin
 [host-tools]: ../spec/host-tools.json
 [operations]: ../OPERATIONS.md
 [peer-messaging]: ./peer-messaging.md
+[pre-push]: ../.husky/pre-push
 [pr-review]: ../scripts/pr_review.py
 [prose-lint]: ../scripts/prose_lint.py
 [readme]: ../README.md

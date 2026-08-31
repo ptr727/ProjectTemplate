@@ -456,6 +456,70 @@ class ContentKeyCase(RepoCase):
         self.assertEqual(self.digest(), from_root, "the key changed with the working directory")
 
 
+class HeadContentCase(RepoCase):
+    """Content the pushed commit carries that the index and working tree no longer show.
+
+    The index and the working tree describe what is about to be committed, never what is already
+    committed, so a key built from those two alone stops seeing a path the moment the tree agrees
+    with the merge base again. The commit still carries it, and a push still delivers it.
+    """
+
+    def test_a_committed_file_removed_in_the_tree_stays_in_the_key(self) -> None:
+        (self.tmp / "payload.txt").write_text("secret\n", encoding="utf-8")
+        self.commit_all("add payload")
+        run(self.tmp, "rm", "-f", "payload.txt")
+        # Index, working tree, and merge base now all agree the path is absent.
+        # The commit that a push would deliver still holds it, which is what has to keep it in.
+        self.assertIn("payload.txt", self.marks())
+        self.assertEqual(self.main_quiet(["check", "--target", self.target]), 1)
+
+    def test_a_committed_edit_reverted_in_the_tree_invalidates_the_pass(self) -> None:
+        (self.tmp / "base.txt").write_text("changed\n", encoding="utf-8")
+        self.commit_all("edit base")
+        self.record("agent-skill")
+        self.assertEqual(self.main_quiet(["check", "--target", self.target]), 0)
+        # The commit keeps the edit, so the reviewed content is still what a push delivers.
+        # Restoring the file from the merge base is what a key blind to HEAD reads as no change.
+        run(self.tmp, "checkout", self.target, "--", "base.txt")
+        self.assertEqual(self.main_quiet(["check", "--target", self.target]), 1)
+
+    def test_a_path_held_by_head_alone_leaves_the_set_when_the_undo_is_committed(self) -> None:
+        """The boundary the HEAD read actually moved, asserted rather than assumed harmless.
+
+        A path in the set only because HEAD disagrees with the base is one the branch committed and
+        the tree has since put back. Committing that undo drops it, and the key moves. That is the
+        key following what a push delivers rather than the commit-boundary property breaking: before
+        the commit a push delivers the change, and after it a push delivers the undo.
+        """
+        (self.tmp / "base.txt").write_text("changed\n", encoding="utf-8")
+        self.commit_all("edit base")
+        run(self.tmp, "checkout", self.target, "--", "base.txt")
+        held_by_head = self.marks()
+        self.assertIn("base.txt", held_by_head, "HEAD is no longer deciding membership")
+        before = self.digest()
+        self.commit_all("commit the undo")
+        self.assertNotIn("base.txt", self.marks())
+        self.assertNotEqual(self.digest(), before, "the pushed content changed and the key did not")
+
+    def test_the_commit_itself_still_leaves_the_key_alone(self) -> None:
+        """The half of the property that must survive, next to the half above that moved.
+
+        Staged first, so the only thing between the two digests is the commit, which is the one
+        operation the HEAD read newly sees. Staging is left out on purpose: `git add` on a modified
+        tracked file collapses a mark that named the index separately, which moves the key by the
+        existing design `state_mark` documents and would hide what this case is measuring.
+
+        It is a floor rather than a proof of the HEAD read, and it passes with that read reverted,
+        since both paths are in the set through their working-tree state either way.
+        """
+        (self.tmp / "new.py").write_text("print('x')\n", encoding="utf-8")
+        (self.tmp / "base.txt").write_text("edited\n", encoding="utf-8")
+        run(self.tmp, "add", "-A")
+        before = self.digest()
+        run(self.tmp, "commit", "-m", "commit the reviewed work")
+        self.assertEqual(self.digest(), before)
+
+
 class StagingIsolationCase(RepoCase):
     def test_reading_the_worktree_does_not_touch_the_real_index(self) -> None:
         """The read stages the tree into a throwaway index, which must stay throwaway."""
@@ -481,6 +545,49 @@ class ReceiptCase(RepoCase):
         self.assertEqual(self.main_quiet(["check", "--target", self.target]), 1)
         self.record("agent-skill")
         self.assertEqual(self.main_quiet(["check", "--target", self.target]), 0)
+
+    def test_an_empty_change_set_needs_no_pass(self) -> None:
+        """A branch with no net content against its target has nothing for a review to read.
+
+        Gating it would demand a review of an empty diff, and a receipt against that empty digest
+        would attest to nothing. `status` still reports what is recorded, which is nothing, so the
+        two answers must be read as the different questions they are.
+        """
+        self.assertEqual(len(self.marks()), 0, "the fixture branch already carries content")
+        self.assertEqual(self.main_quiet(["check", "--target", self.target]), 0)
+        out = io.StringIO()
+        with contextlib.redirect_stdout(out), contextlib.redirect_stderr(io.StringIO()):
+            self.assertEqual(local_review.main(["status", "--target", self.target]), 0)
+        reported = json.loads(out.getvalue())
+        self.assertEqual(reported["changedPaths"], 0)
+        self.assertFalse(reported["covered"], "status counts recorded passes, and none was")
+
+    def test_an_unreadable_receipt_reports_the_boundary_even_with_nothing_to_gate(self) -> None:
+        """A receipt that cannot be read off disk is the check not running, whatever the change set.
+
+        The empty-change answer is a verdict, so reaching it without having tried to read the
+        receipt would convert an execution boundary into a cheerful covered, which is the one
+        reading a gate must never take.
+        """
+        self.assertEqual(len(self.marks()), 0, "the fixture branch already carries content")
+        path = local_review.receipt_path(self.tmp)
+        path.write_text("{}", encoding="utf-8")
+        path.chmod(0o000)
+        self.addCleanup(path.unlink)
+        self.addCleanup(path.chmod, 0o600)
+        if os.access(path, os.R_OK):
+            self.skipTest("this user reads a mode 000 file, so the boundary cannot be provoked")
+        self.assertEqual(self.main_quiet(["check", "--target", self.target]), 2)
+
+    def test_the_empty_change_set_exemption_is_the_only_reason_that_push_passes(self) -> None:
+        """Proves the case above by the one byte that separates it from a gated branch.
+
+        Without this, a branch that happened to carry no content would pass for the same reason a
+        reviewed one does, and the exemption would be untested where it actually fires.
+        """
+        self.assertEqual(self.main_quiet(["check", "--target", self.target]), 0)
+        (self.tmp / "new.py").write_text("print('x')\n", encoding="utf-8")
+        self.assertEqual(self.main_quiet(["check", "--target", self.target]), 1)
 
     def test_a_stale_pass_is_dropped_rather_than_carried(self) -> None:
         (self.tmp / "new.py").write_text("print('x')\n", encoding="utf-8")
@@ -597,6 +704,32 @@ class ReceiptCase(RepoCase):
             2,
         )
         self.assertEqual(self.main_quiet(["check", "--target", self.target]), 1)
+
+    def test_a_receipt_naming_another_target_gets_no_paste_ready_remedy(self) -> None:
+        """The remedy is withheld precisely where following it would stamp unread content.
+
+        A pass recorded against one branch and a check measuring another disagree about scope. The
+        ordinary remedy line records this check's scope, which runs, succeeds, replaces the
+        correctly scoped receipt, and passes the next check over a diff no reviewer read.
+        """
+        (self.tmp / "new.py").write_text("print('x')\n", encoding="utf-8")
+        self.record("agent-skill", target="main")
+        err = io.StringIO()
+        with contextlib.redirect_stderr(err), contextlib.redirect_stdout(io.StringIO()):
+            self.assertEqual(local_review.main(["check", "--target", self.target]), 1)
+        printed = err.getvalue()
+        self.assertNotIn("local_review.py record", printed, "the unsafe remedy was offered anyway")
+        self.assertIn("wrong scope", printed)
+
+    def test_the_remedy_still_appears_when_the_targets_agree(self) -> None:
+        """The floor under the case above, so withholding cannot quietly become withholding always."""
+        (self.tmp / "new.py").write_text("print('x')\n", encoding="utf-8")
+        self.record("agent-skill")
+        (self.tmp / "new.py").write_text("print('y')\n", encoding="utf-8")
+        err = io.StringIO()
+        with contextlib.redirect_stderr(err), contextlib.redirect_stdout(io.StringIO()):
+            self.assertEqual(local_review.main(["check", "--target", self.target]), 1)
+        self.assertIn("local_review.py record", err.getvalue())
 
     def test_the_check_failure_prints_a_command_that_actually_runs(self) -> None:
         """The remedy line is the one actionable thing the failure emits.

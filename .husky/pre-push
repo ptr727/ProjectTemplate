@@ -1,0 +1,99 @@
+#!/usr/bin/env bash
+# Refuses a branch push that no recorded local review pass covers, per GOVERNANCE.md "Verification Discipline".
+# Enable it per clone with `git config core.hooksPath .husky`, and see the pre-commit hook for why `_/husky.sh` is not sourced.
+set -Eeuo pipefail
+
+# Belt and braces for an invocation that does not come from git, which always runs a hook from the top level.
+cd "$(git rev-parse --show-toplevel)"
+
+# A branch update whose object id is not HEAD is content this checkout does not hold.
+# The all-zero id is a delete, whose length differs between a SHA-1 and a SHA-256 repository.
+# Reading stdin without a pipeline keeps the flags in this shell rather than in a subshell.
+head_oid="$(git rev-parse HEAD)"
+pushes_a_branch=no
+pushes_a_stranger=no
+while read -r _ local_oid remote_ref _; do
+    case "$remote_ref" in
+    refs/heads/*) ;;
+    *) continue ;;
+    esac
+    case "$local_oid" in
+    *[!0]*) ;;
+    *) continue ;;
+    esac
+    pushes_a_branch=yes
+    if [ "$local_oid" != "$head_oid" ]; then
+        pushes_a_stranger=yes
+    fi
+done
+if [ "$pushes_a_branch" = no ]; then
+    exit 0
+fi
+if [ "$pushes_a_stranger" = yes ]; then
+    echo "pre-push: this push carries a commit that is not this worktree's HEAD, so the gate cannot speak for it." >&2
+    echo "pre-push: check out the branch being pushed, in its own worktree, and push from there." >&2
+    exit 1
+fi
+
+# A push delivers HEAD while the engine's key covers the index and the working tree.
+# Plumbing rather than `git diff`, which consults diff drivers.
+# A lossy textconv makes differing content compare equal, and off-switches fail open on the next driver.
+# --refresh first, since diff-index reads stat information and a touched file otherwise reads dirty.
+# --ignore-submodules=none because diff.ignoreSubmodules would otherwise hide a differing gitlink.
+# 1 is a real difference, and any other status is git failing, which is a boundary rather than a verdict.
+refresh_status=0
+git update-index -q --refresh || refresh_status=$?
+tree_status=0
+git diff-index --quiet --ignore-submodules=none HEAD -- || tree_status=$?
+if [ "$tree_status" -eq 1 ]; then
+    echo "pre-push: this worktree holds tracked content that differs from HEAD, so the gate cannot speak for the push." >&2
+    # An unresolved merge exits the refresh 1 with the refresh having worked, so it is read here rather than doubted below.
+    if [ -n "$(git ls-files --unmerged)" ]; then
+        echo "pre-push: this worktree has an unresolved merge, so resolve and commit it before pushing." >&2
+    else
+        echo "pre-push: commit what is being pushed, then run the pass and record it, then push." >&2
+        # Past 1 the refresh did not complete, leaving stat information that reads dirty on unchanged content.
+        if [ "$refresh_status" -gt 1 ]; then
+            echo "pre-push: 'git update-index --refresh' exited $refresh_status, so run 'git status' and retry before believing this." >&2
+        fi
+    fi
+    exit 1
+elif [ "$tree_status" -ne 0 ]; then
+    echo "pre-push: 'git diff-index --quiet --ignore-submodules=none HEAD --' failed with $tree_status, so the gate did not run." >&2
+    exit 1
+fi
+
+# The interpreter is chosen by running the probes spec/host-tools.json declares, in its order.
+# The pre-commit hook states why a presence test picks the wrong name on native Windows.
+if python3 --version >/dev/null 2>&1; then
+    run_py() { python3 "$@"; }
+    py_name=python3
+elif py -3 --version >/dev/null 2>&1; then
+    run_py() { py -3 "$@"; }
+    py_name="py -3"
+else
+    echo "pre-push: neither 'python3 --version' nor 'py -3 --version' ran, so the review gate did not run." >&2
+    echo "pre-push: see docs/host-setup.md 'What a Host Must Provide'." >&2
+    exit 1
+fi
+
+# No --target: a target read from the environment is set inline on the very command being gated.
+status=0
+run_py scripts/local_review.py check || status=$?
+if [ "$status" -eq 0 ]; then
+    exit 0
+fi
+if [ "$status" -eq 1 ]; then
+    echo "" >&2
+    # The engine names its own case, and only some of them are a missing pass.
+    if [ "$py_name" != python3 ]; then
+        echo "pre-push: this host runs the engine as '$py_name', so read any 'python3' above as '$py_name'." >&2
+    fi
+    echo "pre-push: this push is blocked, which is the gate working. Read the engine message above for the case." >&2
+    echo "pre-push: the local-strict-review skill's refusal table says what clears each one." >&2
+    exit 1
+fi
+echo "" >&2
+echo "pre-push: the local review gate could not run, which is not a verdict either way." >&2
+echo "pre-push: fix what it reported above, most often by fetching the target branch." >&2
+exit 1
