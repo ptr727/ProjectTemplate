@@ -27,6 +27,7 @@ uvx coverage@latest run --source=scripts,spec,host-setup --append host-setup/age
 uvx coverage@latest run --source=scripts,spec,host-setup --append host-setup/agent-safety/claude/test_install.py
 uvx coverage@latest report
 python3 scripts/build_dist.py --check
+python3 scripts/canonical_review.py check
 python3 scripts/repo_gate.py
 python3 scripts/prose_lint.py . --check charset --check semicolon --check dash --check dupword --check spelling --check comment-wrap --check comment-case --check home-path --check dead-path
 python3 scripts/prose_lint.py . --check charset-unknown --summary
@@ -34,6 +35,8 @@ for f in registry/*.json spec/*.json repo-config/*.json; do jq empty "$f"; done
 python3 spec/validate.py
 python3 scripts/docker_lint.py
 ```
+
+The canonical-review check sits in CI's own list only for a pull request, since a canonical unit's change is measured against the branch it is proposed into and a push carrying no pull request names none. The local run above takes the default target, `develop`, which is the same measurement for an ordinary feature branch and the wrong one for a branch based on `main`, where it needs `--target main` to mean anything.
 
 The cache directory is unique to this verification run and remains outside the checkout. The operating system can reap it with other temporary data. A restricted executor may deny the first `uvx` network request, Docker socket access, or third-party image access to the repository. Record that denial as an execution boundary, then rerun the required command with scoped approval. Persist repository-exposure approval only when the executor constrains the read-only mount, disabled networking, and digest together. Only the rerun's tool output is a lint or test verdict. Provider-specific host configuration lives in [`docs/host-setup.md`](./docs/host-setup.md) "Agent Worktree Access".
 

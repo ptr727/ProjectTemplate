@@ -42,6 +42,17 @@ runs:
       shell: bash
       run: python3 scripts/build_dist.py --check
 
+    # The carried-content half of the local-review rule, per GOVERNANCE.md "Verification Discipline".
+    # The .husky/pre-push hook runs the same check and is bypassable by construction, so this is where it actually binds.
+    # Pull requests only, since a canonical unit's change is measured against the branch it is proposed into and a push carrying no pull request has none.
+    # The base commit reaches the script through the environment rather than through an expression inside it, so a ref value can never be read as shell.
+    - name: Check carried canonical content review coverage step
+      if: github.event.pull_request != null
+      shell: bash
+      env:
+        BASE_SHA: ${{ github.event.pull_request.base.sha }}
+      run: python3 scripts/canonical_review.py check --target "$BASE_SHA"
+
     # Warn-only, and visible rather than absent: an unrun check is one nobody acts on.
     # A finding here names a character no tier covers, and classifying it is a fleet-law edit rather than a prose fix.
     - name: Report unclassified characters step

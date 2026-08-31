@@ -1,0 +1,53 @@
+{
+  "note": "What full-content reviews of hub canonical content have covered, one entry per unit, holding the most recent pass. Written by scripts/canonical_review.py record, never by hand, and git keeps the history. A unit is covered while its digest here matches the content's, so an edit to the unit retires the pass. See ptr727/ProjectTemplate#1138 for why the record exists.",
+  "passes": [
+    {
+      "unit": ".agents/skills/local-strict-review/SKILL.md > (preamble)",
+      "digest": "sha256:e607d4a5c7ad14232516261ab7f0941de11a4312415a65dc054b394a645a106d",
+      "reviewer": "agent-skill",
+      "findings": 1,
+      "hubCommit": "68117017a1483706765a8075ab8a29bb67bfe711",
+      "stamp": "2026-08-31T14:38:05Z"
+    },
+    {
+      "unit": ".agents/skills/local-strict-review/SKILL.md > Mechanics Live Elsewhere",
+      "digest": "sha256:9190c95f50cfed12a0157f1cbb55e080c0fc7cbe2dbbbaf6fd2f744736c365b5",
+      "reviewer": "agent-skill",
+      "findings": 0,
+      "hubCommit": "68117017a1483706765a8075ab8a29bb67bfe711",
+      "stamp": "2026-08-31T14:38:06Z"
+    },
+    {
+      "unit": ".agents/skills/local-strict-review/SKILL.md > The Carried-Content Pass",
+      "digest": "sha256:d983c6d9954a8b06ef0de583d42be863bdca2cccbd026c46a0012f8134cd7e60",
+      "reviewer": "agent-skill",
+      "findings": 3,
+      "hubCommit": "68117017a1483706765a8075ab8a29bb67bfe711",
+      "stamp": "2026-08-31T14:38:05Z"
+    },
+    {
+      "unit": ".agents/skills/local-strict-review/SKILL.md > When to Run It",
+      "digest": "sha256:42be4454bae1fbefcc7d5ad6656727bb049b50b14caef730c7effd7a7a99dceb",
+      "reviewer": "agent-skill",
+      "findings": 4,
+      "hubCommit": "68117017a1483706765a8075ab8a29bb67bfe711",
+      "stamp": "2026-08-31T14:38:05Z"
+    },
+    {
+      "unit": "AGENTS.md > Where the Rules Live",
+      "digest": "sha256:c339c7cca92d462dd3fab2adae3692c1ded67a75d3561b9e5457c368183f3027",
+      "reviewer": "agent-skill",
+      "findings": 1,
+      "hubCommit": "68117017a1483706765a8075ab8a29bb67bfe711",
+      "stamp": "2026-08-31T14:38:06Z"
+    },
+    {
+      "unit": "GOVERNANCE.md > Verification Discipline",
+      "digest": "sha256:7d24dbb61ef94e29b3343f82a0f07f10a98fa405e99db7fa0ce06404bf1a655a",
+      "reviewer": "agent-skill",
+      "findings": 2,
+      "hubCommit": "68117017a1483706765a8075ab8a29bb67bfe711",
+      "stamp": "2026-08-31T14:38:06Z"
+    }
+  ]
+}

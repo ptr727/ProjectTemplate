@@ -4,15 +4,16 @@ The fleet's checks and review tooling, run by hand, with the deterministic ones 
 
 **Hosted here and reached, never carried.** These are not declared in [`spec/files.json`][files], so the audit does not expect a downstream repo to ship them, the same footing as `spec/audit.py`. That is the fleet model rather than an omission: a gate holding no per-repo content has one canonical implementation for the fleet. The prose and repository gate implementations live beside their composite actions under `.github/actions/`, which lets reusable workflows reach the implementation at their pinned hub commit through `$/.github/actions/` without checking out the hub. The same-named files in `scripts/` are thin local entry points that call those action-owned implementations, so maintainers and hooks retain the established commands from a hub checkout without creating a second copy of either gate. A repository that cannot reach the hub reports a local check as not run rather than reconstructing it, since a rebuilt gate encodes its author's reading of the rule and agrees with no other repository.
 
-Python only, standard library only, no third-party packages. Every check script is read-only and exits non-zero on a finding. `build_dist.py`, `local_review.py`, and `skills_install.py` below are the exceptions, since a generator, a recorder, and an installer all exist to write. `build_dist.py --check` and `skills_install.py --report` are read-only modes for CI and for asking without changing anything. `local_review.py status` and `check` answer without recording anything, but they are not read-only in that same sense: reading the working tree stages it, which writes inside `.git` and runs any `filter.*.clean` the repository configures, and only the receipt is left untouched.
+Python only, standard library only, no third-party packages. Every check script is read-only and exits non-zero on a finding. `build_dist.py`, `local_review.py`, `canonical_review.py`, and `skills_install.py` below are the exceptions, since a generator, two recorders, and an installer all exist to write. `build_dist.py --check` and `skills_install.py --report` are read-only modes for CI and for asking without changing anything. `local_review.py status` and `check` answer without recording anything, but they are not read-only in that same sense: reading the working tree stages it, which writes inside `.git` and runs any `filter.*.clean` the repository configures, and only the receipt is left untouched. `canonical_review.py` reads files rather than staging them, so its `list`, `status`, and `check` are read-only outright, and only `record` and `report` write.
 
-The directory separates its kinds by name and by tree. A gate checks and exits non-zero on a finding, and its name carries a `_lint` or `_gate` suffix saying what it gates. The `prose_lint.py` and `repo_gate.py` entry points delegate to the action-owned implementations that gate this tree in CI, and `host_gate.py` gates the machine it runs on. A utility does work rather than gating and carries no suffix: `build_dist.py`, `local_review.py`, `pr_review.py`, `skills_install.py`. The unit tests live apart under [`scripts/tests/`][tests], one `test_<script>.py` per script, driving the canonical implementations against input they must reject. A gate nobody has watched fail is a gate nobody knows works. Where a case covers a table it reads the live table rather than restating it, and each one asserts a floor on what a healthy run reaches, since a check whose scan matches nothing reports zero findings and reads exactly like a pass.
+The directory separates its kinds by name and by tree. A gate checks and exits non-zero on a finding, and its name carries a `_lint` or `_gate` suffix saying what it gates. The `prose_lint.py` and `repo_gate.py` entry points delegate to the action-owned implementations that gate this tree in CI, and `host_gate.py` gates the machine it runs on. A utility does work rather than gating and carries no suffix: `build_dist.py`, `canonical_review.py`, `local_review.py`, `pr_review.py`, `skills_install.py`. The unit tests live apart under [`scripts/tests/`][tests], one `test_<script>.py` per script, driving the canonical implementations against input they must reject. A gate nobody has watched fail is a gate nobody knows works. Where a case covers a table it reads the live table rather than restating it, and each one asserts a floor on what a healthy run reaches, since a check whose scan matches nothing reports zero findings and reads exactly like a pass.
 
 ```sh
 python3 scripts/tests/test_prose_lint.py
 python3 scripts/tests/test_repo_gate.py
 python3 scripts/tests/test_pr_review.py
 python3 scripts/tests/test_local_review.py
+python3 scripts/tests/test_canonical_review.py
 python3 scripts/tests/test_build_dist.py
 python3 scripts/tests/test_skills_install.py
 python3 -m unittest discover -s scripts/tests    # all of them, and exits 5 if the suite vanishes
@@ -241,6 +242,28 @@ python3 scripts/local_review.py run --backend coderabbit-cli
 
 The exit code is three-valued on purpose, per [`AGENTS.md`][agents] "Report an execution boundary separately from a check finding". `0` and `1` are findings a caller acts on, and `2` means the check itself never ran, whether because no git repository resolved, the target ref is absent from this checkout, the receipt could not be read off disk, or a backend binary is not installed. Any unexpected failure reports `2` as well, rather than falling through to the interpreter's own exit `1`, which a caller would read as the "not covered" verdict. `status` reports rather than gating, so it exits `0` whether or not the content is covered, and only reports `2` where it could not run at all. `check` alone treats a branch holding no net content against its target as covered, there being nothing for a review to read and no push git would have anything to reject over, while `status` keeps counting recorded passes and reports that same branch as not covered with zero changed paths. The two answer different questions, and reading either as the other is the mistake that wording guards against.
 
+## `canonical_review.py`
+
+Records and verifies that a full-content review pass covered each unit of the canonical content this hub authors and other repos carry. It is `local_review.py`'s sibling under one rule, asking a different question: that engine asks whether a reviewer read this branch's diff, and this one asks whether a reviewer has read a canonical unit the way the repository carrying it next will, whole, as a new file, knowing nothing about what changed in it. The ordering defect it exists for is [ptr727/ProjectTemplate#1138][canonical-review-issue]. Canonical content is merged here against a diff of a few lines and reaches a reviewer entire only downstream, where the tree is manifest-owned and a local edit becomes drift, so the first real read of a rule happens where nothing can be done about the result and every carrier after that re-discovers the same defect.
+
+**A unit is what a reviewer reads whole.** For a Markdown canonical that is one level-two section, matching [`spec/section-model.md`][section-model]'s fidelity unit and [`spec/divergences.json`][divergences]'s own `<path> > <section>` key, and for anything else it is the file. A file the manifest carries by named sections contributes exactly those, so the two sections [`GOVERNANCE.md`][governance] keeps for itself are not units: no downstream copy holds them, since the audit's undeclared-heading check is what stops one from appearing there, and demanding a carrier's read of one would invent an obligation the manifest does not state. An `interface` entry contributes nothing for the same reason, its body being the carrying repo's own. The skills tree is keyed at [`.agents/skills/`][agents-skills], where a fix lands, rather than at the generated [`.github/skills/`][github-skills-dist] the manifest names, and `build_dist.py --check` is what holds the two equal.
+
+**Coverage is over content, never over a commit.** A unit is covered while a recorded pass names its current digest, so editing the unit retires its pass and editing a neighboring section does not. `check` refuses only the units this branch's own diff moved, measured from the merge-base for `local_review.py`'s reason, and every unit nothing has read here yet is a burn-down entry in [`reports/canonical-review.md`][canonical-review-report] rather than a block on unrelated work. The ledger at [`reports/canonical-review.json`][canonical-review-ledger] holds one entry per unit, its most recent pass, sorted by unit key so a branch touching one unit merges cleanly against a branch touching another, and git keeps the history rather than the file.
+
+Two capture points call it, and neither is load-bearing alone. [`.husky/pre-push`][pre-push] runs `check` beside its sibling and is bypassable by construction, and the hub's own [`.github/actions/validate`][validate-hook] hook runs the same check on every pull request, which is where it actually binds. The `local-strict-review` Skill's "The Carried-Content Pass" is the primary, agent-agnostic layer above both.
+
+```shell
+python3 scripts/canonical_review.py list      # every unit key and its digest. 0 either way
+python3 scripts/canonical_review.py status    # covered, stale, or never read here, as JSON
+python3 scripts/canonical_review.py check     # 0 covered, 1 a changed unit is uncovered, 2 could not run
+python3 scripts/canonical_review.py record --reviewer agent-skill --findings 2 --unit '<key>=<digest>'
+python3 scripts/canonical_review.py report    # rewrites reports/canonical-review.md
+```
+
+`record` binds the digest to the read for `--expect-digest`'s reason above: recording a unit by name alone would stamp whatever the file holds at record time, so an edit between the review and the record would be attested to by a reviewer who never saw it. It refuses an unknown unit, a digest the content has moved past, and a reviewer outside `local_review.py`'s own backend vocabulary, since two spellings of one reviewer make the two records impossible to read together. A pass is recorded whatever it found, including nothing, for the same reason a receipt is: the record says a review ran over exactly this text, never that the text is clean.
+
+The exit code is three-valued on the same contract as its sibling. The boundaries it reports rather than answers are a manifest it cannot read, a ledger it cannot parse, a ledger holding two entries for one unit, a canonical that is not UTF-8, a document carrying two level-two sections of one name, and a target ref that does not resolve. That last one matters more than it looks: every path of an unresolvable ref reads as absent from `git cat-file --batch`, so reading it as a verdict would report a branch that introduced the entire canonical set and demand a pass over all of it.
+
 ## `build_dist.py`
 
 Regenerates [`.github/skills/`][github-skills-dist] and [`.claude-plugin/fleet-skills/`][fleet-skills-dist] from [`.agents/skills/`][agents-skills], the hub's own hand-authored fleet Skills. Codex and opencode read `.agents/skills/` directly, GitHub Copilot reads `.github/skills/`, and Claude Code reads the generated plugin published through [`.claude-plugin/marketplace.json`][marketplace]. `.agents/skills/` stays the one place a skill is hand-edited. Both generated trees are never hand-edited.
@@ -270,7 +293,11 @@ Installs the fleet's Skills for the current machine, cross-platform and idempote
 [agents-skills]: ../.agents/skills/README.md
 [agents]: ../AGENTS.md
 [audit]: ../spec/audit.py
+[canonical-review-issue]: https://github.com/ptr727/ProjectTemplate/issues/1138
+[canonical-review-ledger]: ../reports/canonical-review.json
+[canonical-review-report]: ../reports/canonical-review.md
 [copilot-instructions]: ../.github/copilot-instructions.md
+[divergences]: ../spec/divergences.json
 [editorconfig]: ../.editorconfig
 [files]: ../spec/files.json
 [fleet-skills-dist]: ../.claude-plugin/fleet-skills/
@@ -286,3 +313,4 @@ Installs the fleet's Skills for the current machine, cross-platform and idempote
 [repos]: ../registry/repos.json
 [section-model]: ../spec/section-model.md
 [tests]: ./tests/
+[validate-hook]: ../.github/actions/validate/action.yml
