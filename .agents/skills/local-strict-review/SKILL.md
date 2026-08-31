@@ -57,10 +57,10 @@ Bounds: read-only. No edit, no stage, no commit, no push, no PR-hosted write of 
 
 `scripts/local_review.py` is what makes this rule checkable rather than something each session has to remember. It holds no review logic: the pass above is the review, and the engine records that it happened, keyed on the content the reviewer actually saw. That receipt is what a capture point reads, this repository's `.husky/pre-push` hook being the first of them.
 
-Commit first, then read the digest, then dispatch the subagent, then hand that same value back. Nothing may change the tree between the read and the record, and a commit is a change: it moves the digest for any modified tracked file, so a digest read before one cannot be recorded after it.
+Commit first, then read the digest, then dispatch the subagent, then hand that same value back. Nothing may change the tree between the read and the record. Staging a modified tracked file is such a change, moving the digest although the content did not, and a commit can move it too, since HEAD decides which paths are in the change set at all. Reading after the commit is what leaves neither of them between the read and the record.
 
 ```sh
-engine=<hub-checkout>/scripts/local_review.py     # in the hub itself, scripts/local_review.py
+engine="<hub-checkout>/scripts/local_review.py"   # in the hub itself, scripts/local_review.py
 python3 "$engine" status --target <target>        # JSON, take contentDigest
 # run the pass above, then:
 python3 "$engine" record --reviewer agent-skill --target <target> --expect-digest <digest> [--findings N]
