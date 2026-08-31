@@ -37,7 +37,7 @@ python3 spec/validate.py
 python3 scripts/docker_lint.py
 ```
 
-`report --check` is read-only and runs unconditionally in CI, unlike the coverage check beside it, because a stale burn-down is a property of the commit rather than of a comparison against a base. It fails where the committed report no longer describes the ledger and the tree, which a renamed or deleted unit produces while every other gate stays green, since renaming a unit changes no recorded digest. `python3 scripts/canonical_review.py report` rewrites it.
+`report --check` is read-only and runs unconditionally in CI, unlike the coverage check beside it, because a stale burn-down is a property of the commit rather than of a comparison against a base. It fails where the committed report no longer describes the ledger and the tree, which a deleted unit produces while every other gate stays green, since deleting one changes no recorded digest and leaves `check` covered. Renaming a section of a file the manifest carries by name, meaning `AGENTS.md` or `GOVERNANCE.md`, does the same. Renaming one in a file carried whole does not, since `check` then names the new unit and demands a pass for it. `python3 scripts/canonical_review.py report` rewrites it.
 
 The canonical-review check sits in CI's own list only for a pull request, since a canonical unit's change is measured against the branch it is proposed into and a push carrying no pull request names none. The local run above takes the default target, `develop`, which is the same measurement for an ordinary feature branch and the wrong one for a branch based on `main`, where it needs `--target main` to mean anything.
 

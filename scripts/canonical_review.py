@@ -180,17 +180,20 @@ def file_units(rel: str, text: str) -> dict[str, str]:
     if len(regions) == 1 and regions[0][0] is None:
         return {rel: regions[0][1]}
     out: dict[str, str] = {}
-    seen: set[str] = set()
+    seen: dict[str, str] = {}
     for heading, region in regions:
-        key = f"{rel}{SECTION_DELIM}{heading if heading is not None else PREAMBLE}"
+        name = heading if heading is not None else PREAMBLE
+        key = f"{rel}{SECTION_DELIM}{name}"
         # Two sections of one name are two answers to one question, and keeping the last would record a read of one of them as covering both.
         # Case-folded, because the declared-name lookup folds and spec/audit.py's heading match folds, so a pair differing only in case is one name to every reader but this one.
-        if key.lower() in seen:
+        earlier = seen.get(key.lower())
+        if earlier is not None:
+            shown = f"'{earlier}'" if earlier == name else f"'{earlier}' and '{name}'"
             raise CannotRun(
-                f"{rel} carries two level-two sections named '{heading}',"
+                f"{rel} carries two level-two sections named {shown},"
                 " so a review of one cannot be told from a review of the other"
             )
-        seen.add(key.lower())
+        seen[key.lower()] = name
         out[key] = region
     return out
 

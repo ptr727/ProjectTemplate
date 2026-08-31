@@ -88,9 +88,13 @@ class UnitModelCase(unittest.TestCase):
 
     def test_two_sections_differing_only_in_case_refuse(self) -> None:
         """The declared-name lookup folds case and spec/audit.py's heading match folds, so a pair
-        differing only in case is one name to every reader. Left unfolded here, this guard passed
-        the pair, the dict kept the last, and audit's own match keeps the first, so a pass would be
-        recorded over one section's bytes while the fidelity check hashes the other's."""
+        differing only in case is one name to every reader but this guard.
+
+        Left unfolded, the pair passed here as two distinct keys, and `build_units`' own folded
+        lookup then resolved a manifest declaring either spelling to the last of them while
+        spec/audit.py resolves the same declaration to the first. A pass would be recorded over one
+        section's bytes while the fidelity check hashes the other's, and the first section would be
+        no unit at all."""
         text = "intro\n\n## Alpha\n\nFIRST\n\n## alpha\n\nSECOND\n"
         with self.assertRaises(cr.CannotRun):
             cr.file_units("D.md", text)
