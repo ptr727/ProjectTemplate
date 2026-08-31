@@ -95,8 +95,8 @@ if [ "$py_name" != python3 ]; then
 fi
 if [ "$diff_status" -eq 1 ] || [ "$unit_status" -eq 1 ]; then
     echo "pre-push: this push is blocked, which is the gate working. Read the engine message above for the case." >&2
-    echo "pre-push: the local-strict-review skill's refusal table says what clears a diff-pass refusal," >&2
-    echo "pre-push: and its carried-content section what clears a canonical-unit one." >&2
+    echo "pre-push: the local-strict-review skill's refusal table says what each refusal means and what clears it," >&2
+    echo "pre-push: for both gates, and its carried-content section says how the canonical pass itself is run." >&2
 fi
 if [ "$diff_status" -gt 1 ] || [ "$unit_status" -gt 1 ]; then
     echo "pre-push: a review gate could not run, which is not a verdict either way." >&2

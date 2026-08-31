@@ -12,8 +12,6 @@ Run as `python3 scripts/tests/test_canonical_review.py`, or under
 `python3 -m unittest discover -s scripts/tests`.
 """
 
-from __future__ import annotations
-
 import contextlib
 import io
 import json
@@ -22,6 +20,7 @@ import subprocess
 import sys
 import tempfile
 import unittest
+import unittest.mock
 from pathlib import Path
 from typing import Any
 
@@ -318,6 +317,62 @@ class GateCase(RepoCase):
         self.assertIn("fresh/SKILL.md > One", output)
         self.assertIn("fresh/SKILL.md > Two", output)
 
+    def manifest(self) -> dict:
+        return json.loads((self.tmp / "spec/files.json").read_bytes().decode("utf-8"))
+
+    def test_newly_carrying_an_existing_file_is_a_changed_unit(self) -> None:
+        """The branch changes nothing in the file and everything about who reads it.
+
+        Measured against this branch's own manifest on both sides, the digests match and the gate
+        reports no change, so content nothing has read here reaches every carrier unreviewed. That
+        is the exact first-read case the gate exists for, which is why the base is resolved against
+        the base commit's own manifest.
+        """
+        spec = self.manifest()
+        for entry in spec["baseline"]:
+            if entry["path"] == "OWN.md":
+                entry["fidelity"] = "verbatim"
+        self.write("spec/files.json", json.dumps(spec, indent=2) + "\n")
+        code, output = self.loud(["check"])
+        self.assertEqual(code, cr.EXIT_NOT_COVERED)
+        self.assertIn("OWN.md > Mine", output)
+
+    def test_newly_declaring_a_section_is_a_changed_unit(self) -> None:
+        """The same hazard one level down: the file was carried, this section was not."""
+        spec = self.manifest()
+        for entry in spec["baseline"]:
+            if entry["path"] == "SECT.md":
+                entry["sections"].append("Hub Only")
+        self.write("spec/files.json", json.dumps(spec, indent=2) + "\n")
+        code, output = self.loud(["check"])
+        self.assertEqual(code, cr.EXIT_NOT_COVERED)
+        self.assertIn("SECT.md > Hub Only", output)
+        self.assertNotIn("SECT.md > Carried", output, "an already-carried section was demanded")
+
+    def test_a_base_that_predates_the_manifest_makes_every_unit_a_first_read(self) -> None:
+        """Nothing was carried then, so nothing about this branch's units has been read."""
+        (self.tmp / "spec/files.json").unlink()
+        run(self.tmp, "add", "-A")
+        run(self.tmp, "commit", "-m", "drop the manifest")
+        run(
+            self.tmp,
+            "update-ref",
+            "refs/remotes/origin/develop",
+            run(self.tmp, "rev-parse", "HEAD").strip(),
+        )
+        run(self.tmp, "revert", "--no-edit", "HEAD")
+        code, output = self.loud(["check"])
+        self.assertEqual(code, cr.EXIT_NOT_COVERED)
+        self.assertIn("DOC.md > Alpha", output)
+
+    def test_a_commit_sha_target_resolves(self) -> None:
+        """The form the pull request check passes, which is a bare commit rather than a branch."""
+        base = run(self.tmp, "rev-parse", "refs/remotes/origin/develop").strip()
+        self.write("DOC.md", "intro\n\n## Alpha\n\na body, edited\n\n## Beta\n\nb body\n")
+        code, output = self.loud(["check", "--target", base])
+        self.assertEqual(code, cr.EXIT_NOT_COVERED)
+        self.assertIn("DOC.md > Alpha", output)
+
     def test_an_unresolvable_target_cannot_run_rather_than_reporting_everything_new(self) -> None:
         """Every path of an unresolvable ref reads as absent, which would look like a new canon."""
         code, output = self.loud(["check", "--target", "no-such-branch"])
@@ -447,7 +502,28 @@ class LedgerCase(RepoCase):
         self.assertIn("DOC.md > Alpha", json.loads(output)["orphanedPasses"])
 
 
+class BoundaryCase(RepoCase):
+    """A crash is the check not having run, and must never read as the not-covered verdict."""
+
+    def test_an_unexpected_failure_reports_the_boundary_rather_than_a_verdict(self) -> None:
+        """Exit 1 is what a capture point folds as "a changed unit is uncovered", so a crash that
+        fell through to the interpreter's own exit 1 would report an execution boundary as a gate
+        finding. `blobs_at` is the reachable case: it runs git with a timeout and catches neither
+        OSError nor TimeoutExpired."""
+        for boom in (OSError("no fd"), subprocess.TimeoutExpired("git", 1), RuntimeError("x")):
+            with unittest.mock.patch.object(cr, "blobs_at", side_effect=boom):
+                code, output = self.loud(["check"])
+            self.assertEqual(code, cr.EXIT_CANNOT_RUN, f"{type(boom).__name__} read as a verdict")
+            self.assertIn("unexpected failure", output)
+
+
 class ReportCase(RepoCase):
+    def test_recording_rewrites_the_burn_down(self) -> None:
+        """A ledger and a report that disagree are two answers about the same coverage."""
+        self.record("DOC.md > Alpha")
+        text = (self.tmp / cr.REPORT).read_bytes().decode("utf-8")
+        self.assertIn("- covered: 1", text)
+
     def test_the_report_names_every_outstanding_unit(self) -> None:
         self.assertEqual(self.quiet(["report"]), cr.EXIT_COVERED)
         text = (self.tmp / cr.REPORT).read_bytes().decode("utf-8")

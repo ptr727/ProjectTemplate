@@ -44,8 +44,6 @@ Usage:
     python3 scripts/canonical_review.py report               write reports/canonical-review.md
 """
 
-from __future__ import annotations
-
 import argparse
 import hashlib
 import json
@@ -217,36 +215,42 @@ def declared_sections(entry: dict[str, Any]) -> list[str] | None:
     return [name for name in names if name] or None
 
 
-def carried_paths(root: Path) -> tuple[dict[str, list[str] | None], list[str]]:
-    """Every canonical path this hub authors and a downstream repository carries, and what is absent.
+def parse_manifest(rel: str, data: bytes) -> dict[str, Any]:
+    """The manifest, refused rather than guessed at when it cannot be read."""
+    try:
+        payload = json.loads(data.decode("utf-8"))
+    except (UnicodeError, json.JSONDecodeError) as exc:
+        raise CannotRun(f"cannot read {rel}: {exc}") from exc
+    if not isinstance(payload, dict):
+        raise CannotRun(f"{rel} is not an object, so no carried set can be read from it")
+    return payload
+
+
+def select_carried(
+    manifest: dict[str, Any],
+    exists: Callable[[str], bool],
+    tree_files: Callable[[str, list[str]], list[str] | None],
+) -> tuple[dict[str, list[str] | None], list[str]]:
+    """What a manifest declares carried, over whichever tree the two callbacks describe.
+
+    Parameterized rather than reading the working tree directly, because the base side of a
+    comparison has to be resolved against the base commit's own manifest and its own tree. Reading
+    one manifest against two trees is the defect this shape exists to prevent: a branch that adds
+    an already-present file to the manifest makes content newly carried without changing a byte of
+    it, and a single-manifest comparison scores that as no change at all.
 
     Each value is the section list that path's carry is restricted to, or None where the whole file
-    carries. The tree half reads through `scripts/carry.py`'s own inventory, so the set reviewed
-    here is the set that tool copies, include patterns and symlink refusal and all. Deriving it a
-    second way would let the two disagree about what is carried, and the copy would win.
-
-    A declared path this hub does not itself hold is reported rather than skipped quietly. It is
-    the ordinary case for a file scoped to a project type this hub is not, and it is also what a
-    manifest entry pointing at nothing looks like, so the caller is given the list either way.
+    carries. A declared path the tree does not hold is reported rather than skipped quietly, being
+    the ordinary case for a file scoped to a project type this hub is not, and also what a manifest
+    entry pointing at nothing looks like.
     """
-    manifest_path = root / MANIFEST
-    try:
-        manifest = json.loads(manifest_path.read_bytes().decode("utf-8"))
-    except (OSError, UnicodeError, json.JSONDecodeError) as exc:
-        raise CannotRun(f"cannot read {MANIFEST}: {exc}") from exc
     carried: dict[str, list[str] | None] = {}
     absent: list[str] = []
     for entry in manifest.get("baseline", []):
         if entry.get("fidelity") not in AUTHORED_FIDELITY:
             continue
         rel = str(entry.get("path", ""))
-        # Resolved through carry.py's own check, so a baseline path is held to what a tree path already is.
-        # A manifest naming `../x`, or a canonical that is a symlink, would otherwise be read here and refused there.
-        try:
-            path = carry.relative_root(root, rel)
-        except carry.CarryError as exc:
-            raise CannotRun(f"{MANIFEST} declares an unusable path: {exc}") from exc
-        if not path.is_file():
+        if not exists(rel):
             if rel not in absent:
                 absent.append(rel)
             continue
@@ -261,16 +265,86 @@ def carried_paths(root: Path) -> tuple[dict[str, list[str] | None], list[str]]:
         if entry.get("fidelity") not in TREE_FIDELITY:
             continue
         source = authored_source(entry)
-        if not (root / source).is_dir():
+        found = tree_files(source, list(entry.get("include", ["**/*"])))
+        if found is None:
             absent.append(source)
             continue
-        try:
-            inventory = carry.inventory(root / source, list(entry.get("include", ["**/*"])))
-        except carry.CarryError as exc:
-            raise CannotRun(f"cannot inventory {source}: {exc}") from exc
-        for rel in inventory.files:
+        for rel in found:
             carried[f"{source}/{rel}"] = None
     return carried, sorted(absent)
+
+
+def carried_paths(root: Path) -> tuple[dict[str, list[str] | None], list[str]]:
+    """What the working tree's own manifest declares carried, over the working tree.
+
+    The tree half reads through `scripts/carry.py`'s own inventory, so the set reviewed here is the
+    set that tool copies, include patterns and symlink refusal and all. Deriving it a second way
+    would let the two disagree about what is carried, and the copy would win. A baseline path goes
+    through that same module's containment check, so one half of the set is not stricter than the
+    other.
+    """
+
+    def exists(rel: str) -> bool:
+        try:
+            return carry.relative_root(root, rel).is_file()
+        except carry.CarryError as exc:
+            raise CannotRun(f"{MANIFEST} declares an unusable path: {exc}") from exc
+
+    def tree_files(source: str, patterns: list[str]) -> list[str] | None:
+        if not (root / source).is_dir():
+            return None
+        try:
+            return sorted(carry.inventory(root / source, patterns).files)
+        except carry.CarryError as exc:
+            raise CannotRun(f"cannot inventory {source}: {exc}") from exc
+
+    reader = disk_reader(root)
+    data = reader(MANIFEST)
+    if data is None:
+        raise CannotRun(
+            f"this working tree holds no {MANIFEST}, so nothing describes what it carries"
+        )
+    return select_carried(parse_manifest(MANIFEST, data), exists, tree_files)
+
+
+def tracked_at(root: Path, commit: str) -> set[str]:
+    """Every path the tree at `commit` tracks."""
+    return {
+        path
+        for path in git("ls-tree", "-r", "--name-only", "-z", commit, root=root).split("\0")
+        if path
+    }
+
+
+def carried_at(root: Path, commit: str) -> dict[str, list[str] | None]:
+    """What the manifest at `commit` declared carried, read against that commit's own tree.
+
+    A commit holding no manifest carried nothing, which is the honest answer for a base that
+    predates the manifest and makes every unit on this branch a first read.
+
+    The tree half filters `commit`'s tracked paths through `carry.included` rather than through
+    `carry.inventory`, which walks a filesystem that does not exist for a past commit. The include
+    semantics are that module's either way, and its symlink refusal has nothing to act on here,
+    since a tree entry is read for its path rather than followed.
+    """
+    blobs = blobs_at(root, commit, [MANIFEST])
+    if MANIFEST not in blobs:
+        return {}
+    tracked = tracked_at(root, commit)
+
+    def tree_files(source: str, patterns: list[str]) -> list[str] | None:
+        prefix = f"{source}/"
+        found = [
+            path[len(prefix) :]
+            for path in tracked
+            if path.startswith(prefix) and carry.included(path[len(prefix) :], patterns)
+        ]
+        return sorted(found) if found else None
+
+    carried, _ = select_carried(
+        parse_manifest(MANIFEST, blobs[MANIFEST]), lambda rel: rel in tracked, tree_files
+    )
+    return carried
 
 
 def build_units(
@@ -388,13 +462,16 @@ def blobs_at(root: Path, commit: str, rels: list[str]) -> dict[str, bytes]:
     return out
 
 
-def units_at(root: Path, commit: str, carried: dict[str, list[str] | None]) -> dict[str, str]:
-    """The units the same carried paths held at `commit`.
+def units_at(root: Path, commit: str) -> dict[str, str]:
+    """The units the tree at `commit` carried, by that commit's own manifest.
 
-    The path list is this branch's rather than the commit's, because the question is what this
-    branch changed about content it will carry. A path absent at the base contributes no units, so
-    every unit of a file this branch adds is new, which is what a first reader of it faces.
+    Its own manifest rather than this branch's, because the question is what this branch changed
+    about what a carrier receives, and adding an already-present file or section to the manifest
+    changes exactly that while changing no byte of the file. Measured against one manifest, such a
+    branch reports no changed unit and makes content nothing has read available to every carrier,
+    which is the first-read case this whole gate exists for.
     """
+    carried = carried_at(root, commit)
     blobs = blobs_at(root, commit, sorted(carried))
     found, _ = build_units(carried, blobs.get)
     return {key: digest(text) for key, text in found.items()}
@@ -464,11 +541,15 @@ def resolve_base(target: str | None, root: Path) -> tuple[str, str]:
 
 
 def changed_units(root: Path, base: str) -> tuple[dict[str, str], list[str], list[str]]:
-    """This branch's units, the ones whose content differs from `base`, and what is declared but absent."""
+    """This branch's units, the ones a carrier would read differently than at `base`, and the absentees.
+
+    A unit counts as changed when its text moved and when it is newly carried, since a carrier
+    reads both for the first time and neither has been read here.
+    """
     carried, absent = carried_paths(root)
     found, missing = build_units(carried, disk_reader(root))
     current = {key: digest(text) for key, text in found.items()}
-    before = units_at(root, base, carried)
+    before = units_at(root, base)
     changed = sorted(unit for unit, value in current.items() if before.get(unit) != value)
     return current, changed, sorted(absent + missing)
 
@@ -534,7 +615,8 @@ def cmd_check(args: argparse.Namespace) -> int:
         "\nfix what it finds. Read each unit's whole current text, then record the pass, handing"
         "\nback the key and digest exactly as printed above:"
         "\n  python3 scripts/canonical_review.py record --reviewer agent-skill --unit '<key>=<digest>'"
-        '\nThe local-strict-review skill\'s "The Carried-Content Pass" says how the pass is run.',
+        '\nThe local-strict-review skill\'s "The Carried-Content Pass" says how the pass is run,'
+        "\nand its refusal table what this refusal means where the units named look wrong.",
         sys.stderr,
     )
     return EXIT_NOT_COVERED
@@ -614,7 +696,9 @@ def cmd_record(args: argparse.Namespace) -> int:
             "stamp": stamp,
         }
     write_ledger(root, ledger)
-    emit(f"recorded {args.reviewer} over {len(wanted)} unit(s) in {LEDGER}.")
+    # The burn-down is regenerated here rather than left to a caller to remember, since a ledger and a report that disagree are two answers about the same coverage.
+    write_report(root)
+    emit(f"recorded {args.reviewer} over {len(wanted)} unit(s) in {LEDGER}, and rewrote {REPORT}.")
     return EXIT_COVERED
 
 
@@ -631,13 +715,15 @@ def render_report(
         "# Canonical content review coverage",
         "",
         (
-            "Generated by `python3 scripts/canonical_review.py report` - do not hand-edit. Records"
-            " are written by `canonical_review.py record` into"
+            "Generated by `python3 scripts/canonical_review.py report`, and never hand-edited."
+            " Records are written by `canonical_review.py record` into"
             " [`reports/canonical-review.json`][ledger]. Git dates this file."
         ),
         "",
         (
-            "A unit is one level-two section of a Markdown canonical, or one whole file otherwise."
+            "A unit is what a reviewer reads whole, decided by the carry manifest rather than by"
+            " the document. In the ordinary case that is one level-two section of a carried"
+            " Markdown canonical, and `canonical_review.py list` names the whole set."
             " It is **covered** when a recorded full-content pass names its current text, **stale**"
             " when a pass named earlier text, and **never** when no pass has read it here at all. A"
             " never-read unit is the backlog [ptr727/ProjectTemplate#1138][issue] records: the first"
@@ -713,15 +799,23 @@ def render_report(
     return "\n".join(lines)
 
 
-def cmd_report(args: argparse.Namespace) -> int:
-    root = local_review.repo_root()
+def write_report(root: Path) -> int:
+    """Rewrite the burn-down from the ledger, returning how many units it covers.
+
+    Called by `record` as well as by `report`, because a recorded pass that left the committed
+    counts describing the previous state would put a stale burn-down in front of every reader of
+    it, and the one procedure that writes the ledger is the one place that knows to.
+    """
     current, absent = units(root)
-    ledger = read_ledger(root)
-    text = render_report(current, ledger, absent)
+    text = render_report(current, read_ledger(root), absent)
     path = root / REPORT
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_bytes(text.encode("utf-8"))
-    emit(f"wrote {REPORT} over {len(current)} unit(s).")
+    return len(current)
+
+
+def cmd_report(args: argparse.Namespace) -> int:
+    emit(f"wrote {REPORT} over {write_report(local_review.repo_root())} unit(s).")
     return EXIT_COVERED
 
 
@@ -764,10 +858,27 @@ def main(argv: list[str] | None = None) -> int:
     )
 
     args = parser.parse_args(argv)
+    code = EXIT_CANNOT_RUN
     try:
-        return int(args.handler(args))
+        code = int(args.handler(args))
+        return code
     except CannotRun as exc:
         emit(f"canonical-review: {exc}", sys.stderr)
+        return EXIT_CANNOT_RUN
+    # A reader that closes early, `| head -1` being the ordinary case, otherwise raises here.
+    # It then raises again during the interpreter's own shutdown flush, which exits 120, outside the contract.
+    except BrokenPipeError:
+        # A backstop only, since `emit` absorbs a closed reader at the point of writing.
+        # Whatever verdict was reached is still the honest answer.
+        local_review.silence(sys.stdout)
+        local_review.silence(sys.stderr)
+        return code
+    # A crash is the check not having run, so it reports the boundary code.
+    # Falling through to the interpreter's own exit 1 would read as the not-covered verdict, and a capture point folding that reports an execution boundary as a gate finding.
+    # `blobs_at` is the reachable case: it runs git with a timeout and catches neither OSError nor
+    # TimeoutExpired, both of which a loaded host can produce.
+    except Exception as exc:  # noqa: BLE001
+        emit(f"canonical-review: unexpected failure ({type(exc).__name__}: {exc})", sys.stderr)
         return EXIT_CANNOT_RUN
 
 

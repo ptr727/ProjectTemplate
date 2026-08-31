@@ -19,19 +19,27 @@
     },
     {
       "unit": ".agents/skills/local-strict-review/SKILL.md > The Carried-Content Pass",
-      "digest": "sha256:d983c6d9954a8b06ef0de583d42be863bdca2cccbd026c46a0012f8134cd7e60",
+      "digest": "sha256:1bd1396389709aa388ba5b984cd11cc1335bb7b13da107c32bcc336feb816154",
       "reviewer": "agent-skill",
-      "findings": 3,
-      "hubCommit": "68117017a1483706765a8075ab8a29bb67bfe711",
-      "stamp": "2026-08-31T14:38:05Z"
+      "findings": 0,
+      "hubCommit": "e97708dfe4c92e275118a0705556822993de9f32",
+      "stamp": "2026-08-31T16:17:12Z"
+    },
+    {
+      "unit": ".agents/skills/local-strict-review/SKILL.md > What It Does",
+      "digest": "sha256:2784f7147fcb397f28d475cb2932857cff248344d3b1a6c32547fba1c91c8876",
+      "reviewer": "agent-skill",
+      "findings": 0,
+      "hubCommit": "e97708dfe4c92e275118a0705556822993de9f32",
+      "stamp": "2026-08-31T16:17:12Z"
     },
     {
       "unit": ".agents/skills/local-strict-review/SKILL.md > When to Run It",
-      "digest": "sha256:42be4454bae1fbefcc7d5ad6656727bb049b50b14caef730c7effd7a7a99dceb",
+      "digest": "sha256:dd91a8b1631100ffe6a092c87141ae96500c32656fd9a2ef34bd598cddee0502",
       "reviewer": "agent-skill",
-      "findings": 4,
-      "hubCommit": "68117017a1483706765a8075ab8a29bb67bfe711",
-      "stamp": "2026-08-31T14:38:05Z"
+      "findings": 0,
+      "hubCommit": "e97708dfe4c92e275118a0705556822993de9f32",
+      "stamp": "2026-08-31T16:44:52Z"
     },
     {
       "unit": "AGENTS.md > Where the Rules Live",
@@ -43,11 +51,11 @@
     },
     {
       "unit": "GOVERNANCE.md > Verification Discipline",
-      "digest": "sha256:7d24dbb61ef94e29b3343f82a0f07f10a98fa405e99db7fa0ce06404bf1a655a",
+      "digest": "sha256:0f7d427f2fd507aef0b81e84c3829aa13887838b96647cd37b6cbd7016da50c3",
       "reviewer": "agent-skill",
-      "findings": 2,
-      "hubCommit": "68117017a1483706765a8075ab8a29bb67bfe711",
-      "stamp": "2026-08-31T14:38:06Z"
+      "findings": 0,
+      "hubCommit": "e97708dfe4c92e275118a0705556822993de9f32",
+      "stamp": "2026-08-31T16:26:36Z"
     }
   ]
 }
