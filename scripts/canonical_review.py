@@ -180,14 +180,17 @@ def file_units(rel: str, text: str) -> dict[str, str]:
     if len(regions) == 1 and regions[0][0] is None:
         return {rel: regions[0][1]}
     out: dict[str, str] = {}
+    seen: set[str] = set()
     for heading, region in regions:
         key = f"{rel}{SECTION_DELIM}{heading if heading is not None else PREAMBLE}"
         # Two sections of one name are two answers to one question, and keeping the last would record a read of one of them as covering both.
-        if key in out:
+        # Case-folded, because the declared-name lookup folds and spec/audit.py's heading match folds, so a pair differing only in case is one name to every reader but this one.
+        if key.lower() in seen:
             raise CannotRun(
                 f"{rel} carries two level-two sections named '{heading}',"
                 " so a review of one cannot be told from a review of the other"
             )
+        seen.add(key.lower())
         out[key] = region
     return out
 
@@ -474,9 +477,14 @@ def units_at(root: Path, commit: str) -> dict[str, str]:
     branch reports no changed unit and makes content nothing has read available to every carrier,
     which is the first-read case this whole gate exists for.
     """
-    carried = carried_at(root, commit)
-    blobs = blobs_at(root, commit, sorted(carried))
-    found, _ = build_units(carried, blobs.get)
+    try:
+        carried = carried_at(root, commit)
+        blobs = blobs_at(root, commit, sorted(carried))
+        found, _ = build_units(carried, blobs.get)
+    except CannotRun as exc:
+        # Named, because every message underneath carries only a path and the working tree's copy of that path is usually fine.
+        # A duplicate heading a later commit removed reads as a defect in the file the reader is about to open, which does not hold one.
+        raise CannotRun(f"reading the base commit {commit[:12]}: {exc}") from exc
     return {key: digest(text) for key, text in found.items()}
 
 

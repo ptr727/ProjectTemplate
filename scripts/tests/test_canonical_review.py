@@ -86,6 +86,15 @@ class UnitModelCase(unittest.TestCase):
             cr.file_units("D.md", "## Same\n\na\n\n## Same\n\nb\n")
         self.assertIn("two level-two sections", str(caught.exception))
 
+    def test_two_sections_differing_only_in_case_refuse(self) -> None:
+        """The declared-name lookup folds case and spec/audit.py's heading match folds, so a pair
+        differing only in case is one name to every reader. Left unfolded here, this guard passed
+        the pair, the dict kept the last, and audit's own match keeps the first, so a pass would be
+        recorded over one section's bytes while the fidelity check hashes the other's."""
+        text = "intro\n\n## Alpha\n\nFIRST\n\n## alpha\n\nSECOND\n"
+        with self.assertRaises(cr.CannotRun):
+            cr.file_units("D.md", text)
+
     def test_a_non_markdown_canonical_is_one_unit(self) -> None:
         """A config file has no section seam, so the file is what a reviewer reads whole."""
         self.assertEqual(sorted(cr.file_units("c.json", '{"a": 1}\n')), ["c.json"])
@@ -577,6 +586,45 @@ class BatchReaderCase(RepoCase):
         os.environ["GIT_OBJECT_DIRECTORY"] = str(empty)
         self.addCleanup(self.restore_env, "GIT_OBJECT_DIRECTORY", prev)
         self.assertIn("DOC.md", cr.blobs_at(self.tmp, "HEAD", ["DOC.md"]))
+
+
+class BaseCommitCase(RepoCase):
+    def test_a_defect_at_the_base_names_the_base(self) -> None:
+        """Every message underneath carries only a path, and the working tree's copy of that path is
+        usually fine, so a duplicate heading a later commit removed would read as a defect in the
+        file the reader is about to open."""
+        self.write("DOC.md", "intro\n\n## Alpha\n\na\n\n## alpha\n\nb\n")
+        run(self.tmp, "add", "-A")
+        run(self.tmp, "commit", "-m", "introduce the duplicate")
+        run(
+            self.tmp,
+            "update-ref",
+            "refs/remotes/origin/develop",
+            run(self.tmp, "rev-parse", "HEAD").strip(),
+        )
+        self.write("DOC.md", "intro\n\n## Alpha\n\na\n\n## Beta\n\nb\n")
+        run(self.tmp, "add", "-A")
+        run(self.tmp, "commit", "-m", "remove it")
+        code, output = self.loud(["check"])
+        self.assertEqual(code, cr.EXIT_CANNOT_RUN)
+        self.assertIn("reading the base commit", output)
+
+    def test_a_symlinked_carried_path_is_refused(self) -> None:
+        """carry.py refuses a symlink anywhere in a carried tree, and reading one here would follow
+        it out of the repository the manifest describes."""
+        target = self.outside / "elsewhere.md"
+        target.write_bytes(b"## Alpha\n\nnot ours\n")
+        (self.tmp / "DOC.md").unlink()
+        (self.tmp / "DOC.md").symlink_to(target)
+        with self.assertRaises(cr.CannotRun) as caught:
+            cr.units(self.tmp)
+        self.assertIn("DOC.md", str(caught.exception))
+        # And one pointing inside the repository, which containment alone would let through.
+        (self.tmp / "DOC.md").unlink()
+        (self.tmp / "DOC.md").symlink_to(self.tmp / "OWN.md")
+        with self.assertRaises(cr.CannotRun) as caught:
+            cr.units(self.tmp)
+        self.assertIn("symlink", str(caught.exception))
 
 
 class ReportCase(RepoCase):
