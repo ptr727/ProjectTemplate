@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Refuses a branch push that no recorded local review pass covers, per GOVERNANCE.md "Verification Discipline".
+# Refuses a branch push whose diff no recorded local review pass covers, and one carrying a canonical unit no full-content pass covers, per GOVERNANCE.md "Verification Discipline".
 # Enable it per clone with `git config core.hooksPath .husky`, and see the pre-commit hook for why `_/husky.sh` is not sourced.
 set -Eeuo pipefail
 
@@ -77,23 +77,29 @@ else
     exit 1
 fi
 
+# Two gates under one rule.
+# The first asks whether a recorded pass covers this branch's diff, and the second whether one covers each canonical unit the branch moved, which a repository carrying that content reads whole rather than as a diff.
+# Both run before either verdict is read, so one blocked push names every reason it was refused rather than only the first, which would otherwise cost a second push to discover the next.
 # No --target: a target read from the environment is set inline on the very command being gated.
-status=0
-run_py scripts/local_review.py check || status=$?
-if [ "$status" -eq 0 ]; then
+diff_status=0
+run_py scripts/local_review.py check || diff_status=$?
+unit_status=0
+run_py scripts/canonical_review.py check || unit_status=$?
+if [ "$diff_status" -eq 0 ] && [ "$unit_status" -eq 0 ]; then
     exit 0
 fi
-if [ "$status" -eq 1 ]; then
-    echo "" >&2
-    # The engine names its own case, and only some of them are a missing pass.
-    if [ "$py_name" != python3 ]; then
-        echo "pre-push: this host runs the engine as '$py_name', so read any 'python3' above as '$py_name'." >&2
-    fi
-    echo "pre-push: this push is blocked, which is the gate working. Read the engine message above for the case." >&2
-    echo "pre-push: the local-strict-review skill's refusal table says what clears each one." >&2
-    exit 1
-fi
 echo "" >&2
-echo "pre-push: the local review gate could not run, which is not a verdict either way." >&2
-echo "pre-push: fix what it reported above, most often by fetching the target branch." >&2
+# The engines name their own cases, and only some of them are a missing pass.
+if [ "$py_name" != python3 ]; then
+    echo "pre-push: this host runs the engines as '$py_name', so read any 'python3' above as '$py_name'." >&2
+fi
+if [ "$diff_status" -eq 1 ] || [ "$unit_status" -eq 1 ]; then
+    echo "pre-push: this push is blocked, which is the gate working. Read the engine message above for the case." >&2
+    echo "pre-push: the local-strict-review skill's refusal table says what each refusal means and what clears it," >&2
+    echo "pre-push: for both gates, and its carried-content section says how the canonical pass itself is run." >&2
+fi
+if [ "$diff_status" -gt 1 ] || [ "$unit_status" -gt 1 ]; then
+    echo "pre-push: a review gate could not run, which is not a verdict either way." >&2
+    echo "pre-push: fix what it reported above, most often by fetching the target branch." >&2
+fi
 exit 1
