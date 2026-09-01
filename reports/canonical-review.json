@@ -123,11 +123,11 @@
     },
     {
       "unit": ".agents/skills/workflow-ci-contract/SKILL.md > After Any Workflow Edit",
-      "digest": "sha256:fd916a05277a56c1a4d5e8c77f28d15b4a4cd51901cf5a4796dd586f235a0568",
+      "digest": "sha256:f22a3e87e27be152ace0c2783b7d3669d057a8aec1c6ff6ccf227bf2a238de4b",
       "reviewer": "agent-skill",
-      "findings": 4,
-      "hubCommit": "df5e2493b48aa45d80f586db68af0c21be97ea21",
-      "stamp": "2026-09-01T05:45:32Z"
+      "findings": 1,
+      "hubCommit": "fd8ab73609a2064c83eecf7866614fd99b21517c",
+      "stamp": "2026-09-01T06:50:05Z"
     },
     {
       "unit": "AGENTS.md > Where the Rules Live",
