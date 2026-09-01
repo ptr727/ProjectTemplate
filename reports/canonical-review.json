@@ -211,11 +211,11 @@
     },
     {
       "unit": ".agents/skills/workflow-ci-contract/SKILL.md > After Any Workflow Edit",
-      "digest": "sha256:4c6d8b55e84a4a2162e6b1e5fc818505db7a4a394ded50487a39804aafea6101",
+      "digest": "sha256:7dc31b8f1e7e25effd4b85078f9099b89cf3663452ed0400cf255df019fbef0e",
       "reviewer": "agent-skill",
       "findings": 1,
-      "hubCommit": "5664a954bf0c11acb6bab9014b0463697d18da4b",
-      "stamp": "2026-09-01T23:17:25Z"
+      "hubCommit": "f858a194ce29fa5702e2ce1c6ff8d1f3b221b2ee",
+      "stamp": "2026-09-01T23:24:57Z"
     },
     {
       "unit": ".agents/skills/workflow-ci-contract/SKILL.md > How the Contract Is Read",
