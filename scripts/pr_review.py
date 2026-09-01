@@ -270,6 +270,19 @@ COVERAGE_COUNTS = re.compile(
 # This change puts both spellings into the source and the runbook, so a review of it quotes them.
 # A quoted count read as this round's own is a coverage figure nobody stated.
 FENCE = re.compile(r"^ {0,3}```.*?^ {0,3}```[^\n]*", re.DOTALL | re.MULTILINE)
+# An inline code span is a quotation for the same reason a fenced block is.
+# A reviewer naming `<summary>` in prose was read as opening one.
+# That swallowed the body from there to the next real close tag.
+# The backreference between two boundary guards matches the run length exactly.
+# So a one-backtick span carrying a two-backtick run closes on its own run.
+# A span cannot cross a blank line, per CommonMark.
+# Unbounded it paired two stray backticks and masked every marker between them.
+# Replaced by a space rather than deleted, since deleting joins the text on either side.
+# ``<summary`x`>`` would otherwise become an opening tag the body never carried.
+# A space also leaves nothing unprintable in a marker this script quotes to a reader.
+CODE_SPAN = re.compile(r"(?<!`)(`+)(?!`)(?:[^\n]|\n(?!\s*\n))*?(?<!`)\1(?!`)")
+
+
 # The round's own file summary table, whose first column is a path and whose second is prose.
 # The header row is the marker rather than the `<details>` around it.
 # One measured round carries the table with no `<summary>`, and two summary spellings wrap it.
@@ -912,8 +925,13 @@ def is_coverage_line(line: str) -> bool:
 
 
 def coverage_statements(body: str) -> list[str]:
-    """The lines this round states its file coverage on, quotations excluded."""
-    return [ln.strip() for ln in FENCE.sub("", body or "").splitlines() if is_coverage_line(ln)]
+    """The lines this round states its file coverage on, quotations excluded.
+
+    An inline code span is a quotation the same as a fenced block, so a span carrying a coverage
+    line reads as one this round stated rather than one it quoted.
+    """
+    plain = CODE_SPAN.sub(" ", FENCE.sub("", body or ""))
+    return [ln.strip() for ln in plain.splitlines() if is_coverage_line(ln)]
 
 
 def read_coverage(line: str) -> tuple[int, int] | None:
@@ -1118,7 +1136,7 @@ def unrecognized_in(body: str) -> list[str]:
     # What is left of a drifted refusal is a body with no heading, which is the arm below.
     if refusal_of({"body": body}):
         return []
-    plain = FENCE.sub("", body or "")
+    plain = CODE_SPAN.sub(" ", FENCE.sub("", body or ""))
     headings = [normal(ln) for ln in plain.splitlines() if MARKDOWN_HEADING.match(ln)]
     labels = [normal(m.group(1)) for m in map(LABEL_LINE.match, plain.splitlines()) if m]
     found = [f"heading: {h}" for h in dict.fromkeys(headings) if unvetted(h, VETTED_HEADINGS)]
@@ -1574,7 +1592,7 @@ def qodo_open_findings(body: str) -> list[str]:
         return []
     return [
         s.strip()
-        for s in SUMMARY.findall(body)
+        for s in SUMMARY.findall(CODE_SPAN.sub(" ", FENCE.sub("", body)))
         if QODO_FINDING.match(s) and not QODO_BADGE.search(s)
     ]
 
