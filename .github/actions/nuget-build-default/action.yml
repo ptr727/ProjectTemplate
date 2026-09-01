@@ -76,6 +76,8 @@ runs:
         path: |
           ${{ runner.temp }}/publish/*.nupkg
           ${{ runner.temp }}/publish/*.snupkg
+        # A project that packs nothing would otherwise upload an empty artifact, cut a release, and fail one job later on a download that cannot say why.
+        if-no-files-found: error
         # Consumed within the run by the caller stub's publish-nuget job, so minimize artifact storage.
         retention-days: 1
 

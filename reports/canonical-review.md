@@ -7,9 +7,9 @@ A unit is what a reviewer reads whole, decided by the carry manifest rather than
 ## Coverage
 
 - units: 288
-- covered: 14
+- covered: 24
 - stale: 0
-- never read here: 274
+- never read here: 264
 
 ## Burn-down
 
@@ -210,10 +210,8 @@ A unit is what a reviewer reads whole, decided by the carry manifest rather than
 ### .agents/skills/operational-vs-release-workflow/references/release-publish-mechanics.md
 
 - **(preamble)** - never
-- **Map your outputs to the right seam** - never
 - **No-op republish guarantee** - never
 - **Orchestration vs. build: the override seam** - never
-- **Per-target subsetting** - never
 - **Reusable-task parameter contract** - never
 - **Wrapper repos that track an upstream release** - never
 
@@ -322,9 +320,6 @@ A unit is what a reviewer reads whole, decided by the carry manifest rather than
 
 - **(preamble)** - never
 - **After Any Workflow Edit** - never
-- **How the Contract Is Read** - never
-- **Style Rules That Break in One-Line Diffs** - never
-- **The Core Behavioral Spine** - never
 - **Why This Exists** - never
 
 ### .agents/skills/workflow-ci-contract/references/d-guarantees.md
@@ -333,10 +328,6 @@ A unit is what a reviewer reads whole, decided by the carry manifest rather than
 - **D1: PR Fast-Feedback (Smoke)** - never
 - **D2: Validation at Entry** - never
 - **D3: Versioning and Classification** - never
-- **D4: Release and Publish** - never
-- **D5: Resource Cleanup** - never
-- **D6: Seam Conformance** - never
-- **D7: Concurrency, Permissions, Safety** - never
 - **D8: Bots and Automation** - never
 - **D9: Style and Static** - never
 
@@ -422,7 +413,6 @@ A unit is what a reviewer reads whole, decided by the carry manifest rather than
 - **Repository Layout** - never
 - **Representative Data in Agent-Authored Text** - never
 - **Supported Development Platforms** - never
-- **Workflow YAML Conventions** - never
 
 ### WORKFLOW.md
 

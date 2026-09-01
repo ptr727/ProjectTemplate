@@ -42,6 +42,7 @@ class ReleaseGuardCase(unittest.TestCase):
         canonical_name = "nuget-build-"
         legacy_name = "nuget-push" + "-default"
         required_paths = (
+            "GOVERNANCE.md",
             "WORKFLOW.md",
             ".github/actions/nuget-build-default/action.yml",
             "docs/reusable-workflows.md",
