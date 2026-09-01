@@ -7,9 +7,9 @@ A unit is what a reviewer reads whole, decided by the carry manifest rather than
 ## Coverage
 
 - units: 288
-- covered: 21
+- covered: 23
 - stale: 0
-- never read here: 267
+- never read here: 265
 
 ## Burn-down
 
@@ -113,7 +113,6 @@ A unit is what a reviewer reads whole, decided by the carry manifest rather than
 - **Error handling and logging** - never
 - **Project configuration** - never
 - **Testing conventions** - never
-- **Tooling and editor** - never
 - **Why this exists** - never
 
 ### .agents/skills/dotnet-codestyle/references/conventions.md
@@ -280,7 +279,6 @@ A unit is what a reviewer reads whole, decided by the carry manifest rather than
 ### .agents/skills/shell-codestyle/SKILL.md
 
 - **(preamble)** - never
-- **When shell, not Python** - never
 - **Why this exists** - never
 
 ### .agents/skills/skill-lifecycle/SKILL.md

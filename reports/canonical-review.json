@@ -26,6 +26,14 @@
       "stamp": "2026-09-01T06:18:30Z"
     },
     {
+      "unit": ".agents/skills/dotnet-codestyle/SKILL.md > Tooling and editor",
+      "digest": "sha256:d00e3da0fde14b915ee959bcab0edb68d21cd0b22d954054058bfea21e7473f5",
+      "reviewer": "agent-skill",
+      "findings": 0,
+      "hubCommit": "a76dda7d67033f43c260d21e3ae6a291e1869c0a",
+      "stamp": "2026-09-01T06:46:39Z"
+    },
+    {
       "unit": ".agents/skills/local-strict-review/SKILL.md > (preamble)",
       "digest": "sha256:e607d4a5c7ad14232516261ab7f0941de11a4312415a65dc054b394a645a106d",
       "reviewer": "agent-skill",
@@ -67,11 +75,11 @@
     },
     {
       "unit": ".agents/skills/python-codestyle/SKILL.md > Local development loop",
-      "digest": "sha256:941a84b1f59dfd7dfdd93cb0005bcf9684fdd71759acc6231f7b405f0dce8be5",
+      "digest": "sha256:3c48ebba48fbcbdfd018881ae77fcc89396b0989999ba4c339444c86d8e378b5",
       "reviewer": "agent-skill",
-      "findings": 4,
-      "hubCommit": "ed329f4029c9b035662a96f00834152c27bf2d8b",
-      "stamp": "2026-09-01T06:18:30Z"
+      "findings": 3,
+      "hubCommit": "a76dda7d67033f43c260d21e3ae6a291e1869c0a",
+      "stamp": "2026-09-01T06:46:39Z"
     },
     {
       "unit": ".agents/skills/repo-worktree/SKILL.md > Creating a Worktree",
@@ -104,6 +112,14 @@
       "findings": 9,
       "hubCommit": "df5e2493b48aa45d80f586db68af0c21be97ea21",
       "stamp": "2026-09-01T05:58:02Z"
+    },
+    {
+      "unit": ".agents/skills/shell-codestyle/SKILL.md > When shell, not Python",
+      "digest": "sha256:b29c744996123e32270bc884b6ff66def81646645be442cb3e848fe4dbebcf67",
+      "reviewer": "agent-skill",
+      "findings": 1,
+      "hubCommit": "a76dda7d67033f43c260d21e3ae6a291e1869c0a",
+      "stamp": "2026-09-01T06:46:39Z"
     },
     {
       "unit": ".agents/skills/workflow-ci-contract/SKILL.md > After Any Workflow Edit",
@@ -139,11 +155,11 @@
     },
     {
       "unit": "GOVERNANCE.md > Durable Knowledge and Self-Improvement",
-      "digest": "sha256:4edefe7f44d71631935dea1f6926e4c20d6b265d3bf1c5bfec9cf84be0d1764d",
+      "digest": "sha256:744c320f2fbe92484553e7b41022d047de5ec132136d10da4edadd6efdaa0635",
       "reviewer": "agent-skill",
-      "findings": 6,
-      "hubCommit": "df5e2493b48aa45d80f586db68af0c21be97ea21",
-      "stamp": "2026-09-01T05:58:03Z"
+      "findings": 5,
+      "hubCommit": "a76dda7d67033f43c260d21e3ae6a291e1869c0a",
+      "stamp": "2026-09-01T06:46:39Z"
     },
     {
       "unit": "GOVERNANCE.md > Repository Layout",
@@ -163,11 +179,11 @@
     },
     {
       "unit": "WORKFLOW.md > 4. Behavioral Contract: Expected Outcomes",
-      "digest": "sha256:8dfb687bd8942cf6a5c1a6099cf8ed06a6b70321157e2a8e4d2691f54b3a9fce",
+      "digest": "sha256:f550c8b78c226a5320d05123412067b3629722a875fee3eabe526df48344d983",
       "reviewer": "agent-skill",
-      "findings": 4,
-      "hubCommit": "ed329f4029c9b035662a96f00834152c27bf2d8b",
-      "stamp": "2026-09-01T06:18:30Z"
+      "findings": 5,
+      "hubCommit": "a76dda7d67033f43c260d21e3ae6a291e1869c0a",
+      "stamp": "2026-09-01T06:46:39Z"
     }
   ]
 }

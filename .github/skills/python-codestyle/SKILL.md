@@ -95,11 +95,10 @@ equivalents, per Two Profiles above, and has no such command to run before commi
 those. These are documented commands, and a VS Code tasks mirror carried per the fleet baseline
 (every command-executing task `type: process`, the aggregators dependsOn-only, no `&&` shell
 chaining, so it runs the same on any task shell) is in the hub `vscode-tasks-python.json` snippet.
-CI runs the same clean-compile commands as the authoritative backstop. A Python repo with no
-`.husky/` tree wires the `pre-commit` framework from the canonical `catalog/snippets/pre-commit/`
-directory, hub-local and not carried into every fleet repo. That directory's own README names
-the second file to copy alongside the config. A repo that already carries `.husky/` uses
-Husky.Net instead, which covers Python too. GOVERNANCE.md's hub-only "Running the Linters Locally
+CI runs the same clean-compile commands as the authoritative backstop. The Python mechanism for a
+local hook is the `pre-commit` framework, wired from the canonical `catalog/snippets/pre-commit/`
+directory, hub-local and not carried into every fleet repo. That directory's own README names the
+second file to copy alongside the config. GOVERNANCE.md's hub-only "Running the Linters Locally
 (Known-Working Invocations)" section carries the obligation itself, what the hook must cover, its
 audit treatment, and the per-clone enablement steps.
 

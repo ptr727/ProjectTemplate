@@ -28,7 +28,8 @@ cover general scripting style.
 
 Bash, and only where a program cannot be Python: a bootstrap that installs the interpreter cannot
 be written in it, and a host tool that must run before a development toolchain exists cannot
-depend on one. Everything else is Python, with a test under the scripts tree's `tests/` directory.
+depend on Python either. Everything else is Python, with a test under its own scripts tree's
+`tests/` directory.
 
 ## Rules
 

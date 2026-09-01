@@ -97,8 +97,9 @@ updates, dependency upgrades, benchmarks) on top:
   `dotnet format style --verify-no-changes --severity=info --verbosity=detailed`.
 - **`dotnet-outdated-tool`** checks for dependency updates, and Nerdbank.GitVersioning owns
   version management.
-- CI is the authoritative lint backstop. A local pre-commit hook is strongly suggested: wire
-  Husky.Net from `catalog/snippets/husky/` for local enforcement, including the shared doc gates.
+- CI is the authoritative lint backstop. The .NET mechanism for a local pre-commit hook is
+  Husky.Net, wired from `catalog/snippets/husky/` in the hub, hub-local and not carried into every
+  fleet repo, and covering the shared doc gates alongside the language checks.
 - **Required VS Code extensions**: CSharpier, markdownlint, CSpell. Use the workspace settings
   without overrides.
 
