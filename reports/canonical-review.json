@@ -75,11 +75,11 @@
     },
     {
       "unit": ".agents/skills/local-strict-review/SKILL.md > When to Run It",
-      "digest": "sha256:dd91a8b1631100ffe6a092c87141ae96500c32656fd9a2ef34bd598cddee0502",
+      "digest": "sha256:2de88c5663772d0b2c255fa44a567d6ab04d3b50c67f038af194e910650c83ab",
       "reviewer": "agent-skill",
       "findings": 0,
-      "hubCommit": "e97708dfe4c92e275118a0705556822993de9f32",
-      "stamp": "2026-08-31T16:44:52Z"
+      "hubCommit": "44ae00bd432e1eeaafeb00208d8e713a22f49076",
+      "stamp": "2026-09-01T18:51:57Z"
     },
     {
       "unit": ".agents/skills/operational-vs-release-workflow/references/release-publish-mechanics.md > Map your outputs to the right seam",
