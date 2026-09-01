@@ -1711,7 +1711,7 @@ class TestUnrecognizedShapes(GqlCase):
             OVERVIEW
             + "\nEscaped \\` then <details><summary>Bogus</summary></details> then ` a span `."
         )
-        self.assertIn("summary: Bogus", pr_review.unrecognized_in(body))
+        self.assertEqual(["summary: Bogus"], pr_review.unrecognized_in(body))
 
     def test_a_span_ending_in_a_backslash_still_closes(self) -> None:
         """A backslash inside a code span is literal, so it does not escape the closing run.
@@ -1724,7 +1724,17 @@ class TestUnrecognizedShapes(GqlCase):
             OVERVIEW
             + "\nA span `a\\` then <details><summary>Hidden</summary></details> and ` more."
         )
-        self.assertIn("summary: Hidden", pr_review.unrecognized_in(body))
+        self.assertEqual(["summary: Hidden"], pr_review.unrecognized_in(body))
+
+    def test_a_quoted_marker_stays_masked_when_the_span_ends_in_a_backslash(self) -> None:
+        """The other side of the close guard: a quoted marker must not escape through it.
+
+        Where the span both carries a marker and ends in a backslash, failing to recognize the
+        close would report the quoted marker as a real section, which is the defect the masking
+        was added for in the first place.
+        """
+        body = OVERVIEW + "\nQuoting `<details><summary>Quoted</summary></details>\\` here."
+        self.assertEqual([], pr_review.unrecognized_in(body))
 
     def test_every_vetted_marker_together_reads_as_recognized(self) -> None:
         """The corpus shape in one body, so the lists are held against what they were built from."""
