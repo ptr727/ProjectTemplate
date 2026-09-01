@@ -39,7 +39,7 @@ class ReleaseGuardCase(unittest.TestCase):
         self.assertEqual(1, tracked_text.returncode)
 
     def test_nuget_artifact_name_matches_contracts_and_consumers(self) -> None:
-        canonical_name = "nuget-build-"
+        canonical_name = "nuget-build-$"
         legacy_name = "nuget-push" + "-default"
         required_paths = (
             "GOVERNANCE.md",
@@ -48,10 +48,21 @@ class ReleaseGuardCase(unittest.TestCase):
             "docs/reusable-workflows.md",
         )
 
+        # The bare prefix also matches the action's own directory name, so the exact-name assertions below carry the real check.
         for relative_path in required_paths:
             with self.subTest(path=relative_path):
                 content = (REPO / relative_path).read_text(encoding="utf-8")
-                self.assertIn(canonical_name, content)
+                self.assertIn(canonical_name.rstrip("$"), content)
+
+        # The producer and the documented consumer name one artifact through two different contexts.
+        # A typo in either one leaves the publish job downloading nothing.
+        producer = (REPO / ".github/actions/nuget-build-default/action.yml").read_text(
+            encoding="utf-8"
+        )
+        consumer = (REPO / "docs/reusable-workflows.md").read_text(encoding="utf-8")
+        self.assertIn("name: nuget-build-${{ inputs.branch }}", producer)
+        self.assertIn("name: nuget-build-${{ github.ref_name }}", consumer)
+        self.assertIn('nuget-build-${{ github.ref_name }}\\"', consumer)
 
         tracked_text = run(
             ["git", "grep", "-n", legacy_name],

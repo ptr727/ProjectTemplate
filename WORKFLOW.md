@@ -81,13 +81,13 @@ flowchart LR
   dotnet[dotnet-publish] -->|release-asset-BRANCH-dotnet-publish| store[(run artifacts)]
   nuget[build-nuget] -->|release-asset-BRANCH-nuget| store
   store -->|pattern + merge-multiple| rel["github-release job (D6)"]
-  nuget -->|nuget-build-BRANCH| pub["publish job in the repo's own publisher"]
+  nuget -->|nuget-build-BRANCH| pub["publish-TARGET job in the repo's own publisher"]
   pypi[build-pypi] -->|pypi-build-BRANCH| pub
   pub -->|push| registries[(registries)]
   docker[build-docker] -->|push| registries
 ```
 
-The diagram writes `BRANCH` where the prose writes `<branch>`, because a mermaid label is sanitized as HTML at render and an angle-bracket placeholder is dropped as an unknown tag. This reaches node labels as well as edge labels, which is why the Release Model diagram below writes `X.Y.Z-g-sha` rather than bracketing its own placeholder.
+The diagram writes `BRANCH` and `TARGET` where the prose writes `<branch>` and `<target>`, because a mermaid label is sanitized as HTML at render and an angle-bracket placeholder is dropped as an unknown tag. This reaches node labels as well as edge labels, which is why the Release Model diagram below writes `X.Y.Z-g-sha` rather than bracketing its own placeholder.
 
 ### Reusable-Task Parameter Contract
 

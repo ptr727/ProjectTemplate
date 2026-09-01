@@ -131,11 +131,11 @@
     },
     {
       "unit": "AUDIT.md > 4. Per-Dimension Checks (Letter and Intent)",
-      "digest": "sha256:708ed3f7d047d2c90c5d790bf3c99589eca0895ec69b81b16b61b0e7ba77e043",
+      "digest": "sha256:083d3ca4108c8b1d047e086924360dba45106e62aad5546636a6cbf468271143",
       "reviewer": "agent-skill",
       "findings": 0,
-      "hubCommit": "c3b2898feef97459d01ce7c0b63de25b6c5524bf",
-      "stamp": "2026-09-01T13:57:20Z"
+      "hubCommit": "78898becaa2b1a62cb4c806d86273210c6390ac5",
+      "stamp": "2026-09-01T14:48:23Z"
     },
     {
       "unit": "GOVERNANCE.md > Verification Discipline",
@@ -163,11 +163,11 @@
     },
     {
       "unit": "WORKFLOW.md > 3. Architecture",
-      "digest": "sha256:59c863d0e940e99bf04b3071bf2ad6cc06cdb05dd7a1dc0d7080e76d37cabf2b",
+      "digest": "sha256:2a33c96912e83352029b1e131d2c2066dc3f764e37ac2511b0a0e9487f5583b6",
       "reviewer": "agent-skill",
       "findings": 0,
-      "hubCommit": "c3b2898feef97459d01ce7c0b63de25b6c5524bf",
-      "stamp": "2026-09-01T13:57:20Z"
+      "hubCommit": "78898becaa2b1a62cb4c806d86273210c6390ac5",
+      "stamp": "2026-09-01T14:48:23Z"
     },
     {
       "unit": "WORKFLOW.md > 4. Behavioral Contract: Expected Outcomes",

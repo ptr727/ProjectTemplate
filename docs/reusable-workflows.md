@@ -461,7 +461,7 @@ jobs:
   publish:
     name: Publish project release job
     needs: [plan, validate]
-    if: ${{ needs.plan.outputs.publish == 'true' }}
+    if: ${{ needs.plan.outputs.publish == 'true' && needs.validate.result == 'success' }}
     uses: ptr727/ProjectTemplate/.github/workflows/build-release-task.yml@<hub-main-commit-sha> # <release-tag>
     permissions:
       contents: write
@@ -530,7 +530,7 @@ jobs:
           done
 ```
 
-A Docker repo's stub adds `schedule: - cron: '0 2 * * MON'` to the trigger block, sets `enable_docker: true`, `dockerhub: true`, and `docker_image: ptr727/widget`, maps `DOCKER_HUB_USERNAME`/`DOCKER_HUB_ACCESS_TOKEN` under the `publish` job's `secrets:`, and drops the `publish-nuget` job, since Docker Hub has no OIDC equivalent and the hub task pushes the image itself. A PyPI repo sets `enable_pypi: true` and `enable_nuget: false`, and swaps `publish-nuget` for the same shape one registry over, verbatim as today's:
+A Docker repo's stub adds `schedule: - cron: '0 2 * * MON'` to the trigger block, sets `enable_docker: true`, `dockerhub: true`, `docker_image: ptr727/widget`, `enable_nuget: false` (dropping `nuget_project` with it) and `expect_release_assets: false`, maps `DOCKER_HUB_USERNAME`/`DOCKER_HUB_ACCESS_TOKEN` under the `publish` job's `secrets:`, and drops the `publish-nuget` job, since Docker Hub has no OIDC equivalent and the hub task pushes the image itself. A PyPI repo sets `enable_pypi: true` with `pypi_project_dir` and `pypi_version_file`, `enable_nuget: false` (dropping `nuget_project`) and `expect_release_assets: false`, since PyPI contributes no release asset, and swaps `publish-nuget` for the same shape one registry over, verbatim as today's:
 
 ```yaml
   publish-pypi:

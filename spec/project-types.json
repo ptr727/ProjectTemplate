@@ -19,7 +19,8 @@
             "forbiddenSecrets": ["NUGET_API_KEY"],
             "checks": [
                 { "id": "nuget.publish.oidc", "verdict": "intent", "assert": "NuGet publish uses OIDC Trusted Publishing (NuGet/login), not a stored API key, from a job in the publishing repository's own publisher rather than a reusable workflow a different repository hosts.", "workflowRef": "WORKFLOW.md#output-seam-by-destination" },
-                { "id": "nuget.publish.skipduplicate", "verdict": "letter", "assert": "The push uses --skip-duplicate and is gated on the publish decision, not on an existence check.", "workflowRef": "WORKFLOW.md#d4---release--publish" }
+                { "id": "nuget.publish.skipduplicate", "verdict": "letter", "assert": "The push uses --skip-duplicate and is gated on the publish decision, not on an existence check.", "workflowRef": "WORKFLOW.md#d4---release--publish" },
+                { "id": "nuget.publish.job", "verdict": "letter", "assert": "The publish job declares id-token: write and actions: write, and consume-then-deletes the nuget-build-<branch> artifact.", "workflowRef": "WORKFLOW.md#d7---concurrency-permissions-safety" }
             ]
         },
         "pypi": {
