@@ -2,6 +2,30 @@
   "note": "What full-content reviews of hub canonical content have covered, one entry per unit, holding the most recent pass. Written by scripts/canonical_review.py record, never by hand, and git keeps the history. A unit is covered while its digest here matches the content's, so an edit to the unit retires the pass. See ptr727/ProjectTemplate#1138 for why the record exists.",
   "passes": [
     {
+      "unit": ".agents/skills/agent-conduct/SKILL.md > Before Claiming Done",
+      "digest": "sha256:d000a7b3f3fc3a90c7f2c5516424aaf1a3b97a3b47c3fc3310d34aa676d2a65d",
+      "reviewer": "agent-skill",
+      "findings": 1,
+      "hubCommit": "0e6aacf45334149f6158aa23b8132d6aee1d1eb0",
+      "stamp": "2026-09-01T16:37:57Z"
+    },
+    {
+      "unit": ".agents/skills/drive-pr/SKILL.md > Disposing of Every Finding",
+      "digest": "sha256:97b70e52bc5aebff405200e8f102b3b551d1bc28d93cbbe8aa6667207f95765b",
+      "reviewer": "agent-skill",
+      "findings": 3,
+      "hubCommit": "0e6aacf45334149f6158aa23b8132d6aee1d1eb0",
+      "stamp": "2026-09-01T16:05:59Z"
+    },
+    {
+      "unit": ".agents/skills/drive-pr/SKILL.md > The Drive Loop",
+      "digest": "sha256:e2b73f43112765f809caed562786ff26978ce0f9e4661692d1edc6596c24bd24",
+      "reviewer": "agent-skill",
+      "findings": 2,
+      "hubCommit": "0e6aacf45334149f6158aa23b8132d6aee1d1eb0",
+      "stamp": "2026-09-01T16:37:57Z"
+    },
+    {
       "unit": ".agents/skills/local-strict-review/SKILL.md > (preamble)",
       "digest": "sha256:e607d4a5c7ad14232516261ab7f0941de11a4312415a65dc054b394a645a106d",
       "reviewer": "agent-skill",
@@ -10,12 +34,28 @@
       "stamp": "2026-08-31T14:38:05Z"
     },
     {
+      "unit": ".agents/skills/local-strict-review/SKILL.md > Disposing of Findings",
+      "digest": "sha256:8a02f13222ded9278a0611d305f263ad8c67e1fded86100cc47d3b23a4fc86a8",
+      "reviewer": "agent-skill",
+      "findings": 2,
+      "hubCommit": "0e6aacf45334149f6158aa23b8132d6aee1d1eb0",
+      "stamp": "2026-09-01T16:37:57Z"
+    },
+    {
       "unit": ".agents/skills/local-strict-review/SKILL.md > Mechanics Live Elsewhere",
       "digest": "sha256:9190c95f50cfed12a0157f1cbb55e080c0fc7cbe2dbbbaf6fd2f744736c365b5",
       "reviewer": "agent-skill",
       "findings": 0,
       "hubCommit": "68117017a1483706765a8075ab8a29bb67bfe711",
       "stamp": "2026-08-31T14:38:06Z"
+    },
+    {
+      "unit": ".agents/skills/local-strict-review/SKILL.md > Recording the Pass",
+      "digest": "sha256:5a6f843cda5719f1f2f92badf068dad1ffc638d61a99b91272547a6c12d01c65",
+      "reviewer": "agent-skill",
+      "findings": 2,
+      "hubCommit": "0e6aacf45334149f6158aa23b8132d6aee1d1eb0",
+      "stamp": "2026-09-01T16:37:57Z"
     },
     {
       "unit": ".agents/skills/local-strict-review/SKILL.md > The Carried-Content Pass",
@@ -56,6 +96,38 @@
       "findings": 0,
       "hubCommit": "37d116a2fa0cecf85a220c9005375091db240a8d",
       "stamp": "2026-09-01T14:33:08Z"
+    },
+    {
+      "unit": ".agents/skills/pr-review-conduct/SKILL.md > Answering a suppressed finding",
+      "digest": "sha256:7d1d9acd0646b16f9a41debbc44b97926a8bb43b515ab00e1298d32efb898fc7",
+      "reviewer": "agent-skill",
+      "findings": 1,
+      "hubCommit": "0e6aacf45334149f6158aa23b8132d6aee1d1eb0",
+      "stamp": "2026-09-01T16:37:57Z"
+    },
+    {
+      "unit": ".agents/skills/pr-review-conduct/SKILL.md > Every finding ends in one of five outcomes",
+      "digest": "sha256:f7292e072c812adc3d9f3d7302181978eaf5c313c6c60efd6c7deece6578b1da",
+      "reviewer": "agent-skill",
+      "findings": 4,
+      "hubCommit": "0e6aacf45334149f6158aa23b8132d6aee1d1eb0",
+      "stamp": "2026-09-01T16:06:00Z"
+    },
+    {
+      "unit": ".agents/skills/pr-review-conduct/SKILL.md > Expected review loop",
+      "digest": "sha256:129b6445b11e494700c899653ebd57db9efd000053e16662bec6de650719abb4",
+      "reviewer": "agent-skill",
+      "findings": 1,
+      "hubCommit": "0e6aacf45334149f6158aa23b8132d6aee1d1eb0",
+      "stamp": "2026-09-01T16:37:57Z"
+    },
+    {
+      "unit": ".agents/skills/pr-review-conduct/SKILL.md > Mechanics Live Elsewhere",
+      "digest": "sha256:f9bbcc03fe7a4c5a098c34452b50e62ea4c5899e0def4a1b133d9fb8be43dc94",
+      "reviewer": "agent-skill",
+      "findings": 1,
+      "hubCommit": "0e6aacf45334149f6158aa23b8132d6aee1d1eb0",
+      "stamp": "2026-09-01T16:37:57Z"
     },
     {
       "unit": ".agents/skills/workflow-ci-contract/SKILL.md > How the Contract Is Read",
@@ -136,6 +208,14 @@
       "findings": 0,
       "hubCommit": "78898becaa2b1a62cb4c806d86273210c6390ac5",
       "stamp": "2026-09-01T14:48:23Z"
+    },
+    {
+      "unit": "GOVERNANCE.md > Durable Knowledge and Self-Improvement",
+      "digest": "sha256:4637c1bd6177bdd632f49957d252d56f276c6a6cb3e50b56c63cf8230279ba43",
+      "reviewer": "agent-skill",
+      "findings": 2,
+      "hubCommit": "0e6aacf45334149f6158aa23b8132d6aee1d1eb0",
+      "stamp": "2026-09-01T16:37:57Z"
     },
     {
       "unit": "GOVERNANCE.md > Verification Discipline",
