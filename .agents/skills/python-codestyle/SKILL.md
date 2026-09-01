@@ -92,9 +92,10 @@ repo's type checker: `uv run pyright`, or `uv run mypy src` where mypy is the CI
 where the repo runs both (see Type checking above). Run it, plus `uv run pytest`, before
 committing. A **lint-only** profile's clean-compile substitutes its `uvx` and `unittest`
 equivalents, per Two Profiles above, and has no such command to run before committing beyond
-those. These are documented commands, and a VS Code tasks mirror carried per the fleet baseline
-(every command-executing task `type: process`, the aggregators dependsOn-only, no `&&` shell
-chaining, so it runs the same on any task shell) is in the hub `vscode-tasks-python.json` snippet.
+those. These are documented commands, and the hub's `vscode-tasks-python.json` snippet carries a VS
+Code tasks mirror the fleet baseline expects. Every command-executing task in it is
+`type: process`, and every aggregator is `dependsOn`-only. Neither chains with `&&`, so the
+mirror runs the same on any task shell.
 CI runs the same clean-compile commands as the authoritative backstop. The Python mechanism for a
 local hook is the `pre-commit` framework, wired from the canonical `catalog/snippets/pre-commit/`
 directory, hub-local and not carried into every fleet repo. That directory's own README names the
