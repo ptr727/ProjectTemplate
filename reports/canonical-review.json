@@ -51,11 +51,11 @@
     },
     {
       "unit": ".agents/skills/local-strict-review/SKILL.md > Recording the Pass",
-      "digest": "sha256:5a6f843cda5719f1f2f92badf068dad1ffc638d61a99b91272547a6c12d01c65",
+      "digest": "sha256:1dfd38f46e6cc475330095387774113e4853bbd0bdadbeca6d68ff2b76b3e7d6",
       "reviewer": "agent-skill",
-      "findings": 2,
-      "hubCommit": "0e6aacf45334149f6158aa23b8132d6aee1d1eb0",
-      "stamp": "2026-09-01T16:37:57Z"
+      "findings": 0,
+      "hubCommit": "a5ab8f6515de9fea49a961e88afefcbf46377a79",
+      "stamp": "2026-09-01T16:45:44Z"
     },
     {
       "unit": ".agents/skills/local-strict-review/SKILL.md > The Carried-Content Pass",
@@ -211,11 +211,11 @@
     },
     {
       "unit": "GOVERNANCE.md > Durable Knowledge and Self-Improvement",
-      "digest": "sha256:4637c1bd6177bdd632f49957d252d56f276c6a6cb3e50b56c63cf8230279ba43",
+      "digest": "sha256:e34807301fe5517915c3f9ebe84d1cdfe0d19c74872aa5636184131d979dc5a7",
       "reviewer": "agent-skill",
-      "findings": 2,
-      "hubCommit": "0e6aacf45334149f6158aa23b8132d6aee1d1eb0",
-      "stamp": "2026-09-01T16:37:57Z"
+      "findings": 0,
+      "hubCommit": "a5ab8f6515de9fea49a961e88afefcbf46377a79",
+      "stamp": "2026-09-01T16:45:44Z"
     },
     {
       "unit": "GOVERNANCE.md > Verification Discipline",
