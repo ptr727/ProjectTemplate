@@ -50,12 +50,68 @@
       "stamp": "2026-08-31T14:38:06Z"
     },
     {
+      "unit": "AUDIT.md > 10. Converge: Apply the Fixes",
+      "digest": "sha256:6bc1e573e6c9cd6dace6df67a0d826aaa910d8d94cdf0f29d7571c53def4ff34",
+      "reviewer": "agent-skill",
+      "findings": 0,
+      "hubCommit": "c3b2898feef97459d01ce7c0b63de25b6c5524bf",
+      "stamp": "2026-09-01T13:57:20Z"
+    },
+    {
+      "unit": "AUDIT.md > 4. Per-Dimension Checks (Letter and Intent)",
+      "digest": "sha256:708ed3f7d047d2c90c5d790bf3c99589eca0895ec69b81b16b61b0e7ba77e043",
+      "reviewer": "agent-skill",
+      "findings": 0,
+      "hubCommit": "c3b2898feef97459d01ce7c0b63de25b6c5524bf",
+      "stamp": "2026-09-01T13:57:20Z"
+    },
+    {
       "unit": "GOVERNANCE.md > Verification Discipline",
       "digest": "sha256:0f7d427f2fd507aef0b81e84c3829aa13887838b96647cd37b6cbd7016da50c3",
       "reviewer": "agent-skill",
       "findings": 0,
       "hubCommit": "e97708dfe4c92e275118a0705556822993de9f32",
       "stamp": "2026-08-31T16:26:36Z"
+    },
+    {
+      "unit": "WORKFLOW.md > 1. Purpose and How to Use This Document",
+      "digest": "sha256:35a8c77043da983af04a46300f652d4e3b8a454815b10c380524832cfdbe4a70",
+      "reviewer": "agent-skill",
+      "findings": 0,
+      "hubCommit": "c3b2898feef97459d01ce7c0b63de25b6c5524bf",
+      "stamp": "2026-09-01T13:57:20Z"
+    },
+    {
+      "unit": "WORKFLOW.md > 3. Architecture",
+      "digest": "sha256:59c863d0e940e99bf04b3071bf2ad6cc06cdb05dd7a1dc0d7080e76d37cabf2b",
+      "reviewer": "agent-skill",
+      "findings": 0,
+      "hubCommit": "c3b2898feef97459d01ce7c0b63de25b6c5524bf",
+      "stamp": "2026-09-01T13:57:20Z"
+    },
+    {
+      "unit": "WORKFLOW.md > 4. Behavioral Contract: Expected Outcomes",
+      "digest": "sha256:71023478e957e47a3a91187f1b856f611ca9bf021ace6f21ed4ea81b6b7cad30",
+      "reviewer": "agent-skill",
+      "findings": 0,
+      "hubCommit": "c3b2898feef97459d01ce7c0b63de25b6c5524bf",
+      "stamp": "2026-09-01T13:57:20Z"
+    },
+    {
+      "unit": "WORKFLOW.md > 5. Test Methodology",
+      "digest": "sha256:dabcb9f90bc1966fa320e9f887b4c0232b1a70c9c3318cc87f40e7fbf35e1274",
+      "reviewer": "agent-skill",
+      "findings": 0,
+      "hubCommit": "c3b2898feef97459d01ce7c0b63de25b6c5524bf",
+      "stamp": "2026-09-01T13:57:20Z"
+    },
+    {
+      "unit": "WORKFLOW.md > 6. Per-Project-Type Test Walkthroughs",
+      "digest": "sha256:f6b2044c5b5de3aafd760cf001797e807749c391af93ca2ec0cb3d436b884a33",
+      "reviewer": "agent-skill",
+      "findings": 0,
+      "hubCommit": "c3b2898feef97459d01ce7c0b63de25b6c5524bf",
+      "stamp": "2026-09-01T13:57:21Z"
     }
   ]
 }

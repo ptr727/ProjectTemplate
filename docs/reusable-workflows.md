@@ -85,7 +85,7 @@ The target set. A row exists once its hub task ships, and until then the row is 
 | `merge-bot-task.yml` | none, extra bot rules are a `with:` input | not applicable |
 | `validate-task.yml` | `validate` (a repo's own domain checks, beyond the fleet doc-lint block and the generic unit-test job) | no-op |
 | `get-version-task.yml`, `publish-plan-task.yml` | none | not applicable |
-| `build-release-task.yml` | `dotnet-publish`, `build-nuget`, `build-pypi` | `dotnet-publish-default`, `nuget-push-default`, `pypi-build-default` |
+| `build-release-task.yml` | `dotnet-publish`, `build-nuget`, `build-pypi` | `dotnet-publish-default`, `nuget-build-default`, `pypi-build-default` |
 | `build-docker-task.yml` | `docker-prepare` (extra tags, build-args, matrix), `docker-build-base` | vanilla single-target from `image`, base build required when `build-base` |
 | `publish-docker-readme-task.yml` | `docker-readme-transform` | publish `Docker/README.md` or `README.md` as-is |
 | `check-upstream-version-task.yml` | `resolve-upstream` | none, required |
@@ -180,9 +180,9 @@ Hub: `get-version-task.yml` and `publish-plan-task.yml` hosted, and the downstre
 
 ### Stage 4: The Release Chain and the Docker Core
 
-Hub: `build-release-task.yml` provides the `dotnet-publish`, `build-nuget`, and `build-pypi` hooks. `build-docker-task.yml` follows [The Docker Family][the-docker-family]. The three no-asset release shapes collapse into `expect_release_assets`. No `publish-release-task.yml` ships. A caller stub's `plan`, `validate`, `publish`, and `publish-pypi` jobs each reach one hub task directly. That wiring varies across the fleet's five trigger shapes, so another reusable workflow would become caller-owned inputs. The `release-assets` hook for extra files stays unshipped because no cataloged repo needs it.
+Hub: `build-release-task.yml` provides the `dotnet-publish`, `build-nuget`, and `build-pypi` hooks. `build-docker-task.yml` follows [The Docker Family][the-docker-family]. The three no-asset release shapes collapse into `expect_release_assets`. No `publish-release-task.yml` ships. A caller stub's `plan`, `validate`, `publish`, `publish-nuget`, and `publish-pypi` jobs each reach one hub task directly or push what the task built. That wiring varies across the fleet's five trigger shapes, so another reusable workflow would become caller-owned inputs. The `release-assets` hook for extra files stays unshipped because no cataloged repo needs it.
 
-`build-release-task.yml` reaches `get-version-task.yml` and `build-docker-task.yml` through `$/`, so both sibling tasks resolve at the same hub commit the downstream caller pins. It keeps `validate-release` inline because that gate belongs to the release orchestrator. `build-docker-task.yml` also ships as a task in its own right for a caller that wants only the Docker leg. The `dotnet-publish-default`, `nuget-push-default`, and `pypi-build-default` actions require explicit project paths. Each default action validates its required inputs when selected, while caller-provided hooks remain free to use different inputs.
+`build-release-task.yml` reaches `get-version-task.yml` and `build-docker-task.yml` through `$/`, so both sibling tasks resolve at the same hub commit the downstream caller pins. It keeps `validate-release` inline because that gate belongs to the release orchestrator. `build-docker-task.yml` also ships as a task in its own right for a caller that wants only the Docker leg. The `dotnet-publish-default`, `nuget-build-default`, and `pypi-build-default` actions require explicit project paths. Each default action validates its required inputs when selected, while caller-provided hooks remain free to use different inputs.
 
 - [x] Hub pull request on `develop` in #762.
 - [x] Promoted to `main` in #774 (`0b07a59d`) and released as `2.0.352`, the first tag carrying `build-release-task.yml` and `build-docker-task.yml`. The first release attempt, on `82fecef`, ended in `startup_failure` in [run-startup-failure][run-startup-failure] because `build-nuget` and `github-release` declared job-level permissions. #772 fixed it before #774 promoted.
@@ -195,6 +195,7 @@ Hub: `build-release-task.yml` provides the `dotnet-publish`, `build-nuget`, and 
 - [x] The [pilot smoke run][pilot-smoke-run] exercised `build-release-task.yml` on PhotoCleaner's pull request. Hub defaults ran get-version, validate-release, `dotnet-publish`, `docker-prepare`, and `build-docker`. NuGet, PyPI, and the base build skipped.
 - [x] Cross-repository `$/` resolution observed on PhotoCleaner pull request #58 in [self-reference smoke run][self-reference-smoke-run]: nested get-version and Docker tasks, the .NET publish default, and the Docker prepare default all resolved from the pinned hub feature commit and passed.
 - [x] A real publish through `build-release-task.yml` observed on the PhotoCleaner pilot, [pilot publish run][pilot-publish-run]: release `1.1.11` on `fa91db0` with `Publish GitHub release job` and `Build Docker image job` both succeeding.
+- [x] The first real (non-smoke) NuGet publish through the chain, from ptr727/Utilities at `f3b4cc9` (`2.0.526`), failed the NuGet.org token exchange `HTTP 401` because the OIDC `job_workflow_ref` claim named this hub's `build-release-task.yml` rather than the publishing repository's own workflow. The build itself passed and every later job skipped, so the run published nothing and left no partial release. PhotoCleaner, the pilot, sets `enable_nuget: false`, so the NuGet leg had never run for real. Fixed by moving the push to the caller stub's own `publish-nuget` job, the shape `build-pypi` already used, per [Adopting the Release Chain][adopting-the-release-chain]. A smoke build never reaches either push, so no pull request can catch this class and each adopter's first real release is where it surfaces.
 - [ ] Proof: the next PhotoCleaner release names its .NET publish asset `PhotoCleaner.7z`, which the asset-name fix in this repository derives from the project file. Tick with the release.
 - [ ] `reports/workflow-reuse.md` regenerated with `build-release-task.yml` and `build-docker-task.yml` at 0 copies (hub-only files) and `publish-release.yml` showing callers equal to copies.
 
@@ -405,7 +406,11 @@ A repo whose publisher needs the release-gate decision reaches `publish-plan-tas
 
 ## Adopting the Release Chain
 
-A downstream repo replaces its carried release orchestrator and per-target leaf tasks with a caller stub in its own `publish-release.yml` reaching the hub tasks by pin. `test-pull-request.yml`'s smoke job calls `build-release-task.yml` the same way, with `smoke: true` and the paths-filter's `enable_*` outputs. The renamed .NET publish interface is not yet in a hub release, so the full shape below keeps a pin placeholder and the catalog snippet is withheld until that release exists ([Pinning][pinning]). The task declares no job-level `permissions:` of its own, because a called job's block is validated against the caller's grant before its `if:` runs and would fail a caller that does not grant it at startup. The caller therefore grants only what its enabled paths write with: `contents: write` and `actions: write` when it sets `github: true` on a non-smoke run (the release upload and the artifact cleanup), `id-token: write` when it sets `nuget: true` (a real push through `NuGet/login`), and nothing beyond `contents: read` on a build-only or smoke run, where a Dependabot pull request holds a read-only token.
+A downstream repo replaces its carried release orchestrator and per-target leaf tasks with a caller stub in its own `publish-release.yml` reaching the hub tasks by pin. `test-pull-request.yml`'s smoke job calls `build-release-task.yml` the same way, with `smoke: true` and the paths-filter's `enable_*` outputs. The renamed .NET publish interface is not yet in a hub release, so the full shape below keeps a pin placeholder and the catalog snippet is withheld until that release exists ([Pinning][pinning]). The task declares no job-level `permissions:` of its own, because a called job's block is validated against the caller's grant before its `if:` runs and would fail a caller that does not grant it at startup. The caller therefore grants only what its enabled paths write with: `contents: write` and `actions: write` when it sets `github: true` on a non-smoke run (the release upload and the artifact cleanup), and nothing beyond `contents: read` on a build-only or smoke run, where a Dependabot pull request holds a read-only token. No call to this task ever needs `id-token: write`, because neither package push happens inside it, for the reason the next paragraph gives.
+
+Neither package push runs inside the hub task, and that is a constraint rather than a preference. NuGet.org and PyPI trusted publishing both validate the OIDC token's `job_workflow_ref` claim against the repository that owns the package, and that claim names the workflow file the job actually ran from. A job running from a hub task therefore carries `ptr727/ProjectTemplate/.github/workflows/build-release-task.yml@<sha>`, and the token exchange is rejected, NuGet.org answering `HTTP 401` with `does not start with <owner>/<repo>/.github/workflows/` and PyPI rejecting the same shape under its own code. A caller hook does not avoid it, since a composite action runs inside the hub's job and leaves the claim unchanged. The hub task instead builds the package and uploads it as `nuget-build-<branch>` or `pypi-build-<branch>`, and the caller stub's own `publish-nuget` or `publish-pypi` job downloads that artifact and pushes, so the claim names the publishing repository. A smoke build never reaches either push, which is why a pull request cannot catch this and the first real release is where it surfaces.
+
+The trusted-publishing policy on NuGet.org and PyPI therefore keeps naming the publishing repository and its own `publish-release.yml`, and adopting the chain does not change it. Pointing a policy at the hub's workflow file instead would let any repository calling that task publish that package, so it is not the fix.
 
 The stub keeps its own trigger policy exactly as today: `workflow_dispatch` plus a main-only weekly `schedule` for a Docker repo, or `workflow_dispatch` plus a paths-filtered `push` to `main` for a NuGet or PyPI repo whose merges should auto-publish. What moves to the hub is the release-gate decision, the build/version/publish job graph, and the Docker core, never the trigger. This is the full shape, a NuGet-library repo whose merges publish:
 
@@ -451,32 +456,81 @@ jobs:
     secrets:
       CODECOV_TOKEN: ${{ secrets.CODECOV_TOKEN }}
 
-  # Build, version, validate, push, and release the triggering branch.
+  # Build, version, validate, and release the triggering branch.
   # Grants the write scopes the hub task needs (it declares none of its own except where a job genuinely writes, per its own header).
   publish:
     name: Publish project release job
     needs: [plan, validate]
     if: ${{ needs.plan.outputs.publish == 'true' }}
     uses: ptr727/ProjectTemplate/.github/workflows/build-release-task.yml@<hub-main-commit-sha> # <release-tag>
-    secrets:
-      NUGET_USERNAME: ${{ secrets.NUGET_USERNAME }}
     permissions:
       contents: write
-      id-token: write
       actions: write
     with:
       ref: ${{ github.sha }}
       branch: ${{ github.ref_name }}
       smoke: false
       github: true
-      nuget: true
       enable_docker: false
       enable_pypi: false
       enable_dotnet_publish: false
       nuget_project: ./Widget/Widget.csproj
+
+  # The push lives here rather than in the hub task so the OIDC token's job_workflow_ref claim names this repository.
+  # A skipped publish job skips this one too, so no separate release gate is needed.
+  publish-nuget:
+    name: Publish NuGet library job
+    needs: [validate, publish]
+    runs-on: ubuntu-latest
+    permissions:
+      id-token: write
+      contents: read
+      actions: write
+    steps:
+      - name: Download build artifacts step
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: nuget-build-${{ github.ref_name }}
+          path: ./nuget
+      - name: Setup .NET SDK step
+        uses: actions/setup-dotnet@a98b56852c35b8e3190ac28c8c2271da59106c68 # v6.0.0
+        with:
+          dotnet-version: 10.x
+      # Trades the GitHub OIDC token for a short-lived NuGet key, so there is no stored API key.
+      - name: NuGet login step
+        id: nuget-login
+        uses: NuGet/login@8d196754b4036150537f80ac539e15c2f1028841 # v1.2.0
+        with:
+          user: ${{ secrets.NUGET_USERNAME }}
+      # Pushing the .nupkg also pushes the co-located .snupkg to nuget.org's symbol server, since no --no-symbols flag is set.
+      - name: Push to NuGet.org step
+        env:
+          NUGET_API_KEY: ${{ steps.nuget-login.outputs.NUGET_API_KEY }}
+        run: |
+          set -Eeuo pipefail
+          dotnet nuget push ./nuget/*.nupkg \
+            --source https://api.nuget.org/v3/index.json \
+            --api-key "$NUGET_API_KEY" \
+            --skip-duplicate
+      - name: Delete consumed NuGet build artifact step
+        continue-on-error: true
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -Eeuo pipefail
+          if ! ids=$(gh api "repos/$GITHUB_REPOSITORY/actions/runs/${{ github.run_id }}/artifacts" --paginate \
+            --jq ".artifacts[] | select(.name == \"nuget-build-${{ github.ref_name }}\") | .id"); then
+            echo "::warning::Could not list NuGet build artifacts. The retention-days backstop will reap them."
+            ids=""
+          fi
+          for id in $ids; do
+            if ! gh api --method DELETE "repos/$GITHUB_REPOSITORY/actions/artifacts/$id"; then
+              echo "::warning::Failed to delete artifact $id. The retention-days backstop will reap it."
+            fi
+          done
 ```
 
-A Docker repo's stub adds `schedule: - cron: '0 2 * * MON'` to the trigger block, sets `enable_docker: true`, `dockerhub: true`, and `docker_image: ptr727/widget`, and maps `DOCKER_HUB_USERNAME`/`DOCKER_HUB_ACCESS_TOKEN` under `secrets:` instead of `NUGET_USERNAME`. A PyPI repo keeps `enable_pypi: true` and drops `id-token: write` from the `publish` job's grant, since PyPI publishing stays a separate job at the caller stub, `id-token: write` belonging at that one entry point, verbatim in shape to today's:
+A Docker repo's stub adds `schedule: - cron: '0 2 * * MON'` to the trigger block, sets `enable_docker: true`, `dockerhub: true`, and `docker_image: ptr727/widget`, maps `DOCKER_HUB_USERNAME`/`DOCKER_HUB_ACCESS_TOKEN` under the `publish` job's `secrets:`, and drops the `publish-nuget` job, since Docker Hub has no OIDC equivalent and the hub task pushes the image itself. A PyPI repo sets `enable_pypi: true` and `enable_nuget: false`, and swaps `publish-nuget` for the same shape one registry over, verbatim as today's:
 
 ```yaml
   publish-pypi:
@@ -519,7 +573,7 @@ A Docker repo's stub adds `schedule: - cron: '0 2 * * MON'` to the trigger block
           done
 ```
 
-No `publish-release-task.yml` ships alongside `build-release-task.yml`: the four jobs above are each a thin call to one hub task or a verbatim OIDC upload, and the trigger policy that ties them together genuinely differs enough across the fleet's shapes (dispatch-only Docker schedule, push-gated NuGet or PyPI, KiCadLibrary's branch-matrix dispatch) that hosting it would just move the same `with:` block one file over rather than removing it.
+No `publish-release-task.yml` ships alongside `build-release-task.yml`: the jobs above are each a thin call to one hub task or a verbatim OIDC upload, and the trigger policy that ties them together genuinely differs enough across the fleet's shapes (dispatch-only Docker schedule, push-gated NuGet or PyPI, KiCadLibrary's branch-matrix dispatch) that hosting it would just move the same `with:` block one file over rather than removing it.
 
 ## Adopting the Type-Specific Tasks
 
@@ -609,6 +663,7 @@ Four things the hub cannot prove fall to the first downstream adopter. They are 
 
 [adopting-the-gates]: #adopting-the-gates
 [adopting-the-merge-bot]: #adopting-the-merge-bot
+[adopting-the-release-chain]: #adopting-the-release-chain
 [open-decisions]: #open-decisions
 [pinning]: #pinning
 [rollout]: #rollout

@@ -38,6 +38,54 @@ class ReleaseGuardCase(unittest.TestCase):
         self.assertEqual("", tracked_text.stdout)
         self.assertEqual(1, tracked_text.returncode)
 
+    def test_nuget_artifact_name_matches_contracts_and_consumers(self) -> None:
+        canonical_name = "nuget-build-"
+        legacy_name = "nuget-push" + "-default"
+        required_paths = (
+            "WORKFLOW.md",
+            ".github/actions/nuget-build-default/action.yml",
+            "docs/reusable-workflows.md",
+        )
+
+        for relative_path in required_paths:
+            with self.subTest(path=relative_path):
+                content = (REPO / relative_path).read_text(encoding="utf-8")
+                self.assertIn(canonical_name, content)
+
+        tracked_text = run(
+            ["git", "grep", "-n", legacy_name],
+            cwd=REPO,
+            check=False,
+            capture_output=True,
+            text=True,
+        )
+        self.assertEqual("", tracked_text.stdout)
+        self.assertEqual(1, tracked_text.returncode)
+
+    def test_hub_release_task_never_pushes_to_a_package_registry(self) -> None:
+        # NuGet.org and PyPI validate the OIDC token's job_workflow_ref claim against the repository owning the package.
+        # A push from a hub-hosted task carries this repository's ref instead, so the token exchange fails for every adopter.
+        # The push therefore belongs to the caller stub, and reintroducing it here would break each adopter's first real release.
+        forbidden = ("NuGet/login", "nuget push", "gh-action-pypi-publish")
+        hub_owned = (
+            ".github/workflows/build-release-task.yml",
+            ".github/actions/nuget-build-default/action.yml",
+            ".github/actions/pypi-build-default/action.yml",
+        )
+
+        for relative_path in hub_owned:
+            content = (REPO / relative_path).read_text(encoding="utf-8")
+            for marker in forbidden:
+                with self.subTest(path=relative_path, marker=marker):
+                    self.assertNotIn(marker, content)
+
+        # The caller stub is where those pushes belong, so the documented stub must still carry them.
+        # Without this floor the assertions above would also pass if the release chain stopped publishing entirely.
+        stub_text = (REPO / "docs/reusable-workflows.md").read_text(encoding="utf-8")
+        for marker in ("NuGet/login", "nuget push", "gh-action-pypi-publish"):
+            with self.subTest(marker=marker):
+                self.assertIn(marker, stub_text)
+
     def test_publish_requires_successful_validation(self) -> None:
         workflow = (REPO / ".github/workflows/publish-release.yml").read_text(encoding="utf-8")
         files_spec = (REPO / "spec/files.json").read_text(encoding="utf-8")

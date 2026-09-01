@@ -18,15 +18,15 @@
             "detect": [".github/actions/build-nuget/action.yml", "dotnet nuget push", "nuget_project:"],
             "forbiddenSecrets": ["NUGET_API_KEY"],
             "checks": [
-                { "id": "nuget.publish.oidc", "verdict": "intent", "assert": "NuGet publish uses OIDC Trusted Publishing (NuGet/login), not a stored API key.", "workflowRef": "WORKFLOW.md#d4---release--publish" },
-                { "id": "nuget.publish.skipduplicate", "verdict": "letter", "assert": "The push uses --skip-duplicate and is gated on push, not on an existence check.", "workflowRef": "WORKFLOW.md#d4---release--publish" }
+                { "id": "nuget.publish.oidc", "verdict": "intent", "assert": "NuGet publish uses OIDC Trusted Publishing (NuGet/login), not a stored API key, from a job in the publishing repository's own publisher rather than a reusable workflow a different repository hosts.", "workflowRef": "WORKFLOW.md#output-seam-by-destination" },
+                { "id": "nuget.publish.skipduplicate", "verdict": "letter", "assert": "The push uses --skip-duplicate and is gated on the publish decision, not on an existence check.", "workflowRef": "WORKFLOW.md#d4---release--publish" }
             ]
         },
         "pypi": {
             "detect": [".github/actions/build-pypi/action.yml", "pypa/gh-action-pypi-publish", "pypi_project_dir:"],
             "forbiddenSecrets": ["PYPI_API_TOKEN", "TWINE_PASSWORD"],
             "checks": [
-                { "id": "pypi.publish.oidc", "verdict": "intent", "assert": "PyPI publish uses OIDC Trusted Publishing (no stored token).", "workflowRef": "WORKFLOW.md#d4---release--publish" },
+                { "id": "pypi.publish.oidc", "verdict": "intent", "assert": "PyPI publish uses OIDC Trusted Publishing (no stored token), from a job in the publishing repository's own publisher rather than a reusable workflow a different repository hosts.", "workflowRef": "WORKFLOW.md#output-seam-by-destination" },
                 { "id": "pypi.publish.environment", "verdict": "letter", "assert": "The publish job declares environment: pypi and id-token: write, with skip-existing: true.", "workflowRef": "WORKFLOW.md#d7---concurrency-permissions-safety" }
             ]
         },
