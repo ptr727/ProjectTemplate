@@ -19,11 +19,11 @@
     },
     {
       "unit": ".agents/skills/drive-pr/SKILL.md > The Drive Loop",
-      "digest": "sha256:e2b73f43112765f809caed562786ff26978ce0f9e4661692d1edc6596c24bd24",
+      "digest": "sha256:f05bc847db251e692cf5e3a4e9aecd74448705aa7b9f478efbdb6908721c99be",
       "reviewer": "agent-skill",
-      "findings": 2,
-      "hubCommit": "0e6aacf45334149f6158aa23b8132d6aee1d1eb0",
-      "stamp": "2026-09-01T16:37:57Z"
+      "findings": 0,
+      "hubCommit": "dded739ff0ae8614b52b187a95b00460c0fad8ce",
+      "stamp": "2026-09-01T17:57:39Z"
     },
     {
       "unit": ".agents/skills/local-strict-review/SKILL.md > (preamble)",

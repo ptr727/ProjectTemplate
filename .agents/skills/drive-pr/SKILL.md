@@ -74,7 +74,12 @@ promotion PR once the fix lands, is the early exit this skill exists to prevent.
    to delete it, which fails when `develop` is already checked out somewhere else, the ordinary
    case in this layout. Instead run repo-worktree's post-merge cleanup from the base clone, remove
    the worktree and delete the now-merged local task branch, then verify before deleting the remote
-   one, which is this skill's own step rather than that one's, the object id in `git ls-remote --heads --exit-code -- origin "refs/heads/<branch>"`,
+   one, which is this skill's own step rather than that one's. Both remote commands resolve `origin`,
+   so they hold only where the pull request's head branch lives in this repository, which step 1
+   guarantees by branching here. A pull request opened from a fork follows
+   `upstream-contribution-workflow` instead and neither command applies to it, since `origin` would
+   name the base repository and exit `2` would mean the branch was never there rather than already
+   deleted. The object id in `git ls-remote --heads --exit-code -- origin "refs/heads/<branch>"`,
    which prints `<oid>\t<ref>` so the id is its first field, matches the `headRefOid` captured above, `--` before `origin` and the fully-qualified ref. `--heads origin
    "<branch>"` alone still tail-matches a differently-prefixed branch sharing the same suffix, and
    `--` placed after `origin` instead of before it is not equivalent either, verified empirically
