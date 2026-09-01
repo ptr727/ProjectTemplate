@@ -925,8 +925,13 @@ def is_coverage_line(line: str) -> bool:
 
 
 def coverage_statements(body: str) -> list[str]:
-    """The lines this round states its file coverage on, quotations excluded."""
-    return [ln.strip() for ln in FENCE.sub("", body or "").splitlines() if is_coverage_line(ln)]
+    """The lines this round states its file coverage on, quotations excluded.
+
+    An inline code span is a quotation the same as a fenced block, so a span carrying a coverage
+    line reads as one this round stated rather than one it quoted.
+    """
+    plain = CODE_SPAN.sub(" ", FENCE.sub("", body or ""))
+    return [ln.strip() for ln in plain.splitlines() if is_coverage_line(ln)]
 
 
 def read_coverage(line: str) -> tuple[int, int] | None:

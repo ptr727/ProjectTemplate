@@ -1686,6 +1686,20 @@ class TestUnrecognizedShapes(GqlCase):
         body = OVERVIEW + "\n<details><summary>Reviewed `x` Chances</summary></details>"
         self.assertEqual(["summary: Reviewed Chances"], pr_review.unrecognized_in(body))
 
+    def test_a_coverage_line_inside_a_code_span_is_a_quotation(self) -> None:
+        """A span carrying a coverage line is quoting one, not stating this round's own.
+
+        The fence arm already excluded a quoted line, and a span is the same quotation, so a
+        review whose prose quotes a coverage line was reported as stating an invalid one.
+        """
+        body = OVERVIEW + "\n\nQuoting `a\n- **Files reviewed:** invalid` here.\n"
+        self.assertEqual([], pr_review.coverage_statements(body))
+
+    def test_a_real_coverage_line_survives_the_code_span_mask(self) -> None:
+        """The mask must not cost the reader the statement it exists to find."""
+        line = "- **Files reviewed:** 31/31 changed files"
+        self.assertEqual([line], pr_review.coverage_statements(OVERVIEW + "\n" + line + "\n"))
+
     def test_every_vetted_marker_together_reads_as_recognized(self) -> None:
         """The corpus shape in one body, so the lists are held against what they were built from."""
         self.assertEqual([], pr_review.unrecognized_in(nested()))
