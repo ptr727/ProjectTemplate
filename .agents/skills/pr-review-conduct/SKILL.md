@@ -175,8 +175,9 @@ from a hub checkout. Do not use a provider connector or reconstruct the GitHub m
 ## Mechanics Live Elsewhere
 
 This skill is the provider-agnostic contract. Use `scripts/pr_review.py` from a hub checkout for
-the GitHub-specific API operations, each taking `<number> --repo <owner>/<repo>`. `claims` reads a
-review's own coverage claim. `status` reports coverage, threads, body-only findings, and
+the GitHub-specific API operations, each taking `<number> --repo <owner>/<repo>`. `claims` checks the pull
+request description against the branch it describes, catching a commit or `uses:` ref the head no
+longer carries. `status` reports coverage, threads, body-only findings, and
 shapes in one call. `wait` requests and polls in-process. `comment` posts a PR-conversation
 answer after it reads the PR node ID. `reply` answers a thread by matching the finding's own
 words instead of a line number a fix push can move, and resolves it only when `--resolve` is
