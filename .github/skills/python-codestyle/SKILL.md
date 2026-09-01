@@ -93,14 +93,15 @@ where the repo runs both (see Type checking above). Run it, plus `uv run pytest`
 committing. A **lint-only** profile's clean-compile substitutes its `uvx` and `unittest`
 equivalents, per Two Profiles above, and has no such command to run before committing beyond
 those. These are documented commands, and the hub's `vscode-tasks-python.json` snippet carries the
-VS Code tasks mirror that the fleet baseline expects. Every command-executing task in it is `type:
-process`, and every aggregator is `dependsOn`-only. Neither chains with `&&`, so the mirror runs
-the same on any task shell. CI runs the same clean-compile commands as the authoritative backstop.
-The Python mechanism for a local hook is the `pre-commit` framework, wired from the canonical
-`catalog/snippets/pre-commit/` directory, hub-local and not carried into every fleet repo. That
-directory's own README names the second file to copy alongside the config. GOVERNANCE.md's
-hub-only "Running the Linters Locally (Known-Working Invocations)" section carries the obligation
-itself, what the hook must cover, its audit treatment, and the per-clone enablement steps.
+VS Code tasks mirror that the fleet baseline expects. Every command-executing task in it is
+`type: process`, and every aggregator is `dependsOn`-only. Neither chains with `&&`, so the mirror
+runs the same on any task shell. CI runs the same clean-compile commands as the authoritative
+backstop. The Python mechanism for a local hook is the `pre-commit` framework, wired from the
+canonical `catalog/snippets/pre-commit/` directory, hub-local and not carried into every fleet
+repo. That directory's own README names the second file to copy alongside the config.
+GOVERNANCE.md's hub-only "Running the Linters Locally (Known-Working Invocations)" section carries
+the obligation itself, what the hook must cover, its audit treatment, and the per-clone enablement
+steps.
 
 A restricted executor gives each task a cache directory under a writable temporary root. Point
 `UV_CACHE_DIR`, `RUFF_CACHE_DIR`, `MYPY_CACHE_DIR`, and `COVERAGE_FILE` into that directory before

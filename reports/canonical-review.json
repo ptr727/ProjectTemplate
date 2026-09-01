@@ -163,11 +163,11 @@
     },
     {
       "unit": ".agents/skills/python-codestyle/SKILL.md > Local development loop",
-      "digest": "sha256:791d791545888299263233bd90f9d3f9a8c517ab38b64423196362c5b68e5fed",
+      "digest": "sha256:6f1081d1c1cf0f719f9c154c0b5652a26c7c1f6d2478adc3717becb248a61458",
       "reviewer": "agent-skill",
       "findings": 1,
-      "hubCommit": "c0a399c77b20cf1a90ebbef67337f2615fab71d5",
-      "stamp": "2026-09-01T23:09:43Z"
+      "hubCommit": "5664a954bf0c11acb6bab9014b0463697d18da4b",
+      "stamp": "2026-09-01T23:19:53Z"
     },
     {
       "unit": ".agents/skills/repo-worktree/SKILL.md > Creating a Worktree",
@@ -211,11 +211,11 @@
     },
     {
       "unit": ".agents/skills/workflow-ci-contract/SKILL.md > After Any Workflow Edit",
-      "digest": "sha256:455ae750638b227847f3840107e3389154cdeddca2c3678c7cd77e2743c14246",
+      "digest": "sha256:4c6d8b55e84a4a2162e6b1e5fc818505db7a4a394ded50487a39804aafea6101",
       "reviewer": "agent-skill",
       "findings": 1,
-      "hubCommit": "c0a399c77b20cf1a90ebbef67337f2615fab71d5",
-      "stamp": "2026-09-01T23:09:43Z"
+      "hubCommit": "5664a954bf0c11acb6bab9014b0463697d18da4b",
+      "stamp": "2026-09-01T23:17:25Z"
     },
     {
       "unit": ".agents/skills/workflow-ci-contract/SKILL.md > How the Contract Is Read",
