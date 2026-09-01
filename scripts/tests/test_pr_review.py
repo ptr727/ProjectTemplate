@@ -1624,6 +1624,7 @@ class TestUnrecognizedShapes(GqlCase):
         for shape, unknown in (
             ("heading", "### Reviewed Chances"),
             ("metadata label", "- **Review depth level:** deep"),
+            ("summary", "<details><summary>Reviewed Chances</summary>"),
         ):
             found = pr_review.unrecognized_in(OVERVIEW + "\n" + unknown)
             self.assertTrue(

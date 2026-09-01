@@ -619,7 +619,13 @@ class BaseCommitCase(RepoCase):
         target = self.outside / "elsewhere.md"
         target.write_bytes(b"## Alpha\n\nnot ours\n")
         (self.tmp / "DOC.md").unlink()
-        (self.tmp / "DOC.md").symlink_to(target)
+        try:
+            (self.tmp / "DOC.md").symlink_to(target)
+        except OSError as unprivileged:
+            # Windows refuses a symlink without the privilege or Developer Mode.
+            # That is an execution boundary rather than this guard failing.
+            (self.tmp / "DOC.md").write_bytes(b"## Alpha\n\nown\n")
+            raise unittest.SkipTest(f"this host cannot create a symlink: {unprivileged}") from None
         with self.assertRaises(cr.CannotRun) as caught:
             cr.units(self.tmp)
         self.assertIn("DOC.md", str(caught.exception))
