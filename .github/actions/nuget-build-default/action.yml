@@ -62,12 +62,8 @@ runs:
           -property:InformationalVersion="$ASSEMBLY_INFORMATIONAL_VERSION" \
           -property:PackageVersion="$SEMVER2"
 
-    # The push itself is deliberately not here, and belongs to the caller stub's publish-nuget job.
-    # NuGet.org trusted publishing validates the OIDC token's job_workflow_ref claim against the package's own repository, and a job running from this hub task carries the hub's ref instead, so a push from here fails the token exchange for every adopter.
-    # See docs/reusable-workflows.md "Adopting the Release Chain" for the constraint and the stub that satisfies it.
-    # The .snupkg travels with the .nupkg so that job pushes symbols in the same command.
-    # Branch-suffixed so a run on one branch cannot collide with a run on the other.
-    # Skipped on smoke, since the publish-nuget job runs only on a real publish and nothing would consume it.
+    # A push from here would carry this repository's job_workflow_ref claim, which the adopter's registry rejects.
+    # The .snupkg travels with the .nupkg so the publishing job pushes symbols in the same command.
     - name: Upload build artifacts step
       if: ${{ inputs.smoke != 'true' }}
       uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1

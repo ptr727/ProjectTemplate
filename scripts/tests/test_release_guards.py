@@ -39,7 +39,7 @@ class ReleaseGuardCase(unittest.TestCase):
         self.assertEqual(1, tracked_text.returncode)
 
     def test_nuget_artifact_name_matches_contracts_and_consumers(self) -> None:
-        canonical_name = "nuget-build-$"
+        canonical_name = "nuget-build-"
         legacy_name = "nuget-push" + "-default"
         required_paths = (
             "GOVERNANCE.md",
@@ -48,20 +48,23 @@ class ReleaseGuardCase(unittest.TestCase):
             "docs/reusable-workflows.md",
         )
 
-        # The bare prefix also matches the action's own directory name, so the exact-name assertions below carry the real check.
         for relative_path in required_paths:
             with self.subTest(path=relative_path):
                 content = (REPO / relative_path).read_text(encoding="utf-8")
-                self.assertIn(canonical_name.rstrip("$"), content)
+                self.assertIn(canonical_name, content)
 
-        # The producer and the documented consumer name one artifact through two different contexts.
-        # A typo in either one leaves the publish job downloading nothing.
+        # A typo on either side leaves the publish job downloading nothing.
+        # Anchoring to end of line rejects a name that merely starts with the expected one.
         producer = (REPO / ".github/actions/nuget-build-default/action.yml").read_text(
             encoding="utf-8"
         )
         consumer = (REPO / "docs/reusable-workflows.md").read_text(encoding="utf-8")
-        self.assertIn("name: nuget-build-${{ inputs.branch }}", producer)
-        self.assertIn("name: nuget-build-${{ github.ref_name }}", consumer)
+        self.assertRegex(
+            producer, r"(?m)^[ \t]*name: nuget-build-\$\{\{ inputs\.branch \}\}[ \t]*$"
+        )
+        self.assertRegex(
+            consumer, r"(?m)^[ \t]*name: nuget-build-\$\{\{ github\.ref_name \}\}[ \t]*$"
+        )
         self.assertIn('nuget-build-${{ github.ref_name }}\\"', consumer)
 
         tracked_text = run(
@@ -75,9 +78,7 @@ class ReleaseGuardCase(unittest.TestCase):
         self.assertEqual(1, tracked_text.returncode)
 
     def test_hub_release_task_never_pushes_to_a_package_registry(self) -> None:
-        # NuGet.org and PyPI validate the OIDC token's job_workflow_ref claim against the repository owning the package.
-        # A push from a hub-hosted task carries this repository's ref instead, so the token exchange fails for every adopter.
-        # The push therefore belongs to the caller stub, and reintroducing it here would break each adopter's first real release.
+        # A push from here carries this repository's job_workflow_ref claim, which every adopter's registry rejects.
         forbidden = ("NuGet/login", "nuget push", "gh-action-pypi-publish")
         hub_owned = (
             ".github/workflows/build-release-task.yml",

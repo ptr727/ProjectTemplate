@@ -188,8 +188,7 @@ jobs:
           project-file: ${{ inputs.dotnet_publish_project }}
           asset-name: ${{ inputs.dotnet_publish_asset_name }}
 
-  # NuGet publishing happens in the caller stub's own publish-nuget job, for the reason build-pypi gives below and one more of its own.
-  # NuGet.org trusted publishing validates the OIDC token's job_workflow_ref claim against the package's own repository, and a job running from this task carries this hub's ref instead, so a push from here fails the token exchange for every adopter.
+  # NuGet publishing happens in the caller stub's own publish-nuget job, since a push from here carries this hub's job_workflow_ref claim.
   # This job just builds and uploads the artifact for that job to download, plus the GitHub release asset.
   build-nuget:
     name: Build NuGet library job
