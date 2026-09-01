@@ -1659,6 +1659,33 @@ class TestUnrecognizedShapes(GqlCase):
         body = OVERVIEW + "\n<summary`x`>Reviewed Chances</summary>"
         self.assertEqual([], pr_review.unrecognized_in(body))
 
+    def test_a_stray_backtick_in_two_paragraphs_does_not_mask_between_them(self) -> None:
+        """A code span cannot cross a blank line, so two stray ticks are not a span.
+
+        Unbounded, the pair swallowed every marker between them. That is the silent direction:
+        a real unknown section disappears and the digest closes the loop on a body it never read.
+        """
+        body = (
+            "## Pull request overview\n\nThe change is narrow.\n\n"
+            "The ` character is a delimiter.\n\n"
+            "<details><summary>Bogus Section</summary></details>\n\n"
+            "Also the ` character.\n"
+        )
+        self.assertEqual(["summary: Bogus Section"], pr_review.unrecognized_in(body))
+
+    def test_a_stray_backtick_in_two_paragraphs_does_not_mask_the_headings(self) -> None:
+        """The same over-match in the blocking direction, which reads as a body with no heading."""
+        body = (
+            "Intro with a ` stray tick.\n\n## Pull request overview\n\nText.\n\n"
+            "Another ` stray tick.\n"
+        )
+        self.assertEqual([], pr_review.unrecognized_in(body))
+
+    def test_a_masked_span_leaves_nothing_unprintable_in_a_reported_marker(self) -> None:
+        """The marker is quoted back to a reader, so the mask cannot be an unprintable byte."""
+        body = OVERVIEW + "\n<details><summary>Reviewed `x` Chances</summary></details>"
+        self.assertEqual(["summary: Reviewed Chances"], pr_review.unrecognized_in(body))
+
     def test_every_vetted_marker_together_reads_as_recognized(self) -> None:
         """The corpus shape in one body, so the lists are held against what they were built from."""
         self.assertEqual([], pr_review.unrecognized_in(nested()))
