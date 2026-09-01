@@ -272,9 +272,10 @@ COVERAGE_COUNTS = re.compile(
 FENCE = re.compile(r"^ {0,3}```.*?^ {0,3}```[^\n]*", re.DOTALL | re.MULTILINE)
 # An inline code span is a quotation for the same reason a fenced block is.
 # A reviewer naming `<summary>` in prose was read as opening one.
-# Bounded to a paragraph, and an escaped tick delimits nothing, since either masks a section.
+# Bounded to a paragraph, and an escaped tick opens nothing, since either masks a section.
+# Only the opener takes that guard, a backslash being literal inside a span rather than an escape.
 # Replaced by a space, since deleting joins the sides into a tag the body never carried.
-CODE_SPAN = re.compile(r"(?<![\\`])(`+)(?!`)(?:[^\n]|\n(?!\s*\n))*?(?<![\\`])\1(?!`)")
+CODE_SPAN = re.compile(r"(?<![\\`])(`+)(?!`)(?:[^\n]|\n(?!\s*\n))*?(?<!`)\1(?!`)")
 
 
 # The round's own file summary table, whose first column is a path and whose second is prose.

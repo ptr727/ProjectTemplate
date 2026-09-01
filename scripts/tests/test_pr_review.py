@@ -1713,6 +1713,19 @@ class TestUnrecognizedShapes(GqlCase):
         )
         self.assertIn("summary: Bogus", pr_review.unrecognized_in(body))
 
+    def test_a_span_ending_in_a_backslash_still_closes(self) -> None:
+        """A backslash inside a code span is literal, so it does not escape the closing run.
+
+        Guarding the closer the same way as the opener skipped a valid close, and the span then
+        ran on and masked the section after it, which is the failure the opener guard exists to
+        prevent rather than to cause.
+        """
+        body = (
+            OVERVIEW
+            + "\nA span `a\\` then <details><summary>Hidden</summary></details> and ` more."
+        )
+        self.assertIn("summary: Hidden", pr_review.unrecognized_in(body))
+
     def test_every_vetted_marker_together_reads_as_recognized(self) -> None:
         """The corpus shape in one body, so the lists are held against what they were built from."""
         self.assertEqual([], pr_review.unrecognized_in(nested()))
