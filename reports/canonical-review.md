@@ -7,9 +7,9 @@ A unit is what a reviewer reads whole, decided by the carry manifest rather than
 ## Coverage
 
 - units: 288
-- covered: 23
-- stale: 0
-- never read here: 265
+- covered: 46
+- stale: 2
+- never read here: 240
 
 ## Burn-down
 
@@ -25,7 +25,6 @@ A unit is what a reviewer reads whole, decided by the carry manifest rather than
 
 - **(preamble)** - never
 - **Before Assuming** - never
-- **Before Claiming Done** - never
 - **Delegation, in One Paragraph** - never
 - **When a Failure Surfaces a Lesson** - never
 - **Why This Exists** - never
@@ -134,11 +133,9 @@ A unit is what a reviewer reads whole, decided by the carry manifest rather than
 ### .agents/skills/drive-pr/SKILL.md
 
 - **(preamble)** - never
-- **Disposing of Every Finding** - never
 - **How Far to Drive** - never
 - **Mechanics Live Elsewhere** - never
 - **Stop and Ask, Beyond the How-Far Question** - never
-- **The Drive Loop** - never
 - **What Invoking This Skill Authorizes** - never
 - **Why This Exists** - never
 
@@ -169,8 +166,6 @@ A unit is what a reviewer reads whole, decided by the carry manifest rather than
 
 ### .agents/skills/local-strict-review/SKILL.md
 
-- **Disposing of Findings** - never
-- **Recording the Pass** - never
 - **Running It** - never
 - **Why This Exists** - never
 
@@ -206,21 +201,15 @@ A unit is what a reviewer reads whole, decided by the carry manifest rather than
 ### .agents/skills/operational-vs-release-workflow/references/release-publish-mechanics.md
 
 - **(preamble)** - never
-- **Map your outputs to the right seam** - never
 - **No-op republish guarantee** - never
 - **Orchestration vs. build: the override seam** - never
-- **Per-target subsetting** - never
 - **Reusable-task parameter contract** - never
 - **Wrapper repos that track an upstream release** - never
 
 ### .agents/skills/pr-review-conduct/SKILL.md
 
 - **(preamble)** - never
-- **Answering a suppressed finding** - never
 - **Escalate to the maintainer when** - never
-- **Every finding ends in one of five outcomes** - never
-- **Expected review loop** - never
-- **Mechanics Live Elsewhere** - never
 - **Merge Gate, check this before merging or enabling auto-merge** - never
 - **Triaging findings** - never
 - **Why this exists** - never
@@ -311,9 +300,6 @@ A unit is what a reviewer reads whole, decided by the carry manifest rather than
 ### .agents/skills/workflow-ci-contract/SKILL.md
 
 - **(preamble)** - never
-- **How the Contract Is Read** - never
-- **Style Rules That Break in One-Line Diffs** - never
-- **The Core Behavioral Spine** - never
 - **Why This Exists** - never
 
 ### .agents/skills/workflow-ci-contract/references/d-guarantees.md
@@ -322,10 +308,6 @@ A unit is what a reviewer reads whole, decided by the carry manifest rather than
 - **D1: PR Fast-Feedback (Smoke)** - never
 - **D2: Validation at Entry** - never
 - **D3: Versioning and Classification** - never
-- **D4: Release and Publish** - never
-- **D5: Resource Cleanup** - never
-- **D6: Seam Conformance** - never
-- **D7: Concurrency, Permissions, Safety** - never
 - **D8: Bots and Automation** - never
 - **D9: Style and Static** - never
 
@@ -371,10 +353,8 @@ A unit is what a reviewer reads whole, decided by the carry manifest rather than
 - **(preamble)** - never
 - **0. When to Run and What "Done" Means** - never
 - **1. Scope and Ground-Truth Branch** - never
-- **10. Converge: Apply the Fixes** - never
 - **2. Resolve the Repo's Type(s)** - never
 - **3. Applicability Gate** - never
-- **4. Per-Dimension Checks (Letter and Intent)** - never
 - **5. Assert the Actions Implement WORKFLOW.md** - never
 - **6. Validate Settings, Rulesets, and Secrets** - never
 - **7. Verdict Model** - never
@@ -397,6 +377,7 @@ A unit is what a reviewer reads whole, decided by the carry manifest rather than
 - **Communicating with the User** - never
 - **Devcontainer** - never
 - **Documentation Style Conventions** - never
+- **Durable Knowledge and Self-Improvement** - stale
 - **Editor and Tasks** - never
 - **Foundational Principles** - never
 - **Git and Commit Rules** - never
@@ -409,16 +390,12 @@ A unit is what a reviewer reads whole, decided by the carry manifest rather than
 - **Repository Details** - never
 - **Representative Data in Agent-Authored Text** - never
 - **Supported Development Platforms** - never
-- **Workflow YAML Conventions** - never
 
 ### WORKFLOW.md
 
 - **(preamble)** - never
-- **1. Purpose and How to Use This Document** - never
 - **2. Workflow Style Conventions** - never
-- **3. Architecture** - never
-- **5. Test Methodology** - never
-- **6. Per-Project-Type Test Walkthroughs** - never
+- **4. Behavioral Contract: Expected Outcomes** - stale
 
 ### cspell.json
 

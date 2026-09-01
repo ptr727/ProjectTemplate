@@ -17,11 +17,6 @@ on:
         required: false
         type: boolean
         default: false
-      # Whether to push the library to NuGet.org.
-      nuget:
-        required: false
-        type: boolean
-        default: false
       # Whether to push the docker image to Docker Hub.
       dockerhub:
         required: false
@@ -106,10 +101,6 @@ on:
         type: string
         default: ''
     secrets:
-      # The nuget.org profile name for OIDC trusted publishing.
-      # Not needed when enable_nuget is false.
-      NUGET_USERNAME:
-        required: false
       # Not needed when enable_docker is false.
       DOCKER_HUB_USERNAME:
         required: false
@@ -197,15 +188,13 @@ jobs:
           project-file: ${{ inputs.dotnet_publish_project }}
           asset-name: ${{ inputs.dotnet_publish_asset_name }}
 
+  # NuGet publishing happens in the caller stub's own publish-nuget job, since a push from here carries this hub's job_workflow_ref claim.
+  # This job just builds and uploads the artifact for that job to download, plus the GitHub release asset.
   build-nuget:
     name: Build NuGet library job
     if: ${{ inputs.enable_nuget }}
     needs: [get-version, validate-release]
     runs-on: ubuntu-latest
-    # OIDC trusted publishing through NuGet/login needs id-token: write, and the caller grants it on its call to this task when it sets nuget: true, a real push.
-    # A build-only run (enable_nuget without nuget, or any smoke build) never reaches NuGet/login and needs no such grant.
-    # No job-level permissions: block here, because a called job's block is validated against the caller's grant before its if: runs.
-    # A block naming id-token would fail every caller that does not grant it at startup, including a smoke build under a read-only pull request token.
     steps:
 
       - name: Checkout code step
@@ -219,27 +208,23 @@ jobs:
         with:
           branch: ${{ inputs.branch }}
           smoke: ${{ inputs.smoke }}
-          push: ${{ inputs.nuget && !inputs.smoke }}
           semver2: ${{ needs.get-version.outputs.SemVer2 }}
           assembly-version: ${{ needs.get-version.outputs.AssemblyVersion }}
           assembly-file-version: ${{ needs.get-version.outputs.AssemblyFileVersion }}
           assembly-informational-version: ${{ needs.get-version.outputs.AssemblyInformationalVersion }}
           project-file: ${{ inputs.nuget_project }}
-          nuget-username: ${{ secrets.NUGET_USERNAME }}
 
       - name: Run hub build-nuget default step
         if: ${{ hashFiles('.github/actions/build-nuget/action.yml') == '' }}
-        uses: $/.github/actions/nuget-push-default
+        uses: $/.github/actions/nuget-build-default
         with:
           branch: ${{ inputs.branch }}
           smoke: ${{ inputs.smoke }}
-          push: ${{ inputs.nuget && !inputs.smoke }}
           semver2: ${{ needs.get-version.outputs.SemVer2 }}
           assembly-version: ${{ needs.get-version.outputs.AssemblyVersion }}
           assembly-file-version: ${{ needs.get-version.outputs.AssemblyFileVersion }}
           assembly-informational-version: ${{ needs.get-version.outputs.AssemblyInformationalVersion }}
           project-file: ${{ inputs.nuget_project }}
-          nuget-username: ${{ secrets.NUGET_USERNAME }}
 
   # PyPI publishing happens in the caller stub's own publish-pypi job, since id-token: write is granted only at that one entry point.
   # This job just builds and uploads the artifact for that job to download.
@@ -307,7 +292,8 @@ jobs:
     needs: [get-version, validate-release, dotnet-publish, build-nuget, build-pypi, build-docker]
     # The release upload and the artifact-delete cleanup both write with GITHUB_TOKEN, and the caller grants contents: write and actions: write when it sets github: true on a non-smoke run.
     # A caller publishing only to a registry, or smoke building, leaves this job disabled and grants neither.
-    # No job-level permissions: block here, for the reason build-nuget gives: a block is validated against the caller's grant before if: runs, and a smoke caller holds a read-only token.
+    # No job-level permissions: block here, because a called job's block is validated against the caller's grant before its if: runs.
+    # A block naming contents: write would fail every caller that does not grant it at startup, including a smoke build under a read-only pull request token.
 
     steps:
 
@@ -360,7 +346,7 @@ jobs:
       # A no-file-target repo relaxes it (see download step).
       - name: Create GitHub release step
         if: ${{ steps.release-exists.outputs.exists == 'false' || github.event_name == 'workflow_dispatch' }}
-        uses: softprops/action-gh-release@3d0d9888cb7fd7b750713d6e236d1fcb99157228 # v3.0.2
+        uses: softprops/action-gh-release@efb35369e0ad2afab669f228072c1b0d510eae64 # v3.0.3
         with:
           generate_release_notes: true
           tag_name: ${{ needs.get-version.outputs.SemVer2 }}

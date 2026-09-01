@@ -370,6 +370,20 @@ Three findings raised while writing [`host-setup/windows/`][host-setup-windows],
   - **Settled** - The change is four `usage()` heredocs and four `parse_args()` bodies now that `bootstrap.sh` carries the same contract, and taking it deletes the differences-table row in [`host-setup/windows/README.md`][host-setup-windows] rather than leaving a permanent divergence.
   - **Open** - Nothing.
 
+### Whether a Removed App Execution Alias Comes Back
+
+Removing the `python.exe` and `python3.exe` app execution alias stubs frees the name, which is measured. What is not measured is whether Windows puts them back. The Settings page keeps reporting both aliases as `On` after the files are gone, so the declared state and the on-disk state diverge, and nothing found so far says which one servicing reads. This needs a human to log out and back in, and to reboot, and to report whether the enabled copies reappear in the WindowsApps directory.
+
+**State** `measure`. **Touches** [`host-setup/windows/install-tools.ps1`][install-tools-ps1] and [`docs/host-setup.md`][host-setup-doc], both of which currently say the alias *can* return rather than that it does. **Cost** one logout and one reboot on a Windows host, then a one-line hub edit either way.
+
+- **Log out and back in, then reboot, and report whether the enabled alias copies return.** The check is whether `python.exe` and `python3.exe` exist again directly under the WindowsApps directory, which is the copy that sits on `PATH`. The package's own copies under the App Installer subdirectory are always present and are not the answer.
+  - **Blocked by** - Nothing, beyond the maintainer having a moment to log out and reboot.
+  - **Issue** - [#1161][issue-1161], which this cluster's own change closes. This measurement is what remains after it.
+  - **Checked** - Branch `python3-on-windows` on 2026-09-01, where the aliases were toggled on from Settings, removed by `install-tools.ps1 -Install python`, confirmed gone from the WindowsApps directory, and confirmed still reported `On` by the Settings page after that page was closed and reopened. No logout or reboot has followed, so recreation is untested rather than ruled out.
+  - **Settled** - Removing the file is the only mechanism available. The store the Settings toggle reads was searched for under `AppModel\SystemAppData` and the `AppModel` repository and was not found, and writing a registry location nobody has identified is the guessing the write-safety rules already forbid.
+  - **Settled** - The installer re-removes on every apply rather than assuming a host stays fixed, so recreation is self-healing on the next run either way, and turning the two toggles off in Settings is the durable fix a person can apply.
+  - **Open** - Whether the prose drops to "does not return" or hardens to "returns on every logon", which is the one thing the measurement decides.
+
 ### Neither Host Bootstrap Has Run Against a Truly Fresh Host
 
 Two loaders exist so a copy-paste snippet takes a stock OS install to a configured dev host, and neither has ever been run that way. Everything either has behind it is a dry run or a read against an already-configured checkout, on a machine carrying most of the target tools already. That confirms the logic is internally consistent. It confirms nothing about a `winget` package id still resolving, a stock Debian netinst actually lacking `curl` the way the docs assume, `tar.exe` genuinely shipping on a given Windows image, or the interactive menu reading correctly on a real console. This needs a human watching a real run on a real fresh image and reporting back what broke, including anything that merely looked fine, since neither of those closes from a description of the logic.
@@ -526,6 +540,7 @@ Regenerate [reports/divergences.md][divergences-report] before using it as the w
 [issue-673]: https://github.com/ptr727/ProjectTemplate/issues/673
 [issue-767]: https://github.com/ptr727/ProjectTemplate/issues/767
 [issue-931]: https://github.com/ptr727/ProjectTemplate/issues/931
+[issue-1161]: https://github.com/ptr727/ProjectTemplate/issues/1161
 
 <!-- Pull requests -->
 
@@ -554,6 +569,7 @@ Regenerate [reports/divergences.md][divergences-report] before using it as the w
 [host-setup-doc]: ./docs/host-setup.md
 [host-setup-windows]: ./host-setup/windows/
 [install-tools]: ./host-setup/linux/install-tools.sh
+[install-tools-ps1]: ./host-setup/windows/install-tools.ps1
 [line-endings-ref]: ./.agents/skills/comment-and-doc-style/references/line-endings.md
 [markdownlint]: ./.markdownlint-cli2.jsonc
 [matrix]: ./reports/conformance-matrix.md

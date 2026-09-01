@@ -360,7 +360,7 @@ function Invoke-WingetRemove {
 
 # Managed tools, in the order a report lists them.
 # Every one is a single winget package, which is what makes this a table where the Linux script needs four functions per tool.
-# Probe names the executable that proves the tool is present when winget knows no package for it, and it is py for python because that is the name a correctly set up Windows host carries.
+# Probe names the executable that proves the tool is present when winget knows no package for it, and it is py for python rather than python3 because py is registered by the interpreter's own installer while python3 is created by Repair-PythonName below, and a probe that answers only because this script wrote it proves nothing about the package.
 # Family names the id prefix winget's catalog shares across every channel and pinned major a tool ships under, and is empty everywhere but node: node alone ships as more than one id (Current, LTS, and one per pinned major back to 4), any of which is fine on a host as long as its version clears Available, and Resolve-ToolPackage is what finds which one that is.
 $TOOLS = @(
     @{ Name = 'git'; Package = 'Git.Git'; Probe = 'git'; Optional = @(); Family = '' }
@@ -504,11 +504,40 @@ function Get-ToolStatus {
 function Add-ToolNote {
     param([Parameter(Mandatory)][hashtable]$Tool, [Parameter(Mandatory)][hashtable]$State)
     if ($Tool.Name -eq 'python') {
-        # Written unexpanded, because the expanded form names a real account and the prose gate rejects that.
-        note 'python' 'python3 resolves to the Microsoft Store alias stub under %LOCALAPPDATA%\Microsoft\WindowsApps, so py -3 is the name this contract uses here'
-        $resolved = Get-Command python -ErrorAction SilentlyContinue
-        if ($resolved -and $resolved.Source -notmatch 'Python\d') {
-            note 'python' "python resolves to $(Hide-Home $resolved.Source), which is not the interpreter winget installed"
+        # The note reads the alias's own target package rather than describing every alias as the placeholder, because a report that promises an action the apply then refuses is worse than no report at all.
+        # A Microsoft Store Python registers aliases under these same two names carrying the same tag, and Repair-PythonName deliberately leaves those alone, so the two have to be told apart here as well.
+        foreach ($name in $script:PYTHON_ALIAS_NAMES) {
+            $stub = Join-Path $script:PYTHON_ALIAS_DIR $name
+            if (-not (Test-AppExecutionAlias -Path $stub)) { continue }
+            $package = Get-AppExecutionAliasPackage -Path $stub
+            if (-not $package) {
+                note 'python' "$name in the app execution alias directory is an app execution alias whose target package cannot be read, so an apply of python leaves it alone rather than removing it on a guess"
+            } elseif ($package.StartsWith($script:PYTHON_ALIAS_PACKAGE, [StringComparison]::OrdinalIgnoreCase)) {
+                note 'python' "$name in the app execution alias directory is the Microsoft Store placeholder, which only offers to open the Store and answers ahead of the installed interpreter wherever that directory sits earlier on PATH. Any apply of python removes it, whether -Install, -Upgrade or -Reinstall"
+            } else {
+                note 'python' "$name in the app execution alias directory belongs to $package rather than the Microsoft Store placeholder, so it reaches an interpreter somebody chose and no apply of python removes it. Turn it off under Settings, Apps, Advanced app settings, App execution aliases if the managed interpreter should answer instead"
+            }
+        }
+        # The fleet contract uses python3 as the interpreter name on every platform, so what that name actually reaches here is the fact worth reporting.
+        # A foreign python3 earlier on PATH, from MSYS2, Cygwin or Scoop, is the state nothing else surfaces: it is a real interpreter and answers cleanly, so it is the wrong one silently rather than loudly, and PATH order alone decides it.
+        $line = Get-PythonLine -Version $State.Installed
+        $interpreter = if ($line) { Get-PythonLineInterpreter -Line $line } else { $null }
+        $shim = if ($interpreter) { Join-Path (Split-Path -Parent $interpreter) 'python3.exe' } else { $null }
+        $resolved = Get-Python3OnPath
+        if ($shim -and -not $resolved) {
+            note 'python' 'python3 answers nothing on PATH, and -Install python creates it beside the managed interpreter'
+        } elseif ($shim -and $resolved -ne $shim -and -not (Test-PythonVirtualEnv -Path $resolved)) {
+            note 'python' "python3 resolves to $(Hide-Home $resolved) rather than to the managed $line interpreter at $(Hide-Home $shim), and PATH order alone decides that"
+        }
+        # Compared against the managed interpreter where one could be resolved, and against the weaker shape test otherwise.
+        # The fallback matters because the registry lookup failing is exactly the state where a reader most needs to be told what python reaches, and a check that goes quiet there would be silent on the worst host rather than on the best one.
+        # Every read of the resolved command sits inside this guard rather than beside it, because Set-StrictMode turns a property read on a host where python answers nothing into a terminating error, which would crash the report on exactly the host that most needs one.
+        $python = @(Get-Command python -CommandType Application -ErrorAction SilentlyContinue) | Select-Object -First 1
+        if ($python) {
+            $wrongPython = if ($interpreter) { $python.Source -ne $interpreter } else { $python.Source -notmatch 'Python\d' }
+            if ($wrongPython -and -not (Test-PythonVirtualEnv -Path $python.Source)) {
+                note 'python' "python resolves to $(Hide-Home $python.Source), which is not the interpreter winget installed"
+            }
         }
     }
     if ($State.Scope.Count -gt 1) {
@@ -535,6 +564,248 @@ function Add-ToolNote {
     if ($Tool.Name -eq 'docker') {
         $wslProblem = Test-WslReadyForDocker
         if ($wslProblem) { note 'docker' $wslProblem }
+    }
+}
+
+# --- Python ---
+
+# The reparse tag every Windows app execution alias carries, IO_REPARSE_TAG_APPEXECLINK.
+# Matched as the bare hex value rather than by the label fsutil prints beside it, because that label is localized and the value is not.
+$APPEXECLINK_TAG = '0x8000001b'
+
+# The directory Windows keeps its app execution alias stubs in, which is on PATH by default.
+# Read from the environment rather than written out, because the expanded form names a real account and the prose gate rejects that.
+$PYTHON_ALIAS_DIR = Join-Path $env:LOCALAPPDATA 'Microsoft\WindowsApps'
+
+# Both names rather than python3 alone: python.exe is stubbed the same way and lies identically the moment PATH order puts the alias directory ahead of a real interpreter.
+$PYTHON_ALIAS_NAMES = @('python.exe', 'python3.exe')
+
+# The one package whose python aliases this script will remove, which is the App Installer placeholder that offers to open the Microsoft Store.
+# The tag alone does not identify it: a Microsoft Store Python installs aliases under these same two names carrying this same tag, and those reach a real interpreter the operator chose, so removing one on the tag alone would delete a working setup rather than a placeholder.
+$PYTHON_ALIAS_PACKAGE = 'Microsoft.DesktopAppInstaller_'
+
+# Whether a file is one of Windows' app execution alias stubs rather than a real executable someone put there.
+# Four conditions together, because the deletion this gates cannot be undone and the alias directory is one a person may legitimately have put a program in: the file exists, it is empty, it is a reparse point, and its reparse tag is the app execution alias one.
+# Reading the tag at all is what fsutil is here for, and no other reader answers with it: PowerShell surfaces the ReparsePoint attribute but leaves LinkType empty for this tag, so the attribute alone cannot tell an alias stub from a symlink or a junction, and deleting on the attribute alone would delete either.
+function Test-AppExecutionAlias {
+    param([Parameter(Mandatory)][string]$Path)
+    $item = Get-Item -LiteralPath $Path -Force -ErrorAction SilentlyContinue
+    if (-not $item -or $item.PSIsContainer -or $item.Length -ne 0) { return $false }
+    if (-not ($item.Attributes -band [IO.FileAttributes]::ReparsePoint)) { return $false }
+    # Checked before it is called, the same way Stop-DockerDesktop checks for the docker CLI: an absent command is a PowerShell exception rather than a native exit code, so calling it blind would crash a report rather than answer one.
+    # Answering false where the tag cannot be read is the safe direction, since every caller only ever deletes on a true.
+    if (-not (Get-Command fsutil.exe -ErrorAction SilentlyContinue)) { return $false }
+    $text = (& fsutil.exe reparsepoint query $Path 2>&1 | Out-String)
+    if ($LASTEXITCODE -ne 0) { return $false }
+    return ($text -match [regex]::Escape($script:APPEXECLINK_TAG))
+}
+
+# The package family an app execution alias points at, or nothing where that cannot be read.
+# Only fsutil exposes the reparse buffer at all, and it prints it as a hex dump, so the bytes are decoded from the hex columns rather than from the ASCII rendering beside them, which is lossy for every byte outside printable ASCII.
+# The buffer is UTF-16 and holds several null separated strings, of which the family is the one carrying an underscore and no path separator, verified against the Windows Terminal, App Installer, Notepad and Get Help aliases on a fleet host.
+function Get-AppExecutionAliasPackage {
+    param([Parameter(Mandatory)][string]$Path)
+    if (-not (Get-Command fsutil.exe -ErrorAction SilentlyContinue)) { return $null }
+    $text = (& fsutil.exe reparsepoint query $Path 2>&1 | Out-String)
+    if ($LASTEXITCODE -ne 0) { return $null }
+    $bytes = [System.Collections.Generic.List[byte]]::new()
+    foreach ($line in ($text -split "`r?`n")) {
+        if ($line -notmatch '^[0-9a-f]{4}:\s+(.*)$') { continue }
+        # Capped at the sixteen bytes a dump line carries, so the ASCII column beside them cannot contribute a pair that happens to read as hex.
+        $tokens = @(($Matches[1] -split '\s+') | Where-Object { $_ -match '^[0-9a-f]{2}$' } | Select-Object -First 16)
+        foreach ($token in $tokens) { $bytes.Add([Convert]::ToByte($token, 16)) }
+    }
+    if ($bytes.Count -eq 0) { return $null }
+    $decoded = [Text.Encoding]::Unicode.GetString($bytes.ToArray())
+    $family = @($decoded -split "`0" | Where-Object { $_ -match '_' -and $_ -notmatch '[\\/:]' })
+    if ($family.Count -gt 0) { return $family[0] }
+    return $null
+}
+
+# The major.minor line a version names, which is the unit winget publishes Python under and the unit PEP 514 registers it under.
+# Empty where the version names none, which a caller checks rather than proceeding on a guess.
+function Get-PythonLine {
+    param([string]$Version)
+    if ($Version -match '^(\d+)\.(\d+)') { return "$($Matches[1]).$($Matches[2])" }
+    return ''
+}
+
+# The registry roots PEP 514 interpreters register under, in the order a lookup should prefer them.
+# The 32 bit view is listed because a 32 bit interpreter on a 64 bit host registers there and nowhere else, and an ARM64 host reaches an emulated x64 install the same way.
+$PYTHON_REGISTRY_ROOTS = @(
+    'HKCU:\SOFTWARE\Python\PythonCore'
+    'HKLM:\SOFTWARE\Python\PythonCore'
+    'HKCU:\SOFTWARE\WOW6432Node\Python\PythonCore'
+    'HKLM:\SOFTWARE\WOW6432Node\Python\PythonCore'
+)
+
+# Every registered key for one line, as root and key name, bare key first.
+# PEP 514 lets a line qualify its tag by architecture, so 3.13 is joined by 3.13-32 on a 32 bit install and 3.13-arm64 on an ARM64 one, and a lookup that matches only the bare tag finds nothing on either host while the interpreter is plainly installed.
+# The bare tag sorts first so a host carrying both is answered with its native build rather than whichever key enumerated first.
+# The bare tags and the qualified ones are collected into separate lists and joined at the end, rather than one list a bare tag is pushed onto the front of.
+# Pushing onto the front looks like it expresses the same preference and does not: each root's bare tag lands ahead of the one before it, so the last root searched is answered first and the root order above is inverted for exactly the hosts that carry a line in both.
+function Get-PythonLineTag {
+    param([Parameter(Mandatory)][string]$Line)
+    $bare = @()
+    $qualified = @()
+    foreach ($root in $script:PYTHON_REGISTRY_ROOTS) {
+        foreach ($key in (Get-ChildItem -LiteralPath $root -ErrorAction SilentlyContinue)) {
+            if ($key.PSChildName -eq $Line) { $bare += @{ Root = $root; Name = $key.PSChildName } }
+            elseif ($key.PSChildName -like "$Line-*") { $qualified += @{ Root = $root; Name = $key.PSChildName } }
+        }
+    }
+    return , ($bare + $qualified)
+}
+
+# The interpreter one Python line installed, read from that line's own PEP 514 registry key.
+# That key is what the python.org installer writes and what the py launcher itself reads, so it answers for the line asked about rather than for whatever PATH resolves, which is the whole difference this function exists for, and it answers on a host whose PATH has not been refreshed since the install either.
+# HKCU then HKLM, matching the two scopes winget installs into, and the second is not a fallback for a missing line: a line installed machine wide is registered in that root and in no other.
+function Get-PythonLineInterpreter {
+    param([Parameter(Mandatory)][string]$Line)
+    foreach ($tag in (Get-PythonLineTag -Line $Line)) {
+        $properties = Get-ItemProperty -LiteralPath "$($tag.Root)\$($tag.Name)\InstallPath" -ErrorAction SilentlyContinue
+        if (-not $properties) { continue }
+        # ExecutablePath is preferred over the key's default value because PEP 514 lets a line name an executable that is not the default value's own python.exe, and reading the directory would then name a file that line does not run.
+        $default = [string]$properties.'(default)'
+        $candidates = @($properties.ExecutablePath)
+        if ($default) { $candidates += (Join-Path $default 'python.exe') }
+        foreach ($candidate in $candidates) {
+            if ($candidate -and (Test-Path -LiteralPath $candidate -PathType Leaf)) { return $candidate }
+        }
+    }
+    return $null
+}
+
+# Every Python line PEP 514 says is installed here, as line to interpreter.
+# That is more than the one line this script manages, because each winget id installs its own copy and uninstalling one does not touch another, so lines accumulate on a host that has ever moved between them.
+function Get-PythonLineMap {
+    $map = [ordered]@{}
+    foreach ($root in $script:PYTHON_REGISTRY_ROOTS) {
+        foreach ($key in (Get-ChildItem -LiteralPath $root -ErrorAction SilentlyContinue)) {
+            # Keyed on the bare line rather than the architecture qualified tag, so a host carrying 3.13 and 3.13-32 reports one line rather than two that mean the same thing to a caller comparing against the managed one.
+            $line = ($key.PSChildName -split '-')[0]
+            if ($map.Contains($line)) { continue }
+            $interpreter = Get-PythonLineInterpreter -Line $line
+            if ($interpreter) { $map[$line] = $interpreter }
+        }
+    }
+    return $map
+}
+
+# Where python3 answers from right now, or nothing where it does not answer at all.
+# Filtered to an application because Get-Command alone also answers with a function or an alias defined in this session, and neither of those is what a command run from another shell reaches.
+function Get-Python3OnPath {
+    $found = @(Get-Command 'python3' -CommandType Application -ErrorAction SilentlyContinue) | Select-Object -First 1
+    if ($found) { return $found.Source }
+    return $null
+}
+
+# Whether an interpreter is a virtual environment's rather than a host one.
+# A report distinguishes the two because an activated environment legitimately puts its own interpreter first, which is right for running project code and is not drift worth naming, while every other interpreter answering ahead of the managed one is.
+# The marker is the environment's own pyvenv.cfg, which sits one directory above the Scripts directory the interpreter is in.
+function Test-PythonVirtualEnv {
+    param([string]$Path)
+    if (-not $Path) { return $false }
+    $root = Split-Path -Parent (Split-Path -Parent $Path)
+    if (-not $root) { return $false }
+    return (Test-Path -LiteralPath (Join-Path $root 'pyvenv.cfg') -PathType Leaf)
+}
+
+# On Windows the name python3 lies twice over, and this is the one place both lies are fixed.
+# Windows ships app execution alias stubs called python.exe and python3.exe that only ever offer to open the Microsoft Store.
+# They fail loudly rather than quietly, writing to stderr and exiting 9009 as measured on a fleet host, so a chained command does stop on one, and the harm is not a false pass.
+# What they do is occupy the name: the alias directory is on PATH by default, so wherever it sits ahead of the install directory the stub answers and the installed interpreter cannot be reached under that name at all.
+# Removing the stub file is the only mechanism here, and it frees the name immediately, which is verified rather than assumed.
+# It is not the same act as the Settings toggle, though, and the difference is measured: the toggle keeps reading On afterwards, since whatever store it reads is not this file and no documented interface writes that store.
+# So the alias can return when App Installer is next serviced, this removal runs again on the next apply rather than assuming a host stays fixed, and turning the toggle off in Settings is what stops it coming back at all.
+# The package's own copy under the App Installer subdirectory is deliberately untouched, since winget.exe and the package manager server sit beside it and removing one would break winget itself.
+# And the interpreter winget installs registers python.exe but no python3.exe of its own, so removing the stub alone would leave the name simply absent on a host that does have Python.
+# Both halves therefore run together, the stub goes and a real python3.exe is put beside the interpreter this script manages, which is what makes python3 the one interpreter name the fleet uses on every platform rather than a name that means something different here.
+# Nothing below names a version: the line comes from whatever winget reports installed for the managed id, so this keeps working unchanged when that id moves to a later line.
+function Repair-PythonName {
+    param([string]$Installed)
+
+    # The replacement is resolved before anything is removed, and a failure to resolve one ends the run here with both aliases still in place.
+    # The other order frees the name and then discovers it has nothing to put there, which is worse than either half alone: an unmanaged or unreadable python leaves a host with the Store alias deleted, no python3 created, and not even the Store offer it started with.
+    $line = Get-PythonLine -Version $Installed
+    if (-not $line) {
+        note 'python' 'winget reports no version installed for the managed package, so there is no interpreter here for python3 to sit beside, and the app execution aliases are left alone rather than removed with nothing to replace them'
+        return
+    }
+    $interpreter = Get-PythonLineInterpreter -Line $line
+    if (-not $interpreter) {
+        note 'python' "winget reports $line installed and no interpreter is registered under that line, so python3 was not created and the app execution aliases are left alone. Run this again once the installer has finished writing its registry entries"
+        return
+    }
+
+    foreach ($name in $script:PYTHON_ALIAS_NAMES) {
+        $stub = Join-Path $script:PYTHON_ALIAS_DIR $name
+        if (-not (Test-AppExecutionAlias -Path $stub)) { continue }
+        # Which package the alias points at decides whether it goes, because the tag alone cannot tell a placeholder from a working setup.
+        # An unreadable family is left alone on the same rule, since not knowing what an alias reaches is a reason to keep it rather than a reason to delete it.
+        $package = Get-AppExecutionAliasPackage -Path $stub
+        if (-not $package) {
+            warn "$name is an app execution alias whose target package could not be read, so it is left alone rather than removed on a guess"
+            continue
+        }
+        if (-not $package.StartsWith($script:PYTHON_ALIAS_PACKAGE, [StringComparison]::OrdinalIgnoreCase)) {
+            warn "$name is an app execution alias belonging to $package rather than the Microsoft Store placeholder, so it reaches an interpreter somebody chose and is left alone. Turn it off under Settings, Apps, Advanced app settings, App execution aliases if the managed interpreter should answer instead"
+            continue
+        }
+        info "Removing the $name app execution alias stub from $(Hide-Home $script:PYTHON_ALIAS_DIR)"
+        if ($script:DRY_RUN) {
+            Write-Host "  [dry run] Remove-Item $(Hide-Home $stub)"
+            continue
+        }
+        Remove-Item -LiteralPath $stub -Force -ErrorAction SilentlyContinue
+        if (Test-Path -LiteralPath $stub) {
+            warn "could not remove the $name app execution alias stub, so it still answers ahead of a real interpreter. Turn it off by hand under Settings, Apps, Advanced app settings, App execution aliases"
+        } else {
+            $script:CHANGED += "python removed the $name app execution alias stub"
+        }
+    }
+
+    # Beside the interpreter rather than anywhere else on PATH, and a copy rather than a launcher script.
+    # The containing directory is what CPython resolves its own prefix from, so a copy placed there runs as that interpreter and a copy placed anywhere else does not run at all.
+    # A .cmd or .bat shim would be worse than useless: Git Bash appends .exe and nothing else when it resolves a bare name, so a shim in either of those forms is invisible to exactly the shell the reported failure came from.
+    $shim = Join-Path (Split-Path -Parent $interpreter) 'python3.exe'
+    $source = Get-Item -LiteralPath $interpreter -ErrorAction SilentlyContinue
+    $existing = Get-Item -LiteralPath $shim -ErrorAction SilentlyContinue
+    if ($existing -and $source -and $existing.Length -eq $source.Length -and $existing.LastWriteTime -eq $source.LastWriteTime) {
+        info "python3 already sits beside the $line interpreter at $(Hide-Home $shim)"
+    } elseif ($script:DRY_RUN) {
+        info "Creating python3 beside the $line interpreter"
+        Write-Host "  [dry run] Copy-Item $(Hide-Home $interpreter) $(Hide-Home $shim)"
+    } else {
+        info "Creating python3 beside the $line interpreter at $(Hide-Home $shim)"
+        # Two different failures land here and the remedy differs, so the message names both rather than guessing between them.
+        # A machine wide install sits under a directory this unelevated run cannot write, and the rest of this script deliberately stays unelevated.
+        # And Windows will not replace an executable that is open, which is what an editor or a language server still holding the old shim looks like, so the process is named where one is running, the same way a failed winget install names it.
+        try {
+            Copy-Item -LiteralPath $interpreter -Destination $shim -Force -ErrorAction Stop
+            $script:CHANGED += "python created python3 beside the $line interpreter"
+        } catch {
+            $holding = @(Get-Process -Name 'python3' -ErrorAction SilentlyContinue)
+            $remedy = if ($holding.Count -gt 0) {
+                "python3 is running as process $($holding.Id -join ', '), and Windows cannot replace a running executable, so close whatever is running it and run this again"
+            } else {
+                'copy python.exe to python3.exe there by hand from a prompt that can write that directory, or reinstall python user wide'
+            }
+            # Warned and failed rather than noted, because this is the half of the contract that did not hold: python is installed and python3 still does not reach it.
+            # A note would be the wrong instrument twice over, since it reads as an aside and, on an apply, it is printed under a heading a reader scanning for failures does not look at.
+            warn "python could not write python3 beside the $line interpreter at $(Hide-Home $shim): $($_.Exception.Message). $remedy"
+            $script:FAILED += 'python'
+            return
+        }
+    }
+
+    # A line this script does not manage can carry a python3 of its own and win on PATH, so it is reported and left alone: this run did not necessarily create it, and removing another line's interpreter is not this script's to do.
+    foreach ($entry in (Get-PythonLineMap).GetEnumerator()) {
+        if ($entry.Key -eq $line) { continue }
+        $stale = Join-Path (Split-Path -Parent $entry.Value) 'python3.exe'
+        if (Test-Path -LiteralPath $stale -PathType Leaf) {
+            note 'python' "$($entry.Key) carries a python3 of its own at $(Hide-Home $stale), and PATH order alone decides which one answers; remove it by hand if that line is no longer wanted"
+        }
     }
 }
 
@@ -893,6 +1164,13 @@ function Invoke-Apply {
     foreach ($tool in $script:SELECTED) {
         step $tool
         Invoke-ToolApply -ToolName $tool
+        # Owed after the package itself is settled, on every path Invoke-ToolApply returns by rather than only the one where winget did work, which is where this deviates from the docker branch inside that function.
+        # Docker Desktop only needs stopping when the package is about to move, so its window belongs past the statuses that leave a tool alone, while an app execution alias stub returns on a host whose python has been current for months and a reinstall removes the interpreter this puts python3 beside, so this belongs after all of them instead.
+        # A failed tool is the one case this does skip, and it is the case that matters most: a reinstall whose install half failed has already removed the interpreter, so removing the Store alias on top of it would leave the host with no python, no python3, and no way to get one.
+        # The version is re-read here rather than taken from inside that function, so the line it acts on is the one the host carries now.
+        if ($tool -eq 'python' -and $script:FAILED -notcontains $tool) {
+            Repair-PythonName -Installed (Resolve-InstalledVersion -Version (Get-WingetInstalled -Id (Get-Tool $tool).Package))
+        }
     }
 
     log ''
@@ -901,6 +1179,14 @@ function Invoke-Apply {
         foreach ($entry in $script:CHANGED) { info $entry }
     } else {
         log 'Nothing changed'
+    }
+
+    # Printed here as well as under a report, because an apply is where most notes are actually raised and until now none of them reached the console.
+    # Every note this script writes during an apply was collected into a list only Show-Report rendered, so a declined docker maintenance cycle and every python finding were both discarded by the one mode that had just performed the work they describe.
+    if ($script:NOTES.Count -gt 0) {
+        log ''
+        log 'Notes:'
+        foreach ($entry in $script:NOTES) { info $entry }
     }
 
     if ($script:FAILED.Count -gt 0) {

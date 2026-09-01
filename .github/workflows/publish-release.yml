@@ -64,7 +64,6 @@ jobs:
       smoke: false
       github: true
       dockerhub: false
-      nuget: false
       enable_docker: false
       enable_nuget: false
       enable_pypi: false
