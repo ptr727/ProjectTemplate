@@ -64,15 +64,31 @@ elif [ "$tree_status" -ne 0 ]; then
 fi
 
 # The interpreter is chosen by running the probes spec/host-tools.json declares, in its order.
-# The pre-commit hook states why a presence test picks the wrong name on native Windows.
-if python3 --version >/dev/null 2>&1; then
-    run_py() { python3 "$@"; }
-    py_name=python3
-elif py -3 --version >/dev/null 2>&1; then
+# The pre-commit hook states why running a probe rather than testing for a name is the point.
+# The py launcher answers first because it reaches a registered interpreter whatever is active, where a bare python3 is reached through PATH and an activated virtual environment answers there instead.
+# That launcher exists on Windows alone, so the second probe is what answers on Linux and macOS.
+if py -3 --version >/dev/null 2>&1; then
     run_py() { py -3 "$@"; }
     py_name="py -3"
+elif python3 --version >/dev/null 2>&1; then
+    run_py() { python3 "$@"; }
+    py_name=python3
 else
-    echo "pre-push: neither 'python3 --version' nor 'py -3 --version' ran, so the review gate did not run." >&2
+    echo "pre-push: neither 'py -3 --version' nor 'python3 --version' ran, so the review gate did not run." >&2
+    echo "pre-push: see docs/host-setup.md 'What a Host Must Provide'." >&2
+    exit 1
+fi
+
+# The engines import datetime.UTC at module level, so an interpreter below the floor fails at import and exits 1, which reads as a refusal rather than as the gate never running.
+# The floor and the version pattern are spec/host-tools.json's, read here rather than restated.
+py_floor=3.13
+py_version=$(run_py --version 2>&1 | sed -n 's/^Python \([0-9][0-9.]*\).*/\1/p')
+if [ -z "$py_version" ]; then
+    echo "pre-push: '$py_name --version' printed no recognizable version, so the review gate did not run." >&2
+    exit 1
+fi
+if [ "$(printf '%s\n%s\n' "$py_floor" "$py_version" | sort -V | head -n 1)" != "$py_floor" ]; then
+    echo "pre-push: '$py_name' is Python $py_version, below the $py_floor floor, so the review gate did not run." >&2
     echo "pre-push: see docs/host-setup.md 'What a Host Must Provide'." >&2
     exit 1
 fi

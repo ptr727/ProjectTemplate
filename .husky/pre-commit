@@ -25,16 +25,15 @@ uvx ruff@latest check .
 uvx mypy@latest
 
 # The interpreter is chosen by running the probes spec/host-tools.json declares, in its order.
-# On native Windows the python.org install registers `py` and not `python3`.
-# That name resolves to a Microsoft Store alias stub, and Git Bash inherits the Windows PATH.
-# The stub is on PATH and fails when run, so a presence test selects it and the hook then breaks.
-# Running the probe is the whole point: it is what tells a working interpreter from a name.
-if python3 --version >/dev/null 2>&1; then
-    run_py() { python3 "$@"; }
-elif py -3 --version >/dev/null 2>&1; then
+# Running the probe is the whole point: it is what tells a working interpreter from a name, and Git Bash inherits a Windows PATH that can carry a name which fails when run.
+# The py launcher answers first because it reaches a registered interpreter whatever is active, where a bare python3 is reached through PATH and an activated virtual environment answers there instead.
+# That launcher exists on Windows alone, so the second probe is what answers on Linux and macOS.
+if py -3 --version >/dev/null 2>&1; then
     run_py() { py -3 "$@"; }
+elif python3 --version >/dev/null 2>&1; then
+    run_py() { python3 "$@"; }
 else
-    echo "pre-commit: neither 'python3 --version' nor 'py -3 --version' ran, so the doc gates did not run." >&2
+    echo "pre-commit: neither 'py -3 --version' nor 'python3 --version' ran, so the doc gates did not run." >&2
     echo "pre-commit: see docs/host-setup.md 'What a Host Must Provide'." >&2
     exit 1
 fi
