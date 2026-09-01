@@ -62,7 +62,7 @@ runs:
           -property:InformationalVersion="$ASSEMBLY_INFORMATIONAL_VERSION" \
           -property:PackageVersion="$SEMVER2"
 
-    # A push from here would carry this repository's job_workflow_ref claim, which the adopter's registry rejects.
+    # A push from here runs inside the hub task's job, so its job_workflow_ref claim names the hub and the registry rejects it.
     # The .snupkg travels with the .nupkg so the publishing job pushes symbols in the same command.
     - name: Upload build artifacts step
       if: ${{ inputs.smoke != 'true' }}

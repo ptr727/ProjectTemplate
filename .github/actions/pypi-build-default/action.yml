@@ -105,7 +105,7 @@ runs:
       working-directory: ${{ inputs.project-dir }}
       run: uv build
 
-    # Branch-suffixed so the publisher can build both branches in one run without colliding.
+    # Branch-suffixed so a run on one branch cannot collide with a run on the other.
     # Skipped on smoke, since the publish-pypi job runs only on a real publish and nothing would consume it.
     - name: Upload build artifacts step
       if: ${{ inputs.smoke != 'true' }}

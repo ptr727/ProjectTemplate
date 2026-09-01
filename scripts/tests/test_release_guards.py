@@ -28,6 +28,18 @@ class ReleaseGuardCase(unittest.TestCase):
                 content = (REPO / relative_path).read_text(encoding="utf-8")
                 self.assertIn(canonical_name, content)
 
+        # The prefix alone is satisfied by the action's own directory name.
+        # Anchoring to end of line rejects a name that merely starts with the expected one.
+        producer = (REPO / ".github/actions/pypi-build-default/action.yml").read_text(
+            encoding="utf-8"
+        )
+        consumer = (REPO / "docs/reusable-workflows.md").read_text(encoding="utf-8")
+        self.assertRegex(producer, r"(?m)^[ \t]*name: pypi-build-\$\{\{ inputs\.branch \}\}[ \t]*$")
+        self.assertRegex(
+            consumer, r"(?m)^[ \t]*name: pypi-build-\$\{\{ github\.ref_name \}\}[ \t]*$"
+        )
+        self.assertIn('pypi-build-${{ github.ref_name }}\\"', consumer)
+
         tracked_text = run(
             ["git", "grep", "-n", legacy_name],
             cwd=REPO,
