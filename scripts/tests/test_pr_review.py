@@ -1700,6 +1700,19 @@ class TestUnrecognizedShapes(GqlCase):
         line = "- **Files reviewed:** 31/31 changed files"
         self.assertEqual([line], pr_review.coverage_statements(OVERVIEW + "\n" + line + "\n"))
 
+    def test_an_escaped_backtick_does_not_open_a_span(self) -> None:
+        """A backslash-escaped backtick is a literal, so it delimits nothing.
+
+        Read as an opener it paired with the next real tick and masked everything between, which
+        is the silent direction: a genuine unknown section disappears and the loop closes on a
+        body nobody read.
+        """
+        body = (
+            OVERVIEW
+            + "\nEscaped \\` then <details><summary>Bogus</summary></details> then ` a span `."
+        )
+        self.assertIn("summary: Bogus", pr_review.unrecognized_in(body))
+
     def test_every_vetted_marker_together_reads_as_recognized(self) -> None:
         """The corpus shape in one body, so the lists are held against what they were built from."""
         self.assertEqual([], pr_review.unrecognized_in(nested()))
