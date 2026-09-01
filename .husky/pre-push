@@ -64,15 +64,30 @@ elif [ "$tree_status" -ne 0 ]; then
 fi
 
 # The interpreter is chosen by running the probes spec/host-tools.json declares, in its order.
-# The pre-commit hook states why a presence test picks the wrong name on native Windows.
-if python3 --version >/dev/null 2>&1; then
-    run_py() { python3 "$@"; }
-    py_name=python3
-elif py -3 --version >/dev/null 2>&1; then
+# The py launcher answers first because it reaches a registered interpreter whatever is active, where a bare python3 is reached through PATH and a virtual environment can answer there instead.
+if py -3 --version >/dev/null 2>&1; then
     run_py() { py -3 "$@"; }
     py_name="py -3"
+elif python3 --version >/dev/null 2>&1; then
+    run_py() { python3 "$@"; }
+    py_name=python3
 else
-    echo "pre-push: neither 'python3 --version' nor 'py -3 --version' ran, so the review gate did not run." >&2
+    echo "pre-push: neither 'py -3 --version' nor 'python3 --version' ran, so the review gate did not run." >&2
+    echo "pre-push: see docs/host-setup.md 'What a Host Must Provide'." >&2
+    exit 1
+fi
+
+# The engines import datetime.UTC at module level, so an interpreter below the floor fails at import and exits 1, which reads as a refusal rather than as the gate never running.
+# The interpreter answers about its own version, which needs no text comparison and so no sort -V, a GNU spelling this repository uses only in Linux-only scripts.
+# The floor is read out of the spec rather than repeated here, since a copy drifts the way the probe order above already did.
+py_floor=$(run_py -c "import json; print(next(t['minimum'] for t in json.load(open('spec/host-tools.json'))['tools'] if t['name'] == 'python3'))" 2>/dev/null) || py_floor=""
+if [ -z "$py_floor" ]; then
+    echo "pre-push: could not read the python3 floor from spec/host-tools.json, so the review gate did not run." >&2
+    exit 1
+fi
+if ! run_py -c "import sys; raise SystemExit(0 if sys.version_info >= tuple(int(n) for n in '$py_floor'.split('.')) else 1)"; then
+    py_version=$(run_py -c "import sys; print('.'.join(str(n) for n in sys.version_info[:3]))" 2>/dev/null || true)
+    echo "pre-push: '$py_name' is Python ${py_version:-of an unreadable version}, below the $py_floor floor, so the review gate did not run." >&2
     echo "pre-push: see docs/host-setup.md 'What a Host Must Provide'." >&2
     exit 1
 fi
