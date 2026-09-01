@@ -79,7 +79,12 @@ fi
 
 # The engines import datetime.UTC at module level, so an interpreter below the floor fails at import and exits 1, which reads as a refusal rather than as the gate never running.
 # The interpreter answers about its own version, which needs no text comparison and so no sort -V, a GNU spelling this repository uses only in Linux-only scripts.
-py_floor=3.13
+# The floor is read out of the spec rather than repeated here, since a copy drifts the way the probe order above already did.
+py_floor=$(run_py -c "import json; print(next(t['minimum'] for t in json.load(open('spec/host-tools.json'))['tools'] if t['name'] == 'python3'))" 2>/dev/null) || py_floor=""
+if [ -z "$py_floor" ]; then
+    echo "pre-push: could not read the python3 floor from spec/host-tools.json, so the review gate did not run." >&2
+    exit 1
+fi
 if ! run_py -c "import sys; raise SystemExit(0 if sys.version_info >= tuple(int(n) for n in '$py_floor'.split('.')) else 1)"; then
     py_version=$(run_py -c "import sys; print('.'.join(str(n) for n in sys.version_info[:3]))" 2>/dev/null || true)
     echo "pre-push: '$py_name' is Python ${py_version:-of an unreadable version}, below the $py_floor floor, so the review gate did not run." >&2
