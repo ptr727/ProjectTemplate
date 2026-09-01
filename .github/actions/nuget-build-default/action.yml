@@ -64,8 +64,6 @@ runs:
 
     # Never add a registry push to this action.
     # It runs inside the hub task's job, so an adopter's registry sees this hub in the job_workflow_ref claim and rejects the push.
-    # The .snupkg travels with the .nupkg so the publishing job pushes symbols in the same command.
-    # Skipped on smoke, since the publish-nuget job runs only on a real publish and nothing would consume it.
     - name: Upload build artifacts step
       if: ${{ inputs.smoke != 'true' }}
       uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1

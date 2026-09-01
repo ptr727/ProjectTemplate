@@ -7,9 +7,9 @@ A unit is what a reviewer reads whole, decided by the carry manifest rather than
 ## Coverage
 
 - units: 288
-- covered: 24
+- covered: 34
 - stale: 0
-- never read here: 264
+- never read here: 254
 
 ## Burn-down
 
@@ -25,7 +25,6 @@ A unit is what a reviewer reads whole, decided by the carry manifest rather than
 
 - **(preamble)** - never
 - **Before Assuming** - never
-- **Before Claiming Done** - never
 - **Delegation, in One Paragraph** - never
 - **When a Failure Surfaces a Lesson** - never
 - **Why This Exists** - never
@@ -138,11 +137,9 @@ A unit is what a reviewer reads whole, decided by the carry manifest rather than
 ### .agents/skills/drive-pr/SKILL.md
 
 - **(preamble)** - never
-- **Disposing of Every Finding** - never
 - **How Far to Drive** - never
 - **Mechanics Live Elsewhere** - never
 - **Stop and Ask, Beyond the How-Far Question** - never
-- **The Drive Loop** - never
 - **What Invoking This Skill Authorizes** - never
 - **Why This Exists** - never
 
@@ -173,8 +170,6 @@ A unit is what a reviewer reads whole, decided by the carry manifest rather than
 
 ### .agents/skills/local-strict-review/SKILL.md
 
-- **Disposing of Findings** - never
-- **Recording the Pass** - never
 - **Running It** - never
 - **Why This Exists** - never
 
@@ -218,11 +213,7 @@ A unit is what a reviewer reads whole, decided by the carry manifest rather than
 ### .agents/skills/pr-review-conduct/SKILL.md
 
 - **(preamble)** - never
-- **Answering a suppressed finding** - never
 - **Escalate to the maintainer when** - never
-- **Every finding ends in one of five outcomes** - never
-- **Expected review loop** - never
-- **Mechanics Live Elsewhere** - never
 - **Merge Gate, check this before merging or enabling auto-merge** - never
 - **Triaging findings** - never
 - **Why this exists** - never
@@ -399,7 +390,6 @@ A unit is what a reviewer reads whole, decided by the carry manifest rather than
 - **Communicating with the User** - never
 - **Devcontainer** - never
 - **Documentation Style Conventions** - never
-- **Durable Knowledge and Self-Improvement** - never
 - **Editor and Tasks** - never
 - **Foundational Principles** - never
 - **Git and Commit Rules** - never
