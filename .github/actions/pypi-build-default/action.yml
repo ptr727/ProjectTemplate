@@ -105,7 +105,8 @@ runs:
       working-directory: ${{ inputs.project-dir }}
       run: uv build
 
-    # A push from here runs inside the hub task's job, so an adopter's registry sees this hub in the job_workflow_ref claim and rejects it.
+    # Never add a registry push to this action.
+    # It runs inside the hub task's job, so an adopter's registry sees this hub in the job_workflow_ref claim and rejects the push.
     # Skipped on smoke, since the publish-pypi job runs only on a real publish and nothing would consume it.
     - name: Upload build artifacts step
       if: ${{ inputs.smoke != 'true' }}

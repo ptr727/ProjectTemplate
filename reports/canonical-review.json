@@ -179,11 +179,11 @@
     },
     {
       "unit": "WORKFLOW.md > 5. Test Methodology",
-      "digest": "sha256:dabcb9f90bc1966fa320e9f887b4c0232b1a70c9c3318cc87f40e7fbf35e1274",
+      "digest": "sha256:b12b797e7ea91e568f2529ce5aa94603a65356e6ccceed0306d2631b44b11c65",
       "reviewer": "agent-skill",
       "findings": 0,
-      "hubCommit": "c3b2898feef97459d01ce7c0b63de25b6c5524bf",
-      "stamp": "2026-09-01T13:57:20Z"
+      "hubCommit": "bde1713355e318c13c2b546ccd871822301bfb3c",
+      "stamp": "2026-09-01T15:39:23Z"
     },
     {
       "unit": "WORKFLOW.md > 6. Per-Project-Type Test Walkthroughs",
