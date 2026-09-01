@@ -91,11 +91,11 @@
     },
     {
       "unit": ".agents/skills/repo-worktree/SKILL.md > The Base Branch",
-      "digest": "sha256:6231eb99ddfae5e4cd929c7754bf1ab69802ef5f86f12067e0b33b5ec2c8f2d7",
+      "digest": "sha256:025583508ebeda2bba30492e7e585965c6e52422ee956ab7e6266170ad2fc1e2",
       "reviewer": "agent-skill",
-      "findings": 6,
-      "hubCommit": "df5e2493b48aa45d80f586db68af0c21be97ea21",
-      "stamp": "2026-09-01T05:45:32Z"
+      "findings": 1,
+      "hubCommit": "6b3271c03c1a0dcdb71fd2ad0447ba2b4a1cd04c",
+      "stamp": "2026-09-01T15:41:23Z"
     },
     {
       "unit": ".agents/skills/resync-a-repo/SKILL.md > Reach the hub and measure before changing anything",
@@ -123,11 +123,11 @@
     },
     {
       "unit": ".agents/skills/workflow-ci-contract/SKILL.md > After Any Workflow Edit",
-      "digest": "sha256:f22a3e87e27be152ace0c2783b7d3669d057a8aec1c6ff6ccf227bf2a238de4b",
+      "digest": "sha256:c7078ad8a7867aaad6ee740e3208aad3d8b45a7c22f76c4b6a91fcb5bf11fa36",
       "reviewer": "agent-skill",
-      "findings": 1,
-      "hubCommit": "fd8ab73609a2064c83eecf7866614fd99b21517c",
-      "stamp": "2026-09-01T06:50:05Z"
+      "findings": 0,
+      "hubCommit": "6b3271c03c1a0dcdb71fd2ad0447ba2b4a1cd04c",
+      "stamp": "2026-09-01T15:41:23Z"
     },
     {
       "unit": "AGENTS.md > Where the Rules Live",
@@ -179,11 +179,11 @@
     },
     {
       "unit": "WORKFLOW.md > 4. Behavioral Contract: Expected Outcomes",
-      "digest": "sha256:f550c8b78c226a5320d05123412067b3629722a875fee3eabe526df48344d983",
+      "digest": "sha256:35a8115f5e10488919250ea0631219aed64e4ea592a78a0da8dfcc61a8ee71b5",
       "reviewer": "agent-skill",
-      "findings": 5,
-      "hubCommit": "a76dda7d67033f43c260d21e3ae6a291e1869c0a",
-      "stamp": "2026-09-01T06:46:39Z"
+      "findings": 4,
+      "hubCommit": "6b3271c03c1a0dcdb71fd2ad0447ba2b4a1cd04c",
+      "stamp": "2026-09-01T15:41:23Z"
     }
   ]
 }

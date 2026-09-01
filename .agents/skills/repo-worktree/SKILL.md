@@ -67,8 +67,8 @@ else does: never `checkout`, `pull`, `reset`, `commit`, or any other command tha
 working tree, index, or HEAD while a task is in progress. That distinction is the one a real
 incident missed, where an agent reused a primary checkout as the working directory itself rather
 than only as the source a worktree is created from. On a machine carrying the hub's agent-safety
-install, Claude Code also makes this a mechanical stop for most of that list. `merge
---ff-only`/`pull --ff-only` stay exempt even there, and so does a `checkout <ref>`/`switch <ref>`
+install, Claude Code also makes this a mechanical stop for most of that list.
+`merge --ff-only`/`pull --ff-only` stay exempt even there, and so does a `checkout <ref>`/`switch <ref>`
 naming exactly one positional that resolves as a ref, with no force flag and no `--` separator,
 which is the shape this skill's own cleanup step runs. A `checkout -- .` or a `switch -c <new>` is
 denied, being neither. Prose remains the only enforcement for a non-Claude-Code agent, for a
