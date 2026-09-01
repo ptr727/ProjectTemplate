@@ -28,6 +28,18 @@ class ReleaseGuardCase(unittest.TestCase):
                 content = (REPO / relative_path).read_text(encoding="utf-8")
                 self.assertIn(canonical_name, content)
 
+        # The prefix loop above passes on the action's own directory name, so it fails open alone.
+        # A producer typo leaves the publish job downloading nothing, and a loose delete filter blanket-deletes.
+        producer = (REPO / ".github/actions/pypi-build-default/action.yml").read_text(
+            encoding="utf-8"
+        )
+        consumer = (REPO / "docs/reusable-workflows.md").read_text(encoding="utf-8")
+        self.assertRegex(producer, r"(?m)^[ \t]*name: pypi-build-\$\{\{ inputs\.branch \}\}[ \t]*$")
+        self.assertRegex(
+            consumer, r"(?m)^[ \t]*name: pypi-build-\$\{\{ github\.ref_name \}\}[ \t]*$"
+        )
+        self.assertIn('select(.name == \\"pypi-build-${{ github.ref_name }}\\")', consumer)
+
         tracked_text = run(
             ["git", "grep", "-n", legacy_name],
             cwd=REPO,
@@ -37,6 +49,67 @@ class ReleaseGuardCase(unittest.TestCase):
         )
         self.assertEqual("", tracked_text.stdout)
         self.assertEqual(1, tracked_text.returncode)
+
+    def test_nuget_artifact_name_matches_contracts_and_consumers(self) -> None:
+        canonical_name = "nuget-build-"
+        legacy_name = "nuget-push" + "-default"
+        required_paths = (
+            "GOVERNANCE.md",
+            "WORKFLOW.md",
+            ".github/actions/nuget-build-default/action.yml",
+            "docs/reusable-workflows.md",
+        )
+
+        for relative_path in required_paths:
+            with self.subTest(path=relative_path):
+                content = (REPO / relative_path).read_text(encoding="utf-8")
+                self.assertIn(canonical_name, content)
+
+        # The prefix loop above passes on the action's own directory name, so it fails open alone.
+        # A producer typo leaves the publish job downloading nothing, and a loose delete filter blanket-deletes.
+        producer = (REPO / ".github/actions/nuget-build-default/action.yml").read_text(
+            encoding="utf-8"
+        )
+        consumer = (REPO / "docs/reusable-workflows.md").read_text(encoding="utf-8")
+        self.assertRegex(
+            producer, r"(?m)^[ \t]*name: nuget-build-\$\{\{ inputs\.branch \}\}[ \t]*$"
+        )
+        self.assertRegex(
+            consumer, r"(?m)^[ \t]*name: nuget-build-\$\{\{ github\.ref_name \}\}[ \t]*$"
+        )
+        self.assertIn('select(.name == \\"nuget-build-${{ github.ref_name }}\\")', consumer)
+
+        tracked_text = run(
+            ["git", "grep", "-n", legacy_name],
+            cwd=REPO,
+            check=False,
+            capture_output=True,
+            text=True,
+        )
+        self.assertEqual("", tracked_text.stdout)
+        self.assertEqual(1, tracked_text.returncode)
+
+    def test_hub_release_task_never_pushes_to_a_package_registry(self) -> None:
+        # A push from here carries this repository's job_workflow_ref claim, which every adopter's registry rejects.
+        forbidden = ("NuGet/login", "nuget push", "gh-action-pypi-publish")
+        hub_owned = (
+            ".github/workflows/build-release-task.yml",
+            ".github/actions/nuget-build-default/action.yml",
+            ".github/actions/pypi-build-default/action.yml",
+        )
+
+        for relative_path in hub_owned:
+            content = (REPO / relative_path).read_text(encoding="utf-8")
+            for marker in forbidden:
+                with self.subTest(path=relative_path, marker=marker):
+                    self.assertNotIn(marker, content)
+
+        # The caller stub is where those pushes belong, so the documented stub must still carry them.
+        # Without this floor the assertions above would also pass if the release chain stopped publishing entirely.
+        stub_text = (REPO / "docs/reusable-workflows.md").read_text(encoding="utf-8")
+        for marker in ("NuGet/login", "nuget push", "gh-action-pypi-publish"):
+            with self.subTest(marker=marker):
+                self.assertIn(marker, stub_text)
 
     def test_publish_requires_successful_validation(self) -> None:
         workflow = (REPO / ".github/workflows/publish-release.yml").read_text(encoding="utf-8")

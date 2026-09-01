@@ -1,16 +1,12 @@
-name: Push NuGet package default
-description: Build, OIDC-publish, and upload the release asset for a .NET project.
+name: Build NuGet package default
+description: Build the package and upload it for the caller stub's publish-nuget job and the GitHub release.
 
 inputs:
   branch:
     description: Logical branch driving build configuration. main gives Release, anything else Debug.
     required: true
   smoke:
-    description: Smoke mode skips the NuGet.org push and the release-asset upload.
-    required: false
-    default: 'false'
-  push:
-    description: Push to NuGet.org through OIDC trusted publishing. Ignored on smoke.
+    description: Smoke mode skips the build-artifact upload and the release-asset upload, since nothing would consume either.
     required: false
     default: 'false'
   semver2:
@@ -24,10 +20,6 @@ inputs:
   project-file:
     description: Path to the .NET project file.
     required: true
-  nuget-username:
-    description: nuget.org profile name for OIDC trusted publishing. Empty when push is false.
-    required: false
-    default: ''
 
 runs:
   using: composite
@@ -70,35 +62,22 @@ runs:
           -property:InformationalVersion="$ASSEMBLY_INFORMATIONAL_VERSION" \
           -property:PackageVersion="$SEMVER2"
 
-    # OIDC trusted publishing trades the GitHub OIDC token for a short-lived NuGet key, so there is no stored API key.
-    # Needs id-token: write from the caller, granted only on a real, non-smoke publish.
-    - name: Require nuget-username step
-      if: ${{ inputs.push == 'true' && inputs.smoke != 'true' && inputs.nuget-username == '' }}
-      shell: bash
-      run: |
-        set -Eeuo pipefail
-        echo "::error::inputs.push is true but nuget-username is empty. The caller must map secrets.NUGET_USERNAME through to this hook."
-        exit 1
-
-    - name: NuGet login step
-      if: ${{ inputs.push == 'true' && inputs.smoke != 'true' }}
-      id: nuget-login
-      uses: NuGet/login@8d196754b4036150537f80ac539e15c2f1028841 # v1.2.0
+    # Never add a registry push to this action.
+    # It runs inside the hub task's job, so an adopter's registry sees this hub in the job_workflow_ref claim and rejects the push.
+    # The .snupkg travels with the .nupkg so the publishing job pushes symbols in the same command.
+    # Skipped on smoke, since the publish-nuget job runs only on a real publish and nothing would consume it.
+    - name: Upload build artifacts step
+      if: ${{ inputs.smoke != 'true' }}
+      uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
       with:
-        user: ${{ inputs.nuget-username }}
-
-    # Pushing the .nupkg also pushes the co-located .snupkg to nuget.org's symbol server, since no --no-symbols flag is set.
-    - name: Push to NuGet.org step
-      if: ${{ inputs.push == 'true' && inputs.smoke != 'true' }}
-      shell: bash
-      env:
-        NUGET_API_KEY: ${{ steps.nuget-login.outputs.NUGET_API_KEY }}
-      run: |
-        set -Eeuo pipefail
-        dotnet nuget push "$RUNNER_TEMP"/publish/*.nupkg \
-          --source https://api.nuget.org/v3/index.json \
-          --api-key "$NUGET_API_KEY" \
-          --skip-duplicate
+        name: nuget-build-${{ inputs.branch }}
+        path: |
+          ${{ runner.temp }}/publish/*.nupkg
+          ${{ runner.temp }}/publish/*.snupkg
+        # A project that packs nothing would otherwise only warn, create no artifact at all, cut a release, and fail one job later on a download that cannot say why.
+        if-no-files-found: error
+        # Consumed within the run by the caller stub's publish-nuget job, so minimize artifact storage.
+        retention-days: 1
 
     - name: Zip output step
       if: ${{ inputs.smoke != 'true' }}
