@@ -25,9 +25,7 @@ uvx ruff@latest check .
 uvx mypy@latest
 
 # The interpreter is chosen by running the probes spec/host-tools.json declares, in its order.
-# Running the probe is the whole point: it is what tells a working interpreter from a name, and Git Bash inherits a Windows PATH that can carry a name which fails when run.
-# The py launcher answers first because it reaches a registered interpreter whatever is active, where a bare python3 is reached through PATH and an activated virtual environment answers there instead.
-# That launcher exists on Windows alone, so the second probe is what answers on Linux and macOS.
+# Running one rather than testing for a name is the point, since Git Bash inherits a Windows PATH that can carry a name which fails when run.
 if py -3 --version >/dev/null 2>&1; then
     run_py() { py -3 "$@"; }
 elif python3 --version >/dev/null 2>&1; then
