@@ -384,6 +384,45 @@ class TestSpecCoverage(unittest.TestCase):
         self.assertIn("$metadata.package -isnot [string]", text)
         self.assertIn("$metadataKeys.Count -ne 2", text)
 
+    def test_windows_installer_supplies_the_python3_name(self) -> None:
+        """Windows has no `python3` of its own, so the installer both clears the lie and supplies the name.
+
+        Two halves, and neither is sufficient alone. Windows ships app-execution alias stubs that
+        answer to `python` and `python3` and only offer to open the Microsoft Store. They fail
+        loudly, on stderr with exit 9009, so the harm is not a false pass but an occupied name: the
+        alias directory is on `PATH` by default, so the stub answers wherever it sits ahead of the
+        install directory. Removing them alone would leave `python3` simply absent on a host that
+        does have Python, so the installer also puts a real one beside the interpreter it manages.
+        The reparse-tag guard is what keeps the removal from deleting a real executable someone put
+        in that directory.
+        """
+        text = (WINDOWS / "install-tools.ps1").read_text(encoding="utf-8")
+        self.assertIn("function Repair-PythonName", text)
+        self.assertIn("function Test-AppExecutionAlias", text)
+        self.assertIn("0x8000001b", text)
+        self.assertIn("$PYTHON_ALIAS_NAMES = @('python.exe', 'python3.exe')", text)
+        self.assertIn("Repair-PythonName -Installed", text)
+
+    def test_windows_python3_shim_names_no_version(self) -> None:
+        """The shim follows whatever line the managed package installs, so its code hardcodes none.
+
+        The package ID in `$TOOLS` is the one place a Python version is written down. A literal
+        anywhere in the repair path would silently keep targeting the old line the day that ID moves,
+        which is the failure mode this asserts against rather than merely documents.
+
+        Comments are stripped before the match, because the invariant is about what the code
+        resolves and not about what the prose may use as an example. The architecture-qualified tag
+        rule is far clearer written as `3.13` beside `3.13-arm64` than described in the abstract, and
+        a version named there cannot make a lookup target the wrong line.
+        """
+        text = (WINDOWS / "install-tools.ps1").read_text(encoding="utf-8")
+        section = text.split("# --- Python ---", 1)
+        self.assertEqual(len(section), 2, "install-tools.ps1 carries no Python section")
+        body = section[1].split("# --- WSL ---", 1)[0]
+        code = "\n".join(line for line in body.splitlines() if not line.lstrip().startswith("#"))
+        self.assertNotRegex(code, r"Python3?\d\d|\d+\.\d+")
+        self.assertIn("Get-PythonLine -Version $Installed", code)
+
     def test_every_declared_floor_carries_a_total_remedy_mapping(self) -> None:
         """Each floored tool names a runnable remedy on every platform, or carries a recorded exception.
 
