@@ -1650,6 +1650,15 @@ class TestUnrecognizedShapes(GqlCase):
         body = OVERVIEW + "\n`<summary>` in prose.\n<details><summary>Reviewed Chances</summary>"
         self.assertEqual(["summary: Reviewed Chances"], pr_review.unrecognized_in(body))
 
+    def test_masking_a_code_span_does_not_join_the_text_around_it(self) -> None:
+        """Deleting a span would fuse its two sides into a marker the body never carried.
+
+        `<summary` and `>Reviewed Chances</summary>` are not a tag until the span between them
+        goes away, so the mask has to leave something behind rather than nothing.
+        """
+        body = OVERVIEW + "\n<summary`x`>Reviewed Chances</summary>"
+        self.assertEqual([], pr_review.unrecognized_in(body))
+
     def test_every_vetted_marker_together_reads_as_recognized(self) -> None:
         """The corpus shape in one body, so the lists are held against what they were built from."""
         self.assertEqual([], pr_review.unrecognized_in(nested()))
