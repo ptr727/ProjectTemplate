@@ -272,15 +272,10 @@ COVERAGE_COUNTS = re.compile(
 FENCE = re.compile(r"^ {0,3}```.*?^ {0,3}```[^\n]*", re.DOTALL | re.MULTILINE)
 # An inline code span is a quotation for the same reason a fenced block is.
 # A reviewer naming `<summary>` in prose was read as opening one.
-# That swallowed the body from there to the next real close tag.
-# The backreference between two boundary guards matches the run length exactly.
-# So a one-backtick span carrying a two-backtick run closes on its own run.
-# A span cannot cross a blank line, per CommonMark.
-# Unbounded it paired two stray backticks and masked every marker between them.
-# Replaced by a space rather than deleted, since deleting joins the text on either side.
-# ``<summary`x`>`` would otherwise become an opening tag the body never carried.
-# A space also leaves nothing unprintable in a marker this script quotes to a reader.
-CODE_SPAN = re.compile(r"(?<!`)(`+)(?!`)(?:[^\n]|\n(?!\s*\n))*?(?<!`)\1(?!`)")
+# Bounded to a paragraph, and an escaped tick opens nothing, since either masks a section.
+# Only the opener takes that guard, a backslash being literal inside a span rather than an escape.
+# Replaced by a space, since deleting joins the sides into a tag the body never carried.
+CODE_SPAN = re.compile(r"(?<![\\`])(`+)(?!`)(?:[^\n]|\n(?!\s*\n))*?(?<!`)\1(?!`)")
 
 
 # The round's own file summary table, whose first column is a path and whose second is prose.

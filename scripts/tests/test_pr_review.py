@@ -1700,6 +1700,42 @@ class TestUnrecognizedShapes(GqlCase):
         line = "- **Files reviewed:** 31/31 changed files"
         self.assertEqual([line], pr_review.coverage_statements(OVERVIEW + "\n" + line + "\n"))
 
+    def test_an_escaped_backtick_does_not_open_a_span(self) -> None:
+        """A backslash-escaped backtick is a literal, so it delimits nothing.
+
+        Reading one as an opener pairs it with the next real tick and masks everything between,
+        which is the silent direction: a genuine unknown section disappears and the loop closes
+        on a body nobody read.
+        """
+        body = (
+            OVERVIEW
+            + "\nEscaped \\` then <details><summary>Bogus</summary></details> then ` a span `."
+        )
+        self.assertEqual(["summary: Bogus"], pr_review.unrecognized_in(body))
+
+    def test_a_span_ending_in_a_backslash_still_closes(self) -> None:
+        """A backslash inside a code span is literal, so it does not escape the closing run.
+
+        Guarding the closer the same way as the opener skips a valid close, so the span runs on
+        and masks the section after it, which is the failure the opener guard exists to prevent
+        rather than to cause.
+        """
+        body = (
+            OVERVIEW
+            + "\nA span `a\\` then <details><summary>Hidden</summary></details> and ` more."
+        )
+        self.assertEqual(["summary: Hidden"], pr_review.unrecognized_in(body))
+
+    def test_a_quoted_marker_stays_masked_when_the_span_ends_in_a_backslash(self) -> None:
+        """The other side of the close guard: a quoted marker must not escape through it.
+
+        Where the span both carries a marker and ends in a backslash, failing to recognize the
+        close reports the quoted marker as a real section, which is what the masking exists to
+        prevent.
+        """
+        body = OVERVIEW + "\nQuoting `<details><summary>Quoted</summary></details>\\` here."
+        self.assertEqual([], pr_review.unrecognized_in(body))
+
     def test_every_vetted_marker_together_reads_as_recognized(self) -> None:
         """The corpus shape in one body, so the lists are held against what they were built from."""
         self.assertEqual([], pr_review.unrecognized_in(nested()))
