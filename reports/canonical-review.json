@@ -211,11 +211,11 @@
     },
     {
       "unit": "GOVERNANCE.md > Durable Knowledge and Self-Improvement",
-      "digest": "sha256:e34807301fe5517915c3f9ebe84d1cdfe0d19c74872aa5636184131d979dc5a7",
+      "digest": "sha256:4637c1bd6177bdd632f49957d252d56f276c6a6cb3e50b56c63cf8230279ba43",
       "reviewer": "agent-skill",
       "findings": 0,
-      "hubCommit": "a5ab8f6515de9fea49a961e88afefcbf46377a79",
-      "stamp": "2026-09-01T16:45:44Z"
+      "hubCommit": "fa065fcfb672eb88853c47796f96d8b0236c6811",
+      "stamp": "2026-09-01T16:49:07Z"
     },
     {
       "unit": "GOVERNANCE.md > Verification Discipline",
