@@ -44,4 +44,4 @@ The full catalog, each guarantee with the failure mode it prevents, is in `refer
 
 ## After Any Workflow Edit
 
-Workflow-only changes are not smoke-built, so run actionlint locally (the Docker invocation in `GOVERNANCE.md` "Running the Linters Locally", which bundles shellcheck for `run:` blocks) before pushing, and remember a workflow change is only fully exercised by CI, since `secrets: inherit`, `permissions:`, and `needs:` wiring resolve only in a real run.
+Workflow-only changes are not smoke-built, so run actionlint locally (via the hub-hosted `scripts/docker_lint.py` wrapper, run from the repository being checked as `python3 <hub-checkout>/scripts/docker_lint.py --root "$PWD" --linter actionlint`, actionlint itself bundling shellcheck for `run:` blocks, and documented in `GOVERNANCE.md`'s hub-only "Running the Linters Locally (Known-Working Invocations)" section) before pushing, and remember a workflow change is only fully exercised by CI, since `secrets: inherit`, `permissions:`, and `needs:` wiring resolve only in a real run.

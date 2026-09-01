@@ -2,6 +2,30 @@
   "note": "What full-content reviews of hub canonical content have covered, one entry per unit, holding the most recent pass. Written by scripts/canonical_review.py record, never by hand, and git keeps the history. A unit is covered while its digest here matches the content's, so an edit to the unit retires the pass. See ptr727/ProjectTemplate#1138 for why the record exists.",
   "passes": [
     {
+      "unit": ".agents/skills/comment-and-doc-style/SKILL.md > Docker lint authorization",
+      "digest": "sha256:b61bea3f7010cafc475ce582e234e79f1e55e4bd0e5332dbe2b05f4fb5bb03ff",
+      "reviewer": "agent-skill",
+      "findings": 4,
+      "hubCommit": "df5e2493b48aa45d80f586db68af0c21be97ea21",
+      "stamp": "2026-09-01T05:45:31Z"
+    },
+    {
+      "unit": ".agents/skills/comment-and-doc-style/SKILL.md > PR titles and commit messages",
+      "digest": "sha256:5e23928ad9f6093b65d9a9fa1ecb68b8705770f3ce7937944416095c8186dd10",
+      "reviewer": "agent-skill",
+      "findings": 4,
+      "hubCommit": "df5e2493b48aa45d80f586db68af0c21be97ea21",
+      "stamp": "2026-09-01T05:45:31Z"
+    },
+    {
+      "unit": ".agents/skills/dotnet-codestyle/SKILL.md > Build requirements",
+      "digest": "sha256:6af0ed73c9d9c713a692849718174c4891171275ba037f56bedcf9f2869e2f4c",
+      "reviewer": "agent-skill",
+      "findings": 5,
+      "hubCommit": "df5e2493b48aa45d80f586db68af0c21be97ea21",
+      "stamp": "2026-09-01T05:45:31Z"
+    },
+    {
       "unit": ".agents/skills/local-strict-review/SKILL.md > (preamble)",
       "digest": "sha256:e607d4a5c7ad14232516261ab7f0941de11a4312415a65dc054b394a645a106d",
       "reviewer": "agent-skill",
@@ -42,12 +66,92 @@
       "stamp": "2026-08-31T16:44:52Z"
     },
     {
-      "unit": "AGENTS.md > Where the Rules Live",
-      "digest": "sha256:c339c7cca92d462dd3fab2adae3692c1ded67a75d3561b9e5457c368183f3027",
+      "unit": ".agents/skills/python-codestyle/SKILL.md > Local development loop",
+      "digest": "sha256:ba58fd2565ef6534eb4e9b20ba3e2f48648f84a5314a2055bc454ca95914fc85",
       "reviewer": "agent-skill",
-      "findings": 1,
-      "hubCommit": "68117017a1483706765a8075ab8a29bb67bfe711",
-      "stamp": "2026-08-31T14:38:06Z"
+      "findings": 8,
+      "hubCommit": "df5e2493b48aa45d80f586db68af0c21be97ea21",
+      "stamp": "2026-09-01T05:45:31Z"
+    },
+    {
+      "unit": ".agents/skills/repo-worktree/SKILL.md > Creating a Worktree",
+      "digest": "sha256:5d8b1dff2f47416ac8aa52b612837e9836316a6a374522956df42124c07235c5",
+      "reviewer": "agent-skill",
+      "findings": 11,
+      "hubCommit": "df5e2493b48aa45d80f586db68af0c21be97ea21",
+      "stamp": "2026-09-01T05:45:31Z"
+    },
+    {
+      "unit": ".agents/skills/repo-worktree/SKILL.md > The Base Branch",
+      "digest": "sha256:6231eb99ddfae5e4cd929c7754bf1ab69802ef5f86f12067e0b33b5ec2c8f2d7",
+      "reviewer": "agent-skill",
+      "findings": 6,
+      "hubCommit": "df5e2493b48aa45d80f586db68af0c21be97ea21",
+      "stamp": "2026-09-01T05:45:32Z"
+    },
+    {
+      "unit": ".agents/skills/resync-a-repo/SKILL.md > Reach the hub and measure before changing anything",
+      "digest": "sha256:6fed46dcc5ad75fb29b59f71ffd74eff7bb589887cab30d01a432596cc6c23f7",
+      "reviewer": "agent-skill",
+      "findings": 9,
+      "hubCommit": "df5e2493b48aa45d80f586db68af0c21be97ea21",
+      "stamp": "2026-09-01T05:45:32Z"
+    },
+    {
+      "unit": ".agents/skills/shell-codestyle/SKILL.md > Rules",
+      "digest": "sha256:11e0a976d220ac43ba707327c1212a74bd605c37d66b880c703ed20f51072117",
+      "reviewer": "agent-skill",
+      "findings": 9,
+      "hubCommit": "df5e2493b48aa45d80f586db68af0c21be97ea21",
+      "stamp": "2026-09-01T05:58:02Z"
+    },
+    {
+      "unit": ".agents/skills/workflow-ci-contract/SKILL.md > After Any Workflow Edit",
+      "digest": "sha256:fd916a05277a56c1a4d5e8c77f28d15b4a4cd51901cf5a4796dd586f235a0568",
+      "reviewer": "agent-skill",
+      "findings": 4,
+      "hubCommit": "df5e2493b48aa45d80f586db68af0c21be97ea21",
+      "stamp": "2026-09-01T05:45:32Z"
+    },
+    {
+      "unit": "AGENTS.md > Where the Rules Live",
+      "digest": "sha256:2526a341afe0c6f1e2d2e1fe954855398742474a816e2bcba640672d1363766f",
+      "reviewer": "agent-skill",
+      "findings": 14,
+      "hubCommit": "df5e2493b48aa45d80f586db68af0c21be97ea21",
+      "stamp": "2026-09-01T05:58:03Z"
+    },
+    {
+      "unit": "CODESTYLE.md > General",
+      "digest": "sha256:ee34e84dab97a638e5011f7b8b5fc30893f82461cf6907ba35c96030eb2d4bb0",
+      "reviewer": "agent-skill",
+      "findings": 10,
+      "hubCommit": "df5e2493b48aa45d80f586db68af0c21be97ea21",
+      "stamp": "2026-09-01T05:58:03Z"
+    },
+    {
+      "unit": "CODESTYLE.md > Shell",
+      "digest": "sha256:7cf33c9cf26f21399d2de62d1219da67a16f28acfacf81cbe349948d502cb7ef",
+      "reviewer": "agent-skill",
+      "findings": 7,
+      "hubCommit": "df5e2493b48aa45d80f586db68af0c21be97ea21",
+      "stamp": "2026-09-01T05:45:32Z"
+    },
+    {
+      "unit": "GOVERNANCE.md > Durable Knowledge and Self-Improvement",
+      "digest": "sha256:4edefe7f44d71631935dea1f6926e4c20d6b265d3bf1c5bfec9cf84be0d1764d",
+      "reviewer": "agent-skill",
+      "findings": 6,
+      "hubCommit": "df5e2493b48aa45d80f586db68af0c21be97ea21",
+      "stamp": "2026-09-01T05:58:03Z"
+    },
+    {
+      "unit": "GOVERNANCE.md > Repository Layout",
+      "digest": "sha256:b02bb961b5a0ac3b595b75cd01f6a9be91b5d6690a7f7b24bfe1f9c5660196b7",
+      "reviewer": "agent-skill",
+      "findings": 6,
+      "hubCommit": "df5e2493b48aa45d80f586db68af0c21be97ea21",
+      "stamp": "2026-09-01T05:45:33Z"
     },
     {
       "unit": "GOVERNANCE.md > Verification Discipline",
@@ -56,6 +160,14 @@
       "findings": 0,
       "hubCommit": "e97708dfe4c92e275118a0705556822993de9f32",
       "stamp": "2026-08-31T16:26:36Z"
+    },
+    {
+      "unit": "WORKFLOW.md > 4. Behavioral Contract: Expected Outcomes",
+      "digest": "sha256:3e9a0ef2b0d39099d41dffd99811d5707ac8028220513cffc73a10142b9b341e",
+      "reviewer": "agent-skill",
+      "findings": 17,
+      "hubCommit": "df5e2493b48aa45d80f586db68af0c21be97ea21",
+      "stamp": "2026-09-01T05:58:03Z"
     }
   ]
 }

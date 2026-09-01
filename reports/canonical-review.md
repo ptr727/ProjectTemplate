@@ -7,9 +7,9 @@ A unit is what a reviewer reads whole, decided by the carry manifest rather than
 ## Coverage
 
 - units: 288
-- covered: 7
+- covered: 21
 - stale: 0
-- never read here: 281
+- never read here: 267
 
 ## Burn-down
 
@@ -60,12 +60,10 @@ A unit is what a reviewer reads whole, decided by the carry manifest rather than
 - **Carried files reference no coordination machinery** - never
 - **Character set** - never
 - **Comments** - never
-- **Docker lint authorization** - never
 - **Line endings** - never
 - **Markdown files: linting and spelling** - never
 - **Markdown formatting** - never
 - **Naming tools in prose** - never
-- **PR titles and commit messages** - never
 - **Quantitative claims** - never
 - **Sentence structure** - never
 - **Why this exists** - never
@@ -110,7 +108,6 @@ A unit is what a reviewer reads whole, decided by the carry manifest rather than
 - **(preamble)** - never
 - **Analyzer suppressions (.NET)** - never
 - **Best practices** - never
-- **Build requirements** - never
 - **Code patterns** - never
 - **Coding standards and conventions** - never
 - **Error handling and logging** - never
@@ -235,7 +232,6 @@ A unit is what a reviewer reads whole, decided by the carry manifest rather than
 - **Code style** - never
 - **Layout** - never
 - **Linter cleanliness** - never
-- **Local development loop** - never
 - **Tests** - never
 - **Toolchain** - never
 - **Two profiles** - never
@@ -268,10 +264,8 @@ A unit is what a reviewer reads whole, decided by the carry manifest rather than
 
 - **(preamble)** - never
 - **Agent-Specific Worktree Tools** - never
-- **Creating a Worktree** - never
 - **Listing and Cleanup** - never
 - **Preparing Git Hooks** - never
-- **The Base Branch** - never
 - **The Mandate** - never
 - **Why This Exists** - never
 
@@ -280,14 +274,12 @@ A unit is what a reviewer reads whole, decided by the carry manifest rather than
 - **(preamble)** - never
 - **Apply, in this order** - never
 - **Confirm the procedure before starting** - never
-- **Reach the hub and measure before changing anything** - never
 - **Ship it** - never
 - **Why this exists** - never
 
 ### .agents/skills/shell-codestyle/SKILL.md
 
 - **(preamble)** - never
-- **Rules** - never
 - **When shell, not Python** - never
 - **Why this exists** - never
 
@@ -321,7 +313,6 @@ A unit is what a reviewer reads whole, decided by the carry manifest rather than
 ### .agents/skills/workflow-ci-contract/SKILL.md
 
 - **(preamble)** - never
-- **After Any Workflow Edit** - never
 - **How the Contract Is Read** - never
 - **Style Rules That Break in One-Line Diffs** - never
 - **The Core Behavioral Spine** - never
@@ -400,9 +391,7 @@ A unit is what a reviewer reads whole, decided by the carry manifest rather than
 
 - **(preamble)** - never
 - **.NET** - never
-- **General** - never
 - **Python** - never
-- **Shell** - never
 
 ### GOVERNANCE.md
 
@@ -410,7 +399,6 @@ A unit is what a reviewer reads whole, decided by the carry manifest rather than
 - **Communicating with the User** - never
 - **Devcontainer** - never
 - **Documentation Style Conventions** - never
-- **Durable Knowledge and Self-Improvement** - never
 - **Editor and Tasks** - never
 - **Foundational Principles** - never
 - **Git and Commit Rules** - never
@@ -421,7 +409,6 @@ A unit is what a reviewer reads whole, decided by the carry manifest rather than
 - **Release Model** - never
 - **Repository Boundaries and Write Safety** - never
 - **Repository Details** - never
-- **Repository Layout** - never
 - **Representative Data in Agent-Authored Text** - never
 - **Supported Development Platforms** - never
 - **Workflow YAML Conventions** - never
@@ -432,7 +419,6 @@ A unit is what a reviewer reads whole, decided by the carry manifest rather than
 - **1. Purpose and How to Use This Document** - never
 - **2. Workflow Style Conventions** - never
 - **3. Architecture** - never
-- **4. Behavioral Contract: Expected Outcomes** - never
 - **5. Test Methodology** - never
 - **6. Per-Project-Type Test Walkthroughs** - never
 
