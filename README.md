@@ -267,6 +267,7 @@ A human-readable index of the rules agents enforce, implement, and audit. The au
 ### If Publishing a Package (NuGet or PyPI)
 
 - Publish via OIDC Trusted Publishing, never a stored API key.
+- Keep the push in a separate publish job in the repo's own publisher, never in a build leaf and never in a reusable workflow another repository hosts. Trusted publishing validates the OIDC token's `job_workflow_ref` claim against the repository owning the package, so a push from elsewhere is rejected at the token exchange, and the split is also what keeps `id-token: write` at one entry point.
 
 ### If a Docker Image
 

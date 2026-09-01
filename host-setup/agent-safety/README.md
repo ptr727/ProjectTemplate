@@ -204,10 +204,14 @@ flowchart LR
     subgraph layer2["Prose layer"]
         L2["GOVERNANCE.md / AGENTS.md /\nSkill trigger descriptions --\nread and followed by judgment"]
     end
-    subgraph layer3["Hook layer"]
+    subgraph layer2b["Committed hook layer"]
+        L2B["The repo's own .husky hooks --\nmechanically decided, opt-in per\nclone, bypassable by design"]
+    end
+    subgraph layer3["Host hook layer"]
         L3["This spec's requirements --\nmechanically decided from the\ntool call alone, no judgment"]
     end
     L1 -->|"fixed by a structural\nload/import fix, not a hook"| L2
+    L2 -->|"mechanically decidable check,\nharm is a quality miss,\nthe bypass stays available"| L2B
     L2 -->|"promoted here only when\nmechanically decidable +\ndestructive, per GOVERNANCE.md\n'Durable Knowledge'"| L3
 ```
 
@@ -216,10 +220,27 @@ The first diagram is this spec's actual decision flow, generalized from `claude/
 reached the session at all is a loading bug, fixed the way PR #1081 fixed `local-strict-review`'s
 missed trigger, by wiring `CLAUDE.md` to import `AGENTS.md`. A rule that reached the session and
 was still not followed, where the trigger is mechanically decidable and the harm is destructive,
-is promoted to a hook (requirement 6, above, tracked at [issue #1073][issue-1073], is the worked
-example). A rule whose violation can only be judged, not mechanically decided (was a
+is promoted to a host hook (requirement 6, above, tracked at [issue #1073][issue-1073], is the
+worked example). A rule whose violation can only be judged, not mechanically decided (was a
 review finding actually evidence-backed?), stays prose and a chained Skill trigger, since a hook
 there could only nag, never decide.
+
+The committed layer between those two is not this spec's, and it is drawn because leaving it out
+made the picture read as a binary it is not. A hook the repository carries in its own tree is
+opt-in per clone, visible to anyone reading the repo, and bypassable on purpose, so it can carry a
+rule whose harm is a quality miss rather than a destruction, which the host layer's bar excludes.
+The hub's own `.husky/pre-push` is the worked example there, refusing a branch push that no
+recorded local review pass covers, per [`GOVERNANCE.md`][governance] "Verification Discipline".
+The two layers meet at requirement 4, which denies `--no-verify` unconditionally, so a Claude Code
+session meets a committed hook it cannot wave through with that flag while a human keeps the escape
+hatch. They do not compose into a seal, and saying so would be the more comfortable claim rather
+than the true one. A committed hook is bypassable by construction, since it cannot police its own
+invocation, and `--no-verify` is the documented route rather than the only one. This requirement
+list also reaches Claude Code alone today, per the Per-Agent Status table below, so a Codex or
+opencode session meets the committed hook with every route still open. What a committed hook buys
+is a rule that fails loudly at the moment it is broken instead of silently, for the agent whose
+bypasses this spec covers. It is not a substitute for the prose layer, which is the one that binds
+every agent.
 
 ## Per-Agent Status
 

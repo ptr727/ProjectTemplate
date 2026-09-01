@@ -1,0 +1,277 @@
+{
+  "note": "What full-content reviews of hub canonical content have covered, one entry per unit, holding the most recent pass. Written by scripts/canonical_review.py record, never by hand, and git keeps the history. A unit is covered while its digest here matches the content's, so an edit to the unit retires the pass. See ptr727/ProjectTemplate#1138 for why the record exists.",
+  "passes": [
+    {
+      "unit": ".agents/skills/agent-conduct/SKILL.md > Before Claiming Done",
+      "digest": "sha256:d000a7b3f3fc3a90c7f2c5516424aaf1a3b97a3b47c3fc3310d34aa676d2a65d",
+      "reviewer": "agent-skill",
+      "findings": 1,
+      "hubCommit": "0e6aacf45334149f6158aa23b8132d6aee1d1eb0",
+      "stamp": "2026-09-01T16:37:57Z"
+    },
+    {
+      "unit": ".agents/skills/drive-pr/SKILL.md > Disposing of Every Finding",
+      "digest": "sha256:97b70e52bc5aebff405200e8f102b3b551d1bc28d93cbbe8aa6667207f95765b",
+      "reviewer": "agent-skill",
+      "findings": 3,
+      "hubCommit": "0e6aacf45334149f6158aa23b8132d6aee1d1eb0",
+      "stamp": "2026-09-01T16:05:59Z"
+    },
+    {
+      "unit": ".agents/skills/drive-pr/SKILL.md > The Drive Loop",
+      "digest": "sha256:f05bc847db251e692cf5e3a4e9aecd74448705aa7b9f478efbdb6908721c99be",
+      "reviewer": "agent-skill",
+      "findings": 0,
+      "hubCommit": "dded739ff0ae8614b52b187a95b00460c0fad8ce",
+      "stamp": "2026-09-01T17:57:39Z"
+    },
+    {
+      "unit": ".agents/skills/local-strict-review/SKILL.md > (preamble)",
+      "digest": "sha256:e607d4a5c7ad14232516261ab7f0941de11a4312415a65dc054b394a645a106d",
+      "reviewer": "agent-skill",
+      "findings": 1,
+      "hubCommit": "68117017a1483706765a8075ab8a29bb67bfe711",
+      "stamp": "2026-08-31T14:38:05Z"
+    },
+    {
+      "unit": ".agents/skills/local-strict-review/SKILL.md > Disposing of Findings",
+      "digest": "sha256:8a02f13222ded9278a0611d305f263ad8c67e1fded86100cc47d3b23a4fc86a8",
+      "reviewer": "agent-skill",
+      "findings": 2,
+      "hubCommit": "0e6aacf45334149f6158aa23b8132d6aee1d1eb0",
+      "stamp": "2026-09-01T16:37:57Z"
+    },
+    {
+      "unit": ".agents/skills/local-strict-review/SKILL.md > Mechanics Live Elsewhere",
+      "digest": "sha256:9190c95f50cfed12a0157f1cbb55e080c0fc7cbe2dbbbaf6fd2f744736c365b5",
+      "reviewer": "agent-skill",
+      "findings": 0,
+      "hubCommit": "68117017a1483706765a8075ab8a29bb67bfe711",
+      "stamp": "2026-08-31T14:38:06Z"
+    },
+    {
+      "unit": ".agents/skills/local-strict-review/SKILL.md > Recording the Pass",
+      "digest": "sha256:1dfd38f46e6cc475330095387774113e4853bbd0bdadbeca6d68ff2b76b3e7d6",
+      "reviewer": "agent-skill",
+      "findings": 0,
+      "hubCommit": "a5ab8f6515de9fea49a961e88afefcbf46377a79",
+      "stamp": "2026-09-01T16:45:44Z"
+    },
+    {
+      "unit": ".agents/skills/local-strict-review/SKILL.md > The Carried-Content Pass",
+      "digest": "sha256:1bd1396389709aa388ba5b984cd11cc1335bb7b13da107c32bcc336feb816154",
+      "reviewer": "agent-skill",
+      "findings": 0,
+      "hubCommit": "e97708dfe4c92e275118a0705556822993de9f32",
+      "stamp": "2026-08-31T16:17:12Z"
+    },
+    {
+      "unit": ".agents/skills/local-strict-review/SKILL.md > What It Does",
+      "digest": "sha256:2784f7147fcb397f28d475cb2932857cff248344d3b1a6c32547fba1c91c8876",
+      "reviewer": "agent-skill",
+      "findings": 0,
+      "hubCommit": "e97708dfe4c92e275118a0705556822993de9f32",
+      "stamp": "2026-08-31T16:17:12Z"
+    },
+    {
+      "unit": ".agents/skills/local-strict-review/SKILL.md > When to Run It",
+      "digest": "sha256:2de88c5663772d0b2c255fa44a567d6ab04d3b50c67f038af194e910650c83ab",
+      "reviewer": "agent-skill",
+      "findings": 0,
+      "hubCommit": "44ae00bd432e1eeaafeb00208d8e713a22f49076",
+      "stamp": "2026-09-01T18:51:57Z"
+    },
+    {
+      "unit": ".agents/skills/operational-vs-release-workflow/references/release-publish-mechanics.md > Map your outputs to the right seam",
+      "digest": "sha256:42eb378e35d5810c91bfc40f3a56785f2fae5d6fe772b7ba9e9ed3c6b8a6d13c",
+      "reviewer": "agent-skill",
+      "findings": 0,
+      "hubCommit": "37d116a2fa0cecf85a220c9005375091db240a8d",
+      "stamp": "2026-09-01T14:33:08Z"
+    },
+    {
+      "unit": ".agents/skills/operational-vs-release-workflow/references/release-publish-mechanics.md > Per-target subsetting",
+      "digest": "sha256:e881473b1b377dcb2b33900941d6518e8ac95c4e3a4ce9f9c72fa17c3360feb7",
+      "reviewer": "agent-skill",
+      "findings": 0,
+      "hubCommit": "37d116a2fa0cecf85a220c9005375091db240a8d",
+      "stamp": "2026-09-01T14:33:08Z"
+    },
+    {
+      "unit": ".agents/skills/pr-review-conduct/SKILL.md > Answering a suppressed finding",
+      "digest": "sha256:7d1d9acd0646b16f9a41debbc44b97926a8bb43b515ab00e1298d32efb898fc7",
+      "reviewer": "agent-skill",
+      "findings": 1,
+      "hubCommit": "0e6aacf45334149f6158aa23b8132d6aee1d1eb0",
+      "stamp": "2026-09-01T16:37:57Z"
+    },
+    {
+      "unit": ".agents/skills/pr-review-conduct/SKILL.md > Every finding ends in one of five outcomes",
+      "digest": "sha256:f7292e072c812adc3d9f3d7302181978eaf5c313c6c60efd6c7deece6578b1da",
+      "reviewer": "agent-skill",
+      "findings": 4,
+      "hubCommit": "0e6aacf45334149f6158aa23b8132d6aee1d1eb0",
+      "stamp": "2026-09-01T16:06:00Z"
+    },
+    {
+      "unit": ".agents/skills/pr-review-conduct/SKILL.md > Expected review loop",
+      "digest": "sha256:129b6445b11e494700c899653ebd57db9efd000053e16662bec6de650719abb4",
+      "reviewer": "agent-skill",
+      "findings": 1,
+      "hubCommit": "0e6aacf45334149f6158aa23b8132d6aee1d1eb0",
+      "stamp": "2026-09-01T16:37:57Z"
+    },
+    {
+      "unit": ".agents/skills/pr-review-conduct/SKILL.md > Mechanics Live Elsewhere",
+      "digest": "sha256:b89989675c43e05d67da97f148940d8185a76c1de4f0796d9b205ac4b8da07d4",
+      "reviewer": "agent-skill",
+      "findings": 0,
+      "hubCommit": "b03a838ad24e3ff23ae6eeedb89571130a285ce6",
+      "stamp": "2026-09-01T17:49:26Z"
+    },
+    {
+      "unit": ".agents/skills/workflow-ci-contract/SKILL.md > How the Contract Is Read",
+      "digest": "sha256:89bd7614cb37469788ec836234482c1be2ebc6905bd786ad031504bfe3dd2239",
+      "reviewer": "agent-skill",
+      "findings": 0,
+      "hubCommit": "37d116a2fa0cecf85a220c9005375091db240a8d",
+      "stamp": "2026-09-01T14:23:11Z"
+    },
+    {
+      "unit": ".agents/skills/workflow-ci-contract/SKILL.md > Style Rules That Break in One-Line Diffs",
+      "digest": "sha256:d96271fbc25a48086cf32de4df0bc16b224a553a704aa44dfbd93654bd27c2b2",
+      "reviewer": "agent-skill",
+      "findings": 0,
+      "hubCommit": "37d116a2fa0cecf85a220c9005375091db240a8d",
+      "stamp": "2026-09-01T14:33:08Z"
+    },
+    {
+      "unit": ".agents/skills/workflow-ci-contract/SKILL.md > The Core Behavioral Spine",
+      "digest": "sha256:f7925cc6a6047d82f54aba505e9e7901699596add310fde6e32a2a5d4825b9b1",
+      "reviewer": "agent-skill",
+      "findings": 0,
+      "hubCommit": "37d116a2fa0cecf85a220c9005375091db240a8d",
+      "stamp": "2026-09-01T14:33:09Z"
+    },
+    {
+      "unit": ".agents/skills/workflow-ci-contract/references/d-guarantees.md > D4: Release and Publish",
+      "digest": "sha256:88547d4229a09aa37d7c4c62f4b6a8566729bb3f55378dade9b514a65a431463",
+      "reviewer": "agent-skill",
+      "findings": 0,
+      "hubCommit": "37d116a2fa0cecf85a220c9005375091db240a8d",
+      "stamp": "2026-09-01T14:33:09Z"
+    },
+    {
+      "unit": ".agents/skills/workflow-ci-contract/references/d-guarantees.md > D5: Resource Cleanup",
+      "digest": "sha256:9920002dc94291839cb4bb1b03c02a42daf57ca32e477db178a7b7dbc8955ad9",
+      "reviewer": "agent-skill",
+      "findings": 0,
+      "hubCommit": "37d116a2fa0cecf85a220c9005375091db240a8d",
+      "stamp": "2026-09-01T14:23:11Z"
+    },
+    {
+      "unit": ".agents/skills/workflow-ci-contract/references/d-guarantees.md > D6: Seam Conformance",
+      "digest": "sha256:6d5a39e3a432df61b6a8a0a839584a25edb8d30db4d7e768cc3232fc83b26b74",
+      "reviewer": "agent-skill",
+      "findings": 0,
+      "hubCommit": "37d116a2fa0cecf85a220c9005375091db240a8d",
+      "stamp": "2026-09-01T14:23:11Z"
+    },
+    {
+      "unit": ".agents/skills/workflow-ci-contract/references/d-guarantees.md > D7: Concurrency, Permissions, Safety",
+      "digest": "sha256:95fc50a9adb3ad36c09c9a359b19beac7f65f525347153a1b6c479e745b6f2a2",
+      "reviewer": "agent-skill",
+      "findings": 0,
+      "hubCommit": "37d116a2fa0cecf85a220c9005375091db240a8d",
+      "stamp": "2026-09-01T14:23:11Z"
+    },
+    {
+      "unit": "AGENTS.md > Where the Rules Live",
+      "digest": "sha256:c339c7cca92d462dd3fab2adae3692c1ded67a75d3561b9e5457c368183f3027",
+      "reviewer": "agent-skill",
+      "findings": 1,
+      "hubCommit": "68117017a1483706765a8075ab8a29bb67bfe711",
+      "stamp": "2026-08-31T14:38:06Z"
+    },
+    {
+      "unit": "AUDIT.md > 10. Converge: Apply the Fixes",
+      "digest": "sha256:6bc1e573e6c9cd6dace6df67a0d826aaa910d8d94cdf0f29d7571c53def4ff34",
+      "reviewer": "agent-skill",
+      "findings": 0,
+      "hubCommit": "c3b2898feef97459d01ce7c0b63de25b6c5524bf",
+      "stamp": "2026-09-01T13:57:20Z"
+    },
+    {
+      "unit": "AUDIT.md > 4. Per-Dimension Checks (Letter and Intent)",
+      "digest": "sha256:083d3ca4108c8b1d047e086924360dba45106e62aad5546636a6cbf468271143",
+      "reviewer": "agent-skill",
+      "findings": 0,
+      "hubCommit": "78898becaa2b1a62cb4c806d86273210c6390ac5",
+      "stamp": "2026-09-01T14:48:23Z"
+    },
+    {
+      "unit": "GOVERNANCE.md > Durable Knowledge and Self-Improvement",
+      "digest": "sha256:4637c1bd6177bdd632f49957d252d56f276c6a6cb3e50b56c63cf8230279ba43",
+      "reviewer": "agent-skill",
+      "findings": 0,
+      "hubCommit": "fa065fcfb672eb88853c47796f96d8b0236c6811",
+      "stamp": "2026-09-01T16:49:07Z"
+    },
+    {
+      "unit": "GOVERNANCE.md > Verification Discipline",
+      "digest": "sha256:0f7d427f2fd507aef0b81e84c3829aa13887838b96647cd37b6cbd7016da50c3",
+      "reviewer": "agent-skill",
+      "findings": 0,
+      "hubCommit": "e97708dfe4c92e275118a0705556822993de9f32",
+      "stamp": "2026-08-31T16:26:36Z"
+    },
+    {
+      "unit": "GOVERNANCE.md > Workflow YAML Conventions",
+      "digest": "sha256:78dee33ccdcfa1b7cf25ba9948869f2d8c41ee8b02f3fef17024de6711ca5757",
+      "reviewer": "agent-skill",
+      "findings": 0,
+      "hubCommit": "37d116a2fa0cecf85a220c9005375091db240a8d",
+      "stamp": "2026-09-01T14:33:09Z"
+    },
+    {
+      "unit": "WORKFLOW.md > 1. Purpose and How to Use This Document",
+      "digest": "sha256:35a8c77043da983af04a46300f652d4e3b8a454815b10c380524832cfdbe4a70",
+      "reviewer": "agent-skill",
+      "findings": 0,
+      "hubCommit": "c3b2898feef97459d01ce7c0b63de25b6c5524bf",
+      "stamp": "2026-09-01T13:57:20Z"
+    },
+    {
+      "unit": "WORKFLOW.md > 3. Architecture",
+      "digest": "sha256:2a33c96912e83352029b1e131d2c2066dc3f764e37ac2511b0a0e9487f5583b6",
+      "reviewer": "agent-skill",
+      "findings": 0,
+      "hubCommit": "78898becaa2b1a62cb4c806d86273210c6390ac5",
+      "stamp": "2026-09-01T14:48:23Z"
+    },
+    {
+      "unit": "WORKFLOW.md > 4. Behavioral Contract: Expected Outcomes",
+      "digest": "sha256:71023478e957e47a3a91187f1b856f611ca9bf021ace6f21ed4ea81b6b7cad30",
+      "reviewer": "agent-skill",
+      "findings": 0,
+      "hubCommit": "c3b2898feef97459d01ce7c0b63de25b6c5524bf",
+      "stamp": "2026-09-01T13:57:20Z"
+    },
+    {
+      "unit": "WORKFLOW.md > 5. Test Methodology",
+      "digest": "sha256:b12b797e7ea91e568f2529ce5aa94603a65356e6ccceed0306d2631b44b11c65",
+      "reviewer": "agent-skill",
+      "findings": 0,
+      "hubCommit": "bde1713355e318c13c2b546ccd871822301bfb3c",
+      "stamp": "2026-09-01T15:39:23Z"
+    },
+    {
+      "unit": "WORKFLOW.md > 6. Per-Project-Type Test Walkthroughs",
+      "digest": "sha256:f6b2044c5b5de3aafd760cf001797e807749c391af93ca2ec0cb3d436b884a33",
+      "reviewer": "agent-skill",
+      "findings": 0,
+      "hubCommit": "c3b2898feef97459d01ce7c0b63de25b6c5524bf",
+      "stamp": "2026-09-01T13:57:21Z"
+    }
+  ]
+}
