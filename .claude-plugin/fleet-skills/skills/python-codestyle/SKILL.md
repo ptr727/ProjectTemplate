@@ -95,13 +95,13 @@ equivalents, per Two Profiles above, and has no such command to run before commi
 those. These are documented commands, and a VS Code tasks mirror carried per the fleet baseline
 (every command-executing task `type: process`, the aggregators dependsOn-only, no `&&` shell
 chaining, so it runs the same on any task shell) is in the hub `vscode-tasks-python.json` snippet.
-CI runs the same clean-compile commands as the authoritative backstop. A working local hook is
-strongly suggested fleet-wide, and its absence is a measured audit finding rather than an
-invisible gap: wire the Python `pre-commit` framework from the canonical
-`catalog/snippets/pre-commit/.pre-commit-config.yaml` in the hub, hub-local and not carried into
-every fleet repo, then enable it per clone with `uv tool install pre-commit` once, followed by
-`pre-commit install`. See GOVERNANCE.md's hub-only "Running the Linters Locally (Known-Working
-Invocations)" section for what the hook must cover and what its absence means.
+CI runs the same clean-compile commands as the authoritative backstop. A Python repo with no
+`.husky/` tree wires the `pre-commit` framework from the canonical `catalog/snippets/pre-commit/`
+directory, hub-local and not carried into every fleet repo. That directory's own README names
+the second file to copy alongside the config. A repo that already carries `.husky/` uses
+Husky.Net instead, which covers Python too. GOVERNANCE.md's hub-only "Running the Linters Locally
+(Known-Working Invocations)" section carries the obligation itself, what the hook must cover, its
+audit treatment, and the per-clone enablement steps.
 
 A restricted executor gives each task a cache directory under a writable temporary root. Point
 `UV_CACHE_DIR`, `RUFF_CACHE_DIR`, `MYPY_CACHE_DIR`, and `COVERAGE_FILE` into that directory before

@@ -19,11 +19,11 @@
     },
     {
       "unit": ".agents/skills/dotnet-codestyle/SKILL.md > Build requirements",
-      "digest": "sha256:6af0ed73c9d9c713a692849718174c4891171275ba037f56bedcf9f2869e2f4c",
+      "digest": "sha256:c9a8e764ae6c8423420ba2cb7e8b65d5a0328a405be16a798b8aec521f01c459",
       "reviewer": "agent-skill",
-      "findings": 5,
-      "hubCommit": "df5e2493b48aa45d80f586db68af0c21be97ea21",
-      "stamp": "2026-09-01T05:45:31Z"
+      "findings": 0,
+      "hubCommit": "ed329f4029c9b035662a96f00834152c27bf2d8b",
+      "stamp": "2026-09-01T06:18:30Z"
     },
     {
       "unit": ".agents/skills/local-strict-review/SKILL.md > (preamble)",
@@ -67,11 +67,11 @@
     },
     {
       "unit": ".agents/skills/python-codestyle/SKILL.md > Local development loop",
-      "digest": "sha256:ba58fd2565ef6534eb4e9b20ba3e2f48648f84a5314a2055bc454ca95914fc85",
+      "digest": "sha256:941a84b1f59dfd7dfdd93cb0005bcf9684fdd71759acc6231f7b405f0dce8be5",
       "reviewer": "agent-skill",
-      "findings": 8,
-      "hubCommit": "df5e2493b48aa45d80f586db68af0c21be97ea21",
-      "stamp": "2026-09-01T05:45:31Z"
+      "findings": 4,
+      "hubCommit": "ed329f4029c9b035662a96f00834152c27bf2d8b",
+      "stamp": "2026-09-01T06:18:30Z"
     },
     {
       "unit": ".agents/skills/repo-worktree/SKILL.md > Creating a Worktree",
@@ -163,11 +163,11 @@
     },
     {
       "unit": "WORKFLOW.md > 4. Behavioral Contract: Expected Outcomes",
-      "digest": "sha256:3e9a0ef2b0d39099d41dffd99811d5707ac8028220513cffc73a10142b9b341e",
+      "digest": "sha256:8dfb687bd8942cf6a5c1a6099cf8ed06a6b70321157e2a8e4d2691f54b3a9fce",
       "reviewer": "agent-skill",
-      "findings": 17,
-      "hubCommit": "df5e2493b48aa45d80f586db68af0c21be97ea21",
-      "stamp": "2026-09-01T05:58:03Z"
+      "findings": 4,
+      "hubCommit": "ed329f4029c9b035662a96f00834152c27bf2d8b",
+      "stamp": "2026-09-01T06:18:30Z"
     }
   ]
 }
