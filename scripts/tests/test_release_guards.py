@@ -28,8 +28,8 @@ class ReleaseGuardCase(unittest.TestCase):
                 content = (REPO / relative_path).read_text(encoding="utf-8")
                 self.assertIn(canonical_name, content)
 
-        # A typo on either side leaves the publish job downloading nothing.
-        # Anchoring rejects a name that merely starts or ends with the expected one.
+        # The prefix loop above passes on the action's own directory name, so it fails open alone.
+        # A producer typo leaves the publish job downloading nothing, and a loose delete filter blanket-deletes.
         producer = (REPO / ".github/actions/pypi-build-default/action.yml").read_text(
             encoding="utf-8"
         )
@@ -38,7 +38,7 @@ class ReleaseGuardCase(unittest.TestCase):
         self.assertRegex(
             consumer, r"(?m)^[ \t]*name: pypi-build-\$\{\{ github\.ref_name \}\}[ \t]*$"
         )
-        self.assertIn('\\"pypi-build-${{ github.ref_name }}\\"', consumer)
+        self.assertIn('select(.name == \\"pypi-build-${{ github.ref_name }}\\")', consumer)
 
         tracked_text = run(
             ["git", "grep", "-n", legacy_name],
@@ -65,8 +65,8 @@ class ReleaseGuardCase(unittest.TestCase):
                 content = (REPO / relative_path).read_text(encoding="utf-8")
                 self.assertIn(canonical_name, content)
 
-        # A typo on either side leaves the publish job downloading nothing.
-        # Anchoring rejects a name that merely starts or ends with the expected one.
+        # The prefix loop above passes on the action's own directory name, so it fails open alone.
+        # A producer typo leaves the publish job downloading nothing, and a loose delete filter blanket-deletes.
         producer = (REPO / ".github/actions/nuget-build-default/action.yml").read_text(
             encoding="utf-8"
         )
@@ -77,7 +77,7 @@ class ReleaseGuardCase(unittest.TestCase):
         self.assertRegex(
             consumer, r"(?m)^[ \t]*name: nuget-build-\$\{\{ github\.ref_name \}\}[ \t]*$"
         )
-        self.assertIn('\\"nuget-build-${{ github.ref_name }}\\"', consumer)
+        self.assertIn('select(.name == \\"nuget-build-${{ github.ref_name }}\\")', consumer)
 
         tracked_text = run(
             ["git", "grep", "-n", legacy_name],

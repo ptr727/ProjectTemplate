@@ -105,8 +105,7 @@ runs:
       working-directory: ${{ inputs.project-dir }}
       run: uv build
 
-    # A push from here runs inside the hub task's job, so its job_workflow_ref claim names the hub and the registry rejects it.
-    # Branch-suffixed so a run building more than one branch cannot collide on the name.
+    # A push from here runs inside the hub task's job, so an adopter's registry sees this hub in the job_workflow_ref claim and rejects it.
     # Skipped on smoke, since the publish-pypi job runs only on a real publish and nothing would consume it.
     - name: Upload build artifacts step
       if: ${{ inputs.smoke != 'true' }}
