@@ -1631,6 +1631,25 @@ class TestUnrecognizedShapes(GqlCase):
                 any(f.startswith(shape) for f in found), f"{unknown!r} passed as vetted: {found}"
             )
 
+    def test_a_tag_quoted_in_a_code_span_is_not_read_as_a_section(self) -> None:
+        """A reviewer naming `<summary>` in prose is quoting it, not opening a section.
+
+        The reader consumed from the code span to the next real `</summary>`, swallowing the body
+        between them and reporting the wreckage as an unknown section, so a clean review read as
+        unclosable. It needs a real close tag later in the body to bite, which is why the vetted
+        section below is part of the case rather than scenery. A fenced block was already excluded
+        for the same reason a code span is: a quotation is not a statement.
+        """
+        quoted = "- Add the missing `<summary>`/summary-arm case to the marker test."
+        self.assertEqual(
+            [], pr_review.unrecognized_in(collapsed().replace("\n\n", "\n" + quoted + "\n", 1))
+        )
+
+    def test_a_real_summary_section_survives_the_code_span_strip(self) -> None:
+        """The strip must not cost the reader a genuine section, which is what it exists to find."""
+        body = OVERVIEW + "\n`<summary>` in prose.\n<details><summary>Reviewed Chances</summary>"
+        self.assertEqual(["summary: Reviewed Chances"], pr_review.unrecognized_in(body))
+
     def test_every_vetted_marker_together_reads_as_recognized(self) -> None:
         """The corpus shape in one body, so the lists are held against what they were built from."""
         self.assertEqual([], pr_review.unrecognized_in(nested()))

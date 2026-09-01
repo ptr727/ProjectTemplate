@@ -315,11 +315,11 @@
     },
     {
       "unit": "GOVERNANCE.md > Durable Knowledge and Self-Improvement",
-      "digest": "sha256:4637c1bd6177bdd632f49957d252d56f276c6a6cb3e50b56c63cf8230279ba43",
+      "digest": "sha256:d2caaf6052fdf9838034bcd3dbf8a250d44b303b3bb73754ecb4c6fa0ead8bd0",
       "reviewer": "agent-skill",
-      "findings": 0,
-      "hubCommit": "fa065fcfb672eb88853c47796f96d8b0236c6811",
-      "stamp": "2026-09-01T16:49:07Z"
+      "findings": 2,
+      "hubCommit": "d0541523890324cbbdbb63631c8dd83e6003703a",
+      "stamp": "2026-09-01T19:25:11Z"
     },
     {
       "unit": "GOVERNANCE.md > Repository Layout",
@@ -363,11 +363,11 @@
     },
     {
       "unit": "WORKFLOW.md > 4. Behavioral Contract: Expected Outcomes",
-      "digest": "sha256:35a8115f5e10488919250ea0631219aed64e4ea592a78a0da8dfcc61a8ee71b5",
+      "digest": "sha256:c3ffe518edcfb301c3743d693a14fef3b566d059ff18b97747003bcb55cceffc",
       "reviewer": "agent-skill",
-      "findings": 4,
-      "hubCommit": "6b3271c03c1a0dcdb71fd2ad0447ba2b4a1cd04c",
-      "stamp": "2026-09-01T15:41:23Z"
+      "findings": 3,
+      "hubCommit": "d0541523890324cbbdbb63631c8dd83e6003703a",
+      "stamp": "2026-09-01T19:25:11Z"
     },
     {
       "unit": "WORKFLOW.md > 5. Test Methodology",

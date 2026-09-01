@@ -270,6 +270,11 @@ COVERAGE_COUNTS = re.compile(
 # This change puts both spellings into the source and the runbook, so a review of it quotes them.
 # A quoted count read as this round's own is a coverage figure nobody stated.
 FENCE = re.compile(r"^ {0,3}```.*?^ {0,3}```[^\n]*", re.DOTALL | re.MULTILINE)
+# An inline code span is a quotation for the same reason a fenced block is.
+# A reviewer naming `<summary>` in prose was read as opening one.
+# That swallowed the body from there to the next real close tag.
+# Matched longest-run-first so a double-backtick span carrying a backtick closes on its own run.
+CODE_SPAN = re.compile(r"(?<!`)(`+)(?!`).*?(?<!`)\1(?!`)", re.DOTALL)
 # The round's own file summary table, whose first column is a path and whose second is prose.
 # The header row is the marker rather than the `<details>` around it.
 # One measured round carries the table with no `<summary>`, and two summary spellings wrap it.
@@ -1118,7 +1123,7 @@ def unrecognized_in(body: str) -> list[str]:
     # What is left of a drifted refusal is a body with no heading, which is the arm below.
     if refusal_of({"body": body}):
         return []
-    plain = FENCE.sub("", body or "")
+    plain = CODE_SPAN.sub("", FENCE.sub("", body or ""))
     headings = [normal(ln) for ln in plain.splitlines() if MARKDOWN_HEADING.match(ln)]
     labels = [normal(m.group(1)) for m in map(LABEL_LINE.match, plain.splitlines()) if m]
     found = [f"heading: {h}" for h in dict.fromkeys(headings) if unvetted(h, VETTED_HEADINGS)]

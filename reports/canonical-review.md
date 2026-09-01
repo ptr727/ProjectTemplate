@@ -7,8 +7,8 @@ A unit is what a reviewer reads whole, decided by the carry manifest rather than
 ## Coverage
 
 - units: 288
-- covered: 46
-- stale: 2
+- covered: 48
+- stale: 0
 - never read here: 240
 
 ## Burn-down
@@ -377,7 +377,6 @@ A unit is what a reviewer reads whole, decided by the carry manifest rather than
 - **Communicating with the User** - never
 - **Devcontainer** - never
 - **Documentation Style Conventions** - never
-- **Durable Knowledge and Self-Improvement** - stale
 - **Editor and Tasks** - never
 - **Foundational Principles** - never
 - **Git and Commit Rules** - never
@@ -395,7 +394,6 @@ A unit is what a reviewer reads whole, decided by the carry manifest rather than
 
 - **(preamble)** - never
 - **2. Workflow Style Conventions** - never
-- **4. Behavioral Contract: Expected Outcomes** - stale
 
 ### cspell.json
 
