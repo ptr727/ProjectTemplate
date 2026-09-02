@@ -98,11 +98,12 @@ VS Code tasks mirror that the fleet baseline expects. Every command-executing ta
 runs the same on any task shell. CI runs the same clean-compile commands as the authoritative
 backstop. A repo that keeps no .NET tool manifest wires its local hook from the canonical
 `catalog/snippets/pre-commit/` directory, hub-local and not carried into every fleet repo, or
-wires an equivalent hook of its own at `.husky/pre-commit`, enabled with `core.hooksPath`. That
-path and `.pre-commit-config.yaml` are the two the audit reads. The
-runner follows the host toolchain rather than the languages the hook checks, so a repo already
-building .NET may run these same Python checks from the Husky.Net snippet instead. The
-`pre-commit` directory's own README names the second file to copy alongside the config.
+wires an equivalent hook of its own at `.husky/pre-commit`, enabled with `core.hooksPath` and
+sourcing nothing. That path and `.pre-commit-config.yaml` are the two the audit reads. The
+runner follows the toolchain the repo already keeps rather than the languages the hook checks,
+so a repo keeping a Husky.Net manifest may run these same Python checks from that snippet
+instead. The `pre-commit` directory's own README names the second file to copy alongside the
+config.
 GOVERNANCE.md's hub-only "Running the Linters Locally (Known-Working Invocations)" section carries
 the obligation itself, what the hook must cover, its audit treatment, and the per-clone enablement
 steps.

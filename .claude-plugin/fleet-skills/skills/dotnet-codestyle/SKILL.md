@@ -50,11 +50,13 @@ All builds must complete without warnings, enforced three ways:
   narrowest scope that fits (see Analyzer suppressions below), never left to accumulate.
 - **CI lint backstop.** CI runs the clean-compile checks on every PR as the authoritative gate.
   Husky.Net is wired from the canonical `catalog/snippets/husky/` config in the hub, hub-local
-  and not carried into every fleet repo. Its hook needs a .NET tool manifest declaring Husky.Net,
-  which a .NET repo already keeps and the snippet does not ship. The other canonical shape, `catalog/snippets/pre-commit/`, is for a repo
-  without one, and each shape carries whichever language checks its own repo keeps. A repo may
-  also wire an equivalent hook of its own at `.husky/pre-commit`, enabled with `core.hooksPath`.
-  That path and `.pre-commit-config.yaml` are the two the audit reads.
+  and not carried into every fleet repo. Its hook needs a .NET tool manifest declaring
+  Husky.Net, which the snippet does not ship, so a repo keeping no such manifest takes the other
+  canonical shape, `catalog/snippets/pre-commit/`. Each shape carries whichever language checks
+  its own repo keeps. A repo may also wire an equivalent hook of its own at `.husky/pre-commit`,
+  enabled with `core.hooksPath` and sourcing nothing, since the husky snippet's own hook sources
+  a file only `dotnet husky install` generates. That path and `.pre-commit-config.yaml` are the
+  two the audit reads.
   GOVERNANCE.md's hub-only "Running the Linters Locally (Known-Working Invocations)" section
   carries the obligation itself, what the hook must cover, its audit treatment, and the
   per-clone enablement steps.
