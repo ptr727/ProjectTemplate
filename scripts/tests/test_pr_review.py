@@ -1631,6 +1631,111 @@ class TestUnrecognizedShapes(GqlCase):
                 any(f.startswith(shape) for f in found), f"{unknown!r} passed as vetted: {found}"
             )
 
+    def test_a_tag_quoted_in_a_code_span_is_not_read_as_a_section(self) -> None:
+        """A reviewer naming `<summary>` in prose is quoting it, not opening a section.
+
+        The reader consumed from the code span to the next real `</summary>`, swallowing the body
+        between them and reporting the wreckage as an unknown section, so a clean review read as
+        unclosable. It needs a real close tag later in the body to bite, which is why the vetted
+        section below is part of the case rather than scenery. A fenced block was already excluded
+        for the same reason a code span is: a quotation is not a statement.
+        """
+        quoted = "- Add the missing `<summary>`/summary-arm case to the marker test."
+        self.assertEqual(
+            [], pr_review.unrecognized_in(collapsed().replace("\n\n", "\n" + quoted + "\n", 1))
+        )
+
+    def test_a_real_summary_section_survives_the_code_span_strip(self) -> None:
+        """The strip must not cost the reader a genuine section, which is what it exists to find."""
+        body = OVERVIEW + "\n`<summary>` in prose.\n<details><summary>Reviewed Chances</summary>"
+        self.assertEqual(["summary: Reviewed Chances"], pr_review.unrecognized_in(body))
+
+    def test_masking_a_code_span_does_not_join_the_text_around_it(self) -> None:
+        """Deleting a span would fuse its two sides into a marker the body never carried.
+
+        `<summary` and `>Reviewed Chances</summary>` are not a tag until the span between them
+        goes away, so the mask has to leave something behind rather than nothing.
+        """
+        body = OVERVIEW + "\n<summary`x`>Reviewed Chances</summary>"
+        self.assertEqual([], pr_review.unrecognized_in(body))
+
+    def test_a_stray_backtick_in_two_paragraphs_does_not_mask_between_them(self) -> None:
+        """A code span cannot cross a blank line, so two stray ticks are not a span.
+
+        Unbounded, the pair swallowed every marker between them. That is the silent direction:
+        a real unknown section disappears and the digest closes the loop on a body it never read.
+        """
+        body = (
+            "## Pull request overview\n\nThe change is narrow.\n\n"
+            "The ` character is a delimiter.\n\n"
+            "<details><summary>Bogus Section</summary></details>\n\n"
+            "Also the ` character.\n"
+        )
+        self.assertEqual(["summary: Bogus Section"], pr_review.unrecognized_in(body))
+
+    def test_a_stray_backtick_in_two_paragraphs_does_not_mask_the_headings(self) -> None:
+        """The same over-match in the blocking direction, which reads as a body with no heading."""
+        body = (
+            "Intro with a ` stray tick.\n\n## Pull request overview\n\nText.\n\n"
+            "Another ` stray tick.\n"
+        )
+        self.assertEqual([], pr_review.unrecognized_in(body))
+
+    def test_a_masked_span_leaves_nothing_unprintable_in_a_reported_marker(self) -> None:
+        """The marker is quoted back to a reader, so the mask cannot be an unprintable byte."""
+        body = OVERVIEW + "\n<details><summary>Reviewed `x` Chances</summary></details>"
+        self.assertEqual(["summary: Reviewed Chances"], pr_review.unrecognized_in(body))
+
+    def test_a_coverage_line_inside_a_code_span_is_a_quotation(self) -> None:
+        """A span carrying a coverage line is quoting one, not stating this round's own.
+
+        The fence arm already excluded a quoted line, and a span is the same quotation, so a
+        review whose prose quotes a coverage line was reported as stating an invalid one.
+        """
+        body = OVERVIEW + "\n\nQuoting `a\n- **Files reviewed:** invalid` here.\n"
+        self.assertEqual([], pr_review.coverage_statements(body))
+
+    def test_a_real_coverage_line_survives_the_code_span_mask(self) -> None:
+        """The mask must not cost the reader the statement it exists to find."""
+        line = "- **Files reviewed:** 31/31 changed files"
+        self.assertEqual([line], pr_review.coverage_statements(OVERVIEW + "\n" + line + "\n"))
+
+    def test_an_escaped_backtick_does_not_open_a_span(self) -> None:
+        """A backslash-escaped backtick is a literal, so it delimits nothing.
+
+        Reading one as an opener pairs it with the next real tick and masks everything between,
+        which is the silent direction: a genuine unknown section disappears and the loop closes
+        on a body nobody read.
+        """
+        body = (
+            OVERVIEW
+            + "\nEscaped \\` then <details><summary>Bogus</summary></details> then ` a span `."
+        )
+        self.assertEqual(["summary: Bogus"], pr_review.unrecognized_in(body))
+
+    def test_a_span_ending_in_a_backslash_still_closes(self) -> None:
+        """A backslash inside a code span is literal, so it does not escape the closing run.
+
+        Guarding the closer the same way as the opener skips a valid close, so the span runs on
+        and masks the section after it, which is the failure the opener guard exists to prevent
+        rather than to cause.
+        """
+        body = (
+            OVERVIEW
+            + "\nA span `a\\` then <details><summary>Hidden</summary></details> and ` more."
+        )
+        self.assertEqual(["summary: Hidden"], pr_review.unrecognized_in(body))
+
+    def test_a_quoted_marker_stays_masked_when_the_span_ends_in_a_backslash(self) -> None:
+        """The other side of the close guard: a quoted marker must not escape through it.
+
+        Where the span both carries a marker and ends in a backslash, failing to recognize the
+        close reports the quoted marker as a real section, which is what the masking exists to
+        prevent.
+        """
+        body = OVERVIEW + "\nQuoting `<details><summary>Quoted</summary></details>\\` here."
+        self.assertEqual([], pr_review.unrecognized_in(body))
+
     def test_every_vetted_marker_together_reads_as_recognized(self) -> None:
         """The corpus shape in one body, so the lists are held against what they were built from."""
         self.assertEqual([], pr_review.unrecognized_in(nested()))

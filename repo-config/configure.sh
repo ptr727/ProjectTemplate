@@ -310,7 +310,7 @@ check_ruleset() { # payload-file - the live ruleset must match the committed pol
         [ -z "$t" ] && continue
         # shellcheck disable=SC2016  # $t is a jq --arg variable, not a shell expansion
         want="$(jq -S -c --arg t "$t" "[.rules[] | select(.type==\$t) | .parameters] | first | $norm" "$file")"
-        # shellcheck disable=SC2016
+        # shellcheck disable=SC2016  # $t is a jq --arg variable, not a shell expansion
         got="$(jq -S -c --arg t "$t" "[.rules[] | select(.type==\$t) | .parameters] | first | $norm" <<<"$live")"
         assert "'$rname' rule '$t' parameters match the payload" test "$got" = "$want"
     done <<<"$ptypes"
