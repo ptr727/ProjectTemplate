@@ -2982,7 +2982,7 @@ def _selftest():
         ),
     ]
     # The deploy-site.yml caller stub once deploy-site-task.yml is hub-hosted: no secrets: inherit
-    # (a cross-repository reusable workflow cannot use it), the one crossing secret named instead.
+    # (inherit is documented for same-org or enterprise callers, so the fleet does not use it across repositories), the one crossing secret named instead.
     # No job-level environment: on the caller, unsupported on a job with uses: (ptr727/ProjectTemplate#942).
     deploy_stub = (
         "jobs:\n"

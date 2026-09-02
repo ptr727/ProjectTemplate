@@ -33,9 +33,11 @@ install`'s own bin directory is not yet on `PATH`: run `uv tool update-shell` an
 re-source the shell, or add the directory `uv tool dir --bin` prints directly.
 Full linting (workflow YAML, Markdown,
 spelling, EditorConfig) stays out of the hook: it runs in CI as pinned action wrappers, and on
-demand via the VS Code **Lint** tasks in `catalog/snippets/configs/vscode-tasks-python.json`
-(Docker at `:latest`), which also carries the same prose/EOL gates in whole-repo mode for
-on-demand full-tree validation, not just the diff-scoped commit-time run.
+demand via the VS Code **Lint** tasks. A Python repo takes those from
+`catalog/snippets/configs/vscode-tasks-python.json` (Docker at `:latest`), and a repo with no
+Python takes the Lint group alone rather than that file's Python tasks. Either way they carry
+the same prose/EOL gates in whole-repo mode for on-demand full-tree validation, not just the
+diff-scoped commit-time run.
 
 No LF pin is needed for `.pre-commit-config.yaml` itself: it is plain YAML, not a shebang
 script, so the fleet's `[*]` `.editorconfig`/`.gitattributes` default already covers it.

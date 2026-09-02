@@ -15,8 +15,8 @@ fails the commit rather than silently skipping the gate.
 
 This snippet needs a host .NET toolchain, since the hook sources `.husky/_/husky.sh`, a file
 `dotnet husky install` generates after `dotnet tool restore` restores the tool manifest. A
-repo without one uses `../pre-commit/` instead. Neither snippet is scoped to a language by what it runs, and the
-two shared doc gates are what every repo owes either way.
+repo without one uses `../pre-commit/` instead. Neither snippet is scoped to a language by
+what it runs, and the two shared doc gates are what every repo owes either way.
 
 Full linting (workflow YAML, Markdown, spelling, EditorConfig) is **not** run in the hook. It
 runs in CI as pinned action wrappers, and on demand via the VS Code **Lint** tasks in
