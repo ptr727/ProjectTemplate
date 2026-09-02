@@ -32,7 +32,7 @@ Each guarantee is a MUST from `WORKFLOW.md` section 4, stated as the output a co
 - **D4.2** `target_commitish` is the built commit's SHA (NBGV `GitCommitId`), never a branch name and never a separately re-resolved ref.
 - **D4.3** Every release is a tag plus source zip, README, and LICENSE, `prerelease` equals `branch != default`, file targets attach `release-asset-*`, and a no-file-target caller (Docker-only, PyPI-only, source-only) passes `expect_release_assets: false` or the release-create step fails on unmatched files, a source-only one setting every `enable_*` input false with it. A NuGet caller is not one of those, since its leaf uploads a `release-asset-*` carrying the package.
 - **D4.4** No-op republish: an unchanged version re-pushes nothing, the release-create skips when the tag exists (refreshed only on `workflow_dispatch`), registries dedupe server-side under `dotnet nuget push --skip-duplicate` and PyPI's `skip-existing: true`, and Docker always re-pushes by design.
-- **D4.5** A failed build blocks every publish target: `github-release` needs every build and the terminal registry pusher (Docker) needs every other build, both guarding `!failure() && !cancelled()` so a disabled or unchanged target, skipped rather than failed, still lets the release be cut and the image pushed, and a package target's separate `publish-<target>` job `needs:` the release-task call, so no build failure ships anything partial. A failed **package** push is outside that: the `publish-<target>` job runs after the whole release task and so after `github-release`, and can leave a release and tag for a version the registry never received, recovered by re-dispatching rather than by cleanup.
+- **D4.5** A failed build blocks every publish target: `github-release` needs every build and the terminal registry pusher (Docker) needs every other build, both guarding `!failure() && !cancelled()` so a disabled or unchanged target, skipped rather than failed, still lets the release be cut and the image pushed, and a package target's separate `publish-<target>` job `needs:` the release-task call, so no build failure ships anything partial. A failed **package** push is outside that: the `publish-<target>` job runs after the whole release task and so after `github-release`, and can leave a release and tag for a version the registry never received, recovered by re-dispatching the same commit rather than by cleanup.
 - **D4.6** A deploy check asserts which release and which environment answer, waiting for convergence to a bounded timeout, with an unreachable host reported distinctly from an HTTP status.
 
 ## D5: Resource Cleanup
@@ -56,7 +56,7 @@ Each guarantee is a MUST from `WORKFLOW.md` section 4, stated as the output a co
 - **D7.1** The publisher serializes: global ref-independent concurrency group, `cancel-in-progress: false`.
 - **D7.2** A reusable job declares `permissions:` only where every caller grants that scope at startup (the block is validated before `if:`), and otherwise declares none and runs under the calling job's grant, a callee's extra scope granted by the caller at the one entry point needing it.
 - **D7.3** Boolean inputs are declared in both trigger blocks and compared against both forms.
-- **D7.4** Optional-dependency chaining allowlists `success`/`skipped` explicitly.
+- **D7.4** Optional-dependency chaining allowlists `success`/`skipped` explicitly, beside a status-check function, since the implicit `success()` is false the moment any `needs:` job skipped.
 
 ## D8: Bots and Automation
 

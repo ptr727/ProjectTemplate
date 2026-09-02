@@ -7,9 +7,9 @@ A unit is what a reviewer reads whole, decided by the carry manifest rather than
 ## Coverage
 
 - units: 288
-- covered: 53
+- covered: 54
 - stale: 0
-- never read here: 235
+- never read here: 234
 
 ## Burn-down
 
@@ -388,7 +388,6 @@ A unit is what a reviewer reads whole, decided by the carry manifest rather than
 ### WORKFLOW.md
 
 - **(preamble)** - never
-- **2. Workflow Style Conventions** - never
 
 ### cspell.json
 

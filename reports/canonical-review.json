@@ -267,11 +267,11 @@
     },
     {
       "unit": ".agents/skills/workflow-ci-contract/references/d-guarantees.md > D4: Release and Publish",
-      "digest": "sha256:e4564b0749e3ba1b886e15ca7782c6b5bbe817c7138c71135821b1b5896d6159",
+      "digest": "sha256:5b9bd4c3797df841c41077dd945af2019f2d203f4d0094b523ae84554cbb489c",
       "reviewer": "agent-skill",
-      "findings": 62,
-      "hubCommit": "9b33edb7e0f55fe2a05630a49d5be99ba1e3eb26",
-      "stamp": "2026-09-02T15:16:10Z"
+      "findings": 14,
+      "hubCommit": "30c465ae79de328d2745c31df1b05f0d960c42b7",
+      "stamp": "2026-09-02T15:40:54Z"
     },
     {
       "unit": ".agents/skills/workflow-ci-contract/references/d-guarantees.md > D5: Resource Cleanup",
@@ -291,11 +291,11 @@
     },
     {
       "unit": ".agents/skills/workflow-ci-contract/references/d-guarantees.md > D7: Concurrency, Permissions, Safety",
-      "digest": "sha256:95fc50a9adb3ad36c09c9a359b19beac7f65f525347153a1b6c479e745b6f2a2",
+      "digest": "sha256:c033b50b73c24d96575a7abe6b481323d7b4107eae174340a27430db49af936f",
       "reviewer": "agent-skill",
-      "findings": 0,
-      "hubCommit": "37d116a2fa0cecf85a220c9005375091db240a8d",
-      "stamp": "2026-09-01T14:23:11Z"
+      "findings": 14,
+      "hubCommit": "30c465ae79de328d2745c31df1b05f0d960c42b7",
+      "stamp": "2026-09-02T15:40:54Z"
     },
     {
       "unit": ".agents/skills/workflow-ci-contract/references/test-methodology.md > 5A: Static Audit",
@@ -379,11 +379,11 @@
     },
     {
       "unit": "GOVERNANCE.md > Workflow YAML Conventions",
-      "digest": "sha256:a4a598491dba644fe518a77e9306f3dfd0b0623c38900cea78a15dee9a086f4d",
+      "digest": "sha256:cbeb861edab7ed851e66c772f148c6102b5c1fe9ae8724d2fbd681a76fab673b",
       "reviewer": "agent-skill",
-      "findings": 62,
-      "hubCommit": "9b33edb7e0f55fe2a05630a49d5be99ba1e3eb26",
-      "stamp": "2026-09-02T15:16:10Z"
+      "findings": 14,
+      "hubCommit": "30c465ae79de328d2745c31df1b05f0d960c42b7",
+      "stamp": "2026-09-02T15:40:54Z"
     },
     {
       "unit": "WORKFLOW.md > 1. Purpose and How to Use This Document",
@@ -392,6 +392,14 @@
       "findings": 0,
       "hubCommit": "c3b2898feef97459d01ce7c0b63de25b6c5524bf",
       "stamp": "2026-09-01T13:57:20Z"
+    },
+    {
+      "unit": "WORKFLOW.md > 2. Workflow Style Conventions",
+      "digest": "sha256:083ea7c69ee159fe14a9192062cc86e79d23694909f3a8a1f88bec8b447565b8",
+      "reviewer": "agent-skill",
+      "findings": 14,
+      "hubCommit": "30c465ae79de328d2745c31df1b05f0d960c42b7",
+      "stamp": "2026-09-02T15:40:54Z"
     },
     {
       "unit": "WORKFLOW.md > 3. Architecture",
@@ -403,11 +411,11 @@
     },
     {
       "unit": "WORKFLOW.md > 4. Behavioral Contract: Expected Outcomes",
-      "digest": "sha256:2878a75752ccdbcbdb11400d9d83ecb381ed541ad2ea13e603de810c5ef87c3a",
+      "digest": "sha256:1ef44ce8017e9133ff3dc32a00e7b7bb863524ad0779594db240764df75a790a",
       "reviewer": "agent-skill",
-      "findings": 62,
-      "hubCommit": "9b33edb7e0f55fe2a05630a49d5be99ba1e3eb26",
-      "stamp": "2026-09-02T15:16:10Z"
+      "findings": 14,
+      "hubCommit": "30c465ae79de328d2745c31df1b05f0d960c42b7",
+      "stamp": "2026-09-02T15:40:54Z"
     },
     {
       "unit": "WORKFLOW.md > 5. Test Methodology",
@@ -419,11 +427,11 @@
     },
     {
       "unit": "WORKFLOW.md > 6. Per-Project-Type Test Walkthroughs",
-      "digest": "sha256:671f3bce4616e1a5f6fd7aa90d0a2e444e9828a63426283abe284ee413ec063a",
+      "digest": "sha256:3f8a0a5e837f3c2472b3912f67e765d7d59348d34c04a46b0e2660529ce8ad39",
       "reviewer": "agent-skill",
-      "findings": 62,
-      "hubCommit": "9b33edb7e0f55fe2a05630a49d5be99ba1e3eb26",
-      "stamp": "2026-09-02T15:16:10Z"
+      "findings": 14,
+      "hubCommit": "30c465ae79de328d2745c31df1b05f0d960c42b7",
+      "stamp": "2026-09-02T15:40:54Z"
     }
   ]
 }
