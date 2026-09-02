@@ -4,7 +4,11 @@ The three escalating verification modes from `WORKFLOW.md` section 5, which keep
 
 ## 5A: Static Audit
 
-Read the workflow files plus `version.json` and assert the structural fact behind each applicable D-guarantee, each pass, fail, or N/A with a `file:line` citation, asserting each input in the layer that declares it. The core sweep covers: the paths-filter's target coverage and `.github/workflows/**` exclusion, smoke gating on every upload, the aggregator's `needs:` and skip/fail handling, the entry validation jobs and the two-directional release gate, the single-branch NBGV classification and the three default-branch literals agreeing, `target_commitish` from `GitCommitId`, the consume-then-delete artifact lifecycle with `retention-days: 1` everywhere and no blanket delete, the `pattern:` handoff and `inputs.branch` config, the publisher's serialized concurrency, and the SHA pins. `WORKFLOW.md` 5A lists the per-type addenda (console runtime matrix, NuGet `--skip-duplicate`, the PyPI OIDC environment split, Docker `expect_release_assets` and cache shape, the static-site deploy gates), so apply only the ones the repo's types imply.
+Read the workflow files plus `version.json` and assert the structural fact behind each applicable D-guarantee, each pass, fail, or N/A with a `file:line` citation, remembering the two layers and asserting each input in the file that declares it. `WORKFLOW.md` 5A carries the whole core list and the per-type addenda, and the sibling `d-guarantees.md` carries the guarantees each item answers to, so read this as an index into them rather than as the sweep itself.
+
+The core sweep reaches the paths-filter, naming each target's own build paths so a change touching none marks nothing. It reaches smoke gating on every upload. It reaches the aggregator's `needs:` and its skip and fail handling. It reaches the entry validation jobs and the two-directional release gate. It reaches the single-branch NBGV classification, with the gate's default-branch literal, the `prerelease` expression, and `version.json`'s `publicReleaseRefSpec` all naming the repo's actual default branch. It reaches `target_commitish` from `GitCommitId`. It reaches the consume-then-delete artifact lifecycle, with `retention-days: 1` everywhere and no blanket delete. It reaches the `pattern:` handoff and `inputs.branch` config. It reaches the publisher's serialized concurrency and the SHA pins.
+
+The per-type addenda cover .NET publish, NuGet, PyPI, Docker, and a static site deployed to a host, several assertions each. Apply only the ones the repo's types imply, and read them in `WORKFLOW.md` 5A rather than from this list.
 
 ## 5B: Trace Scenarios
 
@@ -14,7 +18,7 @@ For each applicable scenario, evaluate every job's `if:`/`needs:` against the in
 - **S5/S6** a bot push to `main`: publishes only when code-affecting, and a human push never does.
 - **S7** a publish run builds the one trigger branch with the right classification and leaves no dangling artifacts.
 - **S8** a dispatch from a ref other than `main`/`develop` fails fast.
-- **S9** a no-op re-run: release-create skipped, registries dedupe, PyPI build artifact still deleted, Docker still re-pushes.
+- **S9** a no-op re-run on a schedule or push trigger: release-create skipped, registries dedupe, package build artifacts still deleted, Docker still re-pushes. A dispatch re-run refreshes the release instead.
 - **S10** branch and version classification disagree: the gate fails loud and everything downstream skips.
 - **S12/S13** a deploy dispatch: ref gate first, environment re-asserted, pointer flip separate, live check names the release, and a production deploy from a non-default ref fails before anything is written.
 
