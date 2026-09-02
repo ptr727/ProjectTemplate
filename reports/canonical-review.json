@@ -35,11 +35,11 @@
     },
     {
       "unit": ".agents/skills/dotnet-codestyle/SKILL.md > Build requirements",
-      "digest": "sha256:f1545c3fa60c3c5338b072e85aaf709d35c2113a33c5e3c285a0c600e2304919",
+      "digest": "sha256:a8ee161d2903746f7ee333ba9444211a99013a18f02ca9ddd2f9710b6cfc80d9",
       "reviewer": "agent-skill",
-      "findings": 5,
-      "hubCommit": "19e9f5b3cbd057624cfbe8856731ec82d3cfdcc5",
-      "stamp": "2026-09-02T01:38:59Z"
+      "findings": 0,
+      "hubCommit": "6b31b27cce9b2177999390569687ef6dffdbf0da",
+      "stamp": "2026-09-02T02:08:08Z"
     },
     {
       "unit": ".agents/skills/dotnet-codestyle/SKILL.md > Tooling and editor",
@@ -387,11 +387,11 @@
     },
     {
       "unit": "WORKFLOW.md > 6. Per-Project-Type Test Walkthroughs",
-      "digest": "sha256:f6b2044c5b5de3aafd760cf001797e807749c391af93ca2ec0cb3d436b884a33",
+      "digest": "sha256:b22d155cf3ec026b6e206124189684208979b79e3468fcb4f40e4519fab61eae",
       "reviewer": "agent-skill",
       "findings": 0,
-      "hubCommit": "c3b2898feef97459d01ce7c0b63de25b6c5524bf",
-      "stamp": "2026-09-01T13:57:21Z"
+      "hubCommit": "6b31b27cce9b2177999390569687ef6dffdbf0da",
+      "stamp": "2026-09-02T02:08:08Z"
     }
   ]
 }

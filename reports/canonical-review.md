@@ -7,8 +7,8 @@ A unit is what a reviewer reads whole, decided by the carry manifest rather than
 ## Coverage
 
 - units: 288
-- covered: 47
-- stale: 2
+- covered: 49
+- stale: 0
 - never read here: 239
 
 ## Burn-down
@@ -106,7 +106,6 @@ A unit is what a reviewer reads whole, decided by the carry manifest rather than
 - **(preamble)** - never
 - **Analyzer suppressions (.NET)** - never
 - **Best practices** - never
-- **Build requirements** - stale
 - **Code patterns** - never
 - **Coding standards and conventions** - never
 - **Error handling and logging** - never
@@ -394,7 +393,6 @@ A unit is what a reviewer reads whole, decided by the carry manifest rather than
 
 - **(preamble)** - never
 - **2. Workflow Style Conventions** - never
-- **6. Per-Project-Type Test Walkthroughs** - stale
 
 ### cspell.json
 
