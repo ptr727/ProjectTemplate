@@ -2982,7 +2982,6 @@ def _selftest():
         ),
     ]
     # The deploy-site.yml caller stub once deploy-site-task.yml is hub-hosted: no secrets: inherit, the required crossing secret named instead.
-    # The task also declares an optional SITE_AUTH_TOKEN_ID/SITE_AUTH_TOKEN pair, which a caller maps only where its live check needs one.
     # inherit is documented for same-org or enterprise callers, so the fleet does not use it across repositories.
     # No job-level environment: on the caller, unsupported on a job with uses: (ptr727/ProjectTemplate#942).
     deploy_stub = (
