@@ -35,11 +35,11 @@
     },
     {
       "unit": ".agents/skills/dotnet-codestyle/SKILL.md > Build requirements",
-      "digest": "sha256:a8ee161d2903746f7ee333ba9444211a99013a18f02ca9ddd2f9710b6cfc80d9",
+      "digest": "sha256:c8736b941276f2470f35150ead197697ef7fbc521ae7ad9db8d94021eb536ace",
       "reviewer": "agent-skill",
       "findings": 0,
-      "hubCommit": "6b31b27cce9b2177999390569687ef6dffdbf0da",
-      "stamp": "2026-09-02T02:08:08Z"
+      "hubCommit": "d4cb996ed67bed9e327c5a3b3c4b441466bc37bb",
+      "stamp": "2026-09-02T02:28:22Z"
     },
     {
       "unit": ".agents/skills/dotnet-codestyle/SKILL.md > Tooling and editor",
@@ -171,11 +171,11 @@
     },
     {
       "unit": ".agents/skills/python-codestyle/SKILL.md > Local development loop",
-      "digest": "sha256:2b16524e8edffe8d04c0e1d4dc2abab4e5f7ef44fe9c8908721dae88d264b485",
+      "digest": "sha256:c3bacf3c4a90133d669a48523dbb37ff074e455c6d0c7e6e5c20eeb3a7cc66e8",
       "reviewer": "agent-skill",
-      "findings": 4,
-      "hubCommit": "19e9f5b3cbd057624cfbe8856731ec82d3cfdcc5",
-      "stamp": "2026-09-02T01:38:59Z"
+      "findings": 1,
+      "hubCommit": "d4cb996ed67bed9e327c5a3b3c4b441466bc37bb",
+      "stamp": "2026-09-02T02:28:23Z"
     },
     {
       "unit": ".agents/skills/repo-worktree/SKILL.md > Creating a Worktree",
@@ -307,11 +307,11 @@
     },
     {
       "unit": "CODESTYLE.md > General",
-      "digest": "sha256:7c8339e809b36168a3d2707e4b723005bda81debe0ba8f6018b4b3b95697e87a",
+      "digest": "sha256:fee3f2edbc2d775c9464ac7fddf134e8b45119f4efe718c4f61215f2de292f8c",
       "reviewer": "agent-skill",
       "findings": 0,
-      "hubCommit": "01475e0201567a6fdd9fb9759a390875a4bc634b",
-      "stamp": "2026-09-02T02:00:40Z"
+      "hubCommit": "d4cb996ed67bed9e327c5a3b3c4b441466bc37bb",
+      "stamp": "2026-09-02T02:28:23Z"
     },
     {
       "unit": "CODESTYLE.md > Shell",
@@ -387,11 +387,11 @@
     },
     {
       "unit": "WORKFLOW.md > 6. Per-Project-Type Test Walkthroughs",
-      "digest": "sha256:b22d155cf3ec026b6e206124189684208979b79e3468fcb4f40e4519fab61eae",
+      "digest": "sha256:90cd1e08e32954143484bbd75d2e90fd6b59e70141eac0bcd4e20a5d662335ac",
       "reviewer": "agent-skill",
-      "findings": 0,
-      "hubCommit": "6b31b27cce9b2177999390569687ef6dffdbf0da",
-      "stamp": "2026-09-02T02:08:08Z"
+      "findings": 1,
+      "hubCommit": "d4cb996ed67bed9e327c5a3b3c4b441466bc37bb",
+      "stamp": "2026-09-02T02:28:24Z"
     }
   ]
 }
