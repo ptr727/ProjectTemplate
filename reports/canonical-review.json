@@ -283,11 +283,11 @@
     },
     {
       "unit": ".github/copilot-instructions.md > Reviewing Carried Fleet Content",
-      "digest": "sha256:7ae77c0dfd2a948c68ee9bde900c4c14153407534510f697facf9ce3ffd1805f",
+      "digest": "sha256:83570e2b15143c6f9b79e4d381b7a578d3ae7970d74ae676405a402f6d13630f",
       "reviewer": "agent-skill",
-      "findings": 0,
-      "hubCommit": "112ffd874eaec3784a747b341fbdd0b19d75502c",
-      "stamp": "2026-09-02T03:09:17Z"
+      "findings": 2,
+      "hubCommit": "f0ff674ec0d59bb2c9ec3736ef22d9de205059c8",
+      "stamp": "2026-09-02T03:21:55Z"
     },
     {
       "unit": "AGENTS.md > Where the Rules Live",
