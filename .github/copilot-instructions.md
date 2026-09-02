@@ -24,7 +24,7 @@ Follow the fidelity declared for the file. A byte-locked reference to shared inf
 this repository does not carry is intentional, not a broken link. Raise substantive defects in
 canonical content, but locate the fix at its canonical source instead of proposing a local edit.
 An edit to a verbatim unit is reported, as modified content or as stale where it matches an
-earlier canonical revision. An edit to an intent or presence unit is reported nowhere, beyond
+earlier canonical revision. A content edit to an intent or presence unit is reported nowhere, though a deleted unit is still caught by the presence check, and beyond
 two advisories that read undeclared headings and template references in this file, `AGENTS.md`
 and `GOVERNANCE.md`. So the audit is not what decides this.
 
