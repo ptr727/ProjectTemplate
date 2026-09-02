@@ -23,13 +23,8 @@ put a release-bump magnitude in the title. The full contract is in
 Follow the fidelity declared for the file. A byte-locked reference to shared infrastructure that
 this repository does not carry is intentional, not a broken link. Raise substantive defects in
 canonical content, but locate the fix at its canonical source instead of proposing a local edit.
-An edit to a verbatim unit is reported, as modified content or as stale where it matches an
-earlier canonical revision. A content edit to an intent or presence unit is never compared
-against the canonical. Three advisories still reach it. Two read undeclared headings and
-template references in this file, `AGENTS.md` and `GOVERNANCE.md`. The third is the intent
-staleness advisory, which skips a byte-identical copy outright and so leaves an edited one
-exposed once the hub next changes that file substantively. Deleting a unit is caught by the
-presence check either way. So the audit is not what decides this.
+What the audit does or does not detect is not the reason: a local patch reaches only this
+repository, whatever any tier reports.
 
 ## GitHub Copilot Review Runbook
 
