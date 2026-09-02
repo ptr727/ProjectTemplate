@@ -2453,7 +2453,7 @@ def audit_repo(entry, spec, branch=None):
                         )
                     )
                 # The undeclared-section advisory, per spec/section-model.md, treats an H2 the manifest does not declare as a candidate duplicate of a verbatim section, or as repo-specific content to relocate.
-                # It is advisory only, since a repo may legitimately carry its own project-specific sections, which the AGENTS.md preamble allows, so it points at the reconciliation and never fails.
+                # It is advisory only, since the reconciliation can end in promoting the rule here or relocating it, so it points at that choice and never fails.
                 # It covers UNDECLARED_HEADING_SCANNED, not only AGENTS.md and GOVERNANCE.md, and never names which destination file an undeclared heading belongs in.
                 # Skip the hub itself, since its copies are the source and legitimately hold hub-only sections, Repository Onboarding and Conformance being one, that are deliberately not carried.
                 # A downstream repo carrying such a section is still flagged, which is the point.

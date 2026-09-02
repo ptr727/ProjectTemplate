@@ -36,14 +36,14 @@ Once a workflow's job graph moves into the hub, the carried unit is a caller stu
 
 A downstream repo editing carried content is a different question from a copy trailing the hub, and the answer differs by tier. [`GOVERNANCE.md`][governance] "Durable Knowledge and Self-Improvement" sends a change to carried rule text upstream rather than into the local copy. What follows is why a local patch there is so easy to miss.
 
-The unit decides, never the file. `GOVERNANCE.md` is `intent` as a file while 18 of its 20 sections are `verbatim`. An edit inside one of those is caught, and an edit to the prose around them is not.
+The unit decides, never the file. `GOVERNANCE.md` is `intent` as a file while 18 of its 20 declared sections are `verbatim`. An edit inside one of those is caught, and an edit to the prose around them is not.
 
 - **verbatim and verbatim-tree** - detected. The content hash matches neither the current canonical nor any past revision. "Stale Versus Modified" below reports that as modified fixed content rather than as stale.
 - **interface** - detected only where the edit moves the contract. A changed job key, check name, or hub task token is a finding. An edit to the owned body is the override this tier exists for.
 - **intent** - not detected. Content is never judged, and the staleness advisory cannot fire on a local edit at all. It compares last-change dates, and editing the copy makes it newer than the hub canonical.
 - **presence** - not detected. The unit is asserted to exist and is never read.
 
-So a local rule edit to `CODESTYLE.md` or `WORKFLOW.md`, both `intent` and whole, is reported nowhere. Headings are the one exception. [`section-model.md`][section-model]'s undeclared-section advisory names a heading the hub does not declare, for `AGENTS.md`, `GOVERNANCE.md` and `.github/copilot-instructions.md`. It reads headings rather than rule text, so a rule rewritten under a declared heading stays invisible.
+So a local rule edit to `CODESTYLE.md` or `WORKFLOW.md`, both `intent` and whole, is reported nowhere. Two checks reach some non-verbatim prose, and neither reaches those two files. [`section-model.md`][section-model]'s undeclared-section advisory names a heading the hub does not declare, and it runs only against `AGENTS.md`, `GOVERNANCE.md` and `.github/copilot-instructions.md`. It reads headings rather than rule text, so a rule rewritten under a declared heading stays invisible. [`audit.py`][audit]'s `template_ref_outside_verbatim` reads the prose itself, and it catches only a coordination reference rather than a changed rule.
 
 ## Normalization
 

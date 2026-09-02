@@ -14,8 +14,8 @@ network fetches alongside the Docker pulls the Lint tasks below already do. A fe
 fails the commit rather than silently skipping the gate.
 
 This snippet needs a host .NET toolchain, since the hook sources `.husky/_/husky.sh`, a file
-`dotnet tool restore` and `dotnet husky install` generate. A repo without one uses
-`../pre-commit/` instead. Neither snippet is scoped to a language by what it runs, and the
+`dotnet husky install` generates after `dotnet tool restore` restores the tool manifest. A repo
+without one uses `../pre-commit/` instead. Neither snippet is scoped to a language by what it runs, and the
 two shared doc gates are what every repo owes either way.
 
 Full linting (workflow YAML, Markdown, spelling, EditorConfig) is **not** run in the hook. It
@@ -34,5 +34,5 @@ override needed. A CRLF shebang breaks execution.
 
 Both language blocks run unconditionally, with no tool-presence guard: a repo that keeps a
 block declares that tool required, so a missing one fails the commit loudly rather than
-skipping the check silently. Drop the Python block in a repo with no Python, rather than
-leaving it in place to no-op.
+skipping the check silently. Drop the `dotnet husky run` block in a repo with no .NET project,
+and the Python block in a repo with no Python, rather than leaving either in place to no-op.

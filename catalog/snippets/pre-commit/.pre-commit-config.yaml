@@ -1,4 +1,4 @@
-# Reference pre-commit (pre-commit.com) config for a fleet repo with no host .NET toolchain.
+# Reference pre-commit (pre-commit.com) config for a fleet repo with no host .NET toolchain, or one that prefers this runner.
 # Husky.Net is a dotnet tool, so the discriminator is the toolchain rather than the repo's languages.
 # Drop the ruff and type-check hooks in a repo with no Python, keeping the two doc gates every repo owes.
 # Copy into the repo root alongside ../hub-fetch-run.py.
