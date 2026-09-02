@@ -1,7 +1,7 @@
 ---
 name: workflow-ci-contract
 description: >-
-  Governs the WORKFLOW.md CI/CD behavioral contract for every ptr727/ProjectTemplate fleet repo: the D1-D9 guarantees stated as the failure mode each prevents, the seam contract for release assets, the artifact lifecycle, NBGV versioning and classification, validate-at-entry, and the 5A/5B/5C test methodology with its per-type walkthroughs. Use this whenever writing or editing anything under .github/workflows/, adding or dropping a release target, auditing a repo's workflows, or reasoning about why a publish did or did not fire. This is the YAML half of the pipeline, and the operational-vs-release-workflow skill keeps the git half (branching, promotion, publish policy), so branch choice questions go there. Triggers even when the edit looks mechanical, such as bumping an action, renaming a job, or adding one upload step, because SHA pinning, the ruleset-bound aggregator name, smoke gating on uploads, and retention-days are each easy to break in a one-line diff that no smoke build exercises, since workflow-only changes are deliberately not smoke-built. WORKFLOW.md keeps authority, and GOVERNANCE.md wins where the two overlap.
+  Governs the WORKFLOW.md CI/CD behavioral contract for every ptr727/ProjectTemplate fleet repo: the D1-D9 guarantees, the seam contract for release assets, the artifact lifecycle, NBGV versioning and classification, validate-at-entry, and the 5A/5B/5C test methodology with its per-type walkthroughs. Use this whenever writing or editing anything under .github/workflows/, adding or dropping a release target, auditing a repo's workflows, or reasoning about why a publish did or did not fire. This is the YAML half of the pipeline, and the operational-vs-release-workflow skill keeps the git half (branching, promotion, publish policy), so branch choice questions go there. Triggers even when the edit looks mechanical, such as bumping an action, renaming a job, or adding one upload step, because SHA pinning, the ruleset-bound aggregator name, smoke gating on uploads, and retention-days are each easy to break in a one-line diff that no smoke build exercises, since workflow-only changes are deliberately not smoke-built. WORKFLOW.md keeps authority, and GOVERNANCE.md wins where the two overlap.
 ---
 
 # Workflow CI Contract
@@ -40,7 +40,7 @@ description: >-
 - **No-op republish**: an unchanged version re-pushes nothing, the release-create step skips when the tag exists and is refreshed only on a dispatch, registries dedupe server-side (`--skip-duplicate`, `skip-existing: true`), and Docker alone always re-pushes by design.
 - **A build failure blocks every publish target**: `github-release` needs every build and guards with `!failure() && !cancelled()` as the terminal registry pusher (Docker) does, and a package target's separate `publish-<target>` job `needs:` the release-task call, so no build failure ships anything partial. A failed package push is outside that, since it runs after the release is cut.
 
-The full catalog, each guarantee with the failure mode it prevents, is in `references/d-guarantees.md`. Auditing, tracing, and probing a repo's workflows is `references/test-methodology.md`.
+A condensed catalog of `WORKFLOW.md` section 4 is in `references/d-guarantees.md`. A condensed guide to `WORKFLOW.md` section 5's audit, trace, and probe procedure is in `references/test-methodology.md`.
 
 ## After Any Workflow Edit
 

@@ -234,6 +234,14 @@
       "stamp": "2026-09-01T06:46:39Z"
     },
     {
+      "unit": ".agents/skills/workflow-ci-contract/SKILL.md > (preamble)",
+      "digest": "sha256:b7bf2ed878797d025cd67ba7191b40c1988a1cf0233e0141e73dfe347f1a0836",
+      "reviewer": "agent-skill",
+      "findings": 4,
+      "hubCommit": "99f8de2209405d2dfa8b6d648dc42d55ee3de060",
+      "stamp": "2026-09-02T19:10:19Z"
+    },
+    {
       "unit": ".agents/skills/workflow-ci-contract/SKILL.md > After Any Workflow Edit",
       "digest": "sha256:7dc31b8f1e7e25effd4b85078f9099b89cf3663452ed0400cf255df019fbef0e",
       "reviewer": "agent-skill",
@@ -259,19 +267,19 @@
     },
     {
       "unit": ".agents/skills/workflow-ci-contract/SKILL.md > The Core Behavioral Spine",
-      "digest": "sha256:0061a17edeb3c838b1a72e17dfac823e03a22156a450cf06816f70706c42ffe3",
+      "digest": "sha256:0b53bafe901f2482156fffb07b24cb26968f5cae3c6da1e71bc713c24ab5cfd5",
       "reviewer": "agent-skill",
-      "findings": 9,
-      "hubCommit": "5085d22962752a8690b5bc21095fe7bc91c25f28",
-      "stamp": "2026-09-02T16:34:43Z"
+      "findings": 5,
+      "hubCommit": "1de415fbc5de255f04b2b7f71d42f1f240355639",
+      "stamp": "2026-09-02T19:38:44Z"
     },
     {
       "unit": ".agents/skills/workflow-ci-contract/references/d-guarantees.md > (preamble)",
-      "digest": "sha256:2c0dee23dd279030b8e79e015ca5238eb9031999946dcd844b643fcd2baac723",
+      "digest": "sha256:f5ff09431c97a4c1c86d29b387a686805c467e7761d54e37ca61e75d4d0b2173",
       "reviewer": "agent-skill",
-      "findings": 62,
-      "hubCommit": "9b33edb7e0f55fe2a05630a49d5be99ba1e3eb26",
-      "stamp": "2026-09-02T15:16:10Z"
+      "findings": 5,
+      "hubCommit": "99f8de2209405d2dfa8b6d648dc42d55ee3de060",
+      "stamp": "2026-09-02T18:38:20Z"
     },
     {
       "unit": ".agents/skills/workflow-ci-contract/references/d-guarantees.md > D1: PR Fast-Feedback (Smoke)",
@@ -408,6 +416,14 @@
       "findings": 14,
       "hubCommit": "30c465ae79de328d2745c31df1b05f0d960c42b7",
       "stamp": "2026-09-02T15:40:54Z"
+    },
+    {
+      "unit": "WORKFLOW.md > (preamble)",
+      "digest": "sha256:ea8cdbdf569d5476aa300eee0f797f0318b1a488ea690955f1cc2244b620d3b3",
+      "reviewer": "agent-skill",
+      "findings": 8,
+      "hubCommit": "99f8de2209405d2dfa8b6d648dc42d55ee3de060",
+      "stamp": "2026-09-02T19:16:34Z"
     },
     {
       "unit": "WORKFLOW.md > 1. Purpose and How to Use This Document",

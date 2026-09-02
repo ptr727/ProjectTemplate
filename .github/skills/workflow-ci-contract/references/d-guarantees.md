@@ -1,6 +1,6 @@
 # The D-Guarantees, Condensed
 
-Each guarantee is a MUST from `WORKFLOW.md` section 4, stated as the output a conforming pipeline produces. There an item names an input only where the guarantee applies to a particular trigger or state, and names the failure it prevents only where the output does not already show it. An item naming neither still binds every repo whose shape its domain covers, and a workflow violating any applicable guarantee is not operational. This is the condensed catalog for working from, and `WORKFLOW.md` keeps authority: read the section there when a guarantee's exact wording decides a verdict, since a condensed item can be shorter than the one it condenses.
+Each guarantee is a MUST from `WORKFLOW.md` section 4, stated as the output a conforming pipeline produces. In that section an item names an input only where the guarantee applies to a particular trigger or state, and names the failure it prevents only where the output does not already show it. An item naming neither still binds every repo whose shape its domain covers, and a workflow violating any applicable guarantee is not operational. This is the condensed catalog for working from, and `WORKFLOW.md` keeps authority: read the section there when a guarantee's exact wording decides a verdict, since a condensed item can be shorter than the one it condenses.
 
 ## D1: PR Fast-Feedback (Smoke)
 

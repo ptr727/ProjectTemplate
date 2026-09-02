@@ -12,7 +12,7 @@ Given this document, an agent must be able to do three things to any project:
 
 > **Canonical scope.** This document is authoritative for the workflow contract and test methodology (sections 3 to 6). The conventions in section 2 and the release policy also live in `GOVERNANCE.md` ("Workflow YAML Conventions" and "Release Model"), which is authoritative where the two overlap. Section 2 restates them so this file reads on its own. On any conflict in that overlap, `GOVERNANCE.md` wins.
 
-The guarantees are distilled from failures observed in practice and stated as the **failure-mode each prevents**, so the document stays portable to any project.
+The guarantees are distilled from failures observed in practice. Section 4's preamble states how each item is written.
 
 ## 1. Purpose and How to Use This Document
 
