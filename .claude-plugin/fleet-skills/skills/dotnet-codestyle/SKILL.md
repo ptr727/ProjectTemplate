@@ -49,8 +49,10 @@ All builds must complete without warnings, enforced three ways:
   surfaced as a warning fails the build and must be fixed or deliberately suppressed at the
   narrowest scope that fits (see Analyzer suppressions below), never left to accumulate.
 - **CI lint backstop.** CI runs the clean-compile checks on every PR as the authoritative gate.
-  The .NET mechanism for a local hook is Husky.Net, wired from the canonical
-  `catalog/snippets/husky/` config in the hub, hub-local and not carried into every fleet repo.
+  Husky.Net is wired from the canonical `catalog/snippets/husky/` config in the hub, hub-local
+  and not carried into every fleet repo. Its hook needs a host .NET toolchain, which is what
+  selects it rather than the languages the hook checks. A repo without one, or one that prefers
+  that runner, wires `catalog/snippets/pre-commit/` instead.
   GOVERNANCE.md's hub-only "Running the Linters Locally (Known-Working Invocations)" section
   carries the obligation itself, what the hook must cover, its audit treatment, and the
   per-clone enablement steps.

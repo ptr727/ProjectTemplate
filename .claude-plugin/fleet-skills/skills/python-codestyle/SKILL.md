@@ -96,9 +96,11 @@ those. These are documented commands, and the hub's `vscode-tasks-python.json` s
 VS Code tasks mirror that the fleet baseline expects. Every command-executing task in it is
 `type: process`, and every aggregator is `dependsOn`-only. Neither chains with `&&`, so the mirror
 runs the same on any task shell. CI runs the same clean-compile commands as the authoritative
-backstop. The Python mechanism for a local hook is the `pre-commit` framework, wired from the
-canonical `catalog/snippets/pre-commit/` directory, hub-local and not carried into every fleet
-repo. That directory's own README names the second file to copy alongside the config.
+backstop. A repo with no host .NET toolchain wires its local hook from the canonical
+`catalog/snippets/pre-commit/` directory, hub-local and not carried into every fleet repo. The
+runner follows the host toolchain rather than the languages the hook checks, so a repo already
+building .NET may run these same Python checks from the Husky.Net snippet instead. The
+`pre-commit` directory's own README names the second file to copy alongside the config.
 GOVERNANCE.md's hub-only "Running the Linters Locally (Known-Working Invocations)" section carries
 the obligation itself, what the hook must cover, its audit treatment, and the per-clone enablement
 steps.

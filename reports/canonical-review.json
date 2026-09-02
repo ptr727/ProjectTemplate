@@ -35,11 +35,11 @@
     },
     {
       "unit": ".agents/skills/dotnet-codestyle/SKILL.md > Build requirements",
-      "digest": "sha256:c9a8e764ae6c8423420ba2cb7e8b65d5a0328a405be16a798b8aec521f01c459",
+      "digest": "sha256:f1545c3fa60c3c5338b072e85aaf709d35c2113a33c5e3c285a0c600e2304919",
       "reviewer": "agent-skill",
-      "findings": 0,
-      "hubCommit": "ed329f4029c9b035662a96f00834152c27bf2d8b",
-      "stamp": "2026-09-01T06:18:30Z"
+      "findings": 5,
+      "hubCommit": "19e9f5b3cbd057624cfbe8856731ec82d3cfdcc5",
+      "stamp": "2026-09-02T01:38:59Z"
     },
     {
       "unit": ".agents/skills/dotnet-codestyle/SKILL.md > Tooling and editor",
@@ -171,11 +171,11 @@
     },
     {
       "unit": ".agents/skills/python-codestyle/SKILL.md > Local development loop",
-      "digest": "sha256:6f1081d1c1cf0f719f9c154c0b5652a26c7c1f6d2478adc3717becb248a61458",
+      "digest": "sha256:2b16524e8edffe8d04c0e1d4dc2abab4e5f7ef44fe9c8908721dae88d264b485",
       "reviewer": "agent-skill",
-      "findings": 1,
-      "hubCommit": "5664a954bf0c11acb6bab9014b0463697d18da4b",
-      "stamp": "2026-09-01T23:19:53Z"
+      "findings": 4,
+      "hubCommit": "19e9f5b3cbd057624cfbe8856731ec82d3cfdcc5",
+      "stamp": "2026-09-02T01:38:59Z"
     },
     {
       "unit": ".agents/skills/repo-worktree/SKILL.md > Creating a Worktree",
