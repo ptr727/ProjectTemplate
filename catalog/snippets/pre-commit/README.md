@@ -1,7 +1,7 @@
 # Pre-commit snippet
 
 `.pre-commit-config.yaml` is the reference config for the `pre-commit` framework
-(pre-commit.com), for a repo with no host .NET toolchain, and for any repo that prefers it to
+(pre-commit.com), for a repo that keeps no .NET tool manifest, and for any repo that prefers it to
 Husky.Net. The host toolchain is the discriminator, not the
 repo's own languages: Husky.Net is a `dotnet` tool, and this framework installs independently
 of one. In a repo with Python it runs `ruff format --check` and `ruff check`, plus that

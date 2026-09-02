@@ -38,7 +38,7 @@ A downstream repo editing carried content is a different question from a copy tr
 
 The unit decides, never the file. `GOVERNANCE.md` is `intent` as a file while 18 of its 20 declared sections are `verbatim`. An edit inside one of those is caught, and an edit to the prose around them is not.
 
-- **verbatim and verbatim-tree** - detected. The content hash matches neither the current canonical nor any past revision. "Stale Versus Modified" below reports that as modified fixed content rather than as stale.
+- **verbatim and verbatim-tree** - detected. The content hash is compared against the canonical and every past revision, and "Stale Versus Modified" below reads the result. An edit matching no revision reports as modified fixed content, and one restoring an earlier revision reports as stale, since the hash cannot say how the bytes got there.
 - **interface** - detected only where the edit moves the contract. A changed job key, check name, or hub task token is a finding. An edit to the owned body is the override this tier exists for.
 - **intent** - not detected. Content is never judged, and the staleness advisory never identifies a local edit. It compares last-change dates, so the edit first suppresses the advisory by making the copy newer. Once the hub next changes that file the advisory fires and reports the copy as trailing, which routes to a re-vendor that overwrites the edit rather than to the edit itself.
 - **presence** - not detected. The unit is asserted to exist and is never read.
