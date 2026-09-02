@@ -1,14 +1,14 @@
 # The D-Guarantees, Condensed
 
-Each guarantee is a MUST from `WORKFLOW.md` section 4, stated as input to output plus the failure mode it prevents. This is the condensed catalog for working from, and `WORKFLOW.md` keeps authority, so read the section there when a guarantee's exact wording decides a verdict.
+Each guarantee is a MUST from `WORKFLOW.md` section 4, stated as the output a conforming pipeline produces. There an item names an input only where the guarantee applies to a particular trigger or state, names the failure it prevents only where the output does not already show it, and binds every repo whose shape its domain covers when it names neither. A workflow violating any applicable guarantee is not operational. This is the condensed catalog for working from, and it drops detail rather than adding any, so `WORKFLOW.md` keeps authority: read the section there when a guarantee's exact wording decides a verdict.
 
 ## D1: PR Fast-Feedback (Smoke)
 
-- **D1.1** Only changed targets build: each target has a paths-filter entry, unchanged targets skip. Prevents a changed target slipping through unbuilt.
-- **D1.2** A validation job always runs on any PR, and a non-.NET repo replaces it (never deletes it), re-pointing every `needs:` on it, the aggregator and `smoke-build` both. Prevents a PR merging with no validation, or a dangling `needs:` failing the workflow to load.
+- **D1.1** Only changed targets build: each target has a paths-filter entry naming the paths it is built from, unchanged targets skip, and a change touching no target's paths marks nothing. A filter written as a negation of what must not build marks a docs-only change as a target change and fails this item. Prevents a changed target slipping through unbuilt.
+- **D1.2** A validation job always runs on any PR: the caller's own job reaching the reusable validator, named `validate` in every shipped stub, which is the name the aggregator `needs:`. The validator's internal jobs are not addressable from a caller, and one of the hub's is itself called `validate`, so the matching name in a `needs:` list is always the caller's own job. It detects the tree rather than the language, so a non-.NET repo calls the same validator. A repo whose validation it cannot express replaces the call (never deletes it) and re-points the aggregator's `needs:`. `smoke-build` `needs:` the `changes` job, not the validation job. Prevents a PR merging with no validation, or a dangling `needs:` failing the workflow to load.
 - **D1.3** Smoke never publishes and never uploads: full compile/lint/test, no pushes, every `upload-artifact` gated `!smoke`. Prevents a PR publishing and orphaned artifacts.
-- **D1.4** Workflow-file changes are not smoke-built (the filter excludes `.github/workflows/**`), actionlint still validates them.
-- **D1.5** One required aggregator gates merge: `needs:` the changes and validation jobs, passes on skipped smoke, blocks on failure or cancelled, and its name is ruleset-bound (job `name:` equals ruleset `context:`, renamed together).
+- **D1.4** Workflow-file changes are not smoke-built, since an inclusion list satisfying D1.1 matches no workflow path, and actionlint still validates them.
+- **D1.5** One required aggregator gates merge: `needs:` every other job in the workflow, the validation job alone where there is no smoke build, passes on skipped smoke, blocks on failure or cancelled, and its name is ruleset-bound (job `name:` equals ruleset `context:`, renamed together).
 - **D1.6** Coverage reports to Codecov for C# and Python repos with tests, best-effort so an outage never reds the gate, with a `codecov.yml` setting statuses informational and `.gitignore` excluding coverage output.
 
 ## D2: Validation at Entry
@@ -29,16 +29,16 @@ Each guarantee is a MUST from `WORKFLOW.md` section 4, stated as input to output
 ## D4: Release and Publish
 
 - **D4.1** Gated single-branch publish: a human merge never auto-publishes, the `plan` job decides once, publishes come from a code-affecting bot push to `main`, a dispatch of `main`/`develop`, or the main-only weekly Docker schedule.
-- **D4.2** `target_commitish` is the built commit's SHA (NBGV `GitCommitId`), never a branch name and never `github.sha`.
-- **D4.3** Every release is a tag plus source zip, README, and LICENSE, file targets attach `release-asset-*`, and a no-file-target caller passes `expect_release_assets: false` or the release-create step fails on unmatched files.
-- **D4.4** No-op republish: an unchanged version re-pushes nothing, the release-create skips when the tag exists (refreshed only on `workflow_dispatch`), registries dedupe server-side, and Docker always re-pushes by design.
-- **D4.5** A failed build blocks every publish target: `github-release` needs every build, the terminal registry pusher guards `!failure() && !cancelled()`, and a package target's separate `publish-<target>` job `needs:` the release-task call, so nothing partial ships.
+- **D4.2** `target_commitish` is the built commit's SHA (NBGV `GitCommitId`), never a branch name and never a separately re-resolved ref.
+- **D4.3** Every release is a tag plus source zip, README, and LICENSE, `prerelease` equals `branch != default`, file targets attach `release-asset-*`, and a no-file-target caller (Docker-only, PyPI-only, source-only) passes `expect_release_assets: false` or the release-create step fails on unmatched files. A NuGet caller is not one of those, since its leaf uploads a `release-asset-*` carrying the package.
+- **D4.4** No-op republish: an unchanged version re-pushes nothing, the release-create skips when the tag exists (refreshed only on `workflow_dispatch`), registries dedupe server-side under `dotnet nuget push --skip-duplicate` and PyPI's `skip-existing: true`, and Docker always re-pushes by design.
+- **D4.5** A failed build blocks every publish target: `github-release` needs every build, the terminal registry pusher (Docker) guards `!failure() && !cancelled()` so a disabled or unchanged target, skipped rather than failed, still lets it push, and a package target's separate `publish-<target>` job `needs:` the release-task call, so no build failure ships anything partial. A failed registry **push** is outside that: it runs after `github-release`, so it can leave a release and tag for a version the registry never received, recovered by re-dispatching rather than by cleanup.
 - **D4.6** A deploy check asserts which release and which environment answer, waiting for convergence to a bounded timeout, with an unreachable host reported distinctly from an HTTP status.
 
 ## D5: Resource Cleanup
 
-- **D5.1** A cross-job transfer artifact is deleted at its point of consumption. An in-run intermediate may rely on the retention backstop.
-- **D5.2** The delete runs under the same condition as its consumer, so a no-op re-run skips the release-asset delete while the `nuget-build-*` and `pypi-build-*` deletes still run.
+- **D5.1** A cross-job transfer artifact is deleted by exact name or pattern at its point of consumption. An in-run intermediate may rely on the retention backstop.
+- **D5.2** The delete runs exactly when the consumption happened: the same condition as a conditional consumer (the release create), and `if: ${{ !cancelled() && steps.<download-step-id>.outcome == 'success' }}` where the consumer is a push that always attempts, since a delete with no status-check function in its `if:` inherits `success()` and would skip on the failed push. So a no-op re-run skips the release-asset delete while the `nuget-build-*` and `pypi-build-*` deletes still run.
 - **D5.3** Cleanup is best-effort (`continue-on-error`, tolerate a failed listing, delete all matching ids).
 - **D5.4** Every `upload-artifact` sets `retention-days: 1`.
 - **D5.5** Never blanket-delete the run's artifacts, which destroys diagnostics and auto-emitted build records.

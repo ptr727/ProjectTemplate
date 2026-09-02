@@ -268,6 +268,7 @@ A human-readable index of the rules agents enforce, implement, and audit. The au
 
 - Publish via OIDC Trusted Publishing, never a stored API key.
 - Keep the push in a separate publish job in the repo's own publisher, never in a build leaf and never in a reusable workflow another repository hosts. Trusted publishing validates the OIDC token's `job_workflow_ref` claim against the repository owning the package, so a push from elsewhere is rejected at the token exchange, and the split is also what keeps `id-token: write` at one entry point.
+- Keep the registry's trusted-publishing policy pointed at that publisher's own workflow file, and confirm it before the first release after any change that moves the push. A smoke build never reaches the token exchange, so a stale policy surfaces only on a real release.
 
 ### If a Docker Image
 
