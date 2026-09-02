@@ -451,11 +451,11 @@
     },
     {
       "unit": "WORKFLOW.md > 4. Behavioral Contract: Expected Outcomes",
-      "digest": "sha256:f6048347c0d4492067504afde742eeb23c2e741cd0c928641734ffac0ff71f0f",
+      "digest": "sha256:587d95361c4bd424a65327d3394d266342f13fe05f598b8521bdb7880d781f57",
       "reviewer": "agent-skill",
-      "findings": 4,
-      "hubCommit": "c6e7526cfade19f28f0ab09c4ab283ed00295d7e",
-      "stamp": "2026-09-02T20:49:14Z"
+      "findings": 5,
+      "hubCommit": "7ab81feb4467dd56c0406c1fa98d4f2c94d2ef13",
+      "stamp": "2026-09-02T21:07:56Z"
     },
     {
       "unit": "WORKFLOW.md > 5. Test Methodology",
