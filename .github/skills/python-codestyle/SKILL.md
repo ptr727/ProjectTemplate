@@ -96,8 +96,8 @@ those. These are documented commands, and the hub's `vscode-tasks-python.json` s
 VS Code tasks mirror that the fleet baseline expects. Every command-executing task in it is
 `type: process`, and every aggregator is `dependsOn`-only. Neither chains with `&&`, so the mirror
 runs the same on any task shell. CI runs the same clean-compile commands as the authoritative
-backstop. A repo that keeps no .NET tool manifest, or one that prefers the `pre-commit`
-framework, wires its local hook from the canonical `catalog/snippets/pre-commit/` directory,
+backstop. A repo that keeps no .NET tool manifest declaring Husky.Net, or one that prefers the
+`pre-commit` framework, wires its local hook from the canonical `catalog/snippets/pre-commit/` directory,
 hub-local and not carried into every fleet repo. Any repo may instead wire an equivalent hook of
 its own at `.husky/pre-commit`, enabled with `core.hooksPath` and sourcing nothing. That path and
 `.pre-commit-config.yaml` are the two the audit reads. The runner is bounded by the toolchain the
