@@ -99,7 +99,7 @@ runs the same on any task shell. CI runs the same clean-compile commands as the 
 backstop. A repo with no host .NET toolchain wires its local hook from the canonical
 `catalog/snippets/pre-commit/` directory, hub-local and not carried into every fleet repo, or
 wires an equivalent hook of its own at `.husky/pre-commit`, enabled with `core.hooksPath`. That
-path and the `.pre-commit-config.yaml` this snippet produces are the two the audit reads. The
+path and `.pre-commit-config.yaml` are the two the audit reads. The
 runner follows the host toolchain rather than the languages the hook checks, so a repo already
 building .NET may run these same Python checks from the Husky.Net snippet instead. The
 `pre-commit` directory's own README names the second file to copy alongside the config.
