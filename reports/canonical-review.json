@@ -395,11 +395,11 @@
     },
     {
       "unit": "WORKFLOW.md > 2. Workflow Style Conventions",
-      "digest": "sha256:083ea7c69ee159fe14a9192062cc86e79d23694909f3a8a1f88bec8b447565b8",
+      "digest": "sha256:047d124867942f07a0e1ce0128de5664ac12b06046336dccf6d59139cff68297",
       "reviewer": "agent-skill",
-      "findings": 14,
-      "hubCommit": "30c465ae79de328d2745c31df1b05f0d960c42b7",
-      "stamp": "2026-09-02T15:40:54Z"
+      "findings": 11,
+      "hubCommit": "3cd97cf0ef28d000c83ddd54fa7925fe0c4623f9",
+      "stamp": "2026-09-02T15:56:03Z"
     },
     {
       "unit": "WORKFLOW.md > 3. Architecture",
@@ -419,11 +419,11 @@
     },
     {
       "unit": "WORKFLOW.md > 5. Test Methodology",
-      "digest": "sha256:c8cc8f17670bc75d9bc21dabbca32ee1914537fea73eac36e76cc6f1b85d2ac8",
+      "digest": "sha256:343a9380b464455d1b0fb204284a70457cc362a0d0607d62b023befa77db7a7e",
       "reviewer": "agent-skill",
-      "findings": 62,
-      "hubCommit": "9b33edb7e0f55fe2a05630a49d5be99ba1e3eb26",
-      "stamp": "2026-09-02T15:16:10Z"
+      "findings": 11,
+      "hubCommit": "3cd97cf0ef28d000c83ddd54fa7925fe0c4623f9",
+      "stamp": "2026-09-02T15:56:03Z"
     },
     {
       "unit": "WORKFLOW.md > 6. Per-Project-Type Test Walkthroughs",
