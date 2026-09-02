@@ -102,9 +102,9 @@ hub-local and not carried into every fleet repo. Any repo may instead wire an eq
 its own at `.husky/pre-commit`, enabled with `core.hooksPath` and sourcing nothing. That path and
 `.pre-commit-config.yaml` are the two the audit reads. The runner is bounded by the toolchain the
 repo already keeps rather than by the languages the hook checks, so a repo keeping a Husky.Net
-manifest may run these same Python checks from that snippet instead. Each shape carries whichever
-language checks its own repo keeps, so a repo with .NET as well adds that block rather than
-losing it. The `pre-commit` directory's own README names the second file to copy alongside the
+manifest may run these same Python checks from the `catalog/snippets/husky/` shape instead. Each
+shape carries whichever language checks its own repo keeps, so a repo with .NET as well adds its
+`dotnet husky run` block there rather than losing those checks. The `pre-commit` directory's own README names the second file to copy alongside the
 config.
 GOVERNANCE.md's hub-only "Running the Linters Locally (Known-Working Invocations)" section carries
 the obligation itself, what the hook must cover, its audit treatment, and the per-clone enablement
