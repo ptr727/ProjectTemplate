@@ -1,14 +1,23 @@
 # Pre-commit snippet
 
-`.pre-commit-config.yaml` is the reference config for the Python `pre-commit` framework
-(pre-commit.com), for a Python repo with no `.husky/` tree of its own. It runs `ruff format
---check` and `ruff check`. It also runs this repo's declared type checker, `pyright` or
-`mypy`, matching whichever `python-codestyle` says this repo's CI runs. Each tool runs via
-`uvx`, native tooling, never Docker. `uvx` needs no project dependency, matching CI's own
+`.pre-commit-config.yaml` is the reference config for the `pre-commit` framework
+(pre-commit.com), for a repo that keeps no .NET tool manifest declaring Husky.Net, and for any
+repo that prefers it to Husky.Net. The toolchain the repo already keeps is the discriminator,
+not the repo's own languages: Husky.Net runs from a .NET tool manifest declaring it, and this
+framework needs none.
+In a repo with Python, it runs `ruff format --check` and `ruff check`. It also runs that repo's
+declared type checker, `pyright` or `mypy`, matching whichever `python-codestyle` says its CI
+runs. Each tool runs via `uvx`, native tooling, never Docker. `uvx` needs no project dependency, matching CI's own
 invocation for the lint-only profile (`CODESTYLE.md` "Two profiles"). A repo on the build
 profile with a `uv.lock` may swap in `uv run <tool>` per entry to pin the project's own
 version instead. The config also runs the same two shared doc gates the Husky.Net snippet
-carries: the diff-scoped prose/comment-style gate and the whole-tree line-ending check.
+carries: the diff-scoped prose/comment-style gate and the whole-tree line-ending check. Those two
+are what every repo owes regardless of language. The prose gate's `--diff HEAD` sees the staged
+state under this runner rather than the working tree, since `pre-commit` stashes unstaged changes
+before it runs a hook, so a partially staged file is judged on its staged edits alone here where
+the Husky.Net shape judges all of them. CI re-checks the whole tree either way. A repo with no Python drops the `ruff-format`,
+`ruff-check` and `type-check` hooks and keeps the doc gates, which is what a Docker, config, or
+docs repo wires.
 
 Copy `../hub-fetch-run.py` alongside `.pre-commit-config.yaml` (repo root) for the doc gates
 to run: it fetches those two checks fresh from `ptr727/ProjectTemplate`'s `main` branch and
@@ -27,9 +36,11 @@ install`'s own bin directory is not yet on `PATH`: run `uv tool update-shell` an
 re-source the shell, or add the directory `uv tool dir --bin` prints directly.
 Full linting (workflow YAML, Markdown,
 spelling, EditorConfig) stays out of the hook: it runs in CI as pinned action wrappers, and on
-demand via the VS Code **Lint** tasks in `catalog/snippets/configs/vscode-tasks-python.json`
-(Docker at `:latest`), which also carries the same prose/EOL gates in whole-repo mode for
-on-demand full-tree validation, not just the diff-scoped commit-time run.
+demand via the VS Code **Lint** tasks. A Python repo takes those from
+`catalog/snippets/configs/vscode-tasks-python.json` (Docker at `:latest`), and a repo with no
+Python takes the Lint group alone rather than that file's Python tasks. Either way they carry
+the same prose/EOL gates in whole-repo mode for on-demand full-tree validation, not just the
+diff-scoped commit-time run.
 
 No LF pin is needed for `.pre-commit-config.yaml` itself: it is plain YAML, not a shebang
 script, so the fleet's `[*]` `.editorconfig`/`.gitattributes` default already covers it.

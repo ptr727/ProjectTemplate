@@ -27,7 +27,7 @@ on:
         required: true
         type: string
     secrets:
-      # The one credential that crosses this reusable workflow's boundary as a named secret.
+      # The credentials that cross this reusable workflow's boundary as named secrets.
       # The host address, the user, and the known-hosts value are GitHub Environment variables instead, since they are integrity-critical but not confidential.
       # The deploy job below reads them directly through its own environment binding.
       DEPLOY_SSH_PRIVATE_KEY:

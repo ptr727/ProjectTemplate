@@ -10,6 +10,14 @@
       "stamp": "2026-09-01T16:37:57Z"
     },
     {
+      "unit": ".agents/skills/agent-conduct/SKILL.md > When a Failure Surfaces a Lesson",
+      "digest": "sha256:7bb4825e38c44c74366d2f0051d521968d87df765144bb080ca059a417e2cd75",
+      "reviewer": "agent-skill",
+      "findings": 6,
+      "hubCommit": "52b0c550ab07ab58b940a353a83247d7451e76e5",
+      "stamp": "2026-09-02T01:11:56Z"
+    },
+    {
       "unit": ".agents/skills/comment-and-doc-style/SKILL.md > Docker lint authorization",
       "digest": "sha256:b61bea3f7010cafc475ce582e234e79f1e55e4bd0e5332dbe2b05f4fb5bb03ff",
       "reviewer": "agent-skill",
@@ -27,19 +35,19 @@
     },
     {
       "unit": ".agents/skills/dotnet-codestyle/SKILL.md > Build requirements",
-      "digest": "sha256:c9a8e764ae6c8423420ba2cb7e8b65d5a0328a405be16a798b8aec521f01c459",
+      "digest": "sha256:96e6651c2e024fae3bca713f4a8cab34b37a9bb9eb693a3e25de04465b03113c",
       "reviewer": "agent-skill",
       "findings": 0,
-      "hubCommit": "ed329f4029c9b035662a96f00834152c27bf2d8b",
-      "stamp": "2026-09-01T06:18:30Z"
+      "hubCommit": "a2c9dab3bfde574d179b0765f9bb50f413ce7a80",
+      "stamp": "2026-09-02T03:33:05Z"
     },
     {
       "unit": ".agents/skills/dotnet-codestyle/SKILL.md > Tooling and editor",
-      "digest": "sha256:d00e3da0fde14b915ee959bcab0edb68d21cd0b22d954054058bfea21e7473f5",
+      "digest": "sha256:adaa0bb212c931d838d35dc9777b8ac5605ff46ccffc4448f227c78793085a57",
       "reviewer": "agent-skill",
-      "findings": 0,
-      "hubCommit": "a76dda7d67033f43c260d21e3ae6a291e1869c0a",
-      "stamp": "2026-09-01T06:46:39Z"
+      "findings": 1,
+      "hubCommit": "68be56e977269486eeeca14bdc4982a0adbdb6b3",
+      "stamp": "2026-09-02T13:41:40Z"
     },
     {
       "unit": ".agents/skills/drive-pr/SKILL.md > Disposing of Every Finding",
@@ -163,11 +171,11 @@
     },
     {
       "unit": ".agents/skills/python-codestyle/SKILL.md > Local development loop",
-      "digest": "sha256:6f1081d1c1cf0f719f9c154c0b5652a26c7c1f6d2478adc3717becb248a61458",
+      "digest": "sha256:64911d87dea3c5c46bbe2abccab0bed590ee65a3e93e9083b403ceee77bde450",
       "reviewer": "agent-skill",
       "findings": 1,
-      "hubCommit": "5664a954bf0c11acb6bab9014b0463697d18da4b",
-      "stamp": "2026-09-01T23:19:53Z"
+      "hubCommit": "5eb14540421d630293807288845284a78f8ecc7d",
+      "stamp": "2026-09-02T03:51:13Z"
     },
     {
       "unit": ".agents/skills/repo-worktree/SKILL.md > Creating a Worktree",
@@ -274,6 +282,14 @@
       "stamp": "2026-09-01T14:23:11Z"
     },
     {
+      "unit": ".github/copilot-instructions.md > Reviewing Carried Fleet Content",
+      "digest": "sha256:83570e2b15143c6f9b79e4d381b7a578d3ae7970d74ae676405a402f6d13630f",
+      "reviewer": "agent-skill",
+      "findings": 2,
+      "hubCommit": "f0ff674ec0d59bb2c9ec3736ef22d9de205059c8",
+      "stamp": "2026-09-02T03:21:55Z"
+    },
+    {
       "unit": "AGENTS.md > Where the Rules Live",
       "digest": "sha256:2526a341afe0c6f1e2d2e1fe954855398742474a816e2bcba640672d1363766f",
       "reviewer": "agent-skill",
@@ -299,11 +315,11 @@
     },
     {
       "unit": "CODESTYLE.md > General",
-      "digest": "sha256:ee34e84dab97a638e5011f7b8b5fc30893f82461cf6907ba35c96030eb2d4bb0",
+      "digest": "sha256:54fcc07fc743507089e95ab8f1e7aeb64f0d83e31716514dadb666871a495684",
       "reviewer": "agent-skill",
-      "findings": 10,
-      "hubCommit": "df5e2493b48aa45d80f586db68af0c21be97ea21",
-      "stamp": "2026-09-01T05:58:03Z"
+      "findings": 1,
+      "hubCommit": "112ffd874eaec3784a747b341fbdd0b19d75502c",
+      "stamp": "2026-09-02T03:09:17Z"
     },
     {
       "unit": "CODESTYLE.md > Shell",
@@ -315,11 +331,11 @@
     },
     {
       "unit": "GOVERNANCE.md > Durable Knowledge and Self-Improvement",
-      "digest": "sha256:d2caaf6052fdf9838034bcd3dbf8a250d44b303b3bb73754ecb4c6fa0ead8bd0",
+      "digest": "sha256:cd5ef7be0c674a9ba29c3196ae81757ae18f7bb8ca82f573ffd77f96d363cc8e",
       "reviewer": "agent-skill",
-      "findings": 2,
-      "hubCommit": "d0541523890324cbbdbb63631c8dd83e6003703a",
-      "stamp": "2026-09-01T19:25:11Z"
+      "findings": 11,
+      "hubCommit": "52b0c550ab07ab58b940a353a83247d7451e76e5",
+      "stamp": "2026-09-02T01:11:58Z"
     },
     {
       "unit": "GOVERNANCE.md > Repository Layout",
@@ -379,11 +395,11 @@
     },
     {
       "unit": "WORKFLOW.md > 6. Per-Project-Type Test Walkthroughs",
-      "digest": "sha256:f6b2044c5b5de3aafd760cf001797e807749c391af93ca2ec0cb3d436b884a33",
+      "digest": "sha256:90cd1e08e32954143484bbd75d2e90fd6b59e70141eac0bcd4e20a5d662335ac",
       "reviewer": "agent-skill",
-      "findings": 0,
-      "hubCommit": "c3b2898feef97459d01ce7c0b63de25b6c5524bf",
-      "stamp": "2026-09-01T13:57:21Z"
+      "findings": 1,
+      "hubCommit": "d4cb996ed67bed9e327c5a3b3c4b441466bc37bb",
+      "stamp": "2026-09-02T02:28:24Z"
     }
   ]
 }

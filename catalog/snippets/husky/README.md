@@ -2,7 +2,7 @@
 
 `pre-commit` is the reference git pre-commit hook (installed under `.husky/` by Husky). It
 runs **language formatting/lint and the fleet's shared doc gates**: CSharpier and
-`dotnet format` style via `dotnet husky run` for .NET, or `ruff format --check` / `ruff check` /
+`dotnet format` style via `dotnet husky run` for .NET, plus `ruff format --check` / `ruff check` /
 the repo's type checker for a Python repo (native tooling, no Docker, the same checks the
 `../pre-commit/.pre-commit-config.yaml` snippet runs), plus the diff-scoped prose/comment-style
 gate and the whole-tree line-ending check. Copy `../hub-fetch-run.py` alongside `pre-commit` for
@@ -12,6 +12,12 @@ goes stale by construction, and CI (this repo's own, and the hub's) is the backs
 change that lands broken on `main` before it does real damage locally. These are two more
 network fetches alongside the Docker pulls the Lint tasks below already do. A fetch failure
 fails the commit rather than silently skipping the gate.
+
+This snippet is for a repo that already keeps a .NET tool manifest declaring Husky.Net, since
+the hook sources `.husky/_/husky.sh`, a file `dotnet husky install` generates after
+`dotnet tool restore` restores that manifest. This snippet ships no manifest, so a host .NET
+toolchain alone is not enough and a repo without one uses `../pre-commit/` instead. Neither snippet is scoped to a language by
+what it runs, and the two shared doc gates are what every repo owes either way.
 
 Full linting (workflow YAML, Markdown, spelling, EditorConfig) is **not** run in the hook. It
 runs in CI as pinned action wrappers, and on demand via the VS Code **Lint** tasks in
@@ -29,5 +35,5 @@ override needed. A CRLF shebang breaks execution.
 
 Both language blocks run unconditionally, with no tool-presence guard: a repo that keeps a
 block declares that tool required, so a missing one fails the commit loudly rather than
-skipping the check silently. Drop the `dotnet husky run` block in a non-.NET repo, and drop
-the Python block in a non-Python repo, rather than leaving it in place to no-op.
+skipping the check silently. Drop the `dotnet husky run` block in a repo with no .NET project,
+and the Python block in a repo with no Python, rather than leaving either in place to no-op.

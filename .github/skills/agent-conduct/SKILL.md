@@ -38,7 +38,7 @@ Claims about a pull request being reviewed, clean, or mergeable are owned by the
 ## When a Failure Surfaces a Lesson
 
 - **Durable knowledge lands in the committed docs, not in agent memory**, as part of the change that surfaced it, per `GOVERNANCE.md` "Durable Knowledge and Self-Improvement". Memory does not survive a new session or machine, so it holds only environment nuance and in-flight state.
-- **Where the governing doc is carried from the hub, file the finding against `ptr727/ProjectTemplate`** rather than only patching it locally. A local fix leaves every sibling repo with the same trap. Search open and closed issues first, then update the matching issue or file a new one.
+- **Where the governing doc is carried from the hub, file the finding against `ptr727/ProjectTemplate`.** Patching the local copy leaves every sibling repo with the same trap. Search open and closed issues first, then update the matching issue or file a new one.
 - **A review flags an instance, so fix the class**: sweep for the siblings before replying, because reviewers sample rather than enumerate.
 - **A rule that keeps needing restating** is usually a stale or missing skills install, so run `python3 scripts/skills_install.py --report` from a hub checkout (the `fleet-conformance-check` skill) before concluding the rule does not exist.
 
