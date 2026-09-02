@@ -1,13 +1,12 @@
 # Pre-commit snippet
 
 `.pre-commit-config.yaml` is the reference config for the `pre-commit` framework
-(pre-commit.com), for a repo that keeps no .NET tool manifest, and for any repo that prefers it to
-Husky.Net. The toolchain the repo already keeps is the
-discriminator, not the repo's own languages: Husky.Net runs from a .NET tool manifest declaring
-it, and this framework needs none. In a repo with Python it runs `ruff format --check` and `ruff check`, plus that
-repo's declared type checker, `pyright` or `mypy`, matching whichever `python-codestyle` says
-its CI runs. Each tool runs via
-`uvx`, native tooling, never Docker. `uvx` needs no project dependency, matching CI's own
+(pre-commit.com), for a repo that keeps no .NET tool manifest, and for any repo that prefers it
+to Husky.Net. The toolchain the repo already keeps is the discriminator, not the repo's own
+languages: Husky.Net runs from a .NET tool manifest declaring it, and this framework needs none.
+In a repo with Python, it runs `ruff format --check` and `ruff check`. It also runs that repo's
+declared type checker, `pyright` or `mypy`, matching whichever `python-codestyle` says its CI
+runs. Each tool runs via `uvx`, native tooling, never Docker. `uvx` needs no project dependency, matching CI's own
 invocation for the lint-only profile (`CODESTYLE.md` "Two profiles"). A repo on the build
 profile with a `uv.lock` may swap in `uv run <tool>` per entry to pin the project's own
 version instead. The config also runs the same two shared doc gates the Husky.Net snippet
