@@ -106,8 +106,8 @@ updates, dependency upgrades, benchmarks) on top:
 - CI is the authoritative lint backstop. A repo already keeping a .NET tool manifest declaring
   Husky.Net wires its local pre-commit hook from `catalog/snippets/husky/` in the hub, hub-local
   and not carried into every fleet repo, covering the shared doc gates alongside the language
-  checks. A repo keeping none, or one preferring that runner, takes `catalog/snippets/pre-commit/`
-  instead.
+  checks. A repo keeping none, or one preferring the `pre-commit` framework, takes
+  `catalog/snippets/pre-commit/` instead.
 - **Required VS Code extensions**: CSharpier, markdownlint, CSpell. Use the workspace settings
   without overrides.
 
