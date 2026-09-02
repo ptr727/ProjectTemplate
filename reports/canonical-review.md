@@ -7,9 +7,9 @@ A unit is what a reviewer reads whole, decided by the carry manifest rather than
 ## Coverage
 
 - units: 288
-- covered: 49
+- covered: 50
 - stale: 0
-- never read here: 239
+- never read here: 238
 
 ## Burn-down
 
@@ -335,7 +335,6 @@ A unit is what a reviewer reads whole, decided by the carry manifest rather than
 - **(preamble)** - never
 - **Commit Messages and Pull Request Titles** - never
 - **GitHub Copilot Review Runbook** - never
-- **Reviewing Carried Fleet Content** - never
 - **When in Doubt** - never
 
 ### .markdownlint-cli2.jsonc
