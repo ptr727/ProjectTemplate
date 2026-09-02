@@ -4,11 +4,11 @@ The three escalating verification modes from `WORKFLOW.md` section 5, which keep
 
 ## 5A: Static Audit
 
-Read the workflow files plus `version.json` and assert the structural fact behind each applicable D-guarantee, each pass, fail, or N/A with a `file:line` citation, asserting each input in the file that declares it. `WORKFLOW.md` 5A carries the whole core list and the per-type addenda, and the sibling `d-guarantees.md` carries the guarantees each item answers to, so read this as an index into them rather than as the sweep itself.
+Read the workflow files plus `version.json` and assert the structural fact behind each applicable D-guarantee, each pass, fail, or N/A with a `file:line` citation, remembering the two layers and asserting each input in the file that declares it. `WORKFLOW.md` 5A carries the whole core list and the per-type addenda, and the sibling `d-guarantees.md` carries the guarantees each item answers to, so read this as an index into them rather than as the sweep itself.
 
 The core sweep reaches the paths-filter, naming each target's own build paths so a change touching none marks nothing. It reaches smoke gating on every upload. It reaches the aggregator's `needs:` and its skip and fail handling. It reaches the entry validation jobs and the two-directional release gate. It reaches the single-branch NBGV classification, with the gate's default-branch literal, the `prerelease` expression, and `version.json`'s `publicReleaseRefSpec` all naming the repo's actual default branch. It reaches `target_commitish` from `GitCommitId`. It reaches the consume-then-delete artifact lifecycle, with `retention-days: 1` everywhere and no blanket delete. It reaches the `pattern:` handoff and `inputs.branch` config. It reaches the publisher's serialized concurrency and the SHA pins.
 
-The per-type addenda are the .NET publish runtime matrix, NuGet `--skip-duplicate`, the PyPI OIDC environment split, Docker `expect_release_assets` and cache shape, and the static-site deploy gates. Apply only the ones the repo's types imply.
+The per-type addenda cover .NET publish, NuGet, PyPI, Docker, and a static site deployed to a host, several assertions each. Apply only the ones the repo's types imply, and read them in `WORKFLOW.md` 5A rather than from this list.
 
 ## 5B: Trace Scenarios
 
