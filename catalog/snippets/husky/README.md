@@ -2,7 +2,7 @@
 
 `pre-commit` is the reference git pre-commit hook (installed under `.husky/` by Husky). It
 runs **language formatting/lint and the fleet's shared doc gates**: CSharpier and
-`dotnet format` style via `dotnet husky run` for .NET, or `ruff format --check` / `ruff check` /
+`dotnet format` style via `dotnet husky run` for .NET, plus `ruff format --check` / `ruff check` /
 the repo's type checker for a Python repo (native tooling, no Docker, the same checks the
 `../pre-commit/.pre-commit-config.yaml` snippet runs), plus the diff-scoped prose/comment-style
 gate and the whole-tree line-ending check. Copy `../hub-fetch-run.py` alongside `pre-commit` for

@@ -98,7 +98,7 @@ VS Code tasks mirror that the fleet baseline expects. Every command-executing ta
 runs the same on any task shell. CI runs the same clean-compile commands as the authoritative
 backstop. A repo with no host .NET toolchain wires its local hook from the canonical
 `catalog/snippets/pre-commit/` directory, hub-local and not carried into every fleet repo, or
-wires an equivalent hook of its own on `core.hooksPath`. The
+wires an equivalent hook of its own at `.husky/pre-commit`, which is the path the audit reads. The
 runner follows the host toolchain rather than the languages the hook checks, so a repo already
 building .NET may run these same Python checks from the Husky.Net snippet instead. The
 `pre-commit` directory's own README names the second file to copy alongside the config.

@@ -53,7 +53,8 @@ All builds must complete without warnings, enforced three ways:
   and not carried into every fleet repo. Its hook needs a host .NET toolchain, which a .NET
   repo already has. The other canonical shape, `catalog/snippets/pre-commit/`, is for a repo
   without one, and each shape carries whichever language checks its own repo keeps. A repo may
-  also wire an equivalent hook of its own on `core.hooksPath`.
+  also wire an equivalent hook of its own at `.husky/pre-commit`, which is the path the audit
+  reads.
   GOVERNANCE.md's hub-only "Running the Linters Locally (Known-Working Invocations)" section
   carries the obligation itself, what the hook must cover, its audit treatment, and the
   per-clone enablement steps.
