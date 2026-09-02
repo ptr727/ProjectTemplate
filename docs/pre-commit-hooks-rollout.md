@@ -26,7 +26,8 @@ doc-gate half wired and the language-format half not yet because its own corpus 
 clean, stays operational, per the existing carve-out in GOVERNANCE.md. Two catalog snippets carry
 the canonical shape: Husky.Net
 (`catalog/snippets/husky/`, for a repo already keeping a .NET tool manifest declaring it) and the
-`pre-commit` framework (`catalog/snippets/pre-commit/`, for a repo without one). Both now carry the
+`pre-commit` framework (`catalog/snippets/pre-commit/`, for a repo without one and for any repo
+that prefers it). Both now carry the
 same shared doc gates, the diff-scoped prose/comment-style gate and the whole-tree line-ending
 check, fetched fresh from the hub's `main` branch at run time via `hub-fetch-run.py` rather than
 vendored or pinned.

@@ -12,7 +12,10 @@ invocation for the lint-only profile (`CODESTYLE.md` "Two profiles"). A repo on 
 profile with a `uv.lock` may swap in `uv run <tool>` per entry to pin the project's own
 version instead. The config also runs the same two shared doc gates the Husky.Net snippet
 carries: the diff-scoped prose/comment-style gate and the whole-tree line-ending check. Those two
-are what every repo owes regardless of language. A repo with no Python drops the `ruff-format`,
+are what every repo owes regardless of language. The prose gate's `--diff HEAD` sees the staged
+state under this runner rather than the working tree, since `pre-commit` stashes unstaged changes
+before it runs a hook, so a partially staged file is judged on its staged edits alone here where
+the Husky.Net shape judges all of them. CI re-checks the whole tree either way. A repo with no Python drops the `ruff-format`,
 `ruff-check` and `type-check` hooks and keeps the doc gates, which is what a Docker, config, or
 docs repo wires.
 
