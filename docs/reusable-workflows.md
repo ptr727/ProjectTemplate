@@ -312,6 +312,7 @@ jobs:
               - 'Widget/**'
               - 'Directory.Build.props'
               - 'Directory.Packages.props'
+              - 'global.json'
               - 'version.json'
               - '.github/actions/**'
 
@@ -432,6 +433,7 @@ on:
       - 'version.json'
       - 'Directory.Build.props'
       - 'Directory.Packages.props'
+      - 'global.json'
   workflow_dispatch:
 
 concurrency:
