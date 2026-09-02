@@ -315,6 +315,7 @@ jobs:
               - 'version.json'
               - '.github/actions/**'
 
+  # A C# or Python repo adds secrets: with CODECOV_TOKEN mapped by name here, or its pull request coverage reaches Codecov with no token (D1.6).
   validate:
     name: Validate sources job
     uses: ptr727/ProjectTemplate/.github/workflows/validate-task.yml@<hub-main-commit-sha> # <release-tag>
@@ -680,7 +681,6 @@ Four things the hub cannot prove fall to the first downstream adopter. They are 
 [pinning]: #pinning
 [rollout]: #rollout
 [secrets-and-permissions]: #secrets-and-permissions
-[stage-4]: #stage-4-the-release-chain-and-the-docker-core
 [the-docker-family]: #the-docker-family
 
 <!-- Repo -->

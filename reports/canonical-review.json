@@ -283,11 +283,11 @@
     },
     {
       "unit": ".agents/skills/workflow-ci-contract/references/d-guarantees.md > D4: Release and Publish",
-      "digest": "sha256:5b9bd4c3797df841c41077dd945af2019f2d203f4d0094b523ae84554cbb489c",
+      "digest": "sha256:903841ce4df88f8c74cb2f1d3bbb3fc5f8a813093e819f2726b1a4dbfbba444e",
       "reviewer": "agent-skill",
-      "findings": 14,
-      "hubCommit": "30c465ae79de328d2745c31df1b05f0d960c42b7",
-      "stamp": "2026-09-02T15:40:54Z"
+      "findings": 9,
+      "hubCommit": "445bd440ca7df6fc32a28dd34be9469d2c603f18",
+      "stamp": "2026-09-02T16:49:49Z"
     },
     {
       "unit": ".agents/skills/workflow-ci-contract/references/d-guarantees.md > D5: Resource Cleanup",
@@ -435,27 +435,27 @@
     },
     {
       "unit": "WORKFLOW.md > 4. Behavioral Contract: Expected Outcomes",
-      "digest": "sha256:788c7412e7b95015f399adc7b4e2d04c87f4b71ed6b677772c144b06d5fa4498",
+      "digest": "sha256:48a3cdf206a8c0deeb8b13861106e7046e2243c5bd92d53b277deb95e918b0b2",
       "reviewer": "agent-skill",
       "findings": 9,
-      "hubCommit": "5085d22962752a8690b5bc21095fe7bc91c25f28",
-      "stamp": "2026-09-02T16:34:43Z"
+      "hubCommit": "445bd440ca7df6fc32a28dd34be9469d2c603f18",
+      "stamp": "2026-09-02T16:49:49Z"
     },
     {
       "unit": "WORKFLOW.md > 5. Test Methodology",
-      "digest": "sha256:343a9380b464455d1b0fb204284a70457cc362a0d0607d62b023befa77db7a7e",
+      "digest": "sha256:3014749f3cb30f5a0541cbc9cd4dffa76d0bec7b5c4444373b041ad7c54a2094",
       "reviewer": "agent-skill",
-      "findings": 11,
-      "hubCommit": "3cd97cf0ef28d000c83ddd54fa7925fe0c4623f9",
-      "stamp": "2026-09-02T15:56:03Z"
+      "findings": 9,
+      "hubCommit": "445bd440ca7df6fc32a28dd34be9469d2c603f18",
+      "stamp": "2026-09-02T16:49:49Z"
     },
     {
       "unit": "WORKFLOW.md > 6. Per-Project-Type Test Walkthroughs",
-      "digest": "sha256:3f8a0a5e837f3c2472b3912f67e765d7d59348d34c04a46b0e2660529ce8ad39",
+      "digest": "sha256:baee17c4b942809580be6876ac3da657fd098dc0b36e2064a3ab2ac923b6685b",
       "reviewer": "agent-skill",
-      "findings": 14,
-      "hubCommit": "30c465ae79de328d2745c31df1b05f0d960c42b7",
-      "stamp": "2026-09-02T15:40:54Z"
+      "findings": 9,
+      "hubCommit": "445bd440ca7df6fc32a28dd34be9469d2c603f18",
+      "stamp": "2026-09-02T16:49:49Z"
     }
   ]
 }
