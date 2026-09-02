@@ -307,11 +307,11 @@
     },
     {
       "unit": "CODESTYLE.md > General",
-      "digest": "sha256:c936aef3d1e83265e9180951190749bbd389e81b9faaaccb84254597ff74bd98",
+      "digest": "sha256:7c8339e809b36168a3d2707e4b723005bda81debe0ba8f6018b4b3b95697e87a",
       "reviewer": "agent-skill",
-      "findings": 11,
-      "hubCommit": "52b0c550ab07ab58b940a353a83247d7451e76e5",
-      "stamp": "2026-09-02T01:11:57Z"
+      "findings": 0,
+      "hubCommit": "01475e0201567a6fdd9fb9759a390875a4bc634b",
+      "stamp": "2026-09-02T02:00:40Z"
     },
     {
       "unit": "CODESTYLE.md > Shell",
