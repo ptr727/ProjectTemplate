@@ -7,9 +7,9 @@ A unit is what a reviewer reads whole, decided by the carry manifest rather than
 ## Coverage
 
 - units: 288
-- covered: 50
+- covered: 53
 - stale: 0
-- never read here: 238
+- never read here: 235
 
 ## Burn-down
 
@@ -303,8 +303,6 @@ A unit is what a reviewer reads whole, decided by the carry manifest rather than
 
 ### .agents/skills/workflow-ci-contract/references/d-guarantees.md
 
-- **(preamble)** - never
-- **D1: PR Fast-Feedback (Smoke)** - never
 - **D2: Validation at Entry** - never
 - **D3: Versioning and Classification** - never
 - **D8: Bots and Automation** - never
@@ -313,7 +311,6 @@ A unit is what a reviewer reads whole, decided by the carry manifest rather than
 ### .agents/skills/workflow-ci-contract/references/test-methodology.md
 
 - **(preamble)** - never
-- **5A: Static Audit** - never
 - **5B: Trace Scenarios** - never
 - **5C: Live Probe** - never
 - **Verdict** - never

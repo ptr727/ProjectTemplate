@@ -243,27 +243,43 @@
     },
     {
       "unit": ".agents/skills/workflow-ci-contract/SKILL.md > The Core Behavioral Spine",
-      "digest": "sha256:f7925cc6a6047d82f54aba505e9e7901699596add310fde6e32a2a5d4825b9b1",
+      "digest": "sha256:bc9829fdd1e9e17b3d4a71f00a7db398a25fce39e13c4e5dd8311eebb90fa157",
       "reviewer": "agent-skill",
-      "findings": 0,
-      "hubCommit": "37d116a2fa0cecf85a220c9005375091db240a8d",
-      "stamp": "2026-09-01T14:33:09Z"
+      "findings": 62,
+      "hubCommit": "9b33edb7e0f55fe2a05630a49d5be99ba1e3eb26",
+      "stamp": "2026-09-02T15:16:10Z"
+    },
+    {
+      "unit": ".agents/skills/workflow-ci-contract/references/d-guarantees.md > (preamble)",
+      "digest": "sha256:2c0dee23dd279030b8e79e015ca5238eb9031999946dcd844b643fcd2baac723",
+      "reviewer": "agent-skill",
+      "findings": 62,
+      "hubCommit": "9b33edb7e0f55fe2a05630a49d5be99ba1e3eb26",
+      "stamp": "2026-09-02T15:16:10Z"
+    },
+    {
+      "unit": ".agents/skills/workflow-ci-contract/references/d-guarantees.md > D1: PR Fast-Feedback (Smoke)",
+      "digest": "sha256:58e3860e81d92ae6d4ec4a84d04c6770dccad4caa8fdb3c12132f5aa29ffaaa8",
+      "reviewer": "agent-skill",
+      "findings": 62,
+      "hubCommit": "9b33edb7e0f55fe2a05630a49d5be99ba1e3eb26",
+      "stamp": "2026-09-02T15:16:10Z"
     },
     {
       "unit": ".agents/skills/workflow-ci-contract/references/d-guarantees.md > D4: Release and Publish",
-      "digest": "sha256:88547d4229a09aa37d7c4c62f4b6a8566729bb3f55378dade9b514a65a431463",
+      "digest": "sha256:e4564b0749e3ba1b886e15ca7782c6b5bbe817c7138c71135821b1b5896d6159",
       "reviewer": "agent-skill",
-      "findings": 0,
-      "hubCommit": "37d116a2fa0cecf85a220c9005375091db240a8d",
-      "stamp": "2026-09-01T14:33:09Z"
+      "findings": 62,
+      "hubCommit": "9b33edb7e0f55fe2a05630a49d5be99ba1e3eb26",
+      "stamp": "2026-09-02T15:16:10Z"
     },
     {
       "unit": ".agents/skills/workflow-ci-contract/references/d-guarantees.md > D5: Resource Cleanup",
-      "digest": "sha256:9920002dc94291839cb4bb1b03c02a42daf57ca32e477db178a7b7dbc8955ad9",
+      "digest": "sha256:37ab54b40d243ff4d1f3864dedcf6e0342a0091003ea28d1283f46f16857bd0e",
       "reviewer": "agent-skill",
-      "findings": 0,
-      "hubCommit": "37d116a2fa0cecf85a220c9005375091db240a8d",
-      "stamp": "2026-09-01T14:23:11Z"
+      "findings": 62,
+      "hubCommit": "9b33edb7e0f55fe2a05630a49d5be99ba1e3eb26",
+      "stamp": "2026-09-02T15:16:10Z"
     },
     {
       "unit": ".agents/skills/workflow-ci-contract/references/d-guarantees.md > D6: Seam Conformance",
@@ -280,6 +296,14 @@
       "findings": 0,
       "hubCommit": "37d116a2fa0cecf85a220c9005375091db240a8d",
       "stamp": "2026-09-01T14:23:11Z"
+    },
+    {
+      "unit": ".agents/skills/workflow-ci-contract/references/test-methodology.md > 5A: Static Audit",
+      "digest": "sha256:a23b5e76946c8b7e03a3afff7b874c42f3204c4ded292a6c7d7ff81db6bf20fe",
+      "reviewer": "agent-skill",
+      "findings": 62,
+      "hubCommit": "9b33edb7e0f55fe2a05630a49d5be99ba1e3eb26",
+      "stamp": "2026-09-02T15:16:10Z"
     },
     {
       "unit": ".github/copilot-instructions.md > Reviewing Carried Fleet Content",
@@ -355,11 +379,11 @@
     },
     {
       "unit": "GOVERNANCE.md > Workflow YAML Conventions",
-      "digest": "sha256:78dee33ccdcfa1b7cf25ba9948869f2d8c41ee8b02f3fef17024de6711ca5757",
+      "digest": "sha256:a4a598491dba644fe518a77e9306f3dfd0b0623c38900cea78a15dee9a086f4d",
       "reviewer": "agent-skill",
-      "findings": 0,
-      "hubCommit": "37d116a2fa0cecf85a220c9005375091db240a8d",
-      "stamp": "2026-09-01T14:33:09Z"
+      "findings": 62,
+      "hubCommit": "9b33edb7e0f55fe2a05630a49d5be99ba1e3eb26",
+      "stamp": "2026-09-02T15:16:10Z"
     },
     {
       "unit": "WORKFLOW.md > 1. Purpose and How to Use This Document",
@@ -371,35 +395,35 @@
     },
     {
       "unit": "WORKFLOW.md > 3. Architecture",
-      "digest": "sha256:2a33c96912e83352029b1e131d2c2066dc3f764e37ac2511b0a0e9487f5583b6",
+      "digest": "sha256:cbdfc5161d7951fc9f968257f9090aa8086f10f5fcb869d3a632d12ccfdb2dbe",
       "reviewer": "agent-skill",
-      "findings": 0,
-      "hubCommit": "78898becaa2b1a62cb4c806d86273210c6390ac5",
-      "stamp": "2026-09-01T14:48:23Z"
+      "findings": 62,
+      "hubCommit": "9b33edb7e0f55fe2a05630a49d5be99ba1e3eb26",
+      "stamp": "2026-09-02T15:16:10Z"
     },
     {
       "unit": "WORKFLOW.md > 4. Behavioral Contract: Expected Outcomes",
-      "digest": "sha256:c3ffe518edcfb301c3743d693a14fef3b566d059ff18b97747003bcb55cceffc",
+      "digest": "sha256:2878a75752ccdbcbdb11400d9d83ecb381ed541ad2ea13e603de810c5ef87c3a",
       "reviewer": "agent-skill",
-      "findings": 3,
-      "hubCommit": "d0541523890324cbbdbb63631c8dd83e6003703a",
-      "stamp": "2026-09-01T19:25:11Z"
+      "findings": 62,
+      "hubCommit": "9b33edb7e0f55fe2a05630a49d5be99ba1e3eb26",
+      "stamp": "2026-09-02T15:16:10Z"
     },
     {
       "unit": "WORKFLOW.md > 5. Test Methodology",
-      "digest": "sha256:b12b797e7ea91e568f2529ce5aa94603a65356e6ccceed0306d2631b44b11c65",
+      "digest": "sha256:c8cc8f17670bc75d9bc21dabbca32ee1914537fea73eac36e76cc6f1b85d2ac8",
       "reviewer": "agent-skill",
-      "findings": 0,
-      "hubCommit": "bde1713355e318c13c2b546ccd871822301bfb3c",
-      "stamp": "2026-09-01T15:39:23Z"
+      "findings": 62,
+      "hubCommit": "9b33edb7e0f55fe2a05630a49d5be99ba1e3eb26",
+      "stamp": "2026-09-02T15:16:10Z"
     },
     {
       "unit": "WORKFLOW.md > 6. Per-Project-Type Test Walkthroughs",
-      "digest": "sha256:90cd1e08e32954143484bbd75d2e90fd6b59e70141eac0bcd4e20a5d662335ac",
+      "digest": "sha256:671f3bce4616e1a5f6fd7aa90d0a2e444e9828a63426283abe284ee413ec063a",
       "reviewer": "agent-skill",
-      "findings": 1,
-      "hubCommit": "d4cb996ed67bed9e327c5a3b3c4b441466bc37bb",
-      "stamp": "2026-09-02T02:28:24Z"
+      "findings": 62,
+      "hubCommit": "9b33edb7e0f55fe2a05630a49d5be99ba1e3eb26",
+      "stamp": "2026-09-02T15:16:10Z"
     }
   ]
 }
