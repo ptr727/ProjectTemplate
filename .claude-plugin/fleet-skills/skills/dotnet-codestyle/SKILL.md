@@ -108,7 +108,7 @@ updates, dependency upgrades, benchmarks) on top:
   and not carried into every fleet repo. A repo keeping none, or one preferring the `pre-commit`
   framework, takes `catalog/snippets/pre-commit/` instead. Either shape covers the shared doc
   gates alongside the language checks. Each snippet's own README names the per-clone steps and
-  the second file to copy alongside it, which the Build requirements section above routes to.
+  the second file to copy alongside it.
 - **Required VS Code extensions**: CSharpier, markdownlint, CSpell. Use the workspace settings
   without overrides.
 
