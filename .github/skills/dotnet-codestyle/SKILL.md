@@ -51,9 +51,9 @@ All builds must complete without warnings, enforced three ways:
 - **CI lint backstop.** CI runs the clean-compile checks on every PR as the authoritative gate.
   Husky.Net is wired from the canonical `catalog/snippets/husky/` config in the hub, hub-local
   and not carried into every fleet repo. Its hook needs a .NET tool manifest declaring
-  Husky.Net, which the snippet does not ship, so a repo keeping no such manifest, or one that
-  prefers the other runner, takes the other canonical shape, `catalog/snippets/pre-commit/`. Each shape carries whichever language checks
-  its own repo keeps. A repo may also wire an equivalent hook of its own at `.husky/pre-commit`,
+  Husky.Net, which the snippet does not ship. A repo keeping no such manifest takes the other
+  canonical shape, `catalog/snippets/pre-commit/`, and so does a repo that simply prefers the
+  `pre-commit` framework. Each shape carries whichever language checks its own repo keeps. A repo may also wire an equivalent hook of its own at `.husky/pre-commit`,
   enabled with `core.hooksPath` and sourcing nothing, since the husky snippet's own hook sources
   a file only `dotnet husky install` generates. That path and `.pre-commit-config.yaml` are the
   two the audit reads.
@@ -103,7 +103,7 @@ updates, dependency upgrades, benchmarks) on top:
   `dotnet format style --verify-no-changes --severity=info --verbosity=detailed`.
 - **`dotnet-outdated-tool`** checks for dependency updates, and Nerdbank.GitVersioning owns
   version management.
-- CI is the authoritative lint backstop. The .NET mechanism for a local pre-commit hook is
+- CI is the authoritative lint backstop. A local pre-commit hook running .NET checks is usually
   Husky.Net, wired from `catalog/snippets/husky/` in the hub, hub-local and not carried into every
   fleet repo, and covering the shared doc gates alongside the language checks.
 - **Required VS Code extensions**: CSharpier, markdownlint, CSpell. Use the workspace settings
