@@ -1,4 +1,6 @@
-# Reference pre-commit (pre-commit.com) config for a fleet Python repo with no .NET/Husky.Net tree.
+# Reference pre-commit (pre-commit.com) config for a fleet repo with no host .NET toolchain.
+# Husky.Net is a dotnet tool, so the discriminator is the toolchain rather than the repo's languages.
+# Drop the ruff and type-check hooks in a repo with no Python, keeping the two doc gates every repo owes.
 # Copy into the repo root alongside ../hub-fetch-run.py.
 # Adapt the type-check hook to match this repo's own CI checker (pyright or mypy, per python-codestyle).
 # Install and enable with `uv tool install pre-commit` once, then `pre-commit install`.

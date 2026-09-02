@@ -13,6 +13,11 @@ change that lands broken on `main` before it does real damage locally. These are
 network fetches alongside the Docker pulls the Lint tasks below already do. A fetch failure
 fails the commit rather than silently skipping the gate.
 
+This snippet needs a host .NET toolchain, since the hook sources `.husky/_/husky.sh`, a file
+`dotnet tool restore` and `dotnet husky install` generate. A repo without one uses
+`../pre-commit/` instead. Neither snippet is scoped to a language by what it runs, and the
+two shared doc gates are what every repo owes either way.
+
 Full linting (workflow YAML, Markdown, spelling, EditorConfig) is **not** run in the hook. It
 runs in CI as pinned action wrappers, and on demand via the VS Code **Lint** tasks in
 `catalog/snippets/configs/vscode-tasks.json` (Docker at `:latest`), which also carries the
@@ -29,5 +34,5 @@ override needed. A CRLF shebang breaks execution.
 
 Both language blocks run unconditionally, with no tool-presence guard: a repo that keeps a
 block declares that tool required, so a missing one fails the commit loudly rather than
-skipping the check silently. Drop the `dotnet husky run` block in a non-.NET repo, and drop
-the Python block in a non-Python repo, rather than leaving it in place to no-op.
+skipping the check silently. Drop the Python block in a repo with no Python, rather than
+leaving it in place to no-op.

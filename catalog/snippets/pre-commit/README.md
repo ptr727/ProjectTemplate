@@ -1,14 +1,19 @@
 # Pre-commit snippet
 
-`.pre-commit-config.yaml` is the reference config for the Python `pre-commit` framework
-(pre-commit.com), for a Python repo with no `.husky/` tree of its own. It runs `ruff format
---check` and `ruff check`. It also runs this repo's declared type checker, `pyright` or
-`mypy`, matching whichever `python-codestyle` says this repo's CI runs. Each tool runs via
+`.pre-commit-config.yaml` is the reference config for the `pre-commit` framework
+(pre-commit.com), for a repo with no host .NET toolchain. That is the discriminator, not the
+repo's own languages: Husky.Net is a `dotnet` tool, and this framework installs independently
+of one. In a repo with Python it runs `ruff format --check` and `ruff check`, plus that
+repo's declared type checker, `pyright` or `mypy`, matching whichever `python-codestyle` says
+its CI runs. Each tool runs via
 `uvx`, native tooling, never Docker. `uvx` needs no project dependency, matching CI's own
 invocation for the lint-only profile (`CODESTYLE.md` "Two profiles"). A repo on the build
 profile with a `uv.lock` may swap in `uv run <tool>` per entry to pin the project's own
 version instead. The config also runs the same two shared doc gates the Husky.Net snippet
-carries: the diff-scoped prose/comment-style gate and the whole-tree line-ending check.
+carries: the diff-scoped prose/comment-style gate and the whole-tree line-ending check. Those two
+are what every repo owes regardless of language. A repo with no Python drops the `ruff-format`,
+`ruff-check` and `type-check` hooks and keeps the doc gates, which is what a Docker, config, or
+docs repo wires.
 
 Copy `../hub-fetch-run.py` alongside `.pre-commit-config.yaml` (repo root) for the doc gates
 to run: it fetches those two checks fresh from `ptr727/ProjectTemplate`'s `main` branch and

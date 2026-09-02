@@ -27,14 +27,14 @@ uv run ruff check || exit 1
 # Swap for `uv run mypy` if this repo's CI runs mypy instead.
 uv run pyright || exit 1
 
-# The interpreter is chosen by probing, not assumed, mirroring spec/host-tools.json's own probe order.
+# The interpreter is chosen by running the probes spec/host-tools.json declares, in its order.
 # On native Windows the python.org install registers `py`, not `python3`, and a `python3` found on PATH there is often the Microsoft Store alias stub, present but broken.
-if python3 --version >/dev/null 2>&1; then
-    run_py() { python3 "$@"; }
-elif py -3 --version >/dev/null 2>&1; then
+if py -3 --version >/dev/null 2>&1; then
     run_py() { py -3 "$@"; }
+elif python3 --version >/dev/null 2>&1; then
+    run_py() { python3 "$@"; }
 else
-    echo "pre-commit: neither 'python3 --version' nor 'py -3 --version' ran, so the doc gates did not run." >&2
+    echo "pre-commit: neither 'py -3 --version' nor 'python3 --version' ran, so the doc gates did not run." >&2
     exit 1
 fi
 

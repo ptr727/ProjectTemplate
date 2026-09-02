@@ -32,6 +32,19 @@ The fixed interface of a workflow is stated in [`WORKFLOW.md`][workflow] ("Two L
 
 Once a workflow's job graph moves into the hub, the carried unit is a caller stub rather than the job graph itself, and the contract moves with it: `publish-release.yml`'s `interface` check asserts the `plan`, `validate`, and `publish` job keys and that `plan` and `publish` each name their hub task by token (`publish-plan-task.yml`, `build-release-task.yml`), never the build job list a carried `build-release-task.yml` used to expose.
 
+## What a Local Edit Looks Like
+
+A downstream repo editing carried content is a different question from a copy trailing the hub, and the answer differs by tier. [`GOVERNANCE.md`][governance] "Durable Knowledge and Self-Improvement" sends a change to carried rule text upstream rather than into the local copy. What follows is why a local patch there is so easy to miss.
+
+The unit decides, never the file. `GOVERNANCE.md` is `intent` as a file while 18 of its 20 sections are `verbatim`. An edit inside one of those is caught, and an edit to the prose around them is not.
+
+- **verbatim and verbatim-tree** - detected. The content hash matches neither the current canonical nor any past revision. "Stale Versus Modified" below reports that as modified fixed content rather than as stale.
+- **interface** - detected only where the edit moves the contract. A changed job key, check name, or hub task token is a finding. An edit to the owned body is the override this tier exists for.
+- **intent** - not detected. Content is never judged, and the staleness advisory cannot fire on a local edit at all. It compares last-change dates, and editing the copy makes it newer than the hub canonical.
+- **presence** - not detected. The unit is asserted to exist and is never read.
+
+So a local rule edit to `CODESTYLE.md` or `WORKFLOW.md`, both `intent` and whole, is reported nowhere. Headings are the one exception. [`section-model.md`][section-model]'s undeclared-section advisory names a heading the hub does not declare, for `AGENTS.md`, `GOVERNANCE.md` and `.github/copilot-instructions.md`. It reads headings rather than rule text, so a rule rewritten under a declared heading stays invisible.
+
 ## Normalization
 
 A verbatim check compares content by hash after **line-ending, action-pin, and job-needs normalization**. EOL variance is governed by the line-ending rules, a `uses: <action>@<sha>` pin (with its trailing `# vN` comment) is Dependabot-owned and bumped per repo, and a job's `needs:` list is pruned per repo to its vendored targets (an unvendored name fails the workflow to load), so all three are governed drift rather than a fidelity deviation. This keeps a verbatim workflow job region (the `github-release` job) from flagging on a routine action bump or a legitimate needs-prune while still catching a real structural fork. It does **not** mask placeholders: a verbatim unit carries none. The files that declare a `placeholders` list (for example `.github/copilot-instructions.md` with `<owner>`, `<repo>`, `<N>`) are fidelity `intent`, judged by hand and never hashed. Masking could not serve a hash anyway. A downstream copy holds the substituted value (`ptr727`), not the token (`<owner>`), so masking the token in the canonical alone would guarantee a mismatch. A verbatim unit that ever needed a per-repo substitution would require template-matching (the canonical as a pattern, the copy as an instance), not this content hash. None does today.
