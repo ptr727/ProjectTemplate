@@ -4,7 +4,7 @@ name: Build project release task
 # NBGV runs once in get-version and threads the version to every target.
 # The validate-release job gates branch<->version consistency once before any build or publish.
 # The github-release job is verbatim in shape: pattern download, exists gate, target_commitish, consume-then-delete.
-# The expect_release_assets input collapses the fleet's three no-asset release shapes (Docker-only, PyPI-only, NuGet symbols-only) into one flag.
+# The expect_release_assets input collapses the fleet's three no-asset release shapes (Docker-only, PyPI-only, source-only) into one flag.
 #
 # Each build target uses a caller hook or the hub default for that target.
 # The Docker target calls the hub's reusable Docker task at this workflow's commit.
@@ -57,7 +57,8 @@ on:
         required: false
         type: boolean
         default: true
-      # Set false for a repo that produces no release-asset-* files, such as a Docker-only or PyPI-only one.
+      # Set false for a repo that produces no release-asset-* files, such as a Docker-only, PyPI-only, or source-only one.
+      # A NuGet caller keeps the default, since the nuget-build hook uploads a release-asset-<branch>-nuget carrying the package.
       # The release is then just the tag + source zip + README + LICENSE.
       # The artifact download is skipped and the unmatched-files guard relaxes.
       expect_release_assets:

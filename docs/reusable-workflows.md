@@ -195,7 +195,7 @@ Hub: `build-release-task.yml` provides the `dotnet-publish`, `build-nuget`, and 
 - [x] The [pilot smoke run][pilot-smoke-run] exercised `build-release-task.yml` on PhotoCleaner's pull request. Hub defaults ran get-version, validate-release, `dotnet-publish`, `docker-prepare`, and `build-docker`. NuGet, PyPI, and the base build skipped.
 - [x] Cross-repository `$/` resolution observed on PhotoCleaner pull request #58 in [self-reference smoke run][self-reference-smoke-run]: nested get-version and Docker tasks, the .NET publish default, and the Docker prepare default all resolved from the pinned hub feature commit and passed.
 - [x] A real publish through `build-release-task.yml` observed on the PhotoCleaner pilot, [pilot publish run][pilot-publish-run]: release `1.1.11` on `fa91db0` with `Publish GitHub release job` and `Build Docker image job` both succeeding.
-- [x] The first real (non-smoke) NuGet publish through the chain, from ptr727/Utilities at `f3b4cc9` (`2.0.526`), failed the NuGet.org token exchange `HTTP 401` because the OIDC `job_workflow_ref` claim named this hub's `build-release-task.yml` rather than the publishing repository's own workflow. The build itself passed and every later job skipped, so the run published nothing and left no partial release. PhotoCleaner, the pilot, sets `enable_nuget: false`, so the NuGet leg had never run for real. Fixed by moving the push to the caller stub's own `publish-nuget` job, the shape `build-pypi` already used, per [Adopting the Release Chain][adopting-the-release-chain]. A smoke build never reaches either push, so no pull request can catch this class and each adopter's first real release is where it surfaces. Each NuGet adopter owes a stub edit with its next pin bump, dropping `nuget: true`, the `NUGET_USERNAME` secret mapping and `id-token: write` from its `publish` job and adding the `publish-nuget` job, since those two names are no longer declared on the task and a pin bump without the edit startup-fails.
+- [x] The first real (non-smoke) NuGet publish through the chain, from ptr727/Utilities at `f3b4cc9` (`2.0.526`), failed the NuGet.org token exchange `HTTP 401` because the OIDC `job_workflow_ref` claim named this hub's `build-release-task.yml` rather than the publishing repository's own workflow. The build itself passed and every later job skipped, so the run published nothing and left no partial release. PhotoCleaner, the pilot, sets `enable_nuget: false`, so the NuGet leg had never run for real. Fixed by moving the push to the caller stub's own `publish-nuget` job, the shape `build-pypi` already used, per [Adopting the Release Chain][adopting-the-release-chain]. A smoke build never reaches either push, so no pull request can catch this class and each adopter's first real release is where it surfaces. Each NuGet adopter owes a stub edit with its next pin bump, dropping `nuget: true`, the `NUGET_USERNAME` secret mapping and `id-token: write` from its `publish` job and adding the `publish-nuget` job, since those two names are no longer declared on the task and a pin bump without the edit startup-fails. Every NuGet and PyPI adopter also owes its publish job the artifact-delete condition `if: ${{ !cancelled() && steps.download.outcome == 'success' }}` with `id: download` on the download step, per D5.2, since a step left without one skips on exactly the failed push it exists for. The same adopter also confirms its nuget.org trusted-publishing policy names its own `publish-release.yml` and repoints it where the pre-fix workaround for this same failure, pointing the policy at the hub task, left it naming `build-release-task.yml`, since the `job_workflow_ref` claim moves back to the publishing repository with the push. ptr727/Utilities proved both halves on one commit, a first release run failing the token exchange on the stale policy and the next succeeding after the policy was repointed.
 - [ ] Proof: the next PhotoCleaner release names its .NET publish asset `PhotoCleaner.7z`, which the asset-name fix in this repository derives from the project file. Tick with the release.
 - [ ] `reports/workflow-reuse.md` regenerated with `build-release-task.yml` and `build-docker-task.yml` at 0 copies (hub-only files) and `publish-release.yml` showing callers equal to copies.
 
@@ -271,7 +271,7 @@ A downstream repo replaces its own `validate-task.yml` job bodies and its `test-
 
 **No-build repos** carry the operational trigger shape [WORKFLOW.md "Branch Model"][workflow] states and [#585][issue-585] settles: a direct push to `develop` runs CI advisory (no required check binds the direct-commit allowance), and a `pull_request` to `main` or `develop` runs it pre-merge and actionable. A release-model repo with no build target takes the same stub with a `pull_request: branches: [main, develop]` trigger instead, since it has no direct-commit allowance to keep advisory.
 
-**Release repos with a smoke build** carry the standard `pull_request` trigger, a `changes` paths-filter job (WORKFLOW.md D1.1: each of the repo's own targets gets a filter entry, and `.github/workflows/**` is excluded per D1.4), and a `smoke-build` job. The smoke build calls the repo's own `./.github/workflows/build-release-task.yml` by local path rather than a hub task, since that orchestrator is not hosted until [Stage 4][stage-4].
+**Release repos with a smoke build** carry the standard `pull_request` trigger, a `changes` paths-filter job (WORKFLOW.md D1.1: each of the repo's own targets gets an entry listing that target's own paths, which leaves both docs and `.github/workflows/**` matching nothing and satisfies D1.4 without naming a workflow path at all), and a `smoke-build` job. The smoke build calls the repo's own `./.github/workflows/build-release-task.yml` by local path rather than a hub task, since the renamed .NET publish interface the hub-hosted shape needs is not in a hub release yet, per [Adopting the Release Chain][adopting-the-release-chain].
 
 ```yaml
 name: Test pull request action
@@ -289,7 +289,9 @@ permissions: {}
 
 jobs:
 
-  # Add one filter entry per target this repo builds; a touched target must never fall through unfiltered (D1.1).
+  # One entry per target this repo builds, listing that target's own paths, so a touched target never falls through unfiltered (D1.1).
+  # A negation such as '!.github/workflows/**' marks a docs-only pull request as a target change, which scenario S2 requires to skip.
+  # A repo carrying its own build hook lists .github/actions/** too, since that hook builds the target and actionlint does not reach it.
   changes:
     name: Detect changed targets job
     runs-on: ubuntu-latest
@@ -307,8 +309,14 @@ jobs:
         with:
           filters: |
             release:
-              - '!.github/workflows/**'
+              - 'Widget/**'
+              - 'Directory.Build.props'
+              - 'Directory.Packages.props'
+              - 'global.json'
+              - 'version.json'
+              - '.github/actions/**'
 
+  # A C# or Python repo adds secrets: with CODECOV_TOKEN mapped by name here, or its pull request coverage reaches Codecov with no token (D1.6).
   validate:
     name: Validate sources job
     uses: ptr727/ProjectTemplate/.github/workflows/validate-task.yml@<hub-main-commit-sha> # <release-tag>
@@ -410,7 +418,7 @@ A downstream repo replaces its carried release orchestrator and per-target leaf 
 
 Neither package push runs inside the hub task, and that is a constraint rather than a preference. NuGet.org and PyPI trusted publishing both validate the OIDC token's `job_workflow_ref` claim against the repository that owns the package, and that claim names the workflow file the job actually ran from. A job running from a hub task therefore carries `ptr727/ProjectTemplate/.github/workflows/build-release-task.yml@<sha>`, and the token exchange is rejected, NuGet.org answering `HTTP 401` with `does not start with <owner>/<repo>/.github/workflows/` and PyPI rejecting the same shape under its own code. A caller hook does not avoid it, since a composite action runs inside the hub's job and leaves the claim unchanged. The hub task instead builds the package and uploads it as `nuget-build-<branch>` or `pypi-build-<branch>`, and the caller stub's own `publish-nuget` or `publish-pypi` job downloads that artifact and pushes, so the claim names the publishing repository. A smoke build never reaches either push, which is why a pull request cannot catch this and the first real release is where it surfaces.
 
-The trusted-publishing policy on NuGet.org and PyPI therefore keeps naming the publishing repository and its own `publish-release.yml`, and adopting the chain does not change it. Pointing a policy at the hub's workflow file instead would let any repository calling that task publish that package, so it is not the fix.
+The trusted-publishing policy on NuGet.org and PyPI therefore names the publishing repository and its own `publish-release.yml`. Pointing a policy at the hub's workflow file instead would let any repository calling that task publish that package, so it is not the fix. Confirm the policy before the first release after adopting. A repository whose policy already names its own `publish-release.yml` needs no edit. A repository whose policy names `build-release-task.yml`, which is how the `HTTP 401` was worked around before the push moved, mismatches in the other direction, and its first release after adopting fails the token exchange with `expected 'build-release-task.yml', actual 'publish-release.yml'` until the policy is repointed back. Neither direction is catchable before that release, since a smoke build never reaches the token exchange.
 
 The stub keeps its own trigger policy exactly as today: `workflow_dispatch` plus a main-only weekly `schedule` for a Docker repo, or `workflow_dispatch` plus a paths-filtered `push` to `main` for a NuGet or PyPI repo whose merges should auto-publish. What moves to the hub is the release-gate decision, the build/version/publish job graph, and the Docker core, never the trigger. This is the full shape, a NuGet-library repo whose merges publish:
 
@@ -425,6 +433,7 @@ on:
       - 'version.json'
       - 'Directory.Build.props'
       - 'Directory.Packages.props'
+      - 'global.json'
   workflow_dispatch:
 
 concurrency:
@@ -488,6 +497,7 @@ jobs:
       actions: write
     steps:
       - name: Download build artifacts step
+        id: download
         uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
         with:
           name: nuget-build-${{ github.ref_name }}
@@ -512,7 +522,9 @@ jobs:
             --source https://api.nuget.org/v3/index.json \
             --api-key "$NUGET_API_KEY" \
             --skip-duplicate
+      # Gated on the download rather than on the push, per D5.2: a step with no if: inherits success() and would skip on exactly the failed push where the artifact is already downloaded and the release is already cut.
       - name: Delete consumed NuGet build artifact step
+        if: ${{ !cancelled() && steps.download.outcome == 'success' }}
         continue-on-error: true
         env:
           GH_TOKEN: ${{ github.token }}
@@ -546,6 +558,7 @@ A Docker repo's stub adds `schedule: - cron: '0 2 * * MON'` to the trigger block
       actions: write
     steps:
       - name: Download build artifacts step
+        id: download
         uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
         with:
           name: pypi-build-${{ github.ref_name }}
@@ -555,7 +568,9 @@ A Docker repo's stub adds `schedule: - cron: '0 2 * * MON'` to the trigger block
         with:
           packages-dir: ./dist
           skip-existing: true
+      # Gated on the download rather than on the publish, per D5.2, for the same reason the NuGet stub above gives.
       - name: Delete consumed PyPI build artifact step
+        if: ${{ !cancelled() && steps.download.outcome == 'success' }}
         continue-on-error: true
         env:
           GH_TOKEN: ${{ github.token }}
@@ -668,7 +683,6 @@ Four things the hub cannot prove fall to the first downstream adopter. They are 
 [pinning]: #pinning
 [rollout]: #rollout
 [secrets-and-permissions]: #secrets-and-permissions
-[stage-4]: #stage-4-the-release-chain-and-the-docker-core
 [the-docker-family]: #the-docker-family
 
 <!-- Repo -->
