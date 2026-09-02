@@ -28,7 +28,7 @@ uv run ruff check || exit 1
 uv run pyright || exit 1
 
 # The interpreter is chosen by running the probes spec/host-tools.json declares, in its order.
-# On native Windows the python.org install registers `py`, not `python3`, and a `python3` found on PATH there is often the Microsoft Store alias stub, present but broken.
+# Running one rather than testing for a name is the point, since Git Bash inherits a Windows PATH that can carry a name which fails when run.
 if py -3 --version >/dev/null 2>&1; then
     run_py() { py -3 "$@"; }
 elif python3 --version >/dev/null 2>&1; then
