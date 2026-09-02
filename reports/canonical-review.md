@@ -7,9 +7,9 @@ A unit is what a reviewer reads whole, decided by the carry manifest rather than
 ## Coverage
 
 - units: 288
-- covered: 54
+- covered: 57
 - stale: 0
-- never read here: 234
+- never read here: 231
 
 ## Burn-down
 
@@ -200,8 +200,6 @@ A unit is what a reviewer reads whole, decided by the carry manifest rather than
 ### .agents/skills/operational-vs-release-workflow/references/release-publish-mechanics.md
 
 - **(preamble)** - never
-- **No-op republish guarantee** - never
-- **Orchestration vs. build: the override seam** - never
 - **Reusable-task parameter contract** - never
 - **Wrapper repos that track an upstream release** - never
 
@@ -311,7 +309,6 @@ A unit is what a reviewer reads whole, decided by the carry manifest rather than
 ### .agents/skills/workflow-ci-contract/references/test-methodology.md
 
 - **(preamble)** - never
-- **5B: Trace Scenarios** - never
 - **5C: Live Probe** - never
 - **Verdict** - never
 

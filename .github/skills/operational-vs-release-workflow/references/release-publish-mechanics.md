@@ -34,8 +34,9 @@ standardization baseline: `publish-release.yml` (single-branch publish plan), th
 task plus `github-release` job inside `build-release-task.yml`, `get-version-task.yml`, and the
 aggregator shape of `test-pull-request.yml`. Within
 `test-pull-request.yml`, only the `changes -> smoke-build -> check-workflow-status` aggregator
-wiring and the ruleset-bound job name are verbatim orchestration, while the `unit-test` job and
-the `dorny/paths-filter` entries are owned/per-target. The **build** layer is a hook: a composite
+wiring and the ruleset-bound job name are verbatim orchestration, while the `dorny/paths-filter`
+entries are owned/per-target. The validation job is a call to the reusable validator, whose own
+jobs a caller cannot address. The **build** layer is a hook: a composite
 action at `.github/actions/build-<target>` the hub-hosted `build-release-task.yml` reaches. The
 hub defaults require explicit project paths. A project needing more than a path override carries
 its own hook.
@@ -53,7 +54,7 @@ looks tidier for 1:1 but forks the `github-release` download and breaks its verb
 
 **What a repo still curates** (by design, not a leak): which `enable_<target>` inputs its caller
 stub sets, per the per-target subsetting rule above. `build-release-task.yml` is hub-hosted
-(`docs/reusable-workflows.md` "Stage 4: The Release Chain and the Docker Core"), so its job graph
+(the hub's `docs/reusable-workflows.md` "Stage 4: The Release Chain and the Docker Core"), so its job graph
 and its `github-release` job are the hub's, not a per-repo file a caller edits. A repo adopting the
 release chain carries only the caller stub in its own `publish-release.yml` and
 `test-pull-request.yml`, naming the hub task by pin and setting the `enable_*`, `docker_image`,
@@ -116,9 +117,9 @@ version/tag, which is heavyweight but expected even for a non-.NET repo, and acc
 
 ## No-op republish guarantee
 
-A weekly/dispatch publish where NBGV `SemVer2` is **unchanged** (no new commit since the last
+A scheduled or push publish where NBGV `SemVer2` is **unchanged** (no new commit since the last
 publish) re-pushes **nothing** to GitHub Releases (the `github-release` job's `release-exists`
-check skips the create step), NuGet (`dotnet nuget push --skip-duplicate`), or PyPI
+check skips the create step, and a dispatch refreshes the release instead of skipping), NuGet (`dotnet nuget push --skip-duplicate`), or PyPI
 (`gh-action-pypi-publish` `skip-existing: true`), since all three key on the version string.
 **Docker always re-pushes** by design: it picks up upstream base-image refreshes (e.g.
 `ubuntu:rolling`) that aren't visible in the repo. Boundary: `version.json` has **no

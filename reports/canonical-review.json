@@ -130,6 +130,22 @@
       "stamp": "2026-09-01T14:33:08Z"
     },
     {
+      "unit": ".agents/skills/operational-vs-release-workflow/references/release-publish-mechanics.md > No-op republish guarantee",
+      "digest": "sha256:cf8b084072d372f20beb8e11ea92e958abfeb3a90de8960196760a56db5a98a8",
+      "reviewer": "agent-skill",
+      "findings": 9,
+      "hubCommit": "50d97cd013e013af1fee010dfe8828200792f560",
+      "stamp": "2026-09-02T16:21:12Z"
+    },
+    {
+      "unit": ".agents/skills/operational-vs-release-workflow/references/release-publish-mechanics.md > Orchestration vs. build: the override seam",
+      "digest": "sha256:a7de5ead05a2d1746a0e9d737fc1e12af881bbf23a2972401f0eff969f4a7d4c",
+      "reviewer": "agent-skill",
+      "findings": 9,
+      "hubCommit": "50d97cd013e013af1fee010dfe8828200792f560",
+      "stamp": "2026-09-02T16:21:12Z"
+    },
+    {
       "unit": ".agents/skills/operational-vs-release-workflow/references/release-publish-mechanics.md > Per-target subsetting",
       "digest": "sha256:e881473b1b377dcb2b33900941d6518e8ac95c4e3a4ce9f9c72fa17c3360feb7",
       "reviewer": "agent-skill",
@@ -306,6 +322,14 @@
       "stamp": "2026-09-02T15:16:10Z"
     },
     {
+      "unit": ".agents/skills/workflow-ci-contract/references/test-methodology.md > 5B: Trace Scenarios",
+      "digest": "sha256:b625607723d4f645b89ea84c24ddca4984a9abca614185e8acbe8bc9fd35e460",
+      "reviewer": "agent-skill",
+      "findings": 9,
+      "hubCommit": "50d97cd013e013af1fee010dfe8828200792f560",
+      "stamp": "2026-09-02T16:21:12Z"
+    },
+    {
       "unit": ".github/copilot-instructions.md > Reviewing Carried Fleet Content",
       "digest": "sha256:83570e2b15143c6f9b79e4d381b7a578d3ae7970d74ae676405a402f6d13630f",
       "reviewer": "agent-skill",
@@ -411,11 +435,11 @@
     },
     {
       "unit": "WORKFLOW.md > 4. Behavioral Contract: Expected Outcomes",
-      "digest": "sha256:1ef44ce8017e9133ff3dc32a00e7b7bb863524ad0779594db240764df75a790a",
+      "digest": "sha256:942c5c825cf792cc2e889d7a03494a4c385b9c6950f8ed8fdadbd4a048a80395",
       "reviewer": "agent-skill",
-      "findings": 14,
-      "hubCommit": "30c465ae79de328d2745c31df1b05f0d960c42b7",
-      "stamp": "2026-09-02T15:40:54Z"
+      "findings": 9,
+      "hubCommit": "50d97cd013e013af1fee010dfe8828200792f560",
+      "stamp": "2026-09-02T16:14:36Z"
     },
     {
       "unit": "WORKFLOW.md > 5. Test Methodology",

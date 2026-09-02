@@ -18,7 +18,7 @@ For each applicable scenario, evaluate every job's `if:`/`needs:` against the in
 - **S5/S6** a bot push to `main`: publishes only when code-affecting, and a human push never does.
 - **S7** a publish run builds the one trigger branch with the right classification and leaves no dangling artifacts.
 - **S8** a dispatch from a ref other than `main`/`develop` fails fast.
-- **S9** a no-op re-run: release-create skipped, registries dedupe, PyPI build artifact still deleted, Docker still re-pushes.
+- **S9** a no-op re-run on a schedule or push trigger: release-create skipped, registries dedupe, package build artifacts still deleted, Docker still re-pushes. A dispatch re-run refreshes the release instead.
 - **S10** branch and version classification disagree: the gate fails loud and everything downstream skips.
 - **S12/S13** a deploy dispatch: ref gate first, environment re-asserted, pointer flip separate, live check names the release, and a production deploy from a non-default ref fails before anything is written.
 
