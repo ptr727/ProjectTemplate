@@ -259,11 +259,11 @@
     },
     {
       "unit": ".agents/skills/workflow-ci-contract/SKILL.md > The Core Behavioral Spine",
-      "digest": "sha256:bc9829fdd1e9e17b3d4a71f00a7db398a25fce39e13c4e5dd8311eebb90fa157",
+      "digest": "sha256:0061a17edeb3c838b1a72e17dfac823e03a22156a450cf06816f70706c42ffe3",
       "reviewer": "agent-skill",
-      "findings": 62,
-      "hubCommit": "9b33edb7e0f55fe2a05630a49d5be99ba1e3eb26",
-      "stamp": "2026-09-02T15:16:10Z"
+      "findings": 9,
+      "hubCommit": "5085d22962752a8690b5bc21095fe7bc91c25f28",
+      "stamp": "2026-09-02T16:34:43Z"
     },
     {
       "unit": ".agents/skills/workflow-ci-contract/references/d-guarantees.md > (preamble)",
@@ -435,11 +435,11 @@
     },
     {
       "unit": "WORKFLOW.md > 4. Behavioral Contract: Expected Outcomes",
-      "digest": "sha256:942c5c825cf792cc2e889d7a03494a4c385b9c6950f8ed8fdadbd4a048a80395",
+      "digest": "sha256:788c7412e7b95015f399adc7b4e2d04c87f4b71ed6b677772c144b06d5fa4498",
       "reviewer": "agent-skill",
       "findings": 9,
-      "hubCommit": "50d97cd013e013af1fee010dfe8828200792f560",
-      "stamp": "2026-09-02T16:14:36Z"
+      "hubCommit": "5085d22962752a8690b5bc21095fe7bc91c25f28",
+      "stamp": "2026-09-02T16:34:43Z"
     },
     {
       "unit": "WORKFLOW.md > 5. Test Methodology",
