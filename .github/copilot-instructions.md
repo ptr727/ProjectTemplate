@@ -23,7 +23,8 @@ put a release-bump magnitude in the title. The full contract is in
 Follow the fidelity declared for the file. A byte-locked reference to shared infrastructure that
 this repository does not carry is intentional, not a broken link. Raise substantive defects in
 canonical content, but locate the fix at its canonical source instead of proposing a local edit.
-No fidelity tier rejects one on its own, so the audit is not what stops it.
+An edit to a verbatim unit is reported as modified content, and one to an intent or presence
+unit is reported nowhere, so the audit is not what decides this.
 
 ## GitHub Copilot Review Runbook
 
