@@ -307,11 +307,8 @@ jobs:
         with:
           python-version: "3.13"
 
-      # The dependency mechanism is read from the tree rather than assumed: a committed uv.lock is the uv project shape and syncs frozen, and a root requirements*.txt is the pip shape a non-uv Python repo carries instead.
-      # The pip branch installs into the .venv that uv pip install resolves by default, so the pytest step below can name that interpreter directly and needs no activation carried between steps.
-      # Every requirements*.txt is collected rather than one canonical name, since the test dependencies live in a second file whose spelling differs by repo, and the collected set is resolved in one invocation.
-      # Installing them one file at a time would resolve each alone, and the glob sorts the base file last, so a base pin would silently downgrade what a test-requirements file had just resolved and the break would surface inside pytest rather than at install.
-      # The lockfile branch installs the project itself through uv sync, so the pip branch installs it too wherever pyproject declares a [project] table, and a repo declaring none (a Home Assistant custom_components layout) is left alone rather than failing on a package it does not build.
+      # One resolve over the collected requirements files, since the glob sorts the base file last and a per-file install would let its pins downgrade what the test file just resolved.
+      # The editable install matches what uv sync gives the other branch, and its guard leaves a layout declaring no [project] alone.
       - name: Sync dependencies step
         if: >-
           hashFiles('pyproject.toml') != '' && hashFiles('tests/**') != ''

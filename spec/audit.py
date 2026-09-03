@@ -197,6 +197,24 @@ def repo_tree(slug, ground_head):
     return None if entries is None else set(entries)
 
 
+def in_test_directory(path):
+    """Whether any directory segment of path names a test directory, compared case-insensitively."""
+    return any(segment.lower() in ("test", "tests") for segment in path.split("/")[:-1])
+
+
+def is_python_test_module(path):
+    """Whether path is a module pytest discovers by name, wherever in the tree it sits."""
+    name = path.rsplit("/", 1)[-1]
+    return name.endswith(".py") and (name.startswith("test_") or name.endswith("_test.py"))
+
+
+def is_csharp_test_project(path):
+    """Whether path is a C# project either named or located as a test project."""
+    return path.endswith(".csproj") and (
+        "Test" in path.rsplit("/", 1)[-1] or in_test_directory(path)
+    )
+
+
 def coverage_claiming_types(types, repo_profiles, type_mechanisms, tree):
     """The declared types that owe Codecov coverage, meaning the CODECOV_TOKEN secret and codecov.yml.
 
@@ -218,11 +236,9 @@ def coverage_claiming_types(types, repo_profiles, type_mechanisms, tree):
     mapped to codecov with no detector here keeps its claim too.
     """
     detectors = {
-        "csharp": lambda paths: any(
-            p.endswith(".csproj") and "Test" in p.rsplit("/", 1)[-1] for p in paths
-        ),
+        "csharp": lambda paths: any(is_csharp_test_project(p) for p in paths),
         "python": lambda paths: any(
-            segment in ("test", "tests") for p in paths for segment in p.split("/")[:-1]
+            in_test_directory(p) or is_python_test_module(p) for p in paths
         ),
     }
     claiming = []
@@ -2300,8 +2316,7 @@ def audit_repo(entry, spec, branch=None):
     mechanisms = [
         secrets["targetMechanisms"].get(p.get("target")) for p in entry.get("publish", [])
     ]
-    # The codecov mechanism is claimed from coverage_types above rather than from the profile alone, so a
-    # build-profile language with no tests requires no CODECOV_TOKEN, matching the codecov.yml skip below.
+    # The codecov mechanism follows coverage_types rather than the profile, so a language with no tests requires no CODECOV_TOKEN.
     for name in types:
         if repo_profiles.get(name) == "lint-only":
             continue
@@ -5188,8 +5203,7 @@ def _selftest():
             "  ok   repo_tree: a truncated tree and a missing tree sha both return None, and a whole one drops non-blobs"
         )
 
-    # Coverage applicability turns on tests rather than on the profile alone, so a package-only build repo
-    # is N/A instead of being told to store a token for a report its pipeline never produces.
+    # Applicability turns on tests, so a package-only build repo is N/A rather than owing a token for a report nothing produces.
     type_mechs = {"csharp": "codecov", "python": "codecov"}
     coverage_cases = [
         (["python"], {}, {"src/pkg/__init__.py", "pyproject.toml"}, [], "python, no tests"),
@@ -5197,7 +5211,42 @@ def _selftest():
         (["python"], {"python": "lint-only"}, {"tests/test_a.py"}, [], "python lint-only"),
         (["csharp"], {}, {"src/App/App.csproj"}, [], "csharp, no test project"),
         (["csharp"], {}, {"test/App.Tests/App.Tests.csproj"}, ["csharp"], "csharp with tests"),
-        (["csharp"], {}, {"src/Tests/App.csproj"}, [], "csharp, Tests is a directory name only"),
+        (["csharp"], {}, {"src/Tests/App.csproj"}, ["csharp"], "csharp, located under Tests/"),
+        (
+            ["csharp"],
+            {},
+            {"test/Specs.csproj"},
+            ["csharp"],
+            "csharp, located as a test, named nothing",
+        ),
+        (
+            ["csharp"],
+            {},
+            {"src/App/App.csproj", "docs/x.md"},
+            [],
+            "csharp, neither named nor located as a test",
+        ),
+        (
+            ["python"],
+            {},
+            {"test_app.py", "pyproject.toml"},
+            ["python"],
+            "python, root-level test module",
+        ),
+        (
+            ["python"],
+            {},
+            {"app_test.py", "pyproject.toml"},
+            ["python"],
+            "python, trailing _test module",
+        ),
+        (
+            ["python"],
+            {},
+            {"src/app.py", "contest.py"},
+            [],
+            "python, a module merely containing test",
+        ),
         (
             ["csharp"],
             {},
