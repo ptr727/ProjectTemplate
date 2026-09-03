@@ -123,11 +123,11 @@
     },
     {
       "unit": ".agents/skills/operational-vs-release-workflow/SKILL.md > (preamble)",
-      "digest": "sha256:7ec762ab488f25670e85abb8b534fa1380394e15f520b00b010d59cb4d2700ee",
+      "digest": "sha256:f03486afbab8e5742c3571d7da5544d07a99f7b5a4a90d030baa472a1d6220d6",
       "reviewer": "agent-skill",
       "findings": 0,
-      "hubCommit": "28dafdf46ee35cc9901e845a317991d909a94fac",
-      "stamp": "2026-09-03T18:19:20Z"
+      "hubCommit": "eb6d2a055dc590113f515aed7cac1e019b7d2111",
+      "stamp": "2026-09-03T18:32:16Z"
     },
     {
       "unit": ".agents/skills/operational-vs-release-workflow/references/release-publish-mechanics.md > Map your outputs to the right seam",
@@ -251,11 +251,11 @@
     },
     {
       "unit": ".agents/skills/workflow-ci-contract/SKILL.md > (preamble)",
-      "digest": "sha256:4c8cf4cc6ed2e44a98c0efe5354eac0ccdc48c7468acb38501a1b589d6879cf1",
+      "digest": "sha256:47ca6dfccbb8527b464aaa2c8fd113d536b8102f35635407b7b4e62663226425",
       "reviewer": "agent-skill",
       "findings": 0,
-      "hubCommit": "28dafdf46ee35cc9901e845a317991d909a94fac",
-      "stamp": "2026-09-03T18:19:20Z"
+      "hubCommit": "eb6d2a055dc590113f515aed7cac1e019b7d2111",
+      "stamp": "2026-09-03T18:32:16Z"
     },
     {
       "unit": ".agents/skills/workflow-ci-contract/SKILL.md > After Any Workflow Edit",
@@ -291,11 +291,11 @@
     },
     {
       "unit": ".agents/skills/workflow-ci-contract/SKILL.md > Why This Exists",
-      "digest": "sha256:0c4c6cb522f13a40024d1cf020714076a6c531725d86df5fabced51d77e60c7e",
+      "digest": "sha256:8017a5427bddce74e86b25dcb834f03bcd05eee33b730f6c3d684e02399ca89f",
       "reviewer": "agent-skill",
       "findings": 0,
-      "hubCommit": "28dafdf46ee35cc9901e845a317991d909a94fac",
-      "stamp": "2026-09-03T18:19:22Z"
+      "hubCommit": "eb6d2a055dc590113f515aed7cac1e019b7d2111",
+      "stamp": "2026-09-03T18:32:16Z"
     },
     {
       "unit": ".agents/skills/workflow-ci-contract/references/d-guarantees.md > (preamble)",
