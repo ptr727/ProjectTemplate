@@ -433,6 +433,24 @@ class GateCase(RepoCase):
         self.assertEqual(code, cr.EXIT_CANNOT_RUN)
         self.assertIn("no-such-branch", output)
 
+    def test_record_refuses_an_unresolvable_target(self) -> None:
+        """`record` now resolves a merge-base against `--target` the same way `check` does, so a
+        target that does not resolve is a new refusal `record` did not have when it stamped `HEAD`."""
+        code, output = self.loud(
+            [
+                "record",
+                "--reviewer",
+                "agent-skill",
+                "--target",
+                "no-such-branch",
+                "--unit",
+                f"DOC.md > Alpha={self.units()['DOC.md > Alpha']}",
+            ]
+        )
+        self.assertEqual(code, cr.EXIT_CANNOT_RUN)
+        self.assertIn("no-such-branch", output)
+        self.assertFalse((self.tmp / cr.LEDGER).exists(), "a refused record still wrote a ledger")
+
     def test_a_path_holding_a_line_ending_cannot_run(self) -> None:
         """git cat-file --batch is line-delimited, so such a path would shift every later answer
         onto the wrong request and read as content rather than as a failure."""
@@ -504,7 +522,7 @@ class LedgerCase(RepoCase):
 
         The fixture's `task` branch has made no commit of its own yet, so its merge-base against
         `origin/develop` and its own `HEAD` are the same commit here. That coincidence is why this
-        much still holds against `HEAD`; the case where they diverge, and only the merge-base is
+        much still holds against `HEAD`. The case where they diverge, and only the merge-base is
         what gets stamped, is `test_a_recorded_pass_names_the_merge_base_not_the_branch_tip` below.
         """
         self.record("DOC.md > Alpha")
@@ -513,7 +531,7 @@ class LedgerCase(RepoCase):
         self.assertEqual(entry["reviewer"], "agent-skill")
 
     def test_a_recorded_pass_names_the_merge_base_not_the_branch_tip(self) -> None:
-        """A branch's own tip is squashed away on merge and stops resolving; the merge-base against
+        """A branch's own tip is squashed away on merge and stops resolving. The merge-base against
         the target is a commit the target already holds, so it survives the squash. #1222, #1210."""
         self.write("DOC.md", "intro\n\n## Alpha\n\nedited\n\n## Beta\n\nb body\n")
         run(self.tmp, "add", "-A")

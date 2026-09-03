@@ -697,10 +697,10 @@ def cmd_record(args: argparse.Namespace) -> int:
         return EXIT_CANNOT_RUN
     ledger = read_ledger(root)
     stamp = datetime.now(UTC).strftime("%Y-%m-%dT%H:%M:%SZ")
-    # The hub state a reader can check this pass against, per GOVERNANCE.md "Hub-Hosted Tooling": a verdict carrying no commit cannot be re-run.
-    # It locates the tree rather than the text, since a pass legitimately runs over content that is not committed yet, and the digest above is what locates the text.
+    # A stable anchor a reader can resolve later, per GOVERNANCE.md "Hub-Hosted Tooling": a verdict carrying no commit cannot be re-run.
+    # It is deliberately not the exact tree the pass read: the digest above locates that text, and checking out this commit can show the unit before this pass's own edit.
     # Stamped as the merge-base against the target rather than HEAD: HEAD is this branch's own tip, which a squash merge discards and an amend moves, so either leaves the stamp resolving nowhere on the branch that receives the pass.
-    # The merge-base is a commit the target branch already holds, so it survives both.
+    # The merge-base is ordinarily a commit the target's remote-tracking ref already holds, so it survives both.
     # See #1222 and #1210.
     _, base = resolve_base(args.target, root)
     for unit, value in wanted.items():
@@ -884,8 +884,8 @@ def main(argv: list[str] | None = None) -> int:
         "--target",
         default=None,
         help=(
-            f"target branch (default {DEFAULT_TARGET}), resolved as origin/<value> first;"
-            " hubCommit is stamped as the merge-base against this target"
+            f"target branch (default {DEFAULT_TARGET})"
+            ", whose merge-base against this branch is stamped as hubCommit"
         ),
     )
     p_record.set_defaults(handler=cmd_record)
