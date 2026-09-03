@@ -348,14 +348,18 @@ jobs:
       - name: Check workflow results step
         run: |
           set -Eeuo pipefail
-          for result in "changes:${{ needs.changes.result }}" "validate:${{ needs.validate.result }}" "smoke-build:${{ needs.smoke-build.result }}"; do
+          for result in "changes:${{ needs.changes.result }}" "validate:${{ needs.validate.result }}"; do
             name="${result%%:*}"
             value="${result#*:}"
-            if [[ "$value" != "success" && "$value" != "skipped" ]]; then
+            if [[ "$value" != "success" ]]; then
               echo "::error::Job '$name' did not succeed ($value)."
               exit 1
             fi
           done
+          if [[ "${{ needs.smoke-build.result }}" != "success" && "${{ needs.smoke-build.result }}" != "skipped" ]]; then
+            echo "::error::Job 'smoke-build' did not succeed (${{ needs.smoke-build.result }})."
+            exit 1
+          fi
 ```
 
 A repo that vendors a theme or imports content it does not author narrows the Lint Markdown step's glob instead. Blog carries a WordPress archive and the PaperMod theme, for instance. `.markdownlint-cli2.jsonc` is declared `"fidelity": "verbatim", "whole": true` in `spec/files.json`, so it is not locally editable:
