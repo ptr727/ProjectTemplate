@@ -7,7 +7,7 @@ are in `references/profiles.md`.
 Use `pytest` with configuration in `[tool.pytest.ini_options]`. Default invocation:
 `uv run pytest`.
 
-**Coverage.** A build-profile repo with tests owes WORKFLOW.md's D1.6 coverage obligations.
+**Coverage.** A build-profile repo with tests owes `WORKFLOW.md` D1.6's coverage obligations.
 Read D1.6 before creating or modifying `pyproject.toml`.
 
 - One test file per module under test, named `test_<module>.py`.
