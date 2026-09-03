@@ -283,11 +283,11 @@
     },
     {
       "unit": ".agents/skills/workflow-ci-contract/SKILL.md > The Core Behavioral Spine",
-      "digest": "sha256:d9db545d3f6bef80883b5710366eb6741b54ab5ae90bf104f6c6c8641c54a45e",
+      "digest": "sha256:34b601e5226d221b416d23c0e721c3636ac173f5113526f323ff882f83fc1325",
       "reviewer": "agent-skill",
-      "findings": 0,
-      "hubCommit": "28dafdf46ee35cc9901e845a317991d909a94fac",
-      "stamp": "2026-09-03T18:19:21Z"
+      "findings": 1,
+      "hubCommit": "c04ab659f986b5341a286cf9e1bb5de1b3148ecd",
+      "stamp": "2026-09-03T18:45:18Z"
     },
     {
       "unit": ".agents/skills/workflow-ci-contract/SKILL.md > Why This Exists",
