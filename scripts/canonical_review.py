@@ -49,6 +49,7 @@ import hashlib
 import json
 import os
 import pathlib
+import shlex
 import subprocess
 import sys
 from collections.abc import Callable
@@ -628,7 +629,8 @@ def cmd_check(args: argparse.Namespace) -> int:
         "\nA repository carrying this content reads each of these whole, as a new file, and cannot"
         "\nfix what it finds. Read each unit's whole current text, then record the pass, handing"
         "\nback the key and digest exactly as printed above:"
-        "\n  python3 scripts/canonical_review.py record --reviewer agent-skill --unit '<key>=<digest>'"
+        f"\n  python3 scripts/canonical_review.py record --reviewer agent-skill"
+        f" --target {shlex.quote(target)} --unit '<key>=<digest>'"
         '\nThe local-strict-review skill\'s "The Carried-Content Pass" says how the pass is run,'
         "\nand its refusal table what this refusal means where the units named look wrong.",
         sys.stderr,
@@ -697,16 +699,15 @@ def cmd_record(args: argparse.Namespace) -> int:
         return EXIT_CANNOT_RUN
     ledger = read_ledger(root)
     stamp = datetime.now(UTC).strftime("%Y-%m-%dT%H:%M:%SZ")
-    # The hub commit the engine itself ran from, per GOVERNANCE.md "Hub-Hosted Tooling": a verdict carrying no commit cannot be re-run, and two runs that disagree cannot be attributed to the tree or to the tool.
-    # It locates the tooling rather than the text, since a pass legitimately runs over content that is not committed yet, and the digest above is what locates the text.
-    head = git("rev-parse", "HEAD", root=root).strip()
+    # Stamped as the merge-base against the target, not HEAD, since a squash merge discards HEAD and an amend moves it.
+    _, base = resolve_base(args.target, root)
     for unit, value in wanted.items():
         ledger[unit] = {
             "unit": unit,
             "digest": value,
             "reviewer": args.reviewer,
             "findings": args.findings,
-            "hubCommit": head,
+            "hubCommit": base,
             "stamp": stamp,
         }
     write_ledger(root, ledger)
@@ -877,6 +878,14 @@ def main(argv: list[str] | None = None) -> int:
         help="a unit key and the digest the reviewer read, repeatable",
     )
     p_record.add_argument("--findings", type=int, default=None, help="how many findings it raised")
+    p_record.add_argument(
+        "--target",
+        default=None,
+        help=(
+            f"target branch (default {DEFAULT_TARGET})"
+            ", whose merge-base against this branch is stamped as hubCommit"
+        ),
+    )
     p_record.set_defaults(handler=cmd_record)
 
     p_report = sub.add_parser("report", help=f"write {REPORT}")

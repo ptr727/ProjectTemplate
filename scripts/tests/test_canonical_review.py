@@ -336,6 +336,18 @@ class GateCase(RepoCase):
         self.assertIn("DOC.md > Alpha", output)
         self.assertNotIn("DOC.md > Beta", output, "an untouched section was demanded")
 
+    def test_the_refusal_hands_back_a_record_command_naming_the_checked_target(self) -> None:
+        """Copying the printed command has to record against the base `check` actually measured,
+        never silently default to `develop` when `--target` named something else, and it has to
+        paste as one shell command: a wrapped line with no continuation runs `record` with no
+        `--unit` at all, which the surrounding prose explicitly invites by saying to copy it."""
+        base = run(self.tmp, "rev-parse", "refs/remotes/origin/develop").strip()
+        self.write("DOC.md", "intro\n\n## Alpha\n\na body, edited\n\n## Beta\n\nb body\n")
+        code, output = self.loud(["check", "--target", base])
+        self.assertEqual(code, cr.EXIT_NOT_COVERED)
+        line = f"  python3 scripts/canonical_review.py record --reviewer agent-skill --target {base} --unit '<key>=<digest>'"
+        self.assertIn(line, output.splitlines(), "the printed command must be one whole line")
+
     def test_a_recorded_pass_covers_the_changed_unit(self) -> None:
         self.write("DOC.md", "intro\n\n## Alpha\n\na body, edited\n\n## Beta\n\nb body\n")
         self.assertEqual(self.record("DOC.md > Alpha"), cr.EXIT_COVERED)
@@ -433,6 +445,24 @@ class GateCase(RepoCase):
         self.assertEqual(code, cr.EXIT_CANNOT_RUN)
         self.assertIn("no-such-branch", output)
 
+    def test_record_refuses_an_unresolvable_target(self) -> None:
+        """`record` resolves a merge-base against `--target`, the same way `check` does, so an
+        unresolvable target refuses the record rather than falling back to `HEAD`."""
+        code, output = self.loud(
+            [
+                "record",
+                "--reviewer",
+                "agent-skill",
+                "--target",
+                "no-such-branch",
+                "--unit",
+                f"DOC.md > Alpha={self.units()['DOC.md > Alpha']}",
+            ]
+        )
+        self.assertEqual(code, cr.EXIT_CANNOT_RUN)
+        self.assertIn("no-such-branch", output)
+        self.assertFalse((self.tmp / cr.LEDGER).exists(), "a refused record still wrote a ledger")
+
     def test_a_path_holding_a_line_ending_cannot_run(self) -> None:
         """git cat-file --batch is line-delimited, so such a path would shift every later answer
         onto the wrong request and read as content rather than as a failure."""
@@ -499,12 +529,30 @@ class LedgerCase(RepoCase):
         self.assertEqual(len(entries), 1)
         self.assertEqual(entries["DOC.md > Alpha"]["digest"], self.units()["DOC.md > Alpha"])
 
-    def test_a_recorded_pass_names_the_hub_commit_it_ran_from(self) -> None:
-        """A verdict carrying no commit cannot be re-run, per GOVERNANCE.md "Hub-Hosted Tooling"."""
+    def test_a_recorded_pass_names_a_hub_commit(self) -> None:
+        """The fixture's `task` branch has made no commit of its own yet, so its merge-base against
+        `origin/develop` and its own `HEAD` are the same commit here. That coincidence is why this
+        much still holds against `HEAD`. The case where they diverge, and only the merge-base is
+        what gets stamped, is `test_a_recorded_pass_names_the_merge_base_not_the_branch_tip` below.
+        """
         self.record("DOC.md > Alpha")
         entry = cr.read_ledger(self.tmp)["DOC.md > Alpha"]
         self.assertEqual(entry["hubCommit"], run(self.tmp, "rev-parse", "HEAD").strip())
         self.assertEqual(entry["reviewer"], "agent-skill")
+
+    def test_a_recorded_pass_names_the_merge_base_not_the_branch_tip(self) -> None:
+        """A branch's own tip is squashed away on merge and stops resolving. The merge-base against
+        the target is a commit the target already holds, so it survives the squash. #1222, #1210."""
+        self.write("DOC.md", "intro\n\n## Alpha\n\nedited\n\n## Beta\n\nb body\n")
+        run(self.tmp, "add", "-A")
+        run(self.tmp, "commit", "-m", "advance the branch tip past the merge base")
+        base = run(self.tmp, "rev-parse", "refs/remotes/origin/develop").strip()
+        tip = run(self.tmp, "rev-parse", "HEAD").strip()
+        self.assertNotEqual(base, tip, "the fixture needs a tip that has moved past the base")
+        self.record("DOC.md > Alpha")
+        entry = cr.read_ledger(self.tmp)["DOC.md > Alpha"]
+        self.assertEqual(entry["hubCommit"], base)
+        self.assertNotEqual(entry["hubCommit"], tip)
 
     def test_record_refuses_a_digest_the_content_has_moved_past(self) -> None:
         """The guard against a format-on-save between the review and the record."""

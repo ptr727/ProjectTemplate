@@ -251,7 +251,10 @@ check_ruleset() { # payload-file - the live ruleset must match the committed pol
         fail "ruleset payload $file missing"
         return
     fi
-    rname="$(jqr '.name // empty' "$file")"
+    if ! rname="$(jqr '.name // empty' "$file")"; then
+        fail "ruleset payload $file did not parse"
+        return
+    fi
     if [ -z "$rname" ]; then
         fail "ruleset payload $file has no name"
         return
@@ -268,13 +271,16 @@ check_ruleset() { # payload-file - the live ruleset must match the committed pol
         fail "ruleset '$rname' - could not read live state"
         return
     fi
-    want_enf="$(jq -r '.enforcement' "$file")"
-    assert "ruleset '$rname' enforcement = $want_enf" test "$(jq -r '.enforcement' <<<"$live")" = "$want_enf"
+    if ! want_enf="$(jqr '.enforcement' "$file")"; then
+        fail "ruleset payload $file did not parse"
+        return
+    fi
+    assert "ruleset '$rname' enforcement = $want_enf" test "$(jqr '.enforcement' <<<"$live")" = "$want_enf"
     # The live rule-type set must equal the payload's, compared in both directions.
     # Checking only that each payload type is present live misses a rule someone added by hand.
     # That is drift this script exists to catch, and it passed as clean before.
     local want_types got_types
-    if ! want_types="$(jq -r '[.rules[].type] | sort | join(",")' "$file")"; then
+    if ! want_types="$(jqr '[.rules[].type] | sort | join(",")' "$file")"; then
         fail "ruleset payload $file did not parse"
         return
     fi
@@ -282,13 +288,16 @@ check_ruleset() { # payload-file - the live ruleset must match the committed pol
         fail "ruleset payload $file declares no rules"
         return
     fi
-    got_types="$(jq -r '[.rules[].type] | sort | join(",")' <<<"$live")"
+    if ! got_types="$(jqr '[.rules[].type] | sort | join(",")' <<<"$live")"; then
+        fail "live ruleset for '$rname' did not parse"
+        return
+    fi
     assert "'$rname' rule set = $want_types" test "$got_types" = "$want_types"
     # The bypass list is reported and never asserted, because no payload declares one.
     # Who may bypass a ruleset is a human decision taken in the UI, so code states what is there and judges nothing.
     # It is surfaced on every run rather than left invisible, since it is the field that decides who the rules do not apply to.
     local bypass
-    bypass="$(jq -r '[.bypass_actors[]? | "\(.actor_type) \(.actor_id) \(.bypass_mode)"] | join("; ")' <<<"$live")"
+    bypass="$(jqr '[.bypass_actors[]? | "\(.actor_type) \(.actor_id) \(.bypass_mode)"] | join("; ")' <<<"$live")"
     note "ruleset '$rname' bypass list: ${bypass:-none} (not managed by this script)"
     # Every parameterized rule is compared on its whole parameters object rather than on selected fields.
     # Naming fields one at a time meant a payload could declare a parameter the check never read.
@@ -309,7 +318,7 @@ check_ruleset() { # payload-file - the live ruleset must match the committed pol
               elif type == "array" then map(w(f)) | f
               else f end;
           def n: w(if type=="array" then (if length==0 then . elif (all(.[]; type=="string" or type=="number")) then sort elif (all(.[]; type=="object" and has("context"))) then sort_by(.context) else . end) else . end); n'
-    ptypes="$(jq -r '[.rules[] | select(has("parameters")) | .type] | .[]' "$file")"
+    ptypes="$(jqr '[.rules[] | select(has("parameters")) | .type] | .[]' "$file")"
     while IFS= read -r t; do
         [ -z "$t" ] && continue
         # shellcheck disable=SC2016  # $t is a jq --arg variable, not a shell expansion

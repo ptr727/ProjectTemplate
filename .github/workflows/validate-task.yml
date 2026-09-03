@@ -1,7 +1,7 @@
 name: Validate task
 
 # The fleet validation gate, hosted here once and reached by every repo's test-pull-request stub and its own publish-release stub.
-# Three jobs: lint (the fleet doc-lint block plus language lint by tree detection, the prose gate, and the repo gate), unit-test (a generic dotnet test or uv run pytest, skipped where the caller has no test project), and validate (the validate hook, a repo's own domain checks such as an ESPHome compile, a Hugo build, a KiCad ERC, a codegen-drift check, or PowerShell tests).
+# Three jobs: lint (the fleet doc-lint block plus language lint by tree detection, the prose gate, and the repo gate), unit-test (a generic dotnet test or pytest, skipped where the caller has no test project), and validate (the validate hook, a repo's own domain checks such as an ESPHome compile, a Hugo build, a KiCad ERC, a codegen-drift check, or PowerShell tests).
 # No permissions beyond contents: read where a job needs one, since every job here only checks out and reads.
 # No required inputs, markdown-exclude-globs and repo-gate-exclude-globs are the two optional inputs, and CODECOV_TOKEN is the one optional secret, since coverage upload is best-effort.
 # Hub-owned gates and default hooks resolve through $/ at the reusable workflow's commit, so each implementation is reproducible against the caller's released pin without a second checkout.
@@ -257,8 +257,9 @@ jobs:
 
   # No job-level if: here, since GitHub Actions does not evaluate hashFiles in a job condition, only a step one.
   # Every step below carries its own tree-detection guard instead.
-  # A caller with neither a *Tests*.csproj nor a uv.lock-backed tests/ directory beside a pyproject.toml runs every step's guard false, and the job reports success having done nothing, which is the clean skip this job promises.
-  # The uv.lock guard excludes the lint-only Python profile (spec/project-types.json python profileNote), which is stdlib-only, uvx-run, and carries no lockfile to sync from.
+  # A caller with neither a *Tests*.csproj nor a tests/ directory beside a pyproject.toml and a dependency manifest runs every step's guard false, and the job reports success having done nothing, which is the clean skip this job promises.
+  # That manifest is a committed uv.lock or a root requirements*.txt, the two dependency mechanisms spec/project-types.json names, so a pip-based Python repo with tests is served here rather than skipped, per D1.6.
+  # What excludes the lint-only Python profile here is the root tests/ guard rather than the manifest one, that profile being tooling scripts embedded in a non-Python repo rather than a tested package at the root.
   unit-test:
     name: Unit test job
     runs-on: ubuntu-latest
@@ -299,24 +300,53 @@ jobs:
           CODECOV_TOKEN: ${{ secrets.CODECOV_TOKEN }}
 
       - name: Setup uv step
-        if: hashFiles('pyproject.toml') != '' && hashFiles('tests/**') != '' && hashFiles('uv.lock') != ''
+        if: >-
+          hashFiles('pyproject.toml') != '' && hashFiles('tests/**') != ''
+          && (hashFiles('uv.lock') != '' || hashFiles('requirements*.txt') != '')
         uses: astral-sh/setup-uv@20cfd1bf945f4377ade1205e4dbc17946fc9a30d # v10.0.1
         with:
           python-version: "3.13"
 
+      # One resolve over the collected requirements files, since the glob sorts the base file last and a per-file install would let its pins downgrade what the test file just resolved.
+      # The editable install matches what uv sync gives the other branch, and its guard leaves a layout declaring no [project] alone.
       - name: Sync dependencies step
-        if: hashFiles('pyproject.toml') != '' && hashFiles('tests/**') != '' && hashFiles('uv.lock') != ''
-        run: uv sync --all-groups --frozen
+        if: >-
+          hashFiles('pyproject.toml') != '' && hashFiles('tests/**') != ''
+          && (hashFiles('uv.lock') != '' || hashFiles('requirements*.txt') != '')
+        run: |
+          set -Eeuo pipefail
+          if [ -f uv.lock ]; then
+            uv sync --all-groups --frozen
+          else
+            uv venv
+            requirement_args=()
+            for file in requirements*.txt; do
+              [ -e "$file" ] || continue
+              requirement_args+=(-r "$file")
+            done
+            if [ "${#requirement_args[@]}" -gt 0 ]; then
+              uv pip install "${requirement_args[@]}"
+            fi
+            if grep -Eq '^[[:space:]]*\[project\]' pyproject.toml; then
+              uv pip install -e .
+            fi
+          fi
 
       # --cov-report=xml names the report format and selects nothing to measure, so the repository's own pyproject.toml supplies the --cov selector, per D1.6.
       # The report is checked rather than assumed, because the best-effort upload below reads a missing file exactly as it reads a healthy run.
       # The pre-run delete makes that a check on what this run wrote, since a committed coverage.xml would otherwise satisfy it without any measurement.
       - name: Run pytest step
-        if: hashFiles('pyproject.toml') != '' && hashFiles('tests/**') != '' && hashFiles('uv.lock') != ''
+        if: >-
+          hashFiles('pyproject.toml') != '' && hashFiles('tests/**') != ''
+          && (hashFiles('uv.lock') != '' || hashFiles('requirements*.txt') != '')
         run: |
           set -Eeuo pipefail
           rm -f coverage.xml
-          uv run pytest --cov-report=xml
+          if [ -f uv.lock ]; then
+            uv run pytest --cov-report=xml
+          else
+            .venv/bin/python -m pytest --cov-report=xml
+          fi
           if [[ ! -s coverage.xml ]]; then
             echo "::error::This run wrote no coverage.xml at the repository root. Select a coverage source in this repository's pyproject.toml, an addopts entry of --cov=<package> in practice, since --cov-report=xml alone measures nothing, and leave the report at the root path the upload step below reads."
             exit 1
@@ -324,7 +354,9 @@ jobs:
 
       # Best-effort: continue-on-error plus fail_ci_if_error false, so a missing token never reds the gate.
       - name: Upload coverage to Codecov step (Python)
-        if: hashFiles('pyproject.toml') != '' && hashFiles('tests/**') != '' && hashFiles('uv.lock') != ''
+        if: >-
+          hashFiles('pyproject.toml') != '' && hashFiles('tests/**') != ''
+          && (hashFiles('uv.lock') != '' || hashFiles('requirements*.txt') != '')
         continue-on-error: true
         uses: codecov/codecov-action@fb8b3582c8e4def4969c97caa2f19720cb33a72f # v7.0.0
         with:

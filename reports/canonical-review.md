@@ -7,9 +7,9 @@ A unit is what a reviewer reads whole, decided by the carry manifest rather than
 ## Coverage
 
 - units: 304
-- covered: 81
+- covered: 85
 - stale: 0
-- never read here: 223
+- never read here: 219
 
 ## Burn-down
 
@@ -178,7 +178,6 @@ A unit is what a reviewer reads whole, decided by the carry manifest rather than
 
 ### .agents/skills/operational-vs-release-workflow/SKILL.md
 
-- **(preamble)** - never
 - **Branching (release model)** - never
 - **Operational repositories (the complete delta)** - never
 - **Publishing (release model)** - never
@@ -287,10 +286,6 @@ A unit is what a reviewer reads whole, decided by the carry manifest rather than
 - **What stays governed by the fleet's own rules** - never
 - **Why this exists** - never
 
-### .agents/skills/workflow-ci-contract/SKILL.md
-
-- **Why This Exists** - never
-
 ### .agents/skills/workflow-ci-contract/references/d-guarantees.md
 
 - **D2: Validation at Entry** - never
@@ -301,8 +296,6 @@ A unit is what a reviewer reads whole, decided by the carry manifest rather than
 ### .agents/skills/workflow-ci-contract/references/test-methodology.md
 
 - **(preamble)** - never
-- **5C: Live Probe** - never
-- **Verdict** - never
 
 ### .editorconfig
 
