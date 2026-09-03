@@ -211,11 +211,8 @@ def is_python_test_module(path):
 def is_csharp_test_project(path):
     """Whether path is a C# project either named or located as a test project.
 
-    The name is read two ways because one spelling does not cover both conventions. A
-    case-sensitive "Test" catches the PascalCase names (Foo.Tests.csproj, FooTests.csproj), and a
-    whole-segment match over the dot-delimited name catches a lowercase one (widget.tests.csproj).
-    Lowercasing the whole basename instead would claim Contest.csproj and Latest.csproj, which
-    carry those letters inside a word rather than as a segment of the name.
+    Read two ways because lowercasing the whole basename would claim Contest.csproj and
+    Latest.csproj, which carry those letters inside a word rather than as a name segment.
     """
     if not path.endswith(".csproj"):
         return False
