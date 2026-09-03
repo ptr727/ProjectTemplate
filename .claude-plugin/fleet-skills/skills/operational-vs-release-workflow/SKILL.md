@@ -11,11 +11,14 @@ description: >-
   promoting develop to main, resolving a develop -> main merge conflict, deciding whether a
   release repo's config change needs a PR versus an operational repo's config change can commit
   straight to develop, bumping version.json, adding or dropping a release target, or reasoning
-  about why a merge did or didn't trigger a publish. Triggers even when the request sounds like
-  ordinary git housekeeping ("just push this config fix", "merge develop into main", "cut a
-  release"), because the two workflow models genuinely differ (a direct-to-develop commit that is
-  correct in an operational repo is a rule violation in a release repo, and vice versa) and
-  applying the wrong one is not obviously wrong to a reader who only knows one of the two.
+  about why a merge did or didn't trigger a publish. This is the git half, and the
+  workflow-ci-contract skill keeps the YAML half (the D1-D9 contract and the job graph that
+  implements this policy), so an edit to a workflow file goes there. Triggers even when the
+  request sounds like ordinary git housekeeping ("just push this config fix", "merge develop into
+  main", "cut a release"), because the two workflow models genuinely differ (a direct-to-develop
+  commit that is correct in an operational repo is a rule violation in a release repo, and vice
+  versa) and applying the wrong one is not obviously wrong to a reader who only knows one of the
+  two.
 ---
 
 # Operational vs. Release Workflow
