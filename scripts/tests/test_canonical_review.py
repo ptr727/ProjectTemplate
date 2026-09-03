@@ -338,12 +338,15 @@ class GateCase(RepoCase):
 
     def test_the_refusal_hands_back_a_record_command_naming_the_checked_target(self) -> None:
         """Copying the printed command has to record against the base `check` actually measured,
-        never silently default to `develop` when `--target` named something else."""
+        never silently default to `develop` when `--target` named something else, and it has to
+        paste as one shell command: a wrapped line with no continuation runs `record` with no
+        `--unit` at all, which the surrounding prose explicitly invites by saying to copy it."""
         base = run(self.tmp, "rev-parse", "refs/remotes/origin/develop").strip()
         self.write("DOC.md", "intro\n\n## Alpha\n\na body, edited\n\n## Beta\n\nb body\n")
         code, output = self.loud(["check", "--target", base])
         self.assertEqual(code, cr.EXIT_NOT_COVERED)
-        self.assertIn(f"record --reviewer agent-skill --target {base}", output)
+        line = f"  python3 scripts/canonical_review.py record --reviewer agent-skill --target {base} --unit '<key>=<digest>'"
+        self.assertIn(line, output.splitlines(), "the printed command must be one whole line")
 
     def test_a_recorded_pass_covers_the_changed_unit(self) -> None:
         self.write("DOC.md", "intro\n\n## Alpha\n\na body, edited\n\n## Beta\n\nb body\n")
