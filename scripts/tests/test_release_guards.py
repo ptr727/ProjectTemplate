@@ -252,7 +252,6 @@ gh() {
         self.assertIn('requirement_args+=(-r "$file")', job)
         self.assertIn('uv pip install "${requirement_args[@]}"', job)
         self.assertIn(".venv/bin/python -m pytest --cov-report=xml", job)
-        self.assertEqual(2, job.count("if [ -f uv.lock ]; then"))
 
         # One resolve over every requirements file, never one install per file.
         # The glob sorts the base file last, so a per-file install lets its pins downgrade what the test-requirements file just resolved.

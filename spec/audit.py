@@ -238,7 +238,7 @@ def coverage_claiming_types(types, repo_profiles, type_mechanisms, tree):
     detectors = {
         "csharp": lambda paths: any(is_csharp_test_project(p) for p in paths),
         "python": lambda paths: any(
-            in_test_directory(p) or is_python_test_module(p) for p in paths
+            (p.endswith(".py") and in_test_directory(p)) or is_python_test_module(p) for p in paths
         ),
     }
     claiming = []
@@ -5246,6 +5246,20 @@ def _selftest():
             {"src/app.py", "contest.py"},
             [],
             "python, a module merely containing test",
+        ),
+        (
+            ["python"],
+            {},
+            {"tests/README.md", "pyproject.toml"},
+            [],
+            "python, a test directory holding no Python",
+        ),
+        (
+            ["python"],
+            {},
+            {"tests/conftest.py", "pyproject.toml"},
+            ["python"],
+            "python, a test directory holding Python",
         ),
         (
             ["csharp"],
