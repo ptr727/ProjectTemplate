@@ -308,9 +308,19 @@ jobs:
         if: hashFiles('pyproject.toml') != '' && hashFiles('tests/**') != '' && hashFiles('uv.lock') != ''
         run: uv sync --all-groups --frozen
 
+      # --cov-report=xml names the report format and selects nothing to measure, so the repository's own pyproject.toml supplies the --cov selector, per D1.6.
+      # The report is checked rather than assumed, because the best-effort upload below reads a missing file exactly as it reads a healthy run.
+      # The pre-run delete makes that a check on what this run wrote, since a committed coverage.xml would otherwise satisfy it without any measurement.
       - name: Run pytest step
         if: hashFiles('pyproject.toml') != '' && hashFiles('tests/**') != '' && hashFiles('uv.lock') != ''
-        run: uv run pytest --cov-report=xml
+        run: |
+          set -Eeuo pipefail
+          rm -f coverage.xml
+          uv run pytest --cov-report=xml
+          if [[ ! -s coverage.xml ]]; then
+            echo "::error::This run wrote no coverage.xml at the repository root. Select a coverage source in this repository's pyproject.toml, an addopts entry of --cov=<package> in practice, since --cov-report=xml alone measures nothing, and leave the report at the root path the upload step below reads."
+            exit 1
+          fi
 
       # Best-effort: continue-on-error plus fail_ci_if_error false, so a missing token never reds the gate.
       - name: Upload coverage to Codecov step (Python)
