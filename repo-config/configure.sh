@@ -288,7 +288,10 @@ check_ruleset() { # payload-file - the live ruleset must match the committed pol
         fail "ruleset payload $file declares no rules"
         return
     fi
-    got_types="$(jqr '[.rules[].type] | sort | join(",")' <<<"$live")"
+    if ! got_types="$(jqr '[.rules[].type] | sort | join(",")' <<<"$live")"; then
+        fail "live ruleset for '$rname' did not parse"
+        return
+    fi
     assert "'$rname' rule set = $want_types" test "$got_types" = "$want_types"
     # The bypass list is reported and never asserted, because no payload declares one.
     # Who may bypass a ruleset is a human decision taken in the UI, so code states what is there and judges nothing.

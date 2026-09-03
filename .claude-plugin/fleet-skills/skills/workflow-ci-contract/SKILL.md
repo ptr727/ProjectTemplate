@@ -8,7 +8,7 @@ description: >-
 
 ## Why This Exists
 
-`WORKFLOW.md` in the hub is a behavioral contract stating required outcomes rather than a required implementation, and it had no skill surface, so agents edited workflow YAML without the contract in view. This skill is the summary plus the binding rules, with the guarantee catalog and the test methodology split into `references/`. `WORKFLOW.md` keeps authority for the contract and methodology, and `GOVERNANCE.md` ("Workflow YAML Conventions", "Release Model") wins where those two overlap, which `WORKFLOW.md`'s own canonical-scope note states.
+`WORKFLOW.md` in the hub is a behavioral contract stating required outcomes rather than a required implementation. This skill is that contract's surface, so an agent editing workflow YAML has the contract in view. It carries the summary plus the binding rules, with the guarantee catalog and the test methodology split into `references/`. `WORKFLOW.md` keeps authority for the contract and methodology, and `GOVERNANCE.md` ("Workflow YAML Conventions", "Release Model") wins where those two overlap, which `WORKFLOW.md`'s own canonical-scope note states.
 
 ## How the Contract Is Read
 

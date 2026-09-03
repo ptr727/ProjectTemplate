@@ -291,11 +291,11 @@
     },
     {
       "unit": ".agents/skills/workflow-ci-contract/SKILL.md > Why This Exists",
-      "digest": "sha256:8017a5427bddce74e86b25dcb834f03bcd05eee33b730f6c3d684e02399ca89f",
+      "digest": "sha256:713456da9774e1d979fdef3a31cf90099bd3287e28715754a2d8266979311a53",
       "reviewer": "agent-skill",
-      "findings": 0,
-      "hubCommit": "eb6d2a055dc590113f515aed7cac1e019b7d2111",
-      "stamp": "2026-09-03T18:32:16Z"
+      "findings": null,
+      "hubCommit": "a6c7bb1d0831b5c41a905b0c957661dc14f5f566",
+      "stamp": "2026-09-03T22:06:23Z"
     },
     {
       "unit": ".agents/skills/workflow-ci-contract/references/d-guarantees.md > (preamble)",
@@ -347,11 +347,11 @@
     },
     {
       "unit": ".agents/skills/workflow-ci-contract/references/test-methodology.md > 5A: Static Audit",
-      "digest": "sha256:2996dc30cc8d3b4fe1b41adb5d5a8ebd855e96b7c85c8ddeaa04d22e5085fdda",
+      "digest": "sha256:d3dff5e85fa809cd530b313d0e108f260d7f5437274d5261aeafde77d13666e7",
       "reviewer": "agent-skill",
-      "findings": 0,
-      "hubCommit": "28dafdf46ee35cc9901e845a317991d909a94fac",
-      "stamp": "2026-09-03T18:19:22Z"
+      "findings": null,
+      "hubCommit": "a6c7bb1d0831b5c41a905b0c957661dc14f5f566",
+      "stamp": "2026-09-03T22:06:23Z"
     },
     {
       "unit": ".agents/skills/workflow-ci-contract/references/test-methodology.md > 5B: Trace Scenarios",
