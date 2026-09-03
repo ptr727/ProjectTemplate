@@ -251,7 +251,10 @@ check_ruleset() { # payload-file - the live ruleset must match the committed pol
         fail "ruleset payload $file missing"
         return
     fi
-    rname="$(jqr '.name // empty' "$file")"
+    if ! rname="$(jqr '.name // empty' "$file")"; then
+        fail "ruleset payload $file did not parse"
+        return
+    fi
     if [ -z "$rname" ]; then
         fail "ruleset payload $file has no name"
         return
@@ -268,7 +271,10 @@ check_ruleset() { # payload-file - the live ruleset must match the committed pol
         fail "ruleset '$rname' - could not read live state"
         return
     fi
-    want_enf="$(jqr '.enforcement' "$file")"
+    if ! want_enf="$(jqr '.enforcement' "$file")"; then
+        fail "ruleset payload $file did not parse"
+        return
+    fi
     assert "ruleset '$rname' enforcement = $want_enf" test "$(jqr '.enforcement' <<<"$live")" = "$want_enf"
     # The live rule-type set must equal the payload's, compared in both directions.
     # Checking only that each payload type is present live misses a rule someone added by hand.
@@ -288,7 +294,7 @@ check_ruleset() { # payload-file - the live ruleset must match the committed pol
     # Who may bypass a ruleset is a human decision taken in the UI, so code states what is there and judges nothing.
     # It is surfaced on every run rather than left invisible, since it is the field that decides who the rules do not apply to.
     local bypass
-    bypass="$(jq -r '[.bypass_actors[]? | "\(.actor_type) \(.actor_id) \(.bypass_mode)"] | join("; ")' <<<"$live")"
+    bypass="$(jqr '[.bypass_actors[]? | "\(.actor_type) \(.actor_id) \(.bypass_mode)"] | join("; ")' <<<"$live")"
     note "ruleset '$rname' bypass list: ${bypass:-none} (not managed by this script)"
     # Every parameterized rule is compared on its whole parameters object rather than on selected fields.
     # Naming fields one at a time meant a payload could declare a parameter the check never read.
