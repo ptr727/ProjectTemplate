@@ -178,8 +178,9 @@ judgment for the escalation because asking is inconvenient from where it sits, a
 the thread to keep moving. A dispatcher receiving one puts it to the maintainer at the point that
 work stopped, per `GOVERNANCE.md` "Communicating with the User", and deciding it instead so the
 dispatcher's own work keeps moving is the same resolution by silence this skill's own
-ask-the-maintainer outcome forbids, one seat further from the maintainer. The escalation may travel through several seats, and the work stays stopped in
-every one of them until the answer arrives.
+ask-the-maintainer outcome forbids, one seat further from the maintainer. The escalation may travel through several seats, and what stays stopped is the
+escalated unit of work, in whichever seat holds it, until the answer arrives. A dispatcher's other
+work is not stopped by it.
 
 ## Mechanics Live Elsewhere
 

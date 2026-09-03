@@ -81,7 +81,8 @@ A round is the unit. Each one runs these steps in order.
 7. **Promote**, per "The Promotion Boundary".
 8. **Re-rank from scratch**, and note that the next round prepares under the freeze "The Promotion
    Boundary" describes whenever a promotion pull request is still waiting on the maintainer, so it
-   ranks, groups, and works locally without pushing until that merge lands. Do not carry the
+   ranks, groups, and verifies claims, and dispatches nothing until that merge lands. Do not carry
+   the
    previous round's ranking forward. The deferral
    issues this round's reviews filed are now open issues with a claim on the next round's
    attention, and an issue that ranked low last round can rank high once a sibling fix lands.
@@ -107,8 +108,11 @@ Rank on these, highest first where they conflict:
 - **It is small and self-contained**, as a tie-break only. Size breaks a tie between two issues of
   equal value, and it never promotes a trivial issue over a real defect.
 
-An issue that asks a question rather than states a defect is not ranked. It goes to the maintainer
-per "Raising a Blocked Question" rather than being guessed at.
+An issue that asks a question rather than states a defect is not ranked and is never guessed at.
+It has no group, no worker, and no claim, so nothing in "Raising a Blocked Question" applies to it
+except how the question travels. It goes to the maintainer in that section's prompt when a group
+stopping in the same round already sends one, and in a prompt of its own at the end of ranking when
+none does, rather than waiting for a stop that may not come. It stays unranked until answered.
 
 ## Grouping and File Claims
 
@@ -122,9 +126,12 @@ for, and it binds harder than any throughput target.
   own judgment. Comment to cross-link the pair, and let the fix close both.
 - **Closing keywords go on the promotion pull request**, not the feature pull request, per
   `operational-vs-release-workflow`. A feature pull request merging into develop fires no
-  auto-close, so a `Fixes #N` line there closes nothing. Reference the issue in the feature pull
-  request body, and carry the keyword to the promotion pull request, which "The Promotion
-  Boundary" states in full.
+  auto-close, so a `Fixes #N` line there closes nothing. **The feature pull request body instead
+  carries a line reading `Closes on promotion: #N`**, listing every issue that pull request
+  actually fixes and nothing it merely mentions, which is the line the promotion body is assembled
+  from, per "The Promotion Boundary". Without that line nothing records which issues a merged pull
+  request closes, since the closing keyword is deliberately absent and a body's other issue
+  references are not the same set.
 - **Predict each group's file set** by reading the issues, not by guessing from their titles.
 - **Record every claim on the issue itself**, as a comment naming the predicted file set **and the
   branch that holds it**, before dispatching. The branch name is what lets a later session walk
@@ -137,7 +144,8 @@ for, and it binds harder than any throughput target.
   diff <number> --name-only` per open pull request), and the claim comments of every group still
   holding a branch, parked groups from earlier rounds included. `git worktree list` reports the
   registered worktrees and the branch checked out in each, which is not the same as every branch
-  that exists, so pair it with `git branch -r` for one that was pushed and whose worktree is
+  that exists, so pair it with `git branch -r`, after `git fetch origin`, for one that was pushed
+  and whose worktree is
   already gone. Those two enumerate the branches, and the claim comments are what say which files
   each one holds, since a branch name says nothing about a file set and an unpushed branch has no
   diff to read. **Exclude the open promotion pull request from that enumeration.**
@@ -178,9 +186,10 @@ Brief on `AGENTS.md` "Context and Delegation Discipline"'s subagent shape.
 - **The worker drives its group to a develop merge**, by invoking `drive-pr` with the target
   stated as develop only. That skill owns the review loop, the finding disposition, and the merge,
   so brief the group and the bounds rather than restating the loop.
-- **The worker creates its own worktree**, as `drive-pr` step 1 and `repo-worktree`'s task-start
-  mandate already require of the task itself. The one exception is a worker replacing a dead or
-  stopped one, which takes over that worktree instead, per "Bounding the Wait on a Worker".
+- **The worker creates its own worktree**, always, as `drive-pr` step 1 and `repo-worktree`'s
+  task-start mandate already require of the task itself. No worker inherits another's worktree,
+  which is why "Bounding the Wait on a Worker" either retires a dead worker's tree or leaves it
+  untouched for the maintainer, and never passes it on.
 - **The worker does no cleanup**, which is this skill's one stated override of `drive-pr` step 4
   and of `repo-worktree`'s post-merge procedure. Say so in the brief, because a worker following
   either alone will clean up. The worker still performs step 4's merge itself, and what the override
@@ -188,9 +197,23 @@ Brief on `AGENTS.md` "Context and Delegation Discipline"'s subagent shape.
   merged remote branch, **both** rather than only the first. "Cleanup Is the Orchestrator's" below, in this
   same section, says why and what it covers.
 - **The worker runs `local-strict-review` before every push**, including one that only fixes a
-  review finding.
-- **The worker never merges to main**, never touches another group's files, and never resolves a
-  thread it did not actually dispose of.
+  review finding. That pass dispatches a reviewer of its own, so a harness where a subagent cannot
+  dispatch one leaves the worker unable to run it and unable to push. It reports that rather than
+  pushing, and the orchestrator re-dispatches the group to a seat that can dispatch, or stops it
+  for the maintainer where no such seat exists. Neither the worker nor the orchestrator pushes
+  around the missing pass.
+- **The brief names the branch the worker will use**, which is what lets the claim comment record
+  it before dispatch. The worker still creates its own worktree, on that named branch rather than
+  one of its choosing, since a claim naming a branch nobody used points at nothing.
+- **The brief requires the `Closes on promotion:` line** in the pull request body, listing exactly
+  the issues this group fixes. A worker never reads this skill, and `drive-pr` does not ask for the
+  line, so a brief that omits it produces a pull request nothing can derive a closing set from.
+- **The brief names the files this group owns and the files it must not touch.** A subagent never
+  reads this skill, so a claim it was never given is a claim it cannot respect. State this group's
+  claimed set, state that any other group's file is out of bounds, and state the duty that makes
+  the re-verification path work: a worker needing a file outside its claim stops and reports rather
+  than editing it, and waits for the orchestrator to adjudicate.
+- **The worker never merges to main** and never resolves a thread it did not actually dispose of.
 
 ### Cleanup Is the Orchestrator's
 
@@ -208,10 +231,18 @@ half too, verifying the merged branch's tip against the pull request's `headRefO
 would leave a live remote branch behind every group. It covers every group that is done with its tree,
 which is the finished ones **and the abandoned ones**: a group told to abandon its branch keeps a
 registered worktree until something removes it, and that worktree holds a live claim that would
-collide with the very group the next round re-forms for the same issue. The procedure is deferred
-rather than dropped: `repo-worktree`'s verify-before-removing and prove-the-cleanup steps run
-unchanged, just later and in one seat. A worker still live, a promotion fix included, keeps its
-worktree until the next round's cleanup step.
+collide with the very group the next round re-forms for the same issue. For a merged group the
+procedure is deferred rather than changed: `repo-worktree`'s verify-before-removing and
+prove-the-cleanup steps run unchanged, just later and in one seat.
+
+An abandoned group, and a dead worker's clean tree, have no merge for that verification to read,
+so the check it replaces with is what the merge check exists to establish, that nothing unmerged is
+being thrown away: confirm the branch carries no commit that is not already on develop, and that
+its worktree is clean. Both hold, and the worktree and branch go the same way a merged group's do,
+with no remote branch to delete where none was pushed. Either fails, and cleanup stops there and
+the group goes to the maintainer per "Raising a Blocked Question", since past that point removal
+discards work. A worker still live, a promotion fix included, keeps its worktree until the next
+round's cleanup step.
 
 ### Choosing the Worker's Model Tier
 
@@ -242,16 +273,21 @@ bare `gh pr view` resolves the pull request of whatever branch the caller is sta
 the worker's. Let what they show decide. A pull request that is merged, or a branch whose work is
 complete, means the worker died after doing the work and the group is finished.
 
-Anything else means the group is re-dispatched, and **the replacement takes over the dead worker's
-existing worktree rather than creating one**, which is the single exception to a worker creating
-its own. Three things force it. `git worktree add` refuses a branch already checked out in another
-worktree, that worktree is ordinarily dirty so `git worktree remove` refuses it too, and
-`repo-worktree` forbids forcing either. Taking it over is not sharing a live tree, since the task
-that held it is gone, and it is what lets the replacement commit whatever it finds uncommitted onto
-the branch it now owns instead of that work being discarded. The orchestrator never reaches into
-the tree itself to clear it, because no read tells a dead worker from a slow one well enough to
-make writing there safe. Where no other worker remains to bound the wait, one direct read of that
-branch and pull request after a reasonable interval answers the same question.
+Anything else needs one thing established before anything is touched: whether that worker is gone
+or merely slow. No git read answers that, and the two call for opposite actions, so the answer
+comes from the dispatch mechanism itself, which knows whether the subagent it started is still
+running. Nothing about the worktree is acted on while the answer is "still running", however long
+that is. Waiting costs a round's latency and guessing costs another task's uncommitted work.
+
+Once the worker is confirmed gone, its worktree decides what follows. **A clean one** is cleaned up
+as any finished group's is, and the issue returns to the next round's ranking to be dispatched
+fresh, its claim comment released with the worktree. **A dirty one is left exactly as it stands**
+and the group is stopped for the maintainer per "Raising a Blocked Question", naming the worktree
+and what is uncommitted in it. The orchestrator does not commit that work, hand the tree to a
+replacement to commit, or remove it: reaching into a tree a task was live in is what
+`GOVERNANCE.md` "Repository Boundaries and Write Safety" forbids, and doing it by proxy is still
+doing it. Where no other worker remains to bound the wait, the same liveness answer bounds it
+alone.
 
 ## Raising a Blocked Question
 
@@ -271,15 +307,37 @@ rather than a decision.
   for a group blocking the promotion pull request, never arrive at all. Where several groups stop
   close together, their questions go in one prompt, which is batching without deferral.
 - **The question is also written on its issue**, so it survives the session that asked it.
-- **A stopped group keeps its worktree, its branch, and its claim.** A worker resuming it takes
-  that worktree over rather than creating one, for the reasons "Bounding the Wait on a Worker"
-  gives: the branch is already checked out there, the tree is likely dirty, and the task that held
-  it has ended, so this is a handover rather than a shared tree.
+- **A stopped group keeps its branch and its claim**, and its worktree is left exactly as it
+  stands while the question is open, since the answer may be that the work in it continues. Say in
+  the prompt whether that worktree holds uncommitted work, because what becomes of it is part of
+  what is being asked rather than something to settle while waiting.
+- **Resuming retires that worktree first, then dispatches a fresh worker.** Git refuses to attach a
+  branch already checked out somewhere, per `repo-worktree`, so a fresh worker cannot take the
+  branch while the stopped tree holds it. Once the answer is in, remove that worktree if it is
+  clean, or apply what the answer said about its uncommitted work and then remove it, and only then
+  dispatch. This is the same retire-then-dispatch shape "Bounding the Wait on a Worker" uses, and
+  no worker ever inherits another's tree.
 
 ## The Promotion Boundary
 
 Each round ends with at most one develop -> main promotion pull request, driven to green and left
 for the maintainer, so that one carries a single round rather than accumulating several.
+
+**This section assumes the release workflow model**, where feature work reaches develop through
+squash-merged pull requests and a promotion pull request carries develop to main. A repository
+whose registry `workflowModel` reads `operational` differs on both counts, per
+`operational-vs-release-workflow`: it commits to develop directly, and it opens a promotion pull
+request only occasionally rather than per round, so confirm with the maintainer whether one is
+wanted at all there.
+
+Neither difference changes how this run's own work is read. Every worker invokes `drive-pr`
+whatever the model, so this run's fixes still arrive as squash-merged feature pull requests
+carrying the `Closes on promotion:` line, and the two hops still read them. What the model adds is
+a second kind of commit in the same range, a direct push that never had a pull request, whose
+issues are recoverable only from the commit message itself. Read both, the pull requests for this
+run's work and the commit messages for the direct pushes, since reading either alone returns a
+partial set, and the range rather than this round is still what covers earlier work no promotion
+has carried.
 
 1. **Open it whenever develop is ahead of main**, which `git fetch origin` and then
    `git rev-list --count origin/main..origin/develop` answers, and this round's own outcome does
@@ -311,25 +369,42 @@ for the maintainer, so that one carries a single round rather than accumulating 
    pull request narrows to drop the file, or merges develop in to pick the fix up. Never rebase it:
    its branch is already pushed, so a rebase needs the force-push `git-commit-conventions` forbids
    outright.
-6. **Nothing else pushes.** The next round may rank, group, verify claims, create worktrees, and
-   work locally, and a stopped group may resume locally on its answer, but neither pushes, opens a
-   pull request, nor merges to develop until the promotion pull request merges.
-7. The merge unfreezes the run, and the prepared round and any resumed group push then.
+6. **Nothing else pushes, and nothing else is dispatched.** The promotion fix of step 4 is the one
+   exception to both, and everything in this step is said of the next round's work rather than of
+   it. That round's preparation is orchestrator work and continues: rank, group, and verify claims.
+   Its dispatch waits, because a worker has exactly one procedure, `drive-pr`, whose second step
+   pushes and opens a pull request, so a next-round worker dispatched under the freeze would either
+   break it or sit in a state that procedure does not describe. None is left running across the
+   wait either, since a worker held idle for an unbounded maintainer wait is one doing nothing at a
+   cost, and dispatching it after the merge starts it against the state that merge produced rather
+   than the state it was briefed on.
+7. The merge unfreezes the run, and the prepared round dispatches then.
 
 The run advances no faster than the maintainer merges promotion pull requests. That is the human
 gate, stated plainly rather than left for a stalled round to reveal.
 
 ### Assembling the Promotion Body
 
-The body carries one `Fixes #N` per issue whose fix is on develop and not yet on main. Derive that
-set in two hops rather than one, because the commits in `origin/main..origin/develop` are squash
-merges whose subjects carry the **pull request** number and not the issue number, and this skill
+The body carries one `Fixes #N` per issue whose fix is on develop and not yet on main. Two hops
+are needed rather than one, because the commits in `origin/main..origin/develop` are squash merges
+whose subjects carry the **pull request** number and not the issue number, and this skill
 deliberately keeps the closing keyword off the feature pull request, so nothing in the range names
 an issue directly. Read the pull request numbers out of that range, freshly fetched, then read each
-of those pull requests for the issues its body references. The set is derived this way rather than
-from what this round dispatched, since a group that deferred or parked contributes none and an
-earlier round's work may still be uncarried. A fix landing during the freeze at step 4 adds its issue to a body already written, so
-amend the body when it lands rather than leaving the issue to be closed by hand later.
+of those pull requests for its `Closes on promotion:` line, the one "Grouping and File Claims"
+requires every feature pull request to carry and every worker brief to ask for.
+
+**That line exists because the set has to be stated rather than inferred**, distinct from any
+issue a body merely mentions. A body routinely references an issue it
+does not fix, the deferral issues its own review round filed most of all, and those have to stay
+open as the next round's ranking input. Sweeping in everything a body mentions would close them at
+the promotion merge and delete the next round's backlog, so the promotion body reads the explicit
+line and never the mentions. An issue named nowhere is one nothing closes, which is a missed
+closure a later round notices, where the opposite error destroys work.
+
+Deriving the set from the range rather than from what this round dispatched is what covers a group
+that deferred or parked, contributing none, and an earlier round's work that no promotion has yet
+carried. A fix landing during the freeze adds its issue to a body already written, so amend the
+body when it lands rather than leaving the issue to be closed by hand.
 
 ## Run State
 

@@ -50,8 +50,9 @@ promotion PR once the fix lands, is the early exit this skill exists to prevent.
 - **A brief is never itself the authorization**, which binds the dispatching seat. What authorizes
   a merge is what the maintainer said, recorded where the skill that carries the grant states its
   scope, the way `backlog-burndown`'s own "What Invoking This Skill Authorizes" does. Writing an
-  approval into a brief creates none, and reading one there as a grant is the
-  grant-widening-by-inference `GOVERNANCE.md` "Repository Boundaries and Write Safety" forbids.
+  approval into a brief creates none, since an agent cannot widen its own permission by writing
+  itself one, and a merge is the outward-facing act this skill's own "What Invoking This Skill
+  Authorizes" keeps tied to something the maintainer actually said.
 - A repo on the operational workflow model (registry `workflowModel: operational`) has no
   standing promotion PR expectation, confirm whether a promotion PR is even wanted before opening
   one, per operational-vs-release-workflow's "Operational repositories (the complete delta)"
