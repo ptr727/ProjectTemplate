@@ -197,6 +197,60 @@ def repo_tree(slug, ground_head):
     return None if entries is None else set(entries)
 
 
+def in_test_directory(path):
+    """Whether any directory segment of path names a test directory, compared case-insensitively."""
+    return any(segment.lower() in ("test", "tests") for segment in path.split("/")[:-1])
+
+
+def is_python_test_module(path):
+    """Whether path is a module pytest discovers by name, wherever in the tree it sits."""
+    name = path.rsplit("/", 1)[-1]
+    return name.endswith(".py") and (name.startswith("test_") or name.endswith("_test.py"))
+
+
+def is_csharp_test_project(path):
+    """Whether path is a C# project either named or located as a test project."""
+    return path.endswith(".csproj") and (
+        "Test" in path.rsplit("/", 1)[-1] or in_test_directory(path)
+    )
+
+
+def coverage_claiming_types(types, repo_profiles, type_mechanisms, tree):
+    """The declared types that owe Codecov coverage, meaning the CODECOV_TOKEN secret and codecov.yml.
+
+    A type owes coverage when the fleet maps it to the codecov mechanism, its declared profile is not
+    lint-only, and the repo carries tests for it. The last condition is what keeps a package-only build
+    repo, a library whose tests live elsewhere or are not yet written, from being told to store a token
+    and commit a codecov.yml whose statuses gate a report its pipeline never produces.
+
+    Each detector is deliberately broader than the hub validator's own guard, which keys its C# leg on
+    `**/*Tests*.csproj` and its Python leg on a root `tests/` directory. D1.6 owes coverage to every repo
+    with tests, and a repo the hub leg does not reach meets it through its own workflows instead, so a
+    detector matching the guard exactly would drop the claim for a repo whose suite sits in `test/` or
+    whose project is named `App.UnitTest.csproj`. Every uncertainty here therefore resolves toward
+    keeping the claim, since a claim kept wrongly surfaces as a finding a reader can dismiss and a claim
+    dropped wrongly is a silent clean report on a repo nobody measured.
+
+    `tree` is the repo's blob path set, or None when it could not be read in full. On None the test
+    question is unanswerable, so every candidate type keeps its claim, for that same reason. A type
+    mapped to codecov with no detector here keeps its claim too.
+    """
+    detectors = {
+        "csharp": lambda paths: any(is_csharp_test_project(p) for p in paths),
+        "python": lambda paths: any(
+            (p.endswith(".py") and in_test_directory(p)) or is_python_test_module(p) for p in paths
+        ),
+    }
+    claiming = []
+    for name in types:
+        if type_mechanisms.get(name) != "codecov" or repo_profiles.get(name) == "lint-only":
+            continue
+        detect = detectors.get(name)
+        if tree is None or detect is None or detect(tree):
+            claiming.append(name)
+    return claiming
+
+
 @functools.cache
 def canonical_blob_sha(path):
     """The hub's git blob identity for path, from the same resolved `main` commit
@@ -2237,16 +2291,20 @@ def audit_repo(entry, spec, branch=None):
 
     # --- Secrets (names only) ---
     secrets = spec["secrets"]
-    # The codecov coverage requirement, meaning the CODECOV_TOKEN secret and the codecov.yml file, is claimed by a type only at build profile.
-    # A lint-only language has no tests and so no coverage, per spec/type-model.md.
+    # The codecov coverage requirement, meaning the CODECOV_TOKEN secret and the codecov.yml file, is claimed by a type only at build profile and only where the repo carries tests for that type.
+    # A lint-only language has no tests and so no coverage, per spec/type-model.md, and a build-profile language with no test suite has none either: the validator's leg never runs, so the token and the codecov.yml would gate on a report the pipeline cannot produce.
+    # The tree is read here rather than at the verbatim-tree section below so one call answers both, and the finding for an unreadable tree stays where it was.
     repo_profiles = entry.get("profiles", {})
     if not isinstance(repo_profiles, dict):
         repo_profiles = {}
-    coverage_active = any(
-        secrets.get("typeMechanisms", {}).get(t) == "codecov"
-        and repo_profiles.get(t) != "lint-only"
-        for t in types
+    carried_entries = repo_tree_entries(slug, ground_head)
+    coverage_types = coverage_claiming_types(
+        types,
+        repo_profiles,
+        secrets.get("typeMechanisms", {}),
+        None if carried_entries is None else set(carried_entries),
     )
+    coverage_active = bool(coverage_types)
     stores = {}
     # There is no ok404 here, since an empty store returns {"secrets": []}, so a 404 or 403 from permissions or a rename must surface as ERROR rather than cascade into false missing-secret DEFECTs.
     for store, path in [
@@ -2258,11 +2316,14 @@ def audit_repo(entry, spec, branch=None):
     mechanisms = [
         secrets["targetMechanisms"].get(p.get("target")) for p in entry.get("publish", [])
     ]
-    mechanisms += [
-        secrets.get("typeMechanisms", {}).get(t)
-        for t in types
-        if repo_profiles.get(t) != "lint-only"
-    ]
+    # The codecov mechanism follows coverage_types rather than the profile, so a language with no tests requires no CODECOV_TOKEN.
+    for name in types:
+        if repo_profiles.get(name) == "lint-only":
+            continue
+        mechanism = secrets.get("typeMechanisms", {}).get(name)
+        if mechanism == "codecov" and name not in coverage_types:
+            continue
+        mechanisms.append(mechanism)
     claimed = [secrets["mechanisms"][m] for m in mechanisms if m and m in secrets["mechanisms"]]
     required_by_store = {"actions": set(), "dependabot": set()}
     for store in secrets["baseline"].get("stores", []):
@@ -2341,7 +2402,7 @@ def audit_repo(entry, spec, branch=None):
             continue
         path = item["path"]
         if path == "codecov.yml" and not coverage_active:
-            continue  # coverage feature file: N/A when no type claims codecov at build profile (spec/type-model.md)
+            continue  # coverage feature file: N/A when no type claims codecov at build profile with tests present (spec/type-model.md)
         if path not in wanted_sections:
             wanted_sections[path] = set()
             verbatim_secs[path] = set()
@@ -2491,7 +2552,7 @@ def audit_repo(entry, spec, branch=None):
                 )
 
     # --- Manifest-owned verbatim trees ---
-    carried_entries = repo_tree_entries(slug, ground_head)
+    # carried_entries was read once above, where the coverage applicability check needed it first.
     if carried_entries is None:
         findings.append(
             (
@@ -5140,6 +5201,102 @@ def _selftest():
     else:
         print(
             "  ok   repo_tree: a truncated tree and a missing tree sha both return None, and a whole one drops non-blobs"
+        )
+
+    # Applicability turns on tests, so a package-only build repo is N/A rather than owing a token for a report nothing produces.
+    type_mechs = {"csharp": "codecov", "python": "codecov"}
+    coverage_cases = [
+        (["python"], {}, {"src/pkg/__init__.py", "pyproject.toml"}, [], "python, no tests"),
+        (["python"], {}, {"tests/test_a.py", "pyproject.toml"}, ["python"], "python with tests"),
+        (["python"], {"python": "lint-only"}, {"tests/test_a.py"}, [], "python lint-only"),
+        (["csharp"], {}, {"src/App/App.csproj"}, [], "csharp, no test project"),
+        (["csharp"], {}, {"test/App.Tests/App.Tests.csproj"}, ["csharp"], "csharp with tests"),
+        (["csharp"], {}, {"src/Tests/App.csproj"}, ["csharp"], "csharp, located under Tests/"),
+        (
+            ["csharp"],
+            {},
+            {"test/Specs.csproj"},
+            ["csharp"],
+            "csharp, located as a test, named nothing",
+        ),
+        (
+            ["csharp"],
+            {},
+            {"src/App/App.csproj", "docs/x.md"},
+            [],
+            "csharp, neither named nor located as a test",
+        ),
+        (
+            ["python"],
+            {},
+            {"test_app.py", "pyproject.toml"},
+            ["python"],
+            "python, root-level test module",
+        ),
+        (
+            ["python"],
+            {},
+            {"app_test.py", "pyproject.toml"},
+            ["python"],
+            "python, trailing _test module",
+        ),
+        (
+            ["python"],
+            {},
+            {"src/app.py", "contest.py"},
+            [],
+            "python, a module merely containing test",
+        ),
+        (
+            ["python"],
+            {},
+            {"tests/README.md", "pyproject.toml"},
+            [],
+            "python, a test directory holding no Python",
+        ),
+        (
+            ["python"],
+            {},
+            {"tests/conftest.py", "pyproject.toml"},
+            ["python"],
+            "python, a test directory holding Python",
+        ),
+        (
+            ["csharp"],
+            {},
+            {"test/App.UnitTest.csproj"},
+            ["csharp"],
+            "csharp, singular Test in the name",
+        ),
+        (
+            ["python"],
+            {},
+            {"test/test_a.py", "pyproject.toml"},
+            ["python"],
+            "python, singular test dir",
+        ),
+        (["python"], {}, {"src/tests/test_a.py"}, ["python"], "python, tests below the root"),
+        (["python"], {}, {"tests"}, [], "python, a file named tests is not a directory"),
+        (
+            ["csharp", "python"],
+            {"python": "lint-only"},
+            {"test/App.Tests/App.Tests.csproj", "tools/py/pyproject.toml"},
+            ["csharp"],
+            "mixed repo, the tested C# side claims coverage",
+        ),
+        (["python"], {}, None, ["python"], "unreadable tree keeps the claim"),
+        (["docker"], {}, {"tests/test_a.py"}, [], "a type mapped to no mechanism claims nothing"),
+    ]
+    coverage_ok = True
+    for types_in, profiles_in, tree_in, expected, label in coverage_cases:
+        got = coverage_claiming_types(types_in, profiles_in, type_mechs, tree_in)
+        if got != expected:
+            ok = False
+            coverage_ok = False
+            print(f"  FAIL coverage_claiming_types [{label}] -> {got}, expected {expected}")
+    if coverage_ok:
+        print(
+            "  ok   coverage_claiming_types: tests decide the claim, lint-only never claims, and an unreadable tree keeps it"
         )
 
     id_cases = [
