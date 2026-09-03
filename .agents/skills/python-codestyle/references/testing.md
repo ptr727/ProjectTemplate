@@ -7,6 +7,9 @@ are in `references/profiles.md`.
 Use `pytest` with configuration in `[tool.pytest.ini_options]`. Default invocation:
 `uv run pytest`.
 
+**Coverage.** A build-profile repo with tests owes WORKFLOW.md's D1.6 coverage obligations. Read
+D1.6 before writing `pyproject.toml`.
+
 - One test file per module under test, named `test_<module>.py`.
 - Test functions named `test_<scenario>_<expected_behavior>`, descriptive and not numbered.
 - Use fixtures (defined in `conftest.py` for shared ones, or per-test for narrowly-scoped) instead
