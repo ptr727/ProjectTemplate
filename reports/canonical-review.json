@@ -194,6 +194,14 @@
       "stamp": "2026-09-02T03:51:13Z"
     },
     {
+      "unit": ".agents/skills/python-codestyle/references/testing.md",
+      "digest": "sha256:58de79a2634bd61f5d3d411b550b99537bba437a23a36f0e6995dd74ea67b1c2",
+      "reviewer": "agent-skill",
+      "findings": 0,
+      "hubCommit": "e56d99db54bd0d89f44904b7e76de366ca41c124",
+      "stamp": "2026-09-03T17:48:49Z"
+    },
+    {
       "unit": ".agents/skills/repo-worktree/SKILL.md > Creating a Worktree",
       "digest": "sha256:5d8b1dff2f47416ac8aa52b612837e9836316a6a374522956df42124c07235c5",
       "reviewer": "agent-skill",
@@ -459,11 +467,11 @@
     },
     {
       "unit": "WORKFLOW.md > 5. Test Methodology",
-      "digest": "sha256:3014749f3cb30f5a0541cbc9cd4dffa76d0bec7b5c4444373b041ad7c54a2094",
+      "digest": "sha256:18e41e5b607eb337226934496038656cdb047c0cfb99e6bce5c8f7832dfc74b4",
       "reviewer": "agent-skill",
-      "findings": 9,
-      "hubCommit": "445bd440ca7df6fc32a28dd34be9469d2c603f18",
-      "stamp": "2026-09-02T16:49:49Z"
+      "findings": 38,
+      "hubCommit": "6525cb888406c7f6a1f43c5f9b21fb041200c601",
+      "stamp": "2026-09-03T17:41:49Z"
     },
     {
       "unit": "WORKFLOW.md > 6. Per-Project-Type Test Walkthroughs",

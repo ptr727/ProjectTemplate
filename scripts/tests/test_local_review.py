@@ -234,6 +234,28 @@ class ContentKeyCase(RepoCase):
         run(self.tmp, "update-ref", "refs/remotes/upstream/main", "HEAD")
         self.assertEqual(local_review.target_ref("upstream/main", self.tmp), "upstream/main")
 
+    def test_an_explicit_remote_tracking_target_wins_over_a_same_named_origin_branch(self) -> None:
+        """An explicitly named remote-tracking ref must not lose to the origin/ preference.
+
+        Here `upstream/main` is itself a remote-tracking ref, but a branch on origin happens to
+        be named `upstream/main` too, so `origin/upstream/main` also resolves. Preferring that
+        unconditionally would scope the review against origin instead of the remote the caller
+        actually named, contradicting the documented fork-based-flow intent.
+        """
+        run(self.tmp, "update-ref", "refs/remotes/upstream/main", "HEAD")
+        (self.tmp / "moved.txt").write_text("origin moved on\n", encoding="utf-8")
+        run(self.tmp, "add", "moved.txt")
+        run(self.tmp, "commit", "-m", "origin only")
+        origin_head = run(self.tmp, "rev-parse", "HEAD").strip()
+        run(self.tmp, "update-ref", "refs/remotes/origin/upstream/main", origin_head)
+        run(self.tmp, "reset", "--hard", "HEAD~1")
+        self.assertNotEqual(
+            run(self.tmp, "rev-parse", "origin/upstream/main").strip(),
+            run(self.tmp, "rev-parse", "upstream/main").strip(),
+            "fixture does not distinguish the two",
+        )
+        self.assertEqual(local_review.target_ref("upstream/main", self.tmp), "upstream/main")
+
     def test_a_target_resolving_nowhere_is_a_boundary(self) -> None:
         with self.assertRaises(local_review.CannotRun):
             local_review.target_ref("no-such-branch-anywhere", self.tmp)
