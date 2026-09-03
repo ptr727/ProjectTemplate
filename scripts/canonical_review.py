@@ -49,6 +49,7 @@ import hashlib
 import json
 import os
 import pathlib
+import shlex
 import subprocess
 import sys
 from collections.abc import Callable
@@ -629,7 +630,7 @@ def cmd_check(args: argparse.Namespace) -> int:
         "\nfix what it finds. Read each unit's whole current text, then record the pass, handing"
         "\nback the key and digest exactly as printed above:"
         f"\n  python3 scripts/canonical_review.py record --reviewer agent-skill"
-        f" --target {target} --unit '<key>=<digest>'"
+        f" --target {shlex.quote(target)} --unit '<key>=<digest>'"
         '\nThe local-strict-review skill\'s "The Carried-Content Pass" says how the pass is run,'
         "\nand its refusal table what this refusal means where the units named look wrong.",
         sys.stderr,
