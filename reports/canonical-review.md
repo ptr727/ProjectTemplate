@@ -7,9 +7,9 @@ A unit is what a reviewer reads whole, decided by the carry manifest rather than
 ## Coverage
 
 - units: 288
-- covered: 59
+- covered: 60
 - stale: 0
-- never read here: 229
+- never read here: 228
 
 ## Burn-down
 
@@ -240,10 +240,6 @@ A unit is what a reviewer reads whole, decided by the carry manifest rather than
 - **Adapt before propagating** - never
 - **Two profiles: full specification** - never
 - **Versioning** - never
-
-### .agents/skills/python-codestyle/references/testing.md
-
-- **(whole file)** - never
 
 ### .agents/skills/repo-worktree/SKILL.md
 
