@@ -34,13 +34,13 @@ A language type is present at one of two **depths**, declared as its `profile`:
 - **build** - the language is compiled, tested, and/or packaged in this repo. Its full check set applies (style, type-check, tests, coverage, packaging).
 - **lint-only** - the language is present and style-checked here, but not built: there is no build/test/package for it in this repo. Only its lint/style/type-check checks apply. Build, test, coverage, and packaging checks are N/A.
 
-Each check may declare the **minimum profile** it needs via a `minProfile` field. A check without one applies at every profile, and a check with `minProfile: build` applies only at `build`. So lint/style/type-check checks omit it, while build/test/coverage/package checks set `build`. The audit uses the declared profile to hold the coverage requirement (the CODECOV_TOKEN secret and the codecov.yml file) as N/A for a lint-only language, replacing the older per-check "N/A for the SCRIPTS profile" prose.
+Each check may declare the **minimum profile** it needs via a `minProfile` field. A check without one applies at every profile, and a check with `minProfile: build` applies only at `build`. So lint/style/type-check checks omit it, while build/test/coverage/package checks set `build`. The audit uses the declared profile to hold the coverage requirement (the CODECOV_TOKEN secret and the codecov.yml file) as N/A for a lint-only language, replacing the older per-check "N/A for the SCRIPTS profile" prose. The profile is a floor rather than the whole test, since a build-profile language can still carry no test suite, so the audit reads the repo's tree for tests as well and holds the same requirement N/A where it finds none.
 
 The profile is **declared and validated**, not merely detected. `python` already reads its shape structurally from `pyproject.toml` (a uv PROJECT with tests and a lockfile, versus stdlib SCRIPTS tooling). That structural read becomes the profile **validator**. A declared `python` profile that contradicts the pyproject shape is a false declaration. One concept (the declared profile), checked by detection, rather than two ways to classify.
 
 ### Consequence for cross-cutting checks
 
-A cross-cutting check that presumes a built, tested language must respect the profile. In particular the coverage checks (the `CODECOV_TOKEN` secret and the `codecov.yml` file presence) are **profile-aware**: they are N/A for a language whose declared profile has no tests. A lint-only language must never manufacture a coverage finding.
+A cross-cutting check that presumes a built, tested language must respect the profile. In particular the coverage checks (the `CODECOV_TOKEN` secret and the `codecov.yml` file presence) are **profile-aware and tests-aware**: they are N/A for a language whose declared profile has no tests, and N/A for a build-profile language the repo carries no tests for. A lint-only language must never manufacture a coverage finding, and neither must a package-only build language whose tests live elsewhere or are not yet written.
 
 ## Languages
 

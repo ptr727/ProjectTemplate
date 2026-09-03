@@ -7,9 +7,9 @@ A unit is what a reviewer reads whole, decided by the carry manifest rather than
 ## Coverage
 
 - units: 288
-- covered: 59
+- covered: 65
 - stale: 0
-- never read here: 229
+- never read here: 223
 
 ## Burn-down
 
@@ -180,7 +180,6 @@ A unit is what a reviewer reads whole, decided by the carry manifest rather than
 
 ### .agents/skills/operational-vs-release-workflow/SKILL.md
 
-- **(preamble)** - never
 - **Branching (release model)** - never
 - **Operational repositories (the complete delta)** - never
 - **Publishing (release model)** - never
@@ -241,10 +240,6 @@ A unit is what a reviewer reads whole, decided by the carry manifest rather than
 - **Two profiles: full specification** - never
 - **Versioning** - never
 
-### .agents/skills/python-codestyle/references/testing.md
-
-- **(whole file)** - never
-
 ### .agents/skills/repo-worktree/SKILL.md
 
 - **(preamble)** - never
@@ -294,10 +289,6 @@ A unit is what a reviewer reads whole, decided by the carry manifest rather than
 - **What stays governed by the fleet's own rules** - never
 - **Why this exists** - never
 
-### .agents/skills/workflow-ci-contract/SKILL.md
-
-- **Why This Exists** - never
-
 ### .agents/skills/workflow-ci-contract/references/d-guarantees.md
 
 - **D2: Validation at Entry** - never
@@ -308,8 +299,6 @@ A unit is what a reviewer reads whole, decided by the carry manifest rather than
 ### .agents/skills/workflow-ci-contract/references/test-methodology.md
 
 - **(preamble)** - never
-- **5C: Live Probe** - never
-- **Verdict** - never
 
 ### .editorconfig
 
@@ -373,7 +362,6 @@ A unit is what a reviewer reads whole, decided by the carry manifest rather than
 - **Git and Commit Rules** - never
 - **Hub-Hosted Tooling** - never
 - **Operational Repositories** - never
-- **PR Review Etiquette** - never
 - **Pull Request Title and Commit Message Conventions** - never
 - **Release Model** - never
 - **Repository Boundaries and Write Safety** - never

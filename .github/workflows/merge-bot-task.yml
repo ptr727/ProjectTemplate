@@ -106,12 +106,17 @@ jobs:
             {"head": "upstream-version-main", "base": "main"},
             {"head": "upstream-version-develop", "base": "develop"}
           ]'
+          # The no-auto-merge- marker is reserved ahead of every rule, built-in or caller-supplied, so a caller's own head-prefix can never match an opted-out head.
           matched=$(jq -r --argjson extra "$RULES" --arg head "$HEAD_REF" --arg base "$BASE_REF" '
-            . + $extra
-            | map(select(.base == $base)
-                  | select((.head // "") == $head or ((."head-prefix" // "") as $p | $p != "" and ($head | startswith($p)))))
-            | length > 0' <<<"$builtin")
-          if [[ "$matched" != "true" ]]; then
+            if $head | startswith("no-auto-merge-") then false else
+              . + $extra
+              | map(select(.base == $base)
+                    | select((.head // "") == $head or ((."head-prefix" // "") as $p | $p != "" and ($head | startswith($p)))))
+              | length > 0
+            end' <<<"$builtin")
+          if [[ "$HEAD_REF" == no-auto-merge-* ]]; then
+            echo "::warning::App pull request $HEAD_REF -> $BASE_REF carries the no-auto-merge- marker, not auto-merging"
+          elif [[ "$matched" != "true" ]]; then
             echo "::warning::App pull request $HEAD_REF -> $BASE_REF matches no merge rule, not auto-merging"
           fi
           echo "matched=$matched" >>"$GITHUB_OUTPUT"

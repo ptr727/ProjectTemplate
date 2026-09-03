@@ -122,6 +122,14 @@
       "stamp": "2026-09-01T18:51:57Z"
     },
     {
+      "unit": ".agents/skills/operational-vs-release-workflow/SKILL.md > (preamble)",
+      "digest": "sha256:f03486afbab8e5742c3571d7da5544d07a99f7b5a4a90d030baa472a1d6220d6",
+      "reviewer": "agent-skill",
+      "findings": 0,
+      "hubCommit": "eb6d2a055dc590113f515aed7cac1e019b7d2111",
+      "stamp": "2026-09-03T18:32:16Z"
+    },
+    {
       "unit": ".agents/skills/operational-vs-release-workflow/references/release-publish-mechanics.md > Map your outputs to the right seam",
       "digest": "sha256:42eb378e35d5810c91bfc40f3a56785f2fae5d6fe772b7ba9e9ed3c6b8a6d13c",
       "reviewer": "agent-skill",
@@ -194,6 +202,14 @@
       "stamp": "2026-09-02T03:51:13Z"
     },
     {
+      "unit": ".agents/skills/python-codestyle/references/testing.md",
+      "digest": "sha256:58de79a2634bd61f5d3d411b550b99537bba437a23a36f0e6995dd74ea67b1c2",
+      "reviewer": "agent-skill",
+      "findings": 0,
+      "hubCommit": "e56d99db54bd0d89f44904b7e76de366ca41c124",
+      "stamp": "2026-09-03T17:48:49Z"
+    },
+    {
       "unit": ".agents/skills/repo-worktree/SKILL.md > Creating a Worktree",
       "digest": "sha256:5d8b1dff2f47416ac8aa52b612837e9836316a6a374522956df42124c07235c5",
       "reviewer": "agent-skill",
@@ -235,11 +251,11 @@
     },
     {
       "unit": ".agents/skills/workflow-ci-contract/SKILL.md > (preamble)",
-      "digest": "sha256:b7bf2ed878797d025cd67ba7191b40c1988a1cf0233e0141e73dfe347f1a0836",
+      "digest": "sha256:47ca6dfccbb8527b464aaa2c8fd113d536b8102f35635407b7b4e62663226425",
       "reviewer": "agent-skill",
-      "findings": 4,
-      "hubCommit": "99f8de2209405d2dfa8b6d648dc42d55ee3de060",
-      "stamp": "2026-09-02T19:10:19Z"
+      "findings": 0,
+      "hubCommit": "eb6d2a055dc590113f515aed7cac1e019b7d2111",
+      "stamp": "2026-09-03T18:32:16Z"
     },
     {
       "unit": ".agents/skills/workflow-ci-contract/SKILL.md > After Any Workflow Edit",
@@ -267,11 +283,19 @@
     },
     {
       "unit": ".agents/skills/workflow-ci-contract/SKILL.md > The Core Behavioral Spine",
-      "digest": "sha256:0b53bafe901f2482156fffb07b24cb26968f5cae3c6da1e71bc713c24ab5cfd5",
+      "digest": "sha256:91fbccc9e042f0ad82322b032f1efbd30590db572ae022b13c0ef537a6928ce9",
       "reviewer": "agent-skill",
-      "findings": 5,
-      "hubCommit": "1de415fbc5de255f04b2b7f71d42f1f240355639",
-      "stamp": "2026-09-02T19:38:44Z"
+      "findings": 1,
+      "hubCommit": "3f1cb6a107d860b6dec65357fdc4787a8492ba39",
+      "stamp": "2026-09-03T18:56:39Z"
+    },
+    {
+      "unit": ".agents/skills/workflow-ci-contract/SKILL.md > Why This Exists",
+      "digest": "sha256:713456da9774e1d979fdef3a31cf90099bd3287e28715754a2d8266979311a53",
+      "reviewer": "agent-skill",
+      "findings": null,
+      "hubCommit": "a6c7bb1d0831b5c41a905b0c957661dc14f5f566",
+      "stamp": "2026-09-03T22:06:23Z"
     },
     {
       "unit": ".agents/skills/workflow-ci-contract/references/d-guarantees.md > (preamble)",
@@ -323,11 +347,11 @@
     },
     {
       "unit": ".agents/skills/workflow-ci-contract/references/test-methodology.md > 5A: Static Audit",
-      "digest": "sha256:a23b5e76946c8b7e03a3afff7b874c42f3204c4ded292a6c7d7ff81db6bf20fe",
+      "digest": "sha256:d3dff5e85fa809cd530b313d0e108f260d7f5437274d5261aeafde77d13666e7",
       "reviewer": "agent-skill",
-      "findings": 62,
-      "hubCommit": "9b33edb7e0f55fe2a05630a49d5be99ba1e3eb26",
-      "stamp": "2026-09-02T15:16:10Z"
+      "findings": null,
+      "hubCommit": "a6c7bb1d0831b5c41a905b0c957661dc14f5f566",
+      "stamp": "2026-09-03T22:06:23Z"
     },
     {
       "unit": ".agents/skills/workflow-ci-contract/references/test-methodology.md > 5B: Trace Scenarios",
@@ -336,6 +360,22 @@
       "findings": 9,
       "hubCommit": "50d97cd013e013af1fee010dfe8828200792f560",
       "stamp": "2026-09-02T16:21:12Z"
+    },
+    {
+      "unit": ".agents/skills/workflow-ci-contract/references/test-methodology.md > 5C: Live Probe",
+      "digest": "sha256:b8452d5de92fa99914afdf3e4b8a5a603487cda27fe277df815174c57f675de0",
+      "reviewer": "agent-skill",
+      "findings": 0,
+      "hubCommit": "28dafdf46ee35cc9901e845a317991d909a94fac",
+      "stamp": "2026-09-03T18:19:22Z"
+    },
+    {
+      "unit": ".agents/skills/workflow-ci-contract/references/test-methodology.md > Verdict",
+      "digest": "sha256:fca3f384bfead20bbf4da5381ada9abf417451d72f8e88a51a246fa910faf4a2",
+      "reviewer": "agent-skill",
+      "findings": 0,
+      "hubCommit": "28dafdf46ee35cc9901e845a317991d909a94fac",
+      "stamp": "2026-09-03T18:19:23Z"
     },
     {
       "unit": ".github/copilot-instructions.md > Reviewing Carried Fleet Content",
@@ -394,6 +434,14 @@
       "stamp": "2026-09-02T01:11:58Z"
     },
     {
+      "unit": "GOVERNANCE.md > PR Review Etiquette",
+      "digest": "sha256:e3162c48ed4463345c611d608eb428839e3ba6a8cc9b1a52d0e0d5808e7f0a83",
+      "reviewer": "agent-skill",
+      "findings": 6,
+      "hubCommit": "28dafdf46ee35cc9901e845a317991d909a94fac",
+      "stamp": "2026-09-03T18:28:40Z"
+    },
+    {
       "unit": "GOVERNANCE.md > Repository Layout",
       "digest": "sha256:b02bb961b5a0ac3b595b75cd01f6a9be91b5d6690a7f7b24bfe1f9c5660196b7",
       "reviewer": "agent-skill",
@@ -403,11 +451,11 @@
     },
     {
       "unit": "GOVERNANCE.md > Verification Discipline",
-      "digest": "sha256:0f7d427f2fd507aef0b81e84c3829aa13887838b96647cd37b6cbd7016da50c3",
+      "digest": "sha256:d62a160f347578c5c2f922f280f21ced2e1d4a1adc9df6aed124ea2dce637628",
       "reviewer": "agent-skill",
-      "findings": 0,
-      "hubCommit": "e97708dfe4c92e275118a0705556822993de9f32",
-      "stamp": "2026-08-31T16:26:36Z"
+      "findings": 15,
+      "hubCommit": "28dafdf46ee35cc9901e845a317991d909a94fac",
+      "stamp": "2026-09-03T18:39:43Z"
     },
     {
       "unit": "GOVERNANCE.md > Workflow YAML Conventions",
@@ -451,19 +499,19 @@
     },
     {
       "unit": "WORKFLOW.md > 4. Behavioral Contract: Expected Outcomes",
-      "digest": "sha256:a4b85d3b43f98646b6cf1a7161acacc09f3e4b8f3c23c1197af69d13bba74d84",
+      "digest": "sha256:3616be733206b40f62b360374e08056785038ec7b528c7746ab0a5dfaffc34c3",
       "reviewer": "agent-skill",
-      "findings": 0,
-      "hubCommit": "4fdc718663d0149994e496e890c20c7a77f27c96",
-      "stamp": "2026-09-03T03:04:24Z"
+      "findings": 16,
+      "hubCommit": "28dafdf46ee35cc9901e845a317991d909a94fac",
+      "stamp": "2026-09-03T18:21:27Z"
     },
     {
       "unit": "WORKFLOW.md > 5. Test Methodology",
-      "digest": "sha256:3014749f3cb30f5a0541cbc9cd4dffa76d0bec7b5c4444373b041ad7c54a2094",
+      "digest": "sha256:e4c043871a8fe90f89741b36893a0a4b8cf8ddba18ca8259a4513a300931ed24",
       "reviewer": "agent-skill",
-      "findings": 9,
-      "hubCommit": "445bd440ca7df6fc32a28dd34be9469d2c603f18",
-      "stamp": "2026-09-02T16:49:49Z"
+      "findings": 12,
+      "hubCommit": "28dafdf46ee35cc9901e845a317991d909a94fac",
+      "stamp": "2026-09-03T18:21:33Z"
     },
     {
       "unit": "WORKFLOW.md > 6. Per-Project-Type Test Walkthroughs",

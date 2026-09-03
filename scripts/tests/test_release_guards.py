@@ -3,11 +3,69 @@
 
 from __future__ import annotations
 
+import re
 import unittest
 from pathlib import Path
 from subprocess import run
 
 REPO = Path(__file__).resolve().parents[2]
+
+
+def hash_files(pattern: str, present: set[str]) -> bool:
+    """Whether a workflow `hashFiles(<pattern>)` would match anything in `present`.
+
+    `**` spans directory separators and `*` does not, which is what separates a root-only
+    `requirements*.txt` from a recursive `tests/**`.
+    """
+    regex = re.escape(pattern).replace(r"\*\*", "@@").replace(r"\*", "[^/]*").replace("@@", ".*")
+    return any(re.fullmatch(regex, path) for path in present)
+
+
+def split_top_level(expression: str, operator: str) -> list[str]:
+    """Split on `operator` outside any parentheses."""
+    parts: list[str] = []
+    depth = 0
+    start = 0
+    index = 0
+    while index < len(expression):
+        character = expression[index]
+        if character == "(":
+            depth += 1
+        elif character == ")":
+            depth -= 1
+        elif depth == 0 and expression.startswith(operator, index):
+            parts.append(expression[start:index])
+            index += len(operator)
+            start = index
+            continue
+        index += 1
+    parts.append(expression[start:])
+    return [part.strip() for part in parts]
+
+
+def evaluate_guard(expression: str, present: set[str]) -> bool:
+    """Evaluate a workflow `if:` written only from `hashFiles(...)` emptiness tests, `&&`, `||`, `()`.
+
+    Deliberately narrow rather than a general expression engine: it is here to answer what the
+    validator's Python leg does for one file set, not to reimplement GitHub's evaluator.
+    """
+
+    def atom(text: str) -> bool:
+        match = re.fullmatch(r"hashFiles\('([^']*)'\)\s*(!=|==)\s*''", text.strip())
+        if not match:
+            raise ValueError(f"unsupported guard atom: {text!r}")
+        hit = hash_files(match.group(1), present)
+        return hit if match.group(2) == "!=" else not hit
+
+    result = True
+    for clause in split_top_level(expression, "&&"):
+        if clause.startswith("(") and clause.endswith(")"):
+            result = result and any(
+                atom(alternative) for alternative in split_top_level(clause[1:-1], "||")
+            )
+        else:
+            result = result and atom(clause)
+    return result
 
 
 class ReleaseGuardCase(unittest.TestCase):
@@ -157,6 +215,52 @@ gh() {
             'gh api "repos/<owner>/<repo>/contents/$1?ref=<ground>" >/dev/null 2>&1',
             audit,
         )
+
+    def test_validator_python_leg_reaches_a_pip_dependency_repo(self) -> None:
+        """WORKFLOW.md D1.6 owes coverage to every Python repo with tests, uv-managed or not.
+
+        Gating the leg on `uv.lock` alone skipped a pip/requirements repo that has tests, so it
+        collected no coverage and never reached the missing-report failure either.
+        """
+        workflow = (REPO / ".github/workflows/validate-task.yml").read_text(encoding="utf-8")
+        job = workflow.split("\n  unit-test:\n", 1)[1].split("\n  validate:\n", 1)[0]
+        guards = [
+            " ".join(line.strip() for line in block.strip().splitlines())
+            for block in re.findall(r"(?m)^        if: >-\n((?:^ {10}.*\n)+)", job)
+        ]
+        python_guards = [guard for guard in guards if "tests/**" in guard]
+
+        # Setup, dependency install, pytest, and upload: one drifting guard reintroduces the skip.
+        self.assertEqual(4, len(python_guards))
+        self.assertEqual(1, len(set(python_guards)))
+
+        trees = {
+            "uv project with tests": ({"pyproject.toml", "uv.lock", "tests/test_a.py"}, True),
+            "pip project with tests": (
+                {"pyproject.toml", "requirements.txt", "requirements-test.txt", "tests/test_a.py"},
+                True,
+            ),
+            "tests but no dependency manifest": ({"pyproject.toml", "tests/test_a.py"}, False),
+            "lint-only scripts tree": ({"pyproject.toml", "scripts/tool.py"}, False),
+            "pip project with no tests": ({"pyproject.toml", "requirements.txt"}, False),
+        }
+        for label, (present, expected) in trees.items():
+            with self.subTest(tree=label):
+                self.assertEqual(expected, evaluate_guard(python_guards[0], present))
+
+        # The guard admitting a pip repo is only half of it: the steps must install and run without a lockfile.
+        self.assertIn('requirement_args+=(-r "$file")', job)
+        self.assertIn('uv pip install "${requirement_args[@]}"', job)
+        self.assertIn(".venv/bin/python -m pytest --cov-report=xml", job)
+
+        # One resolve over every requirements file, never one install per file.
+        # The glob sorts the base file last, so a per-file install lets its pins downgrade what the test-requirements file just resolved.
+        self.assertNotIn('uv pip install -r "$file"', job)
+
+        # The lockfile branch installs the project itself, so the pip branch owes the same.
+        # Without it a src-layout repo fails collection on its own package instead of running its tests.
+        self.assertIn("uv pip install -e .", job)
+        self.assertIn(r"grep -Eq '^[[:space:]]*\[project\]' pyproject.toml", job)
 
     def test_audit_bash_blocks_are_not_labeled_as_posix_shell(self) -> None:
         audit_lines = (REPO / "AUDIT.md").read_text(encoding="utf-8").splitlines()

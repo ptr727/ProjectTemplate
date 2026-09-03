@@ -84,12 +84,12 @@ if [ -f "$registry" ]; then
     # The name python3 is not universal: native Windows can register a Microsoft Store stub under that name that resolves on PATH but fails when actually run, so this runs it rather than just checking PATH (docs/host-setup.md).
     # The probe checks 3.7+ (PEP 563, from __future__ import annotations) because that is the oldest interpreter resolve_description.py happens to parse and run on, not because 3.7 is this repo's supported floor.
     # The repository floor is 3.13 (spec/host-tools.json's python3 target, enforced on the host by scripts/host_gate.py).
-    # Its own from __future__ import annotations is what lets resolve_description.py stay parseable below that, not a license for any other spec/ code to hedge for anything older.
     # A too-old interpreter fails here with a clear message instead of a bare traceback from the script.
-    if python3 -c "from __future__ import annotations" >/dev/null 2>&1; then
-        py_cmd=(python3)
-    elif py -3 -c "from __future__ import annotations" >/dev/null 2>&1; then
+    # The py launcher is probed first: it reaches a registered interpreter whatever is active, where a bare python3 goes through PATH and a virtual environment can answer there instead.
+    if py -3 -c "from __future__ import annotations" >/dev/null 2>&1; then
         py_cmd=(py -3)
+    elif python3 -c "from __future__ import annotations" >/dev/null 2>&1; then
+        py_cmd=(python3)
     else
         echo "No Python interpreter found (python3 or py -3) able to run resolve_description.py. This repo targets Python 3.13 (see docs/host-setup.md)." >&2
         exit 1
@@ -141,7 +141,7 @@ apply_ruleset() { # payload-file - create-or-update the ruleset by name
         echo "Ruleset payload $file not found. Aborting to avoid a partially-applied configuration." >&2
         exit 1
     fi
-    rname="$(jq -r '.name // empty' "$file")"
+    rname="$(jqr '.name // empty' "$file")"
     if [ -z "$rname" ]; then
         echo "Ruleset payload $file has no name. Aborting to avoid a partially-applied configuration." >&2
         exit 1
@@ -241,13 +241,20 @@ jq_has() { jq -e "$@" >/dev/null 2>&1; }
 # The vulnerability-alerts endpoint is the example, returning 204 when enabled and 404 when disabled.
 gh_ok() { gh api "$@" >/dev/null 2>&1; }
 
+# Call as `jqr FILTER...`: jq -r plus stripping a line's trailing \r that a native Windows jq (WinGet's jq-1.8.2) puts there.
+# The \r bash expands here, a literal byte rather than sed's own backslash-escape, since that escape is a GNU extension a BSD sed would not honor.
+jqr() { jq -r "$@" | sed $'s/\r$//'; }
+
 check_ruleset() { # payload-file - the live ruleset must match the committed policy, driven by the payload
     local file="$1" rname id live t want got want_enf
     if [ ! -e "$file" ]; then
         fail "ruleset payload $file missing"
         return
     fi
-    rname="$(jq -r '.name // empty' "$file")"
+    if ! rname="$(jqr '.name // empty' "$file")"; then
+        fail "ruleset payload $file did not parse"
+        return
+    fi
     if [ -z "$rname" ]; then
         fail "ruleset payload $file has no name"
         return
@@ -264,13 +271,16 @@ check_ruleset() { # payload-file - the live ruleset must match the committed pol
         fail "ruleset '$rname' - could not read live state"
         return
     fi
-    want_enf="$(jq -r '.enforcement' "$file")"
-    assert "ruleset '$rname' enforcement = $want_enf" test "$(jq -r '.enforcement' <<<"$live")" = "$want_enf"
+    if ! want_enf="$(jqr '.enforcement' "$file")"; then
+        fail "ruleset payload $file did not parse"
+        return
+    fi
+    assert "ruleset '$rname' enforcement = $want_enf" test "$(jqr '.enforcement' <<<"$live")" = "$want_enf"
     # The live rule-type set must equal the payload's, compared in both directions.
     # Checking only that each payload type is present live misses a rule someone added by hand.
     # That is drift this script exists to catch, and it passed as clean before.
     local want_types got_types
-    if ! want_types="$(jq -r '[.rules[].type] | sort | join(",")' "$file")"; then
+    if ! want_types="$(jqr '[.rules[].type] | sort | join(",")' "$file")"; then
         fail "ruleset payload $file did not parse"
         return
     fi
@@ -278,13 +288,16 @@ check_ruleset() { # payload-file - the live ruleset must match the committed pol
         fail "ruleset payload $file declares no rules"
         return
     fi
-    got_types="$(jq -r '[.rules[].type] | sort | join(",")' <<<"$live")"
+    if ! got_types="$(jqr '[.rules[].type] | sort | join(",")' <<<"$live")"; then
+        fail "live ruleset for '$rname' did not parse"
+        return
+    fi
     assert "'$rname' rule set = $want_types" test "$got_types" = "$want_types"
     # The bypass list is reported and never asserted, because no payload declares one.
     # Who may bypass a ruleset is a human decision taken in the UI, so code states what is there and judges nothing.
     # It is surfaced on every run rather than left invisible, since it is the field that decides who the rules do not apply to.
     local bypass
-    bypass="$(jq -r '[.bypass_actors[]? | "\(.actor_type) \(.actor_id) \(.bypass_mode)"] | join("; ")' <<<"$live")"
+    bypass="$(jqr '[.bypass_actors[]? | "\(.actor_type) \(.actor_id) \(.bypass_mode)"] | join("; ")' <<<"$live")"
     note "ruleset '$rname' bypass list: ${bypass:-none} (not managed by this script)"
     # Every parameterized rule is compared on its whole parameters object rather than on selected fields.
     # Naming fields one at a time meant a payload could declare a parameter the check never read.
@@ -305,7 +318,7 @@ check_ruleset() { # payload-file - the live ruleset must match the committed pol
               elif type == "array" then map(w(f)) | f
               else f end;
           def n: w(if type=="array" then (if length==0 then . elif (all(.[]; type=="string" or type=="number")) then sort elif (all(.[]; type=="object" and has("context"))) then sort_by(.context) else . end) else . end); n'
-    ptypes="$(jq -r '[.rules[] | select(has("parameters")) | .type] | .[]' "$file")"
+    ptypes="$(jqr '[.rules[] | select(has("parameters")) | .type] | .[]' "$file")"
     while IFS= read -r t; do
         [ -z "$t" ] && continue
         # shellcheck disable=SC2016  # $t is a jq --arg variable, not a shell expansion
@@ -328,11 +341,9 @@ check_settings() {
     fi
     # Static settings are driven from settings.json, so the check never drifts from the file.
     # Add a key there and it is audited here automatically.
-    # The payload is parsed into a variable before the loop rather than streamed from a process substitution.
-    # A jq failure inside `done < <(...)` leaves the loop body unexecuted without tripping set -e.
-    # Every static setting would then report as checked and passing while nothing was compared, a false clean.
+    # The payload is parsed into a variable before the loop rather than streamed from a process substitution, since a jq failure inside `done < <(...)` would leave the loop body unexecuted without tripping set -e and report every setting as checked and passing while nothing was compared, a false clean.
     local pairs
-    if ! pairs="$(jq -r 'to_entries[] | "\(.key)\t\(.value)"' "$settings_file")"; then
+    if ! pairs="$(jqr 'to_entries[] | "\(.key)\t\(.value)"' "$settings_file")"; then
         fail "settings payload $settings_file did not parse"
         return
     fi
@@ -343,20 +354,20 @@ check_settings() {
     fi
     while IFS=$'\t' read -r key want; do
         # shellcheck disable=SC2016  # $k is a jq --arg variable, not a shell expansion
-        got="$(jq -r --arg k "$key" '.[$k]' <<<"$live")"
+        got="$(jqr --arg k "$key" '.[$k]' <<<"$live")"
         assert "setting $key = $want" test "$got" = "$want"
     done <<<"$pairs"
     # Dynamic settings apply sets: has_discussions (public repos only), default_branch (main, if it exists).
-    private="$(jq -r '.private' <<<"$live")"
+    private="$(jqr '.private' <<<"$live")"
     wantdisc=true
     [ "$private" = "true" ] && wantdisc=false
-    assert "has_discussions = $wantdisc" test "$(jq -r '.has_discussions' <<<"$live")" = "$wantdisc"
+    assert "has_discussions = $wantdisc" test "$(jqr '.has_discussions' <<<"$live")" = "$wantdisc"
     if gh api "repos/$repo/branches/main" --jq '.name' >/dev/null 2>&1; then
-        assert "default_branch = main" test "$(jq -r '.default_branch' <<<"$live")" = main
+        assert "default_branch = main" test "$(jqr '.default_branch' <<<"$live")" = main
     fi
     # $description is empty for two different reasons, told apart below since each needs different follow-up.
     if [ -n "$description" ]; then
-        assert "description = '$description'" test "$(jq -r '.description' <<<"$live")" = "$description"
+        assert "description = '$description'" test "$(jqr '.description' <<<"$live")" = "$description"
     elif [ ! -f "$registry" ]; then
         note "description: no $registry to read (it resolves relative to this script, not from the repo argument). Run from a hub checkout for it to exist, and verify manually."
     else
