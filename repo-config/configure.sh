@@ -141,7 +141,7 @@ apply_ruleset() { # payload-file - create-or-update the ruleset by name
         echo "Ruleset payload $file not found. Aborting to avoid a partially-applied configuration." >&2
         exit 1
     fi
-    rname="$(jq -r '.name // empty' "$file")"
+    rname="$(jqr '.name // empty' "$file")"
     if [ -z "$rname" ]; then
         echo "Ruleset payload $file has no name. Aborting to avoid a partially-applied configuration." >&2
         exit 1
@@ -251,7 +251,7 @@ check_ruleset() { # payload-file - the live ruleset must match the committed pol
         fail "ruleset payload $file missing"
         return
     fi
-    rname="$(jq -r '.name // empty' "$file")"
+    rname="$(jqr '.name // empty' "$file")"
     if [ -z "$rname" ]; then
         fail "ruleset payload $file has no name"
         return
