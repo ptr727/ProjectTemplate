@@ -209,9 +209,19 @@ def is_python_test_module(path):
 
 
 def is_csharp_test_project(path):
-    """Whether path is a C# project either named or located as a test project."""
-    return path.endswith(".csproj") and (
-        "Test" in path.rsplit("/", 1)[-1] or in_test_directory(path)
+    """Whether path is a C# project either named or located as a test project.
+
+    Read two ways because lowercasing the whole basename would claim Contest.csproj and
+    Latest.csproj, which carry those letters inside a word rather than as a name segment.
+    """
+    if not path.endswith(".csproj"):
+        return False
+    name = path.rsplit("/", 1)[-1]
+    segments = name[: -len(".csproj")].lower().split(".")
+    return (
+        "Test" in name
+        or any(segment in ("test", "tests") for segment in segments)
+        or in_test_directory(path)
     )
 
 
@@ -5267,6 +5277,20 @@ def _selftest():
             {"test/App.UnitTest.csproj"},
             ["csharp"],
             "csharp, singular Test in the name",
+        ),
+        (
+            ["csharp"],
+            {},
+            {"src/widget.tests.csproj"},
+            ["csharp"],
+            "csharp, a lowercase test segment outside a test directory",
+        ),
+        (
+            ["csharp"],
+            {},
+            {"src/Contest.csproj", "src/Latest.csproj"},
+            [],
+            "csharp, names carrying those letters inside a word rather than as a segment",
         ),
         (
             ["python"],
