@@ -499,12 +499,32 @@ class LedgerCase(RepoCase):
         self.assertEqual(len(entries), 1)
         self.assertEqual(entries["DOC.md > Alpha"]["digest"], self.units()["DOC.md > Alpha"])
 
-    def test_a_recorded_pass_names_the_hub_commit_it_ran_from(self) -> None:
-        """A verdict carrying no commit cannot be re-run, per GOVERNANCE.md "Hub-Hosted Tooling"."""
+    def test_a_recorded_pass_names_a_hub_commit(self) -> None:
+        """A verdict carrying no commit cannot be re-run, per GOVERNANCE.md "Hub-Hosted Tooling".
+
+        The fixture's `task` branch has made no commit of its own yet, so its merge-base against
+        `origin/develop` and its own `HEAD` are the same commit here. That coincidence is why this
+        much still holds against `HEAD`; the case where they diverge, and only the merge-base is
+        what gets stamped, is `test_a_recorded_pass_names_the_merge_base_not_the_branch_tip` below.
+        """
         self.record("DOC.md > Alpha")
         entry = cr.read_ledger(self.tmp)["DOC.md > Alpha"]
         self.assertEqual(entry["hubCommit"], run(self.tmp, "rev-parse", "HEAD").strip())
         self.assertEqual(entry["reviewer"], "agent-skill")
+
+    def test_a_recorded_pass_names_the_merge_base_not_the_branch_tip(self) -> None:
+        """A branch's own tip is squashed away on merge and stops resolving; the merge-base against
+        the target is a commit the target already holds, so it survives the squash. #1222, #1210."""
+        self.write("DOC.md", "intro\n\n## Alpha\n\nedited\n\n## Beta\n\nb body\n")
+        run(self.tmp, "add", "-A")
+        run(self.tmp, "commit", "-m", "advance the branch tip past the merge base")
+        base = run(self.tmp, "rev-parse", "refs/remotes/origin/develop").strip()
+        tip = run(self.tmp, "rev-parse", "HEAD").strip()
+        self.assertNotEqual(base, tip, "the fixture needs a tip that has moved past the base")
+        self.record("DOC.md > Alpha")
+        entry = cr.read_ledger(self.tmp)["DOC.md > Alpha"]
+        self.assertEqual(entry["hubCommit"], base)
+        self.assertNotEqual(entry["hubCommit"], tip)
 
     def test_record_refuses_a_digest_the_content_has_moved_past(self) -> None:
         """The guard against a format-on-save between the review and the record."""

@@ -697,16 +697,19 @@ def cmd_record(args: argparse.Namespace) -> int:
         return EXIT_CANNOT_RUN
     ledger = read_ledger(root)
     stamp = datetime.now(UTC).strftime("%Y-%m-%dT%H:%M:%SZ")
-    # The hub commit the engine itself ran from, per GOVERNANCE.md "Hub-Hosted Tooling": a verdict carrying no commit cannot be re-run, and two runs that disagree cannot be attributed to the tree or to the tool.
-    # It locates the tooling rather than the text, since a pass legitimately runs over content that is not committed yet, and the digest above is what locates the text.
-    head = git("rev-parse", "HEAD", root=root).strip()
+    # The hub state a reader can check this pass against, per GOVERNANCE.md "Hub-Hosted Tooling": a verdict carrying no commit cannot be re-run.
+    # It locates the tree rather than the text, since a pass legitimately runs over content that is not committed yet, and the digest above is what locates the text.
+    # Stamped as the merge-base against the target rather than HEAD: HEAD is this branch's own tip, which a squash merge discards and an amend moves, so either leaves the stamp resolving nowhere on the branch that receives the pass.
+    # The merge-base is a commit the target branch already holds, so it survives both.
+    # See #1222 and #1210.
+    _, base = resolve_base(args.target, root)
     for unit, value in wanted.items():
         ledger[unit] = {
             "unit": unit,
             "digest": value,
             "reviewer": args.reviewer,
             "findings": args.findings,
-            "hubCommit": head,
+            "hubCommit": base,
             "stamp": stamp,
         }
     write_ledger(root, ledger)
@@ -877,6 +880,14 @@ def main(argv: list[str] | None = None) -> int:
         help="a unit key and the digest the reviewer read, repeatable",
     )
     p_record.add_argument("--findings", type=int, default=None, help="how many findings it raised")
+    p_record.add_argument(
+        "--target",
+        default=None,
+        help=(
+            f"target branch (default {DEFAULT_TARGET}), resolved as origin/<value> first;"
+            " hubCommit is stamped as the merge-base against this target"
+        ),
+    )
     p_record.set_defaults(handler=cmd_record)
 
     p_report = sub.add_parser("report", help=f"write {REPORT}")

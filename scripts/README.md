@@ -265,6 +265,8 @@ python3 scripts/canonical_review.py report --check   # 0 current, 1 stale. Read-
 
 `record` writes the ledger and rewrites the burn-down together, since a ledger and a report that disagree are two answers about one coverage. Both are tracked, so both have to be committed before the push, [`.husky/pre-push`][pre-push] refusing a tree that differs from HEAD before it runs either gate. The receipt above is not tracked and is recorded after the last commit instead, so the two records sit on opposite sides of it, and recording this one first, then committing it with the change, is the shortest order that satisfies both. `record` binds the digest to the read for `--expect-digest`'s reason above: recording a unit by name alone would stamp whatever the file holds at record time, so an edit between the review and the record would be attested to by a reviewer who never saw it. It refuses an unknown unit, a digest the content has moved past, and a reviewer outside `local_review.py`'s own backend vocabulary, since two spellings of one reviewer make the two records impossible to read together. A pass is recorded whatever it found, including nothing, for the same reason a receipt is: the record says a review ran over exactly this text, never that the text is clean.
 
+Each entry's `hubCommit` is stamped as the merge-base against the target (`--target`, default `develop`) rather than `HEAD`. A branch's own tip is exactly what a squash merge discards and an amend moves, so stamping it leaves the field resolving nowhere once the branch that recorded it is gone. The merge-base is a commit the target already holds, so it survives both ([ptr727/ProjectTemplate#1222][hubcommit-issue], [#1210][hubcommit-eight-issue]). A pass recorded before that fix can still name a commit unreachable from wherever a reader's own checkout stands. Those entries are left as recorded rather than rewritten, since inventing a commit for one would fabricate provenance nothing supports, and resolving one is a `git merge-base --is-ancestor <hubCommit> HEAD` a reader runs by hand against their own checkout. Because `record` now resolves the target the same way `check` does, an unresolvable target refuses the record too, where naming no target at all previously never could.
+
 The exit code is three-valued on the same contract as its sibling. The boundaries it reports rather than answers are a manifest it cannot read, a ledger it cannot parse, a ledger holding two entries for one unit, a canonical that is not UTF-8, a document carrying two level-two sections of one name, and a target ref that does not resolve. That last one matters more than it looks: every path of an unresolvable ref reads as absent from `git cat-file --batch`, so reading it as a verdict would report a branch that introduced the entire canonical set and demand a pass over all of it.
 
 ## `build_dist.py`
@@ -309,6 +311,8 @@ Installs the fleet's Skills for the current machine, cross-platform and idempote
 [governance]: ../GOVERNANCE.md
 [host-setup]: ../docs/host-setup.md
 [host-tools]: ../spec/host-tools.json
+[hubcommit-eight-issue]: https://github.com/ptr727/ProjectTemplate/issues/1210
+[hubcommit-issue]: https://github.com/ptr727/ProjectTemplate/issues/1222
 [marketplace]: ../.claude-plugin/marketplace.json
 [operations]: ../OPERATIONS.md
 [pre-push]: ../.husky/pre-push
