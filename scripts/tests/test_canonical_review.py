@@ -336,6 +336,15 @@ class GateCase(RepoCase):
         self.assertIn("DOC.md > Alpha", output)
         self.assertNotIn("DOC.md > Beta", output, "an untouched section was demanded")
 
+    def test_the_refusal_hands_back_a_record_command_naming_the_checked_target(self) -> None:
+        """Copying the printed command has to record against the base `check` actually measured,
+        never silently default to `develop` when `--target` named something else."""
+        base = run(self.tmp, "rev-parse", "refs/remotes/origin/develop").strip()
+        self.write("DOC.md", "intro\n\n## Alpha\n\na body, edited\n\n## Beta\n\nb body\n")
+        code, output = self.loud(["check", "--target", base])
+        self.assertEqual(code, cr.EXIT_NOT_COVERED)
+        self.assertIn(f"record --reviewer agent-skill --target {base}", output)
+
     def test_a_recorded_pass_covers_the_changed_unit(self) -> None:
         self.write("DOC.md", "intro\n\n## Alpha\n\na body, edited\n\n## Beta\n\nb body\n")
         self.assertEqual(self.record("DOC.md > Alpha"), cr.EXIT_COVERED)
@@ -434,8 +443,8 @@ class GateCase(RepoCase):
         self.assertIn("no-such-branch", output)
 
     def test_record_refuses_an_unresolvable_target(self) -> None:
-        """`record` now resolves a merge-base against `--target` the same way `check` does, so a
-        target that does not resolve is a new refusal `record` did not have when it stamped `HEAD`."""
+        """`record` resolves a merge-base against `--target`, the same way `check` does, so an
+        unresolvable target refuses the record rather than falling back to `HEAD`."""
         code, output = self.loud(
             [
                 "record",
@@ -518,9 +527,7 @@ class LedgerCase(RepoCase):
         self.assertEqual(entries["DOC.md > Alpha"]["digest"], self.units()["DOC.md > Alpha"])
 
     def test_a_recorded_pass_names_a_hub_commit(self) -> None:
-        """A verdict carrying no commit cannot be re-run, per GOVERNANCE.md "Hub-Hosted Tooling".
-
-        The fixture's `task` branch has made no commit of its own yet, so its merge-base against
+        """The fixture's `task` branch has made no commit of its own yet, so its merge-base against
         `origin/develop` and its own `HEAD` are the same commit here. That coincidence is why this
         much still holds against `HEAD`. The case where they diverge, and only the merge-base is
         what gets stamped, is `test_a_recorded_pass_names_the_merge_base_not_the_branch_tip` below.

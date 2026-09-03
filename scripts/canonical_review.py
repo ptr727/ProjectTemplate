@@ -628,7 +628,8 @@ def cmd_check(args: argparse.Namespace) -> int:
         "\nA repository carrying this content reads each of these whole, as a new file, and cannot"
         "\nfix what it finds. Read each unit's whole current text, then record the pass, handing"
         "\nback the key and digest exactly as printed above:"
-        "\n  python3 scripts/canonical_review.py record --reviewer agent-skill --unit '<key>=<digest>'"
+        f"\n  python3 scripts/canonical_review.py record --reviewer agent-skill --target {target}"
+        "\n    --unit '<key>=<digest>'"
         '\nThe local-strict-review skill\'s "The Carried-Content Pass" says how the pass is run,'
         "\nand its refusal table what this refusal means where the units named look wrong.",
         sys.stderr,
@@ -697,11 +698,7 @@ def cmd_record(args: argparse.Namespace) -> int:
         return EXIT_CANNOT_RUN
     ledger = read_ledger(root)
     stamp = datetime.now(UTC).strftime("%Y-%m-%dT%H:%M:%SZ")
-    # A stable anchor a reader can resolve later, per GOVERNANCE.md "Hub-Hosted Tooling": a verdict carrying no commit cannot be re-run.
-    # It is deliberately not the exact tree the pass read: the digest above locates that text, and checking out this commit can show the unit before this pass's own edit.
-    # Stamped as the merge-base against the target rather than HEAD: HEAD is this branch's own tip, which a squash merge discards and an amend moves, so either leaves the stamp resolving nowhere on the branch that receives the pass.
-    # The merge-base is ordinarily a commit the target's remote-tracking ref already holds, so it survives both.
-    # See #1222 and #1210.
+    # Stamped as the merge-base against the target, not HEAD, since a squash merge discards HEAD and an amend moves it.
     _, base = resolve_base(args.target, root)
     for unit, value in wanted.items():
         ledger[unit] = {
