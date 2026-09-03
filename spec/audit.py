@@ -205,23 +205,25 @@ def coverage_claiming_types(types, repo_profiles, type_mechanisms, tree):
     repo, a library whose tests live elsewhere or are not yet written, from being told to store a token
     and commit a codecov.yml whose statuses gate a report its pipeline never produces.
 
-    Each detector is the test-presence half of the hub validator's own guard, so the audit reads the
-    evidence the mechanism reads rather than a second definition free to drift from it:
-    `.github/workflows/validate-task.yml` keys its C# leg on a `*Tests*.csproj` anywhere in the tree and
-    its Python leg on a root `tests/` directory. The rest of that guard, the language and dependency
-    markers beside it, is deliberately not read here, since D1.6 owes coverage to every repo with tests
-    and a repo the hub leg does not reach meets it through its own workflows instead.
+    Each detector is deliberately broader than the hub validator's own guard, which keys its C# leg on
+    `**/*Tests*.csproj` and its Python leg on a root `tests/` directory. D1.6 owes coverage to every repo
+    with tests, and a repo the hub leg does not reach meets it through its own workflows instead, so a
+    detector matching the guard exactly would drop the claim for a repo whose suite sits in `test/` or
+    whose project is named `App.UnitTest.csproj`. Every uncertainty here therefore resolves toward
+    keeping the claim, since a claim kept wrongly surfaces as a finding a reader can dismiss and a claim
+    dropped wrongly is a silent clean report on a repo nobody measured.
 
     `tree` is the repo's blob path set, or None when it could not be read in full. On None the test
-    question is unanswerable, so every candidate type keeps its claim: dropping a coverage requirement
-    over an unreadable tree would report a repo clean for a reason nobody measured. A type mapped to
-    codecov with no detector here keeps its claim for the same reason.
+    question is unanswerable, so every candidate type keeps its claim, for that same reason. A type
+    mapped to codecov with no detector here keeps its claim too.
     """
     detectors = {
         "csharp": lambda paths: any(
-            p.endswith(".csproj") and "Tests" in p.rsplit("/", 1)[-1] for p in paths
+            p.endswith(".csproj") and "Test" in p.rsplit("/", 1)[-1] for p in paths
         ),
-        "python": lambda paths: any(p.startswith("tests/") for p in paths),
+        "python": lambda paths: any(
+            segment in ("test", "tests") for p in paths for segment in p.split("/")[:-1]
+        ),
     }
     claiming = []
     for name in types:
@@ -2385,7 +2387,7 @@ def audit_repo(entry, spec, branch=None):
             continue
         path = item["path"]
         if path == "codecov.yml" and not coverage_active:
-            continue  # coverage feature file: N/A when no type claims codecov at build profile (spec/type-model.md)
+            continue  # coverage feature file: N/A when no type claims codecov at build profile with tests present (spec/type-model.md)
         if path not in wanted_sections:
             wanted_sections[path] = set()
             verbatim_secs[path] = set()
@@ -5196,6 +5198,22 @@ def _selftest():
         (["csharp"], {}, {"src/App/App.csproj"}, [], "csharp, no test project"),
         (["csharp"], {}, {"test/App.Tests/App.Tests.csproj"}, ["csharp"], "csharp with tests"),
         (["csharp"], {}, {"src/Tests/App.csproj"}, [], "csharp, Tests is a directory name only"),
+        (
+            ["csharp"],
+            {},
+            {"test/App.UnitTest.csproj"},
+            ["csharp"],
+            "csharp, singular Test in the name",
+        ),
+        (
+            ["python"],
+            {},
+            {"test/test_a.py", "pyproject.toml"},
+            ["python"],
+            "python, singular test dir",
+        ),
+        (["python"], {}, {"src/tests/test_a.py"}, ["python"], "python, tests below the root"),
+        (["python"], {}, {"tests"}, [], "python, a file named tests is not a directory"),
         (
             ["csharp", "python"],
             {"python": "lint-only"},

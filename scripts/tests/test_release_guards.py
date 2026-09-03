@@ -249,9 +249,19 @@ gh() {
                 self.assertEqual(expected, evaluate_guard(python_guards[0], present))
 
         # The guard admitting a pip repo is only half of it: the steps must install and run without a lockfile.
-        self.assertIn("uv pip install -r", job)
+        self.assertIn('requirement_args+=(-r "$file")', job)
+        self.assertIn('uv pip install "${requirement_args[@]}"', job)
         self.assertIn(".venv/bin/python -m pytest --cov-report=xml", job)
         self.assertEqual(2, job.count("if [ -f uv.lock ]; then"))
+
+        # One resolve over every requirements file, never one install per file.
+        # The glob sorts the base file last, so a per-file install lets its pins downgrade what the test-requirements file just resolved.
+        self.assertNotIn('uv pip install -r "$file"', job)
+
+        # The lockfile branch installs the project itself, so the pip branch owes the same.
+        # Without it a src-layout repo fails collection on its own package instead of running its tests.
+        self.assertIn("uv pip install -e .", job)
+        self.assertIn(r"grep -Eq '^[[:space:]]*\[project\]' pyproject.toml", job)
 
     def test_audit_bash_blocks_are_not_labeled_as_posix_shell(self) -> None:
         audit_lines = (REPO / "AUDIT.md").read_text(encoding="utf-8").splitlines()
