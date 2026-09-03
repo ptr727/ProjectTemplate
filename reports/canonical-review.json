@@ -402,6 +402,14 @@
       "stamp": "2026-09-02T01:11:58Z"
     },
     {
+      "unit": "GOVERNANCE.md > PR Review Etiquette",
+      "digest": "sha256:e3162c48ed4463345c611d608eb428839e3ba6a8cc9b1a52d0e0d5808e7f0a83",
+      "reviewer": "agent-skill",
+      "findings": 6,
+      "hubCommit": "28dafdf46ee35cc9901e845a317991d909a94fac",
+      "stamp": "2026-09-03T18:28:40Z"
+    },
+    {
       "unit": "GOVERNANCE.md > Repository Layout",
       "digest": "sha256:b02bb961b5a0ac3b595b75cd01f6a9be91b5d6690a7f7b24bfe1f9c5660196b7",
       "reviewer": "agent-skill",
@@ -411,11 +419,11 @@
     },
     {
       "unit": "GOVERNANCE.md > Verification Discipline",
-      "digest": "sha256:0f7d427f2fd507aef0b81e84c3829aa13887838b96647cd37b6cbd7016da50c3",
+      "digest": "sha256:d62a160f347578c5c2f922f280f21ced2e1d4a1adc9df6aed124ea2dce637628",
       "reviewer": "agent-skill",
-      "findings": 0,
-      "hubCommit": "e97708dfe4c92e275118a0705556822993de9f32",
-      "stamp": "2026-08-31T16:26:36Z"
+      "findings": 15,
+      "hubCommit": "28dafdf46ee35cc9901e845a317991d909a94fac",
+      "stamp": "2026-09-03T18:39:43Z"
     },
     {
       "unit": "GOVERNANCE.md > Workflow YAML Conventions",

@@ -7,9 +7,9 @@ A unit is what a reviewer reads whole, decided by the carry manifest rather than
 ## Coverage
 
 - units: 288
-- covered: 60
+- covered: 61
 - stale: 0
-- never read here: 228
+- never read here: 227
 
 ## Burn-down
 
@@ -369,7 +369,6 @@ A unit is what a reviewer reads whole, decided by the carry manifest rather than
 - **Git and Commit Rules** - never
 - **Hub-Hosted Tooling** - never
 - **Operational Repositories** - never
-- **PR Review Etiquette** - never
 - **Pull Request Title and Commit Message Conventions** - never
 - **Release Model** - never
 - **Repository Boundaries and Write Safety** - never
