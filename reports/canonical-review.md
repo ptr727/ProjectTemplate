@@ -6,10 +6,10 @@ A unit is what a reviewer reads whole, decided by the carry manifest rather than
 
 ## Coverage
 
-- units: 288
-- covered: 61
+- units: 304
+- covered: 81
 - stale: 0
-- never read here: 227
+- never read here: 223
 
 ## Burn-down
 
@@ -132,7 +132,6 @@ A unit is what a reviewer reads whole, decided by the carry manifest rather than
 ### .agents/skills/drive-pr/SKILL.md
 
 - **(preamble)** - never
-- **How Far to Drive** - never
 - **Mechanics Live Elsewhere** - never
 - **Stop and Ask, Beyond the How-Far Question** - never
 - **What Invoking This Skill Authorizes** - never
@@ -165,7 +164,6 @@ A unit is what a reviewer reads whole, decided by the carry manifest rather than
 
 ### .agents/skills/local-strict-review/SKILL.md
 
-- **Running It** - never
 - **Why This Exists** - never
 
 ### .agents/skills/merge-and-release/SKILL.md
@@ -206,7 +204,6 @@ A unit is what a reviewer reads whole, decided by the carry manifest rather than
 ### .agents/skills/pr-review-conduct/SKILL.md
 
 - **(preamble)** - never
-- **Escalate to the maintainer when** - never
 - **Merge Gate, check this before merging or enabling auto-merge** - never
 - **Triaging findings** - never
 - **Why this exists** - never
@@ -332,7 +329,6 @@ A unit is what a reviewer reads whole, decided by the carry manifest rather than
 
 ### AGENTS.md
 
-- **Context and Delegation Discipline** - never
 - **Fleet Bootstrap** - never
 
 ### AUDIT.md

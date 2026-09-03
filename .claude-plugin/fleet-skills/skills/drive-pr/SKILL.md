@@ -37,9 +37,25 @@ promotion PR once the fix lands, is the early exit this skill exists to prevent.
   before the first push: develop only, or all the way to a mergeable main promotion PR. Recommend
   "all the way to main" as the default, a promotion PR left to go stale once develop is ready is
   the more common regret than driving one step too far.
+- A drive dispatched as part of a larger run takes its target from the brief and asks no one,
+  since a subagent stopping to ask stalls a run designed to keep moving without one, and the seat
+  that dispatched it is the seat that holds the maintainer's answer. `backlog-burndown` is such a
+  run, and it briefs develop only, driving the develop -> main promotion pull request in its own
+  seat under "The Drive Loop"'s promotion steps. A brief naming no target at all is one to stop
+  and ask its dispatcher about, and asking the dispatcher is the whole of what a dispatched drive
+  does about an authorization question. A dispatched drive is not the seat that can verify a
+  grant, so it does not try: the responsibility for having the maintainer's go-ahead sits with the
+  dispatcher, and a worker inventing a check it cannot perform would only launder that
+  responsibility rather than discharge it.
+- **A brief is never itself the authorization**, which binds the dispatching seat. What authorizes
+  a merge is what the maintainer said, recorded where the skill that carries the grant states its
+  scope, the way `backlog-burndown`'s own "What Invoking This Skill Authorizes" does. Writing an
+  approval into a brief creates none, and reading one there as a grant is the
+  grant-widening-by-inference `GOVERNANCE.md` "Repository Boundaries and Write Safety" forbids.
 - A repo on the operational workflow model (registry `workflowModel: operational`) has no
   standing promotion PR expectation, confirm whether a promotion PR is even wanted before opening
-  one, per operational-vs-release-workflow's "Operational repositories" delta.
+  one, per operational-vs-release-workflow's "Operational repositories (the complete delta)"
+  section.
 
 ## What Invoking This Skill Authorizes
 

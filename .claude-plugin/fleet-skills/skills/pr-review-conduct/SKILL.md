@@ -172,6 +172,15 @@ from a hub checkout. Do not use a provider connector or reconstruct the GitHub m
 - A finding is judged real but should not be fixed. That decision is never the agent's alone.
 - An architectural redesign is proposed rather than a bug fix.
 
+An agent that cannot reach the maintainer directly, a dispatched subagent being the ordinary case,
+escalates to whoever dispatched it and stops that unit of work there. It never substitutes its own
+judgment for the escalation because asking is inconvenient from where it sits, and it never resolves
+the thread to keep moving. A dispatcher receiving one puts it to the maintainer at the point that
+work stopped, per `GOVERNANCE.md` "Communicating with the User", and deciding it instead so the
+dispatcher's own work keeps moving is the same resolution by silence this skill's own
+ask-the-maintainer outcome forbids, one seat further from the maintainer. The escalation may travel through several seats, and the work stays stopped in
+every one of them until the answer arrives.
+
 ## Mechanics Live Elsewhere
 
 This skill is the provider-agnostic contract. Use `scripts/pr_review.py` from a hub checkout for
