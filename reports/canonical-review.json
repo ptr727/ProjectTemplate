@@ -195,11 +195,11 @@
     },
     {
       "unit": ".agents/skills/python-codestyle/references/testing.md",
-      "digest": "sha256:b9bd1b97ac9953aa9d34435938cb093570d1e33f51380bf1f4cd2ff73c2dfc40",
+      "digest": "sha256:74cc0b107cc85145502ffa587113133127434dce21b26d00ba14625692869ae6",
       "reviewer": "agent-skill",
       "findings": 0,
-      "hubCommit": "810fc9de224a5d23abcc07a9f317db6a74ee4d84",
-      "stamp": "2026-09-03T17:29:24Z"
+      "hubCommit": "6748afdbabf14201dab6f6ee4e58ec0482952955",
+      "stamp": "2026-09-03T17:31:29Z"
     },
     {
       "unit": ".agents/skills/repo-worktree/SKILL.md > Creating a Worktree",
