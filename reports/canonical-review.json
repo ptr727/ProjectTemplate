@@ -459,19 +459,19 @@
     },
     {
       "unit": "WORKFLOW.md > 4. Behavioral Contract: Expected Outcomes",
-      "digest": "sha256:a4b85d3b43f98646b6cf1a7161acacc09f3e4b8f3c23c1197af69d13bba74d84",
+      "digest": "sha256:3616be733206b40f62b360374e08056785038ec7b528c7746ab0a5dfaffc34c3",
       "reviewer": "agent-skill",
-      "findings": 0,
-      "hubCommit": "4fdc718663d0149994e496e890c20c7a77f27c96",
-      "stamp": "2026-09-03T03:04:24Z"
+      "findings": 16,
+      "hubCommit": "28dafdf46ee35cc9901e845a317991d909a94fac",
+      "stamp": "2026-09-03T18:21:27Z"
     },
     {
       "unit": "WORKFLOW.md > 5. Test Methodology",
-      "digest": "sha256:18e41e5b607eb337226934496038656cdb047c0cfb99e6bce5c8f7832dfc74b4",
+      "digest": "sha256:e4c043871a8fe90f89741b36893a0a4b8cf8ddba18ca8259a4513a300931ed24",
       "reviewer": "agent-skill",
-      "findings": 38,
-      "hubCommit": "6525cb888406c7f6a1f43c5f9b21fb041200c601",
-      "stamp": "2026-09-03T17:41:49Z"
+      "findings": 12,
+      "hubCommit": "28dafdf46ee35cc9901e845a317991d909a94fac",
+      "stamp": "2026-09-03T18:21:33Z"
     },
     {
       "unit": "WORKFLOW.md > 6. Per-Project-Type Test Walkthroughs",
