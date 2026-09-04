@@ -227,11 +227,11 @@
     },
     {
       "unit": ".agents/skills/local-strict-review/SKILL.md > Disposing of Findings",
-      "digest": "sha256:568da8c763e51795bff9e294a07976fd1479b93b48d383e6d5b60fe23901d6b3",
+      "digest": "sha256:5da8b49aff872a406122fb74abe744e92f7a4f0d23255bb9902d77b49b8bd12c",
       "reviewer": "agent-skill",
-      "findings": 5,
-      "hubCommit": "16f2e32a037857dfcd68b114f006ca2d0cf12ada",
-      "stamp": "2026-09-04T00:58:38Z"
+      "findings": 3,
+      "hubCommit": "28872b4ab08d10d48e8dc0eecd94cdf257633e7d",
+      "stamp": "2026-09-04T23:42:40Z"
     },
     {
       "unit": ".agents/skills/local-strict-review/SKILL.md > Mechanics Live Elsewhere",
@@ -251,11 +251,11 @@
     },
     {
       "unit": ".agents/skills/local-strict-review/SKILL.md > Running It",
-      "digest": "sha256:612b1fed21acfd0fd5d1adf78109b4abcb4fe497218b30fbd99e3263f7b197d3",
+      "digest": "sha256:f9e0ed6fcb2b798cbf46efa239a5c0a039cf261f3b917ab8d110e2cc0e59136c",
       "reviewer": "agent-skill",
-      "findings": 2,
-      "hubCommit": "16f2e32a037857dfcd68b114f006ca2d0cf12ada",
-      "stamp": "2026-09-04T02:11:36Z"
+      "findings": 3,
+      "hubCommit": "28872b4ab08d10d48e8dc0eecd94cdf257633e7d",
+      "stamp": "2026-09-04T21:20:13Z"
     },
     {
       "unit": ".agents/skills/local-strict-review/SKILL.md > The Carried-Content Pass",
@@ -347,11 +347,11 @@
     },
     {
       "unit": ".agents/skills/pr-review-conduct/SKILL.md > Expected review loop",
-      "digest": "sha256:129b6445b11e494700c899653ebd57db9efd000053e16662bec6de650719abb4",
+      "digest": "sha256:efde1221d83911ef2a0e72b45729130ab9e8f10950f9546697190c5074bb141f",
       "reviewer": "agent-skill",
-      "findings": 1,
-      "hubCommit": "0e6aacf45334149f6158aa23b8132d6aee1d1eb0",
-      "stamp": "2026-09-01T16:37:57Z"
+      "findings": 4,
+      "hubCommit": "28872b4ab08d10d48e8dc0eecd94cdf257633e7d",
+      "stamp": "2026-09-04T23:44:02Z"
     },
     {
       "unit": ".agents/skills/pr-review-conduct/SKILL.md > Mechanics Live Elsewhere",
@@ -627,11 +627,11 @@
     },
     {
       "unit": "GOVERNANCE.md > Verification Discipline",
-      "digest": "sha256:57d6d64ec9e54b08ec9808c2f03aedd7b73eada6783b79f618902908922d305c",
+      "digest": "sha256:8bc599f8aea61158ba0772069e9540cf66bae568460aef72fec19b720931d055",
       "reviewer": "agent-skill",
-      "findings": 3,
-      "hubCommit": "ddca03490f0517fe786ef1d58aff3b8eaf19616b",
-      "stamp": "2026-09-04T16:24:35Z"
+      "findings": 1,
+      "hubCommit": "28872b4ab08d10d48e8dc0eecd94cdf257633e7d",
+      "stamp": "2026-09-04T21:38:25Z"
     },
     {
       "unit": "GOVERNANCE.md > Workflow YAML Conventions",
