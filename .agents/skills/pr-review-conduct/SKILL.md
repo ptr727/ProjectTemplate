@@ -100,9 +100,11 @@ Run `local-strict-review` against the branch's current diff before step 1's push
 The review effort setting is user-controlled. The workflow never selects or changes it. `status` reports `effort=lite`, `effort=balanced`, or `effort=max` when the completed review exposes that metadata, lowercased, and names an inherited setting apart from a chosen one in a separate `effort_source=default|explicit` field, both reading `unknown` when no effort line parses. Missing effort metadata reports `unknown` and does not change coverage or completion. A pending effort-labeled request can complete without a `copilot_work_started` timeline event, so absence of that event never proves the request is abandoned. The bounded timeout reports `PENDING` when no review or terminal answer arrives. After a timeout with `requested=yes`, rerun `wait` for another bounded interval by default because the request may still be active. If the maintainer directs a retry, remove Copilot in the pull request UI, add it again, and rerun `wait`. This recovery replaces only the review request and never changes the effort setting.
 
 Drive to green, a review confirmed on the latest head SHA and every actionable finding closed,
-then apply the Merge Gate above. **Never exit the loop early.** A round count is not a stopping
-condition, and neither is patience running out. Reporting only that the PR was opened is an early
-exit unless the maintainer explicitly instructed the agent not to monitor or drive its review.
+then apply the Merge Gate above. **Never exit the loop early**, this PR-hosted loop, whose
+pre-push counterpart is bounded instead by `local-strict-review` "Disposing of Findings". A
+round count is not a stopping condition here, and neither is patience running out. Reporting
+only that the PR was opened is an early exit unless the maintainer explicitly instructed the
+agent not to monitor or drive its review.
 
 After an authorized merge, run the `repo-worktree` post-merge cleanup procedure unless the user explicitly asks to retain the checkout or branch. The pull request loop is incomplete while its finished worktree or local task branch remains. It is also incomplete until the base clone returns to fetched and fast-forwarded `develop`.
 
