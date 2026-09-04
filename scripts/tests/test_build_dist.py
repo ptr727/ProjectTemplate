@@ -263,6 +263,18 @@ class RegenerateCase(unittest.TestCase):
         (build_dist.DIGEST_DIR / "foo").unlink()
         self.assertTrue(build_dist.is_stale())
 
+    def test_a_stamp_replaced_by_a_symlink_reports_stale(self) -> None:
+        """is_file() follows a symlink, so a stamp pointing outside the tree would otherwise
+        read as current whenever its target happens to hold the right digest."""
+        self.make_skill("foo")
+        build_dist.regenerate()
+        stamp = build_dist.DIGEST_DIR / "foo"
+        target = self.tmp / "outside-stamp"
+        target.write_bytes(stamp.read_bytes())
+        stamp.unlink()
+        stamp.symlink_to(target)
+        self.assertTrue(build_dist.is_stale())
+
     def test_an_orphaned_stamp_reports_stale(self) -> None:
         """A stamp for a retired skill is never read by the per-skill comparison, so it is
         caught by name, the way an orphaned generated directory is."""

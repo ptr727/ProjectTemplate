@@ -100,7 +100,11 @@ def has_exact_entries(root, names, directories):
     if not root.is_dir() or root.is_symlink():
         return False
     entries = list(root.iterdir())
-    shaped = all((entry.is_dir() if directories else entry.is_file()) for entry in entries)
+    # A symlink satisfies is_dir() and is_file(), which follow it, so an entry pointing outside the tree would otherwise pass as generated content.
+    shaped = all(
+        not entry.is_symlink() and (entry.is_dir() if directories else entry.is_file())
+        for entry in entries
+    )
     return shaped and {entry.name for entry in entries} == set(names)
 
 
