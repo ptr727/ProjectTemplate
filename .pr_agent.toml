@@ -1,3 +1,20 @@
 # The two trees below are what scripts/build_dist.py generates from .agents/skills/ and CI holds current, so a finding in either belongs at its source and a review of every copy is one finding three times.
 [ignore]
 glob = ['.github/skills/**', '.claude-plugin/fleet-skills/**']
+
+[review_agent]
+# A crash claimed against a name the build accepts was disproven by running the build, so a claimed failure carries its reproduction or is not a finding.
+issues_user_guidelines = "Report a crash, an exception, or a failing path only after reproducing it against the changed code, and state the reproduction in the finding."
+# A rule finding is answered against the rule's own sentence, and a rule against text the pull request did not change is a note rather than a thread.
+compliance_user_guidelines = "Quote the repository rule's own sentence in the finding, and report a rule against text this pull request did not change in the summary only."
+# An informational finding opened a thread the merge ruleset then required resolved, which is a merge block for a note.
+comments_routing_preset = "custom"
+
+[review_agent.comments_routing]
+action_required = "both"
+remediation_recommended = "both"
+informational = "summary"
+
+[review_agent_ux]
+# The severity badge is an image tag on the finding's title line, which hides the title from a text matcher.
+use_images_and_animations = false
