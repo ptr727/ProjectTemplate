@@ -80,7 +80,7 @@ git = local_review.git
 
 MANIFEST = "spec/files.json"
 LEDGER = "reports/canonical-review.json"
-# The lock `record` holds around its read, merge, and replace of the ledger.
+# The lock `record` holds around its read, merge, and write of the ledger.
 # In this worktree's own git directory rather than beside the ledger, so a record killed mid-write leaves its lock where no add can stage it and where a second worktree never meets it.
 # `held_lock` appends `.lock` to the path it is given.
 LEDGER_LOCK_NAME = "canonical-review-ledger"
