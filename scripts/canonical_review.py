@@ -29,11 +29,9 @@ reviewer's read of this one is still a read of these bytes.
 **The gate is on what a branch changes, and the backlog is reported rather than gated.** Most
 units have never had a full read here, which is the defect #1138 records rather than a reason to
 block every push until it is worked off. `check` refuses only the units this branch's own diff
-moved, so the ordering is fixed going forward, and `report` renders what is left as a burn-down.
-The ledger is the state and is tracked. The burn-down is a rendering of it and is never
-committed: `report` writes it to standard output, and CI writes that to the run's job summary. A
-sorted ledger holding one entry per unit merges when two branches record passes over different
-units, and a rendering carrying global counts does not (ptr727/ProjectTemplate#1268).
+moved, so the ordering is fixed going forward, and `report` renders what is left as a burn-down,
+to standard output rather than into the tree, for the reason `scripts/README.md` gives
+(ptr727/ProjectTemplate#1268).
 
 The verdict vocabulary is `scripts/local_review.py`'s, because both gates run from the same
 pre-push hook and a caller reading an exit code must not have to know which one answered: 0 is
@@ -536,7 +534,7 @@ def ledger_lock(root: Path) -> Path:
 
 
 def write_ledger(root: Path, entries: dict[str, dict[str, Any]]) -> None:
-    """Replace the ledger with `entries`, one per unit, ordered by unit key.
+    """Rewrite the ledger as `entries`, one per unit, ordered by unit key.
 
     Sorted and one entry per unit so a concurrent branch touching a different unit merges cleanly,
     and so the diff of a recorded pass reads as the pass rather than as a reordering. The caller
@@ -714,7 +712,7 @@ def cmd_record(args: argparse.Namespace) -> int:
     stamp = datetime.now(UTC).strftime("%Y-%m-%dT%H:%M:%SZ")
     # Stamped as the merge-base against the target, not HEAD, since a squash merge discards HEAD and an amend moves it.
     _, base = resolve_base(args.target, root)
-    # The same lock shape as `local_review.write_pass`, for the same reason: a record is a read, a merge, and a replace, and only the replace is atomic on its own.
+    # The same lock as `local_review.write_pass`, for the same reason: a record is a read, a merge, and a write, and two of them interleaved lose the pass the second one never read.
     lock = ledger_lock(root)
     fd_lock = local_review.held_lock(lock, LOCK_TIMEOUT)
     try:
@@ -829,13 +827,7 @@ def render_report(
 
 
 def cmd_report(args: argparse.Namespace) -> int:
-    """Render the burn-down to standard output, writing nothing into the tree.
-
-    A rendering that lived in the tree carried global counts, so two branches each recording one
-    pass merged silently to a count one short of the ledger's, and a gate over that file then
-    failed the next unrelated pull request. Rendering at the point of reading has no such state
-    to go stale.
-    """
+    """Render the burn-down to standard output, writing nothing into the tree, per `scripts/README.md`."""
     root = local_review.repo_root()
     current, absent = units(root)
     emit(render_report(current, read_ledger(root), absent))

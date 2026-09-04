@@ -65,9 +65,11 @@ runs:
         fi
         python3 scripts/canonical_review.py check --target "$BASE_SHA"
 
-    # The burn-down is a rendering of the tracked ledger and is never committed, so the run carries it in its job summary instead.
+    # The burn-down goes to the run's job summary rather than into the tree, per scripts/README.md.
     # Every event rather than pull requests only, since it describes the commit rather than a comparison against a base.
+    # Read-only and informational, so `!cancelled()` lets it render after an earlier step failed, where the default would skip it.
     - name: Render the canonical review burn-down step
+      if: ${{ !cancelled() }}
       shell: bash
       run: python3 scripts/canonical_review.py report >> "$GITHUB_STEP_SUMMARY"
 

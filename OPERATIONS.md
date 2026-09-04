@@ -36,7 +36,7 @@ python3 spec/validate.py
 python3 scripts/docker_lint.py
 ```
 
-`python3 scripts/canonical_review.py report` renders the burn-down from the ledger to standard output and writes nothing into the tree, since the ledger is the state and the burn-down is a reading of it, and CI writes the same rendering to the run's job summary. The local block above runs under `set -Eeuo pipefail`, so a failing gate stops it there and the gates below never run, and reaching a second verdict means fixing the first or running the later command on its own.
+`python3 scripts/canonical_review.py report` renders the burn-down from the ledger to standard output, and CI writes the same rendering to the run's job summary. The local block above runs under `set -Eeuo pipefail`, so a failing gate stops it there and the gates below never run, and reaching a second verdict means fixing the first or running the later command on its own.
 
 The canonical-review check sits in CI's own list only for a pull request, since a canonical unit's change is measured against the branch it is proposed into and a push carrying no pull request names none. The local run above takes the default target, `develop`, which is the same measurement for an ordinary feature branch and the wrong one for a branch based on `main`, where it needs `--target main` to mean anything.
 
