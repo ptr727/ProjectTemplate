@@ -596,6 +596,65 @@ class LedgerCase(RepoCase):
             cr.EXIT_CANNOT_RUN,
         )
 
+    def test_two_records_in_either_order_produce_one_ledger(self) -> None:
+        """The ledger is the state two branches merge, so the order two passes were recorded in
+        has to leave no trace in it beyond the stamps, or the same two passes on two branches
+        would be two different files."""
+        alpha, beta = "DOC.md > Alpha", "DOC.md > Beta"
+
+        def payload() -> dict[str, Any]:
+            data = json.loads((self.tmp / cr.LEDGER).read_bytes().decode("utf-8"))
+            for entry in data["passes"]:
+                entry.pop("stamp")
+            return data
+
+        self.record(alpha)
+        self.record(beta)
+        first = payload()
+        (self.tmp / cr.LEDGER).unlink()
+        self.record(beta)
+        self.record(alpha)
+        self.assertEqual(first, payload())
+        self.assertEqual([entry["unit"] for entry in first["passes"]], [alpha, beta])
+
+    def test_two_branches_recording_different_units_merge_without_conflict(self) -> None:
+        """Each branch records a pass over a different unit, and git merges the two ledgers
+        without a conflict."""
+        ledger = cr.LEDGER
+        # Entries that sort between the two, since git merges two insertions only where unchanged lines separate them.
+        self.record("CONF.json")
+        self.record("DOC.md > Alpha")
+        run(self.tmp, "add", ledger)
+        run(self.tmp, "commit", "-m", "seed")
+        run(self.tmp, "branch", "lane-b")
+        self.record(f"{cr.AUTHORED_SKILLS}/demo/SKILL.md > Use It")
+        run(self.tmp, "commit", "-am", "lane a")
+        run(self.tmp, "checkout", "lane-b")
+        self.record("SECT.md > Carried")
+        run(self.tmp, "commit", "-am", "lane b")
+        run(self.tmp, "merge", "--no-edit", "task")
+        self.assertEqual(run(self.tmp, "ls-files", "--unmerged"), "")
+        self.assertEqual(len(cr.read_ledger(self.tmp)), 4)
+
+    def test_a_held_lock_refuses_the_record_rather_than_writing_past_it(self) -> None:
+        """Two overlapping records would each read a ledger without the other's pass and the
+        second write would drop one, so a record that cannot take the lock records nothing."""
+        lock = Path(str(cr.ledger_lock(self.tmp)) + ".lock")
+        lock.write_bytes(b"")
+        self.addCleanup(lock.unlink, missing_ok=True)
+        with unittest.mock.patch.object(cr, "LOCK_TIMEOUT", 0.2):
+            self.assertEqual(self.record("DOC.md > Alpha"), cr.EXIT_CANNOT_RUN)
+        self.assertEqual(cr.read_ledger(self.tmp), {})
+        lock.unlink()
+        self.assertEqual(self.record("DOC.md > Alpha"), cr.EXIT_COVERED)
+        self.assertFalse(lock.exists(), "the record did not release its lock")
+
+    def test_the_lock_lives_in_the_git_directory_rather_than_the_tree(self) -> None:
+        """A lock beside the ledger would be untracked content in `reports/` after a crash,
+        which a blanket add then commits."""
+        git_dir = Path(run(self.tmp, "rev-parse", "--absolute-git-dir").strip())
+        self.assertEqual(cr.ledger_lock(self.tmp).parent, git_dir)
+
     def test_an_orphaned_pass_is_reported_rather_than_dropped(self) -> None:
         """Deciding a section moved rather than vanished is a reader's call, not this tool's."""
         self.record("DOC.md > Alpha")
@@ -686,34 +745,36 @@ class BaseCommitCase(RepoCase):
 
 
 class ReportCase(RepoCase):
-    def test_report_check_catches_a_burn_down_that_no_longer_describes_the_tree(self) -> None:
-        """A deleted unit changes no recorded pass, so `check` stays covered while the committed
-        report still counts and lists a unit that is gone."""
-        self.quiet(["report"])
-        self.assertEqual(self.quiet(["report", "--check"]), cr.EXIT_COVERED)
+    def test_a_record_writes_the_ledger_and_nothing_else_into_the_tree(self) -> None:
+        """The burn-down carried global counts, so two branches each recording one pass merged
+        silently to a count one short of the ledger's. The ledger is the only tracked state."""
+        self.record("DOC.md > Alpha")
+        code, text = self.loud(["report"])
+        self.assertEqual(code, cr.EXIT_COVERED)
+        self.assertIn("- covered: 1", text)
+        untracked = run(self.tmp, "status", "--porcelain", "--untracked-files=all").splitlines()
+        self.assertEqual(untracked, [f"?? {cr.LEDGER}"])
+
+    def test_the_report_describes_the_tree_it_is_rendered_from(self) -> None:
+        """A deleted unit changes no recorded pass, so `check` stays covered, and a rendering
+        made after the deletion no longer counts the unit that is gone."""
+        _, before = self.loud(["report"])
+        self.assertIn("**Beta** -", before)
         self.write("DOC.md", "intro\n\n## Alpha\n\na body\n")
         self.assertEqual(self.quiet(["check"]), cr.EXIT_COVERED, "the premise moved")
-        self.assertEqual(self.quiet(["report", "--check"]), cr.EXIT_NOT_COVERED)
-        self.quiet(["report"])
-        self.assertEqual(self.quiet(["report", "--check"]), cr.EXIT_COVERED)
-
-    def test_recording_rewrites_the_burn_down(self) -> None:
-        """A ledger and a report that disagree are two answers about the same coverage."""
-        self.record("DOC.md > Alpha")
-        text = (self.tmp / cr.REPORT).read_bytes().decode("utf-8")
-        self.assertIn("- covered: 1", text)
+        _, after = self.loud(["report"])
+        self.assertNotIn("**Beta** -", after)
 
     def test_the_report_names_every_outstanding_unit(self) -> None:
-        self.assertEqual(self.quiet(["report"]), cr.EXIT_COVERED)
-        text = (self.tmp / cr.REPORT).read_bytes().decode("utf-8")
+        code, text = self.loud(["report"])
+        self.assertEqual(code, cr.EXIT_COVERED)
         for unit in self.units():
             section = unit.split(cr.SECTION_DELIM, 1)[-1] if cr.SECTION_DELIM in unit else unit
             self.assertIn(section, text, f"{unit} is missing from the burn-down")
 
     def test_the_report_counts_a_recorded_pass(self) -> None:
         self.record("DOC.md > Alpha")
-        self.quiet(["report"])
-        text = (self.tmp / cr.REPORT).read_bytes().decode("utf-8")
+        _, text = self.loud(["report"])
         self.assertIn("- covered: 1", text)
         self.assertNotIn("**Alpha** -", text, "a covered unit is still listed as outstanding")
 

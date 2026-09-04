@@ -30,7 +30,9 @@ SKILLS_SRC = ROOT / ".agents" / "skills"
 PLUGIN_NAME = "fleet-skills"
 DIST_PLUGIN = ROOT / ".claude-plugin" / PLUGIN_NAME
 PLUGIN_MANIFEST = DIST_PLUGIN / ".claude-plugin" / "plugin.json"
-DIGEST_STAMP = DIST_PLUGIN / ".source-digest"
+# One digest file per skill rather than one stamp over every skill's bytes, so two branches editing two skills touch two files and merge (ptr727/ProjectTemplate#1240).
+# Under the plugin root and not under .github/skills/, which spec/files.json carries whole to every fleet repository.
+DIGEST_DIR = DIST_PLUGIN / ".source-digests"
 GITHUB_SKILLS = ROOT / ".github" / "skills"
 
 
@@ -88,18 +90,27 @@ def tree_digest(root, names):
     return h.hexdigest()[:16]
 
 
-def source_digest(names):
-    return tree_digest(SKILLS_SRC, names)
+def skill_digest(name):
+    """The digest of one skill's authored files, which is what its stamp under DIGEST_DIR holds."""
+    return tree_digest(SKILLS_SRC, [name])
+
+
+def has_exact_entries(root, names, directories):
+    """Whether `root` exists and holds exactly one entry per name, each a directory or each a file."""
+    if not root.is_dir() or root.is_symlink():
+        return False
+    entries = list(root.iterdir())
+    # A symlink satisfies is_dir() and is_file(), which follow it, so an entry pointing outside the tree would otherwise pass as generated content.
+    shaped = all(
+        not entry.is_symlink() and (entry.is_dir() if directories else entry.is_file())
+        for entry in entries
+    )
+    return shaped and {entry.name for entry in entries} == set(names)
 
 
 def has_exact_skill_directories(root, names):
     """Whether `root` exists and contains only the expected skill directories."""
-    if not root.is_dir() or root.is_symlink():
-        return False
-    entries = list(root.iterdir())
-    return all(entry.is_dir() for entry in entries) and {entry.name for entry in entries} == set(
-        names
-    )
+    return has_exact_entries(root, names, directories=True)
 
 
 def expected_manifest(names):
@@ -147,21 +158,23 @@ def regenerate():
     for name in names:
         shutil.copytree(SKILLS_SRC / name, GITHUB_SKILLS / name)
     write_plugin_manifest(names)
-    # LF, same as write_plugin_manifest, explicit for the same Windows-platform-default reason.
-    DIGEST_STAMP.write_text(source_digest(names) + "\n", encoding="utf-8", newline="\n")
+    DIGEST_DIR.mkdir(parents=True, exist_ok=True)
+    for name in names:
+        # LF, same as write_plugin_manifest, explicit for the same Windows-platform-default reason.
+        (DIGEST_DIR / name).write_text(skill_digest(name) + "\n", encoding="utf-8", newline="\n")
     return names
 
 
 def is_stale():
     """Whether a generated distribution needs regenerating: missing, corrupted, or built from
     different source bytes. Checks the manifest's own content and the generated tree's actual
-    bytes, not only the digest stamp, since a stamp surviving a partial deletion, a hand-edited
+    bytes, not only the digest stamps, since a stamp surviving a partial deletion, a hand-edited
     manifest, or an edited-in-place generated file would otherwise report current over a plugin
     that no longer actually matches its source. Comparing the source and generated digests
-    directly, rather than trusting the stamp to still describe what is on disk, is what catches
+    directly, rather than trusting a stamp to still describe what is on disk, is what catches
     the in-place edit: nothing else here re-reads the generated files at all.
     """
-    if not DIGEST_STAMP.is_file() or not PLUGIN_MANIFEST.is_file():
+    if not DIGEST_DIR.is_dir() or not PLUGIN_MANIFEST.is_file():
         return True
     names = skill_names()
     try:
@@ -181,14 +194,20 @@ def is_stale():
     dist_skills = DIST_PLUGIN / "skills"
     if not has_exact_skill_directories(dist_skills, names):
         return True
-    current_source_digest = source_digest(names)
-    if DIGEST_STAMP.read_text(encoding="utf-8").strip() != current_source_digest:
-        return True
-    if current_source_digest != tree_digest(dist_skills, names):
-        return True
     if not has_exact_skill_directories(GITHUB_SKILLS, names):
         return True
-    return current_source_digest != tree_digest(GITHUB_SKILLS, names)
+    # Exactly one stamp per skill, checked by name for the same reason the directories are: a stamp left behind by a retired skill is never read below and could not otherwise be noticed.
+    if not has_exact_entries(DIGEST_DIR, names, directories=False):
+        return True
+    for name in names:
+        current = skill_digest(name)
+        if (DIGEST_DIR / name).read_text(encoding="utf-8").strip() != current:
+            return True
+        if current != tree_digest(dist_skills, [name]):
+            return True
+        if current != tree_digest(GITHUB_SKILLS, [name]):
+            return True
+    return False
 
 
 def main():
