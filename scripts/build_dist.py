@@ -30,9 +30,8 @@ SKILLS_SRC = ROOT / ".agents" / "skills"
 PLUGIN_NAME = "fleet-skills"
 DIST_PLUGIN = ROOT / ".claude-plugin" / PLUGIN_NAME
 PLUGIN_MANIFEST = DIST_PLUGIN / ".claude-plugin" / "plugin.json"
-# One digest file per skill, named for the skill, rather than one stamp over every skill's bytes.
-# Two branches editing two skills then touch two files and merge, where the single stamp conflicted on every concurrent skill edit (ptr727/ProjectTemplate#1240).
-# Under the plugin root and not under .github/skills/, which spec/files.json declares a verbatim tree carried whole to every fleet repository, so a stamp there would be carried too.
+# One digest file per skill rather than one stamp over every skill's bytes, so two branches editing two skills touch two files and merge (ptr727/ProjectTemplate#1240).
+# Under the plugin root and not under .github/skills/, which spec/files.json carries whole to every fleet repository.
 DIGEST_DIR = DIST_PLUGIN / ".source-digests"
 GITHUB_SKILLS = ROOT / ".github" / "skills"
 

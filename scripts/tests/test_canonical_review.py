@@ -618,10 +618,10 @@ class LedgerCase(RepoCase):
         self.assertEqual([entry["unit"] for entry in first["passes"]], [alpha, beta])
 
     def test_two_branches_recording_different_units_merge_without_conflict(self) -> None:
-        """The acceptance case: each branch records a pass over a different unit, and git merges
-        the two ledgers without a conflict. The base ledger holds entries that sort between the
-        two, since git merges two insertions only where unchanged lines separate them."""
+        """Each branch records a pass over a different unit, and git merges the two ledgers
+        without a conflict."""
         ledger = cr.LEDGER
+        # Entries that sort between the two, since git merges two insertions only where unchanged lines separate them.
         self.record("CONF.json")
         self.record("DOC.md > Alpha")
         run(self.tmp, "add", ledger)
