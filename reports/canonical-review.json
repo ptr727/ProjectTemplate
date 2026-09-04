@@ -43,11 +43,11 @@
     },
     {
       "unit": ".agents/skills/backlog-burndown/SKILL.md > Dispatching a Worker",
-      "digest": "sha256:51766229c56eb41cd931acb09b146cc07b20ee24e3da51536a60414f587a393a",
+      "digest": "sha256:bd825f92555e4d0a762afe4a2de5ac6a9873b14eed1221a4c2f87d9a70f71489",
       "reviewer": "agent-skill",
-      "findings": 2,
+      "findings": 3,
       "hubCommit": "16f2e32a037857dfcd68b114f006ca2d0cf12ada",
-      "stamp": "2026-09-04T01:35:40Z"
+      "stamp": "2026-09-04T02:41:40Z"
     },
     {
       "unit": ".agents/skills/backlog-burndown/SKILL.md > Ending the Run",
@@ -59,11 +59,11 @@
     },
     {
       "unit": ".agents/skills/backlog-burndown/SKILL.md > Grouping and File Claims",
-      "digest": "sha256:45cc600036c63b8872b96640e7eefe27ee08f020634b8befae7c0ce29480d113",
+      "digest": "sha256:c6c315f4141dd986741e51c290867a8721f3313087e9ff62554681d4b56ca2b1",
       "reviewer": "agent-skill",
-      "findings": 1,
+      "findings": 4,
       "hubCommit": "16f2e32a037857dfcd68b114f006ca2d0cf12ada",
-      "stamp": "2026-09-04T01:44:57Z"
+      "stamp": "2026-09-04T02:41:40Z"
     },
     {
       "unit": ".agents/skills/backlog-burndown/SKILL.md > Mechanics Live Elsewhere",

@@ -153,8 +153,14 @@ for, and it binds harder than any throughput target.
   state, and a local branch holding commits no remote has is invisible to both other reads. Prune
   rather than plain fetch because `--prune` is what drops a remote-tracking ref whose branch is
   gone from the remote, deleted there by another session or through the web interface, and a
-  plain fetch leaves that ref in `git branch -r` to defer valid groups forever. Those three enumerate the
-  branches, with one gap: a branch in the standalone clone `repo-worktree` allows as a fallback is
+  plain fetch leaves that ref in `git branch -r` to defer valid groups forever. Stop and report a
+  failed fetch rather than reading `git branch -r` anyway: the remote-tracking refs still resolve
+  from what the last successful fetch left, so the scan returns a confident answer about a remote
+  it did not reach, missing a branch pushed since and keeping one deleted since. The round
+  stops there and reports, rather than dispatching against a stale answer, and stopping rather
+  than deferring is what the cleanup and promotion steps need too, since both read the same
+  remote.
+  Those three enumerate the branches, with one gap: a branch in the standalone clone `repo-worktree` allows as a fallback is
   reached only once it is pushed, since `git branch -r` inventories the remote rather than this
   repository's checkouts. The claim comments are what say which files each branch holds, since a branch name says nothing about a file set, an unpushed branch has no
   pull request diff to read, and no diff of any branch reports the predicted set a claim records
@@ -224,8 +230,13 @@ Brief on `AGENTS.md` "Context and Delegation Discipline"'s subagent shape.
   whole test. A clean
   tree is retired and the group re-dispatched to a seat that can dispatch. A dirty one is left
   exactly as it stands and the group stopped for the maintainer, as is a group for which no seat
-  that can dispatch exists. Neither the worker nor the orchestrator pushes around the missing
-  pass.
+  that can dispatch exists. That retire-and-re-dispatch case presumes the branch is reachable from
+  this repository, which the standalone clone `repo-worktree` allows as a fallback breaks: a worker that never
+  pushed holds its commits only in that clone, where this repository has no ref to hand a
+  replacement and nothing to retire, so re-dispatching loses the work rather than continuing it.
+  That group stops for the maintainer with the clone named, and no seat this skill defines resumes
+  it, since a worker never inherits another's checkout and the orchestrator opens no branch and
+  edits nothing. Neither the worker nor the orchestrator pushes around the missing pass.
 - **The brief names the branch the worker will use**, which is what lets the claim comment record
   it before dispatch. The worker still creates its own worktree, on that named branch rather than
   one of its choosing, since a claim naming a branch nobody used points at nothing.
