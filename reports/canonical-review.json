@@ -227,11 +227,11 @@
     },
     {
       "unit": ".agents/skills/local-strict-review/SKILL.md > Disposing of Findings",
-      "digest": "sha256:006dceec130b19853b9152a62ed06b5c7462fbaed80846048a27532a68c43a8d",
+      "digest": "sha256:7e25b3613d0e50a37cca4fdc42e8451e9c7bf12773c74ec676f0e2c0016f975d",
       "reviewer": "agent-skill",
       "findings": 2,
       "hubCommit": "28872b4ab08d10d48e8dc0eecd94cdf257633e7d",
-      "stamp": "2026-09-04T21:20:39Z"
+      "stamp": "2026-09-04T21:37:24Z"
     },
     {
       "unit": ".agents/skills/local-strict-review/SKILL.md > Mechanics Live Elsewhere",
@@ -627,11 +627,11 @@
     },
     {
       "unit": "GOVERNANCE.md > Verification Discipline",
-      "digest": "sha256:2ff41281f6b29fd22c1822481af942d44f21a73a65692f5e9e62e2752a23f645",
+      "digest": "sha256:8bc599f8aea61158ba0772069e9540cf66bae568460aef72fec19b720931d055",
       "reviewer": "agent-skill",
       "findings": 1,
       "hubCommit": "28872b4ab08d10d48e8dc0eecd94cdf257633e7d",
-      "stamp": "2026-09-04T21:14:43Z"
+      "stamp": "2026-09-04T21:38:25Z"
     },
     {
       "unit": "GOVERNANCE.md > Workflow YAML Conventions",
