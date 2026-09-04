@@ -1,5 +1,10 @@
 # The two trees below are what scripts/build_dist.py generates from .agents/skills/ and CI holds current, so a finding in either belongs at its source and a review of every copy is one finding three times.
 reviews:
+  # Auto review covers only the default branch unless a base is listed here, each entry a regex, and the default branch stays included whatever is listed.
+  auto_review:
+    enabled: true
+    base_branches:
+      - "^develop$"
   path_filters:
     - "!.github/skills/**"
     - "!.claude-plugin/fleet-skills/**"

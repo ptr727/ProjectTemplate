@@ -129,9 +129,9 @@ The current weakness is availability. A terminal error can leave the required re
 
 The review body provides an actionable summary and links each finding to an inline thread. This makes manual triage straightforward.
 
-Automatic review skipped a feature-to-`develop` pull request because `develop` is not the repository default. The review loop must explicitly trigger CodeRabbit unless its configuration changes.
+Automatic review skips a pull request whose base is not the repository default unless [`.coderabbit.yaml`][coderabbit-auto-review] lists the base under `reviews.auto_review.base_branches`, which the hub's file does for `develop`. The default branch is always included, and each entry is a regex.
 
-Incremental follow-up also requires an explicit command on this pull request. Completion is reported by updating the command reply rather than by creating a new formal review.
+Incremental follow-up needed an explicit command on [pull request #892][pr-892]. Completion is reported by updating the command reply rather than by creating a new formal review.
 
 The collapsed analysis is verbose and can dominate API output. Machine support should read normalized summaries and thread metadata without loading the analysis transcript.
 
@@ -221,6 +221,7 @@ The existing Copilot adapter remains behaviorally unchanged during extraction. P
 
 <!-- External -->
 
+[coderabbit-auto-review]: https://docs.coderabbit.ai/configuration/auto-review
 [coderabbit-config]: https://docs.coderabbit.ai/reference/configuration
 [coderabbit-plans]: https://docs.coderabbit.ai/management/plans
 [copilot-customize]: https://docs.github.com/en/copilot/tutorials/customize-code-review
