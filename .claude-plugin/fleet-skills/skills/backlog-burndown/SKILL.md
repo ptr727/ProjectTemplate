@@ -84,18 +84,17 @@ A round is the unit. Each one runs these steps in order.
 8. **Re-rank from scratch**, and note that the next round prepares under the freeze "The Promotion
    Boundary" describes whenever a promotion pull request is still waiting on the maintainer, so it
    ranks, groups, and verifies claims, and dispatches nothing until that merge lands. Do not carry
-   the
-   previous round's ranking forward. The deferral
-   issues this round's reviews filed are now open issues with a claim on the next round's
-   attention, and an issue that ranked low last round can rank high once a sibling fix lands.
+   the previous round's ranking forward. The deferral issues this round's reviews filed are now
+   open issues with a claim on the next round's attention, and an issue that ranked low last round
+   can rank high once a sibling fix lands.
 
 ## Ranking
 
 Where the repository carries no priority label, and the hub does not, the ranking is the
 orchestrator's judgment against stated criteria rather than a field read off the issue. Where a
 repository does carry one, that label is the first input and these criteria order what it leaves
-tied. Write the ranking, and the reason for the top of
-it, into the report this skill makes at each round boundary, per "Ending the Run".
+tied. Write the ranking, and the reason for the top of it, into the report this skill makes at
+each round boundary, per "Ending the Run".
 
 Rank on these, highest first where they conflict:
 

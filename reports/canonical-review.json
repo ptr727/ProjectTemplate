@@ -83,11 +83,11 @@
     },
     {
       "unit": ".agents/skills/backlog-burndown/SKILL.md > Ranking",
-      "digest": "sha256:0fbfbd39f459950e279c1755bed51eda2dc28e8a2f1463484ec0a193c6984c7e",
+      "digest": "sha256:e58cd0555581811e82a9796072cefc5c3ef14f265f5e4791104a71935cd1de15",
       "reviewer": "agent-skill",
-      "findings": 4,
+      "findings": 3,
       "hubCommit": "16f2e32a037857dfcd68b114f006ca2d0cf12ada",
-      "stamp": "2026-09-04T00:14:42Z"
+      "stamp": "2026-09-04T02:06:41Z"
     },
     {
       "unit": ".agents/skills/backlog-burndown/SKILL.md > Run State",
@@ -115,11 +115,11 @@
     },
     {
       "unit": ".agents/skills/backlog-burndown/SKILL.md > The Round",
-      "digest": "sha256:df2952a0addea0aa2ddd0ec87dcb0221d99213480eaf360660a108aced844d5e",
+      "digest": "sha256:4261479196b88e112bcbd14f9f745be62b09a2b6b56106b2f20ab6111ba6eca4",
       "reviewer": "agent-skill",
-      "findings": 3,
+      "findings": 2,
       "hubCommit": "16f2e32a037857dfcd68b114f006ca2d0cf12ada",
-      "stamp": "2026-09-04T00:14:42Z"
+      "stamp": "2026-09-04T02:06:41Z"
     },
     {
       "unit": ".agents/skills/backlog-burndown/SKILL.md > The Two Seats",
@@ -251,11 +251,11 @@
     },
     {
       "unit": ".agents/skills/local-strict-review/SKILL.md > Running It",
-      "digest": "sha256:43ff0fab22fb0501fd4aad90bf8390382776b8a3fba6355bd7c3f19df145d230",
+      "digest": "sha256:612b1fed21acfd0fd5d1adf78109b4abcb4fe497218b30fbd99e3263f7b197d3",
       "reviewer": "agent-skill",
-      "findings": 5,
+      "findings": 2,
       "hubCommit": "16f2e32a037857dfcd68b114f006ca2d0cf12ada",
-      "stamp": "2026-09-04T00:04:26Z"
+      "stamp": "2026-09-04T02:11:36Z"
     },
     {
       "unit": ".agents/skills/local-strict-review/SKILL.md > The Carried-Content Pass",
