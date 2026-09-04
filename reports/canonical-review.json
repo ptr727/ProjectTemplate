@@ -547,11 +547,11 @@
     },
     {
       "unit": ".github/copilot-instructions.md > Reviewing Carried Fleet Content",
-      "digest": "sha256:83570e2b15143c6f9b79e4d381b7a578d3ae7970d74ae676405a402f6d13630f",
+      "digest": "sha256:c6d69949edc20e0e5ad9fa133061b2ee09f98b99507067b11ae3583f8d583b1e",
       "reviewer": "agent-skill",
-      "findings": 2,
-      "hubCommit": "f0ff674ec0d59bb2c9ec3736ef22d9de205059c8",
-      "stamp": "2026-09-02T03:21:55Z"
+      "findings": 0,
+      "hubCommit": "d857170243aaca002a5c76cbf193886f00bdfb17",
+      "stamp": "2026-09-04T19:14:09Z"
     },
     {
       "unit": "AGENTS.md > Context and Delegation Discipline",

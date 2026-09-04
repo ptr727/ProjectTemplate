@@ -1,0 +1,33 @@
+# The two trees below are what scripts/build_dist.py generates from .agents/skills/ and CI holds current, so a finding in either belongs at its source and a review of every copy is one finding three times.
+reviews:
+  # Auto review covers only the default branch unless a base is listed here, each entry a regex, and the default branch stays included whatever is listed.
+  auto_review:
+    enabled: true
+    base_branches:
+      - "^develop$"
+    # A fleet pull request routinely passes five pushes before it merges, and the default pauses after five reviewed commits, which reads as a reviewer that stopped.
+    auto_pause_after_reviewed_commits: 0
+  path_filters:
+    - "!.github/skills/**"
+    - "!.claude-plugin/fleet-skills/**"
+  # Canonical prose is linted for style in CI and read whole by the local review pass, so a review comment on it earns its place only by naming something false or unfollowable.
+  path_instructions:
+    - path: "**/*.md"
+      instructions: |
+        Report a claim about a tool, a path, a command, or another rule only where it is false, stale, or unverifiable from the repository, and an instruction only where following it literally fails.
+        Do not report wording, tone, or formatting, which CI lints.
+  # The walkthrough extras below add nothing the fleet's review loop reads.
+  sequence_diagrams: false
+  suggested_labels: false
+  suggested_reviewers: false
+  in_progress_fortune: false
+  # CI runs these four linters and fails the pull request on them, so a review comment from the same tool is a second copy of a red check.
+  tools:
+    markdownlint:
+      enabled: false
+    actionlint:
+      enabled: false
+    shellcheck:
+      enabled: false
+    ruff:
+      enabled: false
