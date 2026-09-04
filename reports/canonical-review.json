@@ -18,6 +18,134 @@
       "stamp": "2026-09-02T01:11:56Z"
     },
     {
+      "unit": ".agents/skills/backlog-burndown/SKILL.md > (preamble)",
+      "digest": "sha256:75ac6fdd150652041b8cf1c002d40d7e64903e394983f6ae0c62bec07e200d42",
+      "reviewer": "agent-skill",
+      "findings": 0,
+      "hubCommit": "136661da1b978f793fd5bbd7daa1d95b7338a919",
+      "stamp": "2026-09-03T19:44:45Z"
+    },
+    {
+      "unit": ".agents/skills/backlog-burndown/SKILL.md > Bounding a Prose Group",
+      "digest": "sha256:b94ebeced663da22a9a5b0b32f494d6dbe2045bb8d54ecab5484eb049e9a52d7",
+      "reviewer": "agent-skill",
+      "findings": 0,
+      "hubCommit": "136661da1b978f793fd5bbd7daa1d95b7338a919",
+      "stamp": "2026-09-03T19:44:46Z"
+    },
+    {
+      "unit": ".agents/skills/backlog-burndown/SKILL.md > Bounding the Wait on a Worker",
+      "digest": "sha256:6af6a85a17f9671f6ba50f622a34769e7c8c6fce2100496cd2f9330523755daa",
+      "reviewer": "agent-skill",
+      "findings": 5,
+      "hubCommit": "16f2e32a037857dfcd68b114f006ca2d0cf12ada",
+      "stamp": "2026-09-04T00:04:25Z"
+    },
+    {
+      "unit": ".agents/skills/backlog-burndown/SKILL.md > Dispatching a Worker",
+      "digest": "sha256:bd825f92555e4d0a762afe4a2de5ac6a9873b14eed1221a4c2f87d9a70f71489",
+      "reviewer": "agent-skill",
+      "findings": 3,
+      "hubCommit": "16f2e32a037857dfcd68b114f006ca2d0cf12ada",
+      "stamp": "2026-09-04T02:41:40Z"
+    },
+    {
+      "unit": ".agents/skills/backlog-burndown/SKILL.md > Ending the Run",
+      "digest": "sha256:94b4e3978520d4c14d99e345a8ee526764c6f7e5ea210f0aefd0bd134a8c57f7",
+      "reviewer": "agent-skill",
+      "findings": 0,
+      "hubCommit": "136661da1b978f793fd5bbd7daa1d95b7338a919",
+      "stamp": "2026-09-03T19:44:48Z"
+    },
+    {
+      "unit": ".agents/skills/backlog-burndown/SKILL.md > Grouping and File Claims",
+      "digest": "sha256:c6c315f4141dd986741e51c290867a8721f3313087e9ff62554681d4b56ca2b1",
+      "reviewer": "agent-skill",
+      "findings": 4,
+      "hubCommit": "16f2e32a037857dfcd68b114f006ca2d0cf12ada",
+      "stamp": "2026-09-04T02:41:40Z"
+    },
+    {
+      "unit": ".agents/skills/backlog-burndown/SKILL.md > Mechanics Live Elsewhere",
+      "digest": "sha256:1bdd392da31f3429179c4046103c2a8729ca1808f05b1117e7cbd16a2f3d9eab",
+      "reviewer": "agent-skill",
+      "findings": 0,
+      "hubCommit": "136661da1b978f793fd5bbd7daa1d95b7338a919",
+      "stamp": "2026-09-03T19:44:49Z"
+    },
+    {
+      "unit": ".agents/skills/backlog-burndown/SKILL.md > Raising a Blocked Question",
+      "digest": "sha256:86282c469754ae2c1b5ba5e6694f7d54325e19b2978d5fbef3b50a95a6831c74",
+      "reviewer": "agent-skill",
+      "findings": 7,
+      "hubCommit": "16f2e32a037857dfcd68b114f006ca2d0cf12ada",
+      "stamp": "2026-09-03T23:11:32Z"
+    },
+    {
+      "unit": ".agents/skills/backlog-burndown/SKILL.md > Ranking",
+      "digest": "sha256:e58cd0555581811e82a9796072cefc5c3ef14f265f5e4791104a71935cd1de15",
+      "reviewer": "agent-skill",
+      "findings": 3,
+      "hubCommit": "16f2e32a037857dfcd68b114f006ca2d0cf12ada",
+      "stamp": "2026-09-04T02:06:41Z"
+    },
+    {
+      "unit": ".agents/skills/backlog-burndown/SKILL.md > Run State",
+      "digest": "sha256:6b0b57e0f06237d6f134af15a356aa3ec21bb54c5f2e6bd8460087f392ed20c8",
+      "reviewer": "agent-skill",
+      "findings": 0,
+      "hubCommit": "136661da1b978f793fd5bbd7daa1d95b7338a919",
+      "stamp": "2026-09-03T19:44:50Z"
+    },
+    {
+      "unit": ".agents/skills/backlog-burndown/SKILL.md > Scope",
+      "digest": "sha256:1db5bb5cdd672089c306c59c2776b672ba09541b093fe9e05f4e713c4bc8b530",
+      "reviewer": "agent-skill",
+      "findings": 0,
+      "hubCommit": "136661da1b978f793fd5bbd7daa1d95b7338a919",
+      "stamp": "2026-09-03T19:44:50Z"
+    },
+    {
+      "unit": ".agents/skills/backlog-burndown/SKILL.md > The Promotion Boundary",
+      "digest": "sha256:4b802ff18e55a38f6027b443bebe63c0721e84bf0234b7262aaad726dc005f77",
+      "reviewer": "agent-skill",
+      "findings": 8,
+      "hubCommit": "16f2e32a037857dfcd68b114f006ca2d0cf12ada",
+      "stamp": "2026-09-04T00:33:58Z"
+    },
+    {
+      "unit": ".agents/skills/backlog-burndown/SKILL.md > The Round",
+      "digest": "sha256:4261479196b88e112bcbd14f9f745be62b09a2b6b56106b2f20ab6111ba6eca4",
+      "reviewer": "agent-skill",
+      "findings": 2,
+      "hubCommit": "16f2e32a037857dfcd68b114f006ca2d0cf12ada",
+      "stamp": "2026-09-04T02:06:41Z"
+    },
+    {
+      "unit": ".agents/skills/backlog-burndown/SKILL.md > The Two Seats",
+      "digest": "sha256:988e9cc3aee1ab6aa7c9ada41827a4903f7ae6d06f8051178456888a39c9cb82",
+      "reviewer": "agent-skill",
+      "findings": 0,
+      "hubCommit": "136661da1b978f793fd5bbd7daa1d95b7338a919",
+      "stamp": "2026-09-03T19:44:51Z"
+    },
+    {
+      "unit": ".agents/skills/backlog-burndown/SKILL.md > What Invoking This Skill Authorizes",
+      "digest": "sha256:00d0aff29a7a73bf5575aa0753aac923fdc1364c17968d8e87c96f3658e3ef77",
+      "reviewer": "agent-skill",
+      "findings": 0,
+      "hubCommit": "136661da1b978f793fd5bbd7daa1d95b7338a919",
+      "stamp": "2026-09-03T19:44:52Z"
+    },
+    {
+      "unit": ".agents/skills/backlog-burndown/SKILL.md > Why This Exists",
+      "digest": "sha256:def8e540d75e1b5e40804f0eb708ff868bf834a77440a45ace0eb93b3be49b2c",
+      "reviewer": "agent-skill",
+      "findings": 0,
+      "hubCommit": "136661da1b978f793fd5bbd7daa1d95b7338a919",
+      "stamp": "2026-09-03T19:44:52Z"
+    },
+    {
       "unit": ".agents/skills/comment-and-doc-style/SKILL.md > Docker lint authorization",
       "digest": "sha256:b61bea3f7010cafc475ce582e234e79f1e55e4bd0e5332dbe2b05f4fb5bb03ff",
       "reviewer": "agent-skill",
@@ -50,12 +178,28 @@
       "stamp": "2026-09-02T13:41:40Z"
     },
     {
-      "unit": ".agents/skills/drive-pr/SKILL.md > Disposing of Every Finding",
-      "digest": "sha256:97b70e52bc5aebff405200e8f102b3b551d1bc28d93cbbe8aa6667207f95765b",
+      "unit": ".agents/skills/drive-pr/SKILL.md > (preamble)",
+      "digest": "sha256:5c6af4cd25e9aeaafbfe460691d87bbddf80b4c164f29791fe42df931749e5bb",
       "reviewer": "agent-skill",
-      "findings": 3,
-      "hubCommit": "0e6aacf45334149f6158aa23b8132d6aee1d1eb0",
-      "stamp": "2026-09-01T16:05:59Z"
+      "findings": 4,
+      "hubCommit": "16f2e32a037857dfcd68b114f006ca2d0cf12ada",
+      "stamp": "2026-09-04T00:58:37Z"
+    },
+    {
+      "unit": ".agents/skills/drive-pr/SKILL.md > Disposing of Every Finding",
+      "digest": "sha256:ae3a4a85828fbe73e68906cecfab20bf0c801c22482126c3e16f530aa8b71737",
+      "reviewer": "agent-skill",
+      "findings": 4,
+      "hubCommit": "16f2e32a037857dfcd68b114f006ca2d0cf12ada",
+      "stamp": "2026-09-04T00:58:38Z"
+    },
+    {
+      "unit": ".agents/skills/drive-pr/SKILL.md > How Far to Drive",
+      "digest": "sha256:56b2c85c5b41b3558459646410782718a7167577024a6983c06f0d6133bf4da8",
+      "reviewer": "agent-skill",
+      "findings": 7,
+      "hubCommit": "16f2e32a037857dfcd68b114f006ca2d0cf12ada",
+      "stamp": "2026-09-03T23:11:35Z"
     },
     {
       "unit": ".agents/skills/drive-pr/SKILL.md > The Drive Loop",
@@ -64,6 +208,14 @@
       "findings": 0,
       "hubCommit": "dded739ff0ae8614b52b187a95b00460c0fad8ce",
       "stamp": "2026-09-01T17:57:39Z"
+    },
+    {
+      "unit": ".agents/skills/drive-pr/SKILL.md > What Invoking This Skill Authorizes",
+      "digest": "sha256:5f9593e43214ba87a2bba04c47f870d507e313f1a5dc8383cb3ce863c836fa4e",
+      "reviewer": "agent-skill",
+      "findings": 2,
+      "hubCommit": "16f2e32a037857dfcd68b114f006ca2d0cf12ada",
+      "stamp": "2026-09-04T00:04:25Z"
     },
     {
       "unit": ".agents/skills/local-strict-review/SKILL.md > (preamble)",
@@ -75,11 +227,11 @@
     },
     {
       "unit": ".agents/skills/local-strict-review/SKILL.md > Disposing of Findings",
-      "digest": "sha256:8a02f13222ded9278a0611d305f263ad8c67e1fded86100cc47d3b23a4fc86a8",
+      "digest": "sha256:568da8c763e51795bff9e294a07976fd1479b93b48d383e6d5b60fe23901d6b3",
       "reviewer": "agent-skill",
-      "findings": 2,
-      "hubCommit": "0e6aacf45334149f6158aa23b8132d6aee1d1eb0",
-      "stamp": "2026-09-01T16:37:57Z"
+      "findings": 5,
+      "hubCommit": "16f2e32a037857dfcd68b114f006ca2d0cf12ada",
+      "stamp": "2026-09-04T00:58:38Z"
     },
     {
       "unit": ".agents/skills/local-strict-review/SKILL.md > Mechanics Live Elsewhere",
@@ -96,6 +248,14 @@
       "findings": 0,
       "hubCommit": "a5ab8f6515de9fea49a961e88afefcbf46377a79",
       "stamp": "2026-09-01T16:45:44Z"
+    },
+    {
+      "unit": ".agents/skills/local-strict-review/SKILL.md > Running It",
+      "digest": "sha256:612b1fed21acfd0fd5d1adf78109b4abcb4fe497218b30fbd99e3263f7b197d3",
+      "reviewer": "agent-skill",
+      "findings": 2,
+      "hubCommit": "16f2e32a037857dfcd68b114f006ca2d0cf12ada",
+      "stamp": "2026-09-04T02:11:36Z"
     },
     {
       "unit": ".agents/skills/local-strict-review/SKILL.md > The Carried-Content Pass",
@@ -168,6 +328,14 @@
       "findings": 1,
       "hubCommit": "0e6aacf45334149f6158aa23b8132d6aee1d1eb0",
       "stamp": "2026-09-01T16:37:57Z"
+    },
+    {
+      "unit": ".agents/skills/pr-review-conduct/SKILL.md > Escalate to the maintainer when",
+      "digest": "sha256:7d335c2fa172dc2b3f966eb5540ad357d23feca4ba6156b83610cc208da595f2",
+      "reviewer": "agent-skill",
+      "findings": 7,
+      "hubCommit": "16f2e32a037857dfcd68b114f006ca2d0cf12ada",
+      "stamp": "2026-09-03T23:11:36Z"
     },
     {
       "unit": ".agents/skills/pr-review-conduct/SKILL.md > Every finding ends in one of five outcomes",
@@ -386,12 +554,20 @@
       "stamp": "2026-09-02T03:21:55Z"
     },
     {
-      "unit": "AGENTS.md > Where the Rules Live",
-      "digest": "sha256:2526a341afe0c6f1e2d2e1fe954855398742474a816e2bcba640672d1363766f",
+      "unit": "AGENTS.md > Context and Delegation Discipline",
+      "digest": "sha256:fc4911dfd1b597565eff5b1783493295f5f95197c8452a1410c1499deec21e53",
       "reviewer": "agent-skill",
-      "findings": 14,
-      "hubCommit": "df5e2493b48aa45d80f586db68af0c21be97ea21",
-      "stamp": "2026-09-01T05:58:03Z"
+      "findings": 3,
+      "hubCommit": "16f2e32a037857dfcd68b114f006ca2d0cf12ada",
+      "stamp": "2026-09-04T00:58:39Z"
+    },
+    {
+      "unit": "AGENTS.md > Where the Rules Live",
+      "digest": "sha256:ee899615c15fae90078977de131abbbbc4f461ec6a751db26e5a63eaf8aa1961",
+      "reviewer": "agent-skill",
+      "findings": 0,
+      "hubCommit": "136661da1b978f793fd5bbd7daa1d95b7338a919",
+      "stamp": "2026-09-03T19:44:54Z"
     },
     {
       "unit": "AUDIT.md > 10. Converge: Apply the Fixes",
