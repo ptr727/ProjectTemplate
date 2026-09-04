@@ -227,11 +227,11 @@
     },
     {
       "unit": ".agents/skills/local-strict-review/SKILL.md > Disposing of Findings",
-      "digest": "sha256:7e25b3613d0e50a37cca4fdc42e8451e9c7bf12773c74ec676f0e2c0016f975d",
+      "digest": "sha256:5da8b49aff872a406122fb74abe744e92f7a4f0d23255bb9902d77b49b8bd12c",
       "reviewer": "agent-skill",
-      "findings": 2,
+      "findings": 3,
       "hubCommit": "28872b4ab08d10d48e8dc0eecd94cdf257633e7d",
-      "stamp": "2026-09-04T21:37:24Z"
+      "stamp": "2026-09-04T23:42:40Z"
     },
     {
       "unit": ".agents/skills/local-strict-review/SKILL.md > Mechanics Live Elsewhere",
@@ -347,11 +347,11 @@
     },
     {
       "unit": ".agents/skills/pr-review-conduct/SKILL.md > Expected review loop",
-      "digest": "sha256:2036bc74992e621e4d9a53cf59777793533198af7b7fa77dc2312b893c7d5624",
+      "digest": "sha256:efde1221d83911ef2a0e72b45729130ab9e8f10950f9546697190c5074bb141f",
       "reviewer": "agent-skill",
       "findings": 4,
       "hubCommit": "28872b4ab08d10d48e8dc0eecd94cdf257633e7d",
-      "stamp": "2026-09-04T20:33:56Z"
+      "stamp": "2026-09-04T23:44:02Z"
     },
     {
       "unit": ".agents/skills/pr-review-conduct/SKILL.md > Mechanics Live Elsewhere",

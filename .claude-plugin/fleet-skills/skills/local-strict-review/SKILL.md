@@ -129,11 +129,11 @@ The digest is bound to the read for the same reason `--expect-digest` is above: 
 
 Each bullet is a rule down to its `Why:` line, which is rationale rather than rule, so a stale rationale is a cleanup rather than a defect.
 
-- **Every finding ends in one of the five outcomes `pr-review-conduct` "Every finding ends in one of five outcomes" enumerates, reached here with no thread to reply in.**
+- **Every finding ends in one of the five outcomes that `pr-review-conduct` "Every finding ends in one of five outcomes" enumerates, reached here with no thread to reply in.**
   - `Why:` a local finding and a PR-hosted one deserve the same dispositions, and one home for the list is what stops two copies of it drifting apart.
 - **The agent disposing of a pass's findings classes each one `style`, `introduced`, or `pre-existing`, in that order.** `style` is a preference between defensible forms. `introduced` is any other finding on text this change wrote, rewrote, or removed, on text this change should have written, on a precondition this change left false elsewhere, or load-bearing for a decision this change puts to the maintainer. `pre-existing` is every other finding.
   - `Why:` the reviewer is asked to omit preferences and returns some anyway, and `style` is classed first so that a preference on text this change wrote is not owed a fix.
-- **Another round is owed only while an `introduced` finding is open.** Unless evidence disproves it, an `introduced` finding is fixed, a `pre-existing` one is filed once and blocks nothing, and a `style` one is declined under outcome 2 on `code-review`'s own rule to omit preferences.
+- **Another round is owed only while an `introduced` finding is open.** Unless evidence disproves it, an `introduced` finding is fixed within the budget below, or escalated where `pr-review-conduct` "Escalate to the maintainer when" says so, a `pre-existing` one is filed once and blocks nothing, and a `style` one is declined under outcome 2 on `code-review`'s own rule to omit preferences.
   - `Why:` a finding count over prose never reaches zero, so a loop closing on "did it find anything" does not close, where one closing on the false claim, the unfollowable instruction, or the wrong behavior this change put there does.
 - **A push allows two rounds of edits in answer to the passes it owes, one budget across both.** Where an `introduced` finding is still open after the second round, editing stops and what remains goes to the maintainer with its counts per class, per `pr-review-conduct` "Escalate to the maintainer when".
   - `Why:` past the second round nearly every finding is against text the previous round's fix wrote, so the rounds are producing the defects they find rather than removing them.
