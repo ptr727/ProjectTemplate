@@ -55,6 +55,8 @@ Bounds: read-only. No edit, no stage, no commit, no push, no PR-hosted write of 
 <AGENTS.md's own unresolved-rule closing line, quoted verbatim from "Context and Delegation Discipline", not restated here>
 ```
 
+Before dispatching, grep the tree for other statements of each rule the diff adds or changes, and add each file holding one to the `Paths:` floor, so a statement the diff has put in disagreement is read rather than missed.
+
 **Model tier:** the strongest tier this session can reach, per `AGENTS.md` "Match the model tier to the judgment" and "Never tier down the seat holding the judgment", applied here to the reviewer rather than the author. Run the pass on the same tier that authored the change when only one tier is reachable, a second, adversarially-prompted look still catches what the authoring pass's own "looks ready" judgment did not.
 
 "This session can reach" means the tier this session can name when it dispatches the reviewer, rather than the tier this session is itself running on. A session deliberately tiered down for execution work, a worker dispatched by an orchestrator being the ordinary case, names a stronger tier for the reviewer where its harness lets it, since tiering down the author is the reason the reviewer must not follow it down. What a given harness and account actually permit varies, so treat this as the tier to ask for rather than one to assume. Where a dispatch reaches several tiers but exposes no way to name one, take what it gives and run the pass, on the same reasoning as the single-reachable-tier sentence above. A seat that cannot dispatch a subagent at all cannot perform this pass. Instead of pushing, it reports that it could not run the pass, to whoever dispatched it, or to the maintainer where nobody did. Either way it is a push that does not happen rather than a pass quietly skipped. The headless `run --backend` route under "Recording the Pass" is not the substitute: it runs a vendor CLI against its own review, which never carries the brief above, so it satisfies the rule this section states only where that separate route is what a capture point asked for.
@@ -125,18 +127,18 @@ The digest is bound to the read for the same reason `--expect-digest` is above: 
 
 ## Disposing of Findings
 
-Each bullet's statement is a rule, up to the `Why:` line under it. That `Why:` line is rationale rather than rule, and a stale one is a cleanup rather than a defect.
+Each bullet is a rule down to its `Why:` line, which is rationale rather than rule, so a stale rationale is a cleanup rather than a defect.
 
-- **Every finding ends in one of the outcomes `pr-review-conduct` "Every finding ends in one of five outcomes" enumerates.** That section is the enumeration, and this pass reaches each outcome by acting on it and reporting to whoever drives the work, since it runs before the push that would carry a reply into a thread.
-  - `Why:` a local finding and a PR-hosted one deserve the same dispositions, and one home for them is what stops two copies of the list drifting apart.
-- **The agent disposing of a pass's findings classes each one `style`, `introduced`, or `pre-existing`.** `style` is a preference between two defensible wordings; `introduced` is any other finding where this change wrote, rewrote, or removed the text it lands on, where this change should have written the text and did not, where it is load-bearing for a decision this change puts to the maintainer, or where it shows this change's own edit left a precondition elsewhere false; `pre-existing` is every finding left.
-  - `Why:` the reviewer is told to omit pure preferences and returns some anyway, so `style` is defined first and takes whatever would also fit another class, which is what leaves the three exclusive enough to answer the question below.
-- **The pass closes on one question: is any `introduced` finding still open?** An `introduced` finding is fixed unless the evidence disproves it, a `pre-existing` one is filed as an issue at its source once and blocks nothing, and a `style` finding takes the shortest defensible wording where a round is already open and is otherwise let stand.
-  - `Why:` a finding count over prose never reaches zero, so a pass closing on "did it find anything" does not close, while this one closes on the false claim, the unfollowable instruction, or the wrong behavior this change is answerable for.
-- **A push allows two rounds of edits in answer to this pass.** Where the closing question is still answered yes after the second round, stop editing and put what remains to the maintainer with its counts per class.
-  - `Why:` past the second round nearly every finding is against text the previous round's fix wrote, so the rounds have started producing the defects they find rather than reducing them.
-- **The pass is mandatory, and the count it raises gates nothing.** A pass is recorded whether it raised ten findings or none, so the record attests that a review ran rather than that the content is clean.
-  - `Why:` a gate reading the count would make a pass that raised nothing the cheapest way through it, which is the opposite of what recording one is for.
+- **Every finding ends in one of the five outcomes `pr-review-conduct` "Every finding ends in one of five outcomes" enumerates, reached here with no thread to reply in.**
+  - `Why:` a local finding and a PR-hosted one deserve the same dispositions, and one home for the list is what stops two copies of it drifting apart.
+- **The agent disposing of a pass's findings classes each one `style`, `introduced`, or `pre-existing`, in that order.** `style` is a preference between defensible forms. `introduced` is any other finding on text this change wrote, rewrote, or removed, on text this change should have written, on a precondition this change left false elsewhere, or load-bearing for a decision this change puts to the maintainer. `pre-existing` is every other finding.
+  - `Why:` the reviewer is asked to omit preferences and returns some anyway, and `style` is classed first so that a preference on text this change wrote is not owed a fix.
+- **Another round is owed only while an `introduced` finding is open.** Unless evidence disproves it, an `introduced` finding is fixed, a `pre-existing` one is filed once and blocks nothing, and a `style` one is declined under outcome 2 on `code-review`'s own rule to omit preferences, or, where a round is open anyway, is fixed by taking the shorter of the forms.
+  - `Why:` a finding count over prose never reaches zero, so a loop closing on "did it find anything" does not close, where one closing on the false claim, the unfollowable instruction, or the wrong behavior this change put there does.
+- **A push allows two rounds of edits in answer to the passes it owes, one budget across both.** Where an `introduced` finding is still open after the second round, editing stops and what remains is outcome 3's, put with the counts per class.
+  - `Why:` past the second round nearly every finding is against text the previous round's fix wrote, so the rounds are producing the defects they find rather than removing them.
+- **The pass is mandatory, and the count it records gates nothing.** A pass is recorded whatever it raised, so the record attests that a review ran rather than that the content is clean.
+  - `Why:` a gate reading the count would make a pass raising nothing the cheapest way through it, the opposite of what recording one is for.
 
 ## When to Run It
 
