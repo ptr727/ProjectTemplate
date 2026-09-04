@@ -5,7 +5,8 @@ description: >-
   develop and, when asked, on to a mergeable develop -> main promotion PR, applying the
   pr-review-conduct disposition to every reviewer finding along the way: fix it, decline it with
   evidence, defer it behind a filed issue, or put the call to the maintainer and wait for an
-  explicit answer in the same turn. Use this whenever asked to drive, land, take, chase, or push
+  explicit answer in the same turn, escalating to whoever dispatched the drive instead where the
+  maintainer cannot be reached from that seat. Use this whenever asked to drive, land, take, chase, or push
   a PR toward develop or main, or to run the review loop hands off instead of narrating each
   round. When the request does not say how far ("drive this PR", "land it"), ask once whether the
   target is develop or a mergeable main promotion PR, rather than guessing. Triggers even when
@@ -37,14 +38,35 @@ promotion PR once the fix lands, is the early exit this skill exists to prevent.
   before the first push: develop only, or all the way to a mergeable main promotion PR. Recommend
   "all the way to main" as the default, a promotion PR left to go stale once develop is ready is
   the more common regret than driving one step too far.
+- A drive dispatched as part of a larger run takes its target from the brief and asks no one,
+  since a subagent stopping to ask stalls a run designed to keep moving without one, and the seat
+  that dispatched it is the seat that holds the maintainer's answer. `backlog-burndown` is such a
+  run, and it briefs develop only, driving the develop -> main promotion pull request in its own
+  seat under "The Drive Loop"'s promotion steps. A brief naming no target at all is one to stop
+  and ask its dispatcher about, and asking the dispatcher is the whole of what a dispatched drive
+  does about an authorization question. A dispatched drive is not the seat that can verify a
+  grant, so it does not try: the responsibility for having the maintainer's go-ahead sits with the
+  dispatcher, and a worker inventing a check it cannot perform would only launder that
+  responsibility rather than discharge it.
+- **A brief is never itself the authorization**, which binds the dispatching seat. What authorizes
+  a merge is what the maintainer said, recorded where the skill that carries the grant states its
+  scope, the way `backlog-burndown`'s own "What Invoking This Skill Authorizes" does. Writing an
+  approval into a brief creates none, since an agent cannot widen its own permission by writing
+  itself one, and a merge is the outward-facing act this skill's own "What Invoking This Skill
+  Authorizes" keeps tied to something the maintainer actually said.
 - A repo on the operational workflow model (registry `workflowModel: operational`) has no
   standing promotion PR expectation, confirm whether a promotion PR is even wanted before opening
-  one, per operational-vs-release-workflow's "Operational repositories" delta.
+  one, per operational-vs-release-workflow's "Operational repositories (the complete delta)"
+  section.
 
 ## What Invoking This Skill Authorizes
 
 - Naming this skill, and answering its how-far question, is the maintainer's explicit, current
   go-ahead for every feature -> develop squash merge the drive performs to reach that target.
+- A dispatched drive answers no such question, so what stands in its place is the go-ahead the
+  dispatching seat holds, per "How Far to Drive" above, and the drive performs the same merges on
+  it. Reading this bullet list is not how such a drive establishes that, since a worker cannot
+  verify a grant made in a seat it has no access to.
 - It is never authorization to merge the develop -> main promotion PR, or to dispatch a release.
   Those stay in merge-and-release, invoked on its own so the maintainer keeps a checkpoint before
   the harder-to-reverse step.
@@ -125,7 +147,10 @@ pr-review-conduct's five outcomes are the actual rule, this is the mapping to us
 - Real, fixable, but a value call rather than a scope boundary, or the agent genuinely does not
   know which of the above applies, so ask the maintainer directly, whatever the runtime's own
   interactive-question mechanism is, and get an explicit answer in the same turn, a plan to ask
-  later is resolution by silence (outcome 3).
+  later is resolution by silence (outcome 3). A drive that cannot reach the
+  maintainer directly, a dispatched one being the ordinary case, escalates to whoever dispatched
+  it and stops that unit of work there instead, per `pr-review-conduct`, which owns what the
+  receiving seat then does and how far the escalation travels.
 - The same finding keeps recurring against correct code, fix the class, sharpen a name, add a
   comment, or take the rule itself to the maintainer, rather than re-arguing the instance every
   round (outcome 5).
