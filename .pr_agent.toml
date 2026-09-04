@@ -1,4 +1,3 @@
-# Qodo's repository configuration, read from this file at the root of the default branch.
 # The two trees below are what scripts/build_dist.py generates from .agents/skills/ and CI holds current, so a finding in either belongs at its source and a review of every copy is one finding three times.
 [ignore]
 glob = ['.github/skills/**', '.claude-plugin/fleet-skills/**']
