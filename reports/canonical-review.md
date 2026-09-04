@@ -7,9 +7,9 @@ A unit is what a reviewer reads whole, decided by the carry manifest rather than
 ## Coverage
 
 - units: 304
-- covered: 86
+- covered: 87
 - stale: 0
-- never read here: 218
+- never read here: 217
 
 ## Burn-down
 
@@ -131,7 +131,6 @@ A unit is what a reviewer reads whole, decided by the carry manifest rather than
 
 ### .agents/skills/drive-pr/SKILL.md
 
-- **(preamble)** - never
 - **Mechanics Live Elsewhere** - never
 - **Stop and Ask, Beyond the How-Far Question** - never
 - **Why This Exists** - never

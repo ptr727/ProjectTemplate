@@ -5,7 +5,8 @@ description: >-
   develop and, when asked, on to a mergeable develop -> main promotion PR, applying the
   pr-review-conduct disposition to every reviewer finding along the way: fix it, decline it with
   evidence, defer it behind a filed issue, or put the call to the maintainer and wait for an
-  explicit answer in the same turn. Use this whenever asked to drive, land, take, chase, or push
+  explicit answer in the same turn, escalating to whoever dispatched the drive instead where the
+  maintainer cannot be reached from that seat. Use this whenever asked to drive, land, take, chase, or push
   a PR toward develop or main, or to run the review loop hands off instead of narrating each
   round. When the request does not say how far ("drive this PR", "land it"), ask once whether the
   target is develop or a mergeable main promotion PR, rather than guessing. Triggers even when
@@ -146,7 +147,10 @@ pr-review-conduct's five outcomes are the actual rule, this is the mapping to us
 - Real, fixable, but a value call rather than a scope boundary, or the agent genuinely does not
   know which of the above applies, so ask the maintainer directly, whatever the runtime's own
   interactive-question mechanism is, and get an explicit answer in the same turn, a plan to ask
-  later is resolution by silence (outcome 3).
+  later is resolution by silence (outcome 3). A drive that cannot reach the
+  maintainer directly, a dispatched one being the ordinary case, escalates to whoever dispatched
+  it and stops that unit of work there instead, per `pr-review-conduct`, which owns what the
+  receiving seat then does and how far the escalation travels.
 - The same finding keeps recurring against correct code, fix the class, sharpen a name, add a
   comment, or take the rule itself to the maintainer, rather than re-arguing the instance every
   round (outcome 5).

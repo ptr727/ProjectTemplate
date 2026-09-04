@@ -178,12 +178,20 @@
       "stamp": "2026-09-02T13:41:40Z"
     },
     {
-      "unit": ".agents/skills/drive-pr/SKILL.md > Disposing of Every Finding",
-      "digest": "sha256:97b70e52bc5aebff405200e8f102b3b551d1bc28d93cbbe8aa6667207f95765b",
+      "unit": ".agents/skills/drive-pr/SKILL.md > (preamble)",
+      "digest": "sha256:5c6af4cd25e9aeaafbfe460691d87bbddf80b4c164f29791fe42df931749e5bb",
       "reviewer": "agent-skill",
-      "findings": 3,
-      "hubCommit": "0e6aacf45334149f6158aa23b8132d6aee1d1eb0",
-      "stamp": "2026-09-01T16:05:59Z"
+      "findings": 4,
+      "hubCommit": "16f2e32a037857dfcd68b114f006ca2d0cf12ada",
+      "stamp": "2026-09-04T00:58:37Z"
+    },
+    {
+      "unit": ".agents/skills/drive-pr/SKILL.md > Disposing of Every Finding",
+      "digest": "sha256:ae3a4a85828fbe73e68906cecfab20bf0c801c22482126c3e16f530aa8b71737",
+      "reviewer": "agent-skill",
+      "findings": 4,
+      "hubCommit": "16f2e32a037857dfcd68b114f006ca2d0cf12ada",
+      "stamp": "2026-09-04T00:58:38Z"
     },
     {
       "unit": ".agents/skills/drive-pr/SKILL.md > How Far to Drive",
@@ -219,11 +227,11 @@
     },
     {
       "unit": ".agents/skills/local-strict-review/SKILL.md > Disposing of Findings",
-      "digest": "sha256:8a02f13222ded9278a0611d305f263ad8c67e1fded86100cc47d3b23a4fc86a8",
+      "digest": "sha256:568da8c763e51795bff9e294a07976fd1479b93b48d383e6d5b60fe23901d6b3",
       "reviewer": "agent-skill",
-      "findings": 2,
-      "hubCommit": "0e6aacf45334149f6158aa23b8132d6aee1d1eb0",
-      "stamp": "2026-09-01T16:37:57Z"
+      "findings": 5,
+      "hubCommit": "16f2e32a037857dfcd68b114f006ca2d0cf12ada",
+      "stamp": "2026-09-04T00:58:38Z"
     },
     {
       "unit": ".agents/skills/local-strict-review/SKILL.md > Mechanics Live Elsewhere",
@@ -547,11 +555,11 @@
     },
     {
       "unit": "AGENTS.md > Context and Delegation Discipline",
-      "digest": "sha256:ea475655d0381f213ca4180d9819a1e8fbc8ce49d3bc0cc9fbb95857907142d4",
+      "digest": "sha256:fc4911dfd1b597565eff5b1783493295f5f95197c8452a1410c1499deec21e53",
       "reviewer": "agent-skill",
-      "findings": 4,
+      "findings": 3,
       "hubCommit": "16f2e32a037857dfcd68b114f006ca2d0cf12ada",
-      "stamp": "2026-09-04T00:04:27Z"
+      "stamp": "2026-09-04T00:58:39Z"
     },
     {
       "unit": "AGENTS.md > Where the Rules Live",
