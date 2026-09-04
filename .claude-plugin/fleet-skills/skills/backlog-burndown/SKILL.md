@@ -74,8 +74,10 @@ A round is the unit. Each one runs these steps in order.
 3. **Verify** each group's predicted file set against everything in flight before dispatching
    anything. A group whose files are already claimed waits for the next round.
 4. **Dispatch** at most four workers, one per group, per "Dispatching a Worker".
-5. **Collect** each worker's outcome: merged to develop, parked on a question, or stopped with a
-   reason. Bound this wait per "Bounding the Wait on a Worker".
+5. **Collect** each worker's outcome: merged to develop, stopped on a question only the
+   maintainer can answer, parked behind another group's file claim, or abandoned, which is what
+   the adjudication in "Grouping and File Claims" and a confirmed-gone worker both produce. Bound
+   this wait per "Bounding the Wait on a Worker".
 6. **Clean up** the worktrees, local branches, and merged remote branches of every group that has
    finished or been abandoned, per "Dispatching a Worker".
 7. **Promote**, per "The Promotion Boundary".
@@ -110,9 +112,10 @@ Rank on these, highest first where they conflict:
 
 An issue that asks a question rather than states a defect is not ranked and is never guessed at.
 It has no group, no worker, and no claim, so nothing in "Raising a Blocked Question" applies to it
-except how the question travels. It goes to the maintainer in that section's prompt when a group
-stopping in the same round already sends one, and in a prompt of its own at the end of ranking when
-none does, rather than waiting for a stop that may not come. It stays unranked until answered.
+except how the question travels. It goes to the maintainer at the end of
+ranking, in the same prompt as any other question the run is sending at that moment and in one of
+its own otherwise, rather than waiting for a stop that may not come. It stays unranked until
+answered.
 
 ## Grouping and File Claims
 
@@ -153,6 +156,14 @@ for, and it binds harder than any throughput target.
   earlier round touched, and a round run during the freeze would defer every group it formed. A
   predicted claim that collides with a real one is a group deferred to the next round, never one
   dispatched hoping the overlap stays small.
+- **A branch no claim comment covers still has to yield a file set.** The maintainer's own
+  worktree and a hand-driven task's branch are both enumerated above and neither carries a claim
+  comment, so reading only the comments records them as holding nothing, which is the collision
+  this section exists to prevent rather than the absence of one. Read the branch itself instead:
+  `git diff --name-only origin/develop...<branch>` for what it has committed, and, for a
+  registered worktree, `git -C <worktree> status --porcelain` for what it holds uncommitted. Where
+  neither read is available the set is unknown rather than empty, and an unknown set collides with
+  every group, so ask the maintainer what that branch holds per "Raising a Blocked Question".
 - **Re-verify when a worker reports that its real file set grew** beyond its claim. A worker
   needing a file another group holds stops and reports rather than editing it, and the
   orchestrator decides which group keeps the file, then tells the loser which of three things to
@@ -188,8 +199,8 @@ Brief on `AGENTS.md` "Context and Delegation Discipline"'s subagent shape.
   so brief the group and the bounds rather than restating the loop.
 - **The worker creates its own worktree**, always, as `drive-pr` step 1 and `repo-worktree`'s
   task-start mandate already require of the task itself. No worker inherits another's worktree,
-  which is why "Bounding the Wait on a Worker" either retires a dead worker's tree or leaves it
-  untouched for the maintainer, and never passes it on.
+  which is why "Bounding the Wait on a Worker" either removes a dead worker's tree and its
+  branch or leaves that tree untouched for the maintainer, and never passes it on.
 - **The worker does no cleanup**, which is this skill's one stated override of `drive-pr` step 4
   and of `repo-worktree`'s post-merge procedure. Say so in the brief, because a worker following
   either alone will clean up. The worker still performs step 4's merge itself, and what the override
@@ -199,9 +210,14 @@ Brief on `AGENTS.md` "Context and Delegation Discipline"'s subagent shape.
 - **The worker runs `local-strict-review` before every push**, including one that only fixes a
   review finding. That pass dispatches a reviewer of its own, so a harness where a subagent cannot
   dispatch one leaves the worker unable to run it and unable to push. It reports that rather than
-  pushing, and the orchestrator re-dispatches the group to a seat that can dispatch, or stops it
-  for the maintainer where no such seat exists. Neither the worker nor the orchestrator pushes
-  around the missing pass.
+  pushing, and its worktree is then retired, the branch left standing, since git refuses to attach
+  that branch anywhere else while the reporting tree holds it. This is the worktree-only
+  disposition "Cleanup Is the Orchestrator's" separates out, so a clean tree is the whole test and
+  the commits the branch already carries are what the re-dispatched worker continues from. A clean
+  tree is retired and the group re-dispatched to a seat that can dispatch. A dirty one is left
+  exactly as it stands and the group stopped for the maintainer, as is a group for which no seat
+  that can dispatch exists. Neither the worker nor the orchestrator pushes around the missing
+  pass.
 - **The brief names the branch the worker will use**, which is what lets the claim comment record
   it before dispatch. The worker still creates its own worktree, on that named branch rather than
   one of its choosing, since a claim naming a branch nobody used points at nothing.
@@ -235,8 +251,21 @@ collide with the very group the next round re-forms for the same issue. For a me
 procedure is deferred rather than changed: `repo-worktree`'s verify-before-removing and
 prove-the-cleanup steps run unchanged, just later and in one seat.
 
-An abandoned group, and a dead worker's clean tree, have no merge for that verification to read,
-so the check it replaces with is what the merge check exists to establish, that nothing unmerged is
+**Retiring a worktree and deleting its branch are two dispositions with two tests**, and citing
+one for the other is how a removal that discards nothing gets routed to the maintainer, or a
+removal that discards commits gets waved through. Retiring a worktree alone, the branch left
+standing, risks only what is uncommitted in it: a clean tree is the whole test, the branch's own
+contents do not enter it, and a tree that is not clean is left exactly as it stands while the
+group goes to the maintainer per "Raising a Blocked Question". Deleting the branch as well risks what is committed, so it carries
+whichever branch check the group's state calls for, `repo-worktree`'s verify-before-removing for a
+group whose pull request merged and the no-merge substitute below for one whose has not. Which
+check that is matters: a squash merge never makes the feature tip an ancestor of develop, so the
+substitute would fail on every merged group if it were read as covering them. Every disposition in
+this skill names which of the two it is.
+
+An abandoned group, and a dead worker's clean tree, have no merged pull request for
+`repo-worktree`'s verify-before-removing step to read, so the check that step gives way to here is
+what it exists to establish, that nothing unmerged is
 being thrown away: confirm the branch carries no commit that is not already on develop, and that
 its worktree is clean. Both hold, and the worktree and branch go the same way a merged group's do,
 with no remote branch to delete where none was pushed. Either fails, and cleanup stops there and
@@ -280,8 +309,12 @@ running. Nothing about the worktree is acted on while the answer is "still runni
 that is. Waiting costs a round's latency and guessing costs another task's uncommitted work.
 
 Once the worker is confirmed gone, its worktree decides what follows. **A clean one** is cleaned up
-as any finished group's is, and the issue returns to the next round's ranking to be dispatched
-fresh, its claim comment released with the worktree. **A dirty one is left exactly as it stands**
+as an abandoned group's is, per "Cleanup Is the Orchestrator's", which confirms the branch carries
+no commit that is not already on develop before anything is removed. A worker that committed its
+fix and then died leaves a clean tree standing over commits develop has never seen, so that check
+is what separates the two. It holds, and the issue returns to the next round's ranking to be
+dispatched fresh, its claim comment released with the worktree. It fails, and cleanup stops there
+and the group goes to the maintainer, since past that point removal discards work. **A dirty one is left exactly as it stands**
 and the group is stopped for the maintainer per "Raising a Blocked Question", naming the worktree
 and what is uncommitted in it. The orchestrator does not commit that work, hand the tree to a
 replacement to commit, or remove it: reaching into a tree a task was live in is what
@@ -366,7 +399,13 @@ has carried.
    yields by handing the file over. A holder that already pushed and has an open pull request
    yields by having that pull request wait, its branch untouched, and by the promotion fix taking
    the file, since the two must not be in flight on one file at once. Once the fix lands, that
-   pull request narrows to drop the file, or merges develop in to pick the fix up. Never rebase it:
+   pull request waits untouched until the freeze lifts. Reconciling its content is the next round's
+   worker's job rather than the orchestrator's, which opens no branch and edits nothing. The
+   orchestrator retires that group's worktree, the branch and its pull request left standing,
+   which is the worktree-only disposition "Cleanup Is the Orchestrator's" separates out and the
+   retire-then-dispatch shape "Raising a Blocked Question" uses, and then dispatches a fresh
+   worker on that same branch, briefed either to merge develop in to pick the fix up or to narrow
+   the change to drop the file. Never rebase it:
    its branch is already pushed, so a rebase needs the force-push `git-commit-conventions` forbids
    outright.
 6. **Nothing else pushes, and nothing else is dispatched.** The promotion fix of step 4 is the one

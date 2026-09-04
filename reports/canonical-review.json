@@ -35,19 +35,19 @@
     },
     {
       "unit": ".agents/skills/backlog-burndown/SKILL.md > Bounding the Wait on a Worker",
-      "digest": "sha256:7d55fce35bf3956829006ada2861de28f749cf59878d8ee3609eb0a3ed74ec2e",
+      "digest": "sha256:6af6a85a17f9671f6ba50f622a34769e7c8c6fce2100496cd2f9330523755daa",
       "reviewer": "agent-skill",
-      "findings": 7,
+      "findings": 5,
       "hubCommit": "16f2e32a037857dfcd68b114f006ca2d0cf12ada",
-      "stamp": "2026-09-03T23:11:30Z"
+      "stamp": "2026-09-04T00:04:25Z"
     },
     {
       "unit": ".agents/skills/backlog-burndown/SKILL.md > Dispatching a Worker",
-      "digest": "sha256:f3d04d8aeb75e085155ef6afdef30c414d3c2927bc46217166132d648f73d79e",
+      "digest": "sha256:ee185f0d0e33bfb0f6eecee9068f9fd47c9985037945c33e1c1176101b6cef4e",
       "reviewer": "agent-skill",
-      "findings": 7,
+      "findings": 8,
       "hubCommit": "16f2e32a037857dfcd68b114f006ca2d0cf12ada",
-      "stamp": "2026-09-03T23:11:31Z"
+      "stamp": "2026-09-04T00:33:58Z"
     },
     {
       "unit": ".agents/skills/backlog-burndown/SKILL.md > Ending the Run",
@@ -59,11 +59,11 @@
     },
     {
       "unit": ".agents/skills/backlog-burndown/SKILL.md > Grouping and File Claims",
-      "digest": "sha256:43f937fae415726de562937f37ef27f76d95ad1843736cd21003f9dd0fd99289",
+      "digest": "sha256:44354817a1ba78c8b4e4a1137211cdc78cd2f1b3a32cae8950cf313a6607a7aa",
       "reviewer": "agent-skill",
-      "findings": 7,
+      "findings": 4,
       "hubCommit": "16f2e32a037857dfcd68b114f006ca2d0cf12ada",
-      "stamp": "2026-09-03T23:11:31Z"
+      "stamp": "2026-09-04T00:04:24Z"
     },
     {
       "unit": ".agents/skills/backlog-burndown/SKILL.md > Mechanics Live Elsewhere",
@@ -83,11 +83,11 @@
     },
     {
       "unit": ".agents/skills/backlog-burndown/SKILL.md > Ranking",
-      "digest": "sha256:3334b597fb53445a769cd7d41c91f34a4e68922c1a387034081f9021c45fad1c",
+      "digest": "sha256:0fbfbd39f459950e279c1755bed51eda2dc28e8a2f1463484ec0a193c6984c7e",
       "reviewer": "agent-skill",
-      "findings": 7,
+      "findings": 4,
       "hubCommit": "16f2e32a037857dfcd68b114f006ca2d0cf12ada",
-      "stamp": "2026-09-03T23:11:33Z"
+      "stamp": "2026-09-04T00:14:42Z"
     },
     {
       "unit": ".agents/skills/backlog-burndown/SKILL.md > Run State",
@@ -107,19 +107,19 @@
     },
     {
       "unit": ".agents/skills/backlog-burndown/SKILL.md > The Promotion Boundary",
-      "digest": "sha256:4511ff353bb34433184a1b27c99dbee332f1b68cd1a70de084098785d75ebbf2",
+      "digest": "sha256:4b802ff18e55a38f6027b443bebe63c0721e84bf0234b7262aaad726dc005f77",
       "reviewer": "agent-skill",
-      "findings": 7,
+      "findings": 8,
       "hubCommit": "16f2e32a037857dfcd68b114f006ca2d0cf12ada",
-      "stamp": "2026-09-03T23:11:33Z"
+      "stamp": "2026-09-04T00:33:58Z"
     },
     {
       "unit": ".agents/skills/backlog-burndown/SKILL.md > The Round",
-      "digest": "sha256:e1eae047a717401e72cfcd4f916200cbf2ee85603dfea0869ee96f9cbc5f93ad",
+      "digest": "sha256:df2952a0addea0aa2ddd0ec87dcb0221d99213480eaf360660a108aced844d5e",
       "reviewer": "agent-skill",
-      "findings": 7,
+      "findings": 3,
       "hubCommit": "16f2e32a037857dfcd68b114f006ca2d0cf12ada",
-      "stamp": "2026-09-03T23:11:34Z"
+      "stamp": "2026-09-04T00:14:42Z"
     },
     {
       "unit": ".agents/skills/backlog-burndown/SKILL.md > The Two Seats",
@@ -202,6 +202,14 @@
       "stamp": "2026-09-01T17:57:39Z"
     },
     {
+      "unit": ".agents/skills/drive-pr/SKILL.md > What Invoking This Skill Authorizes",
+      "digest": "sha256:5f9593e43214ba87a2bba04c47f870d507e313f1a5dc8383cb3ce863c836fa4e",
+      "reviewer": "agent-skill",
+      "findings": 2,
+      "hubCommit": "16f2e32a037857dfcd68b114f006ca2d0cf12ada",
+      "stamp": "2026-09-04T00:04:25Z"
+    },
+    {
       "unit": ".agents/skills/local-strict-review/SKILL.md > (preamble)",
       "digest": "sha256:e607d4a5c7ad14232516261ab7f0941de11a4312415a65dc054b394a645a106d",
       "reviewer": "agent-skill",
@@ -235,11 +243,11 @@
     },
     {
       "unit": ".agents/skills/local-strict-review/SKILL.md > Running It",
-      "digest": "sha256:29c09e931d967c4d19cee294c631e56d49752645042a8fccc952faefadce4972",
+      "digest": "sha256:43ff0fab22fb0501fd4aad90bf8390382776b8a3fba6355bd7c3f19df145d230",
       "reviewer": "agent-skill",
-      "findings": 7,
+      "findings": 5,
       "hubCommit": "16f2e32a037857dfcd68b114f006ca2d0cf12ada",
-      "stamp": "2026-09-03T23:11:35Z"
+      "stamp": "2026-09-04T00:04:26Z"
     },
     {
       "unit": ".agents/skills/local-strict-review/SKILL.md > The Carried-Content Pass",
@@ -539,11 +547,11 @@
     },
     {
       "unit": "AGENTS.md > Context and Delegation Discipline",
-      "digest": "sha256:97e7e984154b3d91063359e78d8a7733fa4152b9a82b2e9cca81cf55720be95f",
+      "digest": "sha256:ea475655d0381f213ca4180d9819a1e8fbc8ce49d3bc0cc9fbb95857907142d4",
       "reviewer": "agent-skill",
-      "findings": 0,
-      "hubCommit": "136661da1b978f793fd5bbd7daa1d95b7338a919",
-      "stamp": "2026-09-03T19:44:54Z"
+      "findings": 4,
+      "hubCommit": "16f2e32a037857dfcd68b114f006ca2d0cf12ada",
+      "stamp": "2026-09-04T00:04:27Z"
     },
     {
       "unit": "AGENTS.md > Where the Rules Live",

@@ -62,6 +62,10 @@ promotion PR once the fix lands, is the early exit this skill exists to prevent.
 
 - Naming this skill, and answering its how-far question, is the maintainer's explicit, current
   go-ahead for every feature -> develop squash merge the drive performs to reach that target.
+- A dispatched drive answers no such question, so what stands in its place is the go-ahead the
+  dispatching seat holds, per "How Far to Drive" above, and the drive performs the same merges on
+  it. Reading this bullet list is not how such a drive establishes that, since a worker cannot
+  verify a grant made in a seat it has no access to.
 - It is never authorization to merge the develop -> main promotion PR, or to dispatch a release.
   Those stay in merge-and-release, invoked on its own so the maintainer keeps a checkpoint before
   the harder-to-reverse step.
