@@ -29,8 +29,11 @@ reviewer's read of this one is still a read of these bytes.
 **The gate is on what a branch changes, and the backlog is reported rather than gated.** Most
 units have never had a full read here, which is the defect #1138 records rather than a reason to
 block every push until it is worked off. `check` refuses only the units this branch's own diff
-moved, so the ordering is fixed going forward, and `report` renders what is left as a burn-down
-the way `reports/divergences.md` does for fidelity.
+moved, so the ordering is fixed going forward, and `report` renders what is left as a burn-down.
+The ledger is the state and is tracked. The burn-down is a rendering of it and is never
+committed: `report` writes it to standard output, and CI writes that to the run's job summary. A
+sorted ledger holding one entry per unit merges when two branches record passes over different
+units, and a rendering carrying global counts does not (ptr727/ProjectTemplate#1268).
 
 The verdict vocabulary is `scripts/local_review.py`'s, because both gates run from the same
 pre-push hook and a caller reading an exit code must not have to know which one answered: 0 is
@@ -41,7 +44,7 @@ Usage:
     python3 scripts/canonical_review.py status               what is covered, stale, or never read
     python3 scripts/canonical_review.py check                gate this branch's changed units
     python3 scripts/canonical_review.py record --reviewer agent-skill --unit '<key>=<digest>'
-    python3 scripts/canonical_review.py report               write reports/canonical-review.md
+    python3 scripts/canonical_review.py report               render the burn-down to standard output
 """
 
 import argparse
@@ -79,7 +82,11 @@ git = local_review.git
 
 MANIFEST = "spec/files.json"
 LEDGER = "reports/canonical-review.json"
-REPORT = "reports/canonical-review.md"
+# The lock `record` holds around its read, merge, and replace of the ledger.
+# In this worktree's own git directory rather than beside the ledger, so a record killed mid-write leaves its lock where no add can stage it and where a second worktree never meets it.
+# `held_lock` appends `.lock` to the path it is given.
+LEDGER_LOCK_NAME = "canonical-review-ledger"
+LOCK_TIMEOUT = 10.0
 
 LEDGER_NOTE = (
     "What full-content reviews of hub canonical content have covered, one entry per unit, holding"
@@ -523,11 +530,18 @@ def read_ledger(root: Path) -> dict[str, dict[str, Any]]:
     return out
 
 
+def ledger_lock(root: Path) -> Path:
+    """The path `local_review.held_lock` guards the ledger under, in this worktree's git directory."""
+    return local_review.git_dir(root) / LEDGER_LOCK_NAME
+
+
 def write_ledger(root: Path, entries: dict[str, dict[str, Any]]) -> None:
     """Replace the ledger with `entries`, one per unit, ordered by unit key.
 
     Sorted and one entry per unit so a concurrent branch touching a different unit merges cleanly,
-    and so the diff of a recorded pass reads as the pass rather than as a reordering.
+    and so the diff of a recorded pass reads as the pass rather than as a reordering. The caller
+    holds `ledger_lock` across the read this replaces, since two overlapping records would
+    otherwise each read a ledger without the other's pass and the second write would drop it.
     """
     payload = {"note": LEDGER_NOTE, "passes": [entries[unit] for unit in sorted(entries)]}
     path = root / LEDGER
@@ -697,30 +711,35 @@ def cmd_record(args: argparse.Namespace) -> int:
             )
         emit("Re-read the unit's current text and record that.", sys.stderr)
         return EXIT_CANNOT_RUN
-    ledger = read_ledger(root)
     stamp = datetime.now(UTC).strftime("%Y-%m-%dT%H:%M:%SZ")
     # Stamped as the merge-base against the target, not HEAD, since a squash merge discards HEAD and an amend moves it.
     _, base = resolve_base(args.target, root)
-    for unit, value in wanted.items():
-        ledger[unit] = {
-            "unit": unit,
-            "digest": value,
-            "reviewer": args.reviewer,
-            "findings": args.findings,
-            "hubCommit": base,
-            "stamp": stamp,
-        }
-    write_ledger(root, ledger)
-    # The burn-down is regenerated here rather than left to a caller to remember, since a ledger and a report that disagree are two answers about the same coverage.
-    write_report(root)
-    emit(f"recorded {args.reviewer} over {len(wanted)} unit(s) in {LEDGER}, and rewrote {REPORT}.")
+    # The same lock shape as `local_review.write_pass`, for the same reason: a record is a read, a merge, and a replace, and only the replace is atomic on its own.
+    lock = ledger_lock(root)
+    fd_lock = local_review.held_lock(lock, LOCK_TIMEOUT)
+    try:
+        ledger = read_ledger(root)
+        for unit, value in wanted.items():
+            ledger[unit] = {
+                "unit": unit,
+                "digest": value,
+                "reviewer": args.reviewer,
+                "findings": args.findings,
+                "hubCommit": base,
+                "stamp": stamp,
+            }
+        write_ledger(root, ledger)
+    finally:
+        os.close(fd_lock)
+        Path(str(lock) + ".lock").unlink(missing_ok=True)
+    emit(f"recorded {args.reviewer} over {len(wanted)} unit(s) in {LEDGER}.")
     return EXIT_COVERED
 
 
 def render_report(
     current: dict[str, str], ledger: dict[str, dict[str, Any]], absent: list[str]
 ) -> str:
-    """The burn-down, grouped by the file a unit belongs to."""
+    """The burn-down, grouped by the file a unit belongs to, as Markdown for a job summary or a pager."""
     states = {unit: state_of(unit, value, ledger) for unit, value in current.items()}
     counts = {
         state: sum(1 for s in states.values() if s == state)
@@ -730,9 +749,10 @@ def render_report(
         "# Canonical content review coverage",
         "",
         (
-            "Generated by `python3 scripts/canonical_review.py report`, and never hand-edited."
-            " Records are written by `canonical_review.py record` into"
-            " [`reports/canonical-review.json`][ledger]. Git dates this file."
+            "Rendered by `python3 scripts/canonical_review.py report` from"
+            " `reports/canonical-review.json`, which `canonical_review.py record` writes. The"
+            " ledger is tracked and this rendering is not, so it describes the tree it was"
+            " rendered from and nothing older."
         ),
         "",
         (
@@ -804,51 +824,22 @@ def render_report(
         )
         lines.extend(f"- {path}" for path in absent)
         lines.append("")
-    lines.extend(
-        [
-            "[ledger]: ./canonical-review.json",
-            "[issue]: https://github.com/ptr727/ProjectTemplate/issues/1138",
-            "",
-        ]
-    )
+    lines.extend(["[issue]: https://github.com/ptr727/ProjectTemplate/issues/1138", ""])
     return "\n".join(lines)
 
 
-def write_report(root: Path) -> int:
-    """Rewrite the burn-down from the ledger, returning how many units it covers.
-
-    Called by `record` as well as by `report`, because a recorded pass that left the committed
-    counts describing the previous state would put a stale burn-down in front of every reader of
-    it, and the one procedure that writes the ledger is the one place that knows to.
-    """
-    current, absent = units(root)
-    text = render_report(current, read_ledger(root), absent)
-    path = root / REPORT
-    path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_bytes(text.encode("utf-8"))
-    return len(current)
-
-
 def cmd_report(args: argparse.Namespace) -> int:
+    """Render the burn-down to standard output, writing nothing into the tree.
+
+    A rendering that lived in the tree carried global counts, so two branches each recording one
+    pass merged silently to a count one short of the ledger's, and a gate over that file then
+    failed the next unrelated pull request. Rendering at the point of reading has no such state
+    to go stale.
+    """
     root = local_review.repo_root()
-    if not args.check:
-        emit(f"wrote {REPORT} over {write_report(root)} unit(s).")
-        return EXIT_COVERED
-    # Read-only, on `build_dist.py --check`'s contract, because a burn-down nothing verifies is current only by accident.
-    # Deleting a unit outright changes no recorded pass, so `check` stays covered while the committed report still counts and lists the unit that is gone.
     current, absent = units(root)
-    want = render_report(current, read_ledger(root), absent)
-    path = root / REPORT
-    have = path.read_bytes().decode("utf-8") if path.is_file() else None
-    if have == want:
-        emit(f"{REPORT} is current over {len(current)} unit(s).")
-        return EXIT_COVERED
-    emit(
-        f"{REPORT} does not describe the ledger and the tree."
-        f"\nRun: python3 scripts/canonical_review.py report",
-        sys.stderr,
-    )
-    return EXIT_NOT_COVERED
+    emit(render_report(current, read_ledger(root), absent))
+    return EXIT_COVERED
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -888,11 +879,8 @@ def main(argv: list[str] | None = None) -> int:
     )
     p_record.set_defaults(handler=cmd_record)
 
-    p_report = sub.add_parser("report", help=f"write {REPORT}")
-    p_report.add_argument(
-        "--check",
-        action="store_true",
-        help="read-only: exit 0 where the report is current, 1 where it is not",
+    p_report = sub.add_parser(
+        "report", help="render the burn-down from the ledger to standard output, as Markdown"
     )
     p_report.set_defaults(handler=cmd_report)
 

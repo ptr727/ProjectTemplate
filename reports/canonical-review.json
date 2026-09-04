@@ -259,11 +259,11 @@
     },
     {
       "unit": ".agents/skills/local-strict-review/SKILL.md > The Carried-Content Pass",
-      "digest": "sha256:1bd1396389709aa388ba5b984cd11cc1335bb7b13da107c32bcc336feb816154",
+      "digest": "sha256:0e2902a43d228b74045c7310325fbd7f399f279855e261bbce12cb4f0161ab0d",
       "reviewer": "agent-skill",
-      "findings": 0,
-      "hubCommit": "e97708dfe4c92e275118a0705556822993de9f32",
-      "stamp": "2026-08-31T16:17:12Z"
+      "findings": 3,
+      "hubCommit": "ddca03490f0517fe786ef1d58aff3b8eaf19616b",
+      "stamp": "2026-09-04T16:24:35Z"
     },
     {
       "unit": ".agents/skills/local-strict-review/SKILL.md > What It Does",
@@ -563,11 +563,11 @@
     },
     {
       "unit": "AGENTS.md > Where the Rules Live",
-      "digest": "sha256:ee899615c15fae90078977de131abbbbc4f461ec6a751db26e5a63eaf8aa1961",
+      "digest": "sha256:028afc6eff153d9077d32f1dc10af609bc8822d4fb685aa1ddf2b010ad85f6fa",
       "reviewer": "agent-skill",
-      "findings": 0,
-      "hubCommit": "136661da1b978f793fd5bbd7daa1d95b7338a919",
-      "stamp": "2026-09-03T19:44:54Z"
+      "findings": 1,
+      "hubCommit": "ddca03490f0517fe786ef1d58aff3b8eaf19616b",
+      "stamp": "2026-09-04T16:24:35Z"
     },
     {
       "unit": "AUDIT.md > 10. Converge: Apply the Fixes",
@@ -627,11 +627,11 @@
     },
     {
       "unit": "GOVERNANCE.md > Verification Discipline",
-      "digest": "sha256:d62a160f347578c5c2f922f280f21ced2e1d4a1adc9df6aed124ea2dce637628",
+      "digest": "sha256:57d6d64ec9e54b08ec9808c2f03aedd7b73eada6783b79f618902908922d305c",
       "reviewer": "agent-skill",
-      "findings": 15,
-      "hubCommit": "28dafdf46ee35cc9901e845a317991d909a94fac",
-      "stamp": "2026-09-03T18:39:43Z"
+      "findings": 3,
+      "hubCommit": "ddca03490f0517fe786ef1d58aff3b8eaf19616b",
+      "stamp": "2026-09-04T16:24:35Z"
     },
     {
       "unit": "GOVERNANCE.md > Workflow YAML Conventions",

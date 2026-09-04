@@ -28,7 +28,6 @@ uvx coverage@latest run --source=scripts,spec,host-setup --append host-setup/age
 uvx coverage@latest report
 python3 scripts/build_dist.py --check
 python3 scripts/canonical_review.py check
-python3 scripts/canonical_review.py report --check
 python3 scripts/repo_gate.py
 python3 scripts/prose_lint.py . --check charset --check semicolon --check dash --check dupword --check spelling --check comment-wrap --check comment-case --check home-path --check dead-path
 python3 scripts/prose_lint.py . --check charset-unknown --summary
@@ -37,7 +36,7 @@ python3 spec/validate.py
 python3 scripts/docker_lint.py
 ```
 
-`report --check` is read-only and runs on every event in CI, where the coverage check beside it runs only for a pull request, because a stale burn-down is a property of the commit rather than of a comparison against a base. It also carries `!cancelled()`, so an earlier failing step does not skip it and one run names both verdicts. The local block above has no such arrangement: it runs under `set -Eeuo pipefail`, so a failing `check` stops it there and the gates below never run, and reaching a second verdict means fixing the first or running the later command on its own. It fails where the committed report no longer describes the ledger and the tree, which a deleted unit produces while every other gate stays green, since deleting one changes no recorded digest and leaves `check` covered. Renaming a section of a file the manifest carries by name, meaning `AGENTS.md` or `GOVERNANCE.md`, does the same. Renaming one in a file carried whole does not, since `check` then names the new unit and demands a pass for it. `python3 scripts/canonical_review.py report` rewrites it.
+`python3 scripts/canonical_review.py report` renders the burn-down from the ledger to standard output and writes nothing into the tree, since the ledger is the state and the burn-down is a reading of it, and CI writes the same rendering to the run's job summary. The local block above runs under `set -Eeuo pipefail`, so a failing gate stops it there and the gates below never run, and reaching a second verdict means fixing the first or running the later command on its own.
 
 The canonical-review check sits in CI's own list only for a pull request, since a canonical unit's change is measured against the branch it is proposed into and a push carrying no pull request names none. The local run above takes the default target, `develop`, which is the same measurement for an ordinary feature branch and the wrong one for a branch based on `main`, where it needs `--target main` to mean anything.
 
