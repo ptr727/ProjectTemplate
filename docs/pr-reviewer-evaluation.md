@@ -16,12 +16,15 @@ This document measures whether additional automated reviewers improve the fleet'
 
 ## Status
 
-**State:** Active evaluation\
+**State:** Active evaluation, on public repositories only since the trials ended\
 **Incumbent:** GitHub Copilot\
-**Candidates:** CodeRabbit and Qodo\
+**Candidates:** CodeRabbit and Qodo, each on its open-source tier\
+**Installed but unconfigured:** the Claude GitHub App\
 **Samples:** [ProjectTemplate pull request #891][pr-891], [pull request #892][pr-892], and [pull request #893][pr-893]
 
 No candidate is a required reviewer. A candidate remains advisory until it meets the first-class support criteria below.
+
+Both trials ended in September 2026. CodeRabbit and Qodo now review the maintainer's public repositories under their open-source tiers and never a private one, so a private repository has Copilot as its only pull-request reviewer, and Copilot's own review budget, a self-configured premium request cap, runs out under concurrent pull requests. The Claude GitHub App is installed on the account and could be configured as a reviewer, and its value is unmeasured, since the `local-strict-review` Skill already runs a Claude pass before every push.
 
 ## Evaluation Method
 
@@ -150,15 +153,15 @@ The first sample shows more policy false positives than CodeRabbit. It also supp
 
 - **CodeRabbit** reads `reviews.path_filters` from [`.coderabbit.yaml`][coderabbit-config] at the repository root, where a pattern prefixed with `!` excludes.
 - **Qodo** reads [`.pr_agent.toml`][qodo-config] from the root of the default branch, so the file binds only once it is promoted to `main`, and its [`[ignore]` glob list][qodo-ignore] names the paths to skip.
-- **GitHub Copilot** honors [content exclusion][copilot-exclusion], a repository setting under Copilot rather than a file in the tree, whose paths are `fnmatch` patterns anchored by a leading slash. The setting is a repository administrator's action, and GitHub documents it for organizations on a Business or Enterprise plan. Where it is absent, Copilot keeps reviewing the mirrors, and no file in the tree changes that.
+- **GitHub Copilot** honors [content exclusion][copilot-exclusion], a repository setting under Copilot rather than a file in the tree, whose paths are `fnmatch` patterns anchored by a leading slash. GitHub documents the setting for organizations on a Business or Enterprise plan, and this repository is under a user account, so it is unavailable here. In its place, `.github/copilot-instructions.md` "Reviewing Carried Fleet Content" asks Copilot to post no comment on either tree, which GitHub's [code review customization tutorial][copilot-customize] documents as non-deterministic, so an instruction may be overlooked where a setting cannot.
 
 ## Plan and Repository Scope
 
-The maintainer intends to leave the paid trial when it expires and use only an available no-cost open-source tier. Candidate use is therefore limited to public repositories unless the maintainer approves a later plan change.
+The paid trials are over, and both candidates run on their no-cost open-source tiers. Candidate use is therefore limited to public repositories unless the maintainer approves a later plan change.
 
-[CodeRabbit's current plan documentation][coderabbit-plans] provides an open-source tier for public repositories with rate limits. Confirm its terms again when the trial ends because product plans are external state.
+[CodeRabbit's current plan documentation][coderabbit-plans] provides an open-source tier for public repositories with rate limits. Product plans are external state, so confirm the terms again before relying on them.
 
-Qodo remains under evaluation. Confirm its current public-repository availability, limits, and required permissions before relying on it outside this repository. Its [code-review documentation][qodo-review] describes the review product but does not settle the fleet's plan decision.
+Qodo remains under evaluation on the same footing. Its [code-review documentation][qodo-review] describes the review product but does not settle the fleet's plan decision.
 
 Private repositories remain Copilot-only unless a candidate's approved plan, data terms, and GitHub App permissions receive a separate review.
 
@@ -220,6 +223,7 @@ The existing Copilot adapter remains behaviorally unchanged during extraction. P
 
 [coderabbit-config]: https://docs.coderabbit.ai/reference/configuration
 [coderabbit-plans]: https://docs.coderabbit.ai/management/plans
+[copilot-customize]: https://docs.github.com/en/copilot/tutorials/customize-code-review
 [copilot-exclusion]: https://docs.github.com/en/copilot/how-tos/configure-content-exclusion/exclude-content-from-copilot
 [qodo-config]: https://docs.qodo.ai/install-and-configure/configuration-overview/configuration-file
 [qodo-ignore]: https://docs.pr-agent.ai/usage-guide/additional_configurations/
