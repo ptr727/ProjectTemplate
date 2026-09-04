@@ -147,11 +147,19 @@ for, and it binds harder than any throughput target.
   diff <number> --name-only` per open pull request), and the claim comments of every group still
   holding a branch, parked groups from earlier rounds included. `git worktree list` reports the
   registered worktrees and the branch checked out in each, which is not the same as every branch
-  that exists, so pair it with `git branch -r`, after `git fetch origin`, for one that was pushed
-  and whose worktree is
-  already gone. Those two enumerate the branches, and the claim comments are what say which files
-  each one holds, since a branch name says nothing about a file set and an unpushed branch has no
-  diff to read. **Exclude the open promotion pull request from that enumeration.**
+  that exists, so pair it with `git branch -r`, after `git fetch --prune origin`, for one that was
+  pushed and whose worktree is already gone, and with `git branch` for one that was never pushed
+  and whose worktree is already gone. That third read is not optional here: the worktree-only
+  disposition retires a tree and leaves its branch standing, so this skill produces exactly that
+  state, and a local branch holding commits no remote has is invisible to both other reads. Prune
+  rather than plain fetch because `--prune` is what drops a remote-tracking ref whose branch is
+  gone from the remote, deleted there by another session or through the web interface, and a
+  plain fetch leaves that ref in `git branch -r` to defer valid groups forever. Those three enumerate the
+  branches, with one gap: a branch in the standalone clone `repo-worktree` allows as a fallback is
+  reached only once it is pushed, since `git branch -r` inventories the remote rather than this
+  repository's checkouts. The claim comments are what say which files each branch holds, since a branch name says nothing about a file set, an unpushed branch has no
+  pull request diff to read, and no diff of any branch reports the predicted set a claim records
+  before the work is committed. **Exclude the open promotion pull request from that enumeration.**
   Its diff is all of `origin/main..origin/develop`, so counting it claims nearly every file any
   earlier round touched, and a round run during the freeze would defer every group it formed. A
   predicted claim that collides with a real one is a group deferred to the next round, never one
@@ -210,10 +218,11 @@ Brief on `AGENTS.md` "Context and Delegation Discipline"'s subagent shape.
 - **The worker runs `local-strict-review` before every push**, including one that only fixes a
   review finding. That pass dispatches a reviewer of its own, so a harness where a subagent cannot
   dispatch one leaves the worker unable to run it and unable to push. It reports that rather than
-  pushing, and its worktree is then retired, the branch left standing, since git refuses to attach
-  that branch anywhere else while the reporting tree holds it. This is the worktree-only
-  disposition "Cleanup Is the Orchestrator's" separates out, so a clean tree is the whole test and
-  the commits the branch already carries are what the re-dispatched worker continues from. A clean
+  pushing, and its worktree is then retired, since git refuses to attach that branch anywhere else
+  while the reporting tree holds it. The branch is left standing for its own reason, that the
+  commits it already carries are what the re-dispatched worker continues from. This is the
+  worktree-only disposition "Cleanup Is the Orchestrator's" separates out, so a clean tree is the
+  whole test. A clean
   tree is retired and the group re-dispatched to a seat that can dispatch. A dirty one is left
   exactly as it stands and the group stopped for the maintainer, as is a group for which no seat
   that can dispatch exists. Neither the worker nor the orchestrator pushes around the missing
