@@ -144,6 +144,14 @@ After a corrective push, Qodo updated the existing review comment and its resolv
 
 The first sample shows more policy false positives than CodeRabbit. It also supplied the only command-line length finding, which gives it measurable incremental value.
 
+### Generated Mirrors
+
+`.github/skills/` and `.claude-plugin/fleet-skills/` are the trees `scripts/build_dist.py` generates from `.agents/skills/`, and CI holds them current, so a finding in either belongs at its source and a review of every copy is one finding three times. Two committed files tell CodeRabbit and Qodo to skip them, and Copilot's exclusion is a repository setting.
+
+- **CodeRabbit** reads `reviews.path_filters` from [`.coderabbit.yaml`][coderabbit-config] at the repository root, where a pattern prefixed with `!` excludes.
+- **Qodo** reads [`.pr_agent.toml`][qodo-config] from the root of the default branch, so the file binds only once it is promoted to `main`, and its [`[ignore]` glob list][qodo-ignore] names the paths to skip.
+- **GitHub Copilot** honors [content exclusion][copilot-exclusion], a repository setting under Copilot rather than a file in the tree, whose paths are `fnmatch` patterns anchored by a leading slash. The setting is a repository administrator's action, and GitHub documents it for organizations on a Business or Enterprise plan. Where it is absent, Copilot keeps reviewing the mirrors, and no file in the tree changes that.
+
 ## Plan and Repository Scope
 
 The maintainer intends to leave the paid trial when it expires and use only an available no-cost open-source tier. Candidate use is therefore limited to public repositories unless the maintainer approves a later plan change.
@@ -210,5 +218,9 @@ The existing Copilot adapter remains behaviorally unchanged during extraction. P
 
 <!-- External -->
 
+[coderabbit-config]: https://docs.coderabbit.ai/reference/configuration
 [coderabbit-plans]: https://docs.coderabbit.ai/management/plans
+[copilot-exclusion]: https://docs.github.com/en/copilot/how-tos/configure-content-exclusion/exclude-content-from-copilot
+[qodo-config]: https://docs.qodo.ai/install-and-configure/configuration-overview/configuration-file
+[qodo-ignore]: https://docs.pr-agent.ai/usage-guide/additional_configurations/
 [qodo-review]: https://docs.qodo.ai/code-review
