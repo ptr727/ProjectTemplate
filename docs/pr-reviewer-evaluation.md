@@ -16,7 +16,7 @@ This document measures whether additional automated reviewers improve the fleet'
 
 ## Status
 
-**State:** Active evaluation, on public repositories only since the trials ended\
+**State:** Active evaluation, on public repositories only\
 **Incumbent:** GitHub Copilot\
 **Candidates:** CodeRabbit and Qodo, each on its open-source tier\
 **Installed but unconfigured:** the Claude GitHub App\
@@ -24,7 +24,7 @@ This document measures whether additional automated reviewers improve the fleet'
 
 No candidate is a required reviewer. A candidate remains advisory until it meets the first-class support criteria below.
 
-Both trials ended in September 2026. CodeRabbit and Qodo now review the maintainer's public repositories under their open-source tiers and never a private one, so a private repository has Copilot as its only pull-request reviewer, and Copilot's own review budget, a self-configured premium request cap, runs out under concurrent pull requests. The Claude GitHub App is installed on the account and could be configured as a reviewer, and its value is unmeasured, since the `local-strict-review` Skill already runs a Claude pass before every push.
+As of September 2026 both candidates run on their open-source tiers. CodeRabbit and Qodo review the maintainer's public repositories and never a private one, so a private repository has Copilot as its only pull request reviewer, and Copilot's own review budget, a self-configured premium request cap, runs out under concurrent pull requests. The Claude GitHub App is installed on the account and is not configured as a reviewer, since the `local-strict-review` Skill already runs a review pass before every push toward a pull request, so the App's value is unmeasured.
 
 ## Evaluation Method
 
@@ -149,11 +149,11 @@ The first sample shows more policy false positives than CodeRabbit. It also supp
 
 ### Generated Mirrors
 
-`.github/skills/` and `.claude-plugin/fleet-skills/` are the trees `scripts/build_dist.py` generates from `.agents/skills/`, and CI holds them current, so a finding in either belongs at its source and a review of every copy is one finding three times. Two committed files tell CodeRabbit and Qodo to skip them, and Copilot's exclusion is a repository setting.
+`.github/skills/` and `.claude-plugin/fleet-skills/` are the trees `scripts/build_dist.py` generates from `.agents/skills/`, and CI holds them current, so a finding in either belongs at its source and a review of every copy is one finding three times. Two committed files tell CodeRabbit and Qodo to skip them, and Copilot's exclusion is a repository setting this account does not have, so `.github/copilot-instructions.md` asks instead.
 
 - **CodeRabbit** reads `reviews.path_filters` from [`.coderabbit.yaml`][coderabbit-config] at the repository root, where a pattern prefixed with `!` excludes.
 - **Qodo** reads [`.pr_agent.toml`][qodo-config] from the root of the default branch, so the file binds only once it is promoted to `main`, and its [`[ignore]` glob list][qodo-ignore] names the paths to skip.
-- **GitHub Copilot** honors [content exclusion][copilot-exclusion], a repository setting under Copilot rather than a file in the tree, whose paths are `fnmatch` patterns anchored by a leading slash. GitHub documents the setting for organizations on a Business or Enterprise plan, and this repository is under a user account, so it is unavailable here. In its place, `.github/copilot-instructions.md` "Reviewing Carried Fleet Content" asks Copilot to post no comment on either tree, which GitHub's [code review customization tutorial][copilot-customize] documents as non-deterministic, so an instruction may be overlooked where a setting cannot.
+- **GitHub Copilot** honors [content exclusion][copilot-exclusion], a repository setting under Copilot rather than a file in the tree, whose paths are `fnmatch` patterns anchored by a leading slash. GitHub documents the setting for organizations on a Business or Enterprise plan, and this repository is under a user account, so it is unavailable here. In its place, `.github/copilot-instructions.md` "Reviewing Carried Fleet Content" asks Copilot to post no comment on either tree, and GitHub's [code review customization tutorial][copilot-customize] documents instruction compliance as non-deterministic, so an instruction may be overlooked where a setting cannot.
 
 ## Plan and Repository Scope
 
@@ -204,7 +204,7 @@ The existing Copilot adapter remains behaviorally unchanged during extraction. P
 
 1. Record every CodeRabbit and Qodo finding on subsequent public pull requests.
 2. Measure time to review, current-head coverage, duplicates, and interaction effort.
-3. Recheck candidate plan terms when the CodeRabbit trial expires.
+3. Recheck candidate plan terms periodically, since product plans are external state.
 4. Decide whether either candidate meets the first-class support criteria.
 5. Design `pr_review.py` provider adapters only for candidates that graduate.
 6. Decide separately whether a graduated reviewer is advisory or required.
