@@ -11,11 +11,11 @@
     },
     {
       "unit": ".agents/skills/agent-conduct/SKILL.md > When a Failure Surfaces a Lesson",
-      "digest": "sha256:7bb4825e38c44c74366d2f0051d521968d87df765144bb080ca059a417e2cd75",
+      "digest": "sha256:08efb1b536d3965b8e224c7b0c951a4549714fad9dbe69280444b37e3b74789f",
       "reviewer": "agent-skill",
-      "findings": 6,
-      "hubCommit": "52b0c550ab07ab58b940a353a83247d7451e76e5",
-      "stamp": "2026-09-02T01:11:56Z"
+      "findings": 1,
+      "hubCommit": "4ee4669af5930d842c07ff5daabda6ee0ef621bd",
+      "stamp": "2026-09-05T00:32:38Z"
     },
     {
       "unit": ".agents/skills/backlog-burndown/SKILL.md > (preamble)",
@@ -362,6 +362,14 @@
       "stamp": "2026-09-01T17:49:26Z"
     },
     {
+      "unit": ".agents/skills/pr-review-conduct/SKILL.md > Merge Gate, check this before merging or enabling auto-merge",
+      "digest": "sha256:9fec3aa6f4a0c13134d0c41183b4ada8dcb70a544e6796e7f558996969edae73",
+      "reviewer": "agent-skill",
+      "findings": 10,
+      "hubCommit": "4ee4669af5930d842c07ff5daabda6ee0ef621bd",
+      "stamp": "2026-09-05T00:57:49Z"
+    },
+    {
       "unit": ".agents/skills/python-codestyle/SKILL.md > Local development loop",
       "digest": "sha256:64911d87dea3c5c46bbe2abccab0bed590ee65a3e93e9083b403ceee77bde450",
       "reviewer": "agent-skill",
@@ -627,11 +635,11 @@
     },
     {
       "unit": "GOVERNANCE.md > Verification Discipline",
-      "digest": "sha256:8bc599f8aea61158ba0772069e9540cf66bae568460aef72fec19b720931d055",
+      "digest": "sha256:449e5d3262d38895b2eaedc7275a52fb3b0b9c25fc37598d63c5e455d011bd56",
       "reviewer": "agent-skill",
-      "findings": 1,
-      "hubCommit": "28872b4ab08d10d48e8dc0eecd94cdf257633e7d",
-      "stamp": "2026-09-04T21:38:25Z"
+      "findings": 5,
+      "hubCommit": "4ee4669af5930d842c07ff5daabda6ee0ef621bd",
+      "stamp": "2026-09-05T00:33:49Z"
     },
     {
       "unit": "GOVERNANCE.md > Workflow YAML Conventions",
