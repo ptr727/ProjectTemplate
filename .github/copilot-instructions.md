@@ -30,10 +30,11 @@ the generator and never in the copy. A defect inside an include region, the text
 marker lines `<!-- include: <path> > <heading> -->` and `<!-- /include -->` that every copy
 carries as its authored source does, is fixed in the hub under the heading that key names, since
 the region is generated from that heading's body and the key's path resolves against the hub's
-root rather than this repository's copy of the same file. Post no review comment on a file under
-`.github/skills/` or, in the hub, `.claude-plugin/fleet-skills/`. When the pull request changes
-the file the fix belongs in, comment on that file instead, and otherwise, and for every
-include-region defect raised outside the hub, state the finding in the review summary.
+root rather than this repository's copy of the same file. Where that heading's body is itself a
+region, the fix sits one hop further, under the heading its own key names. Post no review comment
+on a file under `.github/skills/` or, in the hub, `.claude-plugin/fleet-skills/`. When the pull
+request changes the file the fix belongs in, comment on that file instead, and otherwise state
+the finding in the review summary.
 
 ## GitHub Copilot Review Runbook
 

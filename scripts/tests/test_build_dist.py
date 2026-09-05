@@ -19,7 +19,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 import build_dist
 
 
-class RegenerateCase(unittest.TestCase):
+class TreeCase(unittest.TestCase):
     """Redirects every module path onto a temp tree so a case never touches this repo's own."""
 
     def setUp(self) -> None:
@@ -55,6 +55,10 @@ class RegenerateCase(unittest.TestCase):
         d = self.skills_src / name
         d.mkdir(parents=True, exist_ok=True)
         (d / "SKILL.md").write_text(body, encoding="utf-8")
+
+
+class RegenerateCase(TreeCase):
+    """Regeneration and staleness detection over the generated trees."""
 
     def test_a_symlink_in_a_skill_directory_is_rejected_by_regenerate(self) -> None:
         """shutil.copytree() follows a symlink by default, which would silently pull content
@@ -377,7 +381,7 @@ class RegenerateCase(unittest.TestCase):
         self.assertEqual(exit_code, 2)
 
 
-class IncludeCase(RegenerateCase):
+class IncludeCase(TreeCase):
     """Include regions: filled from a heading's body in the authored tree, and held to it by --check."""
 
     HOME = "# Rules\n\n## Alpha\n\nAlpha rule.\n\n- One\n- Two\n\n## Beta\n\nBeta rule.\n"
@@ -679,14 +683,29 @@ class IncludeCase(RegenerateCase):
             "<!-- include: .agents/skills/bar/SKILL.md > Shared -->\n\nIntro.\n\nBeta rule.\n\nOutro.\n\n<!-- /include -->\n",
         )
 
-    def test_a_region_outside_the_authored_tree_is_refused(self) -> None:
-        """Only the authored tree is walked, so such a region would read filled to an includer and stay empty on disk."""
+    def test_a_region_in_a_file_the_walk_does_not_visit_is_refused(self) -> None:
+        """Such a region would read filled to an includer and stay empty on disk."""
         (self.tmp / "RULES.md").write_text(
             "## Alpha\n\n" + self.region("RULES.md > Beta") + "\n## Beta\n\nb\n", encoding="utf-8"
         )
         self.make_skill("foo", self.region("RULES.md > Alpha"))
-        with self.assertRaisesRegex(ValueError, "outside skills/ is never filled"):
+        with self.assertRaisesRegex(ValueError, "does not walk is never filled"):
             build_dist.regenerate()
+        readme = self.skills_src / "README.md"
+        readme.write_text("## Alpha\n\n" + self.region("RULES.md > Beta") + "\n", encoding="utf-8")
+        self.make_skill("foo", self.region(".agents/skills/README.md > Alpha"))
+        with self.assertRaisesRegex(ValueError, "does not walk is never filled"):
+            build_dist.regenerate()
+
+    def test_a_doubled_blank_line_inside_a_fence_is_kept(self) -> None:
+        """Only the blank a dropped marker leaves is collapsed, since a fenced sample's blanks are its text."""
+        (self.tmp / "RULES.md").write_text(
+            "## Alpha\n\n```python\ndef a():\n    pass\n\n\ndef b():\n    pass\n```\n",
+            encoding="utf-8",
+        )
+        self.make_skill("foo", self.region("RULES.md > Alpha"))
+        build_dist.regenerate()
+        self.assertIn("    pass\n\n\ndef b():", self.skill_text())
 
     def test_a_body_leaving_a_fence_open_is_refused(self) -> None:
         (self.tmp / "RULES.md").write_text("## Alpha\n\n```text\nopen\n", encoding="utf-8")

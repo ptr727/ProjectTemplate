@@ -227,9 +227,8 @@ def _marker(line, marker, marker_len):
 def _exact_case(rel, parts):
     """Refuse a key whose spelling differs from the tree's, so a key resolves alike on every host.
 
-    A case-insensitive filesystem would resolve `agents.md` to `AGENTS.md` and a region keyed that
-    way would fill on a macOS or Windows host and exit 2 on Linux CI, and a skill including its
-    own file under another spelling would recurse past the cycle check below.
+    A case-insensitive filesystem would resolve `agents.md` to `AGENTS.md`, so a region keyed that
+    way would fill on a macOS or Windows host and exit 2 on Linux CI.
     """
     current = INCLUDE_ROOT
     for part in parts:
@@ -302,15 +301,13 @@ def heading_body(lines, heading, key):
     # The source's own region markers belong to its regions, not to the text they enclose.
     # A copied marker would open a region inside the one being filled on the next scan.
     # Dropping a marker leaves the blank line the fill put on each side of it beside the source's own, and two blanks in a row are what markdownlint refuses in a file nobody may hand-edit.
+    # Inside a fence a doubled blank is the sample's own text, so it stays.
     body = []
     state = (None, 0)
     for line in lines[start + 1 : end]:
         state, opens, closes = _marker(line, *state)
-        if (
-            opens is None
-            and closes is None
-            and not (body and not body[-1].strip() and not line.strip())
-        ):
+        doubled = state[0] is None and body and not body[-1].strip() and not line.strip()
+        if opens is None and closes is None and not doubled:
             body.append(line)
     while body and not body[0].strip():
         body.pop(0)
@@ -342,7 +339,8 @@ def filled_lines(rel, stack=()):
     Recursive, so a region filled from a file that carries regions of its own reads the text that
     file renders rather than its markers. A cycle is refused by the path that would loop, compared
     as files rather than as spellings, so an alias through a directory symlink cannot slip past.
-    A file with no region comes back exactly as read, so filling it never rewrites anything.
+    A file with no region comes back exactly as read, so filling it never rewrites anything,
+    though it is still decoded to be scanned, so one that is not UTF-8 is refused either way.
     """
     path = include_source(rel)
     if any(path.samefile(seen) for seen in stack):
@@ -365,10 +363,10 @@ def filled_lines(rel, stack=()):
             raise ValueError(
                 f"{rel} mixes line endings, so a region in it cannot be rendered without rewriting the rest"
             )
-        if SKILLS_SRC.resolve() not in path.resolve().parents:
-            # Only the authored tree is walked and written, so a region anywhere else would read filled to an includer while staying empty on disk.
+        if rel not in skill_documents():
+            # Only the files the walk visits are written, so a region anywhere else would read filled to an includer while staying empty on disk.
             raise ValueError(
-                f"{rel}:{index + 1}: an include region outside {SKILLS_SRC.name}/ is never filled"
+                f"{rel}:{index + 1}: an include region in a file the generator does not walk is never filled"
             )
         key = opens.group("key")
         end = None
