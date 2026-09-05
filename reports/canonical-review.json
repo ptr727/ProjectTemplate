@@ -443,19 +443,19 @@
     },
     {
       "unit": ".agents/skills/skill-lifecycle/SKILL.md > The Doc-Packaging Pattern",
-      "digest": "sha256:61a66fd2fdad500449f5c4ca88d97f132095795619544be8420684e8c71a0f5c",
+      "digest": "sha256:6fcbb3fff4a77e6a6173f3966a7ab9fb9bd3108dda48084fcbe3a152a303922f",
       "reviewer": "agent-skill",
-      "findings": 6,
+      "findings": 5,
       "hubCommit": "00832f397a18c656fb15d6972a6acab7ecbcc078",
-      "stamp": "2026-09-05T04:03:30Z"
+      "stamp": "2026-09-05T04:31:54Z"
     },
     {
       "unit": ".agents/skills/skill-lifecycle/SKILL.md > The Pipeline",
-      "digest": "sha256:6ddca7eb6684ffa92a4a1c2263ebdaf4fd741311edbaf6911d6a862efb63604c",
+      "digest": "sha256:fda9640ff3e4b6c0f27de45bef05161f91b16cc8825c5e48d50b214a9d9aa146",
       "reviewer": "agent-skill",
       "findings": 3,
       "hubCommit": "00832f397a18c656fb15d6972a6acab7ecbcc078",
-      "stamp": "2026-09-05T04:04:20Z"
+      "stamp": "2026-09-05T04:33:02Z"
     },
     {
       "unit": ".agents/skills/workflow-ci-contract/SKILL.md > (preamble)",
@@ -587,11 +587,11 @@
     },
     {
       "unit": ".github/copilot-instructions.md > Reviewing Carried Fleet Content",
-      "digest": "sha256:23e7c2e095b46eebb066ce382f78a1f8bed4d137d2603509472b95053a7038ba",
+      "digest": "sha256:bd77823be1db39009d45480d2ceca778c2e835e677fe7c80ab27b2162a966013",
       "reviewer": "agent-skill",
       "findings": 5,
       "hubCommit": "00832f397a18c656fb15d6972a6acab7ecbcc078",
-      "stamp": "2026-09-05T04:03:45Z"
+      "stamp": "2026-09-05T04:33:03Z"
     },
     {
       "unit": "AGENTS.md > Context and Delegation Discipline",

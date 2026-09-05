@@ -593,7 +593,7 @@ class IncludeCase(RegenerateCase):
         self.make_skill("foo")
         path = self.skills_src / "foo" / "SKILL.md"
         path.write_bytes(b"one\r\n<!-- include: RULES.md > Beta -->\n<!-- /include -->\r\n")
-        with self.assertRaisesRegex(ValueError, "mixes CRLF and LF"):
+        with self.assertRaisesRegex(ValueError, "mixes line endings"):
             build_dist.regenerate()
         self.assertEqual(
             path.read_bytes(), b"one\r\n<!-- include: RULES.md > Beta -->\n<!-- /include -->\r\n"
@@ -641,8 +641,64 @@ class IncludeCase(RegenerateCase):
     def test_a_key_spelled_unlike_the_tree_is_refused(self) -> None:
         """A case-insensitive host would resolve it and Linux CI would not, so neither may."""
         self.make_skill("foo", self.region("rules.md > Alpha"))
-        with self.assertRaisesRegex(ValueError, "spelled"):
+        with self.assertRaises(ValueError):
             build_dist.regenerate()
+
+    def test_a_missing_source_is_reported_as_missing_and_a_misspelled_one_as_misspelled(
+        self,
+    ) -> None:
+        self.make_skill("foo", self.region("nowhere.md > Alpha"))
+        with self.assertRaisesRegex(ValueError, "not a file under the repository root"):
+            build_dist.regenerate()
+        with self.assertRaisesRegex(ValueError, "spelled as the tree spells it"):
+            build_dist._exact_case("rules.md", ("rules.md",))
+
+    def test_a_lone_cr_counts_as_a_third_ending(self) -> None:
+        self.make_skill("foo")
+        path = self.skills_src / "foo" / "SKILL.md"
+        path.write_bytes(
+            b"one\r\n\rtwo\r\n<!-- include: RULES.md > Beta -->\r\n<!-- /include -->\r\n"
+        )
+        with self.assertRaisesRegex(ValueError, "mixes line endings"):
+            build_dist.regenerate()
+        path.write_bytes(b"<!-- include: RULES.md > Beta -->\r<!-- /include -->\r")
+        build_dist.regenerate()
+        self.assertEqual(
+            path.read_bytes(),
+            b"<!-- include: RULES.md > Beta -->\r\rBeta rule.\r\r<!-- /include -->\r",
+        )
+
+    def test_a_source_with_text_around_its_own_region_renders_single_blank_lines(self) -> None:
+        self.make_skill(
+            "bar", "## Shared\n\nIntro.\n\n" + self.region("RULES.md > Beta") + "\nOutro.\n"
+        )
+        self.make_skill("foo", self.region(".agents/skills/bar/SKILL.md > Shared"))
+        build_dist.regenerate()
+        self.assertEqual(
+            self.skill_text(),
+            "<!-- include: .agents/skills/bar/SKILL.md > Shared -->\n\nIntro.\n\nBeta rule.\n\nOutro.\n\n<!-- /include -->\n",
+        )
+
+    def test_a_region_outside_the_authored_tree_is_refused(self) -> None:
+        """Only the authored tree is walked, so such a region would read filled to an includer and stay empty on disk."""
+        (self.tmp / "RULES.md").write_text(
+            "## Alpha\n\n" + self.region("RULES.md > Beta") + "\n## Beta\n\nb\n", encoding="utf-8"
+        )
+        self.make_skill("foo", self.region("RULES.md > Alpha"))
+        with self.assertRaisesRegex(ValueError, "outside skills/ is never filled"):
+            build_dist.regenerate()
+
+    def test_a_body_leaving_a_fence_open_is_refused(self) -> None:
+        (self.tmp / "RULES.md").write_text("## Alpha\n\n```text\nopen\n", encoding="utf-8")
+        self.make_skill("foo", self.region("RULES.md > Alpha"))
+        with self.assertRaisesRegex(ValueError, "leaves a code fence open"):
+            build_dist.regenerate()
+
+    def test_fence_step_adds_the_spec_directory_to_sys_path_once(self) -> None:
+        before = len(sys.path)
+        for _ in range(3):
+            build_dist._fence_step("plain", None, 0)
+        self.assertLessEqual(len(sys.path) - before, 1)
 
 
 if __name__ == "__main__":

@@ -6,18 +6,20 @@ install step. Claude Code never scans that path, only .claude/skills/ or a plugi
 directory, so this script materializes a plugin (.claude-plugin/fleet-skills/) that
 .claude-plugin/marketplace.json publishes. GitHub Copilot discovers repository skills under
 .github/skills/, so the script also materializes that tree. .agents/skills/ stays the single
-place a skill's content is ever hand-edited.
+place a skill is ever hand-edited, its include regions excepted, since those are generated from
+the files they name.
 
 A skill reads whole in isolation and a rule has one home, so the text a skill needs from that
 home is generated into it rather than copied: a region between `<!-- include: <path> > <heading> -->`
 and `<!-- /include -->` is filled with the body under that heading, in .agents/skills/ itself, and
---check fails when a region differs from what its source renders now. The key is the same
-`<path> > <section>` vocabulary canonical_review.py keys a unit on.
+--check fails when a region differs from what its source renders now. The key is the root-relative
+path, then ` > `, then the heading text, the delimiter canonical_review.py also keys a unit on.
 
 Usage: python3 scripts/build_dist.py           fill include regions, then regenerate distributions
        python3 scripts/build_dist.py --check   read-only: exit 0 clean, 1 stale, 2 on a real
                                                  failure (a symlink under .agents/skills/, an
-                                                 unreadable file), so a caller reading the exit
+                                                 unreadable file, an include region it cannot
+                                                 render), so a caller reading the exit
                                                  code can tell a finding apart from the check
                                                  itself not having run.
 """
@@ -172,7 +174,9 @@ def _fence_step(line, marker, marker_len):
     scripts/skills_install.py imports this module on hosts whose Python predates what audit.py
     needs, and installing never fills a region.
     """
-    sys.path.insert(0, str(ROOT / "spec"))
+    spec = str(ROOT / "spec")
+    if spec not in sys.path:
+        sys.path.insert(0, spec)
     import audit
 
     return audit._fence_step(line, marker, marker_len)
@@ -194,8 +198,11 @@ def _read_lines(path):
     """
     data = path.read_bytes()
     crlf = data.count(b"\r\n")
-    mixed = bool(crlf) and crlf != data.count(b"\n")
-    return _lf(data.decode("utf-8")).split("\n"), "\r\n" if crlf else "\n", mixed
+    lone_cr = data.count(b"\r") - crlf
+    lone_lf = data.count(b"\n") - crlf
+    mixed = sum(1 for count in (crlf, lone_cr, lone_lf) if count) > 1
+    newline = "\r\n" if crlf else "\r" if lone_cr else "\n"
+    return _lf(data.decode("utf-8")).split("\n"), newline, mixed
 
 
 def _unindented(line):
@@ -226,10 +233,8 @@ def _exact_case(rel, parts):
     """
     current = INCLUDE_ROOT
     for part in parts:
-        if not current.is_dir() or part not in os.listdir(current):
-            raise ValueError(
-                f"include source {rel!r} is not under the repository root spelled as the tree spells it"
-            )
+        if part not in os.listdir(current):
+            raise ValueError(f"include source {rel!r} is not spelled as the tree spells it")
         current = current / part
 
 
@@ -246,10 +251,10 @@ def include_source(rel):
         raise ValueError(
             f"include source {rel!r} is not a plain path relative to the repository root"
         )
-    _exact_case(rel, parts.parts)
     path = INCLUDE_ROOT / parts
     if not path.is_file():
         raise ValueError(f"include source {rel!r} is not a file under the repository root")
+    _exact_case(rel, parts.parts)
     resolved = path.resolve()
     if resolved != INCLUDE_ROOT.resolve() / parts:
         raise ValueError(f"include source {rel!r} is reached through a symlink")
@@ -296,16 +301,24 @@ def heading_body(lines, heading, key):
     )
     # The source's own region markers belong to its regions, not to the text they enclose.
     # A copied marker would open a region inside the one being filled on the next scan.
+    # Dropping a marker leaves the blank line the fill put on each side of it beside the source's own, and two blanks in a row are what markdownlint refuses in a file nobody may hand-edit.
     body = []
     state = (None, 0)
     for line in lines[start + 1 : end]:
         state, opens, closes = _marker(line, *state)
-        if opens is None and closes is None:
+        if (
+            opens is None
+            and closes is None
+            and not (body and not body[-1].strip() and not line.strip())
+        ):
             body.append(line)
     while body and not body[0].strip():
         body.pop(0)
     while body and not body[-1].strip():
         body.pop()
+    if state[0] is not None:
+        # A fence the body leaves open would swallow the end marker on the next scan and blame the skill for a defect in its source.
+        raise ValueError(f"include {key!r}: the heading's body leaves a code fence open")
     if not body:
         # Rendering nothing would leave two blank lines between the markers, which markdownlint refuses in a file nobody may hand-edit.
         raise ValueError(
@@ -350,7 +363,12 @@ def filled_lines(rel, stack=()):
             continue
         if mixed:
             raise ValueError(
-                f"{rel} mixes CRLF and LF line endings, so a region in it cannot be rendered without rewriting the rest"
+                f"{rel} mixes line endings, so a region in it cannot be rendered without rewriting the rest"
+            )
+        if SKILLS_SRC.resolve() not in path.resolve().parents:
+            # Only the authored tree is walked and written, so a region anywhere else would read filled to an includer while staying empty on disk.
+            raise ValueError(
+                f"{rel}:{index + 1}: an include region outside {SKILLS_SRC.name}/ is never filled"
             )
         key = opens.group("key")
         end = None
