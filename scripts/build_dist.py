@@ -160,9 +160,10 @@ SECTION_DELIM = " > "
 INCLUDE_ROOT = ROOT
 _INCLUDE_START = re.compile(r"^<!--\s*include:\s*(?P<key>\S.*?)\s*-->$")
 _INCLUDE_END = re.compile(r"^<!--\s*/include\s*-->$")
-# Level two down, since a level-one heading is a document's title rather than a section a skill would carry.
-_HEADING = re.compile(r"^(#{2,6})\s+(?P<text>\S.*?)\s*$")
-# CommonMark's own bound for a fence and an ATX heading, so a marker or heading sitting in an indented code block is content here the way it is there.
+# Every level, so a level-one heading ends a body, though a key names level two down, since a level-one heading is a document's title rather than a section a skill would carry.
+_HEADING = re.compile(r"^(#{1,6})\s+(?P<text>\S.*?)\s*$")
+# CommonMark's own bound for a fence, so a marker sitting in an indented code block is content here the way it is there.
+# A heading is matched at any indentation instead, the way spec/audit.py and canonical_review.py read one, so the three tools split a document alike.
 _MAX_INDENT = 3
 
 
@@ -271,9 +272,10 @@ def heading_body(lines, heading, key):
 
     Any level from two down, so a key can name a GOVERNANCE.md section, an AGENTS.md subsection, or
     a section of a sibling skill with one vocabulary. Matched the way spec/audit.py matches a
-    declared section, on the parsed text case-folded, so a re-cased heading still resolves. Two
-    matches are two answers to one question, refused rather than resolved to the first, and a
-    heading inside a code block, fenced or indented, is content.
+    declared section, on the parsed text case-folded and at any indentation, so a re-cased heading
+    still resolves and the two split a document alike. Two matches are two answers to one
+    question, refused rather than resolved to the first, and a heading inside a fenced code block
+    is content.
     """
     want = heading.strip().lower()
     headings = []
@@ -283,11 +285,10 @@ def heading_body(lines, heading, key):
         state = (state_marker, state_len)
         if boundary or state_marker is not None:
             continue
-        text = _unindented(line)
-        m = _HEADING.match(text) if text is not None else None
+        m = _HEADING.match(line.strip())
         if m:
             headings.append((index, len(m.group(1)), m.group("text").strip().lower()))
-    matches = [(index, depth) for index, depth, text in headings if text == want]
+    matches = [(index, depth) for index, depth, text in headings if text == want and depth > 1]
     if not matches:
         raise ValueError(f"include {key!r}: no heading {heading.strip()!r} in its source")
     if len(matches) > 1:
@@ -302,11 +303,16 @@ def heading_body(lines, heading, key):
     # A copied marker would open a region inside the one being filled on the next scan.
     # Dropping a marker leaves the blank line the fill put on each side of it beside the source's own, and two blanks in a row are what markdownlint refuses in a file nobody may hand-edit.
     # Inside a fence a doubled blank is the sample's own text, so it stays.
+    # An indented code block has no closing line to track, so the last text line's indentation stands in for its state, erring toward keeping a blank.
     body = []
     state = (None, 0)
+    indented = False
     for line in lines[start + 1 : end]:
         state, opens, closes = _marker(line, *state)
-        doubled = state[0] is None and body and not body[-1].strip() and not line.strip()
+        blank = not line.strip()
+        if not blank:
+            indented = _unindented(line) is None
+        doubled = state[0] is None and not indented and blank and body and not body[-1].strip()
         if opens is None and closes is None and not doubled:
             body.append(line)
     while body and not body[0].strip():

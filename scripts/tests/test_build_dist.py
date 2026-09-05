@@ -337,9 +337,9 @@ class RegenerateCase(TreeCase):
     def test_check_reports_a_symlink_as_2_not_1(self) -> None:
         """1 is --check's own documented "stale" result, so a caller reading the exit code (host-setup/menu.sh among them) needs a different code to tell a real failure apart from that finding.
 
-        is_stale() short-circuits to True (stale, exit 1) the moment the distribution stamp is
-        missing, so the symlink has to be introduced only after a clean regenerate() already
-        produced one, reaching the digest walk that actually raises rather than the early return.
+        The include walk refuses the symlink before the stamp check, so the clean regenerate()
+        before it is not what reaches the raise. It stays so the case still holds a stamp, which
+        is the state a caller reading a 2 rather than a 1 is actually in.
         """
         self.make_skill("foo")
         build_dist.regenerate()
@@ -696,6 +696,38 @@ class IncludeCase(TreeCase):
         self.make_skill("foo", self.region(".agents/skills/README.md > Alpha"))
         with self.assertRaisesRegex(ValueError, "does not walk is never filled"):
             build_dist.regenerate()
+
+    def test_a_level_one_heading_ends_a_body_and_cannot_be_a_key(self) -> None:
+        (self.tmp / "RULES.md").write_text(
+            "## A\n\nAlpha.\n\n# Title\n\n## B\n\nb\n", encoding="utf-8"
+        )
+        self.make_skill("foo", self.region("RULES.md > A"))
+        build_dist.regenerate()
+        self.assertEqual(
+            self.skill_text(), "<!-- include: RULES.md > A -->\n\nAlpha.\n\n<!-- /include -->\n"
+        )
+        self.make_skill("foo", self.region("RULES.md > Title"))
+        with self.assertRaisesRegex(ValueError, "no heading 'Title'"):
+            build_dist.regenerate()
+
+    def test_an_indented_heading_is_a_boundary_as_it_is_to_the_audit(self) -> None:
+        """spec/audit.py and canonical_review.py split on an indented `## ` line, so the generator does too."""
+        (self.tmp / "RULES.md").write_text(
+            "## A\n\nAlpha.\n\n    ## Indented\n\nnot alpha\n", encoding="utf-8"
+        )
+        self.make_skill("foo", self.region("RULES.md > A"))
+        build_dist.regenerate()
+        self.assertEqual(
+            self.skill_text(), "<!-- include: RULES.md > A -->\n\nAlpha.\n\n<!-- /include -->\n"
+        )
+
+    def test_a_doubled_blank_line_inside_an_indented_code_block_is_kept(self) -> None:
+        (self.tmp / "RULES.md").write_text(
+            "## A\n\nText.\n\n    code one\n\n\n    code two\n", encoding="utf-8"
+        )
+        self.make_skill("foo", self.region("RULES.md > A"))
+        build_dist.regenerate()
+        self.assertIn("    code one\n\n\n    code two", self.skill_text())
 
     def test_a_doubled_blank_line_inside_a_fence_is_kept(self) -> None:
         """Only the blank a dropped marker leaves is collapsed, since a fenced sample's blanks are its text."""
