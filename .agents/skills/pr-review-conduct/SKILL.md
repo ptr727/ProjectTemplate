@@ -41,11 +41,14 @@ visible comments, routinely still carries a finding nobody has answered. Treatin
 2. A review is confirmed on the **current head SHA**, matched by commit SHA rather than assumed
    from a green merge-state. A push makes checks go green *before* the re-review lands, and the
    matched review is **read**, not just counted. A review can carry the head SHA and still decline
-   the PR outright, or say it read only part of the changed files. `pr_review.py`'s
-   `review_on_head` names Copilot's own coverage specifically, the currently required reviewer,
-   not "no review of any kind covers this head": a trialed advisory reviewer (CodeRabbit,
-   Qodo) carrying the exact head under `other_reviewed`, with an empty review body and no new
-   threads, is its own ordinary "reviewed, nothing to flag" shape, not a missing review (#1066).
+   the PR outright, or say it read only part of the changed files. The coverage this item
+   requires is Copilot's, and CodeRabbit and Qodo are advisory, since the hub's
+   `docs/pr-reviewer-evaluation.md` "Status" names Copilot the incumbent and says no candidate is
+   a required reviewer: an advisory reviewer's absence blocks nothing, while its findings owe
+   item 3 exactly as Copilot's do. `pr_review.py`'s `review_on_head` names Copilot's own coverage
+   specifically, not "no review of any kind covers this head": an advisory reviewer carrying the
+   exact head under `other_reviewed`, with an empty review body and no new threads, is its own
+   ordinary "reviewed, nothing to flag" shape, not a missing review (#1066).
 3. **Every** finding on that head SHA is closed: threads resolved, issue-level comments (which
    have no resolve action) triaged and replied to, **and** the low-confidence findings collapsed
    in the review body investigated and answered. Those appear in no thread, so polling threads
@@ -55,6 +58,19 @@ visible comments, routinely still carries a finding nobody has answered. Treatin
    give each one the same triage the low-confidence findings above already get (#1058). Qodo's own
    `Resolved`/`Dismissed` self-tracked badge is a fast pre-triage signal, not a substitute for
    reading the finding, spot-verify against `gh pr diff` rather than trusting it outright.
+   What closing a finding owes turns on whether it is `pre-existing`. A finding on text inside a
+   canonical Markdown unit, one the hub's `scripts/canonical_review.py list` names, classed
+   `pre-existing` by the classes `local-strict-review` "Disposing of Findings" defines for a
+   local pass, applied here to a PR-hosted finding, is outcome 4 below applied once per unit
+   rather than once per finding: the round gathers that unit's such findings onto the unit's
+   tracker, an open hub issue whose title carries the unit key, retitled when the key moves and
+   filed by whichever round first needs it, and answers each finding with that issue's link,
+   resolving a thread on that reply, so a remark on a sentence the change never touched costs
+   one link rather than a decline or an issue per finding. The batch runs in the hub, which
+   authors every canonical unit. A carrying repository routes the same finding by ownership
+   rather than by class, since a resync writes the whole text there: it declines the finding
+   under outcome 2, ownership sitting elsewhere, and files it on the same tracker. Every other
+   finding, on text the diff wrote or outside such a unit, takes its own outcome below.
 4. Nothing in the review was a shape the tooling could not read (an unrecognized heading, a moved
    section, an unfamiliar coverage wording). An unrecognized shape blocks the gate on its own.
    File an issue naming it and quoting the body, rather than guessing what the new wording
