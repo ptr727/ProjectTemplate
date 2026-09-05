@@ -129,11 +129,11 @@ The digest is bound to the read for the same reason `--expect-digest` is above: 
 
 Each bullet is a rule down to its `Why:` line, which is rationale rather than rule, so a stale rationale is a cleanup rather than a defect.
 
-- **Every finding ends in one of the five outcomes that `pr-review-conduct` "Every finding ends in one of five outcomes" enumerates, reached here with no thread to reply in.**
+- **Every finding ends in one of the outcomes that `pr-review-conduct` "Every finding ends in one of five outcomes" enumerates, reached here with no thread to reply in.**
   - `Why:` a local finding and a PR-hosted one deserve the same dispositions, and one home for the list is what stops two copies of it drifting apart.
 - **The agent disposing of a pass's findings classes each one `style`, `introduced`, or `pre-existing`, in that order.** `style` is a preference between defensible forms. `introduced` is any other finding on text this change wrote, rewrote, or removed, on text this change should have written, on a precondition this change left false elsewhere, or load-bearing for a decision this change puts to the maintainer. `pre-existing` is every other finding.
   - `Why:` the reviewer is asked to omit preferences and returns some anyway, and `style` is classed first so that a preference on text this change wrote is not owed a fix.
-- **Another round is owed only while an `introduced` finding is open.** Unless evidence disproves it, an `introduced` finding is fixed within the budget below, or escalated where `pr-review-conduct` "Escalate to the maintainer when" says so, a `pre-existing` one is filed once and blocks nothing, and a `style` one is declined under outcome 2 on `code-review`'s own rule to omit preferences.
+- **Another round is owed only while an `introduced` finding is open.** Unless evidence disproves it, an `introduced` finding is fixed within the budget below, or escalated where `pr-review-conduct` "Escalate to the maintainer when" says so, a `pre-existing` one is filed once and blocks nothing, and a `style` one is declined with evidence, per `pr-review-conduct` "Every finding ends in one of five outcomes", the evidence being `code-review` "Review the Change"'s own rule to omit preferences.
   - `Why:` a finding count over prose never reaches zero, so a loop closing on "did it find anything" does not close, where one closing on the false claim, the unfollowable instruction, or the wrong behavior this change put there does.
 - **A push allows two rounds of edits in answer to the passes it owes, one budget across both.** Where an `introduced` finding is still open after the second round, editing stops and what remains goes to the maintainer with its counts per class, per `pr-review-conduct` "Escalate to the maintainer when".
   - `Why:` past the second round nearly every finding is against text the previous round's fix wrote, so the rounds are producing the defects they find rather than removing them.
@@ -142,8 +142,8 @@ Each bullet is a rule down to its `Why:` line, which is rationale rather than ru
 
 ## When to Run It
 
-- Before the first push toward a pull request (`drive-pr`'s Drive Loop step 2, `pr-review-conduct`'s Expected review loop step 1).
-- Before pushing a fix for a reviewer finding, the same self-review blind spot applies to a fix as to the original diff (`drive-pr`'s "Disposing of Every Finding", `pr-review-conduct`'s outcome 1).
+- Before the first push toward a pull request, the push that opens it in `drive-pr` "The Drive Loop" and in `pr-review-conduct` "Expected review loop".
+- Before pushing a fix for a reviewer finding, the same self-review blind spot applies to a fix as to the original diff (the fix outcome of `pr-review-conduct` "Every finding ends in one of five outcomes", which `drive-pr` "Disposing of Every Finding" carries).
 - Whenever `agent-conduct`'s "about to claim work is done, verified, green, or fixed" trigger fires for work that will become, or already is, a pull request.
 - Before pushing a change that edits canonical content other repositories carry, or that newly carries some by widening the manifest, over each unit `check` names, per "The Carried-Content Pass" above.
 

@@ -129,11 +129,12 @@ After an authorized merge, run the `repo-worktree` post-merge cleanup procedure 
 
 ## Every finding ends in one of five outcomes
 
-1. **Real, so fix it.** Take the fix through `local-strict-review` the same way step 1's push
-   went, then reply with the fixing commit SHA. A branch already reviewed once
-   has not been reviewed for the fix, which is the round this gets dropped on and the churn
-   `local-strict-review` exists to stop. For a finding on platform-specific code
-   (PowerShell, a macOS- or WSL-only path), "fixed" means executed on that platform, per
+1. **Real, so fix it.** Take the fix through `local-strict-review` the same way the push that
+   opened the pull request went, per `pr-review-conduct` "Expected review loop", then reply with
+   the fixing commit SHA. A branch already reviewed once has not been reviewed for the fix, which
+   is the round the `local-strict-review` pass gets dropped on and the churn `local-strict-review`
+   exists to stop. For a finding on platform-specific code (PowerShell, a macOS- or WSL-only
+   path), "fixed" means executed on that platform, per
    `agent-conduct` "Before Claiming Done": a fix reasoned out by analogy to a tested equivalent
    elsewhere is not yet fixed, and the reply says so rather than claiming the SHA closes it.
 2. **Not real, or real but structurally out of scope, so decline in the thread with evidence.**
@@ -161,6 +162,9 @@ After an authorized merge, run the `repo-worktree` post-merge cleanup procedure 
 on a sibling repo or PR, even within one batch or one session, gets its own outcome: its own
 evidence-backed decline (outcome 2) or its own explicit maintainer answer (outcome 3). A prior
 instance's outcome is context for the new one, never a standing answer to reuse in its place.
+
+`pr-review-conduct` "Every finding ends in one of five outcomes" keeps the full rule, and the
+`drive-pr` Skill carries it whole as a generated include, applying it while driving.
 
 ## Triaging findings
 

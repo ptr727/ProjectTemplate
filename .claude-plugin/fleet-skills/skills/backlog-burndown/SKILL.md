@@ -58,7 +58,7 @@ it was invoked for is narrower than the rule requires, deliberately.
 - **The grant is bounded by the session it was named in.** A run interrupted and resumed in a new
   session needs the skill named again, which costs one sentence and is the difference between a
   grant and a mode. A grant read back from a note is one nobody gave.
-- The grant does not weaken the `pr-review-conduct` Merge Gate. It answers that gate's item 5 for
+- The grant does not weaken the `pr-review-conduct` Merge Gate. It answers that gate's explicit-permission item for
   this run's feature -> develop merges and nothing else, so a pull request with one open finding
   still does not merge.
 - It is never authorization to merge a develop -> main promotion pull request, to dispatch a
@@ -210,15 +210,16 @@ Brief on `AGENTS.md` "Context and Delegation Discipline"'s subagent shape.
 - **The worker drives its group to a develop merge**, by invoking `drive-pr` with the target
   stated as develop only. That skill owns the review loop, the finding disposition, and the merge,
   so brief the group and the bounds rather than restating the loop.
-- **The worker creates its own worktree**, always, as `drive-pr` step 1 and `repo-worktree`'s
-  task-start mandate already require of the task itself. No worker inherits another's worktree,
+- **The worker creates its own worktree**, always, as `drive-pr`'s worktree isolation and
+  `repo-worktree`'s task-start mandate already require of the task itself. No worker inherits another's worktree,
   which is why "Bounding the Wait on a Worker" either removes a dead worker's tree and its
   branch or leaves that tree untouched for the maintainer, and never passes it on.
-- **The worker does no cleanup**, which is this skill's one stated override of `drive-pr` step 4
-  and of `repo-worktree`'s post-merge procedure. Say so in the brief, because a worker following
-  either alone will clean up. The worker still performs step 4's merge itself, and what the override
-  moves is that step's two cleanup halves, the worktree procedure and the verify-then-delete of the
-  merged remote branch, **both** rather than only the first. "Cleanup Is the Orchestrator's" below, in this
+- **The worker does no cleanup**, which is this skill's one stated override of `drive-pr`'s
+  post-merge cleanup and of `repo-worktree`'s post-merge procedure. Say so in the brief, because
+  a worker following either alone will clean up. The worker still performs the merge itself, and
+  what the override moves is the two cleanup halves `drive-pr` runs after it, the worktree
+  procedure and the verify-then-delete of the merged remote branch, **both** rather than only the
+  first. "Cleanup Is the Orchestrator's" below, in this
   same section, says why and what it covers.
 - **The worker runs `local-strict-review` before every push**, including one that only fixes a
   review finding. That pass dispatches a reviewer of its own, so a harness where a subagent cannot
@@ -260,8 +261,8 @@ finish the procedure from inside its own worktree, since removing that worktree 
 working directory in which to delete its branch.
 
 So the whole procedure moves to the orchestrator, which runs it from the base clone at the round's
-cleanup step, while no worker is live in a tree it touches. It carries `drive-pr` step 4's remote
-half too, verifying the merged branch's tip against the pull request's `headRefOid` before
+cleanup step, while no worker is live in a tree it touches. It carries the remote half of `drive-pr`'s
+post-merge cleanup too, verifying the merged branch's tip against the pull request's `headRefOid` before
 `git push origin --delete`, since taking that step from the worker without naming a new owner
 would leave a live remote branch behind every group. It covers every group that is done with its tree,
 which is the finished ones **and the abandoned ones**: a group told to abandon its branch keeps a
@@ -398,11 +399,13 @@ has carried.
    can still owe a promotion pull request, for work an earlier round landed and no promotion has
    yet carried. A count of zero is the only case with nothing to promote, and the round reports
    that instead of attempting one.
-2. Drive its review loop per `drive-pr` steps 5 through 8, **with a review-round budget set before
-   the first one**, the same discipline "Bounding a Prose Group" applies to a feature branch. That
-   loop repeats until the promotion pull request carries no open finding, and nothing in it
-   terminates on its own, so when the budget is reached, stop and put the state to the maintainer
-   rather than continuing to spend the run's only forward gear on one pull request.
+2. Drive its review loop per the promotion half of `drive-pr` "The Drive Loop", **with a
+   review-round budget set before the first one**, the same discipline "Bounding a Prose Group"
+   applies to a feature branch. That loop repeats until the promotion pull request meets every
+   `pr-review-conduct` Merge Gate item except the maintainer's explicit permission to merge, and
+   nothing in that loop terminates on its own, so when the budget is reached, stop and put the
+   state to the maintainer rather than continuing to spend the run's only forward gear on one pull
+   request.
 3. Put the ready pull request to the maintainer through the interface's own prompt mechanism,
    naming the merge as the action that unblocks the run. The maintainer's merge is the run's clock, so one
    reported in a closing paragraph and never actually asked about stalls every round behind it.
@@ -411,8 +414,8 @@ has carried.
    it lands as its own feature -> develop pass, and that landing moving its head is expected, since
    its head **is** develop. **That pass is dispatched as a worker like any other**, which is the
    one push the freeze permits and the reason the orchestrator still opens no branch of its own.
-   `drive-pr` step 6 sends the seat driving a promotion pull request back through its own steps 1
-   to 4 for such a fix, and here that seat dispatches rather than drives it.
+   `drive-pr` "The Drive Loop" sends the seat driving a promotion pull request back through its
+   own feature -> develop pass for such a fix, and here that seat dispatches rather than drives it.
 5. **A promotion fix outranks any file claim.** A group holding a file it needs yields, because the
    promotion pull request is what the whole run is queued behind. A holder that is merely parked
    yields by handing the file over. A holder that already pushed and has an open pull request
@@ -430,7 +433,7 @@ has carried.
 6. **Nothing else pushes, and nothing else is dispatched.** The promotion fix of step 4 is the one
    exception to both, and everything in this step is said of the next round's work rather than of
    it. That round's preparation is orchestrator work and continues: rank, group, and verify claims.
-   Its dispatch waits, because a worker has exactly one procedure, `drive-pr`, whose second step
+   Its dispatch waits, because a worker has exactly one procedure, `drive-pr`, which
    pushes and opens a pull request, so a next-round worker dispatched under the freeze would either
    break it or sit in a state that procedure does not describe. None is left running across the
    wait either, since a worker held idle for an unbounded maintainer wait is one doing nothing at a
