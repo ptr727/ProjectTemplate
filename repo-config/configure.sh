@@ -26,7 +26,7 @@
 # The derived settings apply computes are asserted by name rather than from a payload, meaning has_discussions and default_branch.
 # The two Dependabot security features are asserted the same way, since apply enables them and no payload declares them.
 # A label is checked on name, color, and description against labels.json, and a label the payload never declared is reported without being asserted, since a repo may carry labels of its own.
-# What is unaudited is a static setting absent from settings.json and a label labels.json does not declare, since only those two groups are payload-driven and the undeclared labels are reported rather than asserted.
+# What is unaudited is a static setting absent from settings.json and a label labels.json does not declare, since those two groups are asserted in the payload's direction only, where a ruleset's rule-type set is compared both ways.
 # Secret names are checked separately, by spec/audit.py from a hub checkout.
 # This script leaves them a manual-verify note for values, which are never readable via the API.
 set -Eeuo pipefail
@@ -173,10 +173,11 @@ apply_ruleset() { # payload-file - create-or-update the ruleset by name
     fi
 }
 
-# Test with `labels_payload_ok`, which is true only when labels.json parses and every label carries a string name, color, and description holding no tab or line break.
-# The type test keeps a missing description from rendering as the literal string null, and the character test keeps a value from splitting the tab-joined rows the two label loops read.
+# Test with `labels_payload_ok`, which is true only when labels.json parses to a non-empty array whose every label meets the API's field contract.
+# That is a non-empty name, a six-digit hex color, and a description of at most 100 characters, each a string holding no tab or line break.
+# The type test keeps a missing description from rendering as the literal string null, the contract tests keep a label from failing at the API partway through the loop, and the character test keeps a value from splitting the tab-joined rows the two label loops read.
 labels_payload_ok() {
-    jq -e 'all(.[]; (.name|type=="string") and (.color|type=="string") and (.description|type=="string") and ((.name+.color+.description)|test("[\t\r\n]")|not))' "$labels_file" >/dev/null 2>&1
+    jq -e 'type=="array" and length > 0 and all(.[]; (.name|type=="string") and (.color|type=="string") and (.description|type=="string") and (.name|length) > 0 and (.color|test("^[0-9a-fA-F]{6}$")) and (.description|length) <= 100 and ((.name+.color+.description)|test("[\t\r\n]")|not))' "$labels_file" >/dev/null 2>&1
 }
 
 apply_labels() { # create-or-update every label labels.json declares, by name
@@ -187,10 +188,6 @@ apply_labels() { # create-or-update every label labels.json declares, by name
     local rows lname color desc
     # The payload was validated by cmd_apply's pre-flight, before any write, so this read cannot be the first to find it malformed.
     rows="$(jqr '.[] | "\(.name)\t\(.color)\t\(.description)"' "$labels_file")"
-    if [ -z "$rows" ]; then
-        echo "Label payload $labels_file declares no labels. Aborting to avoid a partially-applied configuration." >&2
-        exit 1
-    fi
     while IFS=$'\t' read -r lname color desc; do
         gh label create "$lname" --repo "$repo" --color "$color" --description "$desc" --force >/dev/null
     done <<<"$rows"
@@ -208,7 +205,7 @@ cmd_apply() {
     done
     # The label payload's content is validated here too, since apply_labels runs after the settings and Dependabot writes and an abort there would leave them applied.
     if ! labels_payload_ok; then
-        echo "Label payload $labels_file did not parse, or a label lacks a string name, color, or description, or one holds a tab or line break. Aborting before any write." >&2
+        echo "Label payload $labels_file did not parse, is empty, or holds a label outside the field contract (non-empty name, six-digit hex color, description of at most 100 characters, no tab or line break). Aborting before any write." >&2
         exit 1
     fi
     echo "Applying configuration to $repo (model: $model)"
@@ -434,14 +431,10 @@ check_labels() {
         return
     fi
     if ! labels_payload_ok; then
-        fail "label payload $labels_file did not parse, or a label lacks a string name, color, or description, or one holds a tab or line break"
+        fail "label payload $labels_file did not parse, is empty, or holds a label outside the field contract"
         return
     fi
     rows="$(jqr '.[] | "\(.name)\t\(.color)\t\(.description)"' "$labels_file")"
-    if [ -z "$rows" ]; then
-        fail "label payload $labels_file declares no labels"
-        return
-    fi
     # Each declared label is asserted on all three fields, so a color or description edited by hand reads as drift.
     while IFS=$'\t' read -r lname color desc; do
         # shellcheck disable=SC2016  # $n is a jq --arg variable, not a shell expansion
