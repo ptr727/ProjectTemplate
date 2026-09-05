@@ -475,11 +475,11 @@
     },
     {
       "unit": ".agents/skills/skill-lifecycle/SKILL.md > The Doc-Packaging Pattern",
-      "digest": "sha256:29552d4866431bf206797d2f3f9ef15c57cfae7f4a2c8d13e9b0e7b70815dc15",
+      "digest": "sha256:b22e71640b0d6582e7e7d624d03436f443e688cf192bbf4a55de6f3411fcb881",
       "reviewer": "agent-skill",
-      "findings": 2,
+      "findings": 0,
       "hubCommit": "ee4c1ce3dc1a67520b00f2038136c252172f52f5",
-      "stamp": "2026-09-05T21:43:43Z"
+      "stamp": "2026-09-05T22:26:20Z"
     },
     {
       "unit": ".agents/skills/skill-lifecycle/SKILL.md > The Pipeline",
@@ -507,11 +507,11 @@
     },
     {
       "unit": ".agents/skills/workflow-ci-contract/SKILL.md > How the Contract Is Read",
-      "digest": "sha256:04b9563c1052e6d13aaaa995424c0192d26392a87a15bd5c85eb86890eab0707",
+      "digest": "sha256:57ad04138726b32fd827bc6717119e09839f575ae4283dcbbcf7736b40637857",
       "reviewer": "agent-skill",
-      "findings": 3,
+      "findings": 1,
       "hubCommit": "ee4c1ce3dc1a67520b00f2038136c252172f52f5",
-      "stamp": "2026-09-05T19:55:06Z"
+      "stamp": "2026-09-05T22:25:58Z"
     },
     {
       "unit": ".agents/skills/workflow-ci-contract/SKILL.md > Style Rules",
@@ -547,11 +547,11 @@
     },
     {
       "unit": ".agents/skills/workflow-ci-contract/references/d-guarantees.md > The Behavioral Contract",
-      "digest": "sha256:0913ae24a10078715a861634d16b778e7be770c2e1d800003a0d69379810eda5",
+      "digest": "sha256:a1c42afe1ef74fb0b0bab0ae0983262a2f93ca1234fec32d65ac6b4c55706101",
       "reviewer": "agent-skill",
-      "findings": 3,
+      "findings": 4,
       "hubCommit": "ee4c1ce3dc1a67520b00f2038136c252172f52f5",
-      "stamp": "2026-09-05T21:46:03Z"
+      "stamp": "2026-09-05T22:29:37Z"
     },
     {
       "unit": ".agents/skills/workflow-ci-contract/references/test-methodology.md > 5A: Static Audit",
@@ -731,11 +731,11 @@
     },
     {
       "unit": "WORKFLOW.md > 4. Behavioral Contract: Expected Outcomes",
-      "digest": "sha256:2ddee463e13d9cab21847e371f5e4960eef7b43d965f4336e01333dc67195d9a",
+      "digest": "sha256:e68e4d05c52993cd6918d193579f200c8f071d9beb64127a6d390ebfd1e5eb75",
       "reviewer": "agent-skill",
-      "findings": 6,
+      "findings": 11,
       "hubCommit": "ee4c1ce3dc1a67520b00f2038136c252172f52f5",
-      "stamp": "2026-09-05T21:44:30Z"
+      "stamp": "2026-09-05T22:28:32Z"
     },
     {
       "unit": "WORKFLOW.md > 5. Test Methodology",

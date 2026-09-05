@@ -220,7 +220,7 @@ The required behaviors, organized by domain. Each is a **MUST**, stated as the o
 - **D9.4** Docker layer cache targets a registry tag, not `type=gha`; `cache-to` writes only the built branch's `buildcache-<branch>` and only on push, while `cache-from` reads both branches; multi-image repos use a per-image cache tag.
 - **D9.5** Line endings follow `.editorconfig`.
 
-`WORKFLOW.md` section 4 keeps the D-guarantees. The `workflow-ci-contract` Skill carries this section whole as a generated include, at `.agents/skills/workflow-ci-contract/references/d-guarantees.md` in the hub. That is not a repo-relative link, since the path is hub-local and not carried into every fleet repo.
+`WORKFLOW.md` section 4 keeps the D-guarantees, and the `workflow-ci-contract` Skill at `.agents/skills/workflow-ci-contract/references/d-guarantees.md` in the hub, not a repo-relative link since that path is hub-local and not carried into every fleet repo, carries this section whole as a generated include.
 
 ## 5. Test Methodology
 
