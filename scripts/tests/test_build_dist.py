@@ -563,6 +563,7 @@ class IncludeCase(TreeCase):
             "capitalized": "<!-- Include: RULES.md > Alpha -->\n<!-- /include -->\n",
             "trailing text after open": "<!-- include: RULES.md > Alpha --> tail\n",
             "trailing text after close": "<!-- include: RULES.md > Alpha -->\n<!-- /include --> tail\n",
+            "three-dash opener on both": "<!--- include: RULES.md > Alpha --->\n<!--- /include --->\n",
         }
         for label, body in cases.items():
             with self.subTest(label):

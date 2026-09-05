@@ -160,8 +160,8 @@ SECTION_DELIM = " > "
 INCLUDE_ROOT = ROOT
 _INCLUDE_START = re.compile(r"^<!--\s*include:\s*(?P<key>\S.*?)\s*-->$")
 _INCLUDE_END = re.compile(r"^<!--\s*/include\s*-->$")
-# A near miss: a comment beginning like a marker that neither pattern above accepts, case-folded so a capitalized one is caught too.
-_INCLUDE_LIKE = re.compile(r"^<!--\s*/?\s*include\b", re.IGNORECASE)
+# A near miss: a comment beginning like a marker that neither pattern above accepts, case-folded so a capitalized one is caught too, and on any run of dashes so the three-dash opener a hand types on both markers is caught rather than read as content.
+_INCLUDE_LIKE = re.compile(r"^<!--+\s*/?\s*include\b", re.IGNORECASE)
 # Every level, so a level-one heading ends a body, though a key names level two down, since a level-one heading is a document's title rather than a section a skill would carry.
 _HEADING = re.compile(r"^(#{1,6})\s+(?P<text>\S.*?)\s*$")
 # CommonMark's own bound for a fence, so a marker sitting in an indented code block is content here the way it is there.
