@@ -154,7 +154,7 @@ for, and it binds harder than any throughput target.
   plain fetch leaves that ref in `git branch -r` to defer valid groups forever. Stop and report a
   failed fetch rather than reading `git branch -r` anyway, per `GOVERNANCE.md` "Verification
   Discipline" on what a local clone answers for: here the scan would miss a branch pushed since
-  and keep one deleted since. The round
+  the last successful fetch and keep one deleted since it. The round
   stops there and reports, rather than dispatching against a stale answer, and stopping rather
   than deferring is what the cleanup and promotion steps need too, since both read the same
   remote.

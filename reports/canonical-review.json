@@ -91,11 +91,11 @@
     },
     {
       "unit": ".agents/skills/backlog-burndown/SKILL.md > Grouping and File Claims",
-      "digest": "sha256:adf0ab2f8864082e5eed48eb860b66b82b6a8c0d0f7ef858a9b4c0e39f16f497",
+      "digest": "sha256:54c22333992b900419d97a0e01764bfa67113511a5cf3e8b5a354c8d24a7c75a",
       "reviewer": "agent-skill",
-      "findings": 3,
+      "findings": 2,
       "hubCommit": "6a590402646712e93c07f4438ed9a6f5e4dc900e",
-      "stamp": "2026-09-05T17:55:40Z"
+      "stamp": "2026-09-05T18:28:22Z"
     },
     {
       "unit": ".agents/skills/backlog-burndown/SKILL.md > Mechanics Live Elsewhere",
