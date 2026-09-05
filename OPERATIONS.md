@@ -87,7 +87,7 @@ repo-config/configure.sh apply owner/repo release|operational
 
 `check` is read-only and exits non-zero on drift. `apply` is idempotent and drives entirely from the committed payloads, so it is a no-op on a conformant repo.
 
-`apply` is not a narrow toggle. One run patches every key in `repo-config/settings.json`, sets the default branch, enables both Dependabot features, and creates or updates both branch rulesets. On a repository that has deliberately drifted it silently reasserts the fleet configuration.
+`apply` is not a narrow toggle. One run patches every key in `repo-config/settings.json`, sets the default branch, enables both Dependabot features, creates or updates every label in `repo-config/labels.json`, and creates or updates both branch rulesets. On a repository that has deliberately drifted it silently reasserts the fleet configuration.
 
 The model argument selects which develop payload is applied, so passing the wrong one applies the wrong ruleset.
 

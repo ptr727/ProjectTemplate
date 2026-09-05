@@ -10,6 +10,7 @@ The hub holds all fleet-wide repository configuration:
 - `main.json` declares the shared `main` ruleset.
 - `develop.json` declares the release-model `develop` ruleset.
 - `operational/develop.json` declares the operational-model `develop` ruleset.
+- `labels.json` declares the fleet label set.
 - `configure.sh` applies or checks those payloads through the GitHub API.
 
 Downstream repositories carry no `repo-config/` directory. The registry's `workflowModel` selects the `develop` payload. Commands that operate before registry enrollment pass the model explicitly.
@@ -24,13 +25,13 @@ Downstream repositories carry no copy of `spec/secrets.json`. `baseline` applies
 
 **Configure by importing the JSON payloads, never by hand-building the rules** (hand reconstruction has gone wrong on past setups). The result must be **exactly two rulesets named `develop` and `main`**, and the names are load-bearing (`AGENTS.md` and the workflows reference them). Only the `develop` *content* varies by model.
 
-Remove all classic branch-protection rules and stray rulesets. Run `configure.sh apply` from a hub checkout at `main`, naming the target repository and its model. The script applies `settings.json`, the Dependabot security features, and both rulesets. A registered repository can omit the model and use the registry lookup. A repository outside the registry passes the model explicitly:
+Remove all classic branch-protection rules and stray rulesets. Run `configure.sh apply` from a hub checkout at `main`, naming the target repository and its model. The script applies `settings.json`, the Dependabot security features, the label set, and both rulesets. A registered repository can omit the model and use the registry lookup. A repository outside the registry passes the model explicitly:
 
 ```sh
 repo-config/configure.sh apply owner/repo release|operational
 ```
 
-Then validate the result with `repo-config/configure.sh check owner/repo release|operational`, run from the same checkout, which asserts every applied ruleset, setting, and security feature and exits non-zero on drift (the ruleset and settings checks are driven by the committed payloads, so they stay repo-agnostic). Or import each ruleset by hand with `gh api -X POST repos/<owner>/<repo>/rulesets --input repo-config/<name>.json` (operational repos use `operational/develop.json` for `develop`). `gh ruleset` is read-only, so creation goes through `gh api`. The required check binds by name and only turns green after the repo's PR workflow runs once. To edit a live ruleset, GET it, change the field, and PUT the whole writable subset back (a partial PUT `422`s).
+Then validate the result with `repo-config/configure.sh check owner/repo release|operational`, run from the same checkout, which asserts every applied ruleset, setting, label, and security feature and exits non-zero on drift (the ruleset and settings checks are driven by the committed payloads, so they stay repo-agnostic). Or import each ruleset by hand with `gh api -X POST repos/<owner>/<repo>/rulesets --input repo-config/<name>.json` (operational repos use `operational/develop.json` for `develop`). `gh ruleset` is read-only, so creation goes through `gh api`. The required check binds by name and only turns green after the repo's PR workflow runs once. To edit a live ruleset, GET it, change the field, and PUT the whole writable subset back (a partial PUT `422`s).
 
 ## Regenerating the Payloads
 

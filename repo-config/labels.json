@@ -1,0 +1,18 @@
+[
+    { "name": "agents", "color": "f86915", "description": "Agents instructions" },
+    { "name": "bug", "color": "d73a4a", "description": "Something isn't working" },
+    { "name": "chore", "color": "c2e0c6", "description": "Registry, labels, rollout, and other fleet housekeeping" },
+    { "name": "codegen", "color": "3526d4", "description": "Codegen bot" },
+    { "name": "decision", "color": "b60205", "description": "Needs the maintainer's decision before it can be worked" },
+    { "name": "dependencies", "color": "0366d6", "description": "Pull requests that update a dependency file" },
+    { "name": "documentation", "color": "0075ca", "description": "Improvements or additions to documentation" },
+    { "name": "duplicate", "color": "cfd3d7", "description": "This issue or pull request already exists" },
+    { "name": "enhancement", "color": "a2eeef", "description": "New feature or request" },
+    { "name": "gate", "color": "5319e7", "description": "A rule with no mechanical check, or a check that misses a shape" },
+    { "name": "github_actions", "color": "000000", "description": "Pull requests that update GitHub Actions code" },
+    { "name": "introduced", "color": "e99695", "description": "Review finding classed introduced per local-strict-review Disposing of Findings" },
+    { "name": "pre-existing", "color": "bfd4f2", "description": "Review finding classed pre-existing per local-strict-review Disposing of Findings" },
+    { "name": "prose", "color": "fbca04", "description": "A defect in rule or procedure text" },
+    { "name": "script", "color": "1d76db", "description": "A defect in hub tooling" },
+    { "name": "skills", "color": "a25957", "description": "Agent skill" }
+]

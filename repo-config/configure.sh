@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Configure or validate a repository against the committed fleet config in this directory, via the GitHub API.
 #
-#   Apply:  repo-config/configure.sh apply [owner/repo] [release|operational]   # create-or-update settings + rulesets (writes)
+#   Apply:  repo-config/configure.sh apply [owner/repo] [release|operational]   # create-or-update settings + labels + rulesets (writes)
 #   Check:  repo-config/configure.sh check [owner/repo] [release|operational]   # validate an existing repo, non-zero on drift (reads)
 #
 # Both modes need admin on the repo, because the rulesets endpoints require it.
@@ -9,14 +9,15 @@
 # The model may be passed as the sole positional, as in `configure.sh check operational`.
 # The command may be omitted for the apply default, so `configure.sh owner/repo` still applies.
 #
-# The apply mode writes three groups, in order.
+# The apply mode writes four groups, in order.
 # First settings.json via PATCH, plus has_discussions (public repos only) and default_branch (main, only when it exists).
 # Then the Dependabot vulnerability alerts and automated security updates.
+# Then the fleet label set from labels.json, create-or-update by name, leaving any label the payload does not declare alone.
 # Then the branch rulesets, main.json shared and the model-specific develop ruleset, create-or-update by name.
 # The develop ruleset is develop.json where the model is PR-gated, or operational/develop.json for direct signed pushes.
 # Applying the same configuration twice changes nothing, so the mode is idempotent.
 #
-# The check mode is the read-only inverse, and it verifies the same three groups apply writes.
+# The check mode is the read-only inverse, and it verifies the same four groups apply writes.
 # The ruleset and static-settings assertions are driven by the committed payloads, so they stay repo-agnostic.
 # A ruleset is checked on enforcement, on the rule-type set compared in both directions, and on the whole parameters object of every parameterized rule.
 # Comparing the parameters object rather than named fields means a parameter added to a payload is audited with no change here.
@@ -24,7 +25,8 @@
 # That still survives the GitHub API normalizing a stored ruleset, since the comparison is over parsed JSON with sorted keys rather than a byte diff.
 # The derived settings apply computes are asserted by name rather than from a payload, meaning has_discussions and default_branch.
 # The two Dependabot security features are asserted the same way, since apply enables them and no payload declares them.
-# What is unaudited is a static setting absent from settings.json, since only that group is payload-driven.
+# A label is checked on name, color, and description against labels.json, and a label the payload never declared is reported without being asserted, since a repo may carry labels of its own.
+# What is unaudited is a static setting absent from settings.json and a label labels.json does not declare, since those two groups are asserted in the payload's direction only, where a ruleset's rule-type set is compared both ways.
 # Secret names are checked separately, by spec/audit.py from a hub checkout.
 # This script leaves them a manual-verify note for values, which are never readable via the API.
 set -Eeuo pipefail
@@ -75,6 +77,7 @@ operational) develop_ruleset="$script_dir/operational/develop.json" ;;
 esac
 main_ruleset="$script_dir/main.json"
 settings_file="$script_dir/settings.json"
+labels_file="$script_dir/labels.json"
 
 # ----- Resolve the declared description (optional, shared by apply and check) -----
 # Absence keeps the About panel following the README.
@@ -170,15 +173,41 @@ apply_ruleset() { # payload-file - create-or-update the ruleset by name
     fi
 }
 
+# Test with `labels_payload_ok`, which is true only when labels.json parses to a non-empty array whose every label meets the API's field contract.
+# That is a non-empty name, a six-digit hex color, and a description of at most 100 characters, each a string holding no tab or line break.
+# The type test keeps a missing description from rendering as the literal string null, the contract tests keep a label from failing at the API partway through the loop, and the character test keeps a value from splitting the tab-joined rows the two label loops read.
+labels_payload_ok() {
+    jq -e 'type=="array" and length > 0 and all(.[]; (.name|type=="string") and (.color|type=="string") and (.description|type=="string") and (.name|length) > 0 and (.color|test("^[0-9a-fA-F]{6}$")) and (.description|length) <= 100 and ((.name+.color+.description)|test("[\t\r\n]")|not))' "$labels_file" >/dev/null 2>&1
+}
+
+apply_labels() { # create-or-update every label labels.json declares, by name
+    # `gh label create --force` updates a label that exists and creates one that does not, so the write is idempotent by name.
+    # A label the payload does not declare is left standing, because a repo may carry labels of its own and this script deletes nothing.
+    # Every field is read from the payload, so a label added there reaches every fleet repo on the next apply with no change here.
+    # The payload is parsed into a variable before the loop for the reason check_settings gives: a jq failure inside `done < <(...)` skips the body silently.
+    local rows lname color desc
+    # The payload was validated by cmd_apply's pre-flight, before any write, so this read cannot be the first to find it malformed.
+    rows="$(jqr '.[] | "\(.name)\t\(.color)\t\(.description)"' "$labels_file")"
+    while IFS=$'\t' read -r lname color desc; do
+        gh label create "$lname" --repo "$repo" --color "$color" --description "$desc" --force >/dev/null
+    done <<<"$rows"
+    echo "Applied $(wc -l <<<"$rows" | tr -d ' ') labels from labels.json"
+}
+
 cmd_apply() {
     local f private disc payload
     # Pre-flight every required payload before any write, so a partial carry aborts before it half-applies.
-    for f in "$settings_file" "$develop_ruleset" "$main_ruleset"; do
+    for f in "$settings_file" "$labels_file" "$develop_ruleset" "$main_ruleset"; do
         if [ ! -e "$f" ]; then
             echo "Required payload $f not found. Aborting to avoid a partially-applied configuration." >&2
             exit 1
         fi
     done
+    # The label payload's content is validated here too, since apply_labels runs after the settings and Dependabot writes and an abort there would leave them applied.
+    if ! labels_payload_ok; then
+        echo "Label payload $labels_file did not parse, is empty, or holds a label outside the field contract (non-empty name, six-digit hex color, description of at most 100 characters, no tab or line break). Aborting before any write." >&2
+        exit 1
+    fi
     echo "Applying configuration to $repo (model: $model)"
     # The writes below silence stdout only, because the success-response JSON is noise.
     # They still fail loud, since gh errors go to stderr and a failed write aborts the script.
@@ -206,6 +235,8 @@ cmd_apply() {
     gh api --method PUT "repos/$repo/vulnerability-alerts" >/dev/null
     gh api --method PUT "repos/$repo/automated-security-fixes" >/dev/null
     echo "Enabled Dependabot vulnerability alerts + automated security updates"
+    # ----- Fleet label set -----
+    apply_labels
     # ----- Branch rulesets (main shared, develop selected by workflow model) -----
     apply_ruleset "$develop_ruleset"
     apply_ruleset "$main_ruleset"
@@ -388,12 +419,44 @@ check_security() {
     fi
 }
 
+check_labels() {
+    local live rows lname color desc got extra
+    if [ ! -e "$labels_file" ]; then
+        fail "label payload $labels_file missing"
+        return
+    fi
+    # The list is paginated, since a repo carrying more labels than one page holds would otherwise report a later-page label as missing.
+    if ! live="$(gh api --paginate "repos/$repo/labels" --jq '.[]' | jq -s '.')"; then
+        fail "could not read repository labels"
+        return
+    fi
+    if ! labels_payload_ok; then
+        fail "label payload $labels_file did not parse, is empty, or holds a label outside the field contract"
+        return
+    fi
+    rows="$(jqr '.[] | "\(.name)\t\(.color)\t\(.description)"' "$labels_file")"
+    # Each declared label is asserted on all three fields, so a color or description edited by hand reads as drift.
+    while IFS=$'\t' read -r lname color desc; do
+        # shellcheck disable=SC2016  # $n is a jq --arg variable, not a shell expansion
+        got="$(jqr --arg n "$lname" '[.[] | select(.name == $n)] | first // empty | "\(.color)\t\(.description // "")"' <<<"$live")"
+        assert "label '$lname' = $color '$desc'" test "$got" = "$color"$'\t'"$desc"
+    done <<<"$rows"
+    # A label the payload never declared is reported rather than asserted, matching the bypass list: the fleet set is a floor, and a repo may add its own.
+    # shellcheck disable=SC2016  # $want is a jq --slurpfile variable, not a shell expansion
+    if ! extra="$(jqr --slurpfile want "$labels_file" '[.[].name] - [$want[0][].name] | join(", ")' <<<"$live")"; then
+        fail "could not compute the undeclared label list"
+        return
+    fi
+    note "labels not declared by labels.json: ${extra:-none} (left alone by this script)"
+}
+
 cmd_check() {
     echo "Validating configuration for $repo (model: $model)"
     check_ruleset "$develop_ruleset"
     check_ruleset "$main_ruleset"
     check_settings
     check_security
+    check_labels
     # Secret names are asserted by spec/audit.py, not here.
     # Values are never readable via the API regardless.
     note "run spec/audit.py [RepoName] (the registry name, not owner/repo) for required secret names, then verify by hand that their values are valid"
