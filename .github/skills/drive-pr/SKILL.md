@@ -144,9 +144,9 @@ maintainer when".
 1. **Real, so fix it.** Take the fix through `local-strict-review` the same way the push that
    opened the pull request went, per `pr-review-conduct` "Expected review loop", then reply with
    the fixing commit SHA. A branch already reviewed once has not been reviewed for the fix, which
-   is the round that pass gets dropped on and the churn `local-strict-review` exists to stop. For
-   a finding on platform-specific code (PowerShell, a macOS- or WSL-only path), "fixed" means
-   executed on that platform, per
+   is the round the `local-strict-review` pass gets dropped on and the churn `local-strict-review`
+   exists to stop. For a finding on platform-specific code (PowerShell, a macOS- or WSL-only
+   path), "fixed" means executed on that platform, per
    `agent-conduct` "Before Claiming Done": a fix reasoned out by analogy to a tested equivalent
    elsewhere is not yet fixed, and the reply says so rather than claiming the SHA closes it.
 2. **Not real, or real but structurally out of scope, so decline in the thread with evidence.**

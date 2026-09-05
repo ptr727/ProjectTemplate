@@ -400,11 +400,11 @@ has carried.
    yet carried. A count of zero is the only case with nothing to promote, and the round reports
    that instead of attempting one.
 2. Drive its review loop per the promotion half of `drive-pr` "The Drive Loop", **with a
-   review-round budget set before
-   the first one**, the same discipline "Bounding a Prose Group" applies to a feature branch. That
-   loop repeats until the promotion pull request carries no open finding, and nothing in it
-   terminates on its own, so when the budget is reached, stop and put the state to the maintainer
-   rather than continuing to spend the run's only forward gear on one pull request.
+   review-round budget set before the first one**, the same discipline "Bounding a Prose Group"
+   applies to a feature branch. That loop repeats until the promotion pull request meets every
+   `pr-review-conduct` Merge Gate item except the maintainer's explicit permission to merge, and
+   nothing in it terminates on its own, so when the budget is reached, stop and put the state to
+   the maintainer rather than continuing to spend the run's only forward gear on one pull request.
 3. Put the ready pull request to the maintainer through the interface's own prompt mechanism,
    naming the merge as the action that unblocks the run. The maintainer's merge is the run's clock, so one
    reported in a closing paragraph and never actually asked about stalls every round behind it.

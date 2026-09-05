@@ -139,11 +139,11 @@
     },
     {
       "unit": ".agents/skills/backlog-burndown/SKILL.md > The Promotion Boundary",
-      "digest": "sha256:cc4a6ddd4c995d5f077a01a5244fb5f75f072e0d518dc8076f432a81c41ba594",
+      "digest": "sha256:e992ec673e2a5c2e3144b65ade59c2aac8e4482bc86c34cf3edae5c12368652c",
       "reviewer": "agent-skill",
-      "findings": 4,
+      "findings": 5,
       "hubCommit": "fbf1f6d9dc713d6e187d2c3d6542490a2839fe55",
-      "stamp": "2026-09-05T16:11:49Z"
+      "stamp": "2026-09-05T16:30:52Z"
     },
     {
       "unit": ".agents/skills/backlog-burndown/SKILL.md > The Round",
@@ -219,11 +219,11 @@
     },
     {
       "unit": ".agents/skills/drive-pr/SKILL.md > Disposing of Every Finding",
-      "digest": "sha256:0f129d173c93fa9ab9e00dcbc79045e20cbb3ab0da31c084d6dc0c2cbd81dc4a",
+      "digest": "sha256:883689d8b9529430556667c1eba4d2d9aeba2760982697d999244a486a252a73",
       "reviewer": "agent-skill",
       "findings": 2,
       "hubCommit": "fbf1f6d9dc713d6e187d2c3d6542490a2839fe55",
-      "stamp": "2026-09-05T16:11:49Z"
+      "stamp": "2026-09-05T16:30:52Z"
     },
     {
       "unit": ".agents/skills/drive-pr/SKILL.md > How Far to Drive",
@@ -371,11 +371,11 @@
     },
     {
       "unit": ".agents/skills/pr-review-conduct/SKILL.md > Every finding ends in one of five outcomes",
-      "digest": "sha256:f177ef0ddbdf14b008128fa7b0178f528c21ecee9b2e41c5160908817152a750",
+      "digest": "sha256:26a9201900a60d33f5b89ed5a7b274d430b62dad1136a0b80ef45af4dfc8c9f6",
       "reviewer": "agent-skill",
-      "findings": 5,
+      "findings": 4,
       "hubCommit": "fbf1f6d9dc713d6e187d2c3d6542490a2839fe55",
-      "stamp": "2026-09-05T16:11:49Z"
+      "stamp": "2026-09-05T16:30:52Z"
     },
     {
       "unit": ".agents/skills/pr-review-conduct/SKILL.md > Expected review loop",
