@@ -426,6 +426,38 @@
       "stamp": "2026-09-01T06:46:39Z"
     },
     {
+      "unit": ".agents/skills/skill-lifecycle/SKILL.md > (preamble)",
+      "digest": "sha256:6f8099d2cba08c13cc553b4d9b0e8d3d1388d5436777965b9abeeac838d9b9c3",
+      "reviewer": "agent-skill",
+      "findings": 1,
+      "hubCommit": "00832f397a18c656fb15d6972a6acab7ecbcc078",
+      "stamp": "2026-09-05T03:54:48Z"
+    },
+    {
+      "unit": ".agents/skills/skill-lifecycle/SKILL.md > Changing or Retiring a Skill",
+      "digest": "sha256:fd8c57baf48d969a67218d1defdf7be10f277baa832190aba32dedbb9d8001a2",
+      "reviewer": "agent-skill",
+      "findings": 4,
+      "hubCommit": "00832f397a18c656fb15d6972a6acab7ecbcc078",
+      "stamp": "2026-09-05T03:58:10Z"
+    },
+    {
+      "unit": ".agents/skills/skill-lifecycle/SKILL.md > The Doc-Packaging Pattern",
+      "digest": "sha256:61a66fd2fdad500449f5c4ca88d97f132095795619544be8420684e8c71a0f5c",
+      "reviewer": "agent-skill",
+      "findings": 6,
+      "hubCommit": "00832f397a18c656fb15d6972a6acab7ecbcc078",
+      "stamp": "2026-09-05T04:03:30Z"
+    },
+    {
+      "unit": ".agents/skills/skill-lifecycle/SKILL.md > The Pipeline",
+      "digest": "sha256:6ddca7eb6684ffa92a4a1c2263ebdaf4fd741311edbaf6911d6a862efb63604c",
+      "reviewer": "agent-skill",
+      "findings": 3,
+      "hubCommit": "00832f397a18c656fb15d6972a6acab7ecbcc078",
+      "stamp": "2026-09-05T04:04:20Z"
+    },
+    {
       "unit": ".agents/skills/workflow-ci-contract/SKILL.md > (preamble)",
       "digest": "sha256:47ca6dfccbb8527b464aaa2c8fd113d536b8102f35635407b7b4e62663226425",
       "reviewer": "agent-skill",
@@ -555,11 +587,11 @@
     },
     {
       "unit": ".github/copilot-instructions.md > Reviewing Carried Fleet Content",
-      "digest": "sha256:c6d69949edc20e0e5ad9fa133061b2ee09f98b99507067b11ae3583f8d583b1e",
+      "digest": "sha256:23e7c2e095b46eebb066ce382f78a1f8bed4d137d2603509472b95053a7038ba",
       "reviewer": "agent-skill",
-      "findings": 0,
-      "hubCommit": "d857170243aaca002a5c76cbf193886f00bdfb17",
-      "stamp": "2026-09-04T19:14:09Z"
+      "findings": 5,
+      "hubCommit": "00832f397a18c656fb15d6972a6acab7ecbcc078",
+      "stamp": "2026-09-05T04:03:45Z"
     },
     {
       "unit": "AGENTS.md > Context and Delegation Discipline",

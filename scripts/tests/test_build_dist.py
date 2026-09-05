@@ -6,9 +6,12 @@ Run as `python3 scripts/tests/test_build_dist.py`, or under `python3 -m unittest
 
 from __future__ import annotations
 
+import contextlib
+import io
 import json
 import os
 import sys
+import tempfile
 import unittest
 from pathlib import Path
 
@@ -31,14 +34,17 @@ class RegenerateCase(unittest.TestCase):
             build_dist.PLUGIN_MANIFEST,
             build_dist.DIGEST_DIR,
             build_dist.GITHUB_SKILLS,
+            build_dist.INCLUDE_ROOT,
         )
+        build_dist.INCLUDE_ROOT = self.tmp
         build_dist.SKILLS_SRC = self.skills_src
         build_dist.DIST_PLUGIN = self.dist_plugin
         build_dist.PLUGIN_MANIFEST = self.dist_plugin / ".claude-plugin" / "plugin.json"
         build_dist.DIGEST_DIR = self.dist_plugin / ".source-digests"
         build_dist.GITHUB_SKILLS = self.github_skills
 
-    def _restore(self, src, dist, manifest, stamp, github_skills) -> None:
+    def _restore(self, src, dist, manifest, stamp, github_skills, include_root) -> None:
+        build_dist.INCLUDE_ROOT = include_root
         build_dist.SKILLS_SRC = src
         build_dist.DIST_PLUGIN = dist
         build_dist.PLUGIN_MANIFEST = manifest
@@ -369,6 +375,274 @@ class RegenerateCase(unittest.TestCase):
         with mock.patch("sys.argv", ["build_dist.py", "--check"]), mock.patch("builtins.print"):
             exit_code = build_dist.main()
         self.assertEqual(exit_code, 2)
+
+
+class IncludeCase(RegenerateCase):
+    """Include regions: filled from a heading's body in the authored tree, and held to it by --check."""
+
+    HOME = "# Rules\n\n## Alpha\n\nAlpha rule.\n\n- One\n- Two\n\n## Beta\n\nBeta rule.\n"
+
+    def setUp(self) -> None:
+        super().setUp()
+        (self.tmp / "RULES.md").write_text(self.HOME, encoding="utf-8")
+
+    def region(self, key: str, body: str = "") -> str:
+        return f"<!-- include: {key} -->\n{body}<!-- /include -->\n"
+
+    def skill_text(self, name: str = "foo") -> str:
+        return (self.skills_src / name / "SKILL.md").read_text(encoding="utf-8")
+
+    def test_regenerate_fills_a_region_from_its_source_heading(self) -> None:
+        """The region holds the heading's body, not its heading line, with one blank line each side."""
+        self.make_skill(
+            "foo", "# Foo\n\n## Scope\n\n" + self.region("RULES.md > Alpha") + "\nTail.\n"
+        )
+        build_dist.regenerate()
+        self.assertEqual(
+            self.skill_text(),
+            "# Foo\n\n## Scope\n\n<!-- include: RULES.md > Alpha -->\n\nAlpha rule.\n\n- One\n- Two\n\n"
+            "<!-- /include -->\n\nTail.\n",
+        )
+        self.assertFalse(build_dist.is_stale())
+
+    def test_a_filled_region_reaches_both_generated_trees(self) -> None:
+        self.make_skill("foo", self.region("RULES.md > Beta"))
+        build_dist.regenerate()
+        for tree in (self.dist_plugin / "skills", self.github_skills):
+            self.assertIn("Beta rule.", (tree / "foo" / "SKILL.md").read_text(encoding="utf-8"))
+
+    def test_regenerate_is_idempotent(self) -> None:
+        self.make_skill("foo", self.region("RULES.md > Alpha"))
+        build_dist.regenerate()
+        once = self.skill_text()
+        build_dist.regenerate()
+        self.assertEqual(self.skill_text(), once)
+
+    def test_a_file_without_a_region_is_never_rewritten(self) -> None:
+        """Mixed line endings in such a file survive, since nothing is generated into it."""
+        self.make_skill("foo")
+        path = self.skills_src / "foo" / "SKILL.md"
+        path.write_bytes(b"one\r\ntwo\nthree\r\n")
+        build_dist.regenerate()
+        self.assertEqual(path.read_bytes(), b"one\r\ntwo\nthree\r\n")
+
+    def test_a_hand_edited_region_reports_stale(self) -> None:
+        """Acceptance: build_dist.py --check fails when an include region is edited by hand."""
+        self.make_skill("foo", self.region("RULES.md > Alpha"))
+        build_dist.regenerate()
+        path = self.skills_src / "foo" / "SKILL.md"
+        path.write_text(
+            self.skill_text().replace("Alpha rule.", "Alpha rule, reworded."), encoding="utf-8"
+        )
+        self.assertEqual(build_dist.include_drift(), [".agents/skills/foo/SKILL.md"])
+        self.assertTrue(build_dist.is_stale())
+
+    def test_an_edited_source_section_reports_stale(self) -> None:
+        self.make_skill("foo", self.region("RULES.md > Alpha"))
+        build_dist.regenerate()
+        (self.tmp / "RULES.md").write_text(
+            self.HOME.replace("Alpha rule.", "Alpha rule, v2."), encoding="utf-8"
+        )
+        self.assertTrue(build_dist.is_stale())
+        build_dist.regenerate()
+        self.assertIn("Alpha rule, v2.", self.skill_text())
+        self.assertFalse(build_dist.is_stale())
+
+    def test_a_renamed_source_heading_is_a_failure_not_a_stale_result(self) -> None:
+        """Acceptance: --check fails when the source moves, and regenerating cannot repair a key."""
+        self.make_skill("foo", self.region("RULES.md > Alpha"))
+        build_dist.regenerate()
+        (self.tmp / "RULES.md").write_text(
+            self.HOME.replace("## Alpha", "## Alpha Renamed"), encoding="utf-8"
+        )
+        with self.assertRaisesRegex(ValueError, "no heading 'Alpha'"):
+            build_dist.is_stale()
+        with self.assertRaisesRegex(ValueError, "no heading 'Alpha'"):
+            build_dist.regenerate()
+
+    def test_check_reports_a_broken_key_as_2_and_a_stale_region_as_1(self) -> None:
+        self.make_skill("foo", self.region("RULES.md > Alpha"))
+        build_dist.regenerate()
+        path = self.skills_src / "foo" / "SKILL.md"
+        path.write_text(self.skill_text().replace("- Two", "- Two, edited"), encoding="utf-8")
+        argv = sys.argv
+        try:
+            sys.argv = ["build_dist.py", "--check"]
+            with contextlib.redirect_stderr(io.StringIO()) as err:
+                self.assertEqual(build_dist.main(), 1)
+            self.assertIn(".agents/skills/foo/SKILL.md", err.getvalue())
+            (self.tmp / "RULES.md").write_text("## Other\n\nx\n", encoding="utf-8")
+            with contextlib.redirect_stderr(io.StringIO()):
+                self.assertEqual(build_dist.main(), 2)
+        finally:
+            sys.argv = argv
+
+    def test_a_heading_matches_case_folded_and_at_any_level_from_two(self) -> None:
+        (self.tmp / "RULES.md").write_text(
+            "## Top\n\nTop text.\n\n### Inner Rule\n\nInner text.\n\n#### Deeper\n\nDeeper text.\n\n### Next\n\nNext text.\n",
+            encoding="utf-8",
+        )
+        self.make_skill("foo", self.region("RULES.md > inner rule"))
+        build_dist.regenerate()
+        self.assertIn(
+            "Inner text.\n\n#### Deeper\n\nDeeper text.\n\n<!-- /include -->", self.skill_text()
+        )
+        self.assertNotIn("Next text.", self.skill_text())
+
+    def test_two_matching_headings_are_refused(self) -> None:
+        (self.tmp / "RULES.md").write_text(
+            "## Same\n\na\n\n## Other\n\nb\n\n## same\n\nc\n", encoding="utf-8"
+        )
+        self.make_skill("foo", self.region("RULES.md > Same"))
+        with self.assertRaisesRegex(ValueError, "2 headings match"):
+            build_dist.regenerate()
+
+    def test_a_heading_and_a_marker_inside_a_code_fence_are_content(self) -> None:
+        (self.tmp / "RULES.md").write_text(
+            "## Alpha\n\nReal.\n\n```text\n## Beta\n<!-- include: RULES.md > Beta -->\n```\n\nStill alpha.\n\n## Beta\n\nBeta.\n",
+            encoding="utf-8",
+        )
+        self.make_skill(
+            "foo",
+            "```markdown\n<!-- include: RULES.md > Nowhere -->\n```\n\n"
+            + self.region("RULES.md > Alpha"),
+        )
+        build_dist.regenerate()
+        text = self.skill_text()
+        self.assertIn("<!-- include: RULES.md > Nowhere -->\n```", text)
+        self.assertIn(
+            "```text\n## Beta\n<!-- include: RULES.md > Beta -->\n```\n\nStill alpha.\n\n<!-- /include -->",
+            text,
+        )
+        self.assertFalse(build_dist.is_stale())
+
+    def test_an_include_of_a_file_with_regions_reads_its_filled_text(self) -> None:
+        """A region filled from a sibling skill carries what that skill renders, without its markers."""
+        self.make_skill(
+            "bar", "## Shared\n\n" + self.region("RULES.md > Alpha") + "\n## Own\n\nOwn.\n"
+        )
+        self.make_skill("foo", self.region(".agents/skills/bar/SKILL.md > Shared"))
+        build_dist.regenerate()
+        self.assertEqual(
+            self.skill_text(),
+            "<!-- include: .agents/skills/bar/SKILL.md > Shared -->\n\nAlpha rule.\n\n- One\n- Two\n\n<!-- /include -->\n",
+        )
+
+    def test_an_include_cycle_is_refused(self) -> None:
+        self.make_skill("bar", "## B\n\n" + self.region(".agents/skills/foo/SKILL.md > A"))
+        self.make_skill("foo", "## A\n\n" + self.region(".agents/skills/bar/SKILL.md > B"))
+        with self.assertRaisesRegex(ValueError, "include cycle"):
+            build_dist.regenerate()
+
+    def test_a_malformed_region_is_refused(self) -> None:
+        cases = {
+            "no end": "<!-- include: RULES.md > Alpha -->\n",
+            "no start": "<!-- /include -->\n",
+            "nested": "<!-- include: RULES.md > Alpha -->\n<!-- include: RULES.md > Beta -->\n<!-- /include -->\n",
+            "no delimiter": self.region("RULES.md"),
+        }
+        for label, body in cases.items():
+            with self.subTest(label):
+                self.make_skill("foo", body)
+                with self.assertRaises(ValueError):
+                    build_dist.regenerate()
+
+    def test_a_source_outside_the_root_or_under_a_generated_tree_is_refused(self) -> None:
+        outside = Path(self.enterContext(tempfile.TemporaryDirectory())) / "outside.md"
+        outside.write_text("## Alpha\n\nx\n", encoding="utf-8")
+        (self.tmp / "link.md").symlink_to(outside)
+        self.github_skills.mkdir(parents=True, exist_ok=True)
+        (self.github_skills / "gen.md").write_text("## Alpha\n\nx\n", encoding="utf-8")
+        for rel in (
+            "../outside.md",
+            str(outside),
+            "link.md",
+            ".github/skills/gen.md",
+            "missing.md",
+        ):
+            with self.subTest(rel):
+                self.make_skill("foo", self.region(f"{rel} > Alpha"))
+                with self.assertRaises(ValueError):
+                    build_dist.regenerate()
+
+    def test_a_crlf_skill_keeps_its_endings_when_filled(self) -> None:
+        self.make_skill("foo")
+        path = self.skills_src / "foo" / "SKILL.md"
+        path.write_bytes(b"# Foo\r\n\r\n<!-- include: RULES.md > Beta -->\r\n<!-- /include -->\r\n")
+        build_dist.regenerate()
+        self.assertEqual(
+            path.read_bytes(),
+            b"# Foo\r\n\r\n<!-- include: RULES.md > Beta -->\r\n\r\nBeta rule.\r\n\r\n<!-- /include -->\r\n",
+        )
+        self.assertFalse(build_dist.is_stale())
+
+    def test_a_region_in_a_reference_file_is_filled_too(self) -> None:
+        self.make_skill("foo")
+        ref = self.skills_src / "foo" / "references" / "notes.md"
+        ref.parent.mkdir()
+        ref.write_text(self.region("RULES.md > Beta"), encoding="utf-8")
+        build_dist.regenerate()
+        self.assertIn("Beta rule.", ref.read_text(encoding="utf-8"))
+        self.assertIn(
+            "Beta rule.",
+            (self.github_skills / "foo" / "references" / "notes.md").read_text(encoding="utf-8"),
+        )
+
+    def test_mixed_line_endings_in_a_file_with_a_region_are_refused(self) -> None:
+        """Rendering would rewrite the rest of the file to one ending, which is the silent flattening the rule forbids."""
+        self.make_skill("foo")
+        path = self.skills_src / "foo" / "SKILL.md"
+        path.write_bytes(b"one\r\n<!-- include: RULES.md > Beta -->\n<!-- /include -->\r\n")
+        with self.assertRaisesRegex(ValueError, "mixes CRLF and LF"):
+            build_dist.regenerate()
+        self.assertEqual(
+            path.read_bytes(), b"one\r\n<!-- include: RULES.md > Beta -->\n<!-- /include -->\r\n"
+        )
+
+    def test_an_empty_heading_body_is_refused(self) -> None:
+        (self.tmp / "RULES.md").write_text("## Empty\n\n## Next\n\nx\n", encoding="utf-8")
+        self.make_skill("foo", self.region("RULES.md > Empty"))
+        with self.assertRaisesRegex(ValueError, "body is empty"):
+            build_dist.regenerate()
+
+    def test_an_indented_marker_is_content(self) -> None:
+        """Four spaces open an indented code block in CommonMark, so a marker there is a sample, not a region."""
+        body = "    <!-- include: RULES.md > Nowhere -->\n    <!-- /include -->\n"
+        self.make_skill("foo", body)
+        build_dist.regenerate()
+        self.assertEqual(self.skill_text(), body)
+        self.assertFalse(build_dist.is_stale())
+
+    def test_a_symlinked_skill_directory_is_refused_before_any_fill(self) -> None:
+        """The fill writes through whatever the walk found, so the symlink check has to run before it."""
+        target = self.tmp / "elsewhere"
+        target.mkdir()
+        original = self.region("RULES.md > Beta")
+        (target / "SKILL.md").write_text(original, encoding="utf-8")
+        self.skills_src.mkdir(parents=True, exist_ok=True)
+        (self.skills_src / "foo").symlink_to(target, target_is_directory=True)
+        with self.assertRaises(ValueError):
+            build_dist.regenerate()
+        self.assertEqual((target / "SKILL.md").read_text(encoding="utf-8"), original)
+
+    def test_a_directory_symlink_on_the_way_is_refused(self) -> None:
+        """A symlink inside the root can still alias a generated tree or the including file itself."""
+        self.github_skills.mkdir(parents=True, exist_ok=True)
+        (self.github_skills / "gen.md").write_text("## Alpha\n\nx\n", encoding="utf-8")
+        (self.tmp / "docs").mkdir()
+        (self.tmp / "docs" / "link").symlink_to(self.github_skills, target_is_directory=True)
+        (self.tmp / "docs" / "alias").symlink_to(self.skills_src / "foo", target_is_directory=True)
+        for key in ("docs/link/gen.md > Alpha", "docs/alias/SKILL.md > A"):
+            with self.subTest(key):
+                self.make_skill("foo", "## A\n\n" + self.region(key))
+                with self.assertRaisesRegex(ValueError, "through a symlink"):
+                    build_dist.regenerate()
+
+    def test_a_key_spelled_unlike_the_tree_is_refused(self) -> None:
+        """A case-insensitive host would resolve it and Linux CI would not, so neither may."""
+        self.make_skill("foo", self.region("rules.md > Alpha"))
+        with self.assertRaisesRegex(ValueError, "spelled"):
+            build_dist.regenerate()
 
 
 if __name__ == "__main__":

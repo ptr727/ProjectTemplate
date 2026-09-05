@@ -8,7 +8,13 @@ directory, so this script materializes a plugin (.claude-plugin/fleet-skills/) t
 .github/skills/, so the script also materializes that tree. .agents/skills/ stays the single
 place a skill's content is ever hand-edited.
 
-Usage: python3 scripts/build_dist.py           regenerate distributions from .agents/skills/
+A skill reads whole in isolation and a rule has one home, so the text a skill needs from that
+home is generated into it rather than copied: a region between `<!-- include: <path> > <heading> -->`
+and `<!-- /include -->` is filled with the body under that heading, in .agents/skills/ itself, and
+--check fails when a region differs from what its source renders now. The key is the same
+`<path> > <section>` vocabulary canonical_review.py keys a unit on.
+
+Usage: python3 scripts/build_dist.py           fill include regions, then regenerate distributions
        python3 scripts/build_dist.py --check   read-only: exit 0 clean, 1 stale, 2 on a real
                                                  failure (a symlink under .agents/skills/, an
                                                  unreadable file), so a caller reading the exit
@@ -21,9 +27,11 @@ from __future__ import annotations
 import argparse
 import hashlib
 import json
+import os
+import re
 import shutil
 import sys
-from pathlib import Path
+from pathlib import Path, PurePosixPath
 
 ROOT = Path(__file__).resolve().parent.parent
 SKILLS_SRC = ROOT / ".agents" / "skills"
@@ -139,8 +147,284 @@ def write_plugin_manifest(names):
     )
 
 
+# --- Include regions -------------------------------------------------------------------------
+# A skill has to read whole in isolation, and a rule has one home, so the text a skill needs from that home is generated into it rather than copied.
+# The region is filled in the authored tree itself, because Codex and opencode read .agents/skills/ directly and a region left empty there would hand them a skill with a hole in it.
+# The generated trees then mirror the filled source.
+
+# The same `<path> > <heading>` vocabulary canonical_review.py keys a unit on, defined here because that engine imports this module.
+SECTION_DELIM = " > "
+# Sources resolve against the repository root, so a key reads the same in a skill, a finding, and the review ledger.
+INCLUDE_ROOT = ROOT
+_INCLUDE_START = re.compile(r"^<!--\s*include:\s*(?P<key>\S.*?)\s*-->$")
+_INCLUDE_END = re.compile(r"^<!--\s*/include\s*-->$")
+# Level two down, since a level-one heading is a document's title rather than a section a skill would carry.
+_HEADING = re.compile(r"^(#{2,6})\s+(?P<text>\S.*?)\s*$")
+# CommonMark's own bound for a fence and an ATX heading, so a marker or heading sitting in an indented code block is content here the way it is there.
+_MAX_INDENT = 3
+
+
+def _fence_step(line, marker, marker_len):
+    """spec/audit.py's fence reading, imported on first use rather than at module import.
+
+    One reading of CommonMark across the fidelity checks, the review ledger, and this generator,
+    rather than a second one here that could disagree with them. Imported lazily because
+    scripts/skills_install.py imports this module on hosts whose Python predates what audit.py
+    needs, and installing never fills a region.
+    """
+    sys.path.insert(0, str(ROOT / "spec"))
+    import audit
+
+    return audit._fence_step(line, marker, marker_len)
+
+
+def _lf(text):
+    """`text` with every line ending as LF, so a scan sees one line shape whatever the file carries."""
+    return text.replace("\r\n", "\n").replace("\r", "\n")
+
+
+def _read_lines(path):
+    """`(lines, newline, mixed)` for a text file, with the newline the file uses kept for writing it back.
+
+    Detected from the bytes rather than assumed, because a generated rewrite that flattened a CRLF
+    file to LF would be the line-ending corruption GOVERNANCE.md "Verification Discipline" names.
+    A file mixing the two cannot be written back as it was, so `mixed` lets a caller refuse to
+    render into one rather than rewrite it to one ending. UnicodeDecodeError is a ValueError,
+    which is the exit-2 path a caller already reads as the check itself not having run.
+    """
+    data = path.read_bytes()
+    crlf = data.count(b"\r\n")
+    mixed = bool(crlf) and crlf != data.count(b"\n")
+    return _lf(data.decode("utf-8")).split("\n"), "\r\n" if crlf else "\n", mixed
+
+
+def _unindented(line):
+    """The line's text when it sits within CommonMark's three-space bound, else None, since deeper is an indented code block."""
+    stripped = line.lstrip(" ")
+    return stripped.rstrip() if len(line) - len(stripped) <= _MAX_INDENT else None
+
+
+def _marker(line, marker, marker_len):
+    """One line's marker match under fence state: `(state, start_match, end_match)`, both None inside a fence.
+
+    A marker shown inside a code sample, which is how the skill-lifecycle skill documents the
+    syntax, is content rather than a region boundary, whether the sample is fenced or indented.
+    """
+    marker, marker_len, boundary = _fence_step(line, marker, marker_len)
+    text = None if boundary or marker is not None else _unindented(line)
+    if text is None:
+        return (marker, marker_len), None, None
+    return (marker, marker_len), _INCLUDE_START.match(text), _INCLUDE_END.match(text)
+
+
+def _exact_case(rel, parts):
+    """Refuse a key whose spelling differs from the tree's, so a key resolves alike on every host.
+
+    A case-insensitive filesystem would resolve `agents.md` to `AGENTS.md` and a region keyed that
+    way would fill on a macOS or Windows host and exit 2 on Linux CI, and a skill including its
+    own file under another spelling would recurse past the cycle check below.
+    """
+    current = INCLUDE_ROOT
+    for part in parts:
+        if not current.is_dir() or part not in os.listdir(current):
+            raise ValueError(
+                f"include source {rel!r} is not under the repository root spelled as the tree spells it"
+            )
+        current = current / part
+
+
+def include_source(rel):
+    """The file an include key names, refused where it could name anything but authored text under the root.
+
+    A generated tree is never a source, because its text is this script's own output and a region
+    filled from one would round-trip through the mirror it exists to keep honest. A path that
+    resolves to anything but itself went through a symlink, and one on the way could reach outside
+    the root or into a generated tree under a name that looks fine lexically, so none is followed.
+    """
+    parts = PurePosixPath(rel)
+    if not rel or parts.is_absolute() or ".." in parts.parts or parts.as_posix() != rel:
+        raise ValueError(
+            f"include source {rel!r} is not a plain path relative to the repository root"
+        )
+    _exact_case(rel, parts.parts)
+    path = INCLUDE_ROOT / parts
+    if not path.is_file():
+        raise ValueError(f"include source {rel!r} is not a file under the repository root")
+    resolved = path.resolve()
+    if resolved != INCLUDE_ROOT.resolve() / parts:
+        raise ValueError(f"include source {rel!r} is reached through a symlink")
+    for generated in (DIST_PLUGIN, GITHUB_SKILLS):
+        target = generated.resolve()
+        if resolved == target or target in resolved.parents:
+            raise ValueError(
+                f"include source {rel!r} is under a generated tree, which is never a source"
+            )
+    return path
+
+
+def heading_body(lines, heading, key):
+    """The lines under the one heading whose text case-folds to `heading`, up to the next heading at its level or above.
+
+    Any level from two down, so a key can name a GOVERNANCE.md section, an AGENTS.md subsection, or
+    a section of a sibling skill with one vocabulary. Matched the way spec/audit.py matches a
+    declared section, on the parsed text case-folded, so a re-cased heading still resolves. Two
+    matches are two answers to one question, refused rather than resolved to the first, and a
+    heading inside a code block, fenced or indented, is content.
+    """
+    want = heading.strip().lower()
+    headings = []
+    state = (None, 0)
+    for index, line in enumerate(lines):
+        state_marker, state_len, boundary = _fence_step(line, *state)
+        state = (state_marker, state_len)
+        if boundary or state_marker is not None:
+            continue
+        text = _unindented(line)
+        m = _HEADING.match(text) if text is not None else None
+        if m:
+            headings.append((index, len(m.group(1)), m.group("text").strip().lower()))
+    matches = [(index, depth) for index, depth, text in headings if text == want]
+    if not matches:
+        raise ValueError(f"include {key!r}: no heading {heading.strip()!r} in its source")
+    if len(matches) > 1:
+        raise ValueError(
+            f"include {key!r}: {len(matches)} headings match, so the region cannot choose one"
+        )
+    start, depth = matches[0]
+    end = next(
+        (index for index, level, _ in headings if index > start and level <= depth), len(lines)
+    )
+    # The source's own region markers belong to its regions, not to the text they enclose.
+    # A copied marker would open a region inside the one being filled on the next scan.
+    body = []
+    state = (None, 0)
+    for line in lines[start + 1 : end]:
+        state, opens, closes = _marker(line, *state)
+        if opens is None and closes is None:
+            body.append(line)
+    while body and not body[0].strip():
+        body.pop(0)
+    while body and not body[-1].strip():
+        body.pop()
+    if not body:
+        # Rendering nothing would leave two blank lines between the markers, which markdownlint refuses in a file nobody may hand-edit.
+        raise ValueError(
+            f"include {key!r}: the heading's body is empty, so there is nothing to include"
+        )
+    return body
+
+
+def include_body(key, stack):
+    """What the region for `key` holds: the named heading's body, taken from the source as it renders now."""
+    rel, delimiter, heading = key.partition(SECTION_DELIM)
+    if not delimiter or not heading.strip():
+        raise ValueError(f"include key {key!r} is not '<path>{SECTION_DELIM}<heading>'")
+    lines, _, _ = filled_lines(rel, stack)
+    return heading_body(lines, heading, key)
+
+
+def filled_lines(rel, stack=()):
+    """`(lines, newline, has_regions)` for `rel` with every include region holding its source's current content.
+
+    Recursive, so a region filled from a file that carries regions of its own reads the text that
+    file renders rather than its markers. A cycle is refused by the path that would loop, compared
+    as files rather than as spellings, so an alias through a directory symlink cannot slip past.
+    A file with no region comes back exactly as read, so filling it never rewrites anything.
+    """
+    path = include_source(rel)
+    if any(path.samefile(seen) for seen in stack):
+        raise ValueError(f"include cycle: {' -> '.join(str(seen) for seen in (*stack, path))}")
+    lines, newline, mixed = _read_lines(path)
+    out = []
+    has_regions = False
+    state = (None, 0)
+    index = 0
+    while index < len(lines):
+        line = lines[index]
+        state, opens, closes = _marker(line, *state)
+        if closes is not None:
+            raise ValueError(f"{rel}:{index + 1}: an include end marker with no region open")
+        if opens is None:
+            out.append(line)
+            index += 1
+            continue
+        if mixed:
+            raise ValueError(
+                f"{rel} mixes CRLF and LF line endings, so a region in it cannot be rendered without rewriting the rest"
+            )
+        key = opens.group("key")
+        end = None
+        inner = (None, 0)
+        for probe in range(index + 1, len(lines)):
+            inner, nested, closing = _marker(lines[probe], *inner)
+            if nested is not None:
+                raise ValueError(
+                    f"{rel}:{probe + 1}: an include region opens inside the one at line {index + 1}"
+                )
+            if closing is not None:
+                end = probe
+                break
+        if end is None:
+            raise ValueError(f"{rel}:{index + 1}: the include region for {key!r} has no end marker")
+        # One blank line on each side, so a body starting with a list or a heading satisfies the blank-line rules markdownlint holds the rest of the tree to.
+        out.extend([line, "", *include_body(key, (*stack, path)), "", lines[end]])
+        has_regions = True
+        index = end + 1
+    return out, newline, has_regions
+
+
+def filled_bytes(rel):
+    """The bytes `rel` holds once its include regions are current, or its bytes as they are when it has none."""
+    lines, newline, has_regions = filled_lines(rel)
+    if not has_regions:
+        return (INCLUDE_ROOT / rel).read_bytes()
+    return newline.join(lines).encode("utf-8")
+
+
+def skill_documents():
+    """Every Markdown file under the authored tree, as root-relative POSIX paths, the files a region can sit in.
+
+    Symlinks are refused before the walk, since a fill writes through whatever the walk found and
+    a skill directory that is a symlink would put generated text into the tree it points at.
+    """
+    out = []
+    for name in skill_names():
+        reject_symlinks(SKILLS_SRC / name)
+        out.extend(
+            f.relative_to(INCLUDE_ROOT).as_posix()
+            for f in (SKILLS_SRC / name).rglob("*.md")
+            if f.is_file()
+        )
+    return sorted(out)
+
+
+def include_drift():
+    """Authored files whose include regions differ from what their sources render now.
+
+    A hand edit inside a region and a source edit nobody regenerated for both land here. A source
+    heading that no longer resolves raises instead, since regenerating cannot repair a key.
+    """
+    return [
+        rel for rel in skill_documents() if filled_bytes(rel) != (INCLUDE_ROOT / rel).read_bytes()
+    ]
+
+
+def fill_includes():
+    """Rewrite every authored file whose include regions are behind their sources, and return those paths."""
+    changed = []
+    for rel in skill_documents():
+        path = INCLUDE_ROOT / rel
+        rendered = filled_bytes(rel)
+        if rendered != path.read_bytes():
+            path.write_bytes(rendered)
+            changed.append(rel)
+    return changed
+
+
 def regenerate():
     names = skill_names()
+    # Before the copy, so the mirrors carry the filled text and the digests hash it.
+    fill_includes()
     if DIST_PLUGIN.is_symlink() or DIST_PLUGIN.is_file():
         DIST_PLUGIN.unlink()
     elif DIST_PLUGIN.is_dir():
@@ -174,6 +458,9 @@ def is_stale():
     directly, rather than trusting a stamp to still describe what is on disk, is what catches
     the in-place edit: nothing else here re-reads the generated files at all.
     """
+    # First, so a region behind its source reads stale however current the mirrors are, and a key that no longer resolves raises here whatever else is missing.
+    if include_drift():
+        return True
     if not DIGEST_DIR.is_dir() or not PLUGIN_MANIFEST.is_file():
         return True
     names = skill_names()
@@ -221,12 +508,20 @@ def main():
 
     if args.check:
         try:
+            drift = include_drift()
             stale = is_stale()
         except (ValueError, OSError) as exc:
             # 2 rather than 1, so a caller reading the exit code (host-setup/menu.sh among them) can tell this apart from the stale result below, which also exits 1 by this flag's own documented contract.
             # OSError alongside ValueError: is_stale() reads several files beyond the one call already wrapped in its own try/except, and a permissions problem or a file removed out from under it raises that, not ValueError.
             print(exc, file=sys.stderr)
             return 2
+        if drift:
+            print(
+                f"Include regions differ from their sources in {', '.join(drift)}:"
+                " run `python3 scripts/build_dist.py`.",
+                file=sys.stderr,
+            )
+            return 1
         if stale:
             print(
                 "Generated skill distributions are stale: run `python3 scripts/build_dist.py`.",
@@ -237,10 +532,13 @@ def main():
         return 0
 
     try:
+        refreshed = include_drift()
         names = regenerate()
     except ValueError as exc:
         print(exc, file=sys.stderr)
         return 1
+    if refreshed:
+        print(f"Include regions refreshed in {', '.join(refreshed)}.")
     print(f"{DIST_PLUGIN} regenerated from {len(names)} skill(s): {', '.join(names) or '(none)'}.")
     return 0
 
