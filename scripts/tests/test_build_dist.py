@@ -551,6 +551,34 @@ class IncludeCase(TreeCase):
                 with self.assertRaises(ValueError):
                     build_dist.regenerate()
 
+    def test_a_near_miss_marker_is_refused_rather_than_read_as_content(self) -> None:
+        """A line that begins like a marker and matches neither form is a failure, not content.
+
+        Read as content it would leave the region unfilled while --check exits 0, which is the
+        hole in a skill the mechanism exists to prevent, so it is refused wherever the scan meets
+        it: in the skill, and in a source the skill includes.
+        """
+        cases = {
+            "no colon": "<!-- include RULES.md > Alpha -->\n",
+            "capitalized": "<!-- Include: RULES.md > Alpha -->\n<!-- /include -->\n",
+            "trailing text after open": "<!-- include: RULES.md > Alpha --> tail\n",
+            "trailing text after close": "<!-- include: RULES.md > Alpha -->\n<!-- /include --> tail\n",
+        }
+        for label, body in cases.items():
+            with self.subTest(label):
+                self.make_skill("foo", body)
+                with self.assertRaises(ValueError) as caught:
+                    build_dist.regenerate()
+                self.assertIn("begins like an include marker", str(caught.exception))
+        (self.tmp / "RULES.md").write_text(
+            self.HOME + "\n<!-- include RULES.md > Beta -->\n", encoding="utf-8"
+        )
+        self.make_skill("foo", self.region("RULES.md > Alpha"))
+        with self.assertRaises(ValueError) as caught:
+            build_dist.regenerate()
+        self.assertIn("begins like an include marker", str(caught.exception))
+        self.assertIn("RULES.md:", str(caught.exception))
+
     def test_a_source_outside_the_root_or_under_a_generated_tree_is_refused(self) -> None:
         outside = Path(self.enterContext(tempfile.TemporaryDirectory())) / "outside.md"
         outside.write_text("## Alpha\n\nx\n", encoding="utf-8")

@@ -160,6 +160,8 @@ SECTION_DELIM = " > "
 INCLUDE_ROOT = ROOT
 _INCLUDE_START = re.compile(r"^<!--\s*include:\s*(?P<key>\S.*?)\s*-->$")
 _INCLUDE_END = re.compile(r"^<!--\s*/include\s*-->$")
+# A near miss: a comment beginning like a marker that neither pattern above accepts, case-folded so a capitalized one is caught too.
+_INCLUDE_LIKE = re.compile(r"^<!--\s*/?\s*include\b", re.IGNORECASE)
 # Every level, so a level-one heading ends a body, though a key names level two down, since a level-one heading is a document's title rather than a section a skill would carry.
 _HEADING = re.compile(r"^(#{1,6})\s+(?P<text>\S.*?)\s*$")
 # CommonMark's own bound for a fence, so a marker sitting in an indented code block is content here the way it is there.
@@ -212,17 +214,26 @@ def _unindented(line):
     return stripped.rstrip() if len(line) - len(stripped) <= _MAX_INDENT else None
 
 
-def _marker(line, marker, marker_len):
+def _marker(line, marker, marker_len, where):
     """One line's marker match under fence state: `(state, start_match, end_match)`, both None inside a fence.
 
     A marker shown inside a code sample, which is how the skill-lifecycle skill documents the
     syntax, is content rather than a region boundary, whether the sample is fenced or indented.
+    Outside one, a line that begins like a marker and matches neither form is refused rather
+    than read as content, since content is exactly what leaves a region unfilled while --check
+    exits 0, and `where` names the file and line the refusal reports.
     """
     marker, marker_len, boundary = _fence_step(line, marker, marker_len)
     text = None if boundary or marker is not None else _unindented(line)
     if text is None:
         return (marker, marker_len), None, None
-    return (marker, marker_len), _INCLUDE_START.match(text), _INCLUDE_END.match(text)
+    opens, closes = _INCLUDE_START.match(text), _INCLUDE_END.match(text)
+    if opens is None and closes is None and _INCLUDE_LIKE.match(text):
+        raise ValueError(
+            f"{where}: {text!r} begins like an include marker and matches neither form,"
+            " so it would be read as content and leave a region unfilled"
+        )
+    return (marker, marker_len), opens, closes
 
 
 def _exact_case(rel, parts):
@@ -307,8 +318,8 @@ def heading_body(lines, heading, key):
     body = []
     state = (None, 0)
     indented = False
-    for line in lines[start + 1 : end]:
-        state, opens, closes = _marker(line, *state)
+    for number, line in enumerate(lines[start + 1 : end], start + 2):
+        state, opens, closes = _marker(line, *state, f"include {key!r} source line {number}")
         blank = not line.strip()
         if not blank:
             indented = _unindented(line) is None
@@ -358,7 +369,7 @@ def filled_lines(rel, stack=()):
     index = 0
     while index < len(lines):
         line = lines[index]
-        state, opens, closes = _marker(line, *state)
+        state, opens, closes = _marker(line, *state, f"{rel}:{index + 1}")
         if closes is not None:
             raise ValueError(f"{rel}:{index + 1}: an include end marker with no region open")
         if opens is None:
@@ -378,7 +389,7 @@ def filled_lines(rel, stack=()):
         end = None
         inner = (None, 0)
         for probe in range(index + 1, len(lines)):
-            inner, nested, closing = _marker(lines[probe], *inner)
+            inner, nested, closing = _marker(lines[probe], *inner, f"{rel}:{probe + 1}")
             if nested is not None:
                 raise ValueError(
                     f"{rel}:{probe + 1}: an include region opens inside the one at line {index + 1}"
