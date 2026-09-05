@@ -2,19 +2,19 @@
 name: drive-pr
 description: >-
   Drives a ptr727/ProjectTemplate fleet pull request through its review loop, feature branch into
-  develop and, when asked, on to a mergeable develop -> main promotion PR, applying the
-  pr-review-conduct disposition to every reviewer finding along the way: fix it, decline it with
-  evidence, defer it behind a filed issue, or put the call to the maintainer and wait for an
-  explicit answer in the same turn, escalating to whoever dispatched the drive instead where the
-  maintainer cannot be reached from that seat. Use this whenever asked to drive, land, take, chase, or push
+  develop and, when asked, on to a mergeable develop -> main promotion PR, disposing of every
+  reviewer finding along the way under pr-review-conduct's outcomes, carried here whole as a
+  generated include, and escalating to whoever dispatched the drive where the drive's own seat
+  cannot reach the maintainer. Use this whenever asked to drive, land, take, chase, or push
   a PR toward develop or main, or to run the review loop hands off instead of narrating each
   round. When the request does not say how far ("drive this PR", "land it"), ask once whether the
   target is develop or a mergeable main promotion PR, rather than guessing. Triggers even when
   only one PR is named, because a finding raised against the develop -> main promotion PR
   routinely needs its own feature -> develop fix cycle before the promotion PR can go green, and
   stopping at the first promotion-PR finding is the early exit this skill exists to prevent. Ends
-  at develop merged, or at a promotion PR meeting the pr-review-conduct Merge Gate, never merges
-  main itself, that is the separate merge-and-release skill, its own go-ahead.
+  at develop merged, or at a promotion PR meeting every pr-review-conduct Merge Gate item except
+  the maintainer's explicit permission to merge, never merges main itself, that is the separate
+  merge-and-release skill, its own go-ahead.
 ---
 
 # Drive PR
@@ -128,32 +128,57 @@ promotion PR once the fix lands, is the early exit this skill exists to prevent.
    1 to 4 in its own worktree and branch, then return here.
 7. The fix landing on develop updates the promotion PR's diff and head SHA on its own, re-request
    a review on the new head and continue the loop.
-8. Repeat 6 and 7 until the promotion PR itself carries no open finding and its checks are green
-   on the current head.
+8. Repeat 6 and 7 until the promotion PR meets every pr-review-conduct Merge Gate item except the
+   maintainer's explicit permission to merge.
 9. Report the promotion PR number and its ready state. Do not merge it.
 
 ## Disposing of Every Finding
 
-pr-review-conduct's five outcomes are the actual rule, this is the mapping to use while driving:
+The rule below is a generated include, so a defect in it is fixed in `pr-review-conduct` and
+regenerated rather than edited here. A drive that cannot reach the maintainer directly, a
+dispatched one being the ordinary case, escalates per `pr-review-conduct` "Escalate to the
+maintainer when".
 
-- Real, so fix it, then step 2's own order again before replying with the fixing commit SHA
-  (outcome 1). This is the round the pass is most often skipped on, since the fix looks small and
-  the branch was already reviewed once, and a fix push carries content no pass has read exactly as
-  the first push did.
-- Not real, or real but out of scope here, so decline in the thread with evidence: the command
-  and its output, the code path, or the rule that governs it. An assertion never closes a finding
-  on its own (outcome 2).
-- Real and worth doing, but later, so file the issue first, then reply with its link (outcome 4).
-- Real, fixable, but a value call rather than a scope boundary, or the agent genuinely does not
-  know which of the above applies, so ask the maintainer directly, whatever the runtime's own
-  interactive-question mechanism is, and get an explicit answer in the same turn, a plan to ask
-  later is resolution by silence (outcome 3). A drive that cannot reach the
-  maintainer directly, a dispatched one being the ordinary case, escalates to whoever dispatched
-  it and stops that unit of work there instead, per `pr-review-conduct`, which owns what the
-  receiving seat then does and how far the escalation travels.
-- The same finding keeps recurring against correct code, fix the class, sharpen a name, add a
-  comment, or take the rule itself to the maintainer, rather than re-arguing the instance every
-  round (outcome 5).
+<!-- include: .agents/skills/pr-review-conduct/SKILL.md > Every finding ends in one of five outcomes -->
+
+1. **Real, so fix it.** Take the fix through `local-strict-review` the same way the push that
+   opened the pull request went, per `pr-review-conduct` "Expected review loop", then reply with
+   the fixing commit SHA. A branch already reviewed once has not been reviewed for the fix, which
+   is the round that pass gets dropped on and the churn `local-strict-review` exists to stop. For
+   a finding on platform-specific code (PowerShell, a macOS- or WSL-only path), "fixed" means
+   executed on that platform, per
+   `agent-conduct` "Before Claiming Done": a fix reasoned out by analogy to a tested equivalent
+   elsewhere is not yet fixed, and the reply says so rather than claiming the SHA closes it.
+2. **Not real, or real but structurally out of scope, so decline in the thread with evidence.**
+   Disprove a wrong finding with the command and its output, the code path that makes it
+   impossible, or the rule that governs it. A finding that is factually correct but not this
+   repo's to fix (a verbatim-fidelity manifest entry byte-locking the section, ownership that
+   sits elsewhere) declines the same way: name the boundary and cite what proves it. Either shape
+   closes the thread on its own evidence. An assertion ("this is fine") does not close a finding,
+   a decline needs evidence the reviewer itself could check.
+3. **Real, fixable here, but deliberately left as is, a value call rather than a scope
+   boundary, so it is the maintainer's, not the agent's.** Reach for this only once outcome 2 is
+   ruled out, since a scope boundary declines on its own evidence and never needs this outcome at
+   all. State the finding and why the fix is unwanted, and get an explicit answer in the same
+   turn, before moving to other work. A plan to ask later is resolution by silence the moment
+   attention moves elsewhere. If the maintainer is not reachable right now, leave the thread open
+   and say so, rather than treating the intention to ask as the asking.
+4. **Real and worth doing later, so file the issue first, then reply with its link.** A deferral
+   noted only in a thread is lost the moment the PR merges.
+5. **Keeps recurring, so fix the class, not the instance.** A finding raised repeatedly against
+   correct code means the code is not communicating something: add the comment, sharpen the name,
+   narrow the interface, or fix the rule if the rule is wrong. Bouncing the same point across
+   rounds is the signal to escalate the rule itself, not to keep re-arguing it.
+
+**A disposition decided on one PR does not carry to the next.** The same finding shape recurring
+on a sibling repo or PR, even within one batch or one session, gets its own outcome: its own
+evidence-backed decline (outcome 2) or its own explicit maintainer answer (outcome 3). A prior
+instance's outcome is context for the new one, never a standing answer to reuse in its place.
+
+`pr-review-conduct` "Every finding ends in one of five outcomes" keeps the full rule, and the
+`drive-pr` Skill carries it whole as a generated include, applying it while driving.
+
+<!-- /include -->
 
 ## Mechanics Live Elsewhere
 
