@@ -98,7 +98,7 @@ Run [`WORKFLOW.md`][workflow]'s methodology against the repo's **own** Actions: 
 
 ## 6. Validate Settings, Rulesets, and Secrets
 
-- **General settings and rulesets** - fetch the hub and check out `main`. Run `repo-config/configure.sh check <owner>/<repo> release|operational` from that checkout. Pass the target repository and its registry `workflowModel` explicitly. The command checks what `configure.sh apply` writes: the declared settings and labels, the derived settings, the Dependabot security features, and the two rulesets the model selects. It preserves and reports `bypass_actors` without asserting them because bypass authority is a per-repository human decision.
+- **General settings, labels, and rulesets** - fetch the hub and check out `main`. Run `repo-config/configure.sh check <owner>/<repo> release|operational` from that checkout. Pass the target repository and its registry `workflowModel` explicitly. The command checks what `configure.sh apply` writes: the declared settings, the derived settings and the registry description, the declared labels, the Dependabot security features, the shared `main` ruleset, and the `develop` ruleset the model selects. It preserves and reports `bypass_actors` without asserting them because bypass authority is a per-repository human decision.
 
 - **Secrets** - from the same hub checkout, run [`spec/audit.py`][audit-runner] `[repo]` and read its Secrets section. It resolves the required set from the hub's own [`spec/secrets.json`][secrets] plus the registry entry's `publish[]`/`types[]`/`requiredSecrets[]`, confirming each required name exists (name only, not the values) in the Actions store and, where the mechanism needs it (Docker Hub, codegen App), the Dependabot store too.
 

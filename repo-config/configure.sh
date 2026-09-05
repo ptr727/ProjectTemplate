@@ -26,7 +26,7 @@
 # The derived settings apply computes are asserted by name rather than from a payload, meaning has_discussions and default_branch.
 # The two Dependabot security features are asserted the same way, since apply enables them and no payload declares them.
 # A label is checked on name, color, and description against labels.json, and a label the payload never declared is reported without being asserted, since a repo may carry labels of its own.
-# What is unaudited is a static setting absent from settings.json, since only that group and the labels are payload-driven.
+# What is unaudited is a static setting absent from settings.json and a label labels.json does not declare, since only those two groups are payload-driven and the undeclared labels are reported rather than asserted.
 # Secret names are checked separately, by spec/audit.py from a hub checkout.
 # This script leaves them a manual-verify note for values, which are never readable via the API.
 set -Eeuo pipefail
@@ -173,17 +173,19 @@ apply_ruleset() { # payload-file - create-or-update the ruleset by name
     fi
 }
 
+# Test with `labels_payload_ok`, which is true only when labels.json parses and every label carries a string name, color, and description holding no tab or line break.
+# The type test keeps a missing description from rendering as the literal string null, and the character test keeps a value from splitting the tab-joined rows the two label loops read.
+labels_payload_ok() {
+    jq -e 'all(.[]; (.name|type=="string") and (.color|type=="string") and (.description|type=="string") and ((.name+.color+.description)|test("[\t\r\n]")|not))' "$labels_file" >/dev/null 2>&1
+}
+
 apply_labels() { # create-or-update every label labels.json declares, by name
     # `gh label create --force` updates a label that exists and creates one that does not, so the write is idempotent by name.
     # A label the payload does not declare is left standing, because a repo may carry labels of its own and this script deletes nothing.
     # Every field is read from the payload, so a label added there reaches every fleet repo on the next apply with no change here.
     # The payload is parsed into a variable before the loop for the reason check_settings gives: a jq failure inside `done < <(...)` skips the body silently.
     local rows lname color desc
-    # Every field is required, since a missing description would otherwise render as the literal string null and be written fleet-wide.
-    if ! jq -e 'all(.[]; (.name|type=="string") and (.color|type=="string") and (.description|type=="string"))' "$labels_file" >/dev/null; then
-        echo "Label payload $labels_file did not parse, or a label lacks a string name, color, or description. Aborting to avoid a partially-applied configuration." >&2
-        exit 1
-    fi
+    # The payload was validated by cmd_apply's pre-flight, before any write, so this read cannot be the first to find it malformed.
     rows="$(jqr '.[] | "\(.name)\t\(.color)\t\(.description)"' "$labels_file")"
     if [ -z "$rows" ]; then
         echo "Label payload $labels_file declares no labels. Aborting to avoid a partially-applied configuration." >&2
@@ -204,6 +206,11 @@ cmd_apply() {
             exit 1
         fi
     done
+    # The label payload's content is validated here too, since apply_labels runs after the settings and Dependabot writes and an abort there would leave them applied.
+    if ! labels_payload_ok; then
+        echo "Label payload $labels_file did not parse, or a label lacks a string name, color, or description, or one holds a tab or line break. Aborting before any write." >&2
+        exit 1
+    fi
     echo "Applying configuration to $repo (model: $model)"
     # The writes below silence stdout only, because the success-response JSON is noise.
     # They still fail loud, since gh errors go to stderr and a failed write aborts the script.
@@ -426,8 +433,8 @@ check_labels() {
         fail "could not read repository labels"
         return
     fi
-    if ! jq_has 'all(.[]; (.name|type=="string") and (.color|type=="string") and (.description|type=="string"))' <"$labels_file"; then
-        fail "label payload $labels_file did not parse, or a label lacks a string name, color, or description"
+    if ! labels_payload_ok; then
+        fail "label payload $labels_file did not parse, or a label lacks a string name, color, or description, or one holds a tab or line break"
         return
     fi
     rows="$(jqr '.[] | "\(.name)\t\(.color)\t\(.description)"' "$labels_file")"

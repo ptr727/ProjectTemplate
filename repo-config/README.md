@@ -23,7 +23,7 @@ Publish credentials required per mechanism are enumerated in `spec/secrets.json`
 
 ## Labels
 
-The triage labels classify every open issue into one kind of work, so a backlog sweep can pick the gates and scripts, which converge, apart from the prose defects, which re-enter the review loop when worked one bundle at a time. An issue carries exactly one of these kinds, or `enhancement` for a feature, beside whatever surface labels it also carries.
+The triage labels classify an issue by the kind of work it needs, so a backlog sweep can pick the gates and scripts, which converge, ahead of the prose defects, which re-enter the review loop when worked one bundle at a time. An issue carries exactly one of these five, or `enhancement` for a feature, beside whatever surface labels it also carries.
 
 - **`gate`**: a rule that exists in prose with no mechanical check, or a check that misses a shape.
 - **`script`**: a defect in hub tooling.
@@ -31,7 +31,7 @@ The triage labels classify every open issue into one kind of work, so a backlog 
 - **`decision`**: needs the maintainer's decision before it can be worked.
 - **`chore`**: registry, labels, rollout, and other fleet housekeeping.
 
-The class labels `introduced` and `pre-existing` record which class, per the `local-strict-review` Skill's "Disposing of Findings", a filed review finding carried, so the review-cost metric can be computed from issues. A `style` finding is declined rather than filed, so it has no label. `agents`, `skills`, and `codegen` mark the surface, and the rest are GitHub's own defaults and the Dependabot pair, declared so every fleet repo carries at least this set.
+The class labels `introduced` and `pre-existing` record which class, per the `local-strict-review` Skill's "Disposing of Findings", a filed review finding carried. A `style` finding is declined rather than filed, so it has no label. `agents`, `skills`, and `codegen` mark the surface, and the rest are GitHub's own defaults and the Dependabot pair, declared so every fleet repo carries at least this set.
 
 ## Repo Settings
 
