@@ -335,9 +335,8 @@ dispatched fresh, its claim comment released with the worktree. It fails, and cl
 and the group goes to the maintainer, since past that point removal discards work. **A dirty one is left exactly as it stands**
 and the group is stopped for the maintainer per "Raising a Blocked Question", naming the worktree
 and what is uncommitted in it. The orchestrator does not commit that work, hand the tree to a
-replacement to commit, or remove it, per `GOVERNANCE.md` "Repository Boundaries and Write Safety",
-and doing it by proxy is still doing it. Where no other worker remains to bound the wait, the same
-liveness answer bounds it alone.
+replacement to commit, or remove it, per `GOVERNANCE.md` "Repository Boundaries and Write Safety".
+Where no other worker remains to bound the wait, the same liveness answer bounds it alone.
 
 ## Raising a Blocked Question
 
@@ -375,8 +374,8 @@ for the maintainer, so that one carries a single round rather than accumulating 
 **This section assumes the release workflow model**, where feature work reaches develop through
 squash-merged pull requests and a promotion pull request carries develop to main. A repository
 whose registry `workflowModel` reads `operational` reaches develop differently, per `GOVERNANCE.md`
-"Operational Repositories", so confirm with the maintainer whether a promotion pull request per
-round is wanted there.
+"Operational Repositories". Confirm with the maintainer whether a promotion pull request per round
+is wanted there.
 
 That difference changes nothing about how this run's own work is read. Every worker invokes
 `drive-pr` whatever the model, so this run's fixes still arrive as squash-merged feature pull

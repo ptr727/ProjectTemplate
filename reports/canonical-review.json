@@ -67,11 +67,11 @@
     },
     {
       "unit": ".agents/skills/backlog-burndown/SKILL.md > Bounding the Wait on a Worker",
-      "digest": "sha256:ed62295fc5cd355752952f5b288cfa3459aabd517925c98c822be2efcc049194",
+      "digest": "sha256:668f48bfe9c6e2b1eadd7d19f3c9cafcc3aa25695587f2e5537cc1fff16cb3dc",
       "reviewer": "agent-skill",
       "findings": 3,
       "hubCommit": "6a590402646712e93c07f4438ed9a6f5e4dc900e",
-      "stamp": "2026-09-05T17:55:40Z"
+      "stamp": "2026-09-05T18:41:14Z"
     },
     {
       "unit": ".agents/skills/backlog-burndown/SKILL.md > Dispatching a Worker",
@@ -139,11 +139,11 @@
     },
     {
       "unit": ".agents/skills/backlog-burndown/SKILL.md > The Promotion Boundary",
-      "digest": "sha256:f310005ff0889930c1b87daeee5b82ab83cc90a0f039be76d00a1f86861e9157",
+      "digest": "sha256:3c4a3cda775b840ca28d5b59963a93edc86f678a444ac52c3e1987958719ba95",
       "reviewer": "agent-skill",
-      "findings": 4,
+      "findings": 7,
       "hubCommit": "6a590402646712e93c07f4438ed9a6f5e4dc900e",
-      "stamp": "2026-09-05T18:09:24Z"
+      "stamp": "2026-09-05T18:43:00Z"
     },
     {
       "unit": ".agents/skills/backlog-burndown/SKILL.md > The Round",
