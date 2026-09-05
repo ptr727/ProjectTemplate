@@ -99,7 +99,7 @@ AUTHORED_FIDELITY = frozenset({"verbatim", "intent"})
 TREE_FIDELITY = frozenset({"verbatim-tree"})
 
 # `spec/divergences.json`'s own unit key delimiter, so one vocabulary names a section across the fidelity ledger, this one, and any finding written against either.
-SECTION_DELIM = " > "
+SECTION_DELIM = build_dist.SECTION_DELIM
 # The region before a document's first level-two heading is content a carrier reads like any other, so it is a unit rather than a gap between them.
 # A literal `## (preamble)` heading would collide with it, which file_units then refuses as a duplicate rather than resolving, since only one of the two is a section.
 PREAMBLE = "(preamble)"

@@ -1,6 +1,6 @@
 # Fleet Skills
 
-Canonical source for the fleet's Claude Code / opencode / Codex Skills, one directory per skill: `<name>/SKILL.md` plus optional `scripts/` and `references/`. This is the only place a skill's content is hand-authored. Everything else derived from it is generated, never hand-edited.
+Canonical source for the fleet's Claude Code / opencode / Codex Skills, one directory per skill: `<name>/SKILL.md` plus optional `scripts/` and `references/`. This is the only place a skill is hand-authored, and the text inside an include region is generated from the file the region names. Everything else derived from it is generated, never hand-edited.
 
 Codex and opencode read this directory directly (`.agents/skills/<name>/SKILL.md`), no install step required, walking from a downstream repo's working directory up to its own repository root. Claude Code does not scan this path. GitHub Copilot discovers repository skills under `.github/skills/`. `scripts/build_dist.py` generates both the GitHub tree and a Claude-plugin-compatible copy at `.claude-plugin/fleet-skills/`, published through `.claude-plugin/marketplace.json`.
 
