@@ -59,27 +59,27 @@
     },
     {
       "unit": ".agents/skills/backlog-burndown/SKILL.md > Bounding a Prose Group",
-      "digest": "sha256:b94ebeced663da22a9a5b0b32f494d6dbe2045bb8d54ecab5484eb049e9a52d7",
+      "digest": "sha256:7d5647dcd838c8eaca1d342749f7ebaecbad10263919ad17e629be88431d356b",
       "reviewer": "agent-skill",
-      "findings": 0,
-      "hubCommit": "136661da1b978f793fd5bbd7daa1d95b7338a919",
-      "stamp": "2026-09-03T19:44:46Z"
+      "findings": 1,
+      "hubCommit": "6a590402646712e93c07f4438ed9a6f5e4dc900e",
+      "stamp": "2026-09-05T17:55:40Z"
     },
     {
       "unit": ".agents/skills/backlog-burndown/SKILL.md > Bounding the Wait on a Worker",
-      "digest": "sha256:6af6a85a17f9671f6ba50f622a34769e7c8c6fce2100496cd2f9330523755daa",
+      "digest": "sha256:668f48bfe9c6e2b1eadd7d19f3c9cafcc3aa25695587f2e5537cc1fff16cb3dc",
       "reviewer": "agent-skill",
-      "findings": 5,
-      "hubCommit": "16f2e32a037857dfcd68b114f006ca2d0cf12ada",
-      "stamp": "2026-09-04T00:04:25Z"
+      "findings": 3,
+      "hubCommit": "6a590402646712e93c07f4438ed9a6f5e4dc900e",
+      "stamp": "2026-09-05T18:41:14Z"
     },
     {
       "unit": ".agents/skills/backlog-burndown/SKILL.md > Dispatching a Worker",
-      "digest": "sha256:26cd85e54bda73b3395a2fb4ab3df1441585712134353d1e83b033c3e70a205d",
+      "digest": "sha256:84dda6ae64210c2403ae84ce2f345d27865f68f341146c2c006ef6d8379c62de",
       "reviewer": "agent-skill",
-      "findings": 4,
-      "hubCommit": "fbf1f6d9dc713d6e187d2c3d6542490a2839fe55",
-      "stamp": "2026-09-05T16:11:48Z"
+      "findings": 2,
+      "hubCommit": "6a590402646712e93c07f4438ed9a6f5e4dc900e",
+      "stamp": "2026-09-05T17:55:40Z"
     },
     {
       "unit": ".agents/skills/backlog-burndown/SKILL.md > Ending the Run",
@@ -91,11 +91,11 @@
     },
     {
       "unit": ".agents/skills/backlog-burndown/SKILL.md > Grouping and File Claims",
-      "digest": "sha256:c6c315f4141dd986741e51c290867a8721f3313087e9ff62554681d4b56ca2b1",
+      "digest": "sha256:54c22333992b900419d97a0e01764bfa67113511a5cf3e8b5a354c8d24a7c75a",
       "reviewer": "agent-skill",
-      "findings": 4,
-      "hubCommit": "16f2e32a037857dfcd68b114f006ca2d0cf12ada",
-      "stamp": "2026-09-04T02:41:40Z"
+      "findings": 2,
+      "hubCommit": "6a590402646712e93c07f4438ed9a6f5e4dc900e",
+      "stamp": "2026-09-05T18:28:22Z"
     },
     {
       "unit": ".agents/skills/backlog-burndown/SKILL.md > Mechanics Live Elsewhere",
@@ -107,43 +107,43 @@
     },
     {
       "unit": ".agents/skills/backlog-burndown/SKILL.md > Raising a Blocked Question",
-      "digest": "sha256:86282c469754ae2c1b5ba5e6694f7d54325e19b2978d5fbef3b50a95a6831c74",
+      "digest": "sha256:5406ec6bf4c8b4941dbb88d475545e5521ca37ae64e0a21f7fbd7967e9889aa9",
       "reviewer": "agent-skill",
-      "findings": 7,
-      "hubCommit": "16f2e32a037857dfcd68b114f006ca2d0cf12ada",
-      "stamp": "2026-09-03T23:11:32Z"
+      "findings": 1,
+      "hubCommit": "6a590402646712e93c07f4438ed9a6f5e4dc900e",
+      "stamp": "2026-09-05T17:55:40Z"
     },
     {
       "unit": ".agents/skills/backlog-burndown/SKILL.md > Ranking",
-      "digest": "sha256:e58cd0555581811e82a9796072cefc5c3ef14f265f5e4791104a71935cd1de15",
+      "digest": "sha256:5ce2044cd7e78e86a24a15d3b8d939cf922c8fce60841bd37f659feaa51726a5",
       "reviewer": "agent-skill",
-      "findings": 3,
-      "hubCommit": "16f2e32a037857dfcd68b114f006ca2d0cf12ada",
-      "stamp": "2026-09-04T02:06:41Z"
+      "findings": 1,
+      "hubCommit": "6a590402646712e93c07f4438ed9a6f5e4dc900e",
+      "stamp": "2026-09-05T17:55:41Z"
     },
     {
       "unit": ".agents/skills/backlog-burndown/SKILL.md > Run State",
-      "digest": "sha256:6b0b57e0f06237d6f134af15a356aa3ec21bb54c5f2e6bd8460087f392ed20c8",
+      "digest": "sha256:375a886f08433f80e7788bdb394a72ce2afe0e9f922ff9fd3972451a297643b1",
       "reviewer": "agent-skill",
-      "findings": 0,
-      "hubCommit": "136661da1b978f793fd5bbd7daa1d95b7338a919",
-      "stamp": "2026-09-03T19:44:50Z"
+      "findings": 1,
+      "hubCommit": "6a590402646712e93c07f4438ed9a6f5e4dc900e",
+      "stamp": "2026-09-05T17:55:41Z"
     },
     {
       "unit": ".agents/skills/backlog-burndown/SKILL.md > Scope",
-      "digest": "sha256:1db5bb5cdd672089c306c59c2776b672ba09541b093fe9e05f4e713c4bc8b530",
+      "digest": "sha256:1bd758ddc437afe836ddf20b00adfd919c41f95548e92ccdf4b0f5485161f820",
       "reviewer": "agent-skill",
       "findings": 0,
-      "hubCommit": "136661da1b978f793fd5bbd7daa1d95b7338a919",
-      "stamp": "2026-09-03T19:44:50Z"
+      "hubCommit": "6a590402646712e93c07f4438ed9a6f5e4dc900e",
+      "stamp": "2026-09-05T17:55:41Z"
     },
     {
       "unit": ".agents/skills/backlog-burndown/SKILL.md > The Promotion Boundary",
-      "digest": "sha256:7819aeb3ed274bce5e619b67491aaca69d2967abb45faf463b0353d52fbcdd64",
+      "digest": "sha256:3c4a3cda775b840ca28d5b59963a93edc86f678a444ac52c3e1987958719ba95",
       "reviewer": "agent-skill",
-      "findings": 8,
-      "hubCommit": "fbf1f6d9dc713d6e187d2c3d6542490a2839fe55",
-      "stamp": "2026-09-05T16:55:09Z"
+      "findings": 7,
+      "hubCommit": "6a590402646712e93c07f4438ed9a6f5e4dc900e",
+      "stamp": "2026-09-05T18:43:00Z"
     },
     {
       "unit": ".agents/skills/backlog-burndown/SKILL.md > The Round",
@@ -155,11 +155,11 @@
     },
     {
       "unit": ".agents/skills/backlog-burndown/SKILL.md > The Two Seats",
-      "digest": "sha256:988e9cc3aee1ab6aa7c9ada41827a4903f7ae6d06f8051178456888a39c9cb82",
+      "digest": "sha256:e1595ccf33b05823e811b41c2a21aed95c6be91b5bbe55ffa135f8a940adbf0d",
       "reviewer": "agent-skill",
       "findings": 0,
-      "hubCommit": "136661da1b978f793fd5bbd7daa1d95b7338a919",
-      "stamp": "2026-09-03T19:44:51Z"
+      "hubCommit": "6a590402646712e93c07f4438ed9a6f5e4dc900e",
+      "stamp": "2026-09-05T17:57:05Z"
     },
     {
       "unit": ".agents/skills/backlog-burndown/SKILL.md > What Invoking This Skill Authorizes",
