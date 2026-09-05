@@ -10,8 +10,8 @@
     { "name": "enhancement", "color": "a2eeef", "description": "New feature or request" },
     { "name": "gate", "color": "5319e7", "description": "A rule with no mechanical check, or a check that misses a shape" },
     { "name": "github_actions", "color": "000000", "description": "Pull requests that update GitHub Actions code" },
-    { "name": "introduced", "color": "e99695", "description": "Review finding on text the change wrote" },
-    { "name": "pre-existing", "color": "bfd4f2", "description": "Review finding on text the change did not write" },
+    { "name": "introduced", "color": "e99695", "description": "Review finding classed introduced per local-strict-review Disposing of Findings" },
+    { "name": "pre-existing", "color": "bfd4f2", "description": "Review finding classed pre-existing per local-strict-review Disposing of Findings" },
     { "name": "prose", "color": "fbca04", "description": "A defect in rule or procedure text" },
     { "name": "script", "color": "1d76db", "description": "A defect in hub tooling" },
     { "name": "skills", "color": "a25957", "description": "Agent skill" }

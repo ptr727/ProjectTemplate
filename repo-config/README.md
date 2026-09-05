@@ -4,7 +4,7 @@ Hub-only repository and branch configuration held as committed files, kept out o
 
 - `main.json`, `develop.json`, and `operational/develop.json`: the canonical branch rulesets as the managed part of the writable API subset (`name`, `target`, `enforcement`, `conditions`, `rules`). `main.json` is shared. `develop.json` serves release repos, and `operational/develop.json` serves operational repos. `repo-config/configure.sh check owner/repo release|operational` compares the selected payloads with the live rulesets. `bypass_actors` is writable and deliberately unmanaged, so no payload declares one and nothing diffs it: who may bypass a ruleset is a human decision taken in the UI, which `repo-config/configure.sh` preserves on `apply` and reports without asserting on `check`.
 - `labels.json`: the fleet label set, one `name`, `color`, and `description` per label. `repo-config/configure.sh apply owner/repo release|operational` creates or updates every declared label by name and deletes nothing, so a label a repo adds of its own stays. `check` asserts each declared label on all three fields and reports the undeclared ones without judging them.
-- `configure.sh`: run from a hub checkout at `main`, per [GOVERNANCE.md "Hub-Hosted Tooling"][governance-hub-hosted-tooling]. It resolves every payload path against the hub's `repo-config/` directory. Name the target repository explicitly, since the command defaults to whichever repository the shell is sitting in. `repo-config/configure.sh apply owner/repo release|operational` creates or updates the settings, Dependabot security features, and rulesets idempotently. `repo-config/configure.sh check owner/repo release|operational` is the read-only inverse and exits non-zero on drift. The model defaults to the registry `workflowModel` lookup. Pass it explicitly for a repository outside the registry.
+- `configure.sh`: run from a hub checkout at `main`, per [GOVERNANCE.md "Hub-Hosted Tooling"][governance-hub-hosted-tooling]. It resolves every payload path against the hub's `repo-config/` directory. Name the target repository explicitly, since the command defaults to whichever repository the shell is sitting in. `repo-config/configure.sh apply owner/repo release|operational` creates or updates the settings, Dependabot security features, labels, and rulesets idempotently. `repo-config/configure.sh check owner/repo release|operational` is the read-only inverse and exits non-zero on drift. The model defaults to the registry `workflowModel` lookup. Pass it explicitly for a repository outside the registry.
 
 ## Rulesets
 
@@ -23,7 +23,7 @@ Publish credentials required per mechanism are enumerated in `spec/secrets.json`
 
 ## Labels
 
-The triage labels classify every open issue into one kind of work, so a backlog sweep can pick the gates and scripts, which converge, apart from the prose defects, which re-enter the review loop when worked one bundle at a time. An issue carries exactly one of these, or is a feature under `enhancement`.
+The triage labels classify every open issue into one kind of work, so a backlog sweep can pick the gates and scripts, which converge, apart from the prose defects, which re-enter the review loop when worked one bundle at a time. An issue carries exactly one of these kinds, or `enhancement` for a feature, beside whatever surface labels it also carries.
 
 - **`gate`**: a rule that exists in prose with no mechanical check, or a check that misses a shape.
 - **`script`**: a defect in hub tooling.
@@ -31,7 +31,7 @@ The triage labels classify every open issue into one kind of work, so a backlog 
 - **`decision`**: needs the maintainer's decision before it can be worked.
 - **`chore`**: registry, labels, rollout, and other fleet housekeeping.
 
-The class labels `introduced` and `pre-existing` record whether a review finding sits on text the change wrote, so the review-cost metric can be computed from issues. `agents`, `skills`, and `codegen` mark the surface, and the rest are GitHub's own defaults and the Dependabot pair, declared so every fleet repo carries the same set.
+The class labels `introduced` and `pre-existing` record which class, per the `local-strict-review` Skill's "Disposing of Findings", a filed review finding carried, so the review-cost metric can be computed from issues. A `style` finding is declined rather than filed, so it has no label. `agents`, `skills`, and `codegen` mark the surface, and the rest are GitHub's own defaults and the Dependabot pair, declared so every fleet repo carries at least this set.
 
 ## Repo Settings
 

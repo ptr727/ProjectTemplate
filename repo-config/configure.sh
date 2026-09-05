@@ -179,10 +179,12 @@ apply_labels() { # create-or-update every label labels.json declares, by name
     # Every field is read from the payload, so a label added there reaches every fleet repo on the next apply with no change here.
     # The payload is parsed into a variable before the loop for the reason check_settings gives: a jq failure inside `done < <(...)` skips the body silently.
     local rows lname color desc
-    if ! rows="$(jqr '.[] | "\(.name)\t\(.color)\t\(.description)"' "$labels_file")"; then
-        echo "Label payload $labels_file did not parse. Aborting to avoid a partially-applied configuration." >&2
+    # Every field is required, since a missing description would otherwise render as the literal string null and be written fleet-wide.
+    if ! jq -e 'all(.[]; (.name|type=="string") and (.color|type=="string") and (.description|type=="string"))' "$labels_file" >/dev/null; then
+        echo "Label payload $labels_file did not parse, or a label lacks a string name, color, or description. Aborting to avoid a partially-applied configuration." >&2
         exit 1
     fi
+    rows="$(jqr '.[] | "\(.name)\t\(.color)\t\(.description)"' "$labels_file")"
     if [ -z "$rows" ]; then
         echo "Label payload $labels_file declares no labels. Aborting to avoid a partially-applied configuration." >&2
         exit 1
@@ -424,10 +426,11 @@ check_labels() {
         fail "could not read repository labels"
         return
     fi
-    if ! rows="$(jqr '.[] | "\(.name)\t\(.color)\t\(.description)"' "$labels_file")"; then
-        fail "label payload $labels_file did not parse"
+    if ! jq_has 'all(.[]; (.name|type=="string") and (.color|type=="string") and (.description|type=="string"))' <"$labels_file"; then
+        fail "label payload $labels_file did not parse, or a label lacks a string name, color, or description"
         return
     fi
+    rows="$(jqr '.[] | "\(.name)\t\(.color)\t\(.description)"' "$labels_file")"
     if [ -z "$rows" ]; then
         fail "label payload $labels_file declares no labels"
         return
@@ -439,7 +442,11 @@ check_labels() {
         assert "label '$lname' = $color '$desc'" test "$got" = "$color"$'\t'"$desc"
     done <<<"$rows"
     # A label the payload never declared is reported rather than asserted, matching the bypass list: the fleet set is a floor, and a repo may add its own.
-    extra="$(jq -r --slurpfile want "$labels_file" '[.[].name] - [$want[0][].name] | join(", ")' <<<"$live")"
+    # shellcheck disable=SC2016  # $want is a jq --slurpfile variable, not a shell expansion
+    if ! extra="$(jqr --slurpfile want "$labels_file" '[.[].name] - [$want[0][].name] | join(", ")' <<<"$live")"; then
+        fail "could not compute the undeclared label list"
+        return
+    fi
     note "labels not declared by labels.json: ${extra:-none} (left alone by this script)"
 }
 
