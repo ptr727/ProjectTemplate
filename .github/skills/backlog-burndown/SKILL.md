@@ -38,17 +38,15 @@ Everything below turns on which seat is acting, so both are named once here.
   amends the promotion pull request, and it owns worktree and branch cleanup, which "Dispatching a
   Worker" states in full.
 - **A worker** is one dispatched subagent holding one group, one worktree, and one feature branch,
-  which is `AGENTS.md` "Session Scope"'s one-branch-one-deliverable rule applied as written. It
-  drives its own pull request into develop and ends there.
+  the dispatched task `AGENTS.md` "Session Scope" describes. It drives its own pull request into
+  develop and ends there.
 
 ## Scope
 
-One repository, the one the session is in, resolved from its own `origin`. Reads are unrestricted
-per `GOVERNANCE.md` "Repository Boundaries and Write Safety", so reading another repository's
-issues breaks no rule. Working them is out of this skill's scope, and a fleet-wide backlog
-sweep is a different request. That section bounds writes to the owner of
-this repository rather than to this repository alone, and a run staying inside the one repository
-it was invoked for is narrower than the rule requires, deliberately.
+One repository, the one the session is in, resolved from its own `origin`. A run staying inside the
+one repository it was invoked for is narrower than `GOVERNANCE.md` "Repository Boundaries and Write
+Safety" requires, deliberately. Reading another repository's issues is governed there and not here,
+working them is out of this skill's scope, and a fleet-wide backlog sweep is a different request.
 
 ## What Invoking This Skill Authorizes
 
@@ -111,10 +109,10 @@ Rank on these, highest first where they conflict:
 
 An issue that asks a question rather than states a defect is not ranked and is never guessed at.
 It has no group, no worker, and no claim, so nothing in "Raising a Blocked Question" applies to it
-except how the question travels. It goes to the maintainer at the end of
-ranking, in the same prompt as any other question the run is sending at that moment and in one of
-its own otherwise, rather than waiting for a stop that may not come. It stays unranked until
-answered.
+except how the question travels. It goes to the maintainer at the end of ranking, per
+`GOVERNANCE.md` "Communicating with the User", batched with any other question the run is sending
+at that moment and in a prompt of its own otherwise, rather than waiting for a stop that may not
+come. It stays unranked until answered.
 
 ## Grouping and File Claims
 
@@ -154,9 +152,9 @@ for, and it binds harder than any throughput target.
   rather than plain fetch because `--prune` is what drops a remote-tracking ref whose branch is
   gone from the remote, deleted there by another session or through the web interface, and a
   plain fetch leaves that ref in `git branch -r` to defer valid groups forever. Stop and report a
-  failed fetch rather than reading `git branch -r` anyway: the remote-tracking refs still resolve
-  from what the last successful fetch left, so the scan returns a confident answer about a remote
-  it did not reach, missing a branch pushed since and keeping one deleted since. The round
+  failed fetch rather than reading `git branch -r` anyway, per `GOVERNANCE.md` "Verification
+  Discipline" on what a local clone answers for: here the scan would miss a branch pushed since
+  and keep one deleted since. The round
   stops there and reports, rather than dispatching against a stale answer, and stopping rather
   than deferring is what the cleanup and promotion steps need too, since both read the same
   remote.
@@ -199,9 +197,8 @@ its own bound stated in the worker's brief.
   remove the rule that leaned on it. A narrowed qualifier is where a new false claim gets
   introduced, and it is the most common way a prose round produces the finding the following round
   then fixes.
-- **Set a review-round budget before the first push.** A whole-unit prose review can run many
-  rounds where a finding was introduced by the previous round's fix, so state a number in the
-  brief, and when it is reached, land what is correct and file the remainder rather than churning.
+- **The review-round budget is `local-strict-review` "Disposing of Findings"'s.** The brief names
+  it and states no second one.
 
 ## Dispatching a Worker
 
@@ -221,8 +218,8 @@ Brief on `AGENTS.md` "Context and Delegation Discipline"'s subagent shape.
   procedure and the verify-then-delete of the merged remote branch, **both** rather than only the
   first. "Cleanup Is the Orchestrator's" below, in this
   same section, says why and what it covers.
-- **The worker runs `local-strict-review` before every push**, including one that only fixes a
-  review finding. That pass dispatches a reviewer of its own, so a harness where a subagent cannot
+- **The worker runs `local-strict-review` before every push**, per `GOVERNANCE.md` "Verification
+  Discipline". That pass dispatches a reviewer of its own, so a harness where a subagent cannot
   dispatch one leaves the worker unable to run it and unable to push. It reports that rather than
   pushing, and its worktree is then retired, since git refuses to attach that branch anywhere else
   while the reporting tree holds it. The branch is left standing for its own reason, that the
@@ -256,7 +253,7 @@ Brief on `AGENTS.md` "Context and Delegation Discipline"'s subagent shape.
 `repo-worktree`'s post-merge procedure returns the base clone to current develop before proving
 the cleanup, and `operational-vs-release-workflow` states that requirement independently. Four workers doing
 that concurrently mutate one shared checkout, which `GOVERNANCE.md` "Repository Boundaries and
-Write Safety" forbids outright by giving each task its own checkout. A worker also cannot
+Write Safety" forbids. A worker also cannot
 finish the procedure from inside its own worktree, since removing that worktree leaves it with no
 working directory in which to delete its branch.
 
@@ -300,10 +297,10 @@ judgment here: the tier is chosen per group rather than defaulted, because a str
 produces better work up front and takes fewer review rounds to land it, which often costs less
 than a cheaper worker looping. Three kinds of group are never tiered down:
 
-- One touching **carried canonical content**: rule text, a Skill, or anything else this repository
-  authors and other repositories carry, since a wrong rule propagates to every carrier.
-- One touching **a gate, a ruleset, a release condition, or a carried governance section**, which
-  is `AGENTS.md`'s own list of what counts as a design change however small the diff looks.
+- One touching **carried canonical content**, as `GOVERNANCE.md` "Verification Discipline" bounds
+  it, since a wrong rule propagates to every carrier.
+- One touching **anything `AGENTS.md` "Delegation" calls a design change**, however small the diff
+  looks.
 - One whose issues are **complex or entangled**, where the fix depends on reasoning across several
   files or on a contract not stated in the file being edited.
 
@@ -311,7 +308,8 @@ State the chosen tier and its reason in the round's report.
 
 ## Bounding the Wait on a Worker
 
-`AGENTS.md` requires a wait to separate its outcomes and to be bounded, so this one is. A worker
+`AGENTS.md` "Delegation" binds this wait as it binds any other, and this section is how the bound
+is met here. A worker
 reports merged, parked, or stopped. A worker that reports nothing at all is the case needing a
 bound, since it is indistinguishable from a slow one and dying mid-drive is ordinary here.
 
@@ -337,10 +335,9 @@ dispatched fresh, its claim comment released with the worktree. It fails, and cl
 and the group goes to the maintainer, since past that point removal discards work. **A dirty one is left exactly as it stands**
 and the group is stopped for the maintainer per "Raising a Blocked Question", naming the worktree
 and what is uncommitted in it. The orchestrator does not commit that work, hand the tree to a
-replacement to commit, or remove it: reaching into a tree a task was live in is what
-`GOVERNANCE.md` "Repository Boundaries and Write Safety" forbids, and doing it by proxy is still
-doing it. Where no other worker remains to bound the wait, the same liveness answer bounds it
-alone.
+replacement to commit, or remove it, per `GOVERNANCE.md` "Repository Boundaries and Write Safety",
+and doing it by proxy is still doing it. Where no other worker remains to bound the wait, the same
+liveness answer bounds it alone.
 
 ## Raising a Blocked Question
 
@@ -351,13 +348,12 @@ rather than a decision.
 - **The group stops, and nothing about it is disposed of.** No thread is resolved, no finding is
   answered on the orchestrator's own judgment, and no pull request merges.
 - **The other groups keep driving.** One stopped group never idles the round.
-- **The question travels worker to orchestrator to maintainer, and reaches the maintainer at the
-  point the work stops.** A worker escalates to whoever dispatched it, per `pr-review-conduct`,
-  since a dispatched subagent is not the seat that can prompt anyone. The orchestrator is that
-  seat, and it asks then and there through the interface's own prompt mechanism, per
-  `GOVERNANCE.md` "Communicating with the User". Holding the question for a round boundary is the
-  handoff-buried-in-a-paragraph that section forbids, and a boundary can be a long way off or,
-  for a group blocking the promotion pull request, never arrive at all. Where several groups stop
+- **The question travels worker to orchestrator to maintainer, and is asked when the group
+  stops.** A worker escalates to whoever dispatched it, per `pr-review-conduct`, since a
+  dispatched subagent is not the seat that can prompt anyone. The orchestrator is that seat, and
+  it asks then and there, per `GOVERNANCE.md` "Communicating with the User". Holding the question
+  for a round boundary is what that section forbids, and a boundary can be a long way off or, for
+  a group blocking the promotion pull request, never arrive at all. Where several groups stop
   close together, their questions go in one prompt, which is batching without deferral.
 - **The question is also written on its issue**, so it survives the session that asked it.
 - **A stopped group keeps its branch and its claim**, and its worktree is left exactly as it
@@ -378,16 +374,15 @@ for the maintainer, so that one carries a single round rather than accumulating 
 
 **This section assumes the release workflow model**, where feature work reaches develop through
 squash-merged pull requests and a promotion pull request carries develop to main. A repository
-whose registry `workflowModel` reads `operational` differs on both counts, per
-`operational-vs-release-workflow`: it commits to develop directly, and it opens a promotion pull
-request only occasionally rather than per round, so confirm with the maintainer whether one is
-wanted at all there.
+whose registry `workflowModel` reads `operational` reaches develop differently, per `GOVERNANCE.md`
+"Operational Repositories", so confirm with the maintainer whether a promotion pull request per
+round is wanted there.
 
-Neither difference changes how this run's own work is read. Every worker invokes `drive-pr`
-whatever the model, so this run's fixes still arrive as squash-merged feature pull requests
-carrying the `Closes on promotion:` line, and the two hops still read them. What the model adds is
-a second kind of commit in the same range, a direct push that never had a pull request, whose
-issues are recoverable only from the commit message itself. Read both, the pull requests for this
+That difference changes nothing about how this run's own work is read. Every worker invokes
+`drive-pr` whatever the model, so this run's fixes still arrive as squash-merged feature pull
+requests carrying the `Closes on promotion:` line, and the two hops still read them. What the
+operational model adds is a second kind of commit in the same range, a direct push to develop that
+never had a pull request, whose issues are recoverable only from the commit message itself. Read both, the pull requests for this
 run's work and the commit messages for the direct pushes, since reading either alone returns a
 partial set, and the range rather than this round is still what covers earlier work no promotion
 has carried.
@@ -406,8 +401,8 @@ has carried.
    nothing in that loop terminates on its own, so when the budget is reached, stop and put the
    state to the maintainer rather than continuing to spend the run's only forward gear on one pull
    request.
-3. Put the ready pull request to the maintainer through the interface's own prompt mechanism,
-   naming the merge as the action that unblocks the run. The maintainer's merge is the run's clock, so one
+3. Put the ready pull request to the maintainer, per `GOVERNANCE.md` "Communicating with the
+   User", with its merge as the action asked for. The maintainer's merge is the run's clock, so one
    reported in a closing paragraph and never actually asked about stalls every round behind it.
    Do not merge it.
 4. **While it waits, develop takes only what that pull request itself needs.** A finding against
@@ -427,9 +422,9 @@ has carried.
    which is the worktree-only disposition "Cleanup Is the Orchestrator's" separates out and the
    retire-then-dispatch shape "Raising a Blocked Question" uses, and then dispatches a fresh
    worker on that same branch, briefed either to merge develop in to pick the fix up or to narrow
-   the change to drop the file. Never rebase it:
-   its branch is already pushed, so a rebase needs the force-push `git-commit-conventions` forbids
-   outright.
+   the change to drop the file. Never rebase it,
+   since its branch is already pushed and a rebase there needs what `GOVERNANCE.md` "Git and Commit
+   Rules" forbids.
 6. **Nothing else pushes, and nothing else is dispatched.** The promotion fix of step 4 is the one
    exception to both, and everything in this step is said of the next round's work rather than of
    it. That round's preparation is orchestrator work and continues: rank, group, and verify claims.
@@ -471,8 +466,9 @@ body when it lands rather than leaving the issue to be closed by hand.
 
 - **Working notes outside the repository hold the round**: the ranking, the working groups, the
   tier choices, and the worker assignments. A scratch file the harness gives a session serves
-  where there is one, and any note kept out of the tree serves where there is not. It is working
-  state, and nothing about it is committed.
+  where there is one, and any note kept out of the tree serves where there is not. It is the
+  in-flight session state `GOVERNANCE.md` "Durable Knowledge and Self-Improvement" describes, and
+  nothing about it is committed.
 - **GitHub holds what outlives the session.** A claim comment records a group's file set, a pull
   request body records what a round carried, a `Fixes #N` line records what the promotion closes, a
   deferral issue records what was put off and why, a thread reply records how a finding was
