@@ -594,6 +594,14 @@
       "stamp": "2026-09-01T14:48:23Z"
     },
     {
+      "unit": "AUDIT.md > 6. Validate Settings, Rulesets, and Secrets",
+      "digest": "sha256:8ee3857cfecb2f4eabacc785e4cc5450e468cc6da6fd3da7c308b26c30f13ec5",
+      "reviewer": "agent-skill",
+      "findings": 2,
+      "hubCommit": "db9e5695f1501cc894953bdd57db46e4faf74159",
+      "stamp": "2026-09-05T01:43:31Z"
+    },
+    {
       "unit": "CODESTYLE.md > General",
       "digest": "sha256:54fcc07fc743507089e95ab8f1e7aeb64f0d83e31716514dadb666871a495684",
       "reviewer": "agent-skill",
