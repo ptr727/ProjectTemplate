@@ -71,7 +71,8 @@ visible comments, routinely still carries a finding nobody has answered. Treatin
    verbatim unit. A carrying repository routes a finding on a verbatim unit by fidelity rather
    than by class, since a resync writes the whole text there: it declines the finding under
    that section's outcome 2, ownership sitting elsewhere, and files it on the same tracker,
-   while an intent unit's body is the carrier's own to fix. Every other finding, a `style`
+   while a finding on an intent unit is filed there too, the carrier adapting its own copy
+   meanwhile, since the defect is still fixed at the source. Every other finding, a `style`
    remark on untouched text included, takes its own outcome in that section.
 4. Nothing in the review was a shape the tooling could not read (an unrecognized heading, a moved
    section, an unfamiliar coverage wording). An unrecognized shape blocks the gate on its own.
