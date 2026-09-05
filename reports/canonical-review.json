@@ -139,11 +139,11 @@
     },
     {
       "unit": ".agents/skills/backlog-burndown/SKILL.md > The Promotion Boundary",
-      "digest": "sha256:92973ecb7a0c4685878291b6dc5a47d3727ee253fe570c4ec094577922e8a56d",
+      "digest": "sha256:f310005ff0889930c1b87daeee5b82ab83cc90a0f039be76d00a1f86861e9157",
       "reviewer": "agent-skill",
-      "findings": 6,
+      "findings": 4,
       "hubCommit": "6a590402646712e93c07f4438ed9a6f5e4dc900e",
-      "stamp": "2026-09-05T17:59:50Z"
+      "stamp": "2026-09-05T18:09:24Z"
     },
     {
       "unit": ".agents/skills/backlog-burndown/SKILL.md > The Round",
