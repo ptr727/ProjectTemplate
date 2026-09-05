@@ -475,11 +475,11 @@
     },
     {
       "unit": ".agents/skills/skill-lifecycle/SKILL.md > The Doc-Packaging Pattern",
-      "digest": "sha256:a29b2e4cb728cccd5d02c2bad05725a4500a0ab78252f9be042c05a570094f9f",
+      "digest": "sha256:29552d4866431bf206797d2f3f9ef15c57cfae7f4a2c8d13e9b0e7b70815dc15",
       "reviewer": "agent-skill",
-      "findings": 1,
-      "hubCommit": "6aecb8b9b68b04156701a67ee14fbf5144b86332",
-      "stamp": "2026-09-05T14:16:36Z"
+      "findings": 2,
+      "hubCommit": "ee4c1ce3dc1a67520b00f2038136c252172f52f5",
+      "stamp": "2026-09-05T21:43:43Z"
     },
     {
       "unit": ".agents/skills/skill-lifecycle/SKILL.md > The Pipeline",
@@ -547,11 +547,11 @@
     },
     {
       "unit": ".agents/skills/workflow-ci-contract/references/d-guarantees.md > The Behavioral Contract",
-      "digest": "sha256:eb5e6ea5ae14bc34781c82710d24b53d76e49632db66a77672df91f87ef139b2",
+      "digest": "sha256:0913ae24a10078715a861634d16b778e7be770c2e1d800003a0d69379810eda5",
       "reviewer": "agent-skill",
-      "findings": 7,
+      "findings": 3,
       "hubCommit": "ee4c1ce3dc1a67520b00f2038136c252172f52f5",
-      "stamp": "2026-09-05T19:57:54Z"
+      "stamp": "2026-09-05T21:46:03Z"
     },
     {
       "unit": ".agents/skills/workflow-ci-contract/references/test-methodology.md > 5A: Static Audit",
@@ -731,11 +731,11 @@
     },
     {
       "unit": "WORKFLOW.md > 4. Behavioral Contract: Expected Outcomes",
-      "digest": "sha256:abdd441feb857c3c89aa86a1b0ea63160dfc9f46e1671b06911537d555499bfc",
+      "digest": "sha256:2ddee463e13d9cab21847e371f5e4960eef7b43d965f4336e01333dc67195d9a",
       "reviewer": "agent-skill",
-      "findings": 7,
+      "findings": 6,
       "hubCommit": "ee4c1ce3dc1a67520b00f2038136c252172f52f5",
-      "stamp": "2026-09-05T19:56:01Z"
+      "stamp": "2026-09-05T21:44:30Z"
     },
     {
       "unit": "WORKFLOW.md > 5. Test Methodology",
