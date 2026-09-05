@@ -2,20 +2,52 @@
   "note": "What full-content reviews of hub canonical content have covered, one entry per unit, holding the most recent pass. Written by scripts/canonical_review.py record, never by hand, and git keeps the history. A unit is covered while its digest here matches the content's, so an edit to the unit retires the pass. See ptr727/ProjectTemplate#1138 for why the record exists.",
   "passes": [
     {
-      "unit": ".agents/skills/agent-conduct/SKILL.md > Before Claiming Done",
-      "digest": "sha256:d000a7b3f3fc3a90c7f2c5516424aaf1a3b97a3b47c3fc3310d34aa676d2a65d",
+      "unit": ".agents/skills/agent-conduct/SKILL.md > (preamble)",
+      "digest": "sha256:ac019bedc804c3bba57aed7ed2bc1272ae7cc5701e66fa3ee3e97706d939996e",
       "reviewer": "agent-skill",
-      "findings": 1,
-      "hubCommit": "0e6aacf45334149f6158aa23b8132d6aee1d1eb0",
-      "stamp": "2026-09-01T16:37:57Z"
+      "findings": 0,
+      "hubCommit": "6aecb8b9b68b04156701a67ee14fbf5144b86332",
+      "stamp": "2026-09-05T14:23:10Z"
+    },
+    {
+      "unit": ".agents/skills/agent-conduct/SKILL.md > Before Assuming",
+      "digest": "sha256:9de845ccd2449f1a86528f52c2ce581afec7311a0757755620805b2aa93a701d",
+      "reviewer": "agent-skill",
+      "findings": 0,
+      "hubCommit": "6aecb8b9b68b04156701a67ee14fbf5144b86332",
+      "stamp": "2026-09-05T14:21:21Z"
+    },
+    {
+      "unit": ".agents/skills/agent-conduct/SKILL.md > Before Claiming Done",
+      "digest": "sha256:5a3128345565bdbc3f4af16ac4262b4cf88c5e1640385325a4a4ae4fd33ab988",
+      "reviewer": "agent-skill",
+      "findings": 2,
+      "hubCommit": "6aecb8b9b68b04156701a67ee14fbf5144b86332",
+      "stamp": "2026-09-05T14:21:21Z"
+    },
+    {
+      "unit": ".agents/skills/agent-conduct/SKILL.md > Delegation, in One Paragraph",
+      "digest": "sha256:dccb7b425fbee654152fdb64f63b9a438ae2da607a4c8be88c2b58878be3bdbc",
+      "reviewer": "agent-skill",
+      "findings": 0,
+      "hubCommit": "6aecb8b9b68b04156701a67ee14fbf5144b86332",
+      "stamp": "2026-09-05T14:16:35Z"
     },
     {
       "unit": ".agents/skills/agent-conduct/SKILL.md > When a Failure Surfaces a Lesson",
-      "digest": "sha256:08efb1b536d3965b8e224c7b0c951a4549714fad9dbe69280444b37e3b74789f",
+      "digest": "sha256:09fe765939d60461b11fecc4584aa32a78c51720424c8a5ccd66bfa685e628c2",
       "reviewer": "agent-skill",
       "findings": 1,
-      "hubCommit": "4ee4669af5930d842c07ff5daabda6ee0ef621bd",
-      "stamp": "2026-09-05T00:32:38Z"
+      "hubCommit": "6aecb8b9b68b04156701a67ee14fbf5144b86332",
+      "stamp": "2026-09-05T14:21:22Z"
+    },
+    {
+      "unit": ".agents/skills/agent-conduct/SKILL.md > Why This Exists",
+      "digest": "sha256:61b40202de51514aa2c67b106900451d65de170de98fefd2e88a13a2a8eafafa",
+      "reviewer": "agent-skill",
+      "findings": 0,
+      "hubCommit": "6aecb8b9b68b04156701a67ee14fbf5144b86332",
+      "stamp": "2026-09-05T14:16:35Z"
     },
     {
       "unit": ".agents/skills/backlog-burndown/SKILL.md > (preamble)",
@@ -443,19 +475,19 @@
     },
     {
       "unit": ".agents/skills/skill-lifecycle/SKILL.md > The Doc-Packaging Pattern",
-      "digest": "sha256:7f7fc0150ace7fcda647b839ffeb85fb51e6ad23b60cd1b04975e1ff66d90104",
+      "digest": "sha256:a29b2e4cb728cccd5d02c2bad05725a4500a0ab78252f9be042c05a570094f9f",
       "reviewer": "agent-skill",
-      "findings": 4,
-      "hubCommit": "00832f397a18c656fb15d6972a6acab7ecbcc078",
-      "stamp": "2026-09-05T04:49:26Z"
+      "findings": 1,
+      "hubCommit": "6aecb8b9b68b04156701a67ee14fbf5144b86332",
+      "stamp": "2026-09-05T14:16:36Z"
     },
     {
       "unit": ".agents/skills/skill-lifecycle/SKILL.md > The Pipeline",
-      "digest": "sha256:2b8a7b728815e9462e2dffe1af3297f3d08f9dfde4169153c38e565a660903f4",
+      "digest": "sha256:bb0710a02060264e1b093e5f2863d5d327d0c80aa4dd629c8e1ea24eac222a1a",
       "reviewer": "agent-skill",
-      "findings": 6,
-      "hubCommit": "00832f397a18c656fb15d6972a6acab7ecbcc078",
-      "stamp": "2026-09-05T04:49:26Z"
+      "findings": 1,
+      "hubCommit": "6aecb8b9b68b04156701a67ee14fbf5144b86332",
+      "stamp": "2026-09-05T14:16:36Z"
     },
     {
       "unit": ".agents/skills/workflow-ci-contract/SKILL.md > (preamble)",
@@ -650,12 +682,20 @@
       "stamp": "2026-09-01T05:45:32Z"
     },
     {
-      "unit": "GOVERNANCE.md > Durable Knowledge and Self-Improvement",
-      "digest": "sha256:cd5ef7be0c674a9ba29c3196ae81757ae18f7bb8ca82f573ffd77f96d363cc8e",
+      "unit": "GOVERNANCE.md > Communicating with the User",
+      "digest": "sha256:bd373e66ff3c0aff366b81958997a4fdf8b4e289549e0fddd94d28ba7bdaa503",
       "reviewer": "agent-skill",
-      "findings": 11,
-      "hubCommit": "52b0c550ab07ab58b940a353a83247d7451e76e5",
-      "stamp": "2026-09-02T01:11:58Z"
+      "findings": 2,
+      "hubCommit": "6aecb8b9b68b04156701a67ee14fbf5144b86332",
+      "stamp": "2026-09-05T14:21:22Z"
+    },
+    {
+      "unit": "GOVERNANCE.md > Durable Knowledge and Self-Improvement",
+      "digest": "sha256:1bc2f0a6ab7fec3315c3ce57bdbeec6a645832b27c9fb4c3b13ec281b39f76e0",
+      "reviewer": "agent-skill",
+      "findings": 5,
+      "hubCommit": "6aecb8b9b68b04156701a67ee14fbf5144b86332",
+      "stamp": "2026-09-05T14:21:22Z"
     },
     {
       "unit": "GOVERNANCE.md > PR Review Etiquette",
@@ -675,11 +715,11 @@
     },
     {
       "unit": "GOVERNANCE.md > Verification Discipline",
-      "digest": "sha256:449e5d3262d38895b2eaedc7275a52fb3b0b9c25fc37598d63c5e455d011bd56",
+      "digest": "sha256:bc13f5bc89894a95d7c4957e036ad8a09226a8587ee6ce6ed2fc1e62fefeef50",
       "reviewer": "agent-skill",
-      "findings": 5,
-      "hubCommit": "4ee4669af5930d842c07ff5daabda6ee0ef621bd",
-      "stamp": "2026-09-05T00:33:49Z"
+      "findings": 2,
+      "hubCommit": "6aecb8b9b68b04156701a67ee14fbf5144b86332",
+      "stamp": "2026-09-05T14:21:22Z"
     },
     {
       "unit": "GOVERNANCE.md > Workflow YAML Conventions",
