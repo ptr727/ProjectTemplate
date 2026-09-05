@@ -363,11 +363,11 @@
     },
     {
       "unit": ".agents/skills/pr-review-conduct/SKILL.md > Merge Gate, check this before merging or enabling auto-merge",
-      "digest": "sha256:16945c455f33374f8834fb0dbb0ad68a1014423a0d0c78b5fa4e22d9952a92a3",
+      "digest": "sha256:ba55096c376b19a8687894972160a56ec4d31c8aaf053b0bc6a1d6dd7451a896",
       "reviewer": "agent-skill",
-      "findings": 8,
+      "findings": 6,
       "hubCommit": "4ee4669af5930d842c07ff5daabda6ee0ef621bd",
-      "stamp": "2026-09-05T00:33:19Z"
+      "stamp": "2026-09-05T00:46:12Z"
     },
     {
       "unit": ".agents/skills/python-codestyle/SKILL.md > Local development loop",

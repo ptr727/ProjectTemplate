@@ -61,16 +61,18 @@ visible comments, routinely still carries a finding nobody has answered. Treatin
    What closing a finding owes turns on whether it is `pre-existing`. A finding on text inside a
    canonical Markdown unit, one the hub's `scripts/canonical_review.py list` names, classed
    `pre-existing` by the classes `local-strict-review` "Disposing of Findings" defines for a
-   local pass, applied here to a PR-hosted finding, is outcome 4 below applied once per unit
-   rather than once per finding: the round gathers that unit's such findings onto the unit's
-   tracker, an open hub issue whose title carries the unit key, retitled when the key moves and
-   filed by whichever round first needs it, and answers each finding with that issue's link,
-   resolving a thread on that reply, so a remark on a sentence the change never touched costs
-   one link rather than a decline or an issue per finding. The batch runs in the hub, which
-   authors every canonical unit. A carrying repository routes the same finding by ownership
-   rather than by class, since a resync writes the whole text there: it declines the finding
-   under outcome 2, ownership sitting elsewhere, and files it on the same tracker. Every other
-   finding, on text the diff wrote or outside such a unit, takes its own outcome below.
+   local pass, applied here to a PR-hosted finding, is outcome 4 of "Every finding ends in one
+   of five outcomes" below applied once per unit rather than once per finding: the round gathers
+   that unit's such findings onto the unit's tracker, an open hub issue whose title carries the
+   unit key, retitled by the change that moves the key and filed by whichever round first needs
+   it, and answers each finding with that issue's link, resolving a thread on that reply, so a
+   `pre-existing` remark on a sentence the change never touched costs one link rather than a
+   decline or an issue per finding. The batch runs in the hub, which authors the text of every
+   verbatim unit. A carrying repository routes a finding on a verbatim unit by fidelity rather
+   than by class, since a resync writes the whole text there: it declines the finding under
+   that section's outcome 2, ownership sitting elsewhere, and files it on the same tracker,
+   while an intent unit's body is the carrier's own to fix. Every other finding, a `style`
+   remark on untouched text included, takes its own outcome in that section.
 4. Nothing in the review was a shape the tooling could not read (an unrecognized heading, a moved
    section, an unfamiliar coverage wording). An unrecognized shape blocks the gate on its own.
    File an issue naming it and quoting the body, rather than guessing what the new wording
