@@ -843,11 +843,11 @@
     },
     {
       "unit": "GOVERNANCE.md > Workflow YAML Conventions",
-      "digest": "sha256:068a899842357aeea2491d16e2b7589a549f9abc75e61c04a4a796a8a3227b0b",
+      "digest": "sha256:ab4254985a70c3cb81d8081b6dc493c225c3ffebf32f284e5b58b81a7609e409",
       "reviewer": "agent-skill",
       "findings": null,
       "hubCommit": "88053791e5c76fbc4dc753ad3f21d3c3e6c80fcf",
-      "stamp": "2026-09-06T23:17:28Z"
+      "stamp": "2026-09-06T23:39:31Z"
     },
     {
       "unit": "WORKFLOW.md > (preamble)",
