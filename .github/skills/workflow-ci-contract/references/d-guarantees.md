@@ -73,7 +73,7 @@ The required behaviors, organized by domain. Each is a **MUST**, stated as the o
 
 ### D9 - Style / Static
 
-`WORKFLOW.md` section 2 names the tool D9.1 excepts and states the suffix rules D9.2 requires.
+`GOVERNANCE.md` "Workflow YAML Conventions" names the tool D9.1 excepts and states the suffix rules D9.2 requires.
 
 - **D9.1** Every action SHA-pinned with a version comment (sole exception: the documented lagging-tag tool).
 - **D9.2** File/workflow/job/step names follow the suffix rules. A ruleset-bound job's `name:` equals its ruleset `context:` (renamed together).

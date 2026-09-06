@@ -20,7 +20,7 @@ description: >-
 
 ## Style Rules
 
-`GOVERNANCE.md` "Workflow YAML Conventions" and `WORKFLOW.md` section 2 keep the style rules. Read both before editing a workflow or a composite action.
+`GOVERNANCE.md` "Workflow YAML Conventions" keeps the style rules, and the `comment-and-doc-style` Skill keeps the line-ending policy, reached from `GOVERNANCE.md` "Documentation Style Conventions" under "Line Endings". Read both before editing a workflow or a composite action.
 
 ## The Core Behavioral Spine
 

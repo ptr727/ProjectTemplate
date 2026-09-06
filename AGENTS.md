@@ -97,7 +97,7 @@ Every rule below is a level-two section of [`GOVERNANCE.md`](./GOVERNANCE.md) un
 | Opening a pull request, or requesting, monitoring, answering, or closing a review | `PR Review Etiquette`, packaged as the `pr-review-conduct` Skill |
 | Reviewing a pull request, patch, or change set | No section of its own: the `code-review` Skill, which routes to the applicable general, language, documentation, and workflow skills |
 | Reporting progress or asking the user something | `Communicating with the User`, surfaced at its decision moment by the `agent-conduct` Skill, and the section keeps the full rules |
-| Editing a workflow YAML file | `Workflow YAML Conventions`, surfaced with the full `WORKFLOW.md` contract by the `workflow-ci-contract` Skill, and this section and `WORKFLOW.md` keep the full rules |
+| Editing a workflow YAML file | `Workflow YAML Conventions`, surfaced with the full `WORKFLOW.md` contract by the `workflow-ci-contract` Skill, with that section keeping the style rules and `WORKFLOW.md` the contract |
 | Choosing an OS, runtime, or toolchain target | `Supported Development Platforms` |
 | The devcontainer | `Devcontainer` |
 | Editor settings and tasks | `Editor and Tasks` |
