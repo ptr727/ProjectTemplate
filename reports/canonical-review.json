@@ -194,6 +194,14 @@
       "stamp": "2026-09-01T05:45:31Z"
     },
     {
+      "unit": ".agents/skills/comment-and-doc-style/references/line-endings.md > Scripts and extensionless executables",
+      "digest": "sha256:8fd106b584bef3810e28f35f1e0e94c18bc3992f38233c6765557e1c1800c99a",
+      "reviewer": "agent-skill",
+      "findings": 1,
+      "hubCommit": "66d79460335379301db83fe6870303f8f701d92b",
+      "stamp": "2026-09-06T02:24:00Z"
+    },
+    {
       "unit": ".agents/skills/dotnet-codestyle/SKILL.md > Build requirements",
       "digest": "sha256:96e6651c2e024fae3bca713f4a8cab34b37a9bb9eb693a3e25de04465b03113c",
       "reviewer": "agent-skill",
@@ -739,11 +747,11 @@
     },
     {
       "unit": "WORKFLOW.md > 5. Test Methodology",
-      "digest": "sha256:5dbd6bf9dec16c97d244b5bced205c03deb98e5bc25e4e62907e768aa195414b",
+      "digest": "sha256:a7dff7c97f08703ef7d9870e3bef1e368d37af4743f51dd1bafbef7beaf63f45",
       "reviewer": "agent-skill",
-      "findings": 6,
+      "findings": 2,
       "hubCommit": "66d79460335379301db83fe6870303f8f701d92b",
-      "stamp": "2026-09-06T00:53:56Z"
+      "stamp": "2026-09-06T02:19:37Z"
     },
     {
       "unit": "WORKFLOW.md > 6. Per-Project-Type Test Walkthroughs",
