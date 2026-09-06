@@ -50,6 +50,14 @@
       "stamp": "2026-09-05T14:16:35Z"
     },
     {
+      "unit": ".agents/skills/audit-a-repo/SKILL.md > Measuring",
+      "digest": "sha256:641112a85d02d327be4e7d1154b26a19f116a8087c993de516a760857b1a6ed4",
+      "reviewer": "agent-skill",
+      "findings": 0,
+      "hubCommit": "2d63d52cbb8bd8a6d42846ddbdda18737c069187",
+      "stamp": "2026-09-06T20:51:13Z"
+    },
+    {
       "unit": ".agents/skills/backlog-burndown/SKILL.md > (preamble)",
       "digest": "sha256:75ac6fdd150652041b8cf1c002d40d7e64903e394983f6ae0c62bec07e200d42",
       "reviewer": "agent-skill",
@@ -515,11 +523,11 @@
     },
     {
       "unit": ".agents/skills/workflow-ci-contract/SKILL.md > How the Contract Is Read",
-      "digest": "sha256:b208f86efb05ab8e3ff139f25e4610487358fa03df0222a224c540cd14882122",
+      "digest": "sha256:d1c4af2c63eae9841c3ca5755a76f94f290367f5fb7cb5be1810d7e3be5ef028",
       "reviewer": "agent-skill",
       "findings": 0,
-      "hubCommit": "0f9114282e9202db6f22a1ab23a9e8b73f02be11",
-      "stamp": "2026-09-06T18:19:28Z"
+      "hubCommit": "2d63d52cbb8bd8a6d42846ddbdda18737c069187",
+      "stamp": "2026-09-06T20:18:39Z"
     },
     {
       "unit": ".agents/skills/workflow-ci-contract/SKILL.md > Style Rules",
@@ -587,11 +595,11 @@
     },
     {
       "unit": ".agents/skills/workflow-ci-contract/references/test-methodology.md > (preamble)",
-      "digest": "sha256:9429013b2fc946cf54d1eb40ca5e3756211ca3e7992911ac50fb837e325e3771",
+      "digest": "sha256:12773b882e5a37f82e1f710eb8081887a46daf54e7da5535509f46a77d24d18d",
       "reviewer": "agent-skill",
-      "findings": 2,
-      "hubCommit": "0f9114282e9202db6f22a1ab23a9e8b73f02be11",
-      "stamp": "2026-09-06T17:51:06Z"
+      "findings": 0,
+      "hubCommit": "2d63d52cbb8bd8a6d42846ddbdda18737c069187",
+      "stamp": "2026-09-06T20:21:42Z"
     },
     {
       "unit": ".agents/skills/workflow-ci-contract/references/test-methodology.md > 5A: Static Audit",
@@ -619,11 +627,11 @@
     },
     {
       "unit": ".agents/skills/workflow-ci-contract/references/test-methodology.md > The Test Methodology",
-      "digest": "sha256:a084b10818b512d3c6696aae3d678955cbe27290631046e173d2cdd035b59cc1",
+      "digest": "sha256:5194ff2a1f7bb85ef300bddf83016e3d96807d2a5fed9533414cf928109f8037",
       "reviewer": "agent-skill",
       "findings": 0,
-      "hubCommit": "0f9114282e9202db6f22a1ab23a9e8b73f02be11",
-      "stamp": "2026-09-06T17:51:07Z"
+      "hubCommit": "2d63d52cbb8bd8a6d42846ddbdda18737c069187",
+      "stamp": "2026-09-06T20:18:39Z"
     },
     {
       "unit": ".agents/skills/workflow-ci-contract/references/test-methodology.md > Verdict",
@@ -658,6 +666,14 @@
       "stamp": "2026-09-06T05:06:22Z"
     },
     {
+      "unit": "AUDIT.md > (preamble)",
+      "digest": "sha256:a2ef5c014adb4303ae7eac8a6bdf8569964529a5733ef6ce65c35efef6147454",
+      "reviewer": "agent-skill",
+      "findings": 1,
+      "hubCommit": "2d63d52cbb8bd8a6d42846ddbdda18737c069187",
+      "stamp": "2026-09-06T20:42:51Z"
+    },
+    {
       "unit": "AUDIT.md > 10. Converge: Apply the Fixes",
       "digest": "sha256:6bc1e573e6c9cd6dace6df67a0d826aaa910d8d94cdf0f29d7571c53def4ff34",
       "reviewer": "agent-skill",
@@ -666,12 +682,28 @@
       "stamp": "2026-09-01T13:57:20Z"
     },
     {
+      "unit": "AUDIT.md > 3. Applicability Gate",
+      "digest": "sha256:5a93264a923298617dc9ed670ff4a3acd3640012370d8453904825083ac2c0bd",
+      "reviewer": "agent-skill",
+      "findings": 0,
+      "hubCommit": "2d63d52cbb8bd8a6d42846ddbdda18737c069187",
+      "stamp": "2026-09-06T20:42:51Z"
+    },
+    {
       "unit": "AUDIT.md > 4. Per-Dimension Checks (Letter and Intent)",
       "digest": "sha256:083d3ca4108c8b1d047e086924360dba45106e62aad5546636a6cbf468271143",
       "reviewer": "agent-skill",
       "findings": 0,
       "hubCommit": "78898becaa2b1a62cb4c806d86273210c6390ac5",
       "stamp": "2026-09-01T14:48:23Z"
+    },
+    {
+      "unit": "AUDIT.md > 5. Assert the Actions Implement WORKFLOW.md",
+      "digest": "sha256:bc28245e825a254487945189714d112ef5e5410e5967dcfd4ee79c2d3ce398f5",
+      "reviewer": "agent-skill",
+      "findings": 1,
+      "hubCommit": "2d63d52cbb8bd8a6d42846ddbdda18737c069187",
+      "stamp": "2026-09-06T19:30:43Z"
     },
     {
       "unit": "AUDIT.md > 6. Validate Settings, Rulesets, and Secrets",
@@ -755,11 +787,11 @@
     },
     {
       "unit": "WORKFLOW.md > 1. Purpose and How to Use This Document",
-      "digest": "sha256:35a8c77043da983af04a46300f652d4e3b8a454815b10c380524832cfdbe4a70",
+      "digest": "sha256:326b1daa6187f5675ddeefbd5d8bd6fb1510e861d158f152c794a88c689824c2",
       "reviewer": "agent-skill",
       "findings": 0,
-      "hubCommit": "c3b2898feef97459d01ce7c0b63de25b6c5524bf",
-      "stamp": "2026-09-01T13:57:20Z"
+      "hubCommit": "2d63d52cbb8bd8a6d42846ddbdda18737c069187",
+      "stamp": "2026-09-06T19:39:11Z"
     },
     {
       "unit": "WORKFLOW.md > 2. Workflow Style Conventions",
@@ -787,19 +819,19 @@
     },
     {
       "unit": "WORKFLOW.md > 5. Test Methodology",
-      "digest": "sha256:0bdfdb5d7fc20469237f06286a59d36d245192c15310ae55b245196f13206eec",
+      "digest": "sha256:03e87dcc7b8a745aab8dccc8b2bd7558e948f880e31f1c063074dae9b2ebfd6f",
       "reviewer": "agent-skill",
-      "findings": 6,
-      "hubCommit": "0f9114282e9202db6f22a1ab23a9e8b73f02be11",
-      "stamp": "2026-09-06T17:51:07Z"
+      "findings": 1,
+      "hubCommit": "2d63d52cbb8bd8a6d42846ddbdda18737c069187",
+      "stamp": "2026-09-06T20:18:39Z"
     },
     {
       "unit": "WORKFLOW.md > 6. Per-Project-Type Test Walkthroughs",
-      "digest": "sha256:ade51d875b83dfe761ec121d307a06c21e9ba730eaa2ff27e4e428833ee8cfdf",
+      "digest": "sha256:740b093d556b31d42f5edb30c09c718c5a2f38d3c9eb87c7287743ae2537cb15",
       "reviewer": "agent-skill",
-      "findings": 5,
-      "hubCommit": "0f9114282e9202db6f22a1ab23a9e8b73f02be11",
-      "stamp": "2026-09-06T17:51:07Z"
+      "findings": 4,
+      "hubCommit": "2d63d52cbb8bd8a6d42846ddbdda18737c069187",
+      "stamp": "2026-09-06T21:02:39Z"
     }
   ]
 }

@@ -12,7 +12,7 @@ flowchart TD
   s0m["0m: fleet membership, every owned non-fork repo has a registry entry"] --> s0["0: has the repo been stood up? if not, STANDUP.md"]
   s0 --> s1["1: scope, ground-truth branch (main)"]
   s1 --> s2["2: resolve the repo's type(s)"]
-  s2 --> s3["3: applicability gate, per check"]
+  s2 --> s3["3: applicability gate, per item or check"]
   s3 --> s4["4: per-dimension checks, letter and intent"]
   s4 --> s5["5: assert Actions implement WORKFLOW.md"]
   s5 --> s6["6: validate settings, rulesets, secrets"]
@@ -61,7 +61,7 @@ Otherwise read its `types[]`. If the entry is `classificationPending` (a backlog
 
 ## 3. Applicability Gate
 
-Reuse [`WORKFLOW.md`][workflow] section 1: a check that governs a construct the repo does not contain is **N/A**. Record it as N/A and **exclude it from the verdict**. N/A is never a defect. A Docker check on a repo with no image, a NuGet check on a Python package, and the artifact-lifecycle clauses on a source-only repo are all N/A.
+Reuse [`WORKFLOW.md`][workflow] section 1, extended to this audit's own checks: an item or check that governs a construct the repo does not contain is **N/A**. Record it as N/A and **exclude it from the verdict**. N/A is never a defect. A Docker check on a repo with no image, a NuGet check on a Python package, and the artifact-lifecycle clauses on a source-only repo are all N/A.
 
 Which carried files and sections a repo is expected to have is decided by its scope selectors (its type(s) plus workflow model, release trigger, and consumer model). The scope model and the `appliesTo` selector vocabulary are defined in [`spec/scope-model.md`][scope-model].
 
@@ -94,7 +94,7 @@ A check with `intentRef`/`workflowRef` points at the prose section that owns the
 
 ## 5. Assert the Actions Implement WORKFLOW.md
 
-Run [`WORKFLOW.md`][workflow]'s methodology against the repo's **own** Actions: the 5A static audit (structural facts per applicable D-guarantee, each with a `file:line` citation) and the 5B trace scenarios (predicted run/skip + version + release + artifact-end-state vs expected). The contract in WORKFLOW.md section 4 is satisfied by **outcome**, not by matching the catalog snippets in [`catalog/snippets/workflows/`][workflows] byte for byte. Those are the reference implementation, not required bytes.
+Run [`WORKFLOW.md`][workflow]'s methodology against the repo's **own** Actions, reading a workflow it only calls at the SHA it pins: the 5A static audit (structural facts per applicable D-guarantee, each cited in the form 5A sets out) and the 5B trace scenarios (predicted run/skip + version + release + artifact-end-state vs expected). The contract in WORKFLOW.md section 4 is satisfied by **outcome**, not by matching the catalog snippets in [`catalog/snippets/workflows/`][workflows] byte for byte. Those are the reference implementation, not required bytes.
 
 ## 6. Validate Settings, Rulesets, and Secrets
 
