@@ -20,7 +20,7 @@ description: >-
 
 ## Style Rules
 
-`GOVERNANCE.md` "Workflow YAML Conventions" keeps the style rules. Read the section before editing a workflow or a composite action.
+`GOVERNANCE.md` "Workflow YAML Conventions" and `WORKFLOW.md` section 2 keep the style rules. Read both before editing a workflow or a composite action.
 
 ## The Core Behavioral Spine
 

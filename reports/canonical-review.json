@@ -515,11 +515,11 @@
     },
     {
       "unit": ".agents/skills/workflow-ci-contract/SKILL.md > Style Rules",
-      "digest": "sha256:de34009975a7dbf9353b4c3a3bb688b8dcbbe5fbd0882c7911f291d35f5a4072",
+      "digest": "sha256:ea666eb0769e5e0e121cf6b13931f4400e810bb34ae697fc3b5c08517f328c16",
       "reviewer": "agent-skill",
       "findings": 0,
       "hubCommit": "ee4c1ce3dc1a67520b00f2038136c252172f52f5",
-      "stamp": "2026-09-05T19:52:50Z"
+      "stamp": "2026-09-06T00:00:06Z"
     },
     {
       "unit": ".agents/skills/workflow-ci-contract/SKILL.md > The Core Behavioral Spine",
