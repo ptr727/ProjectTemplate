@@ -50,6 +50,14 @@
       "stamp": "2026-09-05T14:16:35Z"
     },
     {
+      "unit": ".agents/skills/audit-a-repo/SKILL.md > Measuring",
+      "digest": "sha256:98307ad6c3a08349d5231778410eb086cd8134ab3ce643032d64ffb64b7e15f0",
+      "reviewer": "agent-skill",
+      "findings": 0,
+      "hubCommit": "2d63d52cbb8bd8a6d42846ddbdda18737c069187",
+      "stamp": "2026-09-06T19:30:42Z"
+    },
+    {
       "unit": ".agents/skills/backlog-burndown/SKILL.md > (preamble)",
       "digest": "sha256:75ac6fdd150652041b8cf1c002d40d7e64903e394983f6ae0c62bec07e200d42",
       "reviewer": "agent-skill",
@@ -515,11 +523,11 @@
     },
     {
       "unit": ".agents/skills/workflow-ci-contract/SKILL.md > How the Contract Is Read",
-      "digest": "sha256:b208f86efb05ab8e3ff139f25e4610487358fa03df0222a224c540cd14882122",
+      "digest": "sha256:30f01af1ea7cee7186211482a81f4065068b8b92c257e243cc002abc70a94be5",
       "reviewer": "agent-skill",
       "findings": 0,
-      "hubCommit": "0f9114282e9202db6f22a1ab23a9e8b73f02be11",
-      "stamp": "2026-09-06T18:19:28Z"
+      "hubCommit": "2d63d52cbb8bd8a6d42846ddbdda18737c069187",
+      "stamp": "2026-09-06T19:45:19Z"
     },
     {
       "unit": ".agents/skills/workflow-ci-contract/SKILL.md > Style Rules",
@@ -587,11 +595,11 @@
     },
     {
       "unit": ".agents/skills/workflow-ci-contract/references/test-methodology.md > (preamble)",
-      "digest": "sha256:9429013b2fc946cf54d1eb40ca5e3756211ca3e7992911ac50fb837e325e3771",
+      "digest": "sha256:04a209df70ae8ddf112cbe6622e77186304bbdd4468c67253d4c98f0ad934149",
       "reviewer": "agent-skill",
-      "findings": 2,
-      "hubCommit": "0f9114282e9202db6f22a1ab23a9e8b73f02be11",
-      "stamp": "2026-09-06T17:51:06Z"
+      "findings": 0,
+      "hubCommit": "2d63d52cbb8bd8a6d42846ddbdda18737c069187",
+      "stamp": "2026-09-06T19:30:43Z"
     },
     {
       "unit": ".agents/skills/workflow-ci-contract/references/test-methodology.md > 5A: Static Audit",
@@ -619,11 +627,11 @@
     },
     {
       "unit": ".agents/skills/workflow-ci-contract/references/test-methodology.md > The Test Methodology",
-      "digest": "sha256:a084b10818b512d3c6696aae3d678955cbe27290631046e173d2cdd035b59cc1",
+      "digest": "sha256:0fb34dc2ff628acd5668fc606bf0c6bf016c9558592dd939109bb2c72479722a",
       "reviewer": "agent-skill",
       "findings": 0,
-      "hubCommit": "0f9114282e9202db6f22a1ab23a9e8b73f02be11",
-      "stamp": "2026-09-06T17:51:07Z"
+      "hubCommit": "2d63d52cbb8bd8a6d42846ddbdda18737c069187",
+      "stamp": "2026-09-06T19:30:43Z"
     },
     {
       "unit": ".agents/skills/workflow-ci-contract/references/test-methodology.md > Verdict",
@@ -672,6 +680,14 @@
       "findings": 0,
       "hubCommit": "78898becaa2b1a62cb4c806d86273210c6390ac5",
       "stamp": "2026-09-01T14:48:23Z"
+    },
+    {
+      "unit": "AUDIT.md > 5. Assert the Actions Implement WORKFLOW.md",
+      "digest": "sha256:bc28245e825a254487945189714d112ef5e5410e5967dcfd4ee79c2d3ce398f5",
+      "reviewer": "agent-skill",
+      "findings": 1,
+      "hubCommit": "2d63d52cbb8bd8a6d42846ddbdda18737c069187",
+      "stamp": "2026-09-06T19:30:43Z"
     },
     {
       "unit": "AUDIT.md > 6. Validate Settings, Rulesets, and Secrets",
@@ -755,11 +771,11 @@
     },
     {
       "unit": "WORKFLOW.md > 1. Purpose and How to Use This Document",
-      "digest": "sha256:35a8c77043da983af04a46300f652d4e3b8a454815b10c380524832cfdbe4a70",
+      "digest": "sha256:326b1daa6187f5675ddeefbd5d8bd6fb1510e861d158f152c794a88c689824c2",
       "reviewer": "agent-skill",
       "findings": 0,
-      "hubCommit": "c3b2898feef97459d01ce7c0b63de25b6c5524bf",
-      "stamp": "2026-09-01T13:57:20Z"
+      "hubCommit": "2d63d52cbb8bd8a6d42846ddbdda18737c069187",
+      "stamp": "2026-09-06T19:39:11Z"
     },
     {
       "unit": "WORKFLOW.md > 2. Workflow Style Conventions",
@@ -787,19 +803,19 @@
     },
     {
       "unit": "WORKFLOW.md > 5. Test Methodology",
-      "digest": "sha256:0bdfdb5d7fc20469237f06286a59d36d245192c15310ae55b245196f13206eec",
+      "digest": "sha256:85cd330a5e8c8102f283425a744a63709b556687ffb485d73c37f636ac197f49",
       "reviewer": "agent-skill",
-      "findings": 6,
-      "hubCommit": "0f9114282e9202db6f22a1ab23a9e8b73f02be11",
-      "stamp": "2026-09-06T17:51:07Z"
+      "findings": 1,
+      "hubCommit": "2d63d52cbb8bd8a6d42846ddbdda18737c069187",
+      "stamp": "2026-09-06T19:30:43Z"
     },
     {
       "unit": "WORKFLOW.md > 6. Per-Project-Type Test Walkthroughs",
-      "digest": "sha256:ade51d875b83dfe761ec121d307a06c21e9ba730eaa2ff27e4e428833ee8cfdf",
+      "digest": "sha256:576a0ae38dcd47e7a614a9addc98714e740489d7d3dece669edfc8f95afe7265",
       "reviewer": "agent-skill",
-      "findings": 5,
-      "hubCommit": "0f9114282e9202db6f22a1ab23a9e8b73f02be11",
-      "stamp": "2026-09-06T17:51:07Z"
+      "findings": 3,
+      "hubCommit": "2d63d52cbb8bd8a6d42846ddbdda18737c069187",
+      "stamp": "2026-09-06T19:45:19Z"
     }
   ]
 }
