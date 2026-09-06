@@ -227,7 +227,7 @@ flowchart LR
 ### G9: WORKFLOW.md and AUDIT.md Have No Skill (Closed)
 
 - **Gap** - The largest law doc ([`WORKFLOW.md`][workflow], the D1-D9 contract) and the measurement procedure ([`AUDIT.md`][audit]) had no skill surface, while every other procedure and language did. Thirteen [`GOVERNANCE.md`][governance] sections were likewise doc-only.
-- **Resolution** - The `workflow-ci-contract` and `audit-a-repo` skills package the two docs in the kept-authority shape (the doc keeps the full rules, the skill is the summary that routes into it). The [`AGENTS.md`][agents] rule map carries a disposition per section: `Workflow YAML Conventions` and the three conduct sections are annotated with their surfacing skill, and a paragraph after the table states why each remaining unannotated section is doc-only by decision, so absence reads as a choice rather than an oversight. Both closing tests hold: the skills ship, and the map carries the dispositions.
+- **Resolution** - `audit-a-repo` packages `AUDIT.md` in the kept-authority shape, the doc keeping the full rules and the skill routing into it. `workflow-ci-contract` packages `WORKFLOW.md` section 4 as a generated include and the rest of that document in the same kept-authority shape. The [`AGENTS.md`][agents] rule map carries a disposition per section: `Workflow YAML Conventions` and the three conduct sections are annotated with their surfacing skill, and a paragraph after the table states why each remaining unannotated section is doc-only by decision, so absence reads as a choice rather than an oversight. Both closing tests hold: the skills ship, and the map carries the dispositions.
 - **Provenance** - All four phase-2 skills shipped in one pull request at the maintainer's direction, superseding the one-pull-request-per-skill note this doc carried, with `skill-lifecycle` authored first inside it so the others follow its procedure.
 
 ### G10: The Skill Lifecycle Has No Skill (Closed)
@@ -267,7 +267,7 @@ Four skills close G9, G10, and G12, shipped through the [`.agents/skills/`][skil
 - **Scope** - The [`WORKFLOW.md`][workflow] behavioral contract: the D-guarantees, the seam contract, artifact lifecycle, NBGV versioning, validate-at-entry, and the per-type walkthroughs as references.
 - **Trigger** - Writing or editing workflow YAML, adding or dropping a release target, or reasoning about why a publish did or did not fire.
 - **Packages** - The YAML half of the pipeline. `operational-vs-release-workflow` keeps the git half (branching, promotion, publish policy), and the two descriptions state the split.
-- **Overlap** - The source doc is large, so the skill is a summary plus binding rules with `references/` splits, the shape `comment-and-doc-style` already uses.
+- **Overlap** - The source doc is large, so the skill is a summary with `references/` splits, the shape `comment-and-doc-style` already uses. Section 4 is carried whole as a generated include and section 5 is indexed.
 
 ### skill-lifecycle
 
