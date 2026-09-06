@@ -899,11 +899,11 @@
     },
     {
       "unit": "WORKFLOW.md > 6. Per-Project-Type Test Walkthroughs",
-      "digest": "sha256:20e24d22848a28c70d28ad114374ac60275baacc9c3a0de83d18c15495cba4a3",
+      "digest": "sha256:aa0bd2d323f81f253c79fab3ebd8d0015912aba1760233f7fcc6c3d79a958d16",
       "reviewer": "agent-skill",
       "findings": null,
       "hubCommit": "88053791e5c76fbc4dc753ad3f21d3c3e6c80fcf",
-      "stamp": "2026-09-06T23:31:53Z"
+      "stamp": "2026-09-06T23:46:53Z"
     }
   ]
 }
