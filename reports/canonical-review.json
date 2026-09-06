@@ -51,11 +51,11 @@
     },
     {
       "unit": ".agents/skills/audit-a-repo/SKILL.md > Measuring",
-      "digest": "sha256:98307ad6c3a08349d5231778410eb086cd8134ab3ce643032d64ffb64b7e15f0",
+      "digest": "sha256:641112a85d02d327be4e7d1154b26a19f116a8087c993de516a760857b1a6ed4",
       "reviewer": "agent-skill",
       "findings": 0,
       "hubCommit": "2d63d52cbb8bd8a6d42846ddbdda18737c069187",
-      "stamp": "2026-09-06T19:30:42Z"
+      "stamp": "2026-09-06T20:51:13Z"
     },
     {
       "unit": ".agents/skills/backlog-burndown/SKILL.md > (preamble)",
@@ -666,12 +666,28 @@
       "stamp": "2026-09-06T05:06:22Z"
     },
     {
+      "unit": "AUDIT.md > (preamble)",
+      "digest": "sha256:a2ef5c014adb4303ae7eac8a6bdf8569964529a5733ef6ce65c35efef6147454",
+      "reviewer": "agent-skill",
+      "findings": 1,
+      "hubCommit": "2d63d52cbb8bd8a6d42846ddbdda18737c069187",
+      "stamp": "2026-09-06T20:42:51Z"
+    },
+    {
       "unit": "AUDIT.md > 10. Converge: Apply the Fixes",
       "digest": "sha256:6bc1e573e6c9cd6dace6df67a0d826aaa910d8d94cdf0f29d7571c53def4ff34",
       "reviewer": "agent-skill",
       "findings": 0,
       "hubCommit": "c3b2898feef97459d01ce7c0b63de25b6c5524bf",
       "stamp": "2026-09-01T13:57:20Z"
+    },
+    {
+      "unit": "AUDIT.md > 3. Applicability Gate",
+      "digest": "sha256:5a93264a923298617dc9ed670ff4a3acd3640012370d8453904825083ac2c0bd",
+      "reviewer": "agent-skill",
+      "findings": 0,
+      "hubCommit": "2d63d52cbb8bd8a6d42846ddbdda18737c069187",
+      "stamp": "2026-09-06T20:42:51Z"
     },
     {
       "unit": "AUDIT.md > 4. Per-Dimension Checks (Letter and Intent)",
@@ -811,11 +827,11 @@
     },
     {
       "unit": "WORKFLOW.md > 6. Per-Project-Type Test Walkthroughs",
-      "digest": "sha256:576a0ae38dcd47e7a614a9addc98714e740489d7d3dece669edfc8f95afe7265",
+      "digest": "sha256:740b093d556b31d42f5edb30c09c718c5a2f38d3c9eb87c7287743ae2537cb15",
       "reviewer": "agent-skill",
-      "findings": 3,
+      "findings": 4,
       "hubCommit": "2d63d52cbb8bd8a6d42846ddbdda18737c069187",
-      "stamp": "2026-09-06T19:45:19Z"
+      "stamp": "2026-09-06T21:02:39Z"
     }
   ]
 }
