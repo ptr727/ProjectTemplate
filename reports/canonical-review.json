@@ -699,19 +699,19 @@
     },
     {
       "unit": "GOVERNANCE.md > Workflow YAML Conventions",
-      "digest": "sha256:3c63ac2eb1b12cc3b5113ad37d13a56ea367ab571c1885062de32ce0a6f8c6b2",
+      "digest": "sha256:dac3f1247b770bc2f4cee37c0ce794b01144c4193cf2ee29eda50a68fe4c194d",
       "reviewer": "agent-skill",
-      "findings": 2,
+      "findings": 3,
       "hubCommit": "66d79460335379301db83fe6870303f8f701d92b",
-      "stamp": "2026-09-06T01:10:45Z"
+      "stamp": "2026-09-06T04:40:33Z"
     },
     {
       "unit": "WORKFLOW.md > (preamble)",
-      "digest": "sha256:cc665adefe0ceabffd43e946ae1eb953a853c833a58a3d71d1bcda38bfe1c7f3",
+      "digest": "sha256:9b74cedfe75e4bf4f8c8dfd435528599a5b96a261e353ce6e30933005c50e2e1",
       "reviewer": "agent-skill",
       "findings": 1,
       "hubCommit": "66d79460335379301db83fe6870303f8f701d92b",
-      "stamp": "2026-09-06T03:31:41Z"
+      "stamp": "2026-09-06T04:40:34Z"
     },
     {
       "unit": "WORKFLOW.md > 1. Purpose and How to Use This Document",
@@ -723,11 +723,11 @@
     },
     {
       "unit": "WORKFLOW.md > 2. Workflow Style Conventions",
-      "digest": "sha256:b126a56a2423e2e21f650a500345e7c59c8c112917c12a3cb71e43c938d430bd",
+      "digest": "sha256:eaeebbe227cc5d915c882471282c317b4c6ac62a258f6e9896c64b847f8f54cf",
       "reviewer": "agent-skill",
       "findings": 0,
       "hubCommit": "66d79460335379301db83fe6870303f8f701d92b",
-      "stamp": "2026-09-06T00:53:55Z"
+      "stamp": "2026-09-06T04:45:08Z"
     },
     {
       "unit": "WORKFLOW.md > 3. Architecture",

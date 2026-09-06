@@ -1,6 +1,6 @@
 # WORKFLOW.md
 
-The guide for CI/CD **workflows** (GitHub Actions): a deliberate mixture of architecture, a **behavioral contract** (expected inputs and outputs), and a **test methodology**, the style rules having their home in `GOVERNANCE.md`. Code style lives in [`CODESTYLE.md`][codestyle]. This file is its sibling for everything under `.github/workflows/`.
+The guide for CI/CD **workflows** (GitHub Actions): a deliberate mixture of architecture, a **behavioral contract** (expected inputs and outputs), and a **test methodology**, the workflow style rules having their home in `GOVERNANCE.md`. Code style lives in [`CODESTYLE.md`][codestyle]. This file is its sibling for everything under `.github/workflows/`.
 
 Its defining principle: **it describes required outcomes, not a required implementation.** Two repos may implement the same guarantee with different YAML. A workflow is correct when it **satisfies the contract** in section 4 and is **defect-free against the expected inputs and outputs**, not when it matches a reference implementation byte for byte. The style conventions that section 2 points at keep workflows legible. The contract in section 4 is what they must *do*.
 
@@ -25,7 +25,7 @@ The guarantees are distilled from failures observed in practice. Section 4's pre
 
 ## 2. Workflow Style Conventions
 
-`GOVERNANCE.md` "Workflow YAML Conventions" keeps the style rules, and this section points at it rather than restating it. Workflow YAML takes the line-ending policy every other file takes, which `GOVERNANCE.md` "Documentation Style Conventions" routes to under "Line Endings". Read the style rules before editing a workflow. They are cheap to check and necessary but not sufficient, since a perfectly styled workflow can still violate section 4.
+`GOVERNANCE.md` "Workflow YAML Conventions" keeps the style rules, and this section points at it rather than restating it. Workflow YAML takes the same line-ending policy as every other file, which `GOVERNANCE.md` "Documentation Style Conventions" routes to under "Line Endings". Read the style rules before editing a workflow. They are cheap to check, necessary but not sufficient (a perfectly styled workflow can still violate section 4).
 
 ## 3. Architecture
 
