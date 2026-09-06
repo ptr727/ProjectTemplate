@@ -264,7 +264,7 @@ Four skills close G9, G10, and G12, shipped through the [`.agents/skills/`][skil
 
 ### workflow-ci-contract
 
-- **Scope** - The [`WORKFLOW.md`][workflow] behavioral contract: the D-guarantees, the seam contract, artifact lifecycle, NBGV versioning, validate-at-entry, and the per-type walkthroughs as references.
+- **Scope** - The [`WORKFLOW.md`][workflow] behavioral contract: the D-guarantees, the seam contract, artifact lifecycle, NBGV versioning, and validate-at-entry, with the architecture, the guarantee catalog, and the test methodology carried as references.
 - **Trigger** - Writing or editing workflow YAML, adding or dropping a release target, or reasoning about why a publish did or did not fire.
 - **Packages** - The YAML half of the pipeline. `operational-vs-release-workflow` keeps the git half (branching, promotion, publish policy), and the two descriptions state the split.
 - **Overlap** - The source doc is large, so the skill is a summary with `references/` splits, the shape `comment-and-doc-style` already uses. Sections 3, 4, and 5 are each carried whole as a generated include.

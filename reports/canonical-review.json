@@ -515,11 +515,11 @@
     },
     {
       "unit": ".agents/skills/workflow-ci-contract/SKILL.md > How the Contract Is Read",
-      "digest": "sha256:a28087d153fd286dd4429fcecba681b79d7fca30b3141b3deee3e8bc2b6a28ed",
+      "digest": "sha256:8bc7c41d38297fede942346c2681dea2c0c270ddb6774f726aad5a464a0e9508",
       "reviewer": "agent-skill",
-      "findings": 4,
+      "findings": 0,
       "hubCommit": "0f9114282e9202db6f22a1ab23a9e8b73f02be11",
-      "stamp": "2026-09-06T17:51:06Z"
+      "stamp": "2026-09-06T18:08:42Z"
     },
     {
       "unit": ".agents/skills/workflow-ci-contract/SKILL.md > Style Rules",
@@ -571,11 +571,11 @@
     },
     {
       "unit": ".agents/skills/workflow-ci-contract/references/d-guarantees.md > (preamble)",
-      "digest": "sha256:a8eca6119c9f149c6998f5c57ca73b083c7cc79b36bf5536f67d1f27ec6cfb14",
+      "digest": "sha256:62ab330411b5d4fb24146921d173bf78005af48b9abffb00dce980f06947ae87",
       "reviewer": "agent-skill",
       "findings": 0,
-      "hubCommit": "ee4c1ce3dc1a67520b00f2038136c252172f52f5",
-      "stamp": "2026-09-05T19:40:55Z"
+      "hubCommit": "0f9114282e9202db6f22a1ab23a9e8b73f02be11",
+      "stamp": "2026-09-06T18:08:47Z"
     },
     {
       "unit": ".agents/skills/workflow-ci-contract/references/d-guarantees.md > The Behavioral Contract",
