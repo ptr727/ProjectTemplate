@@ -24,7 +24,7 @@ description: >-
 
 ## The Contract Text
 
-`references/architecture.md`, `references/d-guarantees.md`, and `references/test-methodology.md` carry `WORKFLOW.md` sections 3, 4, and 5 whole, each as a generated include, so the pipeline's architecture, a guarantee's exact wording, and the audit-trace-probe procedure are each one read away rather than restated in full here. A defect in an include region is fixed in `WORKFLOW.md` and regenerated, never edited in this skill, per the `skill-lifecycle` Skill. `WORKFLOW.md` keeps sections 1, 2, and 6 itself, the applicability rule, the style-rule pointer, and the per-project-type walkthroughs, which say which constructs each type adds, map each construct to the scenarios it reaches, and carry the rules for reading a repository that declares more than one type, so read those there.
+`references/architecture.md`, `references/d-guarantees.md`, and `references/test-methodology.md` carry `WORKFLOW.md` sections 3, 4, and 5 whole, each as a generated include, so the pipeline's architecture, a guarantee's exact wording, and the audit-trace-probe procedure are each one read away rather than restated in full here. A defect in an include region is fixed in `WORKFLOW.md` and regenerated, never edited in this skill, per the `skill-lifecycle` Skill. `WORKFLOW.md` keeps sections 1, 2, and 6 itself, the applicability rule, the style-rule pointer, and the per-project-type walkthroughs, which say which constructs each type adds, map each construct to the scenarios it reaches, and carry three rules for reading a row, one of which is about a repository declaring more than one type, so read those there.
 
 ## After Any Workflow Edit
 
