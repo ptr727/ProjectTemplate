@@ -1,6 +1,6 @@
 # The D-Guarantees
 
-The section below is `WORKFLOW.md` section 4, whole. Which of its items bind a given repository is `WORKFLOW.md` section 1's applicability rule.
+The section below is `WORKFLOW.md` section 4, whole. Which of its items bind a given repository is `WORKFLOW.md` section 1's applicability rule. The architecture these items govern is `WORKFLOW.md` section 3 and the methodology that checks them is `WORKFLOW.md` section 5, carried whole in `architecture.md` and `test-methodology.md` beside this file.
 
 ## The Behavioral Contract
 
