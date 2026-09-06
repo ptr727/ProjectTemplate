@@ -515,11 +515,11 @@
     },
     {
       "unit": ".agents/skills/workflow-ci-contract/SKILL.md > How the Contract Is Read",
-      "digest": "sha256:8bc7c41d38297fede942346c2681dea2c0c270ddb6774f726aad5a464a0e9508",
+      "digest": "sha256:b208f86efb05ab8e3ff139f25e4610487358fa03df0222a224c540cd14882122",
       "reviewer": "agent-skill",
       "findings": 0,
       "hubCommit": "0f9114282e9202db6f22a1ab23a9e8b73f02be11",
-      "stamp": "2026-09-06T18:08:42Z"
+      "stamp": "2026-09-06T18:19:28Z"
     },
     {
       "unit": ".agents/skills/workflow-ci-contract/SKILL.md > Style Rules",
