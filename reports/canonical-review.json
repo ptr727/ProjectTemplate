@@ -243,11 +243,11 @@
     },
     {
       "unit": ".agents/skills/dotnet-codestyle/references/testing.md > Microsoft.Testing.Platform and coverage",
-      "digest": "sha256:b1a2247396903af9ea362d11499811018b7a5241b00f6eaa04ebf0c0d74c4d80",
+      "digest": "sha256:37d08392e883923be61ddfa87d05d268c41e565f1dccfa387d89727f7c654b90",
       "reviewer": "agent-skill",
       "findings": null,
       "hubCommit": "88053791e5c76fbc4dc753ad3f21d3c3e6c80fcf",
-      "stamp": "2026-09-06T23:17:27Z"
+      "stamp": "2026-09-06T23:31:52Z"
     },
     {
       "unit": ".agents/skills/drive-pr/SKILL.md > (preamble)",
@@ -411,11 +411,11 @@
     },
     {
       "unit": ".agents/skills/operational-vs-release-workflow/references/release-publish-mechanics.md > Recovering a failed registry push",
-      "digest": "sha256:2bfc112ab436ebcff653f82e0649d539b905a698af9d116879045b06063de0df",
+      "digest": "sha256:78f378a68cb9bb4401ebb9815103a4a973a100e507c64eb9a62137c1c454c5b6",
       "reviewer": "agent-skill",
       "findings": null,
       "hubCommit": "88053791e5c76fbc4dc753ad3f21d3c3e6c80fcf",
-      "stamp": "2026-09-06T23:17:27Z"
+      "stamp": "2026-09-06T23:31:52Z"
     },
     {
       "unit": ".agents/skills/pr-review-conduct/SKILL.md > Answering a suppressed finding",
@@ -475,11 +475,11 @@
     },
     {
       "unit": ".agents/skills/python-codestyle/references/testing.md",
-      "digest": "sha256:67b5e60c3e1399c424d1cf9234be20ac0dbe5d50ec860a6c9e42b0f2512c27d7",
+      "digest": "sha256:94f61df9b261dbbce373b216b2393492ebd547778dee92d2bac61c892e30a00d",
       "reviewer": "agent-skill",
       "findings": null,
       "hubCommit": "88053791e5c76fbc4dc753ad3f21d3c3e6c80fcf",
-      "stamp": "2026-09-06T23:17:28Z"
+      "stamp": "2026-09-06T23:31:52Z"
     },
     {
       "unit": ".agents/skills/repo-worktree/SKILL.md > Creating a Worktree",
@@ -899,11 +899,11 @@
     },
     {
       "unit": "WORKFLOW.md > 6. Per-Project-Type Test Walkthroughs",
-      "digest": "sha256:a849ee9c34a1b885e1b84dbb8ea25cc17a8b6572cab6e45f6ad7b9952fa0bbc0",
+      "digest": "sha256:20e24d22848a28c70d28ad114374ac60275baacc9c3a0de83d18c15495cba4a3",
       "reviewer": "agent-skill",
       "findings": null,
       "hubCommit": "88053791e5c76fbc4dc753ad3f21d3c3e6c80fcf",
-      "stamp": "2026-09-06T23:17:29Z"
+      "stamp": "2026-09-06T23:31:53Z"
     }
   ]
 }

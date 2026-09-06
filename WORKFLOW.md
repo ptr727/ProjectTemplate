@@ -273,7 +273,7 @@ Three rules govern reading a row, each of them because reading one row alone has
 - **The trigger scenarios come from the publisher's own `on:` block, not from the type.** S5, S6 and S9 turn on which triggers the publisher actually carries, and two repos of one type routinely differ there. Section 5B's preamble owns that rule and it binds here.
 - **N/A names an absent construct, never an unexercised one.** The `pattern:` download (D6.1) and the cleanup jobs (D5.1 to D5.5) live in the release task, so a repo that owns that task and a repo that calls the hub-hosted copy both contain them and are both checked on them. Ownership decides only where the evidence is cited, in the repo's own file or at the SHA it pins, which is the form 5A gives. Section 5A requires an N/A verdict to name the construct that is absent, so an item that cannot be recorded that way is applicable.
 
-Every scenario is reached by exactly one construct, which is what makes the S1 to S13 set partition without a per-type list restating it:
+The table files each of S1 to S13 under exactly one row, which is what covers the set without a per-type list restating it. Filing is not the whole applicability test: a scenario is N/A when **any** construct it needs is absent, and that can be more than the row it sits under, S1 needing the pull request workflow as well as the build target.
 
 | Construct the repo contains | Scenarios it reaches |
 | --- | --- |

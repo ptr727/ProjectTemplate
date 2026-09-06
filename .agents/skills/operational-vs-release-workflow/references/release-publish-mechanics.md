@@ -131,61 +131,21 @@ are intentionally not added.
 
 ## Recovering a failed registry push
 
-A package publish job is gated like everything else, `needs:` the release-task call, so a failed
-build skips it. The **push inside it** is what no gate can reach, because it runs after the whole
-release task and therefore after `github-release`. `WORKFLOW.md` D4.5 names the two recovery
-routes and leaves their mechanics here. A rejected token exchange, a registry outage,
-or a trusted-publishing policy naming the wrong workflow file leaves a published release and tag
-for a version that never reached the registry. The recovery is a re-dispatch or a full re-run rather than a
-cleanup. **A full re-run is always available inside its window, and a re-dispatch only
-while the branch tip has not moved**, so the tip decides whether there is a choice at all rather
-than which route to take. What re-dispatch buys, where it is available, is that it outlives the
-re-run window.
+A package publish job is gated like everything else, `needs:` the release-task call, so a failed build skips it. The **push inside it** is what no gate can reach, because it runs after the whole release task and therefore after `github-release`. `WORKFLOW.md` D4.5 names the two recovery routes and leaves their mechanics here. A rejected token exchange, a registry outage, or a trusted-publishing policy naming the wrong workflow file leaves a published release and tag for a version that never reached the registry. The recovery is a re-dispatch or a full re-run rather than a cleanup. **A full re-run is always available inside its window, and a re-dispatch only while the branch tip has not moved**, so the tip decides whether there is a choice at all rather than which route to take. What re-dispatch buys, where it is available, is that it outlives the re-run window.
 
-**Re-dispatch, available only while the tip has not moved.** A `workflow_dispatch` takes a ref rather than a commit,
-and D2.3 admits only `main` or `develop`, so what it builds is that branch's tip at dispatch time.
-While the tip is still the commit whose push failed, a re-dispatch rebuilds the same version and
-runs its push again, refreshing the release the way any dispatch does.
+**Re-dispatch, available only while the tip has not moved.** A `workflow_dispatch` takes a ref rather than a commit, and D2.3 admits only `main` or `develop`, so what it builds is that branch's tip at dispatch time. While the tip is still the commit whose push failed, a re-dispatch rebuilds the same version and runs its push again, refreshing the release the way any dispatch does.
 
-This is a time-of-check-to-time-of-use race rather than a guarded operation: nothing compares the
-tip against the failed run, so a push landing between the two mints a new version instead of
-erroring, and the operator sees a green publish that left the failed version unpublished. Confirm the failed
-run's own head commit still equals the branch tip immediately before dispatching, reading it as
-`gh run view <id> --json headSha` against `gh api repos/{owner}/{repo}/branches/<branch>` for the
-branch that run built rather than whichever branch is to hand. Where the two differ, or where the
-check is not worth making, prefer the re-run route, which is bound to that commit by construction,
-and fall back to re-dispatch only once the re-run window below has closed.
+This is a time-of-check-to-time-of-use race rather than a guarded operation: nothing compares the tip against the failed run, so a push landing between the two mints a new version instead of erroring, and the operator sees a green publish that left the failed version unpublished. Confirm the failed run's own head commit still equals the branch tip immediately before dispatching, reading it as `gh run view <id> --json headSha` against `gh api repos/{owner}/{repo}/branches/<branch>` for the branch that run built rather than whichever branch is to hand. Where the two differ, or where the check is not worth making, prefer the re-run route, which is bound to that commit by construction, and fall back to re-dispatch only once the re-run window below has closed.
 
-**Re-run all jobs, available inside the window whatever the tip has done.** `gh run rerun <id>` replays the run under the original
-event's `GITHUB_SHA` and `GITHUB_REF` and re-executes every job rather than only the failed ones.
-The publisher pins the release task to that commit with `ref: ${{ github.sha }}`, so `get-version`
-recomputes the same version from the same commit and history, each build leaf checks out the
-`GitCommitId` that job emits, the package artifact D5.2 deleted is rebuilt and re-uploaded rather than
-missing when `publish-<target>` downloads it, and that job retries the push it failed. The release itself
-needs nothing from the re-run, the failed run having already cut it, though on a dispatch-triggered
-run the re-run re-enters `github-release`, which refreshes the release per D4.4's dispatch leg and
-runs the `release-asset-*` delete with it per D5.2. A re-dispatch here would build
-the new tip instead, and NBGV derives the version from git height, so that is a further version and
-the one whose push failed never reaches the registry.
+**Re-run all jobs, available inside the window whatever the tip has done.** `gh run rerun <id>` replays the run under the original event's `GITHUB_SHA` and `GITHUB_REF` and re-executes every job rather than only the failed ones. The publisher pins the release task to that commit with `ref: ${{ github.sha }}`, so `get-version` recomputes the same version from the same commit and history, each build leaf checks out the `GitCommitId` that job emits, the package artifact D5.2 deleted is rebuilt and re-uploaded rather than missing when `publish-<target>` downloads it, and that job retries the push it failed. The release itself needs nothing from the re-run, the failed run having already cut it, though on a dispatch-triggered run the re-run re-enters `github-release`, which refreshes the release per D4.4's dispatch leg and runs the `release-asset-*` delete with it per D5.2. A re-dispatch here would build the new tip instead, and NBGV derives the version from git height, so that is a further version and the one whose push failed never reaches the registry.
 
 Three qualifications come with the re-run route.
 
-- D4.4 and `WORKFLOW.md` 5B's S9 describe a re-run whose predecessor push **succeeded**, where the
-  registry dedupes the second one. This is the case they do not cover, and its retried push is the
-  first the registry ever receives for that version.
-- GitHub offers a re-run only within **30 days** of the initial run, and a repository's own
-  **log** retention setting can be shorter, so the usable window is the shorter of the two. This is
-  the run's own retention and is unrelated to D5.4's `retention-days: 1`, which bounds an uploaded
-  artifact rather than the run.
-- **Re-run failed jobs** (`--failed`) does not serve here. D5.2's delete runs on the path that
-  reaches this case, its gate being `!cancelled()` and the download having succeeded, so it has
-  already removed the package artifact a `--failed` re-run would download, and only the full re-run
-  rebuilds it.
+- D4.4 and `WORKFLOW.md` 5B's S9 describe a re-run whose predecessor push **succeeded**, where the registry dedupes the second one. This is the case they do not cover, and its retried push is the first the registry ever receives for that version.
+- GitHub offers a re-run only within **30 days** of the initial run, and a repository's own **log** retention setting can be shorter, so the usable window is the shorter of the two. This is the run's own retention and is unrelated to D5.4's `retention-days: 1`, which bounds an uploaded artifact rather than the run.
+- **Re-run failed jobs** (`--failed`) does not serve here. D5.2's delete runs on the path that reaches this case, its gate being `!cancelled()` and the download having succeeded, so it has already removed the package artifact a `--failed` re-run would download, and only the full re-run rebuilds it.
 
-Past the window, a moved tip leaves that version with no route to the registry. The release and tag
-already name it, and removing them is not the answer: leave them, and let the next publish carry a
-later version, recording the gap in `HISTORY.md`, since the release body is regenerated on any later dispatch
-refresh and cannot hold the record.
+Past the window, a moved tip leaves that version with no route to the registry. The release and tag already name it, and removing them is not the answer: leave them, and let the next publish carry a later version, recording the gap in `HISTORY.md`, since the release body is regenerated on any later dispatch refresh and cannot hold the record.
 
 What no route settles in advance is whether the registry accepts the retried push.
 
