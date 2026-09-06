@@ -94,7 +94,7 @@ A check with `intentRef`/`workflowRef` points at the prose section that owns the
 
 ## 5. Assert the Actions Implement WORKFLOW.md
 
-Run [`WORKFLOW.md`][workflow]'s methodology against the repo's **own** Actions, reading a workflow it only calls at the SHA it pins: the 5A static audit (structural facts per applicable D-guarantee, each cited in the form 5A sets out) and the 5B trace scenarios (predicted run/skip + version + release + artifact-end-state vs expected). The contract in WORKFLOW.md section 4 is satisfied by **outcome**, not by matching the catalog snippets in [`catalog/snippets/workflows/`][workflows] byte for byte. Those are the reference implementation, not required bytes.
+Run [`WORKFLOW.md`][workflow]'s methodology against the repo's **own** Actions, reading a workflow it only calls at the SHA it pins: the 5A static audit (structural facts per applicable D-guarantee, each cited in the form 5A sets out) and the 5B trace scenarios (predicted run/skip + version + release + artifact-end-state vs expected). The contract in WORKFLOW.md section 4 is satisfied by **outcome**, not by matching the catalog snippets in [`catalog/snippets/workflows/`][workflows] byte for byte. Those are the reference implementation, not required bytes. Where a guarantee names a construct, D6.1's `release-asset-<branch>-<target>` and D9.2's ruleset-bound job `name:` among them, that name is the outcome and a divergence is a **defect** here. That is a separate judgment from the `verbatim` content hash section 0 describes, which classifies a mismatch as stale or modified and reports either at **drift**, since equivalence is intent-governed and a byte diff is a hint to review rather than a verdict.
 
 ## 6. Validate Settings, Rulesets, and Secrets
 

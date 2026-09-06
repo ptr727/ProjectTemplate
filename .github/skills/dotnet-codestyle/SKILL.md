@@ -210,7 +210,7 @@ The .NET mechanics, narrowest first:
 
 xUnit v3 (`xunit.v3`, not the legacy `xunit`) + AwesomeAssertions (`.Should()` API, never native
 asserts). Arrange-Act-Assert pattern, descriptive underscore names, `[Theory]`/`[InlineData]` for
-parameterized tests. See `references/testing.md` for the framework setup template.
+parameterized tests. A test project on `xunit.v3` 4.0.0 or later is MTP-based, and also carries a `global.json` runner declaration, a `Microsoft.Testing.Extensions.CodeCoverage` floor, and no `xunit.runner.visualstudio`. See `references/testing.md` for the framework setup template and that configuration.
 
 ## Project configuration
 
