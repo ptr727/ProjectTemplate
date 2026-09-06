@@ -707,11 +707,11 @@
     },
     {
       "unit": "WORKFLOW.md > (preamble)",
-      "digest": "sha256:a890cae92973cd600e5bf776f461d2ff47373a6e980d90979241b5e58c8e3444",
+      "digest": "sha256:cc665adefe0ceabffd43e946ae1eb953a853c833a58a3d71d1bcda38bfe1c7f3",
       "reviewer": "agent-skill",
-      "findings": 2,
+      "findings": 1,
       "hubCommit": "66d79460335379301db83fe6870303f8f701d92b",
-      "stamp": "2026-09-06T01:10:46Z"
+      "stamp": "2026-09-06T03:31:41Z"
     },
     {
       "unit": "WORKFLOW.md > 1. Purpose and How to Use This Document",

@@ -2,15 +2,15 @@
 
 The guide for CI/CD **workflows** (GitHub Actions): a deliberate mixture of architecture, a **behavioral contract** (expected inputs and outputs), and a **test methodology**, the style rules having their home in `GOVERNANCE.md`. Code style lives in [`CODESTYLE.md`][codestyle]. This file is its sibling for everything under `.github/workflows/`.
 
-Its defining principle: **it describes required outcomes, not a required implementation.** Two repos may implement the same guarantee with different YAML. A workflow is correct when it **satisfies the contract** in section 4 and is **defect-free against the expected inputs and outputs**, not when it matches a reference implementation byte for byte. The style conventions section 2 points at keep workflows legible. The contract in section 4 is what they must *do*.
+Its defining principle: **it describes required outcomes, not a required implementation.** Two repos may implement the same guarantee with different YAML. A workflow is correct when it **satisfies the contract** in section 4 and is **defect-free against the expected inputs and outputs**, not when it matches a reference implementation byte for byte. The style conventions that section 2 points at keep workflows legible. The contract in section 4 is what they must *do*.
 
 Given this document and the `GOVERNANCE.md` sections it points at, an agent must be able to do three things to any project:
 
-1. **Audit** - statically check the workflows against the style conventions section 2 points at and the structural facts each guarantee implies (section 5A).
+1. **Audit** - statically check the workflows against the style conventions that section 2 points at and the structural facts each guarantee implies (section 5A).
 2. **Test** - trace the expected inputs/outputs (section 5B) and, where warranted, drive a live probe (section 5C).
 3. **Assess** - render a verdict: **operational** (every *applicable* guarantee holds and every *applicable* scenario's observed output equals the expected) or **not operational** (any mismatch, which is a *defect*, not a style nit).
 
-> **Canonical scope.** This document is authoritative for the workflow contract and test methodology (sections 3 to 6). The style conventions live in `GOVERNANCE.md` "Workflow YAML Conventions", which section 2 points at rather than restating, and the release policy in `GOVERNANCE.md` "Release Model". Both are authoritative wherever this document overlaps them, so on any such conflict `GOVERNANCE.md` wins.
+> **Canonical scope.** This document is authoritative for the workflow contract and test methodology (sections 3 to 6). The style conventions live in `GOVERNANCE.md` "Workflow YAML Conventions", which section 2 points at rather than restating, and the release policy in `GOVERNANCE.md` "Release Model". `GOVERNANCE.md` is authoritative wherever this document overlaps it, so on any such conflict it wins.
 
 The guarantees are distilled from failures observed in practice. Section 4's preamble states how each item is written.
 
