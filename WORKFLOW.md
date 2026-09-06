@@ -10,7 +10,7 @@ Given this document and the `GOVERNANCE.md` sections it points at, an agent must
 2. **Test** - trace the expected inputs/outputs (section 5B) and, where warranted, drive a live probe (section 5C).
 3. **Assess** - render a verdict: **operational** (every *applicable* guarantee holds and every *applicable* scenario's observed output equals the expected) or **not operational** (any mismatch, which is a *defect*, not a style nit).
 
-> **Canonical scope.** This document is authoritative for the workflow contract and test methodology (sections 3 to 6). The style conventions live in `GOVERNANCE.md` "Workflow YAML Conventions", which section 2 points at rather than restating. The release policy also lives in `GOVERNANCE.md` "Release Model", which is authoritative where section 3 overlaps it, so on any conflict there `GOVERNANCE.md` wins.
+> **Canonical scope.** This document is authoritative for the workflow contract and test methodology (sections 3 to 6). The style conventions live in `GOVERNANCE.md` "Workflow YAML Conventions", which section 2 points at rather than restating, and the release policy in `GOVERNANCE.md` "Release Model". Both are authoritative wherever this document overlaps them, so on any such conflict `GOVERNANCE.md` wins.
 
 The guarantees are distilled from failures observed in practice. Section 4's preamble states how each item is written.
 

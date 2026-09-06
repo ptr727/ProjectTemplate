@@ -603,11 +603,11 @@
     },
     {
       "unit": "AGENTS.md > Where the Rules Live",
-      "digest": "sha256:028afc6eff153d9077d32f1dc10af609bc8822d4fb685aa1ddf2b010ad85f6fa",
+      "digest": "sha256:8d682d3691ebac23f8df9de5312b7c7448e8b073d7811ca74c69b6577a0ebc62",
       "reviewer": "agent-skill",
-      "findings": 1,
-      "hubCommit": "ddca03490f0517fe786ef1d58aff3b8eaf19616b",
-      "stamp": "2026-09-04T16:24:35Z"
+      "findings": 3,
+      "hubCommit": "66d79460335379301db83fe6870303f8f701d92b",
+      "stamp": "2026-09-06T01:10:45Z"
     },
     {
       "unit": "AUDIT.md > 10. Converge: Apply the Fixes",
@@ -691,19 +691,19 @@
     },
     {
       "unit": "GOVERNANCE.md > Workflow YAML Conventions",
-      "digest": "sha256:fad9e30bcd1041e82de1353aced813e8e3f0a5b7ff276165c46240280ebd6543",
+      "digest": "sha256:3c63ac2eb1b12cc3b5113ad37d13a56ea367ab571c1885062de32ce0a6f8c6b2",
       "reviewer": "agent-skill",
-      "findings": 1,
+      "findings": 2,
       "hubCommit": "66d79460335379301db83fe6870303f8f701d92b",
-      "stamp": "2026-09-06T00:46:51Z"
+      "stamp": "2026-09-06T01:10:45Z"
     },
     {
       "unit": "WORKFLOW.md > (preamble)",
-      "digest": "sha256:66f4d1c7ef2cd97250853ba98248071d1b1512ff83eed937cacf625ffed50c4a",
+      "digest": "sha256:a890cae92973cd600e5bf776f461d2ff47373a6e980d90979241b5e58c8e3444",
       "reviewer": "agent-skill",
-      "findings": 4,
+      "findings": 2,
       "hubCommit": "66d79460335379301db83fe6870303f8f701d92b",
-      "stamp": "2026-09-06T00:57:21Z"
+      "stamp": "2026-09-06T01:10:46Z"
     },
     {
       "unit": "WORKFLOW.md > 1. Purpose and How to Use This Document",
