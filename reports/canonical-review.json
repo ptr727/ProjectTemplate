@@ -483,11 +483,11 @@
     },
     {
       "unit": ".agents/skills/skill-lifecycle/SKILL.md > The Doc-Packaging Pattern",
-      "digest": "sha256:b22e71640b0d6582e7e7d624d03436f443e688cf192bbf4a55de6f3411fcb881",
+      "digest": "sha256:357a856eed4481c8c1a75b87928b00b69d5b7cdd4866b82fd84134b179138dd0",
       "reviewer": "agent-skill",
-      "findings": 0,
-      "hubCommit": "ee4c1ce3dc1a67520b00f2038136c252172f52f5",
-      "stamp": "2026-09-05T22:26:20Z"
+      "findings": 3,
+      "hubCommit": "0f9114282e9202db6f22a1ab23a9e8b73f02be11",
+      "stamp": "2026-09-06T17:51:06Z"
     },
     {
       "unit": ".agents/skills/skill-lifecycle/SKILL.md > The Pipeline",
@@ -515,11 +515,11 @@
     },
     {
       "unit": ".agents/skills/workflow-ci-contract/SKILL.md > How the Contract Is Read",
-      "digest": "sha256:57ad04138726b32fd827bc6717119e09839f575ae4283dcbbcf7736b40637857",
+      "digest": "sha256:a28087d153fd286dd4429fcecba681b79d7fca30b3141b3deee3e8bc2b6a28ed",
       "reviewer": "agent-skill",
-      "findings": 1,
-      "hubCommit": "ee4c1ce3dc1a67520b00f2038136c252172f52f5",
-      "stamp": "2026-09-05T22:25:58Z"
+      "findings": 4,
+      "hubCommit": "0f9114282e9202db6f22a1ab23a9e8b73f02be11",
+      "stamp": "2026-09-06T17:51:06Z"
     },
     {
       "unit": ".agents/skills/workflow-ci-contract/SKILL.md > Style Rules",
@@ -528,6 +528,14 @@
       "findings": 0,
       "hubCommit": "66d79460335379301db83fe6870303f8f701d92b",
       "stamp": "2026-09-06T00:53:56Z"
+    },
+    {
+      "unit": ".agents/skills/workflow-ci-contract/SKILL.md > The Contract Text",
+      "digest": "sha256:4a97612e6fc099699e97f76267186932eba13968557175e0b8534e493b247b1d",
+      "reviewer": "agent-skill",
+      "findings": 2,
+      "hubCommit": "0f9114282e9202db6f22a1ab23a9e8b73f02be11",
+      "stamp": "2026-09-06T17:51:06Z"
     },
     {
       "unit": ".agents/skills/workflow-ci-contract/SKILL.md > The Core Behavioral Spine",
@@ -539,11 +547,27 @@
     },
     {
       "unit": ".agents/skills/workflow-ci-contract/SKILL.md > Why This Exists",
-      "digest": "sha256:b7dfbb5b5d20d1bb2c1e78c3a4a0e61256dc4e5a88c4e68169968d42e534d6de",
+      "digest": "sha256:d89e6f3b20c6ec6ca8307fae5346303fc0e0c9eb439f3b960b75f0733a7d836c",
       "reviewer": "agent-skill",
       "findings": 0,
-      "hubCommit": "ee4c1ce3dc1a67520b00f2038136c252172f52f5",
-      "stamp": "2026-09-05T19:41:37Z"
+      "hubCommit": "0f9114282e9202db6f22a1ab23a9e8b73f02be11",
+      "stamp": "2026-09-06T17:51:06Z"
+    },
+    {
+      "unit": ".agents/skills/workflow-ci-contract/references/architecture.md > (preamble)",
+      "digest": "sha256:6d9507914d458b12d94684f297b13de873beae3f48dc0a040a5757ca90e8b566",
+      "reviewer": "agent-skill",
+      "findings": 3,
+      "hubCommit": "0f9114282e9202db6f22a1ab23a9e8b73f02be11",
+      "stamp": "2026-09-06T17:51:06Z"
+    },
+    {
+      "unit": ".agents/skills/workflow-ci-contract/references/architecture.md > The Architecture",
+      "digest": "sha256:32d3c4d8f85423bad4dc0066f8e93e90f27d1dcc172b0b06ec8d826031c132c7",
+      "reviewer": "agent-skill",
+      "findings": 2,
+      "hubCommit": "0f9114282e9202db6f22a1ab23a9e8b73f02be11",
+      "stamp": "2026-09-06T17:51:06Z"
     },
     {
       "unit": ".agents/skills/workflow-ci-contract/references/d-guarantees.md > (preamble)",
@@ -560,6 +584,14 @@
       "findings": 5,
       "hubCommit": "66d79460335379301db83fe6870303f8f701d92b",
       "stamp": "2026-09-06T00:46:52Z"
+    },
+    {
+      "unit": ".agents/skills/workflow-ci-contract/references/test-methodology.md > (preamble)",
+      "digest": "sha256:9429013b2fc946cf54d1eb40ca5e3756211ca3e7992911ac50fb837e325e3771",
+      "reviewer": "agent-skill",
+      "findings": 2,
+      "hubCommit": "0f9114282e9202db6f22a1ab23a9e8b73f02be11",
+      "stamp": "2026-09-06T17:51:06Z"
     },
     {
       "unit": ".agents/skills/workflow-ci-contract/references/test-methodology.md > 5A: Static Audit",
@@ -584,6 +616,14 @@
       "findings": 0,
       "hubCommit": "28dafdf46ee35cc9901e845a317991d909a94fac",
       "stamp": "2026-09-03T18:19:22Z"
+    },
+    {
+      "unit": ".agents/skills/workflow-ci-contract/references/test-methodology.md > The Test Methodology",
+      "digest": "sha256:a084b10818b512d3c6696aae3d678955cbe27290631046e173d2cdd035b59cc1",
+      "reviewer": "agent-skill",
+      "findings": 0,
+      "hubCommit": "0f9114282e9202db6f22a1ab23a9e8b73f02be11",
+      "stamp": "2026-09-06T17:51:07Z"
     },
     {
       "unit": ".agents/skills/workflow-ci-contract/references/test-methodology.md > Verdict",
@@ -731,11 +771,11 @@
     },
     {
       "unit": "WORKFLOW.md > 3. Architecture",
-      "digest": "sha256:cbdfc5161d7951fc9f968257f9090aa8086f10f5fcb869d3a632d12ccfdb2dbe",
+      "digest": "sha256:c0f4d188701cb09ca06f80831d40f4c0cecc8ca75b08fe44ac62aa27d2dd06e0",
       "reviewer": "agent-skill",
-      "findings": 62,
-      "hubCommit": "9b33edb7e0f55fe2a05630a49d5be99ba1e3eb26",
-      "stamp": "2026-09-02T15:16:10Z"
+      "findings": 10,
+      "hubCommit": "0f9114282e9202db6f22a1ab23a9e8b73f02be11",
+      "stamp": "2026-09-06T17:51:07Z"
     },
     {
       "unit": "WORKFLOW.md > 4. Behavioral Contract: Expected Outcomes",
@@ -747,19 +787,19 @@
     },
     {
       "unit": "WORKFLOW.md > 5. Test Methodology",
-      "digest": "sha256:a7dff7c97f08703ef7d9870e3bef1e368d37af4743f51dd1bafbef7beaf63f45",
+      "digest": "sha256:0bdfdb5d7fc20469237f06286a59d36d245192c15310ae55b245196f13206eec",
       "reviewer": "agent-skill",
-      "findings": 2,
-      "hubCommit": "66d79460335379301db83fe6870303f8f701d92b",
-      "stamp": "2026-09-06T02:19:37Z"
+      "findings": 6,
+      "hubCommit": "0f9114282e9202db6f22a1ab23a9e8b73f02be11",
+      "stamp": "2026-09-06T17:51:07Z"
     },
     {
       "unit": "WORKFLOW.md > 6. Per-Project-Type Test Walkthroughs",
-      "digest": "sha256:b2967d951f386797e8c5e5b4b3e4e1699c81e45e72650ff1e3f4d0e4f28e47dd",
+      "digest": "sha256:ade51d875b83dfe761ec121d307a06c21e9ba730eaa2ff27e4e428833ee8cfdf",
       "reviewer": "agent-skill",
-      "findings": 3,
-      "hubCommit": "66d79460335379301db83fe6870303f8f701d92b",
-      "stamp": "2026-09-06T00:46:51Z"
+      "findings": 5,
+      "hubCommit": "0f9114282e9202db6f22a1ab23a9e8b73f02be11",
+      "stamp": "2026-09-06T17:51:07Z"
     }
   ]
 }
