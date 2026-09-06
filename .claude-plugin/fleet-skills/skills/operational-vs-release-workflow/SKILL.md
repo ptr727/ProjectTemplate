@@ -110,6 +110,10 @@ rather than guessing from the repo's contents.
   version string, except Docker, which always re-pushes** to pick up upstream base-image
   refreshes. Full guarantee and the `version.json` `pathFilters` boundary:
   `references/release-publish-mechanics.md`.
+- **A package push can fail after the release is already cut**, since it runs after the release
+  task and no gate covers it. Whether the recovery is a re-dispatch or a full re-run turns on
+  whether the branch tip has moved, and the re-run route has a bounded window:
+  `references/release-publish-mechanics.md`.
 - **Adding, dropping, or wiring a release target** (which leaf task, which artifact-naming
   contract, which seam a given output belongs to: a GitHub Release asset, a package-registry push,
   an image-registry push, a filesystem deploy, or a source-only repo with no build layer at all),

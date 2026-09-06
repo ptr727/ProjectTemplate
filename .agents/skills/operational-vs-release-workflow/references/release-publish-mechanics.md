@@ -128,6 +128,46 @@ NBGV git height and therefore `SemVer2`, and the next publish *does* create a fr
 even when the shipped binary is byte-identical. This is accepted NBGV behavior, and `pathFilters`
 are intentionally not added.
 
+## Recovering a failed registry push
+
+A package push runs after the whole release task, and therefore after `github-release`, so no gate
+covers it and `WORKFLOW.md` D4.5 stops at that fact. A rejected token exchange, a registry outage,
+or a trusted-publishing policy naming the wrong workflow file leaves a published release and tag
+for a version that never reached the registry. The recovery is a re-dispatch or a re-run rather
+than a cleanup, and **which of the two applies turns on whether the branch tip has moved.**
+
+**The tip has not moved: re-dispatch.** A dispatch names a branch, `main` or `develop` per D2.3,
+and never a commit, so what it builds is that branch's tip at dispatch time. While the tip is still
+the commit whose push failed, a re-dispatch refreshes that version's release (D4.4) and runs its
+push again. This is a time-of-check-to-time-of-use race rather than a guarded operation: a push
+landing between reading the tip and dispatching mints a new version instead of erroring.
+
+**The tip has moved: re-run all jobs.** `gh run rerun <id>` replays the run under the original
+event's `GITHUB_SHA` and `GITHUB_REF` and re-executes every job rather than only the failed ones.
+The publisher pins the release task to that commit with `ref: ${{ github.sha }}`, so `get-version`
+recomputes the same version from the same commit and history, each build leaf checks out the
+`GitCommitId` it emits, the package artifact D5.2 deleted is rebuilt and re-uploaded rather than
+missing when `publish-<target>` downloads it, and that job retries the push it failed. The release
+needs nothing from the re-run, the failed run having already cut it. A re-dispatch here would build
+the new tip instead, and NBGV derives the version from git height, so that is a further version and
+the one whose push failed never reaches the registry.
+
+Three qualifications come with the re-run route.
+
+- D4.4 and `WORKFLOW.md` 5B's S9 describe a re-run whose predecessor push **succeeded**, where the
+  registry dedupes the second one. This is the case they do not cover, and its retried push is the
+  first the registry ever receives for that version.
+- GitHub offers a re-run only within **30 days** of the initial run, and a repository's own log
+  retention can be shorter still, so the window is the shorter of the two. Past it, a moved tip
+  leaves that version with no route at all.
+- **Re-run failed jobs** (`--failed`) is unreliable here rather than unavailable. D5.2's delete runs
+  on the path that reaches this case, its gate being `!cancelled()` and the download having
+  succeeded, and it removes the package artifact a `--failed` re-run would download. D5.3 leaves
+  that delete best-effort, so the artifact survives only where that delete itself failed, and
+  `--failed` works in that case alone. `retention-days: 1` (D5.4) expires it within a day regardless.
+
+What no route settles in advance is whether the registry accepts the retried push.
+
 ## Wrapper repos that track an upstream release
 
 A repo wrapping an upstream release uses the hub-hosted `check-upstream-version-task.yml`: a
