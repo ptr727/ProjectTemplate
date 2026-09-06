@@ -611,11 +611,11 @@
     },
     {
       "unit": "AGENTS.md > Where the Rules Live",
-      "digest": "sha256:8d682d3691ebac23f8df9de5312b7c7448e8b073d7811ca74c69b6577a0ebc62",
+      "digest": "sha256:ce4edaf6e8818b89bab224a63e6c4b7df0616d7f1f27a5fef17b7eda7e47b7dc",
       "reviewer": "agent-skill",
-      "findings": 3,
+      "findings": 5,
       "hubCommit": "66d79460335379301db83fe6870303f8f701d92b",
-      "stamp": "2026-09-06T01:10:45Z"
+      "stamp": "2026-09-06T05:06:22Z"
     },
     {
       "unit": "AUDIT.md > 10. Converge: Apply the Fixes",
