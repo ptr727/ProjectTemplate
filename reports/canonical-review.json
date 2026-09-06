@@ -523,11 +523,11 @@
     },
     {
       "unit": ".agents/skills/workflow-ci-contract/SKILL.md > How the Contract Is Read",
-      "digest": "sha256:30f01af1ea7cee7186211482a81f4065068b8b92c257e243cc002abc70a94be5",
+      "digest": "sha256:d1c4af2c63eae9841c3ca5755a76f94f290367f5fb7cb5be1810d7e3be5ef028",
       "reviewer": "agent-skill",
       "findings": 0,
       "hubCommit": "2d63d52cbb8bd8a6d42846ddbdda18737c069187",
-      "stamp": "2026-09-06T19:45:19Z"
+      "stamp": "2026-09-06T20:18:39Z"
     },
     {
       "unit": ".agents/skills/workflow-ci-contract/SKILL.md > Style Rules",
@@ -595,11 +595,11 @@
     },
     {
       "unit": ".agents/skills/workflow-ci-contract/references/test-methodology.md > (preamble)",
-      "digest": "sha256:6b1c53370988684a68e4f19d9f3c7065f51abfa948e7b7c95825cd72dc50ddfd",
+      "digest": "sha256:12773b882e5a37f82e1f710eb8081887a46daf54e7da5535509f46a77d24d18d",
       "reviewer": "agent-skill",
-      "findings": 2,
+      "findings": 0,
       "hubCommit": "2d63d52cbb8bd8a6d42846ddbdda18737c069187",
-      "stamp": "2026-09-06T19:56:38Z"
+      "stamp": "2026-09-06T20:21:42Z"
     },
     {
       "unit": ".agents/skills/workflow-ci-contract/references/test-methodology.md > 5A: Static Audit",
@@ -627,11 +627,11 @@
     },
     {
       "unit": ".agents/skills/workflow-ci-contract/references/test-methodology.md > The Test Methodology",
-      "digest": "sha256:0fb34dc2ff628acd5668fc606bf0c6bf016c9558592dd939109bb2c72479722a",
+      "digest": "sha256:5194ff2a1f7bb85ef300bddf83016e3d96807d2a5fed9533414cf928109f8037",
       "reviewer": "agent-skill",
       "findings": 0,
       "hubCommit": "2d63d52cbb8bd8a6d42846ddbdda18737c069187",
-      "stamp": "2026-09-06T19:30:43Z"
+      "stamp": "2026-09-06T20:18:39Z"
     },
     {
       "unit": ".agents/skills/workflow-ci-contract/references/test-methodology.md > Verdict",
@@ -803,11 +803,11 @@
     },
     {
       "unit": "WORKFLOW.md > 5. Test Methodology",
-      "digest": "sha256:85cd330a5e8c8102f283425a744a63709b556687ffb485d73c37f636ac197f49",
+      "digest": "sha256:03e87dcc7b8a745aab8dccc8b2bd7558e948f880e31f1c063074dae9b2ebfd6f",
       "reviewer": "agent-skill",
       "findings": 1,
       "hubCommit": "2d63d52cbb8bd8a6d42846ddbdda18737c069187",
-      "stamp": "2026-09-06T19:30:43Z"
+      "stamp": "2026-09-06T20:18:39Z"
     },
     {
       "unit": "WORKFLOW.md > 6. Per-Project-Type Test Walkthroughs",
