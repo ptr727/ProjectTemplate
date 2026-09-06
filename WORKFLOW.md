@@ -8,7 +8,7 @@ Given this document and the `GOVERNANCE.md` sections it points at, an agent must
 
 1. **Audit** - statically check the workflows against the style conventions that section 2 points at and the structural facts each guarantee implies (section 5A).
 2. **Test** - trace the expected inputs/outputs (section 5B) and, where warranted, drive a live probe (section 5C).
-3. **Assess** - render a verdict: **operational** (every *applicable* guarantee holds and every *applicable* scenario's observed output equals the expected) or **not operational** (any mismatch, which is a *defect*, not a style nit).
+3. **Assess** - render a verdict: **operational** (every *applicable* guarantee holds, every *applicable* scenario's predicted output equals the expected, and no 5C probe that was run contradicts either) or **not operational** (any *applicable* mismatch, which is a *defect*).
 
 > **Canonical scope.** This document is authoritative for the workflow contract and test methodology (sections 3 to 6). The style conventions live in `GOVERNANCE.md` "Workflow YAML Conventions", which section 2 points at rather than restating, and the release policy in `GOVERNANCE.md` "Release Model". `GOVERNANCE.md` is authoritative wherever this document overlaps it, so on any such conflict it wins.
 
