@@ -1,6 +1,6 @@
 # Testing a Repo's Workflows
 
-The section below is `WORKFLOW.md` section 5, whole. Which of its guarantees and scenarios bind a given repository is `WORKFLOW.md` section 1's applicability rule, and the D-guarantees each one answers to are `WORKFLOW.md` section 4, carried whole in `d-guarantees.md` beside this file.
+The section below is `WORKFLOW.md` section 5, whole. Which of its 5A items and 5B scenarios bind a given repository is `WORKFLOW.md` section 1's applicability rule, and the D-guarantees they exercise are `WORKFLOW.md` section 4, carried whole in `d-guarantees.md` beside this file.
 
 ## The Test Methodology
 

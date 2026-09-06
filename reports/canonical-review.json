@@ -595,11 +595,11 @@
     },
     {
       "unit": ".agents/skills/workflow-ci-contract/references/test-methodology.md > (preamble)",
-      "digest": "sha256:04a209df70ae8ddf112cbe6622e77186304bbdd4468c67253d4c98f0ad934149",
+      "digest": "sha256:6b1c53370988684a68e4f19d9f3c7065f51abfa948e7b7c95825cd72dc50ddfd",
       "reviewer": "agent-skill",
-      "findings": 0,
+      "findings": 2,
       "hubCommit": "2d63d52cbb8bd8a6d42846ddbdda18737c069187",
-      "stamp": "2026-09-06T19:30:43Z"
+      "stamp": "2026-09-06T19:56:38Z"
     },
     {
       "unit": ".agents/skills/workflow-ci-contract/references/test-methodology.md > 5A: Static Audit",
