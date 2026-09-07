@@ -18,6 +18,11 @@ runs:
       env:
         BASE: ${{ inputs.base }}
         PATHS: ${{ inputs.paths }}
+        # A caller reaches this gate at whatever hub commit its workflow pins, and only the action knows which one that is, since a checked-out action carries no history to read it from.
+        # Unnamed, a finding from a stale pin reproduces against no local run and reads as a gate defect rather than as a version gap, which is the reading it got on #1412.
+        # Empty for a local action, where the script falls back to its own checkout.
+        ACTION_REPOSITORY: ${{ github.action_repository }}
+        ACTION_REF: ${{ github.action_ref }}
       run: |
         set -Eeuo pipefail
         # Check the base resolves before scanning, so an empty or absent ref fails naming itself.
@@ -68,7 +73,14 @@ runs:
           done < "$exclude_file"
           echo "Excluding ${#excluded_paths[@]} path(s) from $exclude_file: ${excluded_paths[*]}"
         fi
+        # Both halves are set together or not at all, so one test covers the pair.
+        # A local action leaves them empty, and naming a repository with no ref would be worse than naming nothing, since the point of the value is to identify one commit.
+        # Defaulted rather than read bare, since `set -u` makes an unset variable fatal and a harness that runs this block outside Actions sets neither.
+        provenance_args=()
+        if [ -n "${ACTION_REPOSITORY:-}" ] && [ -n "${ACTION_REF:-}" ]; then
+          provenance_args=(--provenance "${ACTION_REPOSITORY}@${ACTION_REF}")
+        fi
         # Options first, then `--`, so every remaining token is read as a literal path.
         # A path-shaped token beginning with a dash would otherwise parse as an option, and
         # `--list-files` in that position turns the gate into a file listing that exits 0.
-        python3 "$GITHUB_ACTION_PATH/prose_lint.py" --diff "$BASE" "${exclude_args[@]}" -- "${scan[@]}"
+        python3 "$GITHUB_ACTION_PATH/prose_lint.py" --diff "$BASE" "${exclude_args[@]}" "${provenance_args[@]}" -- "${scan[@]}"

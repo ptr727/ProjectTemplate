@@ -2969,6 +2969,85 @@ class TestDeadPath(unittest.TestCase):
         self.assertEqual([], hits)
 
 
+class TestTheVerdictNamesTheCopyThatRaisedIt(unittest.TestCase):
+    """Which copy of the gate produced a verdict, stated rather than inferred from the finding.
+
+    A repository reaches this gate at whatever hub commit its own workflow pins, so CI and a hub
+    checkout run different copies from the moment a rule changes until that pin moves. On
+    #1412 that gap cost a full investigation: three dead-path findings raised by a pin one commit
+    behind the exemption that silences them reproduced against no local run, and with neither
+    verdict naming its copy the only available readings were a wrong invocation or a defect in
+    the action, which is what the issue proposed. Both were wrong and the version gap was not
+    among the candidates, because nothing in the output pointed at one.
+
+    So the property under test is that every verdict carries an attribution, and that the
+    attribution is never guessed: an unresolvable source reports unknown rather than a plausible
+    value, since a wrong attribution sends the next investigation somewhere worse than no
+    attribution does.
+    """
+
+    def test_an_explicit_value_outranks_the_environment(self) -> None:
+        """The action knows the pin and the environment does not, so the action's value wins."""
+        with mock.patch.dict(os.environ, {"PROSE_GATE_PROVENANCE": "from-env@aaaaaaa"}):
+            self.assertEqual("owner/repo@bbbbbbb", prose_lint.gate_provenance("owner/repo@bbbbbbb"))
+
+    def test_the_environment_answers_a_caller_that_passes_no_flag(self) -> None:
+        """A caller invoking the script directly carries the value the same way the action does."""
+        with mock.patch.dict(os.environ, {"PROSE_GATE_PROVENANCE": "owner/repo@ccccccc"}):
+            self.assertEqual("owner/repo@ccccccc", prose_lint.gate_provenance())
+
+    def test_a_checkout_answers_for_itself(self) -> None:
+        """A local run reads its own commit, which is the value a CI verdict is compared against."""
+        with mock.patch.dict(os.environ, {}, clear=False):
+            os.environ.pop("PROSE_GATE_PROVENANCE", None)
+            got = prose_lint.gate_provenance()
+        self.assertRegex(got, r"^local [0-9a-f]{7,40}$")
+
+    def test_a_copy_under_no_checkout_reports_unknown_rather_than_guessing(self) -> None:
+        """The one case where a plausible value would be worse than an absent one.
+
+        Run as a subprocess against a copy outside any repository, because the resolution keys on
+        the module file's own location and an in-process call cannot move it.
+        """
+        tmp = Path(self.enterContext(tempfile.TemporaryDirectory()))
+        detached = tmp / "prose_lint.py"
+        detached.write_text(
+            (REPO / ".github/actions/prose-gate/prose_lint.py").read_text(encoding="utf-8"),
+            encoding="utf-8",
+        )
+        target = tmp / "sample.md"
+        target.write_text("# Sample\n\nOne clean line.\n", encoding="utf-8")
+        env = {k: v for k, v in os.environ.items() if k != "PROSE_GATE_PROVENANCE"}
+        r = subprocess.run(
+            [sys.executable, str(detached), "--check", "dead-path", str(target)],
+            capture_output=True,
+            text=True,
+            check=False,
+            env=env,
+        )
+        self.assertIn("gate unknown", r.stderr)
+
+    def test_both_scope_shapes_carry_the_attribution(self) -> None:
+        """A whole-tree verdict and a diff-scoped one are two formats, so each is asserted."""
+        whole = prose_lint.scope_note(3, 3, None, None, "owner/repo@ddddddd")
+        scoped = prose_lint.scope_note(3, 9, 40, "origin/develop", "owner/repo@ddddddd")
+        self.assertIn("gate owner/repo@ddddddd", whole)
+        self.assertIn("gate owner/repo@ddddddd", scoped)
+
+    def test_the_action_passes_its_own_pin_to_the_script(self) -> None:
+        """The action is the only surface that knows the pin, so the wiring is gated here.
+
+        A checked-out action carries no history of its own, so the script cannot read the pin
+        even though it stands inside the checkout. Losing this wiring returns every CI verdict to
+        the unattributed state without failing anything else.
+        """
+        text = PROSE_GATE_ACTION.read_text(encoding="utf-8")
+        self.assertIn("github.action_repository", text)
+        self.assertIn("github.action_ref", text)
+        self.assertIn("--provenance", text)
+        self.assertIn('"${provenance_args[@]}"', text)
+
+
 class TestHarness(unittest.TestCase):
     def test_this_module_collects_a_plausible_number_of_cases(self) -> None:
         """A module whose cases fail to load still reports OK, which is a pass proving nothing."""

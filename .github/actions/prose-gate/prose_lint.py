@@ -25,6 +25,7 @@ import argparse
 import functools
 import io
 import json
+import os
 import re
 import subprocess
 import sys
@@ -264,7 +265,46 @@ def unread_diff_files(
     return out
 
 
-def scope_note(read: int, discovered: int, lines: int | None, base: str | None) -> str:
+def gate_provenance(explicit: str | None = None) -> str:
+    """Which copy of this gate produced the verdict, named so a finding can be attributed to one.
+
+    A repository reaches this gate through a pinned hub commit, so the copy CI runs is the one
+    that pin names rather than the one a hub checkout holds. The two disagree from the moment a
+    rule changes until the pin moves, and a finding raised by the older copy then reproduces
+    against no local run at all. Unattributed, that reads as a defect in the gate rather than as
+    a version gap, which is the reading it actually got: three dead-path findings were carried
+    into a resync as real work, and the pin was a single commit behind the exemption that
+    silenced them.
+
+    Three sources answer, in the order they can be trusted. An explicit value is the composite
+    action stating its own `owner/repo@ref`, which is the only source that knows the pin, since
+    a checked-out action carries no history of its own. The environment carries the same value
+    for a caller that invokes the script directly. Otherwise this script's own directory answers,
+    because a local run is made from a checkout. None of the three resolving is reported as
+    unknown rather than guessed, since a wrong attribution is worse here than an absent one.
+    """
+    if explicit:
+        return explicit.strip()
+    env = os.environ.get("PROSE_GATE_PROVENANCE", "").strip()
+    if env:
+        return env
+    try:
+        r = subprocess.run(
+            ["git", "-C", str(Path(__file__).resolve().parent), "rev-parse", "--short", "HEAD"],
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+    except (OSError, ValueError):
+        return "unknown"
+    if r.returncode != 0 or not r.stdout.strip():
+        return "unknown"
+    return f"local {r.stdout.strip()}"
+
+
+def scope_note(
+    read: int, discovered: int, lines: int | None, base: str | None, provenance: str
+) -> str:
     """What the run actually read, stated on every verdict rather than only on a busy one.
 
     Five routes to a false clean are on record and every one of them exits 0 in silence: an
@@ -275,12 +315,16 @@ def scope_note(read: int, discovered: int, lines: int | None, base: str | None) 
     is that a scope of nothing prints exactly what a clean tree prints, which is a property of the
     output and not of any single route. Stating the scope is what a reader needs to tell "read
     nothing" from "found nothing", so it is printed even when the count is the whole tree.
+
+    The copy that read that scope is named beside it for the same reason. A scope answers what
+    was read and a provenance answers what read it, and a verdict reproducing nowhere is a
+    question about the second rather than about the first.
     """
     if base is None:
-        return f"scope: {read} file(s) read, whole tree"
+        return f"scope: {read} file(s) read, whole tree, gate {provenance}"
     return (
         f"scope: {read} of {discovered} file(s) read, {lines} changed line(s), "
-        f"diff against {base!r}"
+        f"diff against {base!r}, gate {provenance}"
     )
 
 
@@ -1657,6 +1701,12 @@ def main(argv: list[str] | None = None) -> int:
         help="only report violations on lines changed vs BASE "
         "(matches the repo policy: fix as each file is next edited, not swept)",
     )
+    ap.add_argument(
+        "--provenance",
+        metavar="REF",
+        help="name this copy of the gate on the verdict, as the composite action's "
+        "owner/repo@ref, so a finding can be attributed to the commit that raised it",
+    )
     a = ap.parse_args(argv)
 
     rules = set(a.checks or DEFAULT_RULES)
@@ -1776,7 +1826,10 @@ def main(argv: list[str] | None = None) -> int:
                 print(f"{keys[f]}:{ln}: {kind}: {msg}")
 
     inscope = sum(len(scope[keys[f]]) for f in files) if scope is not None else None
-    print(scope_note(len(files), discovered, inscope, a.diff), file=sys.stderr)
+    print(
+        scope_note(len(files), discovered, inscope, a.diff, gate_provenance(a.provenance)),
+        file=sys.stderr,
+    )
     if a.summary or total:
         print(f"\n{total} violation(s) across {len(byfile)} file(s)", file=sys.stderr)
         for k, v in sorted(bykind.items(), key=lambda kv: -kv[1]):

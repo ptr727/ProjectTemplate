@@ -278,6 +278,15 @@ In a configured editor the `DavidAnson.vscode-markdownlint` extension is enough 
 
 When pulling a public image fails on a Docker-Desktop/WSL credential-helper error (`docker-credential-desktop.exe: exec format error`), retry with an empty Docker config: `DOCKER_CONFIG=$(mktemp -d) docker run ...` after writing `{}` to `$DOCKER_CONFIG/config.json`.
 
+**Reproducing a prose-gate finding a downstream repository reports.** The gate a repository runs is the hub copy its own workflow pins, never the copy a hub checkout holds, so a rule that changed after that pin is a rule no local run has. Every prose-gate verdict names its own copy on the scope line, as `gate ptr727/ProjectTemplate@<sha>` under the action and as `gate local <sha>` from a checkout, and two different values there account for a finding that reproduces nowhere before anything else is investigated. Read the pin from the reporting repository's own workflow, then run that copy against the same worktree and the same diff base CI used:
+
+```sh
+git -C /path/to/ProjectTemplate show <pin>:.github/actions/prose-gate/prose_lint.py > "$SCRATCH/prose_lint_pinned.py"
+cd /path/to/target-worktree && python3 "$SCRATCH/prose_lint_pinned.py" --diff <base> .
+```
+
+A finding the pinned copy raises and the current copy does not is a stale pin rather than a defect in either copy, so the fix is to move the pin rather than to edit the content it flags. The `dead-path` rule reaches this state most often, because it keys on deletion history and therefore speaks only in a repository that tracked a path and removed it, which is never the hub.
+
 ## Supported Development Platforms
 
 - **Cross-platform by default: Windows + macOS + Linux.** Linux runs natively (a Linux desktop, or SSH/remote into a Linux host), through a devcontainer on Windows or macOS, or through WSL2 on Windows, where the devcontainer and WSL routes carry their own nuances (mounts, path translation, SSH-agent forwarding) but deliver the same toolchain. Editing is cross-platform through the GUI regardless of where code runs. Assume this default.
