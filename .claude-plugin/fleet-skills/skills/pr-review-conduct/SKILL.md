@@ -14,7 +14,8 @@ description: >-
   full diff, or left a suppressed low-confidence finding, which opens no thread at all,
   unanswered. Also triggers when a review loop looks stuck
   (no review landing, findings that keep reappearing) or when deciding a finding is real, false,
-  deferred, or a deliberate decline. Provider-specific mechanics are implemented by
+  deferred, or a deliberate decline. Also triggers when a reviewer looks missing or skipped.
+  Provider-specific mechanics are implemented by
   scripts/pr_review.py and bootstrapped by .github/copilot-instructions.md. This skill is the
   contract those surfaces implement, not a replacement for them.
 ---
@@ -82,6 +83,34 @@ visible comments, routinely still carries a finding nobody has answered. Treatin
 
 The agent never merges on its own. A green or CLEAN PR with one open finding is not mergeable,
 full stop, whatever the merge-state field says.
+
+## Which Reviewers a Repository Actually Has
+
+Which reviewers cover a repository is decided per repository, by product terms this fleet observes
+rather than sets. So respond to what the reviewers actually did on the pull request in front of
+you, rather than deciding from a repository property what a reviewer must have done.
+
+- **A reviewer that posted a skip notice is available for the asking.** It says it did not review
+  automatically, which is not the same as not reviewing at all. Comment `@coderabbitai review`, or
+  Qodo's `/review`, and wait for the result as with any other requested review. The agent driving
+  the loop posts that comment itself, on the same standing as requesting a review after a push.
+- **A notice naming when the reviewer can next run is a rate limit, and asking does not clear
+  it.** It reads like the skip notice above and is the opposite case: the trigger returns the same
+  notice rather than a review, so a loop that keeps asking waits on something no amount of asking
+  produces. Wait for the time it names, or proceed on the reviewers that did run, since an advisory
+  reviewer blocks nothing.
+- **Silence is not evidence, and is never read as one on its own.** A reviewer that has posted
+  nothing may not have started yet, may not cover this repository at all, or may have reviewed and
+  had nothing to say, which Merge Gate item 2 describes as its own ordinary shape and which posts
+  no comment to read. Read the reviews themselves rather than the comments alone, since the third
+  case appears only there.
+- **Copilot's absence is neither of those, and blocks.** Merge Gate item 2 requires Copilot's own
+  coverage of the current head, and the loop's own re-request step below is where a missing one is
+  answered, on the terms stated there.
+
+Where a reviewer's behavior still surprises you after reading what it posted, the hub's
+`docs/pr-reviewer-reference.md` records what each one does, what shapes it, and which repositories
+its plan covers, and correcting that file is how the surprise is settled.
 
 ## Expected review loop
 
