@@ -370,6 +370,30 @@
       "stamp": "2026-09-06T23:17:27Z"
     },
     {
+      "unit": ".agents/skills/operational-vs-release-workflow/references/branch-protection-and-promotion.md > App-token workflows use Client ID, not App ID",
+      "digest": "sha256:bf78fc6b7d55be6f8e4083509ccdb18bc471a0febdedaceb19852fe2e2a192dc",
+      "reviewer": "agent-skill",
+      "findings": 0,
+      "hubCommit": "fb782b667feeaa3f10aeb28ff2c3313e9657bd6d",
+      "stamp": "2026-09-07T14:31:21Z"
+    },
+    {
+      "unit": ".agents/skills/operational-vs-release-workflow/references/branch-protection-and-promotion.md > Configuring branch protection: don't hand-build the rules",
+      "digest": "sha256:48488780261df43c5db01323e82a6937efb5b60f9c33bb229a862a72e4347590",
+      "reviewer": "agent-skill",
+      "findings": 5,
+      "hubCommit": "fb782b667feeaa3f10aeb28ff2c3313e9657bd6d",
+      "stamp": "2026-09-07T14:34:33Z"
+    },
+    {
+      "unit": ".agents/skills/operational-vs-release-workflow/references/branch-protection-and-promotion.md > Executing a `develop -> main` promotion safely",
+      "digest": "sha256:c0ab51bf9895d2a63ba207918b36b41e49388409a5a495392cdce733f0cd1736",
+      "reviewer": "agent-skill",
+      "findings": 2,
+      "hubCommit": "fb782b667feeaa3f10aeb28ff2c3313e9657bd6d",
+      "stamp": "2026-09-07T14:31:21Z"
+    },
+    {
       "unit": ".agents/skills/operational-vs-release-workflow/references/release-publish-mechanics.md > (preamble)",
       "digest": "sha256:03b65b37ef0079e48a7628641dab7f0b79b326782127ed841928aa9235703e8b",
       "reviewer": "agent-skill",
@@ -418,6 +442,14 @@
       "stamp": "2026-09-06T23:31:52Z"
     },
     {
+      "unit": ".agents/skills/pr-review-conduct/SKILL.md > (preamble)",
+      "digest": "sha256:53ffb6ff2908ab41d85ef3f390a649d731d65627303056a4c9644d6ce66b1e91",
+      "reviewer": "agent-skill",
+      "findings": 1,
+      "hubCommit": "34f00e240120f84bcd950166a27090ae0ec22e01",
+      "stamp": "2026-09-07T15:32:49Z"
+    },
+    {
       "unit": ".agents/skills/pr-review-conduct/SKILL.md > Answering a suppressed finding",
       "digest": "sha256:7d1d9acd0646b16f9a41debbc44b97926a8bb43b515ab00e1298d32efb898fc7",
       "reviewer": "agent-skill",
@@ -464,6 +496,14 @@
       "findings": 10,
       "hubCommit": "4ee4669af5930d842c07ff5daabda6ee0ef621bd",
       "stamp": "2026-09-05T00:57:49Z"
+    },
+    {
+      "unit": ".agents/skills/pr-review-conduct/SKILL.md > Which Reviewers a Repository Actually Has",
+      "digest": "sha256:894141ec9940cce894abfebc02d65abe0306d5060080b09606d95623d8301a59",
+      "reviewer": "agent-skill",
+      "findings": 0,
+      "hubCommit": "aaaae368fcf0653f37069a3adee97606a5f072ca",
+      "stamp": "2026-09-07T14:06:06Z"
     },
     {
       "unit": ".agents/skills/python-codestyle/SKILL.md > Local development loop",

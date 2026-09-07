@@ -2969,6 +2969,328 @@ class TestDeadPath(unittest.TestCase):
         self.assertEqual([], hits)
 
 
+class TestAnEmptyExclusionIsRefused(unittest.TestCase):
+    """The exclusion that matches everything, refused rather than applied.
+
+    An exclusion is a substring test, so the empty one is a substring of every key and empties
+    the scan while the run exits 0. That is the false-clean shape the scope line exists to make
+    visible, arriving through an argument rather than through a resolution, and a scope of zero
+    prints beside an exit of zero exactly as a clean tree does.
+
+    It is reachable rather than theoretical. The composite action skips a blank line when it
+    builds the arguments from a repository's exclusions file, and a reader reproducing those
+    arguments by hand, which the runbook asks for, has no such step unless it is stated.
+    """
+
+    def run_gate(self, *args: str) -> subprocess.CompletedProcess[str]:
+        root = Path(self.enterContext(tempfile.TemporaryDirectory()))
+        (root / "sample.md").write_text(
+            "# Sample\n\nA line with a repeated the the word.\n", encoding="utf-8"
+        )
+        return subprocess.run(
+            [
+                sys.executable,
+                str(REPO / ".github/actions/prose-gate/prose_lint.py"),
+                *args,
+                "--",
+                str(root),
+            ],
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+
+    def test_an_empty_exclusion_refuses_rather_than_emptying_the_scan(self) -> None:
+        """Exit 2 is the refusal code the other unusable-argument guard already uses."""
+        r = self.run_gate("--check", "dupword", "--exclude", "")
+        self.assertEqual(2, r.returncode, r.stdout + r.stderr)
+        self.assertIn("--exclude was given an empty value", r.stderr)
+
+    def test_a_whitespace_only_exclusion_is_refused_too(self) -> None:
+        """A blank line carrying a space or a tab is the shape a file actually holds."""
+        self.assertEqual(2, self.run_gate("--check", "dupword", "--exclude", "  ").returncode)
+
+    def test_blank_is_judged_the_way_the_action_judges_it(self) -> None:
+        """The guard must not refuse a value the action itself builds and passes.
+
+        The action's trim always removes ASCII whitespace and, in a UTF-8 locale, more besides,
+        while Python's `str.strip` covers a wider set again, so a line holding only a non-breaking
+        space can survive that trim and arrive here as a non-empty argument. Judged by the wider set it would be read as
+        blank and refused, failing that repository's gate on every run over an exclusion that is
+        merely inert.
+        """
+        r = self.run_gate("--check", "dupword", "--exclude", "\u00a0")
+        self.assertNotEqual(2, r.returncode, r.stdout + r.stderr)
+        self.assertNotIn("empty value", r.stderr)
+
+    def test_a_real_exclusion_still_applies(self) -> None:
+        """The guard refuses the empty value without narrowing what an exclusion can name."""
+        found = self.run_gate("--check", "dupword")
+        self.assertEqual(1, found.returncode, found.stdout + found.stderr)
+        excluded = self.run_gate("--check", "dupword", "--exclude", "sample.md")
+        self.assertEqual(0, excluded.returncode, excluded.stdout + excluded.stderr)
+
+
+class TestTheVerdictNamesTheCopyThatRaisedIt(unittest.TestCase):
+    """Which copy of the gate produced a verdict, stated rather than inferred from the finding.
+
+    A repository reaches this gate at whatever hub commit its own workflow pins, so CI and a hub
+    checkout run different copies from the moment a rule changes until that pin moves. On #1412
+    that gap cost a full investigation: three dead-path findings raised by a pin one commit behind
+    the exemption that silences them reproduced against no local run, and with neither verdict
+    naming its copy the only available readings were a wrong invocation or a defect in the action,
+    which is what the issue proposed. Both were wrong and the version gap was not among the
+    candidates, because nothing in the output pointed at one.
+
+    So the property under test is that every verdict carries an attribution and that the
+    attribution is never guessed. The second half is the harder one and it is where the cases
+    concentrate: a checkout containing the script is not a commit describing it, and both ways
+    those come apart produce a well-formed value naming content that was never run.
+    """
+
+    def repo_with_script(self, tracked: bool = True) -> tuple[Path, Path, str]:
+        """A throwaway repository holding a copy of the gate, tracked or merely present."""
+        root = Path(self.enterContext(tempfile.TemporaryDirectory()))
+        subprocess.run(["git", "init", "-q", str(root)], check=True)
+        (root / "seed.txt").write_text("seed\n", encoding="utf-8")
+        script = root / "prose_lint.py"
+        script.write_text(
+            (REPO / ".github/actions/prose-gate/prose_lint.py").read_text(encoding="utf-8"),
+            encoding="utf-8",
+        )
+        add = ["add", "seed.txt", "prose_lint.py"] if tracked else ["add", "seed.txt"]
+        for args in (add, ["commit", "-qm", "base"]):
+            subprocess.run(
+                [
+                    "git",
+                    "-C",
+                    str(root),
+                    "-c",
+                    "user.email=gate@example.invalid",
+                    "-c",
+                    "user.name=gate test",
+                    "-c",
+                    "commit.gpgsign=false",
+                    *args,
+                ],
+                check=True,
+                capture_output=True,
+            )
+        head = subprocess.run(
+            ["git", "-C", str(root), "rev-parse", "--short", "HEAD"],
+            capture_output=True,
+            text=True,
+            check=True,
+        ).stdout.strip()
+        return root, script, head
+
+    def verdict(self, script: Path) -> str:
+        """The scope line the given copy prints, read from a real run rather than from a call."""
+        target = script.parent / "sample.md"
+        target.write_text("# Sample\n\nOne clean line.\n", encoding="utf-8")
+        env = {k: v for k, v in os.environ.items() if k != "PROSE_GATE_PROVENANCE"}
+        r = subprocess.run(
+            [sys.executable, str(script), "--check", "dead-path", str(target)],
+            capture_output=True,
+            text=True,
+            check=False,
+            env=env,
+        )
+        return r.stderr
+
+    def test_an_explicit_value_outranks_the_environment(self) -> None:
+        """The action knows the pin and the environment does not, so the action's value wins."""
+        with mock.patch.dict(os.environ, {"PROSE_GATE_PROVENANCE": "from-env@aaaaaaa"}):
+            self.assertEqual("owner/repo@bbbbbbb", prose_lint.gate_provenance("owner/repo@bbbbbbb"))
+
+    def test_a_whitespace_only_flag_falls_through_rather_than_emptying_the_label(self) -> None:
+        """A truthy value that strips to nothing would print the label with nothing after it.
+
+        Tested before stripping rather than after, so a source carrying no value falls through to
+        the next one, which is what carrying none means.
+        """
+        with mock.patch.dict(os.environ, {"PROSE_GATE_PROVENANCE": "owner/repo@eeeeeee"}):
+            self.assertEqual("owner/repo@eeeeeee", prose_lint.gate_provenance("   "))
+
+    def test_the_environment_answers_a_caller_that_passes_no_flag(self) -> None:
+        """A caller invoking the script directly carries the value the same way the action does."""
+        with mock.patch.dict(os.environ, {"PROSE_GATE_PROVENANCE": "owner/repo@ccccccc"}):
+            self.assertEqual("owner/repo@ccccccc", prose_lint.gate_provenance())
+
+    def test_a_checkout_that_tracks_the_script_names_its_own_commit(self) -> None:
+        """The value is asserted against that repository's actual HEAD, not against a shape.
+
+        The absence of the moved marker is asserted alongside it, since `gate local <head>` is a
+        prefix of `gate local <head>-dirty` and a case reading only for the prefix passes on a
+        resolution that calls every clean copy moved. Dropping the pathspec from the status query
+        does exactly that, because this class writes an untracked sample file into the repository
+        it builds.
+        """
+        _, script, head = self.repo_with_script()
+        out = self.verdict(script)
+        self.assertIn(f"gate local {head}", out)
+        self.assertNotIn("-dirty", out)
+
+    def test_an_edited_working_copy_is_named_as_moved(self) -> None:
+        """The commit no longer describes the file, which is the state of any branch changing a rule.
+
+        Without this the run that most needs an accurate attribution, the one made while editing
+        the rule, is the one that gets the pre-edit commit and no sign that it moved.
+        """
+        _, script, head = self.repo_with_script()
+        with script.open("a", encoding="utf-8") as fh:
+            fh.write("# Edited after the commit.\n")
+        self.assertIn(f"gate local {head}-dirty", self.verdict(script))
+
+    def test_an_untracked_copy_is_attributed_to_nothing(self) -> None:
+        """The failure a bare HEAD read cannot see, since it returns a well-formed wrong answer.
+
+        The repository's HEAD resolves and describes content this copy never held. What is gated
+        here is trackedness rather than repository identity: a copy committed into an unrelated
+        repository is tracked and clean there and is still named by that repository's HEAD, which
+        the resolution's own docstring states it does not close.
+        """
+        _, script, head = self.repo_with_script(tracked=False)
+        out = self.verdict(script)
+        self.assertIn("gate unknown", out)
+        self.assertNotIn(head, out)
+
+    def test_a_copy_under_no_checkout_reports_unknown_rather_than_guessing(self) -> None:
+        """The plain case, a copy extracted to a scratch directory, which the runbook documents."""
+        tmp = Path(self.enterContext(tempfile.TemporaryDirectory()))
+        script = tmp / "prose_lint.py"
+        script.write_text(
+            (REPO / ".github/actions/prose-gate/prose_lint.py").read_text(encoding="utf-8"),
+            encoding="utf-8",
+        )
+        self.assertIn("gate unknown", self.verdict(script))
+
+    def test_an_inherited_git_location_does_not_decide_the_answer(self) -> None:
+        """A git hook exports these, and they outrank `-C`, so a hooked run would answer about the
+        repository that invoked the hook rather than about the copy that is running.
+
+        Reproduced on this branch: the pre-commit run printed `unknown` where the same command
+        printed the commit a moment earlier, and the value that arrives instead is not always
+        harmless, since another arrangement names a real commit in the wrong repository.
+        """
+        _, script, head = self.repo_with_script()
+        other = Path(self.enterContext(tempfile.TemporaryDirectory()))
+        subprocess.run(["git", "init", "-q", str(other)], check=True)
+        target = script.parent / "sample.md"
+        target.write_text("# Sample\n\nOne clean line.\n", encoding="utf-8")
+        env = {k: v for k, v in os.environ.items() if k != "PROSE_GATE_PROVENANCE"}
+        env["GIT_DIR"] = str(other / ".git")
+        r = subprocess.run(
+            [sys.executable, str(script), "--check", "dead-path", str(target)],
+            capture_output=True,
+            text=True,
+            check=False,
+            env=env,
+        )
+        self.assertIn(f"gate local {head}", r.stderr)
+        self.assertNotIn("-dirty", r.stderr)
+
+    def test_both_scope_shapes_carry_the_attribution(self) -> None:
+        """A whole-tree verdict and a diff-scoped one are two formats, so each is asserted."""
+        whole = prose_lint.scope_note(3, 3, None, None, "owner/repo@ddddddd")
+        scoped = prose_lint.scope_note(3, 9, 40, "origin/develop", "owner/repo@ddddddd")
+        self.assertIn("gate owner/repo@ddddddd", whole)
+        self.assertIn("gate owner/repo@ddddddd", scoped)
+
+
+class TestTheActionPassesItsOwnPin(unittest.TestCase):
+    """The one surface that knows the pin, gated by running its script rather than by reading it.
+
+    A checked-out action carries no history of its own, so the script standing inside it cannot
+    resolve the pin and only the action can state it. Asserting that the file mentions the right
+    identifiers passes just as well when the guard is inverted, when the `@` is dropped, or when
+    the argument moves after the `--` that ends option parsing, so the block is executed and the
+    argument vector it builds is what the cases read.
+    """
+
+    def run_block(self, extra: dict[str, str]) -> list[str]:
+        """The action's own shell, against a stub that reports the argument vector it received."""
+        root = Path(self.enterContext(tempfile.TemporaryDirectory()))
+        subprocess.run(["git", "init", "-q", str(root)], check=True)
+        (root / "sample.md").write_text("Clean prose.\n", encoding="utf-8")
+        for args in (["add", "-A"], ["commit", "-qm", "base"]):
+            subprocess.run(
+                [
+                    "git",
+                    "-C",
+                    str(root),
+                    "-c",
+                    "user.email=gate@example.invalid",
+                    "-c",
+                    "user.name=gate test",
+                    "-c",
+                    "commit.gpgsign=false",
+                    *args,
+                ],
+                check=True,
+                capture_output=True,
+            )
+        stub_dir = Path(self.enterContext(tempfile.TemporaryDirectory()))
+        (stub_dir / "prose_lint.py").write_text(
+            "import json, sys\nprint(json.dumps(sys.argv[1:]))\n", encoding="utf-8"
+        )
+        action = PROSE_GATE_ACTION.read_text(encoding="utf-8")
+        _, block = action.split("      run: |\n", 1)
+        lines = []
+        for line in block.splitlines():
+            if line.startswith("        "):
+                lines.append(line.removeprefix("        "))
+            elif not line:
+                lines.append(line)
+            else:
+                break
+        env = {k: v for k, v in os.environ.items() if not k.startswith(("ACTION_", "GITHUB_"))}
+        env |= {"BASE": "HEAD", "PATHS": ".", "GITHUB_ACTION_PATH": str(stub_dir)}
+        env |= extra
+        r = subprocess.run(
+            ["bash", "-c", "\n".join(lines)],
+            cwd=str(root),
+            capture_output=True,
+            text=True,
+            check=False,
+            env=env,
+        )
+        self.assertEqual(0, r.returncode, r.stdout + r.stderr)
+        return json.loads(r.stdout.strip().splitlines()[-1])
+
+    def test_the_context_value_reaches_the_script_before_the_path_separator(self) -> None:
+        """After `--` the argument is read as a path, so its position is as load-bearing as its value."""
+        argv = self.run_block({"ACTION_REPOSITORY": "owner/repo", "ACTION_REF": "deadbee"})
+        self.assertIn("--provenance", argv)
+        self.assertEqual("owner/repo@deadbee", argv[argv.index("--provenance") + 1])
+        self.assertLess(argv.index("--provenance"), argv.index("--"))
+
+    def test_the_default_environment_variables_answer_when_the_context_is_empty(self) -> None:
+        """A reference form populating only the environment still names the pin.
+
+        The context's value for a repository-relative reference is undocumented, and this is the
+        fallback that keeps a downstream verdict attributed if it turns out to be empty.
+        """
+        argv = self.run_block(
+            {"GITHUB_ACTION_REPOSITORY": "owner/repo", "GITHUB_ACTION_REF": "cafe123"}
+        )
+        self.assertEqual("owner/repo@cafe123", argv[argv.index("--provenance") + 1])
+
+    def test_neither_source_set_passes_no_flag_rather_than_half_a_value(self) -> None:
+        """A caller naming the action by a workspace-relative path, where the script answers instead.
+
+        What this repository's own run resolves to is deliberately not asserted here. It reaches
+        the gate through a repository-qualified self-reference, and what that populates is read
+        off a real run rather than predicted, which is the whole point of naming the copy.
+        """
+        self.assertNotIn("--provenance", self.run_block({}))
+
+    def test_half_a_value_is_not_passed(self) -> None:
+        """A repository with no ref names no commit, so it is worse than naming nothing."""
+        self.assertNotIn("--provenance", self.run_block({"ACTION_REPOSITORY": "owner/repo"}))
+        self.assertNotIn("--provenance", self.run_block({"ACTION_REF": "deadbee"}))
+
+
 class TestHarness(unittest.TestCase):
     def test_this_module_collects_a_plausible_number_of_cases(self) -> None:
         """A module whose cases fail to load still reports OK, which is a pass proving nothing."""

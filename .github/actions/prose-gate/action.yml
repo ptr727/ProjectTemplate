@@ -18,6 +18,14 @@ runs:
       env:
         BASE: ${{ inputs.base }}
         PATHS: ${{ inputs.paths }}
+        # A caller reaches this gate at whatever hub commit its workflow pins, and only the action knows which one that is, since a checked-out action carries no history to read it from.
+        # Unnamed, a finding from a stale pin reproduces against no local run and reads as a gate defect rather than as a version gap, which is the reading it got on #1412.
+        # Both the context and the default environment variable are read, because the context's value for a repository-relative reference is undocumented and the two are populated by different paths.
+        # Either being empty leaves the script to fall back to its own checkout, which is the correct answer whenever the action was not fetched from a pin.
+        # This repository calls the reusable workflow by a workspace-relative path, so its own runs may well take that fallback, and a downstream repository calling it at a pin is the case these exist for.
+        # What each form populates is read off a real run rather than predicted here, since predicting it is what a verdict naming its own copy exists to stop anyone having to do.
+        ACTION_REPOSITORY: ${{ github.action_repository }}
+        ACTION_REF: ${{ github.action_ref }}
       run: |
         set -Eeuo pipefail
         # Check the base resolves before scanning, so an empty or absent ref fails naming itself.
@@ -68,7 +76,16 @@ runs:
           done < "$exclude_file"
           echo "Excluding ${#excluded_paths[@]} path(s) from $exclude_file: ${excluded_paths[*]}"
         fi
+        # The context is preferred and the default environment variable is the fallback, so a reference form that populates only one of them still names the pin.
+        # Naming a repository with no ref, or a ref with no repository, would be worse than naming nothing, since the value exists to identify one commit.
+        # Defaulted rather than read bare, since `set -u` makes an unset variable fatal and a harness that runs this block outside Actions sets neither.
+        action_repository="${ACTION_REPOSITORY:-${GITHUB_ACTION_REPOSITORY:-}}"
+        action_ref="${ACTION_REF:-${GITHUB_ACTION_REF:-}}"
+        provenance_args=()
+        if [ -n "$action_repository" ] && [ -n "$action_ref" ]; then
+          provenance_args=(--provenance "${action_repository}@${action_ref}")
+        fi
         # Options first, then `--`, so every remaining token is read as a literal path.
         # A path-shaped token beginning with a dash would otherwise parse as an option, and
         # `--list-files` in that position turns the gate into a file listing that exits 0.
-        python3 "$GITHUB_ACTION_PATH/prose_lint.py" --diff "$BASE" "${exclude_args[@]}" -- "${scan[@]}"
+        python3 "$GITHUB_ACTION_PATH/prose_lint.py" --diff "$BASE" "${exclude_args[@]}" "${provenance_args[@]}" -- "${scan[@]}"
