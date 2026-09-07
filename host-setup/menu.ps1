@@ -62,8 +62,9 @@ Usage: menu.ps1 [options]
 
 An interactive menu over this fleet's host and repo tooling: update the host tools, upgrade the
 OS packages, install the fleet skills, audit a cataloged repo, and pull the hub's verbatim-owned
-files into a downstream repo's own worktree. Run from a hub checkout or from any other repo. The
-menu shows each the tasks that apply to it.
+files, or just the verbatim rule sections inside a mixed file, into a downstream repo's own
+worktree. Run from a hub checkout or from any other repo. Only the tasks that apply to that
+checkout are shown.
 
 Options:
   -y, -Yes          Pass -Yes to each tool this menu runs, so a tool does not prompt. The menu's
@@ -488,7 +489,7 @@ function Show-Menu {
     log '   9  Report fleet Skills install status'
     log '  10  Install or update the fleet Skills'
     log ''
-    log 'Hub, ptr727/ProjectTemplate:'
+    log "Hub, $($script:HUB_REPO):"
     log '  11  Audit a cataloged repo'
     log '  12  Check the generated Skills distributions are current'
     # Also gated on REF: scripts/carry.py always rejects a hub checkout that is not exactly on the default ref.
@@ -497,6 +498,8 @@ function Show-Menu {
         log 'Downstream, the repo this menu is run from:'
         log '  13  Check what the hub would change here, change nothing'
         log "  14  Pull the hub's verbatim-owned files into this repo"
+        log "  15  Check the hub's verbatim rule sections inside this repo's mixed files"
+        log '  16  Pull those rule sections in, leaving every other section alone'
     }
     log ''
     log '   q  Quit'
@@ -524,6 +527,11 @@ function Invoke-Dispatch {
             # -DryRun changes nothing, and scripts/carry.py itself has no dry-run mode, so a dry-run apply reads as its own check instead of silently mutating the downstream worktree.
             if ($script:DRY_RUN) { return (Invoke-CarryAction 'check') }
             return (Invoke-CarryAction 'apply')
+        }
+        '15' { return (Invoke-CarryAction 'check-sections') }
+        '16' {
+            if ($script:DRY_RUN) { return (Invoke-CarryAction 'check-sections') }
+            return (Invoke-CarryAction 'apply-sections')
         }
         { $_ -in @('q', 'Q') } { $script:QUIT = $true; return 0 }
         default {

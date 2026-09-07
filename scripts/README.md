@@ -16,6 +16,7 @@ python3 scripts/tests/test_local_review.py
 python3 scripts/tests/test_canonical_review.py
 python3 scripts/tests/test_build_dist.py
 python3 scripts/tests/test_skills_install.py
+python3 scripts/tests/test_carry.py
 python3 -m unittest discover -s scripts/tests    # all of them, and exits 5 if the suite vanishes
 uvx coverage@latest run --source=scripts,spec,host-setup -m unittest discover -s scripts/tests && uvx coverage@latest report
 ```
@@ -280,14 +281,26 @@ A skill has to read whole in isolation and a rule has one home, so the text a sk
 
 ## `carry.py`
 
-Copies manifest-owned trees from a freshly fetched ProjectTemplate `main` checkout into an isolated downstream feature worktree. `check` reports the canonical commit, repository identity, applicable declarations, path differences, and tree digests without changing the target. `apply` reports each write or removal and repeats the comparison before it succeeds.
+Copies manifest-owned trees, and the verbatim `## heading` regions inside a mixed file, from a freshly fetched ProjectTemplate `main` checkout into an isolated downstream feature worktree. `check` reports the canonical commit, repository identity, applicable declarations, path differences, and tree digests without changing the target. `apply` reports each write or removal and repeats the comparison before it succeeds.
 
 ```shell
 python3 scripts/carry.py check PhotoCleaner --target /path/to/worktree
 python3 scripts/carry.py apply PhotoCleaner --target /path/to/worktree
+python3 scripts/carry.py check-sections PhotoCleaner --target /path/to/worktree
+python3 scripts/carry.py apply-sections PhotoCleaner --target /path/to/worktree
 ```
 
 The tool validates the registry identity, target origin, feature-branch worktree, development-branch ancestry, unrelated changes, root containment, and symlink-free trees. A pruned declaration authorizes removal only beneath its target root.
+
+The section modes close the gap between the two things that already existed: a tree mode owns a whole tree, and [`spec/audit.py`][audit] names a stale section precisely without writing anything, so the one apply step in [`RESYNC.md`][resync] with no tested tool behind it was the step the AGENTS.md-overwrite incident happened on. `check-sections` reports each declared verbatim section and which of them are stale, and exits `1` while any is. `apply-sections` replaces only those regions and then re-reads the file to assert three things: the level-two heading sequence is unchanged, every line outside the replaced regions is byte-identical to what was there before, and each declared section now matches the hub's canonical. The second of those is the one that earns its keep, since the defect it exists for, one blank line dropped between the preamble and the first heading, is invisible in a diff review, breaks no renderer, and no gate in this repository flags it.
+
+Region boundaries come from `spec/audit.py`'s own fence reading rather than a second reading of CommonMark, so a level-two heading marker shown inside a code sample cannot end a region for this tool and not for the check that judges the result. The replacement carries the terminator the section's own heading line carried, so a CRLF repository keeps its endings and the file is never rewritten to one ending it may not use throughout.
+
+Every refusal is raised while planning, before the first file is written, so a refused run leaves nothing re-vendored. What refuses: a section the manifest declares that the repository does not carry (where it belongs is a standup question), a file absent from the target, a file that is not UTF-8 or that carries a bare carriage return, which the fidelity comparison reads as a line break and this tool does not, a file declaring both placeholders and verbatim sections (a verbatim unit carries none, per [`spec/fidelity-model.md`][fidelity-model]), a region holding content the fidelity comparison normalizes away, such as a Dependabot-owned action pin, whose bytes the repository rather than the hub owns, and two declared names resolving to one region. A failure after that point is the write itself or its assertion, and it names the file it was working on, because an earlier file may already hold its re-vendored content.
+
+A region runs to the next level-two heading, so the blank line before that heading sits inside the region and a section ending its file has none. `spec/audit.py`'s `extract_section` reads those two as the same content, since it splits the document on LF and joins the region back with LF, so a file-final newline and a blank line before a following heading both render as one trailing empty element. The comparison therefore uses that form, and the write reconciles the boundary to what the target document needs rather than copying it from the hub: a section that ends the hub's file keeps a blank line before whatever follows it downstream, and one that ends the target's file gains no trailing blank line.
+
+The target is required to be clean, with no owned root exempted from the unrelated-changes check, unlike a tree carry. A tree's root holds nothing but hub-owned content, so exempting it gives up nothing, where these files hold the repository's own sections too and exempting one would let a write land on top of an uncommitted edit to a section the tool never touches.
 
 ## `skills_install.py`
 
@@ -307,6 +320,7 @@ Installs the fleet's Skills for the current machine, cross-platform and idempote
 [copilot-instructions]: ../.github/copilot-instructions.md
 [divergences]: ../spec/divergences.json
 [editorconfig]: ../.editorconfig
+[fidelity-model]: ../spec/fidelity-model.md
 [files]: ../spec/files.json
 [fleet-skills-dist]: ../.claude-plugin/fleet-skills/
 [github-skills-dist]: ../.github/skills/
@@ -323,6 +337,7 @@ Installs the fleet's Skills for the current machine, cross-platform and idempote
 [prose-gate-action]: ../.github/actions/prose-gate/action.yml
 [record-lock-issue]: https://github.com/ptr727/ProjectTemplate/issues/1151
 [repos]: ../registry/repos.json
+[resync]: ../RESYNC.md
 [section-model]: ../spec/section-model.md
 [tests]: ./tests/
 [validate-hook]: ../.github/actions/validate/action.yml
