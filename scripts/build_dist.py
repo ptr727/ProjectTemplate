@@ -27,6 +27,7 @@ Usage: python3 scripts/build_dist.py           fill include regions, then regene
 from __future__ import annotations
 
 import argparse
+import functools
 import hashlib
 import json
 import os
@@ -169,20 +170,38 @@ _HEADING = re.compile(r"^(#{1,6})\s+(?P<text>\S.*?)\s*$")
 _MAX_INDENT = 3
 
 
-def _fence_step(line, marker, marker_len):
-    """spec/audit.py's fence reading, imported on first use rather than at module import.
+# Deliberately lru_cache(maxsize=None) rather than functools.cache, which needs 3.9, and the noqa below is what stops ruff rewriting it back under this repo's own py313 target.
+# The module scripts/skills_install.py imports this one at module scope, and host-setup/*/install-skills.* and scripts/skills_install.sh each commit to Python 3.7+, because that path runs before the fleet's own toolchain exists to install a newer interpreter.
+# So functools.cache here would raise AttributeError at import on 3.7 and 3.8, breaking the one path that has to survive an old host, and spec/host-tools.json's python3 entry records that 3.7 floor and why it sits below the fleet's own.
+@functools.lru_cache(maxsize=None)  # noqa: UP033
+def _audit_module():
+    """spec/audit.py, imported on first use rather than at module import, then held.
 
-    One reading of CommonMark across the fidelity checks, the review ledger, and this generator,
-    rather than a second one here that could disagree with them. Imported lazily because
-    scripts/skills_install.py imports this module on hosts whose Python predates what audit.py
-    needs, and installing never fills a region.
+    Imported lazily because scripts/skills_install.py imports this module on hosts whose Python
+    predates what audit.py needs, and installing never fills a region. Held because the caller
+    below reaches for it once per line, and re-resolving it there costs a sys.path scan and a
+    sys.modules lookup every time: one pass over the 24 authored skills, 4644 lines across the 40
+    Markdown files they comprise, measured warm in one process, best of five, costs 17.5 ms
+    re-resolved against 0.9 ms held, where calling audit directly costs 0.7 ms. One --check run
+    makes 18708 of these calls, four times that corpus, because it scans the authored tree and
+    both generated trees, and it runs on every pull request. The cache sits here rather than on
+    _fence_step, whose arguments vary per line and would make one unbounded.
     """
     spec = str(ROOT / "spec")
     if spec not in sys.path:
         sys.path.insert(0, spec)
     import audit
 
-    return audit._fence_step(line, marker, marker_len)
+    return audit
+
+
+def _fence_step(line, marker, marker_len):
+    """spec/audit.py's fence reading.
+
+    One reading of CommonMark across the fidelity checks, the review ledger, and this generator,
+    rather than a second one here that could disagree with them.
+    """
+    return _audit_module()._fence_step(line, marker, marker_len)
 
 
 def _lf(text):

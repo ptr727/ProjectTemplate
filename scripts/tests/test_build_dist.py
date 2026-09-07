@@ -10,6 +10,7 @@ import contextlib
 import io
 import json
 import os
+import subprocess
 import sys
 import tempfile
 import unittest
@@ -775,10 +776,43 @@ class IncludeCase(TreeCase):
             build_dist.regenerate()
 
     def test_fence_step_adds_the_spec_directory_to_sys_path_once(self) -> None:
+        """The cache would otherwise hide this: held, the accessor's body runs once per process, so
+        the `not in sys.path` guard could be deleted and the path still grow by only one. Clearing
+        between calls makes the body run each time, which is what the guard is there for."""
         before = len(sys.path)
         for _ in range(3):
+            build_dist._audit_module.cache_clear()
             build_dist._fence_step("plain", None, 0)
         self.assertLessEqual(len(sys.path) - before, 1)
+
+    def test_the_audit_module_is_resolved_once_however_many_lines_are_read(self) -> None:
+        """`_fence_step` reaches for it per line, so resolving it per line is what this stops."""
+        build_dist._audit_module.cache_clear()
+
+        for _ in range(50):
+            build_dist._fence_step("plain", None, 0)
+
+        self.assertEqual(build_dist._audit_module.cache_info().misses, 1)
+        self.assertEqual(build_dist._audit_module.cache_info().hits, 49)
+
+    def test_importing_this_module_does_not_import_audit(self) -> None:
+        """The laziness `scripts/skills_install.py` depends on, which caching must not give up.
+
+        It imports this module on hosts whose Python predates what `audit.py` needs, and installing
+        never fills a region, so importing `audit` at module scope would break that path. Run in a
+        fresh interpreter because this test process has already imported `audit` by other means.
+        """
+        scripts_dir = str(Path(build_dist.__file__).parent)
+        source = (
+            f"import sys; sys.path.insert(0, {scripts_dir!r}); import build_dist;"
+            " print('audit' in sys.modules, end='')"
+        )
+
+        result = subprocess.run(
+            [sys.executable, "-c", source], capture_output=True, text=True, check=True
+        )
+
+        self.assertEqual(result.stdout, "False", "importing build_dist pulled in audit")
 
 
 if __name__ == "__main__":
