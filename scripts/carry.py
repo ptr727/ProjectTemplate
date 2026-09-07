@@ -464,11 +464,6 @@ def section_span(lines: list[str], heading: str) -> tuple[int, int] | None:
     return None if start is None else (start, len(lines))
 
 
-def region_text(lines: list[str], span: tuple[int, int]) -> str:
-    """The exact bytes of the line range, terminators included."""
-    return "".join(lines[span[0] : span[1]])
-
-
 def comparable_region(lines: list[str], span: tuple[int, int]) -> str:
     """The region rendered the way `spec/audit.py`'s `extract_section` renders it.
 
@@ -477,8 +472,9 @@ def comparable_region(lines: list[str], span: tuple[int, int]) -> str:
     file carries it. The consequence is worth stating, because it decides what this tool writes: a
     section that ends the hub's file and the same section followed by a heading downstream, with
     one blank line between, render to the identical string. The fidelity comparison therefore reads
-    them as the same content, and the raw bytes do not, so this is the form to compare and
-    `region_text` is the form to write.
+    them as the same content, and the raw bytes do not, so this is the form to compare. It is not
+    the form to write: `replace_sections` builds its own lines, because writing needs the target's
+    own terminators and this form has flattened them.
     """
     bodies = [line[: len(line) - len(terminator(line))] for line in lines[span[0] : span[1]]]
     if span[1] == len(lines) and lines and terminator(lines[-1]):

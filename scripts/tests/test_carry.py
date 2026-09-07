@@ -495,8 +495,8 @@ class CarrySectionTests(unittest.TestCase):
         )
 
     def test_comparable_region_matches_the_fidelity_check_across_the_file_boundary(self) -> None:
-        """`region_text` and `extract_section` differ by one newline exactly when one copy's section
-        ends its file and the other's does not, which is the case this form exists to reconcile."""
+        """A region's raw bytes and `extract_section` differ by one newline exactly when one copy's
+        section ends its file and the other's does not, which is what this form reconciles."""
         hub = "# T\n\n## X\n\nbody\n"
         padded = "# T\n\n## X\n\nbody\n\n## Y\n\nlocal\n"
 
@@ -512,8 +512,8 @@ class CarrySectionTests(unittest.TestCase):
             carry.comparable_region(carry.split_lines(hub), hub_span),
         )
         self.assertNotEqual(
-            carry.region_text(carry.split_lines(hub), hub_span),
-            carry.region_text(carry.split_lines(padded), padded_span),
+            "".join(carry.split_lines(hub)[hub_span[0] : hub_span[1]]),
+            "".join(carry.split_lines(padded)[padded_span[0] : padded_span[1]]),
         )
 
     def test_plan_sections_refuses_on_a_later_unit_before_anything_is_written(self) -> None:
