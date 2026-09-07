@@ -193,6 +193,18 @@ class CarryManifestTests(unittest.TestCase):
     def test_selector_excludes_inapplicable_declaration(self) -> None:
         self.assertFalse(carry.applicable(["python"], {"csharp", "release"}))
 
+    def test_refuses_the_hub_as_a_tree_target_unless_every_declaration_opts_in(self) -> None:
+        opted_in = {"target": "docs", "allowHubTarget": True}
+        not_opted_in = {"target": "spec"}
+
+        carry.refuse_hub_tree_target(carry.HUB_NAME, [opted_in])
+        carry.refuse_hub_tree_target("PhotoCleaner", [not_opted_in])
+
+        with self.assertRaisesRegex(
+            carry.CarryError, "does not allow ProjectTemplate as its target"
+        ):
+            carry.refuse_hub_tree_target(carry.HUB_NAME, [opted_in, not_opted_in])
+
     def test_rejects_overlapping_targets(self) -> None:
         declarations = [
             {

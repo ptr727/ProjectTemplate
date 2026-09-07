@@ -63,8 +63,8 @@ Usage: menu.ps1 [options]
 An interactive menu over this fleet's host and repo tooling: update the host tools, upgrade the
 OS packages, install the fleet skills, audit a cataloged repo, and pull the hub's verbatim-owned
 files, or just the verbatim rule sections inside a mixed file, into a downstream repo's own
-worktree. Run from a hub checkout or from any other repo. Each is shown the tasks that apply
-to it.
+worktree. Run from a hub checkout or from any other repo. Only the tasks that apply to that
+checkout are shown.
 
 Options:
   -y, -Yes          Pass -Yes to each tool this menu runs, so a tool does not prompt. The menu's
@@ -489,7 +489,7 @@ function Show-Menu {
     log '   9  Report fleet Skills install status'
     log '  10  Install or update the fleet Skills'
     log ''
-    log 'Hub, ptr727/ProjectTemplate:'
+    log "Hub, ${HUB_REPO}:"
     log '  11  Audit a cataloged repo'
     log '  12  Check the generated Skills distributions are current'
     # Also gated on REF: scripts/carry.py always rejects a hub checkout that is not exactly on the default ref.
