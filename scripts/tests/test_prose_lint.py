@@ -3010,6 +3010,19 @@ class TestAnEmptyExclusionIsRefused(unittest.TestCase):
         """A blank line carrying a space or a tab is the shape a file actually holds."""
         self.assertEqual(2, self.run_gate("--check", "dupword", "--exclude", "  ").returncode)
 
+    def test_blank_is_judged_the_way_the_action_judges_it(self) -> None:
+        """The guard must not refuse a value the action itself builds and passes.
+
+        The action trims an exclusions line with bash's ASCII whitespace class, and Python's
+        `str.strip` covers a wider set, so a line holding only a non-breaking space survives that
+        trim and arrives here as a non-empty argument. Judged by the wider set it would be read as
+        blank and refused, failing that repository's gate on every run over an exclusion that is
+        merely inert.
+        """
+        r = self.run_gate("--check", "dupword", "--exclude", "\u00a0")
+        self.assertNotEqual(2, r.returncode, r.stdout + r.stderr)
+        self.assertNotIn("empty value", r.stderr)
+
     def test_a_real_exclusion_still_applies(self) -> None:
         """The guard refuses the empty value without narrowing what an exclusion can name."""
         found = self.run_gate("--check", "dupword")
@@ -3089,6 +3102,15 @@ class TestTheVerdictNamesTheCopyThatRaisedIt(unittest.TestCase):
         """The action knows the pin and the environment does not, so the action's value wins."""
         with mock.patch.dict(os.environ, {"PROSE_GATE_PROVENANCE": "from-env@aaaaaaa"}):
             self.assertEqual("owner/repo@bbbbbbb", prose_lint.gate_provenance("owner/repo@bbbbbbb"))
+
+    def test_a_whitespace_only_flag_falls_through_rather_than_emptying_the_label(self) -> None:
+        """A truthy value that strips to nothing would print the label with nothing after it.
+
+        Tested before stripping rather than after, so a source carrying no value falls through to
+        the next one, which is what carrying none means.
+        """
+        with mock.patch.dict(os.environ, {"PROSE_GATE_PROVENANCE": "owner/repo@eeeeeee"}):
+            self.assertEqual("owner/repo@eeeeeee", prose_lint.gate_provenance("   "))
 
     def test_the_environment_answers_a_caller_that_passes_no_flag(self) -> None:
         """A caller invoking the script directly carries the value the same way the action does."""

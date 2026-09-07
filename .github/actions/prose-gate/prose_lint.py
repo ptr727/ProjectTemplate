@@ -285,7 +285,9 @@ def gate_provenance(explicit: str | None = None) -> str:
     sends the next investigation at a copy nobody ran, where no attribution at least leaves the
     question open.
     """
-    if explicit:
+    # Stripped before it is tested rather than after, since a whitespace-only value is truthy and would otherwise pass the test and then empty itself, printing the label with nothing after it.
+    # A source carrying no value falls through to the next one, which is what carrying none means.
+    if explicit and explicit.strip():
         return explicit.strip()
     env = os.environ.get("PROSE_GATE_PROVENANCE", "").strip()
     if env:
@@ -441,6 +443,10 @@ def path_candidate(token: str, in_span: bool = True) -> str | None:
             return None
     return token.removeprefix("./")
 
+
+# The characters bash's `[[:space:]]` class holds in the C locale, which is what the composite action trims an exclusions line with.
+# Python's own `str.strip` covers a wider set, so the two disagree about which lines are blank unless this one is named explicitly.
+ASCII_BLANK = " \t\n\r\v\f"
 
 # Paths with a `retire` disposition remain valid references to a hub-hosted tool or a declared deletion.
 # The action fetches this file without the hub tree, so a test keeps this literal set equal to the ledger.
@@ -1773,7 +1779,9 @@ def main(argv: list[str] | None = None) -> int:
     # An exclusion is a substring test, so the empty one matches every key and empties the scan while the run still exits 0.
     # That is the false clean this gate exists to refuse rather than to emit, arriving through an argument rather than through a resolution.
     # It is reachable from a blank line in a repository's exclusions file, since the composite action skips those and a reader reproducing its arguments by hand has no such step unless it is stated.
-    if any(not x.strip() for x in a.exclude):
+    # Blank is judged by the ASCII whitespace the action's own trim uses rather than by `str.strip`, whose wider set includes characters that survive that trim.
+    # Judged the wider way this refuses a value the action does build, so a line holding only a non-breaking space would fail that repository's gate on every run instead of passing through as the inert exclusion it is.
+    if any(not x.strip(ASCII_BLANK) for x in a.exclude):
         print(
             "error: --exclude was given an empty value, which matches every path and would "
             "report a whole-tree scan as clean. Drop the blank entry rather than passing it, "
