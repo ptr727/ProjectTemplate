@@ -306,7 +306,26 @@ def checkout_provenance(script: Path) -> str:
     Both are closed by asking what HEAD actually says about this path rather than what it says
     about the repository: an untracked path is attributed to nothing, and a tracked path whose
     working copy has moved is named as moved rather than as its commit.
+
+    The third way they come apart is the environment rather than the filesystem. Git's location
+    variables outrank `-C`, and a git hook exports them, so a run made from inside one answers
+    about whichever repository invoked the hook rather than about the copy that is running. That
+    is the same wrong attribution arriving by a different route, so the location variables are
+    dropped and the answer keys on the script's own path alone.
     """
+    located_by_environment = (
+        "GIT_DIR",
+        "GIT_COMMON_DIR",
+        "GIT_WORK_TREE",
+        "GIT_INDEX_FILE",
+        "GIT_OBJECT_DIRECTORY",
+        "GIT_ALTERNATE_OBJECT_DIRECTORIES",
+        "GIT_CEILING_DIRECTORIES",
+        "GIT_DISCOVERY_ACROSS_FILESYSTEM",
+        "GIT_NAMESPACE",
+        "GIT_PREFIX",
+    )
+    env = {k: v for k, v in os.environ.items() if k not in located_by_environment}
 
     def git(*args: str) -> str | None:
         try:
@@ -315,6 +334,7 @@ def checkout_provenance(script: Path) -> str:
                 capture_output=True,
                 text=True,
                 check=False,
+                env=env,
             )
         except (OSError, ValueError):
             return None

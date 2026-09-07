@@ -3083,6 +3083,30 @@ class TestTheVerdictNamesTheCopyThatRaisedIt(unittest.TestCase):
         )
         self.assertIn("gate unknown", self.verdict(script))
 
+    def test_an_inherited_git_location_does_not_decide_the_answer(self) -> None:
+        """A git hook exports these, and they outrank `-C`, so a hooked run would answer about the
+        repository that invoked the hook rather than about the copy that is running.
+
+        Reproduced on this branch: the pre-commit run printed `unknown` where the same command
+        printed the commit a moment earlier, and the value that arrives instead is not always
+        harmless, since another arrangement names a real commit in the wrong repository.
+        """
+        _, script, head = self.repo_with_script()
+        other = Path(self.enterContext(tempfile.TemporaryDirectory()))
+        subprocess.run(["git", "init", "-q", str(other)], check=True)
+        target = script.parent / "sample.md"
+        target.write_text("# Sample\n\nOne clean line.\n", encoding="utf-8")
+        env = {k: v for k, v in os.environ.items() if k != "PROSE_GATE_PROVENANCE"}
+        env["GIT_DIR"] = str(other / ".git")
+        r = subprocess.run(
+            [sys.executable, str(script), "--check", "dead-path", str(target)],
+            capture_output=True,
+            text=True,
+            check=False,
+            env=env,
+        )
+        self.assertIn(f"gate local {head}", r.stderr)
+
     def test_both_scope_shapes_carry_the_attribution(self) -> None:
         """A whole-tree verdict and a diff-scoped one are two formats, so each is asserted."""
         whole = prose_lint.scope_note(3, 3, None, None, "owner/repo@ddddddd")
