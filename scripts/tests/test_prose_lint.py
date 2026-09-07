@@ -2969,6 +2969,55 @@ class TestDeadPath(unittest.TestCase):
         self.assertEqual([], hits)
 
 
+class TestAnEmptyExclusionIsRefused(unittest.TestCase):
+    """The exclusion that matches everything, refused rather than applied.
+
+    An exclusion is a substring test, so the empty one is a substring of every key and empties
+    the scan while the run exits 0. That is the false-clean shape the scope line exists to make
+    visible, arriving through an argument rather than through a resolution, and a scope of zero
+    prints beside an exit of zero exactly as a clean tree does.
+
+    It is reachable rather than theoretical. The composite action skips a blank line when it
+    builds the arguments from a repository's exclusions file, and a reader reproducing those
+    arguments by hand, which the runbook asks for, has no such step unless it is stated.
+    """
+
+    def run_gate(self, *args: str) -> subprocess.CompletedProcess[str]:
+        root = Path(self.enterContext(tempfile.TemporaryDirectory()))
+        (root / "sample.md").write_text(
+            "# Sample\n\nA line with a repeated the the word.\n", encoding="utf-8"
+        )
+        return subprocess.run(
+            [
+                sys.executable,
+                str(REPO / ".github/actions/prose-gate/prose_lint.py"),
+                *args,
+                "--",
+                str(root),
+            ],
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+
+    def test_an_empty_exclusion_refuses_rather_than_emptying_the_scan(self) -> None:
+        """Exit 2 is the refusal code the other unusable-argument guard already uses."""
+        r = self.run_gate("--check", "dupword", "--exclude", "")
+        self.assertEqual(2, r.returncode, r.stdout + r.stderr)
+        self.assertIn("--exclude was given an empty value", r.stderr)
+
+    def test_a_whitespace_only_exclusion_is_refused_too(self) -> None:
+        """A blank line carrying a space or a tab is the shape a file actually holds."""
+        self.assertEqual(2, self.run_gate("--check", "dupword", "--exclude", "  ").returncode)
+
+    def test_a_real_exclusion_still_applies(self) -> None:
+        """The guard refuses the empty value without narrowing what an exclusion can name."""
+        found = self.run_gate("--check", "dupword")
+        self.assertEqual(1, found.returncode, found.stdout + found.stderr)
+        excluded = self.run_gate("--check", "dupword", "--exclude", "sample.md")
+        self.assertEqual(0, excluded.returncode, excluded.stdout + excluded.stderr)
+
+
 class TestTheVerdictNamesTheCopyThatRaisedIt(unittest.TestCase):
     """Which copy of the gate produced a verdict, stated rather than inferred from the finding.
 
@@ -3206,7 +3255,12 @@ class TestTheActionPassesItsOwnPin(unittest.TestCase):
         self.assertEqual("owner/repo@cafe123", argv[argv.index("--provenance") + 1])
 
     def test_neither_source_set_passes_no_flag_rather_than_half_a_value(self) -> None:
-        """A local action, this repository's own run among them, where the script answers instead."""
+        """A caller naming the action by a workspace-relative path, where the script answers instead.
+
+        What this repository's own run resolves to is deliberately not asserted here. It reaches
+        the gate through a repository-qualified self-reference, and what that populates is read
+        off a real run rather than predicted, which is the whole point of naming the copy.
+        """
         self.assertNotIn("--provenance", self.run_block({}))
 
     def test_half_a_value_is_not_passed(self) -> None:

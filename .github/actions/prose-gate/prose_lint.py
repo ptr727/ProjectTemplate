@@ -1770,6 +1770,17 @@ def main(argv: list[str] | None = None) -> int:
     # Only a repository declares a model, so two of them refuse and anything else resolves to one anchor.
     # TestScanRootDecidesTheRuleSet carries the cases and the reason each one exists.
     scan_paths = a.paths or ["."]
+    # An exclusion is a substring test, so the empty one matches every key and empties the scan while the run still exits 0.
+    # That is the false clean this gate exists to refuse rather than to emit, arriving through an argument rather than through a resolution.
+    # It is reachable from a blank line in a repository's exclusions file, since the composite action skips those and a reader reproducing its arguments by hand has no such step unless it is stated.
+    if any(not x.strip() for x in a.exclude):
+        print(
+            "error: --exclude was given an empty value, which matches every path and would "
+            "report a whole-tree scan as clean. Drop the blank entry rather than passing it, "
+            "the way the composite action skips a blank line in .github/prose-gate-excludes.",
+            file=sys.stderr,
+        )
+        return 2
     # Anything that is not a file or a directory is refused rather than absorbed.
     # `discover` reads such an argument as `.`, so it scanned the caller's directory while the rule set anchored on the argument's parent.
     # Tested for what it is rather than for whether it exists, since a FIFO, a socket, and a device all exist and are none of the two.
