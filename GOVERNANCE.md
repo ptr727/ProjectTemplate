@@ -278,6 +278,19 @@ In a configured editor the `DavidAnson.vscode-markdownlint` extension is enough 
 
 When pulling a public image fails on a Docker-Desktop/WSL credential-helper error (`docker-credential-desktop.exe: exec format error`), retry with an empty Docker config: `DOCKER_CONFIG=$(mktemp -d) docker run ...` after writing `{}` to `$DOCKER_CONFIG/config.json`.
 
+**Reproducing a prose-gate finding a downstream repository reports.** The gate a repository runs is the hub copy its own workflow pins, never the copy a hub checkout holds, so a rule that changed after that pin is a rule no local run has. Every verdict names its own copy on the scope line, which is where to look first: `gate <owner>/<repo>@<ref>` is a pinned remote action, `gate local <sha>` is a checkout that tracks the script at that commit, `gate local <sha>-dirty` is the same with the file edited, and `gate unknown` is a copy no commit describes. A verdict carrying no `gate` clause at all predates this rule, which dates the copy just as usefully. A `local` value is meaningful only inside the repository that produced it, since it names a commit and not the repository holding it. A hand-set value is whatever its caller typed, so say in it that the run is a reproduction, or the verdict is indistinguishable from the CI one it is being compared against. Take the reporting repository's pin from the `@` in its workflow's `uses:` line, which is the commit alone rather than the whole reference that line spells, then run that copy against the same worktree and the same diff base CI used. Name the pin yourself, because an extracted copy sits under no checkout and would otherwise report `unknown`:
+
+```sh
+scratch="$(mktemp -d)"
+git -C /path/to/ProjectTemplate show <hub-sha>:.github/actions/prose-gate/prose_lint.py > "$scratch/prose_lint_pinned.py"
+cd /path/to/target-worktree
+PROSE_GATE_PROVENANCE="reproducing ptr727/ProjectTemplate@<hub-sha>" python3 "$scratch/prose_lint_pinned.py" --diff <base> -- .
+```
+
+Where the reporting repository carries `.github/prose-gate-excludes`, pass each of its non-empty, non-comment lines as a `--exclude <path>` argument, trimmed of the surrounding whitespace the way the composite action trims it. An untrimmed value is a substring that matches no key, so it excludes nothing and says nothing about having failed. Omitting them widens the run past what CI read, and a finding on an excluded file is then a local artifact rather than the one being chased. Skip the blank lines rather than passing them, since an empty exclusion would match every path, and the gate refuses one rather than reporting the empty scan that follows as clean.
+
+A finding the pinned copy raises and the current copy does not is a stale pin rather than a defect in either copy, so the fix is to move the pin rather than to edit the content it flags. The `dead-path` rule reaches this state most often, because it keys on deletion history and so speaks only about a path a repository tracked and removed. The hub deletes paths of its own and the rule fires there too. What does not fire here is a mention of a path the fleet hosts centrally, such as one under `repo-config/`, because those carry a standing exemption rather than because of what any one tree happens to hold. The exemption is what a downstream repository is missing when its pin predates an addition to that list, and the hub cannot see the difference from its own runs.
+
 ## Supported Development Platforms
 
 - **Cross-platform by default: Windows + macOS + Linux.** Linux runs natively (a Linux desktop, or SSH/remote into a Linux host), through a devcontainer on Windows or macOS, or through WSL2 on Windows, where the devcontainer and WSL routes carry their own nuances (mounts, path translation, SSH-agent forwarding) but deliver the same toolchain. Editing is cross-platform through the GUI regardless of where code runs. Assume this default.

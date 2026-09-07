@@ -25,6 +25,7 @@ import argparse
 import functools
 import io
 import json
+import os
 import re
 import subprocess
 import sys
@@ -264,7 +265,103 @@ def unread_diff_files(
     return out
 
 
-def scope_note(read: int, discovered: int, lines: int | None, base: str | None) -> str:
+def gate_provenance(explicit: str | None = None) -> str:
+    """Which copy of this gate produced the verdict, named so a finding can be attributed to one.
+
+    A repository reaches this gate through a pinned hub commit, so the copy CI runs is the one
+    that pin names rather than the one a hub checkout holds. The two disagree from the moment a
+    rule changes until the pin moves, and a finding raised by the older copy then reproduces
+    against no local run at all. Unattributed, that reads as a defect in the gate rather than as
+    a version gap, which is the reading it actually got: three dead-path findings were carried
+    into a resync as real work, and the pin was a single commit behind the exemption that
+    silenced them.
+
+    Three sources answer, in the order they can be trusted. An explicit value is the composite
+    action stating its own `owner/repo@ref`, which is the only source that knows the pin, since
+    a checked-out action carries no history of its own. The environment carries the same value
+    for a caller that invokes the script directly. Otherwise this script's own checkout answers,
+    under the conditions `checkout_provenance` states. None of the three resolving is reported as
+    unknown rather than guessed, since a wrong attribution is worse here than an absent one: it
+    sends the next investigation at a copy nobody ran, where no attribution at least leaves the
+    question open.
+    """
+    # Stripped before it is tested rather than after, since a whitespace-only value is truthy and would otherwise pass the test and then empty itself, printing the label with nothing after it.
+    # A source carrying no value falls through to the next one, which is what carrying none means.
+    if explicit and explicit.strip():
+        return explicit.strip()
+    env = os.environ.get("PROSE_GATE_PROVENANCE", "").strip()
+    if env:
+        return env
+    return checkout_provenance(Path(__file__).resolve())
+
+
+def checkout_provenance(script: Path) -> str:
+    """The commit that describes this file's content, or unknown where no commit does.
+
+    A checkout containing the script is not the same fact as a commit describing it, and reading
+    HEAD alone conflates the two. Dropping a copy into an unrelated repository resolves that
+    repository's HEAD, which is a well-formed answer naming content it never held. Editing the
+    file in place resolves the commit before the edit, which is the ordinary state of any branch
+    that changes a rule, so the run that most needs an accurate attribution is the one that would
+    get a stale one.
+
+    Both are narrowed by asking what HEAD says about this path rather than what it says about the
+    repository: an untracked path is attributed to nothing, and a tracked path whose working copy
+    has moved is named as moved rather than as its commit.
+
+    What this does not establish is which repository answered. A copy committed into an unrelated
+    repository is tracked and clean there, so it is named by that repository's HEAD, and the value
+    carries no identity to tell it apart from a hub checkout's own. A `local` value is therefore
+    read as a commit inside the repository that produced it and nowhere else, which is what the
+    explicit and environment sources exist to do better. Closing it properly means naming the
+    repository alongside the commit, and that is a change to the value's shape rather than to
+    this resolution.
+
+    The third way they come apart is the environment rather than the filesystem. Git's location
+    variables outrank `-C`, and a git hook exports them, so a run made from inside one answers
+    about whichever repository invoked the hook rather than about the copy that is running. That
+    is the same wrong attribution arriving by a different route, so the location variables are
+    dropped and the answer keys on the script's own path alone.
+    """
+    located_by_environment = (
+        "GIT_DIR",
+        "GIT_COMMON_DIR",
+        "GIT_WORK_TREE",
+        "GIT_INDEX_FILE",
+        "GIT_OBJECT_DIRECTORY",
+        "GIT_ALTERNATE_OBJECT_DIRECTORIES",
+        "GIT_CEILING_DIRECTORIES",
+        "GIT_DISCOVERY_ACROSS_FILESYSTEM",
+        "GIT_NAMESPACE",
+        "GIT_PREFIX",
+    )
+    env = {k: v for k, v in os.environ.items() if k not in located_by_environment}
+
+    def git(*args: str) -> str | None:
+        try:
+            r = subprocess.run(
+                ["git", "-C", str(script.parent), *args],
+                capture_output=True,
+                text=True,
+                check=False,
+                env=env,
+            )
+        except (OSError, ValueError):
+            return None
+        return r.stdout if r.returncode == 0 else None
+
+    if git("ls-files", "--error-unmatch", "--", str(script)) is None:
+        return "unknown"
+    head = (git("rev-parse", "--short", "HEAD") or "").strip()
+    if not head:
+        return "unknown"
+    moved = (git("status", "--porcelain", "--", str(script)) or "").strip()
+    return f"local {head}-dirty" if moved else f"local {head}"
+
+
+def scope_note(
+    read: int, discovered: int, lines: int | None, base: str | None, provenance: str
+) -> str:
     """What the run actually read, stated on every verdict rather than only on a busy one.
 
     Five routes to a false clean are on record and every one of them exits 0 in silence: an
@@ -275,12 +372,16 @@ def scope_note(read: int, discovered: int, lines: int | None, base: str | None) 
     is that a scope of nothing prints exactly what a clean tree prints, which is a property of the
     output and not of any single route. Stating the scope is what a reader needs to tell "read
     nothing" from "found nothing", so it is printed even when the count is the whole tree.
+
+    The copy that read that scope is named beside it for the same reason. A scope answers what
+    was read and a provenance answers what read it, and a verdict reproducing nowhere is a
+    question about the second rather than about the first.
     """
     if base is None:
-        return f"scope: {read} file(s) read, whole tree"
+        return f"scope: {read} file(s) read, whole tree, gate {provenance}"
     return (
         f"scope: {read} of {discovered} file(s) read, {lines} changed line(s), "
-        f"diff against {base!r}"
+        f"diff against {base!r}, gate {provenance}"
     )
 
 
@@ -342,6 +443,11 @@ def path_candidate(token: str, in_span: bool = True) -> str | None:
             return None
     return token.removeprefix("./")
 
+
+# The ASCII whitespace the composite action's trim always removes from an exclusions line, whatever locale it runs under.
+# Its `[[:space:]]` is a superset of this in a UTF-8 locale and Python's own `str.strip` is a superset again, so judging blank by either would refuse a value the action does build and pass.
+# Naming the smallest of the three keeps the divergence one way, which is the direction where the guard cannot fail a repository over an exclusion that is merely inert.
+ASCII_BLANK = " \t\n\r\v\f"
 
 # Paths with a `retire` disposition remain valid references to a hub-hosted tool or a declared deletion.
 # The action fetches this file without the hub tree, so a test keeps this literal set equal to the ledger.
@@ -1657,6 +1763,12 @@ def main(argv: list[str] | None = None) -> int:
         help="only report violations on lines changed vs BASE "
         "(matches the repo policy: fix as each file is next edited, not swept)",
     )
+    ap.add_argument(
+        "--provenance",
+        metavar="REF",
+        help="name this copy of the gate on the verdict, as the composite action's "
+        "owner/repo@ref, so a finding can be attributed to the commit that raised it",
+    )
     a = ap.parse_args(argv)
 
     rules = set(a.checks or DEFAULT_RULES)
@@ -1665,6 +1777,19 @@ def main(argv: list[str] | None = None) -> int:
     # Only a repository declares a model, so two of them refuse and anything else resolves to one anchor.
     # TestScanRootDecidesTheRuleSet carries the cases and the reason each one exists.
     scan_paths = a.paths or ["."]
+    # An exclusion is a substring test, so the empty one matches every key and empties the scan while the run still exits 0.
+    # That is the false clean this gate exists to refuse rather than to emit, arriving through an argument rather than through a resolution.
+    # It is reachable from a blank line in a repository's exclusions file, since the composite action skips those and a reader reproducing its arguments by hand has no such step unless it is stated.
+    # Blank is judged by the ASCII whitespace the action's own trim uses rather than by `str.strip`, whose wider set includes characters that survive that trim.
+    # Judged the wider way this refuses a value the action does build, so a line holding only a non-breaking space would fail that repository's gate on every run instead of passing through as the inert exclusion it is.
+    if any(not x.strip(ASCII_BLANK) for x in a.exclude):
+        print(
+            "error: --exclude was given an empty value, which matches every path and would "
+            "report a whole-tree scan as clean. Drop the blank entry rather than passing it, "
+            "the way the composite action skips a blank line in .github/prose-gate-excludes.",
+            file=sys.stderr,
+        )
+        return 2
     # Anything that is not a file or a directory is refused rather than absorbed.
     # `discover` reads such an argument as `.`, so it scanned the caller's directory while the rule set anchored on the argument's parent.
     # Tested for what it is rather than for whether it exists, since a FIFO, a socket, and a device all exist and are none of the two.
@@ -1776,7 +1901,10 @@ def main(argv: list[str] | None = None) -> int:
                 print(f"{keys[f]}:{ln}: {kind}: {msg}")
 
     inscope = sum(len(scope[keys[f]]) for f in files) if scope is not None else None
-    print(scope_note(len(files), discovered, inscope, a.diff), file=sys.stderr)
+    print(
+        scope_note(len(files), discovered, inscope, a.diff, gate_provenance(a.provenance)),
+        file=sys.stderr,
+    )
     if a.summary or total:
         print(f"\n{total} violation(s) across {len(byfile)} file(s)", file=sys.stderr)
         for k, v in sorted(bykind.items(), key=lambda kv: -kv[1]):
