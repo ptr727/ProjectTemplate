@@ -9,9 +9,11 @@ keeping and changes as that measurement changes.
 The split is deliberate. A reader mid-review needs the behavior and needs it to be stable. The
 evaluation is a living argument and moves for reasons that have nothing to do with the behavior.
 
-Everything here is external product state that the fleet observes rather than sets, so it goes
-stale without warning. Where an observation disagrees with this file, the product moved and this
-file is what gets corrected.
+Much of what follows is external product state that the fleet observes rather than sets, so it
+goes stale without warning. An observation disagreeing with this file is not always that, though:
+a skipped review also comes from a rate limit, or from a repository's own committed configuration,
+both described below. Rule those out first, and where neither explains it, the product moved and
+this file is what gets corrected.
 
 ## Table of Contents <!-- omit from toc -->
 

@@ -86,9 +86,11 @@ full stop, whatever the merge-state field says.
 
 ## Which Reviewers a Repository Actually Has
 
-Which reviewers cover a repository is decided per repository, by product terms this fleet observes
-rather than sets. So respond to what the reviewers actually did on the pull request in front of
-you, rather than deciding from a repository property what a reviewer must have done.
+Whether a reviewer covers a repository at all is decided by product terms this fleet observes
+rather than sets, and whether it reviewed this pull request is decided by those terms together
+with configuration a repository commits itself. So respond to what the reviewers actually did on
+the pull request in front of you, rather than deciding from a repository property what a reviewer
+must have done.
 
 - **A reviewer that posted a skip notice is available for the asking.** It says it did not review
   automatically, which is not the same as not reviewing at all. Comment `@coderabbitai review`, or
@@ -104,13 +106,16 @@ you, rather than deciding from a repository property what a reviewer must have d
   had nothing to say, which Merge Gate item 2 describes as its own ordinary shape and which posts
   no comment to read. Read the reviews themselves rather than the comments alone, since the third
   case appears only there.
-- **Copilot's absence is neither of those, and blocks.** Merge Gate item 2 requires Copilot's own
+- **Copilot's absence blocks, and is answered elsewhere.** Merge Gate item 2 requires Copilot's own
   coverage of the current head, and the loop's own re-request step below is where a missing one is
-  answered, on the terms stated there.
+  answered, on the terms stated there. A refusal naming the account quota is its own case rather
+  than a review: it covers no head, so the gate stays unsatisfied, and nothing the loop does
+  clears it, since the refusal names no time to wait for and re-requesting returns it again. That
+  one goes to the maintainer, rather than into a wait with no stated end.
 
 Where a reviewer's behavior still surprises you after reading what it posted, the hub's
 `docs/pr-reviewer-reference.md` records what each one does, what shapes it, and which repositories
-its plan covers, and correcting that file is how the surprise is settled.
+its plan covers.
 
 ## Expected review loop
 

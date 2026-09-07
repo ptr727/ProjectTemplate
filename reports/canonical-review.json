@@ -475,11 +475,11 @@
     },
     {
       "unit": ".agents/skills/pr-review-conduct/SKILL.md > Which Reviewers a Repository Actually Has",
-      "digest": "sha256:d5b71107c0f40c9c1d9e73dc105860e0a6bfdfeac1f4472c6cce7630a8fb75b1",
+      "digest": "sha256:894141ec9940cce894abfebc02d65abe0306d5060080b09606d95623d8301a59",
       "reviewer": "agent-skill",
-      "findings": 1,
+      "findings": 0,
       "hubCommit": "aaaae368fcf0653f37069a3adee97606a5f072ca",
-      "stamp": "2026-09-07T13:51:42Z"
+      "stamp": "2026-09-07T14:06:06Z"
     },
     {
       "unit": ".agents/skills/python-codestyle/SKILL.md > Local development loop",
