@@ -511,7 +511,8 @@ def guard_governed_drift(path: str, section: str, region: str, side: str) -> Non
     if audit_module().normalize(region) != normalize_eol(region):
         raise CarryError(
             f"{path} section '{section}' carries content the fidelity comparison normalizes away"
-            f" ({side} copy), so re-vendoring its bytes could revert per-repository drift; re-vendor it by hand"
+            f" ({side} copy), so re-vendoring its bytes could revert per-repository drift."
+            " Re-vendor that section by hand"
         )
 
 
