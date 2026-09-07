@@ -443,6 +443,8 @@ print_menu() {
         log "Downstream, the repo this menu is run from:"
         log "  12  Check what the hub would change here, change nothing"
         log "  13  Pull the hub's verbatim-owned files into this repo"
+        log "  14  Check the hub's verbatim rule sections inside this repo's mixed files"
+        log "  15  Pull those rule sections in, leaving every other section alone"
     fi
     log ""
     log "   q  Quit"
@@ -473,6 +475,14 @@ dispatch() {
             carry_action check
         else
             carry_action apply
+        fi
+        ;;
+    14) carry_action check-sections ;;
+    15)
+        if [[ $DRY_RUN == true ]]; then
+            carry_action check-sections
+        else
+            carry_action apply-sections
         fi
         ;;
     q | Q) QUIT=true ;;

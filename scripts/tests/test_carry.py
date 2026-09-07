@@ -323,5 +323,256 @@ class CarryManifestTests(unittest.TestCase):
                 carry.verify_target(worktree, {"url": str(remote)}, [owned])
 
 
+HUB_DOC = """# Title
+
+Preamble that the hub and the target share.
+
+## Fleet Bootstrap
+
+The hub's current wording.
+
+```text
+## Not A Heading
+```
+
+## Where the Rules Live
+
+The hub's current table.
+"""
+
+TARGET_DOC = """# Title
+
+Preamble that the hub and the target share.
+
+## Fleet Bootstrap
+
+A wording three revisions behind.
+
+```text
+## Not A Heading
+```
+
+## Local Addition
+
+A rule this repository wrote after a fault the fleet has never seen.
+
+## Where the Rules Live
+
+The hub's current table.
+"""
+
+
+class CarrySectionTests(unittest.TestCase):
+    """The verbatim-section re-vendor: what it replaces, what it must not touch, and what it refuses."""
+
+    def span(self, lines: list[str], heading: str) -> tuple[int, int]:
+        """The section's line range, failing the test rather than returning None, so a caller can unpack it."""
+        found = carry.section_span(lines, heading)
+        if found is None:
+            self.fail(f"section '{heading}' was not found")
+        return found
+
+    def test_split_lines_round_trips_every_ending(self) -> None:
+        for text in ("a\nb\n", "a\r\nb\r\n", "a\r\nb\n", "a\nb", "", "\n"):
+            with self.subTest(text=text):
+                self.assertEqual("".join(carry.split_lines(text)), text)
+
+    def test_section_span_reads_a_fenced_heading_as_content(self) -> None:
+        lines = carry.split_lines(HUB_DOC)
+
+        start, end = self.span(lines, "Fleet Bootstrap")
+
+        self.assertEqual(lines[start], "## Fleet Bootstrap\n")
+        self.assertIn("## Not A Heading\n", lines[start:end])
+        self.assertEqual(lines[end], "## Where the Rules Live\n")
+
+    def test_section_span_folds_case_and_reports_an_absent_section(self) -> None:
+        lines = carry.split_lines(HUB_DOC)
+
+        self.assertEqual(
+            carry.section_span(lines, "fleet bootstrap"),
+            carry.section_span(lines, "Fleet Bootstrap"),
+        )
+        self.assertIsNone(carry.section_span(lines, "Release Model"))
+
+    def test_replace_sections_leaves_every_other_byte_identical(self) -> None:
+        """The pilot's own defect: a rebuild that drops the blank line before the first heading."""
+        target = carry.split_lines(TARGET_DOC)
+        source = carry.split_lines(HUB_DOC)
+
+        result = "".join(carry.replace_sections(target, source, ["Fleet Bootstrap"], "AGENTS.md"))
+
+        self.assertIn("The hub's current wording.", result)
+        self.assertNotIn("A wording three revisions behind.", result)
+        self.assertIn("A rule this repository wrote", result)
+        self.assertEqual(
+            carry.outside_sections(carry.split_lines(result), ["Fleet Bootstrap"], "AGENTS.md"),
+            carry.outside_sections(target, ["Fleet Bootstrap"], "AGENTS.md"),
+        )
+        self.assertEqual(carry.h2_headings(carry.split_lines(result)), carry.h2_headings(target))
+
+    def test_replace_sections_preserves_the_targets_line_endings(self) -> None:
+        target = carry.split_lines(TARGET_DOC.replace("\n", "\r\n"))
+        source = carry.split_lines(HUB_DOC)
+
+        result = "".join(carry.replace_sections(target, source, ["Fleet Bootstrap"], "AGENTS.md"))
+
+        self.assertNotIn("\n", result.replace("\r\n", ""))
+        self.assertIn("The hub's current wording.\r\n", result)
+
+    def test_replace_sections_terminates_a_region_the_hub_ended_unterminated(self) -> None:
+        source = carry.split_lines(HUB_DOC.rstrip("\n"))
+        target = carry.split_lines(
+            "# Title\n\n## Where the Rules Live\n\nStale.\n\n## Local Addition\n\nKept.\n"
+        )
+
+        result = "".join(
+            carry.replace_sections(target, source, ["Where the Rules Live"], "AGENTS.md")
+        )
+
+        self.assertIn("The hub's current table.\n## Local Addition\n", result)
+        self.assertEqual(carry.h2_headings(carry.split_lines(result)), carry.h2_headings(target))
+
+    def _write(self, root: pathlib.Path, text: str) -> pathlib.Path:
+        path = root / "AGENTS.md"
+        path.write_bytes(text.encode("utf-8"))
+        return path
+
+    def test_assert_sections_passes_on_a_correct_re_vendor(self) -> None:
+        target = carry.split_lines(TARGET_DOC)
+        source = carry.split_lines(HUB_DOC)
+        rewritten = carry.replace_sections(target, source, ["Fleet Bootstrap"], "AGENTS.md")
+
+        with tempfile.TemporaryDirectory() as temp:
+            path = self._write(pathlib.Path(temp), "".join(rewritten))
+            carry.assert_sections(
+                "AGENTS.md", path, source, ["Fleet Bootstrap"], ["Fleet Bootstrap"], target
+            )
+
+    def test_assert_sections_catches_a_dropped_blank_line(self) -> None:
+        """Mutation test: the replacer's defect from the pilot, which review and the linters both miss."""
+        target = carry.split_lines(TARGET_DOC)
+        source = carry.split_lines(HUB_DOC)
+        start, _ = self.span(target, "Fleet Bootstrap")
+        dropped = list(carry.replace_sections(target, source, ["Fleet Bootstrap"], "AGENTS.md"))
+        self.assertEqual(dropped[start - 1], "\n")
+        del dropped[start - 1]
+
+        with tempfile.TemporaryDirectory() as temp:
+            path = self._write(pathlib.Path(temp), "".join(dropped))
+            with self.assertRaisesRegex(carry.CarryError, "text outside the re-vendored sections"):
+                carry.assert_sections(
+                    "AGENTS.md", path, source, ["Fleet Bootstrap"], ["Fleet Bootstrap"], target
+                )
+
+    def test_assert_sections_catches_a_deleted_local_section(self) -> None:
+        target = carry.split_lines(TARGET_DOC)
+        source = carry.split_lines(HUB_DOC)
+
+        with tempfile.TemporaryDirectory() as temp:
+            path = self._write(pathlib.Path(temp), HUB_DOC)
+            with self.assertRaisesRegex(carry.CarryError, "heading sequence changed"):
+                carry.assert_sections(
+                    "AGENTS.md", path, source, ["Fleet Bootstrap"], ["Fleet Bootstrap"], target
+                )
+
+    def test_assert_sections_catches_a_region_that_did_not_take(self) -> None:
+        target = carry.split_lines(TARGET_DOC)
+        source = carry.split_lines(HUB_DOC)
+
+        with tempfile.TemporaryDirectory() as temp:
+            path = self._write(pathlib.Path(temp), TARGET_DOC)
+            with self.assertRaisesRegex(carry.CarryError, "does not match the hub's canonical"):
+                carry.assert_sections("AGENTS.md", path, source, [], ["Fleet Bootstrap"], target)
+
+    def test_verbatim_section_names_skips_bare_strings_and_intent(self) -> None:
+        item = {
+            "sections": [
+                "A bare string is intent",
+                {"name": "Verbatim Everywhere", "fidelity": "verbatim"},
+                {"name": "Intent Section", "fidelity": "intent"},
+                {"name": "Verbatim Elsewhere", "fidelity": "verbatim", "appliesTo": ["python"]},
+            ]
+        }
+
+        self.assertEqual(carry.verbatim_section_names(item, {"dotnet"}), ["Verbatim Everywhere"])
+
+    def test_section_units_refuses_a_placeholder_file(self) -> None:
+        manifest = {
+            "baseline": [
+                {
+                    "path": "COPILOT.md",
+                    "placeholders": ["<owner>"],
+                    "sections": [{"name": "Runbook", "fidelity": "verbatim"}],
+                }
+            ]
+        }
+
+        with self.assertRaisesRegex(carry.CarryError, "placeholders and verbatim sections"):
+            carry.section_units(manifest, {"dotnet"})
+
+    def test_section_units_refuses_a_non_markdown_file(self) -> None:
+        manifest = {
+            "baseline": [
+                {
+                    "path": ".vscode/tasks.json",
+                    "sections": [{"name": "Tasks", "fidelity": "verbatim"}],
+                }
+            ]
+        }
+
+        with self.assertRaisesRegex(carry.CarryError, "cannot be declared on"):
+            carry.section_units(manifest, {"dotnet"})
+
+    def test_section_units_merges_one_path_declared_twice(self) -> None:
+        manifest = {
+            "baseline": [
+                {
+                    "path": "AGENTS.md",
+                    "appliesTo": ["dotnet"],
+                    "sections": [{"name": "Fleet Bootstrap", "fidelity": "verbatim"}],
+                },
+                {
+                    "path": "AGENTS.md",
+                    "appliesTo": ["dotnet"],
+                    "sections": [{"name": "Where the Rules Live", "fidelity": "verbatim"}],
+                },
+            ]
+        }
+
+        self.assertEqual(
+            carry.section_units(manifest, {"dotnet"}),
+            [("AGENTS.md", ["Fleet Bootstrap", "Where the Rules Live"])],
+        )
+
+    def test_guard_refuses_a_region_the_fidelity_comparison_normalizes(self) -> None:
+        region = "## Job\n\n```yaml\nuses: actions/checkout@" + "a" * 40 + " # v4\n```\n"
+
+        with self.assertRaisesRegex(carry.CarryError, "normalizes away"):
+            carry.guard_governed_drift("AGENTS.md", "Job", region, "hub")
+
+        carry.guard_governed_drift("AGENTS.md", "Fleet Bootstrap", HUB_DOC, "hub")
+
+    def test_run_sections_refuses_the_hub_as_a_target(self) -> None:
+        with (
+            tempfile.TemporaryDirectory() as temp,
+            self.assertRaisesRegex(carry.CarryError, "never a re-vendor target"),
+        ):
+            carry.run_sections("check-sections", carry.HUB_NAME, pathlib.Path(temp), carry.ROOT)
+
+    def test_the_manifest_declares_sections_this_hub_actually_carries(self) -> None:
+        """The tool reads the real manifest, so a renamed heading must surface here rather than downstream."""
+        manifest = carry.load_json(carry.ROOT / "spec/files.json")
+
+        units = carry.section_units(manifest, {"dotnet", "release", "two-phase"})
+
+        self.assertTrue(units)
+        for path, names in units:
+            lines = carry.split_lines(carry.decode_text(carry.ROOT / path, path))
+            for name in names:
+                with self.subTest(path=path, section=name):
+                    self.assertIsNotNone(carry.section_span(lines, name))
+
+
 if __name__ == "__main__":
     unittest.main()

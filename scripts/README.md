@@ -16,6 +16,7 @@ python3 scripts/tests/test_local_review.py
 python3 scripts/tests/test_canonical_review.py
 python3 scripts/tests/test_build_dist.py
 python3 scripts/tests/test_skills_install.py
+python3 scripts/tests/test_carry.py
 python3 -m unittest discover -s scripts/tests    # all of them, and exits 5 if the suite vanishes
 uvx coverage@latest run --source=scripts,spec,host-setup -m unittest discover -s scripts/tests && uvx coverage@latest report
 ```
@@ -280,14 +281,20 @@ A skill has to read whole in isolation and a rule has one home, so the text a sk
 
 ## `carry.py`
 
-Copies manifest-owned trees from a freshly fetched ProjectTemplate `main` checkout into an isolated downstream feature worktree. `check` reports the canonical commit, repository identity, applicable declarations, path differences, and tree digests without changing the target. `apply` reports each write or removal and repeats the comparison before it succeeds.
+Copies manifest-owned trees, and the verbatim `## heading` regions inside a mixed file, from a freshly fetched ProjectTemplate `main` checkout into an isolated downstream feature worktree. `check` reports the canonical commit, repository identity, applicable declarations, path differences, and tree digests without changing the target. `apply` reports each write or removal and repeats the comparison before it succeeds.
 
 ```shell
 python3 scripts/carry.py check PhotoCleaner --target /path/to/worktree
 python3 scripts/carry.py apply PhotoCleaner --target /path/to/worktree
+python3 scripts/carry.py check-sections PhotoCleaner --target /path/to/worktree
+python3 scripts/carry.py apply-sections PhotoCleaner --target /path/to/worktree
 ```
 
 The tool validates the registry identity, target origin, feature-branch worktree, development-branch ancestry, unrelated changes, root containment, and symlink-free trees. A pruned declaration authorizes removal only beneath its target root.
+
+The section modes close the gap between the two things that already existed: a tree mode owns a whole tree, and [`spec/audit.py`][audit] names a stale section precisely without writing anything, so the one apply step in [`RESYNC.md`][resync] with no tested tool behind it was the step the AGENTS.md-overwrite incident happened on. `check-sections` reports each declared verbatim section and which of them are stale, and exits `1` while any is. `apply-sections` replaces only those regions and then re-reads the file to assert three things: the level-two heading sequence is unchanged, every line outside the replaced regions is byte-identical to what was there before, and each declared section now matches the hub's canonical. The second of those is the one that earns its keep, since the defect it exists for, one blank line dropped between the preamble and the first heading, is invisible in a diff review, breaks no renderer, and no gate in this repository flags it.
+
+Region boundaries come from `spec/audit.py`'s own fence reading rather than a second reading of CommonMark, so a level-two heading marker shown inside a code sample cannot end a region for this tool and not for the check that judges the result. The replacement carries the terminator the section's own heading line carried, so a CRLF repository keeps its endings and the file is never rewritten to one ending it may not use throughout. Four states refuse rather than guess: a section the manifest declares that the repository does not carry (where it belongs is a standup question), a file absent from the target, a file declaring both placeholders and verbatim sections (a verbatim unit carries none, per [`spec/fidelity-model.md`][fidelity-model]), and a region holding content the fidelity comparison normalizes away, such as a Dependabot-owned action pin, whose bytes the repository rather than the hub owns.
 
 ## `skills_install.py`
 
@@ -307,6 +314,7 @@ Installs the fleet's Skills for the current machine, cross-platform and idempote
 [copilot-instructions]: ../.github/copilot-instructions.md
 [divergences]: ../spec/divergences.json
 [editorconfig]: ../.editorconfig
+[fidelity-model]: ../spec/fidelity-model.md
 [files]: ../spec/files.json
 [fleet-skills-dist]: ../.claude-plugin/fleet-skills/
 [github-skills-dist]: ../.github/skills/
@@ -323,6 +331,7 @@ Installs the fleet's Skills for the current machine, cross-platform and idempote
 [prose-gate-action]: ../.github/actions/prose-gate/action.yml
 [record-lock-issue]: https://github.com/ptr727/ProjectTemplate/issues/1151
 [repos]: ../registry/repos.json
+[resync]: ../RESYNC.md
 [section-model]: ../spec/section-model.md
 [tests]: ./tests/
 [validate-hook]: ../.github/actions/validate/action.yml
