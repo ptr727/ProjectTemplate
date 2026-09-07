@@ -1,6 +1,6 @@
 # Pull Request Reviewer Reference
 
-This document is the operational reference for how each pull request reviewer in this fleet behaves: which repositories it covers, how it is triggered, what its output looks like, and which committed file shapes it. It answers "what will this reviewer do here?", separately from [`pr-reviewer-evaluation.md`][pr-reviewer-evaluation], which measures whether a candidate is worth keeping and changes as that measurement changes.
+This document is the operational reference for how each pull request reviewer in this fleet behaves: which repositories it covers, how it is triggered, what its output looks like, and which committed file shapes it. It answers what a reviewer will actually do here, separately from [`pr-reviewer-evaluation.md`][pr-reviewer-evaluation], which measures whether a candidate is worth keeping and changes as that measurement changes.
 
 The split is deliberate. A reader mid-review needs the behavior and needs it to be stable. The evaluation is a living argument and moves for reasons that have nothing to do with the behavior.
 
