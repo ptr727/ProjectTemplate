@@ -801,18 +801,29 @@ class IncludeCase(TreeCase):
         It imports this module on hosts whose Python predates what `audit.py` needs, and installing
         never fills a region, so importing `audit` at module scope would break that path. Run in a
         fresh interpreter because this test process has already imported `audit` by other means.
+
+        The measurement is the delta across the import rather than the child's absolute state, since
+        a `sitecustomize` or `usercustomize` hook runs before `-c` does and could import a module of
+        that name itself. That would be this case failing to run rather than the import being wrong,
+        which is a boundary to report rather than a finding to raise, so it skips and says so.
         """
         scripts_dir = str(Path(build_dist.__file__).parent)
         source = (
-            f"import sys; sys.path.insert(0, {scripts_dir!r}); import build_dist;"
-            " print('audit' in sys.modules, end='')"
+            "import sys; before = 'audit' in sys.modules;"
+            f" sys.path.insert(0, {scripts_dir!r}); import build_dist;"
+            " print(before, 'audit' in sys.modules, end='')"
         )
 
         result = subprocess.run(
             [sys.executable, "-c", source], capture_output=True, text=True, check=True
         )
 
-        self.assertEqual(result.stdout, "False", "importing build_dist pulled in audit")
+        before, after = result.stdout.split()
+        if before == "True":
+            self.skipTest(
+                "this interpreter imports a module named audit at startup, so the import delta cannot be read here"
+            )
+        self.assertEqual(after, "False", "importing build_dist pulled in audit")
 
 
 if __name__ == "__main__":
