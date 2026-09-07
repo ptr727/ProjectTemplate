@@ -152,12 +152,7 @@ The existing Copilot adapter remains behaviorally unchanged during extraction. P
 
 ## Next Evaluation Steps
 
-1. Record every CodeRabbit and Qodo finding on subsequent public pull requests.
-2. Measure time to review, current-head coverage, duplicates, and interaction effort.
-3. Recheck candidate plan terms periodically, since product plans are external state.
-4. Decide whether either candidate meets the first-class support criteria.
-5. Design `pr_review.py` provider adapters only for candidates that graduate.
-6. Decide separately whether a graduated reviewer is advisory or required.
+1. Record every CodeRabbit and Qodo finding on subsequent public pull requests. 2. Measure time to review, current-head coverage, duplicates, and interaction effort. 3. Recheck candidate plan terms periodically, since product plans are external state. 4. Decide whether either candidate meets the first-class support criteria. 5. Design `pr_review.py` provider adapters only for candidates that graduate. 6. Decide separately whether a graduated reviewer is advisory or required.
 
 <!-- Docs -->
 

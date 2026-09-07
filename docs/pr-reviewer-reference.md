@@ -1,19 +1,10 @@
 # Pull Request Reviewer Reference
 
-This document is the operational reference for how each pull request reviewer in this fleet
-behaves: which repositories it covers, how it is triggered, what its output looks like, and which
-committed file shapes it. It answers "what will this reviewer do here", separately from
-[`pr-reviewer-evaluation.md`][pr-reviewer-evaluation], which measures whether a candidate is worth
-keeping and changes as that measurement changes.
+This document is the operational reference for how each pull request reviewer in this fleet behaves: which repositories it covers, how it is triggered, what its output looks like, and which committed file shapes it. It answers "what will this reviewer do here", separately from [`pr-reviewer-evaluation.md`][pr-reviewer-evaluation], which measures whether a candidate is worth keeping and changes as that measurement changes.
 
-The split is deliberate. A reader mid-review needs the behavior and needs it to be stable. The
-evaluation is a living argument and moves for reasons that have nothing to do with the behavior.
+The split is deliberate. A reader mid-review needs the behavior and needs it to be stable. The evaluation is a living argument and moves for reasons that have nothing to do with the behavior.
 
-Much of what follows is external product state that the fleet observes rather than sets, so it
-goes stale without warning. An observation disagreeing with this file is not always that, though:
-a skipped review also comes from a rate limit, or from a repository's own committed configuration,
-both described below. Rule those out first, and where neither explains it, the product moved and
-this file is what gets corrected.
+Much of what follows is external product state that the fleet observes rather than sets, so it goes stale without warning. An observation disagreeing with this file is not always that, though: a skipped review also comes from a rate limit, or from a repository's own committed configuration, both described below. Rule those out first, and where neither explains it, the product moved and this file is what gets corrected.
 
 ## Table of Contents <!-- omit from toc -->
 
@@ -25,11 +16,7 @@ this file is what gets corrected.
 
 As of September 2026 both candidates run on their open-source tiers. CodeRabbit and Qodo review the maintainer's public repositories and never a private one, so a private repository has Copilot as its only pull request reviewer, and Copilot's own review budget, a self-configured premium request cap, runs out under concurrent pull requests. CodeRabbit's open-source tier auto-reviews only a repository with at least ten stars, so on `ProjectTemplate`, which holds fewer, it reviews only on an explicit trigger. The Claude GitHub App is installed on the account and is not configured as a reviewer, since the `local-strict-review` Skill already runs a review pass before every push toward a pull request.
 
-The consequence a review loop actually needs: **a private repository has Copilot alone**, and no
-trigger produces a candidate review there, while **a public repository below CodeRabbit's star
-gate still has a CodeRabbit review for the asking**. `.agents/skills/pr-review-conduct/SKILL.md`
-"Which Reviewers a Repository Actually Has" states the rule an agent applies, in a form that needs
-none of the facts above, since it is carried into repositories that hold no copy of this file.
+The consequence a review loop actually needs: **a private repository has Copilot alone**, and no trigger produces a candidate review there, while **a public repository below CodeRabbit's star gate still has a CodeRabbit review for the asking**. `.agents/skills/pr-review-conduct/SKILL.md` "Which Reviewers a Repository Actually Has" states the rule an agent applies, in a form that needs none of the facts above, since it is carried into repositories that hold no copy of this file.
 
 ## Interaction and Operations
 
@@ -43,14 +30,9 @@ The review body provides an actionable summary and links each finding to an inli
 
 Automatic review skips a pull request whose base is not the repository default unless [`.coderabbit.yaml`][coderabbit-auto-review] lists the base under `reviews.auto_review.base_branches`, which the hub's file does for `develop`. The default branch is always included, and each entry is a regex. On the open-source tier, automatic review also needs the repository to hold at least ten stars, which `ProjectTemplate` does not, so a review here is triggered by commenting `@coderabbitai review`, and until then CodeRabbit's summary comment says so in place of a review while its status check reports success.
 
-Its collapsed analysis is verbose and can dominate API output, and its status context reports
-success while actionable comments remain, so finding state is read from review threads rather than
-from that check.
+Its collapsed analysis is verbose and can dominate API output, and its status context reports success while actionable comments remain, so finding state is read from review threads rather than from that check.
 
-On the open-source tier it is also rate limited. A rate-limited pull request receives a notice
-naming when a review can next run, in place of the review, and it has the same shape as the
-star-gate skip notice while behaving oppositely: re-triggering returns the notice again rather
-than a review.
+On the open-source tier it is also rate limited. A rate-limited pull request receives a notice naming when a review can next run, in place of the review, and it has the same shape as the star-gate skip notice while behaving oppositely: re-triggering returns the notice again rather than a review.
 
 Incremental follow-up needed an explicit command on [pull request #892][pr-892]. Completion is reported by updating the command reply rather than by creating a new formal review.
 
@@ -58,8 +40,7 @@ Incremental follow-up needed an explicit command on [pull request #892][pr-892].
 
 The findings are individually anchored and usually concise after HTML presentation is removed.
 
-After a corrective push it updates the existing review comment and its resolved state rather than
-creating another review, so a reader comparing review creation events alone sees no second round.
+After a corrective push it updates the existing review comment and its resolved state rather than creating another review, so a reader comparing review creation events alone sees no second round.
 
 The formal review body was empty. All useful state lived in inline comments, so a body-only reader would report no findings.
 
