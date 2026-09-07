@@ -3047,9 +3047,18 @@ class TestTheVerdictNamesTheCopyThatRaisedIt(unittest.TestCase):
             self.assertEqual("owner/repo@ccccccc", prose_lint.gate_provenance())
 
     def test_a_checkout_that_tracks_the_script_names_its_own_commit(self) -> None:
-        """The value is asserted against that repository's actual HEAD, not against a shape."""
+        """The value is asserted against that repository's actual HEAD, not against a shape.
+
+        The absence of the moved marker is asserted alongside it, since `gate local <head>` is a
+        prefix of `gate local <head>-dirty` and a case reading only for the prefix passes on a
+        resolution that calls every clean copy moved. Dropping the pathspec from the status query
+        does exactly that, because this class writes an untracked sample file into the repository
+        it builds.
+        """
         _, script, head = self.repo_with_script()
-        self.assertIn(f"gate local {head}", self.verdict(script))
+        out = self.verdict(script)
+        self.assertIn(f"gate local {head}", out)
+        self.assertNotIn("-dirty", out)
 
     def test_an_edited_working_copy_is_named_as_moved(self) -> None:
         """The commit no longer describes the file, which is the state of any branch changing a rule.
@@ -3062,11 +3071,13 @@ class TestTheVerdictNamesTheCopyThatRaisedIt(unittest.TestCase):
             fh.write("# Edited after the commit.\n")
         self.assertIn(f"gate local {head}-dirty", self.verdict(script))
 
-    def test_a_copy_in_an_unrelated_checkout_is_attributed_to_nothing(self) -> None:
+    def test_an_untracked_copy_is_attributed_to_nothing(self) -> None:
         """The failure a bare HEAD read cannot see, since it returns a well-formed wrong answer.
 
-        The repository's HEAD resolves and describes content this copy never held, and the value
-        is indistinguishable from a genuine hub checkout's own.
+        The repository's HEAD resolves and describes content this copy never held. What is gated
+        here is trackedness rather than repository identity: a copy committed into an unrelated
+        repository is tracked and clean there and is still named by that repository's HEAD, which
+        the resolution's own docstring states it does not close.
         """
         _, script, head = self.repo_with_script(tracked=False)
         out = self.verdict(script)
@@ -3106,6 +3117,7 @@ class TestTheVerdictNamesTheCopyThatRaisedIt(unittest.TestCase):
             env=env,
         )
         self.assertIn(f"gate local {head}", r.stderr)
+        self.assertNotIn("-dirty", r.stderr)
 
     def test_both_scope_shapes_carry_the_attribution(self) -> None:
         """A whole-tree verdict and a diff-scoped one are two formats, so each is asserted."""

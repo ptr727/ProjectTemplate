@@ -298,14 +298,22 @@ def checkout_provenance(script: Path) -> str:
 
     A checkout containing the script is not the same fact as a commit describing it, and reading
     HEAD alone conflates the two. Dropping a copy into an unrelated repository resolves that
-    repository's HEAD, which is a well-formed answer naming content it never held, and the value
-    is indistinguishable from a hub checkout's own. Editing the file in place resolves the commit
-    before the edit, which is the ordinary state of any branch that changes a rule, so the run
-    that most needs an accurate attribution is the one that would get a stale one.
+    repository's HEAD, which is a well-formed answer naming content it never held. Editing the
+    file in place resolves the commit before the edit, which is the ordinary state of any branch
+    that changes a rule, so the run that most needs an accurate attribution is the one that would
+    get a stale one.
 
-    Both are closed by asking what HEAD actually says about this path rather than what it says
-    about the repository: an untracked path is attributed to nothing, and a tracked path whose
-    working copy has moved is named as moved rather than as its commit.
+    Both are narrowed by asking what HEAD says about this path rather than what it says about the
+    repository: an untracked path is attributed to nothing, and a tracked path whose working copy
+    has moved is named as moved rather than as its commit.
+
+    What this does not establish is which repository answered. A copy committed into an unrelated
+    repository is tracked and clean there, so it is named by that repository's HEAD, and the value
+    carries no identity to tell it apart from a hub checkout's own. A `local` value is therefore
+    read as a commit inside the repository that produced it and nowhere else, which is what the
+    explicit and environment sources exist to do better. Closing it properly means naming the
+    repository alongside the commit, and that is a change to the value's shape rather than to
+    this resolution.
 
     The third way they come apart is the environment rather than the filesystem. Git's location
     variables outrank `-C`, and a git hook exports them, so a run made from inside one answers
