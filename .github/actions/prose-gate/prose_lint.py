@@ -444,8 +444,9 @@ def path_candidate(token: str, in_span: bool = True) -> str | None:
     return token.removeprefix("./")
 
 
-# The characters bash's `[[:space:]]` class holds in the C locale, which is what the composite action trims an exclusions line with.
-# Python's own `str.strip` covers a wider set, so the two disagree about which lines are blank unless this one is named explicitly.
+# The ASCII whitespace the composite action's trim always removes from an exclusions line, whatever locale it runs under.
+# Its `[[:space:]]` is a superset of this in a UTF-8 locale and Python's own `str.strip` is a superset again, so judging blank by either would refuse a value the action does build and pass.
+# Naming the smallest of the three keeps the divergence one way, which is the direction where the guard cannot fail a repository over an exclusion that is merely inert.
 ASCII_BLANK = " \t\n\r\v\f"
 
 # Paths with a `retire` disposition remain valid references to a hub-hosted tool or a declared deletion.

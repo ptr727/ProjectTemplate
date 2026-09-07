@@ -3013,9 +3013,9 @@ class TestAnEmptyExclusionIsRefused(unittest.TestCase):
     def test_blank_is_judged_the_way_the_action_judges_it(self) -> None:
         """The guard must not refuse a value the action itself builds and passes.
 
-        The action trims an exclusions line with bash's ASCII whitespace class, and Python's
-        `str.strip` covers a wider set, so a line holding only a non-breaking space survives that
-        trim and arrives here as a non-empty argument. Judged by the wider set it would be read as
+        The action's trim always removes ASCII whitespace and, in a UTF-8 locale, more besides,
+        while Python's `str.strip` covers a wider set again, so a line holding only a non-breaking
+        space can survive that trim and arrive here as a non-empty argument. Judged by the wider set it would be read as
         blank and refused, failing that repository's gate on every run over an exclusion that is
         merely inert.
         """
