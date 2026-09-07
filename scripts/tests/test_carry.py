@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import pathlib
+import re
 import subprocess
 import sys
 import tempfile
@@ -200,9 +201,9 @@ class CarryManifestTests(unittest.TestCase):
         carry.refuse_hub_tree_target(carry.HUB_NAME, [opted_in])
         carry.refuse_hub_tree_target("PhotoCleaner", [not_opted_in])
 
-        with self.assertRaisesRegex(
-            carry.CarryError, "does not allow ProjectTemplate as its target"
-        ):
+        # Escaped and taken from the constant, since pinning the literal here would reintroduce the hard-coded name this guard's own message was changed to stop carrying.
+        expected = f"does not allow {re.escape(carry.HUB_NAME)} as its target"
+        with self.assertRaisesRegex(carry.CarryError, expected):
             carry.refuse_hub_tree_target(carry.HUB_NAME, [opted_in, not_opted_in])
 
     def test_rejects_overlapping_targets(self) -> None:
