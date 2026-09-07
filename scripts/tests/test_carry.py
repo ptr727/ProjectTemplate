@@ -433,6 +433,93 @@ class CarrySectionTests(unittest.TestCase):
         self.assertIn("The hub's current table.\n## Local Addition\n", result)
         self.assertEqual(carry.h2_headings(carry.split_lines(result)), carry.h2_headings(target))
 
+    def _unit(self, hub_text: str, target_text: str | None, sections: list[str]) -> None:
+        """Plan one AGENTS.md unit from two documents written to temporary hub and target trees."""
+        with tempfile.TemporaryDirectory() as temp:
+            root = pathlib.Path(temp)
+            hub, target = root / "hub", root / "target"
+            hub.mkdir()
+            target.mkdir()
+            (hub / "AGENTS.md").write_bytes(hub_text.encode("utf-8"))
+            if target_text is not None:
+                (target / "AGENTS.md").write_bytes(target_text.encode("utf-8"))
+            carry.plan_unit(hub, target, "AGENTS.md", sections)
+
+    def test_plan_unit_refuses_a_file_the_target_does_not_carry(self) -> None:
+        with self.assertRaisesRegex(carry.CarryError, "absent from the target, which is a standup"):
+            self._unit(HUB_DOC, None, ["Fleet Bootstrap"])
+
+    def test_plan_unit_refuses_a_section_absent_from_the_hub(self) -> None:
+        with self.assertRaisesRegex(carry.CarryError, "absent from the hub's own copy"):
+            self._unit(HUB_DOC, TARGET_DOC, ["Release Model"])
+
+    def test_plan_unit_refuses_a_section_absent_from_the_target(self) -> None:
+        hub = HUB_DOC + "\n## Release Model\n\nHub only.\n"
+        with self.assertRaisesRegex(carry.CarryError, "absent from the target"):
+            self._unit(hub, TARGET_DOC, ["Release Model"])
+
+    def test_plan_unit_refuses_a_section_that_ends_one_file_and_not_the_other(self) -> None:
+        """The hub's last section carries no blank line before a heading, so its bytes and a
+        downstream local section that follows it cannot both be satisfied."""
+        target = TARGET_DOC + "\n## Repository Local Rule\n\nWritten after a local fault.\n"
+        with self.assertRaisesRegex(
+            carry.CarryError, "ends the file in one copy and not the other"
+        ):
+            self._unit(HUB_DOC, target, ["Where the Rules Live"])
+
+    def test_plan_unit_refuses_a_bare_carriage_return(self) -> None:
+        with self.assertRaisesRegex(carry.CarryError, "bare carriage return"):
+            self._unit(HUB_DOC, TARGET_DOC.replace("\n", "\r"), ["Fleet Bootstrap"])
+
+    def test_plan_unit_reports_the_stale_sections_and_nothing_else(self) -> None:
+        with tempfile.TemporaryDirectory() as temp:
+            root = pathlib.Path(temp)
+            hub, target = root / "hub", root / "target"
+            hub.mkdir()
+            target.mkdir()
+            (hub / "AGENTS.md").write_bytes(HUB_DOC.encode("utf-8"))
+            (target / "AGENTS.md").write_bytes(TARGET_DOC.encode("utf-8"))
+
+            plan = carry.plan_unit(
+                hub, target, "AGENTS.md", ["Fleet Bootstrap", "Where the Rules Live"]
+            )
+
+        self.assertEqual(plan.stale, ["Fleet Bootstrap"])
+        self.assertEqual(plan.declared, ["Fleet Bootstrap", "Where the Rules Live"])
+
+    def test_replace_sections_refuses_two_names_resolving_to_one_region(self) -> None:
+        target = carry.split_lines(TARGET_DOC)
+        source = carry.split_lines(HUB_DOC)
+
+        with self.assertRaisesRegex(carry.CarryError, "two regions that overlap"):
+            carry.replace_sections(
+                target, source, ["Fleet Bootstrap", "fleet bootstrap"], "AGENTS.md"
+            )
+
+    def test_verbatim_section_names_folds_case_when_deduplicating(self) -> None:
+        item = {
+            "sections": [
+                {"name": "Fleet Bootstrap", "fidelity": "verbatim"},
+                {"name": "fleet bootstrap ", "fidelity": "verbatim"},
+            ]
+        }
+
+        self.assertEqual(carry.verbatim_section_names(item, {"dotnet"}), ["Fleet Bootstrap"])
+
+    def test_assert_sections_accepts_a_heading_the_re_vendor_re_cased(self) -> None:
+        """A re-cased heading is the drift this tool fixes, so the postcondition must not read the
+        corrected casing as the section set having changed."""
+        target = carry.split_lines(TARGET_DOC.replace("## Fleet Bootstrap", "## fleet bootstrap"))
+        source = carry.split_lines(HUB_DOC)
+        rewritten = carry.replace_sections(target, source, ["Fleet Bootstrap"], "AGENTS.md")
+
+        with tempfile.TemporaryDirectory() as temp:
+            path = self._write(pathlib.Path(temp), "".join(rewritten))
+            carry.assert_sections(
+                "AGENTS.md", path, source, ["Fleet Bootstrap"], ["Fleet Bootstrap"], target
+            )
+            self.assertIn("## Fleet Bootstrap\n", path.read_text(encoding="utf-8"))
+
     def _write(self, root: pathlib.Path, text: str) -> pathlib.Path:
         path = root / "AGENTS.md"
         path.write_bytes(text.encode("utf-8"))

@@ -4,6 +4,7 @@
 import argparse
 import fnmatch
 import hashlib
+import itertools
 import json
 import os
 import pathlib
@@ -378,8 +379,19 @@ def audit_module() -> Any:
 _LINE = re.compile(r"[^\n]*\n|[^\n]+$")
 
 
-def split_lines(text: str) -> list[str]:
-    """`text` as lines that keep their own terminators, so joining them returns the original bytes."""
+def split_lines(text: str, rel: str | None = None) -> list[str]:
+    """`text` as lines that keep their own terminators, so joining them returns the original bytes.
+
+    A lone CR is refused rather than read as content, because `spec/audit.py`'s `normalize` treats
+    one as a line break and this does not, so the two would read a CR-terminated document as
+    different line sets: the audit would report a section stale that this tool cannot even locate,
+    and the refusal it would otherwise raise names an absent section rather than the real problem.
+    """
+    if rel is not None and "\r" in text.replace("\r\n", ""):
+        raise CarryError(
+            f"{rel} carries a bare carriage return, which the fidelity comparison reads as a line"
+            " break and this tool does not, so the two would disagree about where a section stops"
+        )
     return _LINE.findall(text)
 
 
@@ -398,6 +410,8 @@ def normalize_eol(text: str) -> str:
     two copies say the same thing, and this tool writes bytes, so masking either would let it
     overwrite a value the repository owns. Line endings are the one exception, because
     `.gitattributes` governs them separately and a re-vendor preserves whichever the target uses.
+    `scripts/canonical_review.py`'s own `normalize` is this same reduction for the same reason, and
+    it is not shared, since that module imports this one and importing it back would be a cycle.
     """
     return text.replace("\r\n", "\n").replace("\r", "\n")
 
@@ -494,7 +508,7 @@ def verbatim_section_names(item: dict[str, Any], selectors: set[str]) -> list[st
     A bare-string entry is `appliesTo` `*` at intent fidelity, matching `spec/audit.py`'s own
     reading of the same manifest, so it is never a re-vendor target.
     """
-    out = []
+    out: list[str] = []
     for element in item.get("sections", []):
         if isinstance(element, str):
             continue
@@ -507,7 +521,8 @@ def verbatim_section_names(item: dict[str, Any], selectors: set[str]) -> list[st
         name = element.get("name")
         if not isinstance(name, str) or not name.strip():
             raise CarryError("section declaration name must be a non-empty string")
-        if name not in out:
+        # Folded and stripped, matching `section_span`'s own lookup key, since two spellings of one heading resolve to one region and replacing that region twice would splice its tail in again.
+        if name.strip().lower() not in {seen.strip().lower() for seen in out}:
             out.append(name)
     return out
 
@@ -544,7 +559,8 @@ def section_units(manifest: dict[str, Any], selectors: set[str]) -> list[tuple[s
                 " overwrite a substituted value"
             )
         merged = units.setdefault(path, [])
-        merged.extend(name for name in names if name not in merged)
+        seen = {name.strip().lower() for name in merged}
+        merged.extend(name for name in names if name.strip().lower() not in seen)
     return list(units.items())
 
 
@@ -565,8 +581,16 @@ def replace_sections(
         if target_span is None or source_span is None:
             raise CarryError(f"{path} section '{section}' could not be located to replace")
         spans.append((target_span, source_span))
+    ordered = sorted(spans, reverse=True)
+    # Two names resolving to one region would splice that region's replacement in twice, the second time against indices the first splice already moved, so the file would gain a duplicated tail before any postcondition read it back.
+    for (later, _), (earlier, _) in itertools.pairwise(ordered):
+        if earlier[1] > later[0]:
+            raise CarryError(
+                f"{path} names two regions that overlap, lines {earlier} and {later},"
+                " so one replacement would splice over the other"
+            )
     out = list(target_lines)
-    for (start, end), source_span in sorted(spans, reverse=True):
+    for (start, end), source_span in ordered:
         ending = terminator(out[start]) or "\n"
         region = []
         for line in source_lines[source_span[0] : source_span[1]]:
@@ -596,8 +620,12 @@ def assert_sections(
     see. `apply` already re-compares tree digests after writing, and this is that discipline for a
     section.
     """
-    after_lines = split_lines(decode_text(target_file, path))
-    if h2_headings(after_lines) != h2_headings(before_lines):
+    after_lines = split_lines(decode_text(target_file, path), path)
+    # Folded, because `section_span` locates a heading folded, so a re-cased heading is drift this tool fixes rather than a change of section set.
+    # Any other edit to a heading line is caught byte-for-byte by the two comparisons below.
+    if [name.lower() for name in h2_headings(after_lines)] != [
+        name.lower() for name in h2_headings(before_lines)
+    ]:
         raise CarryError(
             f"post-apply check failed for {path}: the level-two heading sequence changed,"
             " so the section set or its order did not survive the write"
@@ -641,6 +669,74 @@ def decode_text(path: pathlib.Path, rel: str) -> str:
         raise CarryError(f"cannot read {rel}: {exc}") from exc
 
 
+@dataclass(frozen=True)
+class SectionPlan:
+    """One file's re-vendor, decided but not yet written."""
+
+    path: str
+    declared: list[str]
+    source_lines: list[str]
+    target_lines: list[str]
+    stale: list[str]
+
+
+def plan_unit(
+    hub: pathlib.Path, target: pathlib.Path, path: str, declared: list[str]
+) -> SectionPlan:
+    """Locate every declared section in both copies and decide which are stale, writing nothing."""
+    source_file = relative_root(hub, path)
+    target_file = relative_root(target, path)
+    if not target_file.is_file():
+        raise CarryError(
+            f"{path} is absent from the target, which is a standup question rather than drift"
+            " (the hub's STANDUP.md carries the baseline), so this refuses rather than creating it"
+        )
+    source_lines = split_lines(decode_text(source_file, path), path)
+    target_lines = split_lines(decode_text(target_file, path), path)
+    stale = []
+    for section in declared:
+        source_span = section_span(source_lines, section)
+        if source_span is None:
+            raise CarryError(
+                f"{path} section '{section}' is declared verbatim but absent from the hub's own copy"
+            )
+        target_span = section_span(target_lines, section)
+        if target_span is None:
+            raise CarryError(
+                f"{path} section '{section}' is declared verbatim but absent from the target."
+                " Where a declared section belongs in a file that never carried it is a standup"
+                " question rather than a drift question, so this refuses rather than guessing"
+            )
+        # A region runs to the next level-two heading, so the blank line before that heading is inside it and a section ending the file has none.
+        # Where one copy ends the file and the other does not, the hub's bytes and the target's document structure cannot both be satisfied: writing them verbatim runs the following heading onto the last line of the region, and padding the region leaves bytes the fidelity comparison would then report as drift forever.
+        # Both are wrong, so this names the conflict instead of picking one.
+        if (source_span[1] == len(source_lines)) != (target_span[1] == len(target_lines)):
+            raise CarryError(
+                f"{path} section '{section}' ends the file in one copy and not the other, so the"
+                " hub's bytes and this file's own heading spacing cannot both be satisfied;"
+                " reconcile the section order by hand and raise it against the manifest"
+            )
+        source_region = region_text(source_lines, source_span)
+        target_region = region_text(target_lines, target_span)
+        guard_governed_drift(path, section, source_region, "hub")
+        guard_governed_drift(path, section, target_region, "target")
+        if normalize_eol(source_region) != normalize_eol(target_region):
+            stale.append(section)
+    return SectionPlan(path, declared, source_lines, target_lines, stale)
+
+
+def plan_sections(
+    hub: pathlib.Path, target: pathlib.Path, units: list[tuple[str, list[str]]]
+) -> list[SectionPlan]:
+    """Every unit's plan, so each refusal is raised before the first file is written.
+
+    A refusal reached partway through the writes would leave one file re-vendored and the next
+    not, reported by the same exit code as a refusal that touched nothing, and the operator would
+    have no way to tell the two apart from the output.
+    """
+    return [plan_unit(hub, target, path, declared) for path, declared in units]
+
+
 def run_sections(mode: str, name: str, target: pathlib.Path, hub: pathlib.Path = ROOT) -> int:
     """Compare, and for `apply-sections` re-vendor, the verbatim sections inside a mixed file.
 
@@ -659,52 +755,40 @@ def run_sections(mode: str, name: str, target: pathlib.Path, hub: pathlib.Path =
     entry = resolve_repo(name, registry)
     selectors = selector_set(entry, registry.get("defaults", {}))
     units = section_units(manifest, selectors)
-    owned_roots = [relative_root(target, path) for path, _ in units]
-    verify_target(target, entry, owned_roots)
+    # No owned root, unlike a tree carry.
+    # A tree's root holds nothing but hub-owned content, so exempting it from the unrelated-changes check gives up nothing, where these files hold the repository's own sections too and exempting one would let this tool's writes land on top of somebody's uncommitted edit to a section it never touches.
+    # The cost is that a second apply needs the first one committed, which is the order RESYNC.md already gives.
+    verify_target(target, entry, [])
+    plans = plan_sections(hub, target, units)
     print(f"hubCommit: {hub_commit}")
     print(f"repository: {name}")
     print(f"types: {','.join(entry.get('types', []))}")
-    print(f"files: {len(units)}")
-    clean = True
-    for path, declared in units:
-        source_file = relative_root(hub, path)
-        target_file = relative_root(target, path)
-        if not target_file.is_file():
-            raise CarryError(
-                f"{path} is absent from the target, which is a standup question rather than drift"
-                " (the hub's STANDUP.md carries the baseline), so this refuses rather than creating it"
+    print(f"files: {len(plans)}")
+    for plan in plans:
+        print(
+            json.dumps(
+                {"path": plan.path, "sections": plan.declared, "stale": plan.stale}, sort_keys=True
             )
-        source_lines = split_lines(decode_text(source_file, path))
-        target_lines = split_lines(decode_text(target_file, path))
-        stale = []
-        for section in declared:
-            source_span = section_span(source_lines, section)
-            if source_span is None:
-                raise CarryError(
-                    f"{path} section '{section}' is declared verbatim but absent from the hub's own copy"
-                )
-            target_span = section_span(target_lines, section)
-            if target_span is None:
-                raise CarryError(
-                    f"{path} section '{section}' is declared verbatim but absent from the target."
-                    " Where a declared section belongs in a file that never carried it is a standup"
-                    " question rather than a drift question, so this refuses rather than guessing"
-                )
-            source_region = region_text(source_lines, source_span)
-            target_region = region_text(target_lines, target_span)
-            guard_governed_drift(path, section, source_region, "hub")
-            guard_governed_drift(path, section, target_region, "target")
-            if normalize_eol(source_region) != normalize_eol(target_region):
-                stale.append(section)
-        print(json.dumps({"path": path, "sections": declared, "stale": stale}, sort_keys=True))
-        clean = clean and not stale
-        if mode == "apply-sections" and stale:
-            rewritten = replace_sections(target_lines, source_lines, stale, path)
-            target_file.write_bytes("".join(rewritten).encode("utf-8"))
-            print(f"write {path}")
-            assert_sections(path, target_file, source_lines, stale, declared, target_lines)
-            print(json.dumps({"path": path, "postApply": True, "stale": []}, sort_keys=True))
-    return 0 if mode == "apply-sections" or clean else 1
+        )
+    if mode != "apply-sections":
+        return 0 if all(not plan.stale for plan in plans) else 1
+    for plan in plans:
+        if not plan.stale:
+            continue
+        target_file = relative_root(target, plan.path)
+        rewritten = replace_sections(plan.target_lines, plan.source_lines, plan.stale, plan.path)
+        target_file.write_bytes("".join(rewritten).encode("utf-8"))
+        print(f"write {plan.path}")
+        assert_sections(
+            plan.path,
+            target_file,
+            plan.source_lines,
+            plan.stale,
+            plan.declared,
+            plan.target_lines,
+        )
+        print(json.dumps({"path": plan.path, "postApply": True, "stale": []}, sort_keys=True))
+    return 0
 
 
 def run(mode: str, name: str, target: pathlib.Path, hub: pathlib.Path = ROOT) -> int:
@@ -712,12 +796,7 @@ def run(mode: str, name: str, target: pathlib.Path, hub: pathlib.Path = ROOT) ->
     manifest = load_json(hub / "spec/files.json")
     hub_commit = verify_hub(hub, registry)
     entry = resolve_repo(name, registry)
-    defaults = registry.get("defaults", {})
-    selectors = set(entry.get("types", []))
-    selectors.add(entry.get("workflowModel") or defaults.get("workflowModel") or "release")
-    selectors.add(entry.get("releaseTrigger") or defaults.get("releaseTrigger") or "two-phase")
-    if entry.get("consumerModel"):
-        selectors.add(entry["consumerModel"])
+    selectors = selector_set(entry, registry.get("defaults", {}))
     all_declarations = manifest.get("trees")
     if not isinstance(all_declarations, list):
         raise CarryError("manifest trees must be an array")
@@ -727,9 +806,7 @@ def run(mode: str, name: str, target: pathlib.Path, hub: pathlib.Path = ROOT) ->
         for declaration in all_declarations
         if applicable(declaration.get("appliesTo", "*"), selectors)
     ]
-    if name == "ProjectTemplate" and any(
-        not item.get("allowHubTarget", False) for item in declarations
-    ):
+    if name == HUB_NAME and any(not item.get("allowHubTarget", False) for item in declarations):
         raise CarryError("a declaration does not allow ProjectTemplate as its target")
     owned_roots = [relative_root(target, item["target"]) for item in declarations]
     verify_target(target, entry, owned_roots)
