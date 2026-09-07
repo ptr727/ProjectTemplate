@@ -62,8 +62,9 @@ Usage: menu.ps1 [options]
 
 An interactive menu over this fleet's host and repo tooling: update the host tools, upgrade the
 OS packages, install the fleet skills, audit a cataloged repo, and pull the hub's verbatim-owned
-files into a downstream repo's own worktree. Run from a hub checkout or from any other repo. The
-menu shows each the tasks that apply to it.
+files, or just the verbatim rule sections inside a mixed file, into a downstream repo's own
+worktree. Run from a hub checkout or from any other repo. The menu shows each the tasks that
+apply to it.
 
 Options:
   -y, -Yes          Pass -Yes to each tool this menu runs, so a tool does not prompt. The menu's

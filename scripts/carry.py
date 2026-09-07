@@ -469,6 +469,23 @@ def region_text(lines: list[str], span: tuple[int, int]) -> str:
     return "".join(lines[span[0] : span[1]])
 
 
+def comparable_region(lines: list[str], span: tuple[int, int]) -> str:
+    """The region rendered the way `spec/audit.py`'s `extract_section` renders it.
+
+    That function splits the whole document on LF and joins the region's lines back with LF, so a
+    file ending in a newline yields one final empty element and a region running to the end of the
+    file carries it. The consequence is worth stating, because it decides what this tool writes: a
+    section that ends the hub's file and the same section followed by a heading downstream, with
+    one blank line between, render to the identical string. The fidelity comparison therefore reads
+    them as the same content, and the raw bytes do not, so this is the form to compare and
+    `region_text` is the form to write.
+    """
+    bodies = [line[: len(line) - len(terminator(line))] for line in lines[span[0] : span[1]]]
+    if span[1] == len(lines) and lines and terminator(lines[-1]):
+        bodies.append("")
+    return "\n".join(bodies)
+
+
 def outside_sections(lines: list[str], sections: list[str], path: str) -> str:
     """Every line outside the named regions, joined, which is the text a re-vendor must not touch.
 
@@ -537,30 +554,34 @@ def section_units(manifest: dict[str, Any], selectors: set[str]) -> list[tuple[s
     if not isinstance(baseline, list):
         raise CarryError("manifest baseline must be an array")
     units: dict[str, list[str]] = {}
+    placeholder_paths = set()
     for item in baseline:
         if not isinstance(item, dict):
             raise CarryError(f"baseline declaration must be an object: {item!r}")
         if not applicable(item.get("appliesTo", "*"), selectors):
             continue
-        names = verbatim_section_names(item, selectors)
-        if not names:
-            continue
         path = item.get("path")
         if not isinstance(path, str) or not path:
             raise CarryError("baseline declaration path must be a non-empty string")
+        # Collected for every applicable entry rather than only the ones carrying verbatim sections, since the two can be declared on separate entries for one path and a file is written once whichever entry named the substitution.
+        if item.get("placeholders"):
+            placeholder_paths.add(path)
+        names = verbatim_section_names(item, selectors)
+        if not names:
+            continue
         if not path.endswith(".md"):
             raise CarryError(
                 f"a verbatim section is a Markdown heading region, so it cannot be declared on {path}"
             )
-        if item.get("placeholders"):
-            raise CarryError(
-                f"{path} declares both placeholders and verbatim sections, and a verbatim unit carries"
-                " no placeholder (spec/fidelity-model.md 'Normalization'), so re-vendoring one could"
-                " overwrite a substituted value"
-            )
         merged = units.setdefault(path, [])
         seen = {name.strip().lower() for name in merged}
         merged.extend(name for name in names if name.strip().lower() not in seen)
+    for path in sorted(set(units) & placeholder_paths):
+        raise CarryError(
+            f"{path} declares both placeholders and verbatim sections, and a verbatim unit carries"
+            " no placeholder (spec/fidelity-model.md 'Normalization'), so re-vendoring one could"
+            " overwrite a substituted value"
+        )
     return list(units.items())
 
 
@@ -597,8 +618,16 @@ def replace_sections(
             body = line[: len(line) - len(terminator(line))]
             region.append(body + ending if terminator(line) else body)
         # A region spliced ahead of more of the file has to end terminated, or its last line would run into the heading that follows it.
-        if region and end < len(out) and not terminator(region[-1]):
+        if region and not terminator(region[-1]):
             region[-1] += ending
+        # A region runs to the next level-two heading, so the blank line before that heading is inside it and a section ending its file has none.
+        # Where the two copies differ on that, `comparable_region` reads both as the same content, so the boundary is reconciled to what this document needs rather than copied from the other one: pad where a heading follows, and drop the trailing blank where nothing does.
+        source_ends_file = source_span[1] == len(source_lines)
+        target_ends_file = end == len(out)
+        if source_ends_file and not target_ends_file:
+            region.append(ending)
+        elif target_ends_file and not source_ends_file and region and not region[-1].strip():
+            region.pop()
         out[start:end] = region
     return out
 
@@ -642,8 +671,8 @@ def assert_sections(
         source_span = section_span(source_lines, section)
         if after_span is None or source_span is None:
             raise CarryError(f"post-apply check failed for {path}: section '{section}' is absent")
-        if normalize_eol(region_text(after_lines, after_span)) != normalize_eol(
-            region_text(source_lines, source_span)
+        if comparable_region(after_lines, after_span) != comparable_region(
+            source_lines, source_span
         ):
             raise CarryError(
                 f"post-apply check failed for {path} section '{section}':"
@@ -707,20 +736,11 @@ def plan_unit(
                 " Where a declared section belongs in a file that never carried it is a standup"
                 " question rather than a drift question, so this refuses rather than guessing"
             )
-        # A region runs to the next level-two heading, so the blank line before that heading is inside it and a section ending the file has none.
-        # Where one copy ends the file and the other does not, the hub's bytes and the target's document structure cannot both be satisfied: writing them verbatim runs the following heading onto the last line of the region, and padding the region leaves bytes the fidelity comparison would then report as drift forever.
-        # Both are wrong, so this names the conflict instead of picking one.
-        if (source_span[1] == len(source_lines)) != (target_span[1] == len(target_lines)):
-            raise CarryError(
-                f"{path} section '{section}' ends the file in one copy and not the other, so the"
-                " hub's bytes and this file's own heading spacing cannot both be satisfied;"
-                " reconcile the section order by hand and raise it against the manifest"
-            )
-        source_region = region_text(source_lines, source_span)
-        target_region = region_text(target_lines, target_span)
+        source_region = comparable_region(source_lines, source_span)
+        target_region = comparable_region(target_lines, target_span)
         guard_governed_drift(path, section, source_region, "hub")
         guard_governed_drift(path, section, target_region, "target")
-        if normalize_eol(source_region) != normalize_eol(target_region):
+        if source_region != target_region:
             stale.append(section)
     return SectionPlan(path, declared, source_lines, target_lines, stale)
 
@@ -735,6 +755,35 @@ def plan_sections(
     have no way to tell the two apart from the output.
     """
     return [plan_unit(hub, target, path, declared) for path, declared in units]
+
+
+def apply_plans(target: pathlib.Path, plans: list[SectionPlan]) -> None:
+    """Write each plan's stale regions and assert the result, one file at a time.
+
+    Every refusal has already been raised by `plan_sections`, so nothing here can decline to
+    proceed. What can still fail is the write itself or the assertion after it, and each names the
+    file it was working on, because by then an earlier file may already hold its re-vendored
+    content and the operator has to know which.
+    """
+    for plan in plans:
+        if not plan.stale:
+            continue
+        target_file = relative_root(target, plan.path)
+        rewritten = replace_sections(plan.target_lines, plan.source_lines, plan.stale, plan.path)
+        try:
+            target_file.write_bytes("".join(rewritten).encode("utf-8"))
+        except OSError as exc:
+            raise CarryError(f"cannot write {plan.path}: {exc}") from exc
+        print(f"write {plan.path}")
+        assert_sections(
+            plan.path,
+            target_file,
+            plan.source_lines,
+            plan.stale,
+            plan.declared,
+            plan.target_lines,
+        )
+        print(json.dumps({"path": plan.path, "postApply": True, "stale": []}, sort_keys=True))
 
 
 def run_sections(mode: str, name: str, target: pathlib.Path, hub: pathlib.Path = ROOT) -> int:
@@ -757,7 +806,7 @@ def run_sections(mode: str, name: str, target: pathlib.Path, hub: pathlib.Path =
     units = section_units(manifest, selectors)
     # No owned root, unlike a tree carry.
     # A tree's root holds nothing but hub-owned content, so exempting it from the unrelated-changes check gives up nothing, where these files hold the repository's own sections too and exempting one would let this tool's writes land on top of somebody's uncommitted edit to a section it never touches.
-    # The cost is that a second apply needs the first one committed, which is the order RESYNC.md already gives.
+    # The cost is that a second apply needs the first one committed, and RESYNC.md's step 1 runs these modes before anything else writes to the tree.
     verify_target(target, entry, [])
     plans = plan_sections(hub, target, units)
     print(f"hubCommit: {hub_commit}")
@@ -772,22 +821,7 @@ def run_sections(mode: str, name: str, target: pathlib.Path, hub: pathlib.Path =
         )
     if mode != "apply-sections":
         return 0 if all(not plan.stale for plan in plans) else 1
-    for plan in plans:
-        if not plan.stale:
-            continue
-        target_file = relative_root(target, plan.path)
-        rewritten = replace_sections(plan.target_lines, plan.source_lines, plan.stale, plan.path)
-        target_file.write_bytes("".join(rewritten).encode("utf-8"))
-        print(f"write {plan.path}")
-        assert_sections(
-            plan.path,
-            target_file,
-            plan.source_lines,
-            plan.stale,
-            plan.declared,
-            plan.target_lines,
-        )
-        print(json.dumps({"path": plan.path, "postApply": True, "stale": []}, sort_keys=True))
+    apply_plans(target, plans)
     return 0
 
 

@@ -10,6 +10,8 @@ import tempfile
 import unittest
 
 sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent.parent))
+sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent.parent.parent / "spec"))
+import audit
 import carry
 
 
@@ -430,7 +432,7 @@ class CarrySectionTests(unittest.TestCase):
             carry.replace_sections(target, source, ["Where the Rules Live"], "AGENTS.md")
         )
 
-        self.assertIn("The hub's current table.\n## Local Addition\n", result)
+        self.assertIn("The hub's current table.\n\n## Local Addition\n", result)
         self.assertEqual(carry.h2_headings(carry.split_lines(result)), carry.h2_headings(target))
 
     def _unit(self, hub_text: str, target_text: str | None, sections: list[str]) -> None:
@@ -458,14 +460,118 @@ class CarrySectionTests(unittest.TestCase):
         with self.assertRaisesRegex(carry.CarryError, "absent from the target"):
             self._unit(hub, TARGET_DOC, ["Release Model"])
 
-    def test_plan_unit_refuses_a_section_that_ends_one_file_and_not_the_other(self) -> None:
-        """The hub's last section carries no blank line before a heading, so its bytes and a
-        downstream local section that follows it cannot both be satisfied."""
-        target = TARGET_DOC + "\n## Repository Local Rule\n\nWritten after a local fault.\n"
-        with self.assertRaisesRegex(
-            carry.CarryError, "ends the file in one copy and not the other"
-        ):
-            self._unit(HUB_DOC, target, ["Where the Rules Live"])
+    def test_a_section_ending_the_hub_file_keeps_a_blank_line_before_what_follows(self) -> None:
+        """The hub's last section carries no blank line before a following heading, because it has
+        none. `spec/audit.py` reads that and one blank line as the same content, so the boundary is
+        reconciled to what the target document needs rather than copied byte-for-byte."""
+        hub = carry.split_lines(HUB_DOC)
+        target = carry.split_lines(
+            TARGET_DOC + "\n## Repository Local Rule\n\nWritten after a local fault.\n"
+        )
+
+        result = "".join(carry.replace_sections(target, hub, ["Where the Rules Live"], "AGENTS.md"))
+
+        self.assertIn("The hub's current table.\n\n## Repository Local Rule\n", result)
+        self.assertIn("Written after a local fault.", result)
+        self.assertEqual(
+            audit.extract_section(result, "Where the Rules Live"),
+            audit.extract_section(HUB_DOC, "Where the Rules Live"),
+        )
+
+    def test_a_section_ending_the_target_file_keeps_no_trailing_blank_line(self) -> None:
+        """The mirror case: nothing follows the section downstream, so the hub's own trailing blank
+        line would leave the file ending on one."""
+        hub = carry.split_lines(HUB_DOC + "\n## Release Model\n\nHub only.\n")
+        target = carry.split_lines("# Title\n\n## Where the Rules Live\n\nStale.\n")
+
+        result = "".join(carry.replace_sections(target, hub, ["Where the Rules Live"], "AGENTS.md"))
+
+        self.assertTrue(result.endswith("The hub's current table.\n"))
+        self.assertEqual(
+            audit.extract_section(result, "Where the Rules Live"),
+            audit.extract_section(
+                HUB_DOC + "\n## Release Model\n\nHub only.\n", "Where the Rules Live"
+            ),
+        )
+
+    def test_comparable_region_matches_the_fidelity_check_across_the_file_boundary(self) -> None:
+        """`region_text` and `extract_section` differ by one newline exactly when one copy's section
+        ends its file and the other's does not, which is the case this form exists to reconcile."""
+        hub = "# T\n\n## X\n\nbody\n"
+        padded = "# T\n\n## X\n\nbody\n\n## Y\n\nlocal\n"
+
+        hub_span = self.span(carry.split_lines(hub), "X")
+        padded_span = self.span(carry.split_lines(padded), "X")
+
+        self.assertEqual(
+            carry.comparable_region(carry.split_lines(hub), hub_span),
+            carry.comparable_region(carry.split_lines(padded), padded_span),
+        )
+        self.assertEqual(
+            audit.extract_section(hub, "X"),
+            carry.comparable_region(carry.split_lines(hub), hub_span),
+        )
+        self.assertNotEqual(
+            carry.region_text(carry.split_lines(hub), hub_span),
+            carry.region_text(carry.split_lines(padded), padded_span),
+        )
+
+    def test_plan_sections_refuses_on_a_later_unit_before_anything_is_written(self) -> None:
+        """Every refusal is reachable while planning, so a bad second unit stops the run with the
+        first one still unwritten."""
+        with tempfile.TemporaryDirectory() as temp:
+            root = pathlib.Path(temp)
+            hub, target = root / "hub", root / "target"
+            hub.mkdir()
+            target.mkdir()
+            for tree, text in ((hub, HUB_DOC), (target, TARGET_DOC)):
+                (tree / "AGENTS.md").write_bytes(text.encode("utf-8"))
+            (hub / "GOVERNANCE.md").write_bytes(HUB_DOC.encode("utf-8"))
+            before = (target / "AGENTS.md").read_bytes()
+
+            with self.assertRaisesRegex(carry.CarryError, "absent from the target"):
+                carry.plan_sections(
+                    hub,
+                    target,
+                    [("AGENTS.md", ["Fleet Bootstrap"]), ("GOVERNANCE.md", ["Fleet Bootstrap"])],
+                )
+
+            self.assertEqual((target / "AGENTS.md").read_bytes(), before)
+
+    def test_apply_plans_writes_every_stale_unit_and_asserts_each(self) -> None:
+        with tempfile.TemporaryDirectory() as temp:
+            root = pathlib.Path(temp)
+            hub, target = root / "hub", root / "target"
+            hub.mkdir()
+            target.mkdir()
+            for name in ("AGENTS.md", "GOVERNANCE.md"):
+                (hub / name).write_bytes(HUB_DOC.encode("utf-8"))
+                (target / name).write_bytes(TARGET_DOC.encode("utf-8"))
+            units = [("AGENTS.md", ["Fleet Bootstrap"]), ("GOVERNANCE.md", ["Fleet Bootstrap"])]
+
+            plans = carry.plan_sections(hub, target, units)
+            carry.apply_plans(target, plans)
+
+            for name in ("AGENTS.md", "GOVERNANCE.md"):
+                written = (target / name).read_text(encoding="utf-8")
+                self.assertIn("The hub's current wording.", written)
+                self.assertIn("A rule this repository wrote", written)
+            self.assertEqual([plan.stale for plan in plans], [["Fleet Bootstrap"]] * 2)
+
+    def test_section_units_refuses_a_placeholder_declared_on_a_sibling_entry(self) -> None:
+        """The two can sit on separate entries for one path, and the file is written once."""
+        manifest = {
+            "baseline": [
+                {"path": "AGENTS.md", "placeholders": ["<owner>"]},
+                {
+                    "path": "AGENTS.md",
+                    "sections": [{"name": "Fleet Bootstrap", "fidelity": "verbatim"}],
+                },
+            ]
+        }
+
+        with self.assertRaisesRegex(carry.CarryError, "placeholders and verbatim sections"):
+            carry.section_units(manifest, {"dotnet"})
 
     def test_plan_unit_refuses_a_bare_carriage_return(self) -> None:
         with self.assertRaisesRegex(carry.CarryError, "bare carriage return"):
