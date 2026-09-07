@@ -249,10 +249,10 @@ def normalized_origin(value: str) -> str:
 
 
 def verify_hub(hub: pathlib.Path, registry: dict[str, Any]) -> str:
-    entry = resolve_repo("ProjectTemplate", registry)
+    entry = resolve_repo(HUB_NAME, registry)
     origin = normalized_origin(git(hub, "config", "--get", "remote.origin.url"))
     if origin != normalized_origin(entry["url"]):
-        raise CarryError("hub origin does not match the ProjectTemplate registry entry")
+        raise CarryError(f"hub origin does not match the {HUB_NAME} registry entry")
     git(hub, "fetch", "origin", "main")
     head = git(hub, "rev-parse", "HEAD")
     if head != git(hub, "rev-parse", "origin/main"):
@@ -842,6 +842,18 @@ def run_sections(mode: str, name: str, target: pathlib.Path, hub: pathlib.Path =
     return 0
 
 
+def refuse_hub_tree_target(name: str, declarations: list[dict[str, Any]]) -> None:
+    """Refuse the hub as a tree-carry target unless every applicable declaration opts in.
+
+    A tree declaration owns its target root outright and prunes what it does not carry, so pointing
+    one at the hub aims a repository's own source tree at a copy of itself. `allowHubTarget` is the
+    per-declaration opt in, and its absence is the refusal. Lifted out of `run` so it can be
+    exercised without a hub checkout, which `verify_hub` would otherwise demand first.
+    """
+    if name == HUB_NAME and any(not item.get("allowHubTarget", False) for item in declarations):
+        raise CarryError(f"a declaration does not allow {HUB_NAME} as its target")
+
+
 def run(mode: str, name: str, target: pathlib.Path, hub: pathlib.Path = ROOT) -> int:
     registry = load_json(hub / "registry/repos.json")
     manifest = load_json(hub / "spec/files.json")
@@ -857,8 +869,7 @@ def run(mode: str, name: str, target: pathlib.Path, hub: pathlib.Path = ROOT) ->
         for declaration in all_declarations
         if applicable(declaration.get("appliesTo", "*"), selectors)
     ]
-    if name == HUB_NAME and any(not item.get("allowHubTarget", False) for item in declarations):
-        raise CarryError("a declaration does not allow ProjectTemplate as its target")
+    refuse_hub_tree_target(name, declarations)
     owned_roots = [relative_root(target, item["target"]) for item in declarations]
     verify_target(target, entry, owned_roots)
     print(f"hubCommit: {hub_commit}")
